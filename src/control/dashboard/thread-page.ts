@@ -12,7 +12,7 @@ import type { ThreadId } from "../../ids.ts";
 import { promptSenders } from "../inbox.ts";
 import type { AgentView } from "../conversation-view.ts";
 import { checkBeside, liveNote, phaseNote, reviewersNote, roundNote, roundsSpent } from "../review-model.ts";
-import type { QueuedThread, Wait } from "../queue.ts";
+import type { QueuedThread, Wait } from "../../contract/threads.ts";
 import { tokenCount, type UsageTotals } from "../usage.ts";
 import { attentions } from "../attention.ts";
 import { Html, html, actualBadge, desiredTone, sessionTone, outputLabel, dot, state, icon, menu, threadState, ago, workingFor, type Part, type Tone } from "./view.ts";

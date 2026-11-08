@@ -1,17 +1,23 @@
 /** What the commands share: their types, the flag readers, the table, and the waits on a thread's pylon. */
 import { setTimeout as sleep } from "node:timers/promises";
 import type { ParseArgsOptionsConfig } from "node:util";
-import type { ThreadDetail } from "../control/wire.ts";
 import type { Project } from "../control/project.ts";
 import { titleOf } from "../thread-title.ts";
 import type { WebSocket } from "ws";
 import { CliError, type ErrorKind } from "./transport.ts";
+import { callOf, type ApiRoute, type CallArgs, type ReplyOf } from "../contract/route.ts";
+import { threadRoutes } from "../contract/threads.ts";
 
 export type Values = Record<string, string | boolean | string[] | undefined>;
 /** `idleMs` is how long the reply may take, 30 s by default. */
 export type Api = (method: string, path: string, body?: unknown, idleMs?: number) => Promise<unknown>;
 /** Follows one of the API's event streams until it ends or `signal` aborts it. */
 export type Follow = (path: string, onEvent: (data: unknown) => void | Promise<void>, signal: AbortSignal, onCursor?: (id: string) => void) => Promise<void>;
+/** Calls one of the contract's routes and answers its reply. */
+export async function request<R extends ApiRoute>(api: Api, route: R, args: CallArgs<R>, idleMs?: number): Promise<ReplyOf<R>> {
+  const { path, body } = callOf(route, args);
+  return await api(route.method, path, body, idleMs) as ReplyOf<R>;
+}
 /** What a command prints: its JSON for --json, its text otherwise. With `exit`, it prints that and then exits as that kind of failure. */
 export interface Result { json: unknown; text: string; exit?: ErrorKind }
 /** What attach needs beyond the API. */
@@ -131,7 +137,7 @@ export async function whenRunning<T>(api: Api, id: string, send: () => Promise<T
       return await send();
     } catch (err) {
       if (!(err instanceof CliError) || !err.retryable) throw err;
-      const { status } = (await api("GET", thread(id)) as ThreadDetail).thread;
+      const { status } = (await request(api, threadRoutes.show, { thread: id })).thread;
       if (status === "archived" || status === "deleted") throw err;
       refused = err;
       return undefined;

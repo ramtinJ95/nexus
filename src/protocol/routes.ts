@@ -48,21 +48,6 @@ export const probeRoutes = {
   fetchArtifact: { method: "GET", path: "/v1/artifacts/{artifact}", role: "peer-probe" },
 } as const satisfies Record<string, ProbeRoute>;
 
-export type ParamsOf<P extends string> = P extends `${string}{${infer K}}${infer Rest}` ? Record<K, string> & ParamsOf<Rest> : unknown;
-type IsUnion<T, U = T> = T extends unknown ? ([U] extends [T] ? false : true) : never;
-/** One route's literal path only, since a union of routes or a widened `ProbeRoute` cannot say which parameters it needs. */
-type PathArgs<P extends string> = string extends P ? never : true extends IsUnion<P> ? never : P extends `${string}{${string}` ? [ParamsOf<P>] : [];
-
-/** The route's path with each parameter URI-encoded. */
-export function routePath<P extends string>(route: { path: P }, ...params: PathArgs<P>): string {
-  const given: Partial<Record<string, string>> = params[0] ?? {};
-  return route.path.replace(/\{(\w+)\}/g, (_, key: string) => {
-    const value = given[key];
-    if (value === undefined) throw new Error(`${route.path} needs ${key}`);
-    return encodeURIComponent(value);
-  });
-}
-
 /**
  * The probe authorizes by a path's first segment under /v1, before it looks for a handler, so a wrong caller gets 403
  * even for a method or path no route serves.

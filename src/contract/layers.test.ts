@@ -1,0 +1,18 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
+
+const src = resolve(import.meta.dirname, "..");
+/** The parsers need zod, so they stay in -parse.ts files, which only Node loads. */
+const bundled = readdirSync(import.meta.dirname).filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts") && !file.endsWith("-parse.ts"));
+const runtimeImport = /^import\s+(?!type\s)[^;]*?\bfrom\s+["']([^"']+)["']/gm;
+
+test("src/contract imports nothing at run time beyond itself and src/util, so a browser can bundle it, its parsers aside", () => {
+  const outside = bundled.flatMap((file) => [...readFileSync(join(import.meta.dirname, file), "utf8").matchAll(runtimeImport)]
+    .map((match) => match[1]!.startsWith(".") ? relative(src, resolve(import.meta.dirname, match[1]!)) : match[1]!)
+    .filter((target) => dirname(target) !== "contract" && dirname(target) !== "util")
+    .map((target) => `${file} imports ${target}`));
+  assert.deepEqual(outside, []);
+  assert.ok(bundled.includes("threads.ts") && bundled.includes("route.ts"));
+});

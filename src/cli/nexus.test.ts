@@ -20,7 +20,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import type { PipelineItem } from "../control/pipeline.ts";
 import { planningPrefix } from "../control/agent-protocol.ts";
-import type { QueuedThread } from "../control/queue.ts";
+import type { QueuedThread } from "../contract/threads.ts";
 import type { Thread } from "../control/thread-store.ts";
 import type { ThreadDetail } from "../control/wire.ts";
 import { detailText } from "./thread-text.ts";

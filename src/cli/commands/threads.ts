@@ -3,13 +3,13 @@
  * their agents, and their lifecycle.
  */
 import { randomUUID } from "node:crypto";
-import type { OpenedSession, ThreadDetail, ThreadRow, Sent } from "../../control/wire.ts";
-import type { QueuedThread } from "../../control/queue.ts";
-import type { Preview, Thread } from "../../control/thread-store.ts";
+import type { OpenedSession } from "../../control/wire.ts";
+import type { Preview } from "../../control/thread-store.ts";
+import { threadRoutes as routes } from "../../contract/threads.ts";
 import type { Changes, Diff, Listing } from "../../checkout-files.ts";
 import { attachTerminal, processTty } from "../attach.ts";
 import { CliError } from "../transport.ts";
-import { type Values, type Api, type Command, str, thread, int, workerOptions, briefOf, table, waitMs, pylonCommandMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
+import { type Values, type Api, type Command, str, thread, request, int, workerOptions, briefOf, table, waitMs, pylonCommandMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
 import { detailText, portsText, listingText, changesText, queuedRow, queuedText, threadRow } from "../thread-text.ts";
 
 function portArg(given: string): number {
@@ -35,7 +35,7 @@ async function served(api: Api, id: string, port: number): Promise<Preview> {
       return new CliError("failed", `port ${port} of ${id} was not served within ${waitMs / 1000} s${why}. \`nexus ports ${id}\` shows whether it listens and whether its preview is published`);
     },
   }, async () => {
-    const d = await api("GET", thread(id)) as ThreadDetail;
+    const d = await request(api, routes.show, { thread: id });
     preview = d.ports?.find((l) => l.port === port)?.preview;
     return preview?.ready === true ? preview : undefined;
   });
@@ -44,26 +44,20 @@ async function served(api: Api, id: string, port: number): Promise<Preview> {
 /** "A", "A and B", or "A, B and C". */
 const listed = (names: readonly string[]) => names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 
-/** The first line of a message, as the title of the thread it starts. */
-
-async function send(api: Api, id: string, text: string, steer: boolean, requestId: string, idleMs?: number): Promise<Sent> {
-  return await api("POST", `${thread(id)}/messages`, { text, requestId, mode: steer ? "steer" : "followUp" }, idleMs) as Sent;
-}
-
 /** A thread action whose route answers 204. Its JSON is null. */
-const action = (path: string, done: string, body?: unknown): Command => ({
+const action = (done: string, call: (api: Api, thread: string) => Promise<null>): Command => ({
   args: [1, 1],
   async run(api, [id]) {
-    await api("POST", `${thread(id!)}/${path}`, body);
+    await call(api, id!);
     return { json: null, text: `${done} ${id}.` };
   },
 });
 
 /** A thread action whose route answers the thread, or the queued thread when it has not started. */
-const statusChange = (method: string, path: string, done: string, queued: string): Command => ({
+const statusChange = (route: typeof routes.archive | typeof routes.unarchive | typeof routes.delete, done: string, queued: string): Command => ({
   args: [1, 1],
   async run(api, [id]) {
-    const t = await api(method, `${thread(id!)}${path}`) as Thread | QueuedThread;
+    const t = await request(api, route, { thread: id! });
     return { json: t, text: `${done} ${t.id}.${"waits" in t ? ` ${queued}` : ""}` };
   },
 });
@@ -74,14 +68,12 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     options: { project: { type: "string" }, all: { type: "boolean" }, queued: { type: "boolean" } },
     async run(api, _, v) {
       const project = str(v, "project");
-      const query = project === undefined ? "" : `?project=${encodeURIComponent(project)}`;
-      const queuing = (api("GET", `/v1/queued${query}`) as Promise<QueuedThread[]>).then((all) => all.filter((q) => v.all === true || q.status === "queued"));
+      const queuing = request(api, routes.queued, { query: { project } }).then((all) => all.filter((q) => v.all === true || q.status === "queued"));
       if (v.queued === true) {
         const queued = await queuing;
         return { json: queued, text: queued.length === 0 ? "No queued threads." : table(queued.map(queuedRow)) };
       }
-      const [queued, threads] = await Promise.all([queuing, api("GET", `/v1/threads${query}`) as Promise<ThreadRow[]>]);
-      const shown = v.all === true ? threads : threads.filter((t) => t.status !== "deleted");
+      const [queued, shown] = await Promise.all([queuing, request(api, routes.list, { query: { project, ...v.all === true ? {} : { deleted: false } } })]);
       const rows = [...shown.map(threadRow), ...queued.map(queuedRow)];
       return { json: shown, text: rows.length === 0 ? "No threads." : table(rows) };
     },
@@ -89,12 +81,12 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
   show: {
     args: [1, 1],
     async run(api, [id]) {
-      let d: ThreadDetail;
+      let d;
       try {
-        d = await api("GET", thread(id!)) as ThreadDetail;
+        d = await request(api, routes.show, { thread: id! });
       } catch (err) {
         if (!(err instanceof CliError) || err.code !== "queued") throw err;
-        const q = await api("GET", `/v1/queued/${encodeURIComponent(id!)}`) as QueuedThread;
+        const q = await request(api, routes.queuedThread, { thread: id! });
         return { json: q, text: queuedText(q) };
       }
       return { json: d, text: detailText(d) };
@@ -103,7 +95,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
   ports: {
     args: [1, 1],
     async run(api, [id]) {
-      const d = await api("GET", thread(id!)) as ThreadDetail;
+      const d = await request(api, routes.show, { thread: id! });
       return { json: d.ports, text: portsText(d.ports, id!) };
     },
   },
@@ -184,21 +176,21 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
       if (title === undefined) throw new CliError("invalid", "start needs --title, --message or --claude");
       const requestId = str(v, "request-id");
       // One request: the control plane sends the first message once the thread starts, as the person's.
-      const body = { project, title, ...optional, ...resources === undefined ? {} : { resources }, ...requestId === undefined ? {} : { requestId }, ...v.plan === true ? { planning: true } : {} };
+      const body = { project, title, ...optional, ...resources === undefined ? {} : { resources }, ...requestId === undefined ? {} : { requestId }, ...v.plan === true ? { planning: true as const } : {} };
       if (after !== undefined) {
-        const q = await api("POST", "/v1/threads", { ...body, after }) as QueuedThread | Thread;
+        const q = await request(api, routes.start, { body: { ...body, after } });
         // A repeat of the request ID after the queued thread started answers the thread.
         if (!("after" in q)) return { json: q, text: `Started ${q.id} on ${q.project}: ${q.title}` };
         return { json: q, text: `Queued ${q.id} on ${q.project}: ${q.title}. It starts once ${listed(q.after)} ${q.after.length === 1 ? "has merged its pull request" : "have merged their pull requests"}.` };
       }
-      const t = await api("POST", "/v1/threads", body) as Thread;
+      const t = await request(api, routes.start, { body });
       return { json: t, text: `Started ${v.plan === true ? "planning thread " : ""}${t.id} on ${t.project}: ${t.title}${v.message === undefined ? "" : "\nSent the first message."}` };
     },
   },
   "start-queued": {
     args: [1, 1],
     async run(api, [id]) {
-      const t = await api("POST", `${thread(id!)}/start`) as Thread;
+      const t = await request(api, routes.startQueued, { thread: id! });
       return { json: t, text: `Started ${t.id} on ${t.project}: ${t.title}` };
     },
   },
@@ -210,8 +202,9 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
       // The API treats a resend with the same request ID as the same message, so a caller that retries passes one.
       const requestId = str(v, "request-id") ?? `msg:${randomUUID()}`;
       // A Claude worker's message is typed in its pylon, so its send waits for a paused pylon to wake.
-      const claude = (await api("GET", thread(id!)) as ThreadDetail).claudeWorker !== undefined;
-      const message = () => send(api, id!, words.join(" "), steer, requestId, claude ? pylonCommandMs : undefined);
+      const claude = (await request(api, routes.show, { thread: id! })).claudeWorker !== undefined;
+      const body = { text: words.join(" "), requestId, mode: steer ? "steer" as const : "followUp" as const };
+      const message = () => request(api, routes.message, { thread: id!, body }, claude ? pylonCommandMs : undefined);
       const reply = claude ? await whenRunning(api, id!, message, "the message was not sent") : await message();
       if ("claude" in reply) {
         const resumed = reply.claude.resumed ? " Its session was resumed to take it." : "";
@@ -226,15 +219,15 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     async run(api, [id], v) {
       const shown = str(v, "last-reply-at");
       if (shown !== undefined && v.unread) throw new CliError("invalid", "--last-reply-at marks a reply seen, so it cannot go with --unread");
-      await api("POST", `${thread(id!)}/${v.unread ? "unseen" : "seen"}`, shown === undefined ? {} : { lastReplyAt: int(shown, "--last-reply-at", 0) });
+      await request(api, v.unread ? routes.unseen : routes.seen, { thread: id!, body: shown === undefined ? {} : { lastReplyAt: int(shown, "--last-reply-at", 0) } });
       return { json: null, text: `Marked ${id} ${v.unread ? "unread" : "seen"}.` };
     },
   },
-  abort: action("abort", "Aborted the run of"),
-  retry: action("retry", "Retried the parked tasks of"),
-  "retry-pylon": action("pylon/retry", "Retried the pylon of"),
-  wake: action("activity", "Recorded activity on", { kind: "human" }),
-  archive: statusChange("POST", "/archive", "Archived", "Its queued start is cancelled."),
-  unarchive: statusChange("POST", "/unarchive", "Unarchived", "It is queued again."),
-  delete: statusChange("DELETE", "", "Deleted", "It will never start."),
+  abort: action("Aborted the run of", (api, thread) => request(api, routes.abort, { thread })),
+  retry: action("Retried the parked tasks of", (api, thread) => request(api, routes.retry, { thread })),
+  "retry-pylon": action("Retried the pylon of", (api, thread) => request(api, routes.retryPylon, { thread })),
+  wake: action("Recorded activity on", (api, thread) => request(api, routes.activity, { thread, body: { kind: "human" } })),
+  archive: statusChange(routes.archive, "Archived", "Its queued start is cancelled."),
+  unarchive: statusChange(routes.unarchive, "Unarchived", "It is queued again."),
+  delete: statusChange(routes.delete, "Deleted", "It will never start."),
 };

@@ -3,7 +3,7 @@ import type { ThreadId } from "../ids.ts";
 import type { Attention, Need } from "./attention.ts";
 import { itemView, threadPhase, type PipelineItem } from "./pipeline.ts";
 import type { NodeQuestion } from "./questions.ts";
-import type { QueuedThread } from "./queue.ts";
+import type { QueuedThread } from "../contract/threads.ts";
 import { archivedDiskMs, settleStuck } from "./reconcile.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";

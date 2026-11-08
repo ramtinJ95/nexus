@@ -8,7 +8,7 @@ import { defaultClaudeModel } from "../../protocol/agent-kinds.ts";
 import type { NodeRecord } from "../node-store.ts";
 import type { Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
-import type { QueuedThread } from "../queue.ts";
+import type { QueuedThread } from "../../contract/threads.ts";
 import type { Status } from "../doctor-model.ts";
 import { span } from "./elapsed.ts";
 import { themeScript, Html, html, dot, icon, clonedIcons, menu, threadState, dims, workingFor, type Tone } from "./view.ts";

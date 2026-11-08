@@ -10,7 +10,6 @@
  */
 import { startedByNexus } from "./agent-protocol.ts";
 import { defaultClaudeModel } from "../protocol/agent-kinds.ts";
-import type { BootInputs } from "../protocol/spawn.ts";
 import { newThreadId, requestIds, type ProjectId, type ThreadId } from "../ids.ts";
 import { singleFlight } from "../single-flight.ts";
 import { Refusal } from "./refusal.ts";
@@ -19,39 +18,10 @@ import type { Thread } from "./thread-store.ts";
 import { checkStart, resourcesOf } from "./threads.ts";
 import type { StartKey, StartRequest } from "./start-request.ts";
 import type { QueuedRecord } from "./queue-store.ts";
+import type { QueuedThread, Wait } from "../contract/threads.ts";
 import { sendWithStandingRules } from "./standing-rules.ts";
 
 type QueueRegistry = Pick<Registry, "createThread" | "currentImage" | "isReviewer" | "latestHealthSample" | "node" | "nodes" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveQueued" | "saveTemplate" | "templates" | "thread">;
-
-/** What one predecessor means for the queued thread. */
-export interface Wait { thread: ThreadId; state: "waiting" | "landed" | "blocked"; why: string }
-
-/** The API's view of a thread that has not started, which `show` and `threads --queued` print. */
-export interface QueuedThread {
-  id: ThreadId;
-  title: string;
-  project: ProjectId;
-  startedBy: string;
-  createdAt: number;
-  /** Archived means cancelled. */
-  status: "queued" | "archived" | "deleted";
-  after: readonly ThreadId[];
-  /** One per predecessor, in `after` order. */
-  waits: readonly Wait[];
-  /** Some wait is blocked, or the queue holds a start refused for a branch the remote does not have. */
-  blocked: boolean;
-  /** A node, or "auto". */
-  node: string;
-  worker: "harness" | "claude";
-  model: string | null;
-  /** The first message, or the Claude prompt as given, without the `/poteto-mode` a start puts in front. */
-  prompt: string | null;
-  branch: string | null;
-  commit: string | null;
-  resources: BootInputs["resources"];
-  startNow: { by: string; at: number } | null;
-  lastError: string | null;
-}
 
 export interface ThreadQueue {
   /** Validates and records, with `key` if given; throws a Refusal. Does not start it; the caller calls poll() after. */

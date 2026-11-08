@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { request } from "node:http";
 import { itemThread, type PipelineItem } from "../pipeline.ts";
-import type { QueuedThread } from "../queue.ts";
+import type { QueuedThread } from "../../contract/threads.ts";
 import type { Thread } from "../thread-store.ts";
 import type { ThreadDetail } from "../wire.ts";
 import { detailText } from "../../cli/thread-text.ts";

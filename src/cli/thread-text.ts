@@ -4,7 +4,7 @@
  */
 import type { ThreadDetail, ThreadRow } from "../control/wire.ts";
 import type { Placement, Room } from "../control/thread-store.ts";
-import type { QueuedThread, Wait } from "../control/queue.ts";
+import type { QueuedThread, Wait } from "../contract/threads.ts";
 import type { Review } from "../control/review-model.ts";
 import type { Question } from "../control/questions.ts";
 import { reservedNames } from "../control/holds.ts";
