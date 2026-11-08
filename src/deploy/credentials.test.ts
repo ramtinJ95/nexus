@@ -7,8 +7,9 @@ import { test, type TestContext } from "node:test";
 import { promisify } from "node:util";
 import { parseConfig } from "../control/main.ts";
 import { harnessModels, openCredentials, requireModel } from "../control/harness/credentials.ts";
-import { claudeNames, harnessSignedIn, provision, scripted, stores, system, type Answers, type FollowUp, type Host } from "./credentials.ts";
+import { claudeNames, harnessSignedIn, heldNames, provision, scripted, stores, system, type Answers, type FollowUp, type Host } from "./credentials.ts";
 import { agentKinds } from "../protocol/agent-kinds.ts";
+import { heldSecrets } from "../protocol/observations.ts";
 import { snapshot } from "../test-support/kit.ts";
 
 const exec = promisify(execFile);
@@ -299,6 +300,30 @@ test("without a terminal the answers come from NEXUS_* variables or the files th
     await assert.rejects(provision("control", fresh.host, scripted(env), silent), wrong);
     assert.deepEqual(await snapshot(fresh.root), before);
   }
+});
+
+test("a token the probe would refuse is refused before secrets.env is touched, and a secrets.env the probe refuses is not added to", async (t) => {
+  const quoted = await machine(t, "node");
+  const before = await snapshot(quoted.root);
+  await assert.rejects(provision("node", quoted.host, scripted({ NEXUS_CLAUDE_TOKEN: `"${claudeToken}"`, NEXUS_GIT_KEY: "no" }), silent),
+    (err: Error) => /\/etc\/nexus\/secrets\.env: line \d+ quotes the value of CLAUDE_CODE_OAUTH_TOKEN/.test(err.message) && !err.message.includes(claudeToken));
+  assert.deepEqual(await snapshot(quoted.root), before);
+
+  const twice = await machine(t, "node");
+  await twice.put(stores.claude.file, "STRIPE_KEY=a\nSTRIPE_KEY=b\n", 0o640);
+  const refused = await snapshot(twice.root);
+  await assert.rejects(provision("node", twice.host, scripted({ NEXUS_CLAUDE_TOKEN: claudeToken, NEXUS_GIT_KEY: "no" }), silent), /\/etc\/nexus\/secrets\.env: line 2 sets STRIPE_KEY a second time/);
+  assert.deepEqual(await snapshot(twice.root), refused);
+
+  const held = await machine(t, "node");
+  await held.put(stores.claude.file, "NEXUS_CHATGPT_TOKEN=x\n", 0o640);
+  const holding = await snapshot(held.root);
+  await assert.rejects(provision("node", held.host, scripted({ NEXUS_CLAUDE_TOKEN: claudeToken, NEXUS_GIT_KEY: "no" }), silent), /line 1 sets NEXUS_CHATGPT_TOKEN, which the control plane hands to this probe/);
+  assert.deepEqual(await snapshot(held.root), holding);
+});
+
+test("the held names credentials refuses are the probe's", () => {
+  assert.deepEqual(heldNames, heldSecrets);
 });
 
 test("the harness is signed in when its credentials file holds a login, and a file that is not JSON is refused", () => {

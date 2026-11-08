@@ -10,6 +10,8 @@ import { constants } from "node:fs";
 import { access, appendFile, open, readFile, rename, rm, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { appendSecret, parseSecretsFile } from "../node-base/secrets-env.ts";
+import { chatgptTokenGrant } from "../protocol/secret-grants.ts";
 import { configFiles, prefix, roleLinks, servicePath, stateDirs, users } from "../node-layout.ts";
 
 const exec = promisify(execFile);
@@ -36,6 +38,11 @@ export const stores = {
 } as const satisfies Record<string, Store>;
 
 export const claudeNames = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"] as const;
+/**
+ * The probe's heldSecrets, which it derives from the agent kinds. Those need zod, and this runs before npm ci, so the
+ * names are copied here and credentials.test.ts checks the copy.
+ */
+export const heldNames: readonly string[] = [chatgptTokenGrant.name];
 const login = join(prefix, roleLinks.control, "src/control/login.ts");
 
 /** GitHub's published SSH host key fingerprints, https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints */
@@ -48,11 +55,6 @@ const githubFingerprints: ReadonlySet<string> = new Set([
 /** Whether a harness credentials file holds a login. Throws when it is not JSON. */
 export function harnessSignedIn(text: string): boolean {
   return Object.keys((JSON.parse(text) as { credentials?: object }).credentials ?? {}).length > 0;
-}
-
-/** The names in a secrets.env, never their values. */
-export function secretNames(text: string): string[] {
-  return text.split(/\r?\n/).flatMap((line) => /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(line)?.[1] ?? []);
 }
 
 /** ssh-keyscan's output, refused unless it has keys and every key is one GitHub publishes. */
@@ -297,14 +299,15 @@ export async function provision(role: "control" | "node", host: Host, answers: A
   const addSecret = async (name: string, value: string) => {
     const file = at.secrets;
     const text = await host.read(file);
-    if (text === undefined) await host.write(file, `${name}=${value}\n`, stores.claude);
-    else await host.append(file, `${text === "" || text.endsWith("\n") ? "" : "\n"}${name}=${value}\n`);
+    const line = appendSecret(file, text ?? "", name, value, heldNames);
+    if (text === undefined) await host.write(file, line, stores.claude);
+    else await host.append(file, line);
     say(`Added ${name} to ${file}.`);
     next.add("probe");
   };
 
-  const names = secretNames(await host.read(at.secrets) ?? "");
-  const claudeName = claudeNames.find((name) => names.includes(name));
+  const secrets = parseSecretsFile(at.secrets, await host.read(at.secrets) ?? "", heldNames);
+  const claudeName = claudeNames.find((name) => secrets.names().includes(name));
   if (claudeName !== undefined) say(`Left ${claudeName} in ${at.secrets} alone.`);
   else {
     const value = await answers.secret({
@@ -315,7 +318,7 @@ export async function provision(role: "control" | "node", host: Host, answers: A
     if (value !== undefined) await addSecret(value.startsWith("sk-ant-api") ? "ANTHROPIC_API_KEY" : "CLAUDE_CODE_OAUTH_TOKEN", value);
   }
 
-  const existing = /^GH_TOKEN=(.*)$/m.exec(await host.read(at.secrets) ?? "")?.[1];
+  const existing = secrets.value("GH_TOKEN");
   let github = existing;
   if (existing !== undefined) say(`Left GH_TOKEN in ${at.secrets} alone.`);
   else {

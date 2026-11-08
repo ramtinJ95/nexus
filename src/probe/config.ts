@@ -15,6 +15,7 @@ import { nodeNameSchema, tailnetNodeIdSchema } from "../protocol/fields.ts";
 import { heldSecrets } from "../protocol/observations.ts";
 import { probePort, type ProbeAuthConfig } from "../protocol/routes.ts";
 import { deployerWakeFile, stateDirs } from "../node-layout.ts";
+import { parseSecretsFile } from "../node-base/secrets-env.ts";
 
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
 /** Tailscale's address ranges. BlockList compares parsed addresses, so every spelling of an address matches. */
@@ -92,28 +93,6 @@ export async function readProbeConfig(path: string): Promise<ProbeConfig> {
   }
 }
 
-/**
- * `NAME=value` lines, blank lines and `#` comments. Values are taken verbatim to the end of the line, so
- * quoting is refused rather than guessed at. A held secret is refused, as the control plane provides it. Errors
- * name the line, never the value.
- */
-export function parseSecretsEnv(text: string): SecretSource {
-  const values = new Map<string, string>();
-  text.split(/\r?\n/).forEach((line, i) => {
-    const at = `line ${i + 1}`;
-    if (/^\s*(#|$)/.test(line)) return;
-    const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);
-    if (match === null) throw new Error(`${at} is not NAME=value`);
-    const [, name, value] = match as unknown as [string, string, string];
-    if (values.has(name)) throw new Error(`${at} sets ${name} a second time`);
-    if (heldSecrets.includes(name)) throw new Error(`${at} sets ${name}, which the control plane hands to this probe. Remove the line`);
-    if (value === "") throw new Error(`${at} gives ${name} no value`);
-    if (/^(["']).*\1$/.test(value)) throw new Error(`${at} quotes the value of ${name}. Values are taken verbatim, so remove the quotes`);
-    values.set(name, value);
-  });
-  return { value: (name) => values.get(name), names: () => [...values.keys()] };
-}
-
 /** The node's secret file, plus the held secrets the control plane hands over, which are kept in memory only. */
 export interface NodeSecrets extends SecretSource { hold(name: string, value: string): void }
 
@@ -144,11 +123,7 @@ export async function readSecretsFile(path: string): Promise<SecretSource> {
     if ((stat.mode & 0o007) !== 0) {
       throw new Error(`${path} has mode ${(stat.mode & 0o777).toString(8)}, so every user on this node can reach it. Run chmod o-rwx ${path}`);
     }
-    try {
-      return parseSecretsEnv(await file.readFile("utf8"));
-    } catch (err) {
-      throw new Error(`${path}: ${(err as Error).message}`);
-    }
+    return parseSecretsFile(path, await file.readFile("utf8"), heldSecrets);
   } finally {
     await file.close();
   }
