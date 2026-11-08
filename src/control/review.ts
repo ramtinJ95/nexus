@@ -590,8 +590,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const setting = project === undefined ? undefined : registry.project(project)?.autoReview;
     // Only a review asked to land is landed: one the person started without --land stops at approval, as they asked.
     if (r.land === null || setting?.mode !== "yolo" || !deps.mayLand(setting.enabledBy) || !registry.isCurrentReview(r)) return;
-    const question = askingHolds(registry.questions(r.builder), r.id);
-    if (question === undefined || !asksAt(r, question.holds)) return;
+    const question = askingHolds(registry.questions(r.builder), r.id, r.rounds.at(-1));
+    if (question === undefined) return;
     try {
       landHolds(question, setting.enabledBy as TailnetNodeId, project);
     } catch (err) {
@@ -627,11 +627,23 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   };
   /** The holds question of `r` that is open at its latest head and names exactly the holds `texts` name. */
   const openQuestion = (r: Review, texts: readonly string[]): HoldsQuestion | undefined => {
-    const q = askingHolds(registry.questions(r.builder), r.id);
-    return q !== undefined && asksAt(r, q.holds) && JSON.stringify(q.holds.holds.map((h) => h.text).sort()) === JSON.stringify([...texts].sort()) ? q : undefined;
+    const q = askingHolds(registry.questions(r.builder), r.id, r.rounds.at(-1));
+    return q !== undefined && JSON.stringify(q.holds.holds.map((h) => h.text).sort()) === JSON.stringify([...texts].sort()) ? q : undefined;
   };
-  /** Whether a question about holds was asked of `r` at its latest round's head and base, since a change against another base is another change. */
-  const asksAt = (r: Review, holds: HeldQuestion) => holds.review === r.id && holds.head === r.rounds.at(-1)!.head && holds.base === (r.rounds.at(-1)!.base ?? null);
+  /**
+   * Saves `next`, the Land press by `by` on `r`, and answers Land to `question`, the holds question it waives, in the
+   * same transaction. A save of the review since `r` was read refuses it as `moved`.
+   */
+  function savePress(r: Review, next: Review, by: string, question: HoldsQuestion | undefined, moved: Refusal): HoldsQuestion | undefined {
+    const save = () => {
+      if (!registry.saveReview(next, [], r)) throw moved;
+    };
+    let answered: HoldsQuestion | undefined;
+    if (question === undefined) save();
+    else answered = registry.answerQuestion(question, { option: landOption, by: by as TailnetNodeId, at: now() }, save);
+    void poll();
+    return answered;
+  }
 
   /**
    * Waits on `party`. Once a turn of it ended after the loop's last message without the answer the loop needs, it gets
@@ -1183,10 +1195,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (head !== undefined && r.rounds.at(-1)!.head !== head) throw new Refusal("conflict", `review ${r.id} of ${builderId} is at ${r.rounds.at(-1)!.head}, not ${head}, so it was not landed. Look at it again before landing it`);
       const next = pressed(r, requestedBy, waive);
       // A press that waives the holds the review's question names answers it, as its Land does.
-      const question = waive === undefined ? undefined : openQuestion(r, waive);
-      if (question === undefined) registry.saveReview(next);
-      else registry.answerQuestion(question, { option: landOption, by: requestedBy as TailnetNodeId, at: now() }, () => registry.saveReview(next));
-      void poll();
+      savePress(r, next, requestedBy, waive === undefined ? undefined : openQuestion(r, waive),
+        new Refusal("conflict", `review ${r.id} of ${builderId} moved on while it was landed. Look at it again`));
       return next;
     },
 
@@ -1226,7 +1236,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const { holds } = question;
     const r = registry.review(question.thread);
     const moved = new Refusal("conflict", `the review of ${question.thread} moved on since question ${question.id} asked about its holds at ${holds.head}, so nothing was waived. Look at it again`);
-    if (r === null || !asksAt(r, holds)) throw moved;
+    if (r === null || askingHolds([question], r.id, r.rounds.at(-1)) === undefined) throw moved;
     // The loop asked about these holds at this head and base, which may come from the change before the round
     // recorded them, so the waiver is the question's, and the landing reads the head's holds again before it merges.
     const waiver = { ...waiverOf(r, by, holds.holds.map((h) => h.text), holds.holds.map((h) => h.code)), ...yolo !== undefined && { yolo } };
@@ -1240,11 +1250,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       pressOn(r);
       next = { ...r, land: r.land ?? { requestedBy: by, head: holds.head, base: holds.base }, waiver };
     }
-    const answered = registry.answerQuestion(question, { option: landOption, by, at: now() }, () => {
-      if (!registry.saveReview(next, [], r)) throw moved;
-    });
-    void poll();
-    return answered;
+    return savePress(r, next, by, question, moved)!;
   }
 
   function landableAt(builderId: ThreadId): Review {

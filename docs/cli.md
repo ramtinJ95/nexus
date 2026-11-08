@@ -1430,7 +1430,7 @@ A question is something a thread asks the person, with a fixed set of answers. T
 | `id` | `string` | Chosen by the asker, such as `qn-<uuid>`. Asking again with the same ID asks nothing new |
 | `thread` | `string` | The thread that asked it |
 | `text` | `string` | What is asked, in the markdown replies use. It may be several lines |
-| `options` | `string[]` | Two or more distinct labels. The answer is one of them. None for an `ask`, which is answered with `choices` |
+| `options` | `string[]` | Two or more distinct values. The answer names one of them, and the dashboard shows each under its own label. None for an `ask`, which is answered with `choices` |
 | `reserved` | `string \| null` | The merge policy's reserved case a `holds` question's holds are, such as `auth`, or null. Always null for any other kind |
 | `answerer` | `"person" \| "deployer"` | Who may answer it |
 | `askedAt` | `number` | When it was asked |
