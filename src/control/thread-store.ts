@@ -27,7 +27,7 @@ import { claudeTurn } from "../../images/pylon/nexus-contract.ts";
 import { errorStop, transcriptStart, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
 import { maxEntries } from "../contract/streams.ts";
 import type { NodeStore } from "./node-store.ts";
-import { upgradeAttempts } from "./record-upgrade.ts";
+import { upgradeAttempts, upgradeSubmitted } from "./record-upgrade.ts";
 
 /**
  * The node a thread's pylon boots on, and why. An `auto` placement keeps every node it weighed: the room a node that
@@ -232,11 +232,13 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
   const { setting, setSetting } = db.hold(holding);
   const { node } = nodes;
   const reconcile = (thread: ThreadId) => { for (const p of participants) p.reconcile?.(thread); };
-  // Each pylon's attempts an older control plane saved are upgraded once, with no event, so every tick reads this code's shape.
+  // Each pylon's attempts and job sent that an older control plane saved are upgraded once, with no event, so every tick reads this code's shape.
   transaction(() => {
-    for (const row of sql("SELECT id, attempts FROM pylons").all()) {
-      const upgraded = JSON.stringify(upgradeAttempts(json(row.attempts)));
-      if (upgraded !== row.attempts) sql("UPDATE pylons SET attempts = ? WHERE id = ?").run(upgraded, row.id as string);
+    for (const row of sql("SELECT id, attempts, submitted FROM pylons").all()) {
+      const attempts = JSON.stringify(upgradeAttempts(json(row.attempts)));
+      if (attempts !== row.attempts) sql("UPDATE pylons SET attempts = ? WHERE id = ?").run(attempts, row.id as string);
+      const submitted = row.submitted === null ? null : JSON.stringify(upgradeSubmitted(json(row.submitted)));
+      if (submitted !== row.submitted) sql("UPDATE pylons SET submitted = ? WHERE id = ?").run(submitted, row.id as string);
     }
   });
 

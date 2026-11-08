@@ -422,6 +422,7 @@ async function tickOnce(): Promise<PlanStep> {
     save() {},
     desired: () => pylon.desired,
     sealedBoot: () => undefined,
+    uncountedFailed() { throw new Error("the slice wakes no pylon for reading"); },
   });
 }
 

@@ -125,10 +125,7 @@ export interface PlanInput {
   /** The secrets the node holds: those in its secret file, and the held secrets the control plane has handed its probe. */
   nodeSecrets: ReadonlySet<string>;
   inFlight: JobStatus | null; // for this pylon, or for an artifact this pylon is waiting on
-  /**
-   * Consecutive failed jobs, and the last one's. A success clears both. `readFailure` is a failed wake for reading, which
-   * only the usage backfill acts on, so it neither counts nor fails the pylon.
-   */
+  /** Consecutive failed jobs, and the last one's. A success clears both. */
   attempts: Attempts;
   /** A human retried the pylon after the planner gave up, and no job has succeeded nor the planner finished or given up since. */
   retrying: boolean;
@@ -142,14 +139,18 @@ export interface PlanInput {
 
 /** `message` is the job's message and the end of its log, bounded by failureMessage. */
 export interface FailedAttempt { at: number; code: JobErrorCode; message: string }
-export interface Attempts { count: number; last: FailedAttempt | null; readFailure?: FailedAttempt }
+export interface Attempts { count: number; last: FailedAttempt | null }
 export const noAttempts: Readonly<Attempts> = Object.freeze({ count: 0, last: null });
 
+/**
+ * A failure of an `uncounted` step, its job's or the planner giving up, neither counts against the pylon nor fails it. It
+ * goes to the usage module, which woke the pylon only to read it.
+ */
 export type PlanStep =
   | { kind: "done" }
   | { kind: "wait"; reason: "node-offline" | "in-flight" | "backoff" | "transitioning" | "held-secret" }
-  | { kind: "submit"; job: Job }
-  | { kind: "fail"; code: JobErrorCode; reason: string }; // the registry marks the pylon failed until a human retries
+  | { kind: "submit"; job: Job; uncounted?: true }
+  | { kind: "fail"; code: JobErrorCode; reason: string; uncounted?: true }; // the registry marks the pylon failed until a human retries
 
 const maxAttempts = 5;
 const backoffScheduleMs = [5_000, 15_000, 45_000, 120_000, 120_000] as const;
@@ -179,8 +180,8 @@ const planRules: readonly Rule[] = [
   (i) => i.inFlight?.state === "running" ? wait("in-flight") : null,
   // 3. Delete ignores the attempt budget. A pylon removed by hand is absent but may still have previews published.
   (i) => i.desired !== "deleted" ? null : i.observed === "absent" && !i.previewsRouted ? done : submit({ kind: "delete", pylonId: i.pylonId }),
-  // A failed wake for reading is tried once and never fails the pylon. The backfill gives up on it and clears the attempt.
-  ({ desired, attempts: { last, readFailure } }) => desired === "reading" && (readFailure !== undefined || last !== null) ? wait("backoff") : null,
+  // A wake for reading retries no failure. Its own go to the usage hold, which gives up on the read (PlanStep).
+  ({ desired, attempts: { last } }) => desired === "reading" && last !== null ? wait("backoff") : null,
   // 4.
   ({ attempts: { last } }) => last !== null && !retryable[last.code] ? fail(last.code, `last job failed with ${last.code}, which is not retryable: ${last.message}`) : null,
   ({ attempts: { count, last } }) => last !== null && count >= maxAttempts ? fail(last.code, `gave up after ${count} failed attempts, the last with ${last.code}: ${last.message}`) : null,
@@ -261,7 +262,8 @@ export function failureMessage(message: string, logTail: string): string {
 export function planPylon(input: PlanInput, now: number): PlanStep {
   for (const rule of planRules) {
     const step = rule(input, now);
-    if (step !== null) return step;
+    if (step === null) continue;
+    return input.desired === "reading" && (step.kind === "submit" || step.kind === "fail") ? { ...step, uncounted: true } : step;
   }
   throw new Error("unreachable: the last plan rule always returns a step");
 }

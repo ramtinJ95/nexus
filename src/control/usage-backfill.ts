@@ -8,6 +8,9 @@
  * the same way, and the read records the archive settled, which its disk's delete waits on. The pause ends every turn
  * on the pylon and a wake for reading starts none, so only a read after it proves nothing came after the read. One
  * pylon is up at a time across the run and the settles, and a settle goes first.
+ *
+ * A wake for reading that fails neither counts against its pylon nor fails it (PlanStep's `uncounted`). The loop hands
+ * the failure to the usage store, whose hold gives the thread up for it.
  */
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import { desiredPhase } from "./reconcile.ts";
@@ -107,8 +110,8 @@ export function usageBackfill(options: {
       const waiting = blocked(p);
       registry.waitUsageBackfill(waiting);
       if (waiting !== null) return;
-      // A failure from before the thread was archived would hold the wake in backoff, which the run reads as its own.
-      if (p.attempts.last !== null || p.attempts.readFailure !== undefined) registry.clearPylonAttempts(p.pylonId);
+      // A failure from before the thread was archived would hold the wake in backoff, or give it up as the run's own.
+      if (p.attempts.last !== null) registry.clearPylonAttempts(p.pylonId);
       registry.holdUsageBackfill(t.id, now);
       wake(p.node);
       return;
@@ -193,7 +196,7 @@ export function usageBackfill(options: {
       const waiting = blocked(p);
       registry.waitSettle(t.id, waiting);
       if (waiting !== null) continue;
-      if (p.attempts.last !== null || p.attempts.readFailure !== undefined) registry.clearPylonAttempts(p.pylonId);
+      if (p.attempts.last !== null) registry.clearPylonAttempts(p.pylonId);
       registry.holdSettle(t.id, now);
       wake(p.node);
       return "held";
@@ -213,11 +216,6 @@ export function usageBackfill(options: {
     if (t.status !== "archived") return finish("it was unarchived while it was read, so live counting reads it");
     if (p === undefined) return finish("its pylon has no record");
     if (p.failed !== null) return finish(`its pylon failed: ${p.failed}`);
-    const last = p.attempts.readFailure ?? p.attempts.last;
-    if (last !== null) {
-      registry.clearPylonAttempts(p.pylonId);
-      return finish(`the pylon did not boot: ${last.code}: ${last.message}`);
-    }
     const o = seen(p);
     if (o !== null && o !== "absent" && o.phase === "running") {
       try {

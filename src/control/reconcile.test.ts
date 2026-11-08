@@ -45,7 +45,7 @@ const phase = (p: "booting" | "stopping" | "deleting"): PylonObservation => ({ p
 const fresh: PylonSource & { kind: "fresh" } = { kind: "fresh", preSetup: null };
 const fromTemplate: PylonSource & { kind: "template" } = { kind: "template", template };
 const spawn = (source: PylonSource): PlanStep => ({ kind: "submit", job: { kind: "spawn", pylonId, boot: { ...boot, source }, live, liveHash } });
-const spawnForReading = (source: PylonSource): PlanStep => ({ kind: "submit", job: { kind: "spawn", pylonId, boot: { ...boot, source }, live, liveHash, relaunch: false } });
+const spawnForReading = (source: PylonSource): PlanStep => ({ kind: "submit", job: { kind: "spawn", pylonId, boot: { ...boot, source }, live, liveHash, relaunch: false }, uncounted: true });
 const asking = (names: readonly string[]): Omit<BootInputs, "source"> => ({ ...boot, network: { allowedHosts: [], secrets: names.map((name) => ({ name, hosts: ["api.example.com"] })) } });
 const spawnAsking = (names: readonly string[], source: PylonSource): PlanStep => ({ kind: "submit", job: { kind: "spawn", pylonId, boot: { ...asking(names), source }, live, liveHash } });
 const pause: PlanStep = { kind: "submit", job: { kind: "pause", pylonId, checkpoint: nextCheckpoint } };
@@ -58,8 +58,8 @@ const jobInFlight = (state: "running" | "succeeded"): JobStatus => state === "ru
   ? { jobId: "j1" as JobId, subject: pylonId, kind: "spawn", state, startedAt: "2027-01-01T00:00:00Z" }
   : { jobId: "j1" as JobId, subject: pylonId, kind: "spawn", state, finishedAt: "2027-01-01T00:00:00Z" };
 
-/** [count, failed this many ms before now, last code, and "reading" for a failed wake for reading, kept apart from the count]. */
-type Attempts = readonly [number, number | null, JobErrorCode | null, "reading"?];
+/** [count, failed this many ms before now, last code]. */
+type Attempts = readonly [number, number | null, JobErrorCode | null];
 
 interface Row {
   desired: DesiredPhase;
@@ -97,9 +97,9 @@ const rows: Record<string, Row> = {
   "delete does not wait for a transition": { desired: "deleted", observed: phase("stopping"), inFlight: null, attempts: none, online: true, present: imageOnly, expect: del },
   "a failed wake for reading waits rather than failing, whatever its code": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [1, 600_000, "setup-failed"], online: true, present: imageOnly, expect: wait("backoff") },
   "a wake for reading that failed past the attempt budget still waits": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [5, 600_000, "backend"], online: true, present: imageOnly, expect: wait("backoff") },
-  "a failed wake for reading still waits while the thread is read": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [0, 600_000, "setup-failed", "reading"], online: true, present: imageOnly, expect: wait("backoff") },
-  "a wake for reading that failed once the backfill let go of the pylon neither fails nor holds its pause": { desired: "paused", observed: running(null), inFlight: null, attempts: [0, 1_000, "setup-failed", "reading"], online: true, present: imageOnly, expect: pause },
-  "a wake for reading that failed is no failure for a later wake, which boots at once": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: [0, 1_000, "backend", "reading"], online: true, present: imageOnly, expect: spawn({ kind: "resume", checkpoint: lastCheckpoint }) },
+  "a failed wake for reading still waits within its backoff": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [1, 1_000, "setup-failed"], online: true, present: imageOnly, expect: wait("backoff") },
+  "a wake for reading whose failure went to the usage hold leaves no attempt, so its pause goes out at once": { desired: "paused", observed: running(null), inFlight: null, attempts: none, online: true, present: imageOnly, expect: pause },
+  "a wake for reading whose failure went to the usage hold leaves no attempt, so a later wake boots at once": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, expect: spawn({ kind: "resume", checkpoint: lastCheckpoint }) },
   // 4
   "a non-retryable code fails": { desired: "running", observed: "absent", inFlight: null, attempts: [1, 60_000, "setup-failed"], online: true, present: imageOnly, expect: { kind: "fail", code: "setup-failed", reason: "last job failed with setup-failed, which is not retryable: the probe's setup-failed message" } },
   "five failed attempts fail": { desired: "running", observed: "absent", inFlight: null, attempts: [5, 600_000, "backend"], online: true, present: imageOnly, expect: { kind: "fail", code: "backend", reason: "gave up after 5 failed attempts, the last with backend: the probe's backend message" } },
@@ -131,7 +131,7 @@ const rows: Record<string, Row> = {
   "a retried pylon whose probe cannot say why it broke fails, never pausing it": { desired: "running", observed: brokenUnknown, inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: { kind: "fail", code: "backend", reason: "pylon is broken: qcow2 header unreadable. The node did not say why the pylon broke in a way this control plane understands. Upgrade Nexus on the node and the control plane, or start again from the project" } },
   "a retried broken pylon still waits out its backoff": { desired: "running", observed: broken, inFlight: null, attempts: [1, 1_000, "backend"], online: true, present: imageOnly, retrying: true, expect: wait("backoff") },
   "reading and stopped resumes from the checkpoint without bringing the sessions back": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, expect: spawnForReading({ kind: "resume", checkpoint: lastCheckpoint }) },
-  "reading and broken fails like running, which is why the backfill wakes only a stopped pylon": { desired: "reading", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", code: "backend", reason: "pylon is broken: qcow2 header unreadable" } },
+  "reading and broken gives up like running, uncounted, which is why the backfill wakes only a stopped pylon": { desired: "reading", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", code: "backend", reason: "pylon is broken: qcow2 header unreadable", uncounted: true } },
   // 7b
   "a missing image is fetched before the template, from the first holder": {
     desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: [], firstBoot: fromTemplate,
@@ -166,7 +166,7 @@ const rows: Record<string, Row> = {
 };
 
 function input(row: Row): PlanInput {
-  const [count, failedAgo, lastCode, reading] = row.attempts;
+  const [count, failedAgo, lastCode] = row.attempts;
   const attempt = lastCode === null ? null : { at: now - failedAgo!, code: lastCode, message: `the probe's ${lastCode} message` };
   return {
     pylonId, node, live, liveHash, nextCheckpoint,
@@ -179,7 +179,7 @@ function input(row: Row): PlanInput {
     nodeArtifacts: new Set(row.present),
     nodeSecrets: new Set(row.secrets?.holds ?? []),
     inFlight: row.inFlight === null ? null : jobInFlight(row.inFlight),
-    attempts: { count, last: reading === undefined ? attempt : null, ...(reading === undefined || attempt === null ? {} : { readFailure: attempt }) },
+    attempts: { count, last: attempt },
     retrying: row.retrying ?? false,
     holders: (id) => row.holders?.[id] ?? [],
     artifactSha256: (id) => `sha-${id}`,

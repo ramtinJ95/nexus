@@ -6,7 +6,7 @@ import type { Db, Holding, Row } from "./db.ts";
 import type { ProjectId, ThreadId } from "../ids.ts";
 import { roleOf } from "./agent-protocol.ts";
 import type { AgentCall } from "./agent-usage.ts";
-import type { ArchiveFacts } from "./reconcile.ts";
+import type { ArchiveFacts, FailedAttempt } from "./reconcile.ts";
 import type { Thread, ThreadParticipant } from "./thread-store.ts";
 import type { BackfillThread, Breakdown, UsageBackfill, UsageReport, UsageTotals } from "../contract/usage.ts";
 
@@ -100,6 +100,22 @@ export function usageStore(db: Db, threads: {
 
   function endUsageBackfill(state: "stopped" | "done", now: number) {
     sql("UPDATE usage_backfill SET state = ?, finished_at = ?, thread = NULL, phase = NULL, since = NULL, waiting = NULL WHERE state = 'running'").run(state, now);
+  }
+
+  /** The pylon held to be read whole: a settle's, which goes first, or the running run's. */
+  function usageHold(): UsageHold | null {
+    if (settle !== null) return { by: "settle", thread: settle.thread, phase: settle.phase, since: settle.since };
+    const run = usageBackfill();
+    return run.state === "running" && run.current !== null ? { by: "run", ...run.current } : null;
+  }
+
+  /**
+   * The holder records the thread read, with a null reason, or given up on, and its hold then waits for the pause. A
+   * settle's failure keeps its first line, as a pylon's failure ends with its log.
+   */
+  function finishUsageHold(hold: Pick<UsageHold, "by" | "thread">, reason: string | null, now: number) {
+    if (hold.by === "run") finishUsageBackfillThread(hold.thread, reason === null ? "done" : "skipped", reason, now);
+    else finishSettle(hold.thread, reason === null ? null : reason.split("\n")[0]!, now);
   }
 
   const sums = (calls: string) => `coalesce(sum(input), 0) AS input, coalesce(sum(output), 0) AS output, coalesce(sum(cache_write), 0) AS cache_write,
@@ -225,19 +241,16 @@ export function usageStore(db: Db, threads: {
       if (reason === null) settleWaits.delete(thread);
       else settleWaits.set(thread, reason);
     },
-    /** The pylon held to be read whole: a settle's, which goes first, or the running run's. */
-    usageHold(): UsageHold | null {
-      if (settle !== null) return { by: "settle", thread: settle.thread, phase: settle.phase, since: settle.since };
-      const run = usageBackfill();
-      return run.state === "running" && run.current !== null ? { by: "run", ...run.current } : null;
-    },
+    usageHold,
+    finishUsageHold,
     /**
-     * The holder records the thread read, with a null reason, or given up on, and its hold then waits for the pause. A
-     * settle's failure keeps its first line, as a pylon's failure ends with its log.
+     * A wake for reading of the thread failed, which the hold that reads it gives up on. One whose thread is no longer
+     * archived is left to the backfill's next step, which says so.
      */
-    finishUsageHold(hold: Pick<UsageHold, "by" | "thread">, reason: string | null, now: number) {
-      if (hold.by === "run") finishUsageBackfillThread(hold.thread, reason === null ? "done" : "skipped", reason, now);
-      else finishSettle(hold.thread, reason === null ? null : reason.split("\n")[0]!, now);
+    failUsageRead(thread: ThreadId, failure: FailedAttempt) {
+      const hold = usageHold();
+      if (hold?.thread !== thread || hold.phase !== "reading" || threadRecord(thread)?.status !== "archived") return;
+      finishUsageHold(hold, `the pylon did not boot: ${failure.code}: ${failure.message}`, failure.at);
     },
     /** The holder lets go of the pylon it holds, once it is paused. */
     releaseUsageHold(hold: Pick<UsageHold, "by">) {
