@@ -23,8 +23,10 @@ import { githubTokenGrant } from "../../protocol/secret-grants.ts";
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
 import { parseRecord, transcriptStart, type ClaudeConversation, type ClaudeEntry } from "../claude-transcript.ts";
 import { runningPylon, stoppedPylon, testCapacity, testImage, testObservation } from "../../test-support/kit.ts";
-import { imagePaths } from "./items.ts";
-import { liveFrames, liveStreams } from "./live-frames.ts";
+import { claudeItems, conversationItems, imagePaths } from "./items.ts";
+import { liveFrames, liveStreams, type ItemsOf } from "./live-frames.ts";
+import type { PromptSenders } from "../inbox.ts";
+import type { Question } from "../questions.ts";
 import { promptSenders, typeIntoClaude } from "../inbox.ts";
 import { senders } from "../agent-protocol.ts";
 import { startHint, type HintPart } from "./start-hint.ts";
@@ -154,6 +156,11 @@ function conversationOf(html: string) {
     dock: textOf(dock),
   };
 }
+
+
+/** A view's rows as the route reads them, with the questions and prompt senders a test gives a Claude transcript. */
+const itemsWith = (thread: ThreadId, questions = (): readonly Question[] => [], senders = (): PromptSenders => () => null): ItemsOf => (view) =>
+  view.kind === "claude" ? claudeItems(view.view, questions(), thread, senders()) : conversationItems(view.view, thread);
 
 test("the overview lists each project's open threads with their phases, node and activity, and folds the archived", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
@@ -527,7 +534,7 @@ test("an answered AskUserQuestion leaves the dock and shows in the conversation 
     toolu_1: `Claude asked Drink Which drink? ✓ Tea Hot a cup of tea Coffee Strong Notes: no rush Extras What goes in it? ✓ Milk Sugar Own answer: Oat cream Answered from ${laptop}, just now .`,
     toolu_2: `Claude asked Drink Which drink? Tea Hot Coffee Strong Extras What goes in it? Milk Sugar ${terminal} Answered in the terminal.`,
   });
-  const frame = liveFrames(thread, null, () => s.registry.questions(thread.id))({ kind: "claude", session: "s1", entries: s.registry.claudeEntries(thread.id), dropped: 0, readAt: 1, working: false, usageLimit: null });
+  const frame = liveFrames(thread, null, itemsWith(thread.id, () => s.registry.questions(thread.id)))({ kind: "claude", session: "s1", entries: s.registry.claudeEntries(thread.id), dropped: 0, readAt: 1, working: false, usageLimit: null });
   assert.equal(askCardsOf(`id="convo"${(frame as { convo: string }).convo}`)["toolu_1"], askCardsOf(page)["toolu_1"], "the page's stream shows the answer as the page does");
 });
 
@@ -1970,10 +1977,10 @@ test("a Claude worker's page stream names one view for one conversation, and ano
   const thread = await claudeThread(s, []);
   const reply = (text: string): ClaudeEntry => ({ kind: "reply", at: 1, text });
   const view = (entries: ClaudeEntry[]): ClaudeConversation => ({ kind: "claude", session: "s1", entries, dropped: 0, readAt: 1, working: false, usageLimit: null });
-  const shows = (entries: ClaudeEntry[]) => (liveFrames(thread)(view(entries)) as { shows: string }).shows;
+  const shows = (entries: ClaudeEntry[]) => (liveFrames(thread, null, itemsWith(thread.id))(view(entries)) as { shows: string }).shows;
   assert.equal(shows([reply("A"), reply("Z")]), shows([reply("A"), reply("Z")]), "the same entries in another array");
   assert.notEqual(shows([reply("A"), reply("Z")]), shows([reply("B"), reply("Z")]), "a replaced transcript that ends as the old one did");
-  const frames = liveFrames(thread);
+  const frames = liveFrames(thread, null, itemsWith(thread.id));
   const first = frames(view([reply("A")])) as { convo: string; shows: string };
   const named = frames({ ...view([reply("A")]), working: true });
   assert.deepEqual(Object.keys(named ?? {}), ["shows"], "a view whose region reads as before gets a frame of its name alone");
@@ -1987,7 +1994,7 @@ test("the page streams of one thread render each view once between them, and the
   const view = (text: string): ClaudeConversation => ({ kind: "claude", session: "s1", entries: [{ kind: "reply", at: 1, text }], dropped: 0, readAt: 1, working: false, usageLimit: null });
   let renders = 0;
   const reader = liveStreams();
-  const join = () => reader(thread, null, () => { renders++; return []; }, () => () => null);
+  const join = () => reader(thread, null, (view) => { renders++; return itemsWith(thread.id)(view); });
   const [a, b] = [join(), join()];
   const first = view("A");
   assert.deepEqual(a.frames(first), b.frames(first));
@@ -2283,7 +2290,7 @@ test("a Claude worker's prompt is Nexus's only when Nexus typed it, the usage li
   const rows = conversationOf((await s.call("GET", `/threads/${thread.id}`)).text).rows;
   assert.ok(rows.includes(`Nexus usage limit ${continued}`), rows.join("\n"));
   assert.ok(rows.includes(`You ${theirs}`), rows.join("\n"));
-  const frame = liveFrames(thread, null, () => [], () => promptSenders(s.registry, thread.id))({ kind: "claude", session: "s1", entries, dropped: 0, readAt: 1, working: false, usageLimit: null });
+  const frame = liveFrames(thread, null, itemsWith(thread.id, () => [], () => promptSenders(s.registry, thread.id)))({ kind: "claude", session: "s1", entries, dropped: 0, readAt: 1, working: false, usageLimit: null });
   assert.deepEqual(conversationOf(`id="convo"${(frame as { convo: string }).convo}<div class="dock"></main>`).rows, rows, "the page's stream names them as the page does");
 });
 
@@ -2730,6 +2737,22 @@ test("the Cluster page asks only the picked node's probe, and shows each other n
   assert.deepEqual(asked, [node], "only the picked node's probe is asked");
 });
 
+test("a node card says why it has no reading: its probe failed, or the caller may not read a node's health", async (t) => {
+  const unused = { command: () => Promise.reject(new Error("unused")), stream: () => Promise.reject(new Error("unused")) };
+  const tower = "tower" as NodeName;
+  const probes = new Map([node, tower].map((name) => [name, { ...unused, health: () => Promise.reject(new Error(`${name} is unreachable`)) }] as const));
+  const s = await seeded(t, { ...landingOptions(), probes });
+  s.registry.upsertNode({ name: tower, tailnetHost: "tower.tail.ts.net", tailnetNodeId: "nTOWER" as TailnetNodeId });
+  const load = (page: string, name: string) => /<dt>Load<\/dt><dd>[\s\S]*?<span class="meter-words">([\s\S]*?)<\/span><\/dd>/.exec(page.split(`data-node="${name}"`)[1]!)![1]!;
+  const failed = (await s.call("GET", `/nodes/${node}`)).text;
+  assert.equal(load(failed, node), `<span class="dim" title="${node} is unreachable">not read</span>`, "a failed read names its error");
+  assert.equal(load(failed, tower), `<span class="dim">no reading in 5 minutes</span>`);
+  s.callAs(phone);
+  const refused = (await s.call("GET", `/nodes/${node}`)).text;
+  assert.match(refused, /<p class="error" role="alert">caller may not read a node&#39;s health/, "the picked node says the read was refused");
+  assert.equal(load(refused, tower), `<span class="dim" title="Only a deployer reads a node&#39;s health">not read</span>`, "another node's card says only a deployer reads it");
+});
+
 test("a queued thread's preview says once what it waits for", async (t) => {
   const s = await seeded(t);
   const first = await s.start("acme", "Fix checkout");
@@ -2954,8 +2977,8 @@ test("a finished text renders as it did uncached, and a streaming answer keeps i
   const thread = await s.start("acme", "Fix checkout");
   const text = `Done: **${randomUUID()}** and \`code\`.\n\n- one\n- two`;
   const reply = (entries: ClaudeEntry[]): ClaudeConversation => ({ kind: "claude", session: "s1", entries, dropped: 0, readAt: 1, working: false, usageLimit: null });
-  const rendered = (liveFrames(thread)(reply([{ kind: "reply", at: 1, text }])) as { convo: string }).convo;
-  assert.equal((liveFrames(thread)(reply([{ kind: "reply", at: 1, text }])) as { convo: string }).convo, rendered, "a render from the cache is the render it keeps");
+  const rendered = (liveFrames(thread, null, itemsWith(thread.id))(reply([{ kind: "reply", at: 1, text }])) as { convo: string }).convo;
+  assert.equal((liveFrames(thread, null, itemsWith(thread.id))(reply([{ kind: "reply", at: 1, text }])) as { convo: string }).convo, rendered, "a render from the cache is the render it keeps");
   assert.match(rendered, /<strong>[^<]+<\/strong> and <code>code<\/code>\.<\/p><ul><li><p>one<\/p><\/li><li><p>two<\/p><\/li><\/ul>/);
 
   const caret = '<span class="caret" aria-hidden="true"></span>';
@@ -2965,7 +2988,7 @@ test("a finished text renders as it did uncached, and a streaming answer keeps i
     docs: streaming === null ? {} : { "pi.live": { run: { taskId: 1, inputs: [1] }, tools: [], generation: { attempt: 1, message: assistant([{ type: "text", text: streaming }], "pending") } } },
   }) as never;
   const streamed = `Streaming ${randomUUID()}`;
-  const carets = (view: never) => (liveFrames(thread)(view) as { convo: string }).convo.split(caret).length - 1;
+  const carets = (view: never) => (liveFrames(thread, null, itemsWith(thread.id))(view) as { convo: string }).convo.split(caret).length - 1;
   assert.equal(carets(harness(null, streamed)), 1);
   assert.equal(carets(harness(streamed, null)), 0, "the finished text is not the streaming render");
   assert.equal(carets(harness(streamed, streamed)), 1, "nor the streaming render the finished one");

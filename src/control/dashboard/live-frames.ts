@@ -4,11 +4,9 @@ import type { ConversationView } from "@earendil-works/pi-durable";
 import type { Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
 import type { ClaudeConversation } from "../claude-transcript.ts";
-import type { PromptSenders } from "../inbox.ts";
 import { agentView, type AgentView } from "../../contract/threads.ts";
-import type { Question } from "../questions.ts";
 import { Html, html, ago } from "./view.ts";
-import { itemsOf, modelOf, type Item } from "./items.ts";
+import { modelOf, type Item } from "./items.ts";
 import { blocks, blockView } from "./conversation.ts";
 
 /**
@@ -56,17 +54,20 @@ const grown = /<!--grow-->([\s\S]*?)<!--\/grow-->/g;
 /** A render of a thread page's conversation region, with its growing parts apart, and the view it shows. */
 interface LiveRender { region: string; shape: string; parts: readonly string[]; shows: string }
 
+/** A thread's conversation as the rows its page shows, which the route reads for each view. */
+export type ItemsOf = (view: AgentView) => readonly Item[];
+
 /**
  * Renders the conversation region once per view. Every watch of a conversation is handed the same view, so the
  * readers of one thread's stream that share this render each view once between them.
  */
-function liveRender(t: Thread, claudeModel: string | null, questions: () => readonly Question[], senders: () => PromptSenders): (served: ConversationView | ClaudeConversation) => LiveRender {
+function liveRender(t: Thread, claudeModel: string | null, items: ItemsOf): (served: ConversationView | ClaudeConversation) => LiveRender {
   let last: { served: ConversationView | ClaudeConversation; render: LiveRender } | null = null;
   return (served) => {
     if (last?.served === served) return last.render;
     const view = agentView(served);
     const model = view.kind === "claude" ? claudeModel : modelOf(view.view);
-    const region = convo(t, view, itemsOf(view, questions, t.id, senders), model, Date.now()).text;
+    const region = convo(t, view, items(view), model, Date.now()).text;
     const render = { region, shape: region.replace(grown, "<!--grow-->"), parts: [...region.matchAll(grown)].map((m) => m[1]!), shows: shownKey(view, model) };
     last = { served, render };
     return render;
@@ -96,8 +97,7 @@ function readerFrames(render: (served: ConversationView | ClaudeConversation) =>
   };
 }
 
-export const liveFrames = (t: Thread, claudeModel: string | null = null, questions: () => readonly Question[] = () => [], senders: () => PromptSenders = () => () => null) =>
-  readerFrames(liveRender(t, claudeModel, questions, senders));
+export const liveFrames = (t: Thread, claudeModel: string | null, items: ItemsOf) => readerFrames(liveRender(t, claudeModel, items));
 
 /**
  * The renders of thread pages' streams, one per thread while any of its readers has framed a view, so a view renders
@@ -106,11 +106,11 @@ export const liveFrames = (t: Thread, claudeModel: string | null = null, questio
  */
 export function liveStreams() {
   const shared = new Map<ThreadId, { render: ReturnType<typeof liveRender>; readers: number }>();
-  return (t: Thread, claudeModel: string | null, questions: () => readonly Question[], senders: () => PromptSenders) => {
+  return (t: Thread, claudeModel: string | null, items: ItemsOf) => {
     let joined: { render: ReturnType<typeof liveRender>; readers: number } | null = null;
     const frames = readerFrames((served) => {
       if (joined === null) {
-        joined = shared.get(t.id) ?? { render: liveRender(t, claudeModel, questions, senders), readers: 0 };
+        joined = shared.get(t.id) ?? { render: liveRender(t, claudeModel, items), readers: 0 };
         joined.readers++;
         shared.set(t.id, joined);
       }

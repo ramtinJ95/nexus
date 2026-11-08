@@ -11,7 +11,7 @@ import type { Context, FoldView, HomeView, Latest, Peek } from "./context.ts";
 import type { HeldWork, InboxNeed } from "../work.ts";
 import { prose, inline } from "./markdown.ts";
 import { cleanupCard, judgmentCards, questionCard, landing, nudgeCard, resumeCard } from "./cards.ts";
-import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, foldCap, foldHref, type Shell } from "./shell.ts";
+import { layout, threadsOf, queuedLook, closedLabel, quietLabel, newProjectButton, foldCap, foldHref, type Shell } from "./shell.ts";
 import { lifeOfThread, roleLine, type Life } from "./lifecycle.ts";
 import { flightLines, flightRows, flightStack, heldLine, inFlight, itemActions, itemBrief, peekHref, peekKey, peekView } from "./flight.ts";
 import { lifeTrack } from "./timeline.ts";
@@ -29,7 +29,7 @@ export function home(c: Context, h: HomeView, dialogs: Pick<Shell, "start" | "ad
   const peeked = peek === null ? null : peek.kind === "item" && peek.item.thread !== null ? peek.item.thread : peekKey(peek);
   const carded = peeked !== null && cards.has(peeked);
   const flying = inFlight(placed);
-  const waiting = c.needs().length;
+  const waiting = c.needs.length;
   return layout(c, {
     title: dialogs.start !== undefined ? "Start a thread" : dialogs.addProject === true ? "New project" : "Threads",
     ...dialogs,
@@ -81,7 +81,8 @@ function table(c: Context, offline: ReadonlySet<NodeName>, threads: readonly Thr
 }
 
 /** Each project's threads with its queued threads, its quiet fold capped and its closed threads as a link to their own page. */
-function overview(c: Context, { projects, offline }: HomeView): Html {
+function overview(c: Context, { offline }: HomeView): Html {
+  const { projects } = c;
   return html`${projects.length === 0 ? html`<div class="first-project"><p class="empty">No projects yet. A project names the repository its threads clone and the node they run on.</p>${newProjectButton}</div>` : projects.map((p) => {
   const { recent, quiet, closed } = threadsOf(c, p.id);
   const queued = c.queuedIn(p.id);
@@ -94,7 +95,7 @@ ${queued.length > 0 && html`<h3 class="ov-sub">Queued</h3><table class="ov ov-qu
   const [label, tone] = queuedLook(q);
   return html`<tr>
 <td><span class="ov-title">${dot(tone, label)}<a href="/threads/${q.id}">${q.title}</a><span class="tag">${label}</span></span></td>
-<td>${q.waits.map((w) => html`<span class="ov-wait">${threadTitle(c, w.thread)}: ${w.why}</span>`)}</td>
+<td>${q.waits.map((w) => html`<span class="ov-wait">${c.title(w.thread)}: ${w.why}</span>`)}</td>
 <td class="wide">${q.node}</td>
 </tr>`;
 })}</tbody>
@@ -136,7 +137,7 @@ ${(page > 1 || older) && html`<p class="fold-pages">${page > 1 && html`<a class=
 /** The key of the work a card is for, as the work in flight and the preview name it. A node's cleanup is no work's. */
 const keyOf = (n: InboxNeed) => n.kind === "cleanup" ? null : n.kind === "held" ? heldKey(n.work) : n.d.thread.id;
 
-const needCards = (c: Context) => new Set(c.needs().map(keyOf).filter((key) => key !== null));
+const needCards = (c: Context) => new Set(c.needs.map(keyOf).filter((key) => key !== null));
 
 const needId = (n: InboxNeed) => n.kind === "cleanup" ? `need-${n.question.node}-${n.question.id}`
   : n.kind === "held" ? `need-${heldKey(n.work)}`
@@ -149,7 +150,7 @@ const heldKey = (w: HeldWork) => w.kind === "item" ? w.item.id : w.kind === "que
  * what moves it on. The work the person picked is marked, and its card has the latest reply `picked` read.
  */
 function needsList(c: Context, h: HomeView, picked: { key: string; card: string | null; reply: Latest["reply"] } | null): Html {
-  const needs = c.needs();
+  const needs = c.needs;
   // A thread with several cards says where its work is, and is picked, on the card the person picked, or else its first.
   const lead = (key: string | null) => needs.find((n) => keyOf(n) === key && key === picked?.key && needId(n) === picked.card) ?? needs.find((n) => keyOf(n) === key);
   const leads = new Set(needs.filter((n) => lead(keyOf(n)) === n));
@@ -168,11 +169,11 @@ ${fold(needId(n), html`<div class="need-head"><span class="need-what">Cleanup</s
   if (n.kind === "held") {
     const l = heldLine(c, n.work);
     const item = n.work.kind === "item" ? n.work.item : undefined;
-    const project = item === undefined ? undefined : h.projects.find((p) => p.id === item.project);
+    const project = item === undefined ? undefined : c.projects.find((p) => p.id === item.project);
     const what = item === undefined ? (l.state[0] === "blocked" ? "Blocked" : "Held") : item.approved === null && project?.pipeline?.autoStart === false ? "Approve item" : "Held item";
     return html`<article class="need need-held${mark(n)}" id="${needId(n)}" data-peek-key="${l.key}" tabindex="-1" aria-label="${what}: ${l.title}">
 ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="${peekHref(l.key)}" data-peek="${l.key}"><span class="dim">${l.project} /</span> ${l.title}</a><span class="need-at">${l.when}</span></div>`,
-  html`${n.work.kind === "thread" ? whereNow(c, h, n.work.d, l.life, replyOf(l.key)) : html`<div class="need-ctx">${lifeTrack(l.life, false)}</div>`}<p class="land-note">${l.life.why.replace(/\.$/, "")}.</p>${item !== undefined && itemBrief(c, item)}${item !== undefined && project !== undefined ? itemActions(item, project) : n.work.kind === "queued" && html`<div class="need-act"><a class="btn btn-xs" href="/threads/${l.key}">Open thread</a></div>`}`, l.life.why, mark(n))}
+  html`${n.work.kind === "thread" ? whereNow(c, h, n.work.d, l.life, replyOf(l.key)) : html`<div class="need-ctx">${lifeTrack(l.life, false)}</div>`}<p class="land-note">${l.life.why.replace(/\.$/, "")}.</p>${item !== undefined && itemBrief(h, item)}${item !== undefined && project !== undefined ? itemActions(item, project) : n.work.kind === "queued" && html`<div class="need-act"><a class="btn btn-xs" href="/threads/${l.key}">Open thread</a></div>`}`, l.life.why, mark(n))}
 </article>`;
   }
   const t = n.d.thread;
@@ -210,7 +211,7 @@ function needCard(c: Context, h: HomeView, n: ThreadNeed): [what: string, body: 
   const t = d.thread;
   const { label, fix } = needWording(n, c.now);
   if (fix !== null) return [label, html`<p class="land-note">${fix.body}</p><div class="need-act">${needAction(t, fix.action)}</div>`];
-  const lands = landsOnItsOwn(h.projects.find((p) => p.id === t.project)?.autoReview);
+  const lands = landsOnItsOwn(c.projects.find((p) => p.id === t.project)?.autoReview);
   switch (n.kind) {
     case "review": {
       const card = landing(c, d, lands, "inbox");

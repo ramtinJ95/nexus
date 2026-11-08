@@ -13,9 +13,9 @@ import type { Context, HomeView, Latest, Peek } from "./context.ts";
 import type { HeldWork } from "../work.ts";
 import { clock, span } from "./elapsed.ts";
 import { prose } from "./markdown.ts";
-import { deployedForMs, lifeOfItem, phaseTone, pipelineItems, lifeOfThread, roleLine, stages, type Life, type Stage } from "./lifecycle.ts";
+import { deployedForMs, lifeOfItem, phaseTone, lifeOfThread, roleLine, stages, type Life, type Stage } from "./lifecycle.ts";
 import { lifeTrack } from "./timeline.ts";
-import { lastActive, queuedLook, threadTitle } from "./shell.ts";
+import { lastActive, queuedLook } from "./shell.ts";
 import { isOpenStatus } from "../reconcile.ts";
 
 /** An item's Approve, while its project waits for the person to approve each item, and its Cancel, until it has a thread. */
@@ -48,9 +48,9 @@ const itemLine = (c: Context, i: PipelineItem): Line => ({ key: i.id, title: i.t
 export function flightLines(c: Context, h: HomeView): Map<Stage, Line[]> {
   const recent = (t: Thread) => isOpenStatus(t.status) || (t.status === "archived" && t.archivedAt !== undefined && c.now - t.archivedAt < deployedForMs);
   const lines = [
-    ...pipelineItems(c).filter((i) => i.thread === null).map((i) => itemLine(c, i)),
-    ...h.projects.flatMap((p) => c.queuedIn(p.id)).map((q) => queuedLine(c, q)),
-    ...c.threads().filter((t) => recent(t) && h.role(t) === "builder").map((t) => [t, threadLine(c, t)] as const).filter(([t, l]) => t.status !== "archived" || l.life.stage === "deployed").map(([, l]) => l),
+    ...h.items.filter((i) => i.thread === null).map((i) => itemLine(c, i)),
+    ...c.projects.flatMap((p) => c.queuedIn(p.id)).map((q) => queuedLine(c, q)),
+    ...c.threads.filter((t) => recent(t) && h.role(t) === "builder").map((t) => [t, threadLine(c, t)] as const).filter(([t, l]) => t.status !== "archived" || l.life.stage === "deployed").map(([, l]) => l),
   ];
   const placed = Map.groupBy(lines.filter((l) => l.life.stage !== null), (l) => l.life.stage!);
   for (const stage of placed.values()) stage.sort((a, b) => a.order - b.order);
@@ -116,10 +116,10 @@ function latest({ reply, asked }: Latest, now: number): Html {
 }
 
 /** What an item waits to start after and its brief, which its preview and its Needs you card show. */
-export function itemBrief(c: Context, i: PipelineItem): Html {
+export function itemBrief(h: HomeView, i: PipelineItem): Html {
   // An item that became a thread previews as that thread, so one that waits on the person leads to its card.
   const after = i.after.map((id) => {
-    const x = pipelineItems(c).find((y) => y.id === id);
+    const x = h.items.find((y) => y.id === id);
     return { key: x?.thread ?? id, title: x?.title ?? id };
   });
   return html`${after.length > 0 && html`<p class="peek-meta">After ${after.map((x, n) => html`${n > 0 && ", "}<a class="link" href="${peekHref(x.key)}" data-peek="${x.key}">${x.title}</a>`)}</p>`}
@@ -131,13 +131,13 @@ export function peekView(c: Context, h: HomeView, p: Peek | null): Html | false 
   if (p === null) return false;
   if (p.kind === "item") {
     const i = p.item;
-    const project = h.projects.find((x) => x.id === i.project);
+    const project = c.projects.find((x) => x.id === i.project);
     const life = lifeOfItem(c, i);
     return html`<section class="peek" aria-labelledby="peek-h" data-peek-key="${i.id}">
 <header class="peek-head"><span class="peek-proj">${i.project}<span class="dim"> item </span><code>${i.id}</code></span><h2 id="peek-h">${dot(phaseTone[i.phase.kind], i.phase.kind)}<span>${i.title}</span></h2>${i.thread !== null && html`<a class="btn btn-xs" href="/threads/${i.thread}">Open thread</a>`}${close}</header>
 ${lifeTrack(life, false)}
 ${next(life)}
-${itemBrief(c, i)}
+${itemBrief(h, i)}
 <p class="peek-meta">Added by ${i.addedBy} ${ago(i.addedAt, c.now)}, for ${i.worker === "claude" ? `Claude Code${i.model !== null ? `, ${i.model}` : ""}` : "the Nexus agent"}.</p>
 ${project !== undefined && itemActions(i, project)}
 </section>`;
@@ -149,7 +149,7 @@ ${project !== undefined && itemActions(i, project)}
     return html`<section class="peek" aria-labelledby="peek-h" data-peek-key="${q.id}">
 <header class="peek-head"><span class="peek-proj">${q.project}</span><h2 id="peek-h">${dot(tone, label)}<span>${q.title}</span></h2><a class="btn btn-xs" href="/threads/${q.id}">Open thread</a>${close}</header>
 ${lifeTrack(life, false)}
-${next(life, q.waits.every((w) => w.state === "landed") ? undefined : html`<ul class="peek-waits">${q.waits.map((w) => html`<li>${state(w.state, w.state === "landed" ? "ok" : w.state === "blocked" ? "bad" : "idle")} <a class="link" href="${peekHref(w.thread)}" data-peek="${w.thread}">${threadTitle(c, w.thread)}</a>: ${w.why}</li>`)}</ul>`)}
+${next(life, q.waits.every((w) => w.state === "landed") ? undefined : html`<ul class="peek-waits">${q.waits.map((w) => html`<li>${state(w.state, w.state === "landed" ? "ok" : w.state === "blocked" ? "bad" : "idle")} <a class="link" href="${peekHref(w.thread)}" data-peek="${w.thread}">${c.title(w.thread)}</a>: ${w.why}</li>`)}</ul>`)}
 <p class="peek-meta">Starts on ${q.node} with ${q.resources.cpus} CPUs, ${q.resources.memoryGiB} GiB of memory and ${q.resources.diskGiB} GiB of disk.</p>
 </section>`;
   }

@@ -4,7 +4,7 @@
  * and what waits on the person.
  */
 import type { ThreadId } from "../../ids.ts";
-import { itemView, phaseStep, steps, threadStage, type ItemPhase, type PipelineItem, type Step } from "../pipeline.ts";
+import { phaseStep, steps, type ItemPhase, type PipelineItem, type Step } from "../pipeline.ts";
 import { checkThread, landingAt, landingSteps, roundsSpent, type LandingAt, type LandingStep, type PhaseKind, type Review } from "../review-model.ts";
 import { html, type Html, type Tone } from "./view.ts";
 import { checkBeside, duration, liveNote, needWording } from "../wording.ts";
@@ -83,32 +83,30 @@ function runAt(r: Review, id: ThreadId): string {
  * A thread that is not a builder says in one line what it is, in place of the track, with the review it serves, until
  * its builder's next review replaced it or its check is over.
  */
-export function roleLine(c: Pick<Context, "registry" | "reviews">, id: ThreadId, role: Exclude<Role, "builder">): Html {
+export function roleLine(c: Pick<Context, "reviews" | "thread">, id: ThreadId, role: Exclude<Role, "builder">): Html {
   if (role === "planning") return html`<p class="role-line">Planning thread. Each item it proposes waits for you to accept it.</p>`;
   const r = c.reviews().find((r) => role === "reviewer" ? r.reviewer === id || (r.second?.kind === "claude" && r.second.thread === id) : ranIn(r, id));
   const what = { reviewer: "Reviewer", check: "Check", verify: "Live check" }[role];
   if (r === undefined) return html`<p class="role-line">${what} for a review that has moved on.</p>`;
-  const builder = html`<a class="link" href="/threads/${r.builder}">${c.registry.thread(r.builder)?.title ?? r.builder}</a>`;
+  const builder = html`<a class="link" href="/threads/${r.builder}">${c.thread(r.builder)?.title ?? r.builder}</a>`;
   const at = role === "reviewer" ? reviewAt[r.phase.kind](r) : runAt(r, id);
   return html`<p class="role-line">${what} of <a class="link" href="${r.pr.url}" target="_blank" rel="noreferrer">PR #${r.pr.number}</a> for ${builder}<span class="role-at">${at}</span></p>`;
 }
 
 /** A started or queued thread's life, from its pipeline phase and what of it waits on the person. */
-export function lifeOfThread(c: Pick<Context, "registry" | "needs" | "now">, id: ThreadId): Life {
-  const { phase, at } = threadStage(c.registry, id, c.now);
-  const needs = c.needs().filter((n): n is ThreadNeed => n.kind !== "cleanup" && n.kind !== "held" && n.d.thread.id === id);
-  const review = c.registry.review(id);
+export function lifeOfThread(c: Pick<Context, "stage" | "review" | "needs" | "now">, id: ThreadId): Life {
+  const { phase, at } = c.stage(id);
+  const needs = c.needs.filter((n): n is ThreadNeed => n.kind !== "cleanup" && n.kind !== "held" && n.d.thread.id === id);
+  const review = c.review(id);
   const said = (needs.length === 0 ? null : needWording(needs[0]!, c.now).why || null) ?? (review === null ? null : reviewNext(review));
   return { stage: stageOf(phase.kind), at, why: said ?? phase.why, needs };
 }
 
 /** An item's life: its thread's once it has one, and before then its own phase on the first step. */
-export function lifeOfItem(c: Pick<Context, "registry" | "needs" | "now">, item: PipelineItem): Life {
+export function lifeOfItem(c: Pick<Context, "stage" | "review" | "needs" | "now">, item: PipelineItem): Life {
   if (item.thread !== null) return lifeOfThread(c, item.thread);
   return { stage: stageOf(item.phase.kind), at: "planned", why: item.phase.why, needs: [] };
 }
-
-export const pipelineItems = (c: Pick<Context, "registry" | "now">) => c.registry.items().map((i) => itemView(c.registry, i, c.now));
 
 /**
  * The track of steps a card or a page draws: each step done, the one it is at, held there or not, and those ahead.

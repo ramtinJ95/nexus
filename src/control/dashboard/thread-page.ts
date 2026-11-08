@@ -20,7 +20,7 @@ import { modelOf } from "./items.ts";
 import { runOf, stateBar, composer, type Run } from "./conversation.ts";
 import { convo, shownKey } from "./live-frames.ts";
 import { judgmentCards, questionCards, landing, cancelReview, nudgeCard, resumeCard } from "./cards.ts";
-import { layout, queuedLook, threadTitle } from "./shell.ts";
+import { layout, queuedLook } from "./shell.ts";
 import { lifeOfThread, roleLine } from "./lifecycle.ts";
 import { lifeTrack, timeline } from "./timeline.ts";
 import { usageColumns, exact } from "./usage-page.ts";
@@ -53,7 +53,8 @@ function lookOf(d: ThreadDetail, p: Preview) {
 }
 
 /** `streaming` is a poll from a page whose stream shows the conversation. */
-export function threadPage(c: Context, { d, row, node, role, agent, usage, view, items, renderedReplyAt, nudged, lands }: ThreadView, streaming = false): Html {
+export function threadPage(c: Context, page: ThreadView, streaming = false): Html {
+  const { d, row, node, role, agent, usage, view, items, renderedReplyAt, nudged, lands } = page;
   const { thread: t } = d;
   const read = view === null || view instanceof Error ? null : view;
   const run = runOf(d, read, items, c.now);
@@ -74,7 +75,7 @@ ${role === "builder" ? html`<nav class="life-bar" id="life" data-live aria-label
 <div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button>${life !== null && html`<button type="button" class="tab tab-tl" role="tab" aria-selected="false" aria-controls="timeline-view" data-tab="timeline">${icon("timeline")}<span class="tab-name">Timeline</span></button>`}${t.status !== "deleted" && html`<button type="button" class="tab tab-term"${!open && " hidden"} role="tab" aria-selected="false" aria-controls="term-view" data-tab="term" title="A terminal in the pylon, as nexus attach ${t.id} gives">${icon("terminal")}<span class="tab-name">Terminal</span></button>`}</div>
 <div class="strip" id="strip" data-live>${strip(d)}</div>
 <div id="facts" data-live hidden>${facts(d)}</div>
-${life !== null && html`<section class="timeline-view" id="timeline-view" role="tabpanel" aria-label="Timeline" hidden><div class="tl-wrap" id="timeline" data-live>${timeline(c, d, items, life)}</div></section>`}
+${life !== null && html`<section class="timeline-view" id="timeline-view" role="tabpanel" aria-label="Timeline" hidden><div class="tl-wrap" id="timeline" data-live>${timeline(c, page, life)}</div></section>`}
 <div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}"${shows !== null && html` data-shows="${shows}"`} data-live${agent.kind !== "none" && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${shows === null && convo(t, view, items, model, c.now)}</div></div>
 <section class="file-view" id="file-view" role="tabpanel" aria-label="File diff" hidden></section>
 ${t.status !== "deleted" && termView(t)}
@@ -149,7 +150,7 @@ export function queuedPage(c: Context, q: QueuedThread): Html {
 <nav class="life-bar" id="life" data-live aria-label="Stages">${lifeTrack(lifeOfThread(c, q.id), false)}</nav>
 <div class="scroll"><div class="page queued" id="queued" data-live>
 <section aria-labelledby="waits-h"><h2 id="waits-h">Starts once these threads' pull requests merge</h2>
-<ul class="list">${q.waits.map((w) => html`<li>${state(w.state, waitTone[w.state])} <a class="link" href="/threads/${w.thread}">${threadTitle(c, w.thread)}</a>: ${w.why}</li>`)}</ul>
+<ul class="list">${q.waits.map((w) => html`<li>${state(w.state, waitTone[w.state])} <a class="link" href="/threads/${w.thread}">${c.title(w.thread)}</a>: ${w.why}</li>`)}</ul>
 ${q.status === "queued" && q.blocked && html`<p class="dim">A blocked thread stays queued. Start it now, or archive it to cancel it.</p>`}
 ${q.startNow !== null && html`<p class="dim">Start now was asked ${ago(q.startNow.at, c.now)}, so it starts without waiting once it can.</p>`}
 </section>

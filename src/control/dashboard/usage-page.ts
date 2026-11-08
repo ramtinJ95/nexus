@@ -1,8 +1,8 @@
-import type { ProjectId, ThreadId } from "../../ids.ts";
-import { periods, periodStart, type Period } from "../usage.ts";
+import type { ThreadId } from "../../ids.ts";
+import { periods, type Period } from "../usage.ts";
 import { breakdownLook, breakdowns, tokenColumns, tokenCount, utc, type UsageBackfill, type UsageTotals } from "../../contract/usage.ts";
 import { Html, html, menu, type Part } from "./view.ts";
-import type { Context } from "./context.ts";
+import type { Context, UsageView } from "./context.ts";
 import { layout } from "./shell.ts";
 
 /** A phone hides the wide columns of a usage table. */
@@ -20,7 +20,7 @@ function usageTable(id: string, keyHead: string, rows: readonly (UsageTotals & {
 
 function backfillNote(c: Context, b: UsageBackfill): Html {
   const run = b.state === "never" ? null : b;
-  const thread = (id: ThreadId) => html`<a class="link" href="/threads/${id}">${c.registry.thread(id)?.title ?? id}</a>`;
+  const thread = (id: ThreadId) => html`<a class="link" href="/threads/${id}">${c.thread(id)?.title ?? id}</a>`;
   const recovered = run === null ? "" : `${exact(run.recovered.calls)} calls and ${tokenCount(run.recovered.tokens)} tokens recovered`;
   const read = run === null ? "" : `${run.read} of ${run.of} threads read`;
   const doing = run?.current == null ? run?.waiting == null ? "" : html` It waits: ${run.waiting}.`
@@ -38,8 +38,7 @@ ${run !== null && run.skipped.length > 0 && html`<table class="ov" id="usage-bac
 }
 
 /** The tokens every agent spent in the period, in all and by each breakdown, as `GET /v1/usage` reports them. */
-export function usagePage(c: Context, period: Period, project: ProjectId | null): Html {
-  const report = c.registry.usageReport({ since: periodStart(period, c.now), project, by: breakdowns });
+export function usagePage(c: Context, { period, project, report }: UsageView): Html {
   const href = (p: Period, of: string | null) => `/usage?period=${p}${of === null ? "" : `&project=${encodeURIComponent(of)}`}`;
   const seg = (label: string, to: string, current: boolean) => html`<a class="seg-tab" href="${to}"${current && html` aria-current="page"`}>${label}</a>`;
   return layout(c, {
@@ -49,7 +48,7 @@ export function usagePage(c: Context, period: Period, project: ProjectId | null)
 <div class="scroll"><div class="page usage" id="usage" data-live>
 <div class="usage-filters">
 <nav class="seg-bar usage-seg" aria-label="Period">${(Object.keys(periods) as Period[]).map((p) => seg(periods[p], href(p, project), p === period))}</nav>
-<nav class="seg-bar usage-seg" aria-label="Project">${seg("All projects", href(period, null), project === null)}${c.registry.projects().map((p) => seg(p.id, href(period, p.id), p.id === project))}</nav>
+<nav class="seg-bar usage-seg" aria-label="Project">${seg("All projects", href(period, null), project === null)}${c.projects.map((p) => seg(p.id, href(period, p.id), p.id === project))}</nav>
 </div>
 <section aria-labelledby="usage-totals-h"><div class="ov-head"><h2 id="usage-totals-h">Tokens${project !== null && ` in ${project}`}</h2></div>
 ${usageTable("usage-totals", "Period", [{ key: periods[period], ...report.total }])}
