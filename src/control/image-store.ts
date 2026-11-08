@@ -1,8 +1,8 @@
 /**
- * The image store: each recorded image, in `images`, each template, in `templates`, and the current image, the previous
- * image and the latest image build or rollout, in the `current`, `previous-image` and `image-operation` settings.
+ * The image store: each recorded image, each template, the current image, the previous image and the latest image build
+ * or rollout.
  */
-import { json, jsonOrNull, type Db, type Row } from "./db.ts";
+import { json, jsonOrNull, type Db, type Holding, type Row } from "./db.ts";
 import type { ImageId, JobId, NodeName, ProjectId, TailnetNodeId, TemplateId } from "../ids.ts";
 import type { ImageManifest } from "../protocol/images.ts";
 import type { BuildingTemplate, TemplateRecord } from "./templates.ts";
@@ -45,8 +45,11 @@ function recordedImage(r: Row): RecordedImage {
   return { ...image, release: image.release ?? null };
 }
 
+export const holding = { tables: { images: {}, templates: {} }, settings: ["current", "previous-image", "image-operation"] } as const satisfies Holding;
+
 export function imageStore(db: Db) {
-  const { transaction, sql, setting, setSetting } = db;
+  const { transaction, sql } = db;
+  const { setting, setSetting } = db.hold(holding);
   function image(id: ImageId): RecordedImage | undefined {
     const row = sql("SELECT manifest FROM images WHERE id = ?").get(id);
     return row && recordedImage(row);

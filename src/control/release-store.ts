@@ -1,16 +1,18 @@
 /**
- * The release store: the desired release and the deploy drain, in the `release` and `deploy-drain` settings, each
- * node's release report, in `release_reports`, and the releases each node's deployer last said it holds, in the
- * `releases:<node>` setting.
+ * The release store: the desired release, the deploy drain, each node's release report, and the releases each node's
+ * deployer last said it holds.
  */
-import { json, jsonOrNull, type Db } from "./db.ts";
+import { json, jsonOrNull, type Db, type Holding } from "./db.ts";
 import type { EventKind } from "./events.ts";
 import type { NodeName } from "../ids.ts";
 import type { DesiredRelease, Drain, ReleaseReport } from "../protocol/deploy.ts";
 import type { ReleaseInventory } from "../deploy/release-cleanup.ts";
 
+export const holding = { tables: { release_reports: {} }, settings: ["release", "deploy-drain", "releases:"] } as const satisfies Holding;
+
 export function releaseStore(db: Db, appendEvent: (kind: EventKind, thread: null, payload: Record<string, unknown>) => unknown) {
-  const { sql, setting, setSetting } = db;
+  const { sql } = db;
+  const { setting, setSetting } = db.hold(holding);
   return {
     desiredRelease: (): DesiredRelease | null => jsonOrNull<DesiredRelease>(setting("release")),
     setDesiredRelease(release: DesiredRelease) {

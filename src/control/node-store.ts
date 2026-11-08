@@ -1,8 +1,7 @@
 /**
- * The node store: each node, in `nodes`, the join tokens, in `join_tokens`, and the nodes that joined with one, in
- * `joined_nodes`.
+ * The node store: each node, the join tokens, and the nodes that joined with one.
  */
-import { jsonOrNull, type Db, type Row } from "./db.ts";
+import { jsonOrNull, type Db, type Holding, type Row } from "./db.ts";
 import type { NodeName, TailnetNodeId } from "../ids.ts";
 import type { NodeCapacity, NodeObservation } from "../protocol/observations.ts";
 
@@ -33,7 +32,10 @@ function nodeRow(r: Row): NodeRecord {
 
 export type NodeStore = ReturnType<typeof nodeStore>;
 
+export const holding = { tables: { nodes: {}, join_tokens: {}, joined_nodes: {} } } as const satisfies Holding;
+
 export function nodeStore(db: Db) {
+  db.hold(holding);
   const { transaction, sql } = db;
   function node(name: NodeName): NodeRecord | undefined {
     const row = sql("SELECT * FROM nodes WHERE name = ?").get(name);

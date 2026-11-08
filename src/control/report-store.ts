@@ -1,8 +1,8 @@
 /**
- * The health store: each change of `nexus doctor`'s checks that two passes in a row confirmed, in `doctor_reports`,
- * with when the person saw it in its record.
+ * The health store: each change of `nexus doctor`'s checks that two passes in a row confirmed, with when the person saw
+ * it in its record.
  */
-import { json, type Db } from "./db.ts";
+import { json, type Db, type Holding } from "./db.ts";
 import type { EventKind } from "./events.ts";
 import { checkKey, statuses, type HealthChange, type Status } from "./doctor-model.ts";
 
@@ -25,7 +25,10 @@ function changeRow(r: Record<string, unknown>): HealthChange | null {
 /** Each check's latest change, in the order of those changes. */
 const latest = (changes: readonly HealthChange[]) => [...new Map(changes.map((c) => [checkKey(c), c])).values()].sort((a, b) => a.id - b.id);
 
+export const holding = { tables: { doctor_reports: {} } } as const satisfies Holding;
+
 export function reportStore(db: Db, appendEvent: (kind: EventKind, thread: null, payload: Record<string, unknown>) => unknown) {
+  db.hold(holding);
   const { sql } = db;
   const changes = () => sql("SELECT id, at, record FROM doctor_reports ORDER BY id").all().flatMap((r) => changeRow(r) ?? []);
   return {

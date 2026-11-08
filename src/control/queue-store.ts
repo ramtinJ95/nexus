@@ -1,8 +1,7 @@
 /**
- * The queue store: each queued thread's record, in `queued_threads`. A save with a start's key stores the key,
- * in its transaction.
+ * The queue store: each queued thread's record. A save with a start's key stores the key, in its transaction.
  */
-import { json, type Db } from "./db.ts";
+import { json, type Db, type Holding } from "./db.ts";
 import type { ProjectId, ThreadId } from "../ids.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
 import type { StartKey, StartRequest } from "./start-request.ts";
@@ -33,13 +32,16 @@ export interface QueuedRecord {
   firstMessage: "pending" | "sent" | null;
 }
 
+export const holding = { tables: { queued_threads: { record: "id" } } } as const satisfies Holding;
+
 export function queueStore(db: Db, saveStartKey: (key: StartKey, thread: ThreadId) => void) {
-  const { transaction, sql, recordOf, saveRecord } = db;
-  const queuedThread = (id: ThreadId): QueuedRecord | undefined => recordOf<QueuedRecord>("queued_threads", "id", id) ?? undefined;
+  const { transaction, sql } = db;
+  const queued = db.hold(holding).records<QueuedRecord>("queued_threads");
+  const queuedThread = (id: ThreadId): QueuedRecord | undefined => queued.get(id) ?? undefined;
 
   function saveQueued(record: QueuedRecord, key?: StartKey) {
     transaction(() => {
-      saveRecord("queued_threads", "id", record.id, record);
+      queued.save(record.id, record);
       if (key !== undefined) saveStartKey(key, record.id);
     });
   }
