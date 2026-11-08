@@ -3,32 +3,31 @@
  */
 import { HttpError } from "../http-error.ts";
 import { eventCursor, eventKinds, type EventFilter } from "../events.ts";
-import { ok, type RouteEntry, type ApiKit } from "./kit.ts";
+import { ok, on, type RouteEntry, type ApiKit } from "./kit.ts";
 import { anyAllowed } from "./access.ts";
+import { streamRoutes as routes } from "../../contract/streams.ts";
 
 export function streamRoutes(kit: ApiKit): readonly RouteEntry[] {
   const { thread, stream, followEvents, registry, agents } = kit;
 
   return [
-    ["GET", /^\/v1\/events$/, anyAllowed, (_, r) => {
-      // A follower that reads the state itself whenever it connects needs no history.
-      const since = r.query.get("since") === "latest" ? registry.newestEvent() : r.query.get("since") ?? "0";
+    on(routes.events, anyAllowed, (_, { query }) => {
+      const since = query.since === "latest" ? registry.newestEvent() : query.since ?? "0";
       try { eventCursor(since); } catch { throw new HttpError(400, "invalid event cursor"); }
-      const kinds = r.query.getAll("kind");
-      if (kinds.some((k) => !(eventKinds as readonly string[]).includes(k))) throw new HttpError(400, "unknown event kind");
-      const filter: EventFilter = { kinds, ...(r.query.has("thread") ? { thread: r.query.get("thread")! } : {}), ...(r.query.has("project") ? { project: r.query.get("project")! } : {}) };
+      if (query.kinds.some((k) => !(eventKinds as readonly string[]).includes(k))) throw new HttpError(400, "unknown event kind");
+      const filter: EventFilter = { kinds: query.kinds, ...(query.thread === undefined ? {} : { thread: query.thread }), ...(query.project === undefined ? {} : { project: query.project }) };
       const read = (from: string) => registry.eventBatch(from, filter);
       const first = read(since);
-      if (r.query.get("follow") !== "true") return ok(first.events);
+      if (!query.follow) return ok(first.events);
       return { stream: (res) => followEvents(res, first, read) };
-    }],
-    ["GET", /^\/v1\/threads\/([^/]+)\/events$/, anyAllowed, ([, id]) => {
-      const t = thread(id!, { status: "kept", agent: "harness" });
+    }),
+    on(routes.threadEvents, anyAllowed, ({ thread: id }) => {
+      const t = thread(id, { status: "kept", agent: "harness" });
       return { stream: (res) => stream(res, t, () => agents.harness.watch(t), agents.harness.frames()) };
-    }],
-    ["GET", /^\/v1\/threads\/([^/]+)\/claude\/events$/, anyAllowed, ([, id]) => {
-      const t = thread(id!, { status: "kept", agent: "claude" });
+    }),
+    on(routes.claudeEvents, anyAllowed, ({ thread: id }) => {
+      const t = thread(id, { status: "kept", agent: "claude" });
       return { stream: (res) => stream(res, t, () => agents.claude.watch(t), agents.claude.frames()) };
-    }],
+    }),
   ];
 }

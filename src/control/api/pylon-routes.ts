@@ -1,46 +1,19 @@
 /**
  * What a person does in a thread's pylon: previews, sessions, and reads of its checkout and conversation images.
  */
-import { z } from "zod";
-import type { OpenedSession } from "../wire.ts";
 import type { PortRange, Preview, Thread } from "../thread-store.ts";
 import { HttpError } from "../http-error.ts";
-import { sessionHarnessSchema } from "../../protocol/agent-kinds.ts";
-import { checkoutReader, contentType, maxFileBytes, pathsFit, type CheckoutReader } from "../../checkout-files.ts";
+import { checkoutReader, contentType, maxFileBytes, type CheckoutReader } from "../../checkout-files.ts";
 import { linkedName } from "../../services-file.ts";
-import { reservedPorts } from "../../protocol/ports.ts";
-import { maxRecordBytes, readTranscriptImage } from "../claude-transcript.ts";
+import { readTranscriptImage } from "../claude-transcript.ts";
 import { partHash } from "../conversation-view.ts";
-import { ok, created, noContent, parse, type Reply, type RouteEntry, type ApiKit } from "./kit.ts";
+import { ok, created, noContent, parse, on, type Reply, type RouteEntry, type ApiKit } from "./kit.ts";
 import { focusScript, herdrPanePattern } from "../../guest-contract.ts";
 import { checkoutDir } from "../../../images/pylon/nexus-contract.ts";
 import { anyAllowed } from "./access.ts";
+import { pylonRoutes as routes, type ImageSource, type OpenedSession } from "../../contract/pylon.ts";
+import { changesBaseSchema, checkoutPath, diffPaths, imageSourceSchema, previewSchema, sessionSchema } from "../../contract/pylon-parse.ts";
 
-const previewSchema = z.strictObject({ port: z.int().min(1).max(65535).refine((port) => !reservedPorts.has(port), "is Nexus's own") });
-const sessionSchema = z.strictObject({
-  harness: sessionHarnessSchema.default("claude-code"),
-  /** The Herdr workspace's label. The harness's name by default. */
-  title: z.string().trim().min(1).max(80).optional(),
-});
-
-/** A path in the checkout, relative to it. Empty is the checkout itself. */
-const checkoutPath = z.string().refine((path) => !path.includes("\0"), "has a NUL byte").refine((path) => pathsFit([path]), "is too long");
-/** A diff's paths, which the probe's request must carry together. */
-const diffPaths = z.array(checkoutPath.min(1)).max(100).refine(pathsFit, "are too long together");
-const changesBaseSchema = z.enum(["start", "head", "turn"]).default("start");
-
-const queryCount = z.string().regex(/^\d{1,15}$/, "must be a whole number").transform(Number);
-const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
-/** Where an image of a thread's conversation is, as the dashboard's image links name it. */
-const imageSourceSchema = z.discriminatedUnion("source", [
-  /** A block of the Claude worker's current transcript, as a prompt or result entry's `images` names it. */
-  z.strictObject({ source: z.literal("transcript"), offset: queryCount, bytes: queryCount.refine((n) => n > 0 && n <= maxRecordBytes, "is not a record's length"), sha256: sha256Schema, index: queryCount }),
-  /** An image part of a harness conversation: the entry's ID, its message, the part, and the SHA-256 of the part's base64 data. */
-  z.strictObject({ source: z.literal("harness"), entry: queryCount, message: queryCount, part: queryCount, sha256: sha256Schema }),
-  /** A file in the checkout, or the file at a base of the Changes view. */
-  z.strictObject({ source: z.literal("file"), path: checkoutPath.min(1), base: z.enum(["start", "head", "turn"]).optional() }),
-]);
-type ImageSource = z.infer<typeof imageSourceSchema>;
 /** A transcript or harness image is named by its hash, so its link never serves other bytes. A file may change. */
 const imageCaching: Readonly<Record<ImageSource["source"], string>> = { transcript: "private, max-age=31536000, immutable", harness: "private, max-age=31536000, immutable", file: "no-cache" };
 
@@ -75,7 +48,7 @@ export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortR
   };
 
   /** An image of the thread's conversation, as one of the raster types a browser shows, and never anything that runs. */
-  async function conversationImage(t: Thread, source: ImageSource): Promise<Reply> {
+  async function conversationImage(t: Thread, source: ImageSource): Promise<Extract<Reply, { file: Buffer }>> {
     const read = imageReaders[source.source] as (t: Thread, source: ImageSource) => Promise<Buffer | null>;
     const bytes = await read(t, source);
     if (bytes === null) throw new HttpError(404, "the image is gone: the conversation or file no longer holds it");
@@ -91,7 +64,7 @@ export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortR
     return via(t, (probe, pylonId) => read(checkoutReader((argv) => probe.stream(pylonId, argv), checkoutDir, undefined, turn)));
   }
 
-  async function checkoutFile(t: Thread, path: string): Promise<Reply> {
+  async function checkoutFile(t: Thread, path: string): Promise<Extract<Reply, { file: Buffer }>> {
     const content = await inCheckout(t, (c) => c.read(path));
     return { status: 200, file: content, type: contentType(path, content) };
   }
@@ -169,42 +142,41 @@ export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortR
   }
 
   return [
-    ["POST", /^\/v1\/threads\/([^/]+)\/previews$/, { role: "person", action: "publish a preview" }, async (m, r) => {
+    on(routes.preview, { role: "person", action: "publish a preview" }, async ({ thread: id }, r) => {
       const body = await r.body();
-      return ok(await linkPort(thread(m[1]!), body));
-    }],
-    ["DELETE", /^\/v1\/threads\/([^/]+)\/previews\/([^/]+)$/, { role: "person", action: "unpublish a preview" }, async (m) => {
-      const { port } = parse(previewSchema, { port: /^\d+$/.test(m[2]!) ? Number(m[2]) : m[2] });
-      await unlinkPort(thread(m[1]!), port);
+      return ok(await linkPort(thread(id), body));
+    }),
+    on(routes.unpreview, { role: "person", action: "unpublish a preview" }, async ({ thread: id, port: given }) => {
+      const { port } = parse(previewSchema, { port: /^\d+$/.test(given) ? Number(given) : given });
+      await unlinkPort(thread(id), port);
       return noContent;
-    }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/sessions$/, { role: "person", action: "open a session in a thread's pylon" }, async (m, r) => {
+    }),
+    on(routes.openSession, { role: "person", action: "open a session in a thread's pylon" }, async ({ thread: id }, r) => {
       const body = await r.body();
-      return created(await openSession(thread(m[1]!), body));
-    }],
-    ["DELETE", /^\/v1\/threads\/([^/]+)\/sessions\/([^/]+)$/, { role: "person", action: "close a session in a thread's pylon" }, async (m) => {
-      await closeSession(thread(m[1]!), m[2]!);
+      return created(await openSession(thread(id), body));
+    }),
+    on(routes.closeSession, { role: "person", action: "close a session in a thread's pylon" }, async ({ thread: id, session }) => {
+      await closeSession(thread(id), session);
       return noContent;
-    }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/sessions\/([^/]+)\/focus$/, { role: "person", action: "focus a session in a thread's pylon" }, async (m) => {
-      await focusSession(thread(m[1]!), m[2]!);
+    }),
+    on(routes.focusSession, { role: "person", action: "focus a session in a thread's pylon" }, async ({ thread: id, session }) => {
+      await focusSession(thread(id), session);
       return noContent;
-    }],
-    ["GET", /^\/v1\/threads\/([^/]+)\/files$/, anyAllowed, async (m, r) => {
-      const path = parse(checkoutPath, r.query.get("path") ?? "");
-      return ok(await inCheckout(thread(m[1]!), (c) => c.list(path)));
-    }],
-    ["GET", /^\/v1\/threads\/([^/]+)\/files\/content$/, anyAllowed, async (m, r) => checkoutFile(thread(m[1]!), parse(checkoutPath.min(1), r.query.get("path") ?? ""))],
-    ["GET", /^\/v1\/threads\/([^/]+)\/image$/, anyAllowed, async (m, r) => conversationImage(thread(m[1]!), parse(imageSourceSchema, Object.fromEntries(r.query)))],
-    ["GET", /^\/v1\/threads\/([^/]+)\/changes$/, anyAllowed, async (m, r) => {
-      const base = parse(changesBaseSchema, r.query.get("base") ?? undefined);
-      return ok(await inCheckout(thread(m[1]!), (c) => c.changes(base)));
-    }],
-    // Each `path` is a pathspec, so a renamed file needs its old path too.
-    ["GET", /^\/v1\/threads\/([^/]+)\/diff$/, anyAllowed, async (m, r) => {
-      const base = parse(changesBaseSchema, r.query.get("base") ?? undefined);
-      const paths = parse(diffPaths, r.query.getAll("path"));
-      return ok(await inCheckout(thread(m[1]!), (c) => c.diff(base, paths)));
-    }],
+    }),
+    on(routes.files, anyAllowed, async ({ thread: id }, r) => {
+      const path = parse(checkoutPath, r.query.path);
+      return ok(await inCheckout(thread(id), (c) => c.list(path)));
+    }),
+    on(routes.file, anyAllowed, async ({ thread: id }, r) => checkoutFile(thread(id), parse(checkoutPath.min(1), r.query.path))),
+    on(routes.image, anyAllowed, async ({ thread: id }, r) => conversationImage(thread(id), parse(imageSourceSchema, r.query))),
+    on(routes.changes, anyAllowed, async ({ thread: id }, r) => {
+      const base = parse(changesBaseSchema, r.query.base);
+      return ok(await inCheckout(thread(id), (c) => c.changes(base)));
+    }),
+    on(routes.diff, anyAllowed, async ({ thread: id }, r) => {
+      const base = parse(changesBaseSchema, r.query.base);
+      const paths = parse(diffPaths, r.query.paths);
+      return ok(await inCheckout(thread(id), (c) => c.diff(base, paths)));
+    }),
   ];
 }

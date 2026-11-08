@@ -3,13 +3,12 @@
  * their agents, and their lifecycle.
  */
 import { randomUUID } from "node:crypto";
-import type { OpenedSession } from "../../control/wire.ts";
 import type { Preview } from "../../control/thread-store.ts";
 import { threadRoutes as routes } from "../../contract/threads.ts";
-import type { Changes, Diff, Listing } from "../../checkout-files.ts";
+import { pylonRoutes, type ChangesBase } from "../../contract/pylon.ts";
 import { attachTerminal, processTty } from "../attach.ts";
 import { CliError } from "../transport.ts";
-import { type Values, type Api, type Command, str, thread, request, int, workerOptions, briefOf, table, waitMs, pylonCommandMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
+import { type Values, type Api, type Command, str, request, int, workerOptions, briefOf, table, waitMs, pylonCommandMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
 import { detailText, portsText, listingText, changesText, queuedRow, queuedText, threadRow } from "../thread-text.ts";
 
 function portArg(given: string): number {
@@ -20,9 +19,9 @@ function portArg(given: string): number {
 
 /** A diff of a large tree can take the pylon a while. */
 const checkoutReadMs = 120_000;
-const baseQuery = (v: Values) => {
+const baseOf = (v: Values): ChangesBase => {
   if (v.uncommitted === true && v.turn === true) throw new CliError("invalid", "--turn and --uncommitted cannot be used together");
-  return v.turn === true ? "base=turn" : v.uncommitted === true ? "base=head" : "base=start";
+  return v.turn === true ? "turn" : v.uncommitted === true ? "head" : "start";
 };
 
 /** Polls the thread until its node reports the port listening and its preview published and warmed. */
@@ -104,7 +103,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     options: { wait: { type: "boolean" } },
     async run(api, [id, given], v) {
       const port = portArg(given!);
-      const linked = await api("POST", `${thread(id!)}/previews`, { port }) as Preview;
+      const linked = await request(api, pylonRoutes.preview, { thread: id!, body: { port } });
       const preview = v.wait === true ? await served(api, id!, port) : linked;
       return { json: preview, text: preview.failed !== null ? `${preview.url} (not ready: ${preview.failed})` : preview.ready ? preview.url : `${preview.url} (not served yet. \`--wait\` waits until it is)` };
     },
@@ -113,14 +112,14 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     args: [2, 2],
     async run(api, [id, given]) {
       const port = portArg(given!);
-      await whenRunning(api, id!, () => api("DELETE", `${thread(id!)}/previews/${port}`, {}), `port ${port} is still published`);
+      await whenRunning(api, id!, () => request(api, pylonRoutes.unpreview, { thread: id!, port: String(port) }), `port ${port} is still published`);
       return { json: null, text: `Unpublished port ${port} of ${id}.` };
     },
   },
   files: {
     args: [1, 2],
     async run(api, [id, path = ""]) {
-      const l = await whenRunning(api, id!, () => api("GET", `${thread(id!)}/files?path=${encodeURIComponent(path)}`, undefined, checkoutReadMs), "nothing was listed") as Listing;
+      const l = await whenRunning(api, id!, () => request(api, pylonRoutes.files, { thread: id!, query: { path } }, checkoutReadMs), "nothing was listed");
       return { json: l, text: listingText(l) };
     },
   },
@@ -128,7 +127,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     args: [1, 1],
     options: { uncommitted: { type: "boolean" }, turn: { type: "boolean" } },
     async run(api, [id], v) {
-      const c = await whenRunning(api, id!, () => api("GET", `${thread(id!)}/changes?${baseQuery(v)}`, undefined, checkoutReadMs), "no changes were read") as Changes;
+      const c = await whenRunning(api, id!, () => request(api, pylonRoutes.changes, { thread: id!, query: { base: baseOf(v) } }, checkoutReadMs), "no changes were read");
       return { json: c, text: changesText(c) };
     },
   },
@@ -136,8 +135,8 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     args: [1, Infinity],
     options: { uncommitted: { type: "boolean" }, turn: { type: "boolean" } },
     async run(api, [id, ...paths], v) {
-      const query = [baseQuery(v), ...paths.map((p) => `path=${encodeURIComponent(p)}`)].join("&");
-      const d = await whenRunning(api, id!, () => api("GET", `${thread(id!)}/diff?${query}`, undefined, checkoutReadMs), "no diff was read") as Diff;
+      const query = { base: baseOf(v), paths };
+      const d = await whenRunning(api, id!, () => request(api, pylonRoutes.diff, { thread: id!, query }, checkoutReadMs), "no diff was read");
       const text = d.diff === "" ? "No changes." : d.diff.replace(/\n$/, "");
       return { json: d, text: d.truncated ? `${text}\n[The diff stops here, at its 4 MiB limit. Name paths to see the rest.]` : text };
     },
@@ -148,7 +147,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     async run(api, [id], v) {
       const body = Object.fromEntries((["harness", "title"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]]));
       // The API answers once the agent is ready or waits for its human, which can take a minute.
-      const opened = await whenRunning(api, id!, () => api("POST", `${thread(id!)}/sessions`, body, pylonCommandMs), "no session was opened") as OpenedSession;
+      const opened = await whenRunning(api, id!, () => request(api, pylonRoutes.openSession, { thread: id!, body }, pylonCommandMs), "no session was opened");
       return { json: opened, text: `Opened ${opened.harness} session ${JSON.stringify(opened.title)} in pane ${opened.herdrPane} of ${id}. \`nexus attach ${id}\` attaches to it.` };
     },
   },
@@ -157,7 +156,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
   "session close": {
     args: [2, 2],
     async run(api, [id, session]) {
-      await api("DELETE", `${thread(id!)}/sessions/${encodeURIComponent(session!)}`, {});
+      await request(api, pylonRoutes.closeSession, { thread: id!, session: session! });
       return { json: null, text: `Closed session ${session} of ${id}.` };
     },
   },

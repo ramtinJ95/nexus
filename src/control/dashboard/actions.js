@@ -1,5 +1,6 @@
 // The buttons that act on a thread, an item or a question, each as the CLI's command does.
-import { api } from "./request.js";
+import { api, request } from "./request.js";
+import { pylonRoutes } from "../../contract/pylon.ts";
 import { refreshAfter, showError, whenRunning } from "./page.js";
 import { setOpen } from "./nav.js";
 import { showSession } from "./checkout.js";
@@ -17,9 +18,9 @@ const actions = {
   retry: (thread) => api("POST", `/v1/threads/${thread}/retry`),
   "retry-pylon": (thread) => api("POST", `/v1/threads/${thread}/pylon/retry`),
   // Publishes the port. The next refresh shows its preview, which links once the node serves it.
-  "link-port": (thread, { port }) => api("POST", `/v1/threads/${thread}/previews`, { port: Number(port) }),
+  "link-port": (thread, { port }) => request(pylonRoutes.preview, { thread, body: { port: Number(port) } }),
   // As `nexus unpreview`.
-  unpublish: (thread, { port }) => whenRunning(thread, () => api("DELETE", `/v1/threads/${thread}/previews/${port}`, {})),
+  unpublish: (thread, { port }) => whenRunning(thread, () => request(pylonRoutes.unpreview, { thread, port })),
   // As `nexus review --cancel`.
   "cancel-review": (thread) => api("POST", `/v1/threads/${thread}/review/cancel`, {}),
   // As `nexus land`, for the commit the confirmation named, waiving the holds the card names the person may waive. The
@@ -34,11 +35,11 @@ const actions = {
   answer: (_, { question, option }) => api("POST", `/v1/questions/${encodeURIComponent(question)}/answer`, { option }),
   // As `nexus session open`, then shows the session in the terminal.
   "open-session": async (thread, { harness }) => {
-    const { herdrPane } = await whenRunning(thread, () => api("POST", `/v1/threads/${thread}/sessions`, { harness }));
+    const { herdrPane } = await whenRunning(thread, () => request(pylonRoutes.openSession, { thread, body: { harness } }));
     await showSession(thread, herdrPane);
   },
   // As `nexus session close`.
-  "close-session": (thread, { session }) => api("DELETE", `/v1/threads/${thread}/sessions/${encodeURIComponent(session)}`, {}),
+  "close-session": (thread, { session }) => request(pylonRoutes.closeSession, { thread, session }),
   "show-session": (thread, { pane }) => showSession(thread, pane),
 };
 

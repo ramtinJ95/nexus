@@ -9,27 +9,42 @@ export const apiKeepAliveMs = 5_000;
 
 export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
-/** A query's format, which the client encodes and the server decodes. `encode` answers "" or "?" and the parameters. */
-export interface QueryCodec<Q> {
+/**
+ * A query's format, which the client encodes and the server decodes. `encode` answers "" or "?" and the parameters.
+ * `decode` answers `Raw`, the parameters as they came, where the server still has to check them, as it does a body.
+ */
+export interface QueryCodec<Q, Raw = Q> {
   encode(query: Q): string;
-  decode(params: URLSearchParams): Q;
+  decode(params: URLSearchParams): Raw;
 }
 
+/** "" for no parameters, or "?" and them, in order. A parameter given undefined is left out. */
+export function queryOf(entries: readonly (readonly [string, string | undefined])[]): string {
+  const params = new URLSearchParams(entries.filter((entry): entry is [string, string] => entry[1] !== undefined));
+  return params.size === 0 ? "" : `?${params}`;
+}
+
+/** The reply type of a route that answers a file's bytes rather than JSON. */
+export interface FileBytes { readonly bytes: true }
+/** The reply type of a route that answers server-sent events, each one's data an `E`. */
+export interface EventStream<E> { readonly event: E }
+
 /** A route of the control plane's API. `reply` and `body` are never set: they carry the reply's and the request body's types. */
-export interface ApiRoute<M extends Method = Method, P extends string = string, Reply = unknown, Body = unknown, Q = unknown> {
+export interface ApiRoute<M extends Method = Method, P extends string = string, Reply = unknown, Body = unknown, Q = unknown, Raw = Q> {
   method: M;
   path: P;
-  query?: QueryCodec<Q>;
+  query?: QueryCodec<Q, Raw>;
   readonly reply?: Reply;
   readonly body?: Body;
 }
 export type ReplyOf<R> = R extends ApiRoute<Method, string, infer Reply> ? Reply : never;
 export type BodyOf<R> = R extends ApiRoute<Method, string, unknown, infer Body> ? Body : never;
-export type QueryOf<R> = R extends ApiRoute<Method, string, unknown, unknown, infer Q> ? Q : never;
+export type QueryOf<R> = R extends ApiRoute<Method, string, unknown, unknown, infer Q, unknown> ? Q : never;
+export type RawQueryOf<R> = R extends ApiRoute<Method, string, unknown, unknown, unknown, infer Raw> ? Raw : never;
 
 /** A route that answers `Reply` and takes `Body`, which is undefined for a route that takes none. */
 export function route<Reply, Body = undefined>() {
-  return <const M extends Method, const P extends string, Q = undefined>(method: M, path: P, query?: QueryCodec<Q>): ApiRoute<M, P, Reply, Body, Q> =>
+  return <const M extends Method, const P extends string, Q = undefined, Raw = Q>(method: M, path: P, query?: QueryCodec<Q, Raw>): ApiRoute<M, P, Reply, Body, Q, Raw> =>
     query === undefined ? { method, path } : { method, path, query };
 }
 

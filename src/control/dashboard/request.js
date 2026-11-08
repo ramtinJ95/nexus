@@ -1,4 +1,6 @@
 // The JSON API the dashboard's pages call, over the page's fetch or a test's.
+import { callOf } from "../../contract/route.ts";
+
 export function apiOver({ fetch } = globalThis) {
   /** Sends JSON as the API requires, and throws the API's error message with its status, code and whether it is retryable. */
   return async function api(method, path, body, signal) {
@@ -14,3 +16,9 @@ export function apiOver({ fetch } = globalThis) {
   };
 }
 export const api = apiOver();
+
+/** Calls one of the contract's routes with its path's parameters, its query and its body. */
+export function request(route, args, signal) {
+  const { path, body } = callOf(route, args);
+  return api(route.method, path, body, signal);
+}

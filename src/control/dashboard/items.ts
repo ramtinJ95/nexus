@@ -12,6 +12,8 @@ import { askedIn, askQuestionId, type AskedQuestion, type Question } from "../qu
 import { clock } from "./elapsed.ts";
 import type { Tone } from "./view.ts";
 import { checkoutDir } from "../../../images/pylon/nexus-contract.ts";
+import { callOf } from "../../contract/route.ts";
+import { pylonRoutes, type ImageSource } from "../../contract/pylon.ts";
 
 /**
  * One row of the conversation. A tool call carries its result, which the transcript holds in a later entry, and the
@@ -48,8 +50,7 @@ const messageText = (content: UserMessage["content"], image: (part: ImageContent
 
 /** An image a row shows, linked to its full size. `caption` is a checkout file's path. */
 export interface Shot { src: string; label: string; caption: string | null }
-const imageRoute = (thread: ThreadId, query: Record<string, string | number>) =>
-  `/v1/threads/${thread}/image?${new URLSearchParams(Object.entries(query).map(([key, value]) => [key, String(value)]))}`;
+const imageRoute = (thread: ThreadId, source: ImageSource) => callOf(pylonRoutes.image, { thread, query: source }).path;
 const inlineShots = (images: readonly { src: string }[]): Shot[] => images.map(({ src }, i) => ({ src, label: `Image ${i + 1}`, caption: null }));
 const transcriptShots = (thread: ThreadId, images: readonly TranscriptImage[] = []): Shot[] => inlineShots(images.map((image) => ({ src: imageRoute(thread, { source: "transcript", ...image }) })));
 const fileShots = (thread: ThreadId, paths: readonly string[]): Shot[] => paths.map((path) => ({ src: imageRoute(thread, { source: "file", path }), label: path, caption: path }));

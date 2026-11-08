@@ -1,14 +1,14 @@
 // A thread page's checkout: the changes pane, the tabs beside the conversation with each file's diff and the
 // terminal, and the review notes on a diff.
 import { afterSend, emptyReview, formatReview, kinds, linesLabel, noteOn, place, rangeOf, readReview, rowsOf } from "./review.js";
-import { api } from "./request.js";
+import { request } from "./request.js";
+import { changesBases, pylonRoutes, statusLetters } from "../../contract/pylon.ts";
 import { afterSwap, el, end, main, present, retryShots, scroller, showError } from "./page.js";
 import { bases, checkoutText } from "./checkout-text.js";
 
 // A template's icons are in its content, outside the document.
 const iconOf = (name) => document.getElementById("icons").content.querySelector(`.i-${name}`).cloneNode(true);
-const statusLetter = { added: "A", modified: "M", deleted: "D", renamed: "R", copied: "C", typechange: "T" };
-const badge = (status) => el("span", { className: `badge badge-${status}`, title: status, textContent: statusLetter[status] });
+const badge = (status) => el("span", { className: `badge badge-${status}`, title: status, textContent: statusLetters[status] });
 /** +12 −3, or nothing for a binary file. */
 const counts = (additions, deletions) => additions === null ? el("span", { className: "dim small", textContent: "binary" })
   : el("span", { className: "lines" }, el("span", { className: "add", textContent: `+${additions}` }), " ", el("span", { className: "del", textContent: `−${deletions}` }));
@@ -20,7 +20,7 @@ export const changesPane = document.getElementById("pane-changes");
 const thread = changesPane?.dataset.thread;
 const baseKey = "nexus.base";
 export const checkout = {
-  base: Object.hasOwn(bases, localStorage.getItem(baseKey)) ? localStorage.getItem(baseKey) : "start",
+  base: changesBases.includes(localStorage.getItem(baseKey)) ? localStorage.getItem(baseKey) : "start",
   /** The last reply, kept so a fold the reader closed and the open tabs survive a read. */
   changes: null,
   /** Whether the reader asked to wake a paused pylon to read it, so the read happens once it runs. */
@@ -70,7 +70,7 @@ export async function readChanges(wake = false) {
   if (checkout.changes === null) showChanges(el("p", { className: "empty", textContent: facts.pylon === "running" ? "Reading the changes…" : "Waking the pylon…" }));
   reading = (async () => {
     try {
-      const changes = await api("GET", `/v1/threads/${thread}/changes?base=${base}`);
+      const changes = await request(pylonRoutes.changes, { thread, query: { base } });
       checkout.wanted = false;
       if (base !== checkout.base) return;
       // The thread closed while the read was out, so the reply is stale.
@@ -323,7 +323,7 @@ let landing = null;
  */
 export async function showSession(thread, pane) {
   const opened = await terminal;
-  if (opened != null && await opened.landed()) await api("POST", `/v1/threads/${thread}/sessions/${encodeURIComponent(pane)}/focus`, {});
+  if (opened != null && await opened.landed()) await request(pylonRoutes.focusSession, { thread, session: pane });
   else landing = pane;
   showTab(terminalTab);
 }
@@ -445,9 +445,9 @@ async function readDiff(path) {
   if (fileView.dataset.path !== path || fileView.querySelector(".diff-view") === null) fileView.replaceChildren(head, el("p", { className: "empty fv-note", textContent: "Reading the diff…" }));
   fileView.dataset.path = path;
   // A renamed file's old path goes too, or the diff shows it as added.
-  const query = [file.path, ...(file.oldPath === null ? [] : [file.oldPath])].map((p) => `&path=${encodeURIComponent(p)}`).join("");
+  const paths = [file.path, ...(file.oldPath === null ? [] : [file.oldPath])];
   try {
-    const [{ diff, truncated }, { diffOf }] = await Promise.all([api("GET", `/v1/threads/${thread}/diff?base=${checkout.base}${query}`), import("./diff.js")]);
+    const [{ diff, truncated }, { diffOf }] = await Promise.all([request(pylonRoutes.diff, { thread, query: { base: checkout.base, paths } }), import("./diff.js")]);
     if (read !== diffRead) return;
     openDiff = { read, head, shown: diffOf(diff), truncated };
     await drawDiff(openDiff);
