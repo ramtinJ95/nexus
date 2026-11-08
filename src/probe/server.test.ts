@@ -199,6 +199,41 @@ test("each route of the table answers only its caller role, and refuses every ot
   }
 });
 
+test("the probe answers GET /v1/health from its own host with its commit, before any caller check", async (t) => {
+  const { base, callAs } = await setup(t);
+  callAs(null);
+  const res = await fetch(`${base}/v1/health`);
+  assert.deepEqual([res.status, await res.json()], [200, { commit: null }], "a checkout runs as no commit");
+  assert.equal((await fetch(`${base}/v1/health?x`)).status, 404, "only the exact path is the health answer");
+});
+
+test("an upgrade is authorized by its path's role like any request, then reaches only a route that upgrades to its protocol", async (t) => {
+  const { probe, callAs } = await setup(t);
+  const upgrade = async (path: string, protocol = "nexus-stream") => {
+    const socket = connect(probe.port, "127.0.0.1");
+    socket.write(`GET ${path} HTTP/1.1\r\nhost: probe\r\nconnection: upgrade\r\nupgrade: ${protocol}\r\n\r\n`);
+    const [head] = await once(socket, "data") as [Buffer];
+    socket.destroy();
+    return head.toString().split("\r\n\r\n");
+  };
+  const status = (answer: string[]) => answer[0]!.split("\r\n")[0];
+  assert.deepEqual([status(await upgrade("/v1/other")), (await upgrade("/v1/other"))[1]], ["HTTP/1.1 404 Not Found", "no upgrade route /v1/other"]);
+  callAs(peer);
+  assert.equal(status(await upgrade("/v1/jobs/x")), "HTTP/1.1 403 Forbidden");
+  assert.equal(status(await upgrade(`/v1/pylons/${pylonId}/stream`)), "HTTP/1.1 403 Forbidden");
+  callAs(controlPlane);
+  assert.deepEqual((await upgrade("/v1/jobs/x"))[1], "no upgrade route /v1/jobs/x for nexus-stream");
+  assert.deepEqual((await upgrade(`/v1/pylons/${pylonId}/stream`, "websocket"))[1], `no upgrade route /v1/pylons/${pylonId}/stream for websocket`);
+  assert.deepEqual((await upgrade(`/v1/pylons/${pylonId}/stream`))[1], `${pylonId} is absent, not running`, "the pylon is checked before the request is read");
+});
+
+test("a route on a pylon refuses a pylon that is not running before it reads the request", async (t) => {
+  const { base } = await setup(t);
+  const res = await fetch(`${base}/v1/pylons/${pylonId}/commands`, { method: "POST", body: "not a command" });
+  assert.deepEqual([res.status, await res.text()], [409, `${pylonId} is absent, not running`]);
+  assert.equal((await fetch(`${base}/v1/jobs/%E0`)).status, 400, "a path parameter that does not decode is the caller's error");
+});
+
 test("a method a route does not serve gets that route's answer: 405 or 404", async (t) => {
   const { base, callAs } = await setup(t);
   const answer = async (method: string, path: string) => {
