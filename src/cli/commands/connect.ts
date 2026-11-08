@@ -34,6 +34,7 @@ function connectText(url: string, file: string, caller: Whoami): string {
 
 export const connectCommands: Readonly<Record<string, Command>> = {
   connect: {
+    help: ["  nexus connect <host>                         find the control plane on a tailnet name or URL, save it, and say what this device may do"],
     args: [1, 1],
     async run(_, [host], v) {
       const file = configFile();

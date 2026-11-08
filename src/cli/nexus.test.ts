@@ -234,6 +234,15 @@ test("the CLI runs a thread's life through the SOCKS proxy, and --json prints th
   assert.ok(s.proxy.connects.length > 0 && s.proxy.connects.every((c) => c === `${apiName}:${s.api.port}`), "the proxy resolved the API's name");
 });
 
+test("each command's help names every flag it takes", () => {
+  // project show's entry says how project add and project edit set the standing rules.
+  const elsewhere: Record<string, readonly string[]> = { "project edit": ["rules-file", "clear-rules"] };
+  for (const [name, command] of Object.entries(commands)) {
+    const unnamed = Object.keys(command.options ?? {}).filter((flag) => !command.help.join("\n").includes(`--${flag}`) && !elsewhere[name]?.includes(flag));
+    assert.deepEqual(unnamed, [], name);
+  }
+});
+
 test("--help or -h after a command prints its lines of nexus --help and exits 0 without a request", async (t) => {
   const s = await setup(t);
   const all = new Set((await s.nexus(["--help"])).stdout.split("\n"));

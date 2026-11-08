@@ -3,6 +3,7 @@
  * their agents, and their lifecycle.
  */
 import { randomUUID } from "node:crypto";
+import { sessionHarnessSchema } from "../../protocol/agent-kinds.ts";
 import type { Preview } from "../../control/thread-store.ts";
 import { threadRoutes as routes } from "../../contract/threads.ts";
 import { pylonRoutes, type ChangesBase } from "../../contract/pylon.ts";
@@ -41,8 +42,10 @@ async function served(api: Api, id: string, port: number): Promise<Preview> {
 /** "A", "A and B", or "A, B and C". */
 const listed = (names: readonly string[]) => names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 
+const actionHelp = ["  nexus abort|retry|retry-pylon|wake <thread>"];
 /** A thread action whose route answers 204. Its JSON is null. */
 const action = (done: string, call: (api: Api, thread: string) => Promise<null>): Command => ({
+  help: actionHelp,
   args: [1, 1],
   async run(api, [id]) {
     await call(api, id!);
@@ -50,8 +53,10 @@ const action = (done: string, call: (api: Api, thread: string) => Promise<null>)
   },
 });
 
+const statusHelp = ["  nexus archive|unarchive|delete <thread>"];
 /** A thread action whose route answers the thread, or the queued thread when it has not started. */
 const statusChange = (route: typeof routes.archive | typeof routes.unarchive | typeof routes.delete, done: string, queued: string): Command => ({
+  help: statusHelp,
   args: [1, 1],
   async run(api, [id]) {
     const t = await request(api, route, { thread: id! });
@@ -61,6 +66,10 @@ const statusChange = (route: typeof routes.archive | typeof routes.unarchive | t
 
 export const threadsCommands: Readonly<Record<string, Command>> = {
   threads: {
+    help: [
+      "  nexus threads [--project P] [--all] [--queued]",
+      "    threads, then queued ones; deleted ones and cancelled queued ones only with --all, and --queued lists only queued ones",
+    ],
     args: [0, 0],
     options: { project: { type: "string" }, all: { type: "boolean" }, queued: { type: "boolean" } },
     async run(api, _, v) {
@@ -76,6 +85,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     },
   },
   show: {
+    help: ["  nexus show <thread>                          a thread with its pylon, sessions, previews and outputs"],
     args: [1, 1],
     async run(api, [id]) {
       let d;
@@ -90,6 +100,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     },
   },
   ports: {
+    help: ["  nexus ports <thread>                         the TCP ports the pylon listens on, and each one's preview"],
     args: [1, 1],
     async run(api, [id]) {
       const d = await request(api, routes.show, { thread: id! });
@@ -97,6 +108,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     },
   },
   preview: {
+    help: ["  nexus preview <thread> <port> [--wait]       publish a port as a preview, and print its URL"],
     args: [2, 2],
     options: { wait: { type: "boolean" } },
     async run(api, [id, given], v) {
@@ -107,6 +119,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     },
   },
   unpreview: {
+    help: ["  nexus unpreview <thread> <port>              stop publishing a port that preview published"],
     args: [2, 2],
     async run(api, [id, given]) {
       const port = portArg(given!);
@@ -115,6 +128,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     },
   },
   files: {
+    help: ["  nexus files <thread> [path]                  a directory of the pylon's checkout"],
     args: [1, 2],
     async run(api, [id, path = ""]) {
       const l = await whenRunning(api, id!, () => request(api, pylonRoutes.files, { thread: id!, query: { path } }), "nothing was listed");
@@ -122,6 +136,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     },
   },
   changes: {
+    help: ["  nexus changes <thread> [--uncommitted | --turn]       the files changed since boot, HEAD, or the latest turn"],
     args: [1, 1],
     options: { uncommitted: { type: "boolean" }, turn: { type: "boolean" } },
     async run(api, [id], v) {
@@ -130,6 +145,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     },
   },
   diff: {
+    help: ["  nexus diff <thread> [path...] [--uncommitted | --turn]"],
     args: [1, Infinity],
     options: { uncommitted: { type: "boolean" }, turn: { type: "boolean" } },
     async run(api, [id, ...paths], v) {
@@ -140,6 +156,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     },
   },
   "session open": {
+    help: [`  nexus session open <thread> [--harness ${sessionHarnessSchema.options.join("|")}] [--title T]`],
     args: [1, 1],
     options: { harness: { type: "string" }, title: { type: "string" } },
     async run(api, [id], v) {
@@ -152,6 +169,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
   // Not tried again on a 409: a paused session comes back with its pylon's wake, and a pane asked for before the wake
   // may name another session after it.
   "session close": {
+    help: ["  nexus session close <thread> <pane|id>       a session in no pane by its ID, which `nexus show` gives"],
     args: [2, 2],
     async run(api, [id, session]) {
       await request(api, pylonRoutes.closeSession, { thread: id!, session: session! });
@@ -159,12 +177,20 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     },
   },
   attach: {
+    help: ["  nexus attach <thread>                        this terminal on the pylon's Herdr sessions, through the control plane"],
     args: [1, 1],
     async run(_api, [id], _values, _follow, local) {
       await attachTerminal(local.connect, id!, processTty());
     },
   },
   start: {
+    help: [
+      "  nexus start --project P [--title T] [--message M | --claude PROMPT [--model ID]] [--node N|auto] [--branch B] [--commit C]",
+      "              [--cpus n] [--memory GiB] [--disk GiB] [--after THREAD[,THREAD...]] [--request-id ID] [--plan]",
+      "    --after queues it to start once each of those threads' pull requests has merged",
+      "    --plan makes it a planning thread, whose proposed items become questions you accept or reject",
+      "    --request-id makes a repeat of the start answer the thread the first made",
+    ],
     args: [0, 0],
     options: { ...workerOptions, "request-id": { type: "string" }, plan: { type: "boolean" } },
     async run(api, _, v) {
@@ -185,6 +211,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     },
   },
   "start-queued": {
+    help: ["  nexus start-queued <thread>                  start a queued thread now, without waiting for the threads it is queued after"],
     args: [1, 1],
     async run(api, [id]) {
       const t = await request(api, routes.startQueued, { thread: id! });
@@ -192,6 +219,10 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     },
   },
   send: {
+    help: [
+      "  nexus send <thread> <text...> [--steer] [--request-id ID]",
+      "    a message to the agent, or typed into the Claude worker's session, which waits for a paused pylon to wake",
+    ],
     args: [2, Infinity],
     options: { steer: { type: "boolean" }, "request-id": { type: "string" } },
     async run(api, [id, ...words], v) {
@@ -211,6 +242,10 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     },
   },
   seen: {
+    help: [
+      "  nexus seen <thread> [--unread | --last-reply-at MS]",
+      "    mark the latest reply seen, or unread, or only up to the reply at MS, as captured with what the client showed",
+    ],
     args: [1, 1],
     options: { unread: { type: "boolean" }, "last-reply-at": { type: "string" } },
     async run(api, [id], v) {

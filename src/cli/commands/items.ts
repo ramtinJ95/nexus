@@ -23,6 +23,7 @@ function itemText(i: PipelineItem): string {
 
 export const itemsCommands: Readonly<Record<string, Command>> = {
   items: {
+    help: ["  nexus items [--project P] [--all]            pipeline items and the phase each is in; cancelled ones only with --all"],
     args: [0, 0],
     options: { project: { type: "string" }, all: { type: "boolean" } },
     async run(api, _, v) {
@@ -31,6 +32,11 @@ export const itemsCommands: Readonly<Record<string, Command>> = {
     },
   },
   "item add": {
+    help: [
+      "  nexus item add --project P [--title T] (--message M | --claude PROMPT [--model ID]) [--after ITEM[,ITEM...]]",
+      "                 [--node N|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB]",
+      "    an item becomes a queued thread once the items it is after are, and starts once their pull requests merge",
+    ],
     args: [0, 0],
     options: workerOptions,
     async run(api, _, v) {
@@ -41,6 +47,7 @@ export const itemsCommands: Readonly<Record<string, Command>> = {
     },
   },
   "item show": {
+    help: ["  nexus item show <item>                       an item with its phase, its thread and its brief"],
     args: [1, 1],
     async run(api, [id]) {
       const i = await request(api, itemRoutes.show, { item: id! });
@@ -48,6 +55,7 @@ export const itemsCommands: Readonly<Record<string, Command>> = {
     },
   },
   "item approve": {
+    help: ["  nexus item approve <item>                    let an item become a thread, in a project whose pipeline waits for approval"],
     args: [1, 1],
     async run(api, [id]) {
       const i = await request(api, itemRoutes.approve, { item: id! });
@@ -55,6 +63,7 @@ export const itemsCommands: Readonly<Record<string, Command>> = {
     },
   },
   "item cancel": {
+    help: ["  nexus item cancel <item>                     an item that is not a thread yet, which then never becomes one"],
     args: [1, 1],
     async run(api, [id]) {
       const i = await request(api, itemRoutes.cancel, { item: id! });

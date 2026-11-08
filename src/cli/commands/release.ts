@@ -63,8 +63,8 @@ async function imageWait(api: Api, started: ImageOperation): Promise<Result> {
 }
 
 /** Starts an image operation, and with --wait follows it until it ends. */
-const imageCommand = (args: Command["args"], start: (api: Api, positionals: readonly string[]) => Promise<ImageOperation>): Command => ({
-  args, options: { wait: { type: "boolean" } },
+const imageCommand = (help: Command["help"], args: Command["args"], start: (api: Api, positionals: readonly string[]) => Promise<ImageOperation>): Command => ({
+  help, args, options: { wait: { type: "boolean" } },
   async run(api, positionals, v) {
     const operation = await start(api, positionals);
     return v.wait === true ? imageWait(api, operation) : { json: operation, text: operationText(operation) };
@@ -124,6 +124,7 @@ export const answeredText = (r: Review, running: boolean) => running
 
 export const releaseCommands: Readonly<Record<string, Command>> = {
   release: {
+    help: ["  nexus release"],
     args: [0, 0],
     async run(api) {
       const view = await request(api, releaseRoutes.release, {});
@@ -131,6 +132,11 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
     },
   },
   review: {
+    help: [
+      "  nexus review <thread> [--pr N] [--rounds N] [--land]",
+      "    a reviewer on another model for the thread's open PR, round after round until it approves; --land merges and deploys under the merge policy",
+      "  nexus review --cancel <thread>               end the thread's running review and archive its reviewer, unless it began merging or deploying",
+    ],
     args: [1, 1], options: { pr: { type: "string" }, rounds: { type: "string" }, land: { type: "boolean" }, cancel: { type: "boolean" } },
     async run(api, [id], v) {
       if (v.cancel === true) {
@@ -146,6 +152,10 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
     },
   },
   land: {
+    help: [
+      "  nexus land <thread> [--waive]",
+      "    land an approved review under the merge policy, or try a held landing again; --waive answers Land to the review's question about the holds reserved for you",
+    ],
     args: [1, 1], options: { waive: { type: "boolean" } },
     async run(api, [id], v) {
       const { question, running, ...press } = v.waive === true ? await pressOf(api, id!, { input: process.stdin, output: process.stderr }) : {};
@@ -159,6 +169,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
     },
   },
   deploy: {
+    help: ["  nexus deploy <commit|main> [--wait]"],
     args: [1, 1], options: { wait: { type: "boolean" } },
     async run(api, [commit], values) {
       if (commit !== "main" && !fullCommit.test(commit!)) throw new CliError("invalid", "deploy takes main or a full lower-case commit hash");
@@ -179,10 +190,11 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
       return { json: view, text: releaseText(view) };
     },
   },
-  "image build": imageCommand([0, 0], (api) => request(api, imageRoutes.build, {})),
-  "image rollout": imageCommand([1, 1], (api, [image]) => request(api, imageRoutes.rollout, { body: { image: image as ImageId } })),
-  "image rollback": imageCommand([0, 0], (api) => request(api, imageRoutes.rollback, {})),
+  "image build": imageCommand(["  nexus image build [--wait]                   build the recipe of the control plane's release, and record the image"], [0, 0], (api) => request(api, imageRoutes.build, {})),
+  "image rollout": imageCommand(["  nexus image rollout <image> [--wait]         copy an image to every online node, then make it current"], [1, 1], (api, [image]) => request(api, imageRoutes.rollout, { body: { image: image as ImageId } })),
+  "image rollback": imageCommand(["  nexus image rollback [--wait]                roll out again the image that was current before this one"], [0, 0], (api) => request(api, imageRoutes.rollback, {})),
   "image list": {
+    help: ["  nexus image list                             recorded images, the nodes that hold each, and the last image operation"],
     args: [0, 0],
     async run(api) {
       const view = await request(api, imageRoutes.list, {});
@@ -190,6 +202,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
     },
   },
   "image current": {
+    help: ["  nexus image current                          the current image and the one before it"],
     args: [0, 0],
     async run(api) {
       const images = await request(api, imageRoutes.current, {});

@@ -20,6 +20,7 @@ export function doctorText(report: DoctorReport): string {
 
 export const doctorCommands: Readonly<Record<string, Command>> = {
   doctor: {
+    help: ["  nexus doctor                                 check each node and the control plane now: release, disk, pylons, backup, login, certificate"],
     args: [0, 0],
     async run(api) {
       const report = await request(api, doctorRoutes.doctor, {});

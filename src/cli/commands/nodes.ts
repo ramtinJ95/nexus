@@ -45,6 +45,7 @@ function healthText(h: NodeHealth): string {
 
 export const nodesCommands: Readonly<Record<string, Command>> = {
   node: {
+    help: ["  nexus node <name>                            a node's load, memory, disk, temperatures and pylon processes, read now; deployers only"],
     args: [1, 1],
     async run(api, [name]) {
       const health = await request(api, nodeRoutes.health, { node: name! });
@@ -52,6 +53,7 @@ export const nodesCommands: Readonly<Record<string, Command>> = {
     },
   },
   nodes: {
+    help: ["  nexus nodes"],
     args: [0, 0],
     async run(api) {
       const nodes = await request(api, nodeRoutes.list, {});

@@ -26,6 +26,8 @@ interface Local {
   connect(path: string): Promise<WebSocket>;
 }
 export interface Command {
+  /** Its lines of `nexus --help`, which its own --help prints. Commands that share an entry share the array. */
+  help: readonly string[];
   args: readonly [min: number, max: number];
   options?: ParseArgsOptionsConfig;
   /** Nothing when the command printed its own output, as watch does. */

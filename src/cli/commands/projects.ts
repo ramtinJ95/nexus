@@ -84,6 +84,7 @@ function projectText(p: Project): string {
 
 export const projectsCommands: Readonly<Record<string, Command>> = {
   projects: {
+    help: ["  nexus projects"],
     args: [0, 0],
     async run(api) {
       const projects = await request(api, projectRoutes.list, {});
@@ -91,6 +92,10 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
     },
   },
   "project show": {
+    help: [
+      "  nexus project show <id>                      a project's settings, and the standing rules each builder thread gets with its first message",
+      "    project add and project edit set the rules with --rules-file PATH, or - for stdin, and project edit --clear-rules clears them",
+    ],
     args: [1, 1],
     async run(api, [id]) {
       // From the list, so the command needs no route newer than `projects`.
@@ -100,6 +105,14 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
     },
   },
   "project edit": {
+    help: [
+      "  nexus project edit <id> [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]",
+      "    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...",
+      "    [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]",
+      "    [--auto-review off|review|land|yolo]   review each builder's PR on its own, land it too, and with yolo waive the holds you may; land and yolo need a deployer",
+      "    [--pipeline off|approve|start]    turn pipeline items into threads, once the person approves each or on their own",
+      "    [--second-reviewer off|on|always|reserved,lines=N]   a second reviewer on another model for the PRs the rule names",
+    ],
     args: [1, 1],
     options: {
       ...placementOptions,
@@ -143,6 +156,11 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
     },
   },
   "project add": {
+    help: [
+      "  nexus project add <id> (<repo-url> | --scratch) [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]",
+      "                    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]... [--rules-file PATH|-]",
+      "                    [--auto-review off|review|land|yolo]",
+    ],
     args: [1, 2],
     options: {
       ...placementOptions,

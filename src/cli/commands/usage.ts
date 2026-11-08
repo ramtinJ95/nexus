@@ -37,6 +37,10 @@ function usageText(r: UsageReport): string {
 
 export const usageCommands: Readonly<Record<string, Command>> = {
   usage: {
+    help: [
+      "  nexus usage [--since today|7d|30d|all|DATE] [--project P] [--by model|project|kind|role|day]",
+      "    the tokens the agents spent, in all and by model, project, agent, role and day, or only --by's; --since is 7d by default",
+    ],
     args: [0, 0],
     options: { since: { type: "string" }, project: { type: "string" }, by: { type: "string" } },
     async run(api, _, v) {
@@ -45,6 +49,10 @@ export const usageCommands: Readonly<Record<string, Command>> = {
     },
   },
   "usage backfill": {
+    help: [
+      "  nexus usage backfill [--dry-run | --stop]",
+      "    read archived threads' transcripts from their start, waking one pylon at a time, or list what it would read, or stop; deployers only",
+    ],
     args: [0, 0],
     options: { "dry-run": { type: "boolean" }, stop: { type: "boolean" } },
     async run(api, _, v) {
