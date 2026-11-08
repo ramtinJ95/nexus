@@ -444,7 +444,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   };
 }
 
-const attach: Policy = { role: "person", action: "attach to a thread's pylon" };
+const attach = { role: "person", action: "attach to a thread's pylon" } satisfies Policy;
 
 function requireJson(req: IncomingMessage) {
   if (req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") throw new Refusal("unsupported", "requests that change state must have content-type application/json");

@@ -8,7 +8,7 @@ import { ok, type RouteEntry, type ApiKit } from "./kit.ts";
 import { anyAllowed, type Policy } from "./access.ts";
 
 /** The backfill wakes archived threads' pylons, so starting or stopping it takes the same right as `nexus deploy`. */
-const steer: Policy = { role: "deployer", action: "start or stop the usage backfill" };
+const steer = { role: "deployer", action: "start or stop the usage backfill" } satisfies Policy;
 
 export function usageRoutes(kit: ApiKit, options: { usageBackfill?: UsageBackfillJob | undefined }): readonly RouteEntry[] {
   const { registry } = kit;

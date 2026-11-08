@@ -21,7 +21,7 @@ const imageSchema = z.strictObject({
 const rolloutSchema = z.strictObject({ image: imageSchema.shape.id });
 const noFields = z.strictObject({});
 /** An image becomes what every new pylon boots, so building and rolling one out takes the same right as `nexus deploy`. */
-const roll: Policy = { role: "deployer", action: "build, roll out or roll back an image" };
+const roll = { role: "deployer", action: "build, roll out or roll back an image" } satisfies Policy;
 
 export function imageRoutes(kit: ApiKit, options: { images?: ImageRollout | undefined }): readonly RouteEntry[] {
   const { registry } = kit;

@@ -27,7 +27,7 @@ export type Role = "tailnet" | "joiner" | "allowed" | "person" | "deployer" | "r
  * deploy's drain.
  */
 export type Policy = ({ role: "person" | "deployer" | "control-node"; action: string } | { role: "tailnet" | "joiner" | "allowed" | "reporter"; why?: string }) & { startsTurn?: true };
-export const anyAllowed: Policy = { role: "allowed" };
+export const anyAllowed = { role: "allowed" } satisfies Policy;
 
 type AccessRegistry = Pick<Registry, "nodeByTailnetId">;
 
@@ -154,7 +154,7 @@ export function apiAccess(registry: Registry, wake: (node: NodeName) => void, op
 export type Access = ReturnType<typeof apiAccess>;
 
 /** Landing merges and may deploy, so it takes the same right as `nexus deploy`, whatever the repository. */
-export const landing: Policy = { role: "deployer", action: "land a pull request, which deploys" };
+export const landing = { role: "deployer", action: "land a pull request, which deploys" } satisfies Policy;
 
 /** For a route whose body asks for a landing, which the land route's own role checks otherwise. */
 export function mayLand(roles: ReadonlySet<Role>) {

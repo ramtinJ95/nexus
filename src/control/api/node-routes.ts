@@ -10,7 +10,7 @@ import { ok, type RouteEntry, type ApiKit } from "./kit.ts";
 import { anyAllowed, type Policy } from "./access.ts";
 
 /** A node's health says what runs on it, so only a deployer reads it. */
-export const readHealth: Policy = { role: "deployer", action: "read a node's health" };
+export const readHealth = { role: "deployer", action: "read a node's health" } satisfies Policy;
 
 const maxSpanMs = 31 * 24 * 60 * 60 * 1000;
 

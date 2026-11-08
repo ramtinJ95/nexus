@@ -24,7 +24,9 @@ export type Reply =
   | { stream(res: ServerResponse): Promise<void> | void; status?: never; file?: never };
 /** `roles` are what roleOf gives the caller, and `host` its MagicDNS name, which only the join's whois gives. */
 export type Route = (match: RegExpExecArray, req: { query: URLSearchParams; body(empty?: unknown): Promise<unknown>; caller: TailnetNodeId; roles: ReadonlySet<Role>; host: string | null }) => Reply | Promise<Reply>;
-export type RouteEntry = readonly ["GET" | "POST" | "PUT" | "PATCH" | "DELETE", RegExp, Policy, Route];
+/** A route any allowed caller or tailnet node changes state with says why it may. */
+type WritePolicy = Policy & ({ role: Exclude<Policy["role"], "allowed" | "tailnet"> } | { why: string });
+export type RouteEntry = readonly ["GET", RegExp, Policy, Route] | readonly ["POST" | "PUT" | "PATCH" | "DELETE", RegExp, WritePolicy, Route];
 export const ok = (body: unknown): Reply => ({ status: 200, body });
 export const created = (body: unknown): Reply => ({ status: 201, body });
 export const noContent: Reply = { status: 204 };
