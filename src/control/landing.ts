@@ -14,7 +14,7 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import { landingVerb, type HoldCause, type Phase, type Review } from "./review-model.ts";
 
-type LandingRegistry = Pick<Registry, "desiredRelease" | "drain" | "nodes" | "project" | "releaseReports" | "reviews" | "setDesiredRelease">;
+type LandingRegistry = Pick<Registry, "desiredRelease" | "drain" | "nodes" | "now" | "project" | "releaseReports" | "reviews" | "setDesiredRelease">;
 type Releasing = Extract<Phase, { kind: "deploying" | "rolling-back" }>;
 
 export interface LandingDeps {
@@ -55,7 +55,7 @@ export function landing({ registry, release, mayLand, now, toPerson }: LandingDe
      */
     ahead(r: Review): string | null {
       if (!deploys(r)) return null;
-      if (isDraining(registry.drain())) return "a deploy drains the control plane";
+      if (isDraining(registry.drain(), registry.now())) return "a deploy drains the control plane";
       for (const other of registry.reviews()) {
         const verb = other.id === r.id || !deploys(other) ? null : landingVerb(other);
         if (verb !== null) return `${other.id} ${verb}`;

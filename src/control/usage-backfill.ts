@@ -25,7 +25,7 @@ import type { UsageCounter } from "./usage-counter.ts";
 import type { UsageHold } from "./usage-store.ts";
 import type { BackfillPlanRow, UsageBackfill } from "../contract/usage.ts";
 
-type UsageBackfillRegistry = Pick<Registry, "clearPylonAttempts" | "finishUsageBackfill" | "finishUsageBackfillThread" | "finishUsageHold" | "holdSettle" | "holdUsageBackfill" | "keptArchives" | "markUnread" | "node" | "nodes" | "projects" | "pylon" | "pylonsOn" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseUsageHold" | "reserved" | "sealBoot" | "startUsageBackfill" | "stopUsageBackfill" | "storedThreads" | "thread" | "threads" | "usageBackfill" | "usageBackfillThreads" | "usageHold" | "waitSettle" | "waitUsageBackfill">;
+type UsageBackfillRegistry = Pick<Registry, "clearPylonAttempts" | "finishUsageBackfill" | "finishUsageBackfillThread" | "finishUsageHold" | "holdSettle" | "holdUsageBackfill" | "keptArchives" | "markUnread" | "node" | "nodes" | "now" | "projects" | "pylon" | "pylonsOn" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseUsageHold" | "reserved" | "sealBoot" | "startUsageBackfill" | "stopUsageBackfill" | "storedThreads" | "thread" | "threads" | "usageBackfill" | "usageBackfillThreads" | "usageHold" | "waitSettle" | "waitUsageBackfill">;
 
 export interface UsageBackfillJob {
   status(): UsageBackfill;

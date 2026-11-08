@@ -117,7 +117,7 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
   const seen = (unseen: boolean) => async ({ thread: id }: { thread: string }, r: { body(empty?: unknown): Promise<unknown> }) => {
     const t = thread(id);
     const body = parse(seenSchema, await r.body({}));
-    registry.markSeen(t.id, unseen, Date.now(), body.lastReplyAt);
+    registry.markSeen(t.id, unseen, registry.now(), body.lastReplyAt);
     return noContent;
   };
 

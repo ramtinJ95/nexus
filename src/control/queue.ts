@@ -24,7 +24,7 @@ import { prLocationOf, servesReview, threadRole } from "./work-model.ts";
 import { brokenRule, startRules } from "../contract/threads-parse.ts";
 import { isOpenStatus } from "./reconcile.ts";
 
-type QueueRegistry = Pick<Registry, "createThread" | "currentImage" | "isReviewer" | "latestHealthSample" | "node" | "nodes" | "planning" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveQueued" | "saveTemplate" | "templates" | "thread">;
+type QueueRegistry = Pick<Registry, "createThread" | "currentImage" | "isReviewer" | "latestHealthSample" | "node" | "nodes" | "now" | "planning" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveQueued" | "saveTemplate" | "templates" | "thread">;
 
 export interface ThreadQueue {
   /** Validates and records, with `key` if given; throws a Refusal. Does not start it; the caller calls poll() after. */

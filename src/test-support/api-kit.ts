@@ -130,7 +130,7 @@ export async function testApi(t: import("node:test").TestContext, options: TestA
     ...(deployment === null ? {} : { deployment: deployment ?? { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} } }),
     startThread,
     features: { ...noFeatures, reviews, cleanup, doctor, queue, pipeline, planning: plans, images: images ?? null, usageBackfill: backfill ?? null },
-    gate: turnGate(() => isDraining(registry.drain())),
+    gate: turnGate(() => isDraining(registry.drain(), registry.now())),
     health: () => null,
     hostnames: new Set(["127.0.0.1"]),
     harness,

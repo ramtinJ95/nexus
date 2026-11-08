@@ -202,7 +202,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     log,
   }));
 
-  const gate = turnGate(() => isDraining(registry.drain()));
+  const gate = turnGate(() => isDraining(registry.drain(), registry.now()));
   const harness = gateTurns(rawHarness, gate);
   const images = services.start(startImageRollout({
     registry, probes: probeMap, buildNode: config.imageBuildNode, recipe: () => loadImageRecipe(), release: runningCommit,

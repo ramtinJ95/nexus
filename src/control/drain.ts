@@ -4,7 +4,7 @@ export class DeployDraining extends Error {
   constructor() { super("control plane is draining for deployment; retry after the release completes"); }
 }
 
-export const isDraining = (drain: Drain | null) => drain?.locked === true || (drain?.expiresAt ?? 0) > Date.now();
+export const isDraining = (drain: Drain | null, now: number) => drain?.locked === true || (drain?.expiresAt ?? 0) > now;
 
 /**
  * One per control plane, shared by the API's turn-starting routes, the harness methods harness/host.ts lists and the queue's

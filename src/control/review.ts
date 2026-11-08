@@ -51,7 +51,7 @@ import { servesReview, threadRole } from "./work-model.ts";
 import { builderFindings, builderNotes, fencedAnswers, nextRound, quoteRequest, reminder, reviewerRequest, type FencedAnswer } from "./prompts.ts";
 import { isOpenStatus, openStatuses } from "./reconcile.ts";
 
-type ReviewRegistry = Pick<Registry, "agent" | "answerQuestion" | "desiredRelease" | "drain" | "isCurrentReview" | "isReviewer" | "nodeByTailnetId" | "nodes" | "planning" | "prReviewed" | "prWatch" | "project" | "pylon" | "question" | "questions" | "releaseReports" | "replaceQuestions" | "review" | "reviews" | "reviewsToStep" | "saveReview" | "setDesiredRelease" | "setThreadStatus" | "storedThreads" | "thread" | "threadsAsking">;
+type ReviewRegistry = Pick<Registry, "agent" | "answerQuestion" | "desiredRelease" | "drain" | "isCurrentReview" | "isReviewer" | "nodeByTailnetId" | "nodes" | "now" | "planning" | "prReviewed" | "prWatch" | "project" | "pylon" | "question" | "questions" | "releaseReports" | "replaceQuestions" | "review" | "reviews" | "reviewsToStep" | "saveReview" | "setDesiredRelease" | "setThreadStatus" | "storedThreads" | "thread" | "threadsAsking">;
 
 /** How long a turn's end may run ahead of its transcript before a reply without the block counts as missing it. */
 const replyGraceMs = 60_000;

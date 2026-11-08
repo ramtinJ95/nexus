@@ -416,6 +416,8 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
 
   return {
     ...claude,
+    /** The registry's clock, the one time source for decisions over its records. */
+    now: clock,
     updateAttention,
     threadRecord,
     saveStartKey,
@@ -637,7 +639,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     harnessThreads: (): StoredThread[] => sql(`SELECT * FROM threads t WHERE conversation_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM claude_workers WHERE thread = t.id)
       AND (status <> 'deleted' OR conversation_id NOT IN (SELECT conversation FROM aborted_conversations)) ORDER BY created_at, id`).all().map(threadRow),
     recordAborted(conversationId: string) { sql("INSERT OR IGNORE INTO aborted_conversations (conversation) VALUES (?)").run(conversationId); },
-    markSeen(id: ThreadId, unread: boolean, now = Date.now(), lastReplyAt?: number | null) {
+    markSeen(id: ThreadId, unread: boolean, now = clock(), lastReplyAt?: number | null) {
       if (!unread && lastReplyAt === null) return;
       transaction(() => {
         sql("UPDATE threads SET seen_at = CASE WHEN ? THEN last_reply_at - 1 ELSE max(coalesce(seen_at, 0), min(max(?, coalesce(last_reply_at, 0)), ?)) END WHERE id = ?").run(unread ? 1 : 0, now, lastReplyAt ?? Number.MAX_SAFE_INTEGER, id);

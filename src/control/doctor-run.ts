@@ -17,7 +17,7 @@ import type { Registry } from "./registry.ts";
 import type { NewHealthChange } from "./health-store.ts";
 
 export interface DoctorSources {
-  registry: Pick<Registry, "nodes" | "node" | "pylon" | "keptArchives" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserved" | "desiredRelease" | "nodeByTailnetId" | "releaseReports">;
+  registry: Pick<Registry, "nodes" | "now" | "node" | "pylon" | "keptArchives" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserved" | "desiredRelease" | "nodeByTailnetId" | "releaseReports">;
   self: TailnetNodeId;
   backupStatus(): Promise<BackupStatusRead>;
   login(): Promise<LoginState>;
