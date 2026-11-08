@@ -8,7 +8,7 @@ import { threadRoutes as routes } from "../../contract/threads.ts";
 import { pylonRoutes, type ChangesBase } from "../../contract/pylon.ts";
 import { attachTerminal, processTty } from "../attach.ts";
 import { CliError } from "../transport.ts";
-import { type Values, type Api, type Command, str, request, int, workerOptions, briefOf, table, waitMs, pylonCommandMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
+import { type Values, type Api, type Command, str, request, int, workerOptions, briefOf, table, waitMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
 import { detailText, portsText, listingText, changesText, queuedRow, queuedText, threadRow } from "../thread-text.ts";
 
 function portArg(given: string): number {
@@ -17,8 +17,6 @@ function portArg(given: string): number {
   return port;
 }
 
-/** A diff of a large tree can take the pylon a while. */
-const checkoutReadMs = 120_000;
 const baseOf = (v: Values): ChangesBase => {
   if (v.uncommitted === true && v.turn === true) throw new CliError("invalid", "--turn and --uncommitted cannot be used together");
   return v.turn === true ? "turn" : v.uncommitted === true ? "head" : "start";
@@ -67,7 +65,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     options: { project: { type: "string" }, all: { type: "boolean" }, queued: { type: "boolean" } },
     async run(api, _, v) {
       const project = str(v, "project");
-      const queuing = request(api, routes.queued, { query: { project } }).then((all) => all.filter((q) => v.all === true || q.status === "queued"));
+      const queuing = request(api, routes.queued, { query: { project, ...v.all === true ? {} : { status: "queued" } } });
       if (v.queued === true) {
         const queued = await queuing;
         return { json: queued, text: queued.length === 0 ? "No queued threads." : table(queued.map(queuedRow)) };
@@ -119,7 +117,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
   files: {
     args: [1, 2],
     async run(api, [id, path = ""]) {
-      const l = await whenRunning(api, id!, () => request(api, pylonRoutes.files, { thread: id!, query: { path } }, checkoutReadMs), "nothing was listed");
+      const l = await whenRunning(api, id!, () => request(api, pylonRoutes.files, { thread: id!, query: { path } }), "nothing was listed");
       return { json: l, text: listingText(l) };
     },
   },
@@ -127,7 +125,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     args: [1, 1],
     options: { uncommitted: { type: "boolean" }, turn: { type: "boolean" } },
     async run(api, [id], v) {
-      const c = await whenRunning(api, id!, () => request(api, pylonRoutes.changes, { thread: id!, query: { base: baseOf(v) } }, checkoutReadMs), "no changes were read");
+      const c = await whenRunning(api, id!, () => request(api, pylonRoutes.changes, { thread: id!, query: { base: baseOf(v) } }), "no changes were read");
       return { json: c, text: changesText(c) };
     },
   },
@@ -136,7 +134,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     options: { uncommitted: { type: "boolean" }, turn: { type: "boolean" } },
     async run(api, [id, ...paths], v) {
       const query = { base: baseOf(v), paths };
-      const d = await whenRunning(api, id!, () => request(api, pylonRoutes.diff, { thread: id!, query }, checkoutReadMs), "no diff was read");
+      const d = await whenRunning(api, id!, () => request(api, pylonRoutes.diff, { thread: id!, query }), "no diff was read");
       const text = d.diff === "" ? "No changes." : d.diff.replace(/\n$/, "");
       return { json: d, text: d.truncated ? `${text}\n[The diff stops here, at its 4 MiB limit. Name paths to see the rest.]` : text };
     },
@@ -147,7 +145,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     async run(api, [id], v) {
       const body = Object.fromEntries((["harness", "title"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]]));
       // The API answers once the agent is ready or waits for its human, which can take a minute.
-      const opened = await whenRunning(api, id!, () => request(api, pylonRoutes.openSession, { thread: id!, body }, pylonCommandMs), "no session was opened");
+      const opened = await whenRunning(api, id!, () => request(api, pylonRoutes.openSession, { thread: id!, body }), "no session was opened");
       return { json: opened, text: `Opened ${opened.harness} session ${JSON.stringify(opened.title)} in pane ${opened.herdrPane} of ${id}. \`nexus attach ${id}\` attaches to it.` };
     },
   },
@@ -203,7 +201,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
       // A Claude worker's message is typed in its pylon, so its send waits for a paused pylon to wake.
       const claude = (await request(api, routes.show, { thread: id! })).claudeWorker !== undefined;
       const body = { text: words.join(" "), requestId, mode: steer ? "steer" as const : "followUp" as const };
-      const message = () => request(api, routes.message, { thread: id!, body }, claude ? pylonCommandMs : undefined);
+      const message = () => request(api, routes.message, { thread: id!, body });
       const reply = claude ? await whenRunning(api, id!, message, "the message was not sent") : await message();
       if ("claude" in reply) {
         const resumed = reply.claude.resumed ? " Its session was resumed to take it." : "";

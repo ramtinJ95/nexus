@@ -7,16 +7,12 @@ import type { Registry } from "../registry.ts";
 import type { Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
 import { HttpError } from "../http-error.ts";
+import { apiPingMs } from "../../contract/route.ts";
 
 type EventBatch = ReturnType<Registry["eventBatch"]>;
 
 /** Streams open at once, across threads and callers. Each holds a watch, and the streams of one thread page share its renders. */
 export const maxStreams = 16;
-/**
- * Under the CLI's 30 s idle timeout, so a quiet thread's stream stays open. Each ping renders the latest view again
- * first, so what a frame shows of the time, such as how long ago the thread started, stays true.
- */
-const pingMs = 15_000;
 
 export function eventStreams(streamStallMs: number) {
   /**
@@ -112,7 +108,9 @@ export function eventStreams(streamStallMs: number) {
       if (frame !== null) sse.send(`data: ${JSON.stringify(frame)}\n\n`);
       return frame !== null;
     };
-    sse.begin(pingMs, () => { if (!flush()) sse.send(": ping\n\n"); }, flush);
+    // Each ping renders the latest view again first, so what a frame shows of the time, such as how long ago the
+    // thread started, stays true.
+    sse.begin(apiPingMs, () => { if (!flush()) sse.send(": ping\n\n"); }, flush);
     flush();
     watch.start(async (view) => {
       latest = view;

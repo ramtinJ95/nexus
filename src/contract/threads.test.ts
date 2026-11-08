@@ -63,6 +63,11 @@ test("a call's path encodes its thread, and its query decodes on the server to w
   }
   assert.equal(callOf(threadRoutes.list, { query: { project: undefined } }).path, "/v1/threads");
   assert.equal(callOf(threadRoutes.queued, { query: { project: "nexus" } }).path, "/v1/queued?project=nexus");
+  for (const query of [{ status: "queued" as const }, { project: "nexus", status: "queued" as const }]) {
+    const { path } = callOf(threadRoutes.queued, { query });
+    assert.deepEqual(threadRoutes.queued.query!.decode(new URL(path, "http://nexus").searchParams), query, path);
+  }
+  assert.deepEqual(threadRoutes.queued.query!.decode(new URLSearchParams("status=archived")), {});
   assert.deepEqual(threadRoutes.list.query!.decode(new URLSearchParams("deleted=true")), {});
 });
 

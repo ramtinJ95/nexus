@@ -9,10 +9,11 @@ import type { PipelineItem } from "../control/pipeline.ts";
 import type { itemSchema, projectAddSchema, projectEditSchema } from "./projects-parse.ts";
 import { queryOf, route, type QueryCodec } from "./route.ts";
 
-export interface ItemsQuery { project?: string | undefined }
+/** `cancelled: false` leaves out the items whose phase is cancelled. */
+export interface ItemsQuery { project?: string | undefined; cancelled?: false }
 const itemsQuery: QueryCodec<ItemsQuery> = {
-  encode: ({ project }) => queryOf([["project", project]]),
-  decode: (params) => params.has("project") ? { project: params.get("project")! } : {},
+  encode: ({ project, cancelled }) => queryOf([["project", project], ["cancelled", cancelled === false ? "false" : undefined]]),
+  decode: (params) => ({ ...params.has("project") ? { project: params.get("project")! } : {}, ...params.get("cancelled") === "false" ? { cancelled: false } : {} }),
 };
 
 export const projectRoutes = {

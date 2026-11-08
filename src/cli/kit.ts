@@ -9,14 +9,14 @@ import { callOf, type ApiRoute, type CallArgs, type ReplyOf } from "../contract/
 import { threadRoutes } from "../contract/threads.ts";
 
 export type Values = Record<string, string | boolean | string[] | undefined>;
-/** `idleMs` is how long the reply may take, 30 s by default. */
+/** `idleMs` is how long the reply may take, the route's. */
 export type Api = (method: string, path: string, body?: unknown, idleMs?: number) => Promise<unknown>;
 /** Follows one of the API's event streams until it ends or `signal` aborts it. */
 export type Follow = (path: string, onEvent: (data: unknown) => void | Promise<void>, signal: AbortSignal, onCursor?: (id: string) => void) => Promise<void>;
 /** Calls one of the contract's routes and answers its reply. */
-export async function request<R extends ApiRoute>(api: Api, route: R, args: CallArgs<R>, idleMs?: number): Promise<ReplyOf<R>> {
+export async function request<R extends ApiRoute>(api: Api, route: R, args: CallArgs<R>): Promise<ReplyOf<R>> {
   const { path, body } = callOf(route, args);
-  return await api(route.method, path, body, idleMs) as ReplyOf<R>;
+  return await api(route.method, path, body, route.idleMs) as ReplyOf<R>;
 }
 /** What a command prints: its JSON for --json, its text otherwise. With `exit`, it prints that and then exits as that kind of failure. */
 export interface Result { json: unknown; text: string; exit?: ErrorKind }
@@ -91,8 +91,6 @@ export function table(rows: readonly (readonly string[])[]): string {
 export const clip = (text: string, max: number) => text.length <= max ? text : `${text.slice(0, max)}...`;
 
 export const waitMs = 120_000;
-/** Longer than the probe takes to answer a command, at most 90 s. */
-export const pylonCommandMs = 120_000;
 export const waitPollMs = 1_000;
 
 /**

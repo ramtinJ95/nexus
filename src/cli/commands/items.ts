@@ -26,8 +26,7 @@ export const itemsCommands: Readonly<Record<string, Command>> = {
     args: [0, 0],
     options: { project: { type: "string" }, all: { type: "boolean" } },
     async run(api, _, v) {
-      const project = str(v, "project");
-      const items = (await request(api, itemRoutes.list, { query: { project } })).filter((i) => v.all === true || i.phase.kind !== "cancelled");
+      const items = await request(api, itemRoutes.list, { query: { project: str(v, "project"), ...v.all === true ? {} : { cancelled: false } } });
       return { json: items, text: items.length === 0 ? "No pipeline items." : table(items.map(itemRow)) };
     },
   },

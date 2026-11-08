@@ -76,5 +76,10 @@ test("each query is the one the CLI and the dashboard built by hand", () => {
   assert.equal(callOf(itemRoutes.list, { query: { project: "nexus" } }).path, "/v1/items?project=nexus");
   assert.deepEqual(itemRoutes.list.query!.decode(new URLSearchParams("project=nexus")), { project: "nexus" });
   assert.deepEqual(itemRoutes.list.query!.decode(new URLSearchParams("")), {});
+  for (const query of [{ cancelled: false as const }, { project: "nexus", cancelled: false as const }]) {
+    const { path } = callOf(itemRoutes.list, { query });
+    assert.deepEqual(itemRoutes.list.query!.decode(new URL(path, "http://nexus").searchParams), query, path);
+  }
+  assert.deepEqual(itemRoutes.list.query!.decode(new URLSearchParams("cancelled=true")), {});
   assert.equal(callOf(questionRoutes.answer, { question: "q/1", body: { option: "Land" } }).path, "/v1/questions/q%2F1/answer");
 });
