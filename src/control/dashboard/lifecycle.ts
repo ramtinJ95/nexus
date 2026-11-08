@@ -6,6 +6,7 @@
 import type { ThreadId } from "../../ids.ts";
 import { roleOf } from "../agent-protocol.ts";
 import { keptPastDay } from "../reconcile.ts";
+import { prLocation, watchedPrs } from "../pr-watch-model.ts";
 import { itemView, threadPhase, type ItemPhase, type PipelineItem } from "../pipeline.ts";
 import { checkBeside, checkThread, landingAt, landingSteps, liveNote, roundsSpent, trackStep, type LandingAt, type LandingStep, type PhaseKind, type Review } from "../review-model.ts";
 import { html, limitText, type Html, type Tone } from "./view.ts";
@@ -152,7 +153,7 @@ export function lifeOfThread(c: Pick<Context, "registry" | "needs" | "now">, id:
   const at: Step = track ?? (mapped !== null && mapped !== "held" ? mapped
     : review !== null ? "review"
     : !started ? "queued"
-    : c.registry.prWatch(id)?.links.some((l) => l.pr.state === "open") ? "review" : "building");
+    : prLocation(null, watchedPrs(c.registry.prWatch(id))).kind === "open" ? "review" : "building");
   const stage = needs.length > 0 ? "held" : mapped;
   const said = (needs.length === 0 ? null : needWhy(needs[0]!, c.now) || null) ?? (review === null ? null : reviewNext(review));
   return { stage, at, why: said ?? phase.why, needs };

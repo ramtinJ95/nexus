@@ -20,6 +20,7 @@ import type { StartKey, StartRequest } from "./start-request.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 import type { QueuedThread, Wait } from "../contract/threads.ts";
 import { sendWithStandingRules } from "./standing-rules.ts";
+import { prLocation, watchedPrs } from "./pr-watch-model.ts";
 
 type QueueRegistry = Pick<Registry, "createThread" | "currentImage" | "isReviewer" | "latestHealthSample" | "node" | "nodes" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveQueued" | "saveTemplate" | "templates" | "thread">;
 
@@ -41,10 +42,7 @@ const waiting = (thread: ThreadId, why: string): Wait => ({ thread, state: "wait
 const landed = (thread: ThreadId, why: string): Wait => ({ thread, state: "landed", why });
 const blocked = (thread: ThreadId, why: string): Wait => ({ thread, state: "blocked", why });
 
-/**
- * A merge wins over an archive, so a predecessor archived after its pull request merged still landed. A review that
- * saw its PR merged outside it counts as the merge it is.
- */
+/** A merge wins over an archive, so a predecessor archived after its pull request merged still landed. */
 export function waitOf(registry: QueueRegistry, id: ThreadId): Wait {
   const t = registry.thread(id);
   if (t === undefined) {
@@ -56,15 +54,12 @@ export function waitOf(registry: QueueRegistry, id: ThreadId): Wait {
     }
   }
   const review = registry.review(id);
-  if (review !== null && (review.merged !== null || review.phase.kind === "merged")) return landed(id, `PR #${review.pr.number} merged`);
-  const links = registry.prWatch(id)?.links.map((l) => l.pr) ?? [];
-  const merged = links.find((pr) => pr.state === "merged");
-  const open = links.find((pr) => pr.state === "open");
-  if (merged !== undefined && open === undefined) return landed(id, `PR #${merged.number} merged`);
+  const where = prLocation(review, watchedPrs(registry.prWatch(id)));
+  if (where.kind === "merged") return landed(id, `PR #${where.number} merged`);
   if (t.status === "archived" || t.status === "deleted") return blocked(id, `is ${t.status} and its pull request did not merge`);
   if (review?.phase.kind === "needs-person") return blocked(id, `its review ended for the person: ${review.phase.reasons[0] ?? "no reason given"}`);
-  if (links.length > 0 && links.every((pr) => pr.state === "closed")) return blocked(id, `PR #${links.at(-1)!.number} closed without merging`);
-  return open !== undefined ? waiting(id, `PR #${open.number} is open`) : waiting(id, "has no pull request yet");
+  if (where.kind === "closed") return blocked(id, `PR #${where.number} closed without merging`);
+  return where.kind === "open" ? waiting(id, `PR #${where.number} is open`) : waiting(id, "has no pull request yet");
 }
 
 export function queuedView(registry: QueueRegistry, record: QueuedRecord): QueuedThread {
