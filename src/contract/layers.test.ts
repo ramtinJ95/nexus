@@ -16,5 +16,5 @@ test("src/contract imports nothing at run time beyond itself and src/util, so a 
     .filter((target) => dirname(target) !== "contract" && dirname(target) !== "util")
     .map((target) => `${file} imports ${target}`));
   assert.deepEqual(outside, []);
-  assert.ok(["threads.ts", "route.ts", "pylon.ts", "streams.ts", "watch.ts"].every((file) => bundled.includes(file)));
+  assert.ok(["threads.ts", "route.ts", "pylon.ts", "streams.ts", "watch.ts", "release.ts", "reports.ts", "projects.ts", "reviews.ts"].every((file) => bundled.includes(file)));
 });
