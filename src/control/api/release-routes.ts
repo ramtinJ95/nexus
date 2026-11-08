@@ -3,10 +3,13 @@
  */
 import { z } from "zod";
 import { HttpError } from "../http-error.ts";
-import { commitSchema, releaseView, releasesSchema, reportSchema, resolveMain, type DeploymentOptions } from "../releases.ts";
+import { commitSchema, releaseView, releasesSchema, reportSchema, resolveMain } from "../releases.ts";
 import type { CleanupPass } from "../cleanup.ts";
 import { ok, parse, type RouteEntry, type ApiKit } from "./kit.ts";
-import { anyAllowed, refusal } from "./access.ts";
+import { anyAllowed, refusal, type Deployment } from "./access.ts";
+
+/** The deployment, and what `main` resolves to, which a test fixes. */
+export type DeploymentOptions = Deployment & { resolveMain?: () => Promise<string> };
 
 export function releaseRoutes(kit: ApiKit, options: { deployment?: DeploymentOptions | undefined; cleanup?: CleanupPass | undefined }): readonly RouteEntry[] {
   const { registry, agents, draining, gate } = kit;

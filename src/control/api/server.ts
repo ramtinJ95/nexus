@@ -1,7 +1,6 @@
 import { DeployDraining, isDraining, turnGate, type TurnGate } from "../drain.ts";
 import { answerLocalHealth, runningCommit } from "../../deploy/health.ts";
 import { version } from "../../version.ts";
-import type { DeploymentOptions } from "../releases.ts";
 /**
  * The control plane's HTTP API for the dashboard and the CLI. JSON in and out.
  *
@@ -54,7 +53,7 @@ import { admit, anyAllowed, apiAccess, refusal, type Policy, type Role } from ".
 import { pylonAccess } from "./pylon-access.ts";
 import { eventStreams, maxStreams } from "./sse.ts";
 import { threadViews } from "./thread-view.ts";
-import { releaseRoutes } from "./release-routes.ts";
+import { releaseRoutes, type DeploymentOptions } from "./release-routes.ts";
 import { streamRoutes } from "./stream-routes.ts";
 import { projectRoutes } from "./project-routes.ts";
 import { usageRoutes } from "./usage-routes.ts";
