@@ -1145,22 +1145,23 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       return null;
     });
     const id = `rv-${randomBytes(4).toString("hex")}`;
+    const expect = mint(id);
     const second = rule === null ? {} : { second: secondFor(rule, models, project.secrets) };
-    const draft: Review = {
-      id, expect: mint(id), sent: 1, builder: builder.id, reviewer: "" as ThreadId, pr: { repo, number, url: snapshot.pr.url, title: snapshot.pr.title, branch: snapshot.detail.branch }, models, reviewerKind: kind.claude ? "claude" : "harness",
-      maxRounds: request.rounds ?? maxRounds, land: request.land, auto: request.auto, brief, ...second,
-      rounds: [{ head: snapshot.detail.head, base: snapshot.detail.base, ...verdictsFor(seatsFor(second)), check: null, answers: null }], merged: null, waiver: null, phase: { kind: "reviewing" }, outbox: null,
-      since: now(), nudges: 0, startedAt: now(), asked: "",
-    };
-    const prompt = reviewerRequest(draft, snapshot.detail, draft.expect, kind.model);
+    const pr = { repo, number, url: snapshot.pr.url, title: snapshot.pr.title, branch: snapshot.detail.branch };
+    const asked = reviewerRequest({ pr, models, brief }, snapshot.detail, expect, kind.model);
+    const at = now();
     beginning++;
     let review: Review;
     try {
-      const reviewer = await deps.startThread({
-        project: builder.project, title: `Review of #${number}: ${snapshot.pr.title}`.slice(0, 200), near: registry.pylon(builder.pylonId)!.node, branch: snapshot.detail.branch,
-        ...(kind.claude ? { claude: prompt, model: kind.model, raw: true } : {}),
-      }, reviewerCaller);
-      review = { ...draft, reviewer: reviewer.id, asked: prompt, ...(kind.claude ? {} : { outbox: { to: "reviewer", id: `${id}:1`, text: prompt, attempted: null } }) };
+      const reviewer = await startReviewer(builder, `Review of #${number}: ${snapshot.pr.title}`, pr.branch, kind.model, kind.claude, asked);
+      const started: Review = {
+        id, expect, sent: 0, builder: builder.id, reviewer: reviewer.id, pr, models, reviewerKind: kind.claude ? "claude" : "harness",
+        maxRounds: request.rounds ?? maxRounds, land: request.land, auto: request.auto, brief, ...second,
+        rounds: [{ head: snapshot.detail.head, base: snapshot.detail.base, ...verdictsFor(seatsFor(second)), check: null, answers: null }], merged: null, waiver: null, phase: { kind: "reviewing" }, outbox: null,
+        since: at, nudges: 0, startedAt: at, asked,
+      };
+      // A Claude reviewer's first request is its first prompt, which still takes the first message's number.
+      review = kind.claude ? { ...started, sent: 1 } : resend(started, "reviewer");
       if (secondReads(review)) review = await startSecond(review, snapshot.detail);
       registry.saveReview(review);
     } finally {
@@ -1170,6 +1171,13 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     return review;
   }
 
+  /**
+   * A reviewer's thread on `model`, started near the builder with its first request: a Claude worker's first prompt,
+   * or else the harness reviewer's first message, which its review sends.
+   */
+  const startReviewer = (builder: Thread, title: string, branch: string, model: string, claude: boolean, request: string) => deps.startThread({
+    project: builder.project, title: title.slice(0, 200), near: registry.pylon(builder.pylonId)!.node, branch, ...(claude ? { claude: request, model, raw: true } : {}),
+  }, reviewerCaller);
   /** A second reviewer for `rule` on a model neither the builder nor the first reviewer runs, to start, or why none can run. */
   const secondFor = (rule: string, models: Review["models"], secrets: Project["secrets"]): SecondReviewer => {
     const model = secondReviewerFor([models.builder, models.reviewer], secrets);
@@ -1188,10 +1196,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const asked = reviewerRequest(r, { ...detail, head: round.head, base: round.base ?? detail.base }, expect, second.model);
     const builder = registry.thread(r.builder)!;
     try {
-      const thread = await deps.startThread({
-        project: builder.project, title: `Second review of #${r.pr.number}: ${r.pr.title}`.slice(0, 200), near: registry.pylon(builder.pylonId)!.node, branch: r.pr.branch,
-        claude: asked, model: second.model, raw: true,
-      }, reviewerCaller);
+      const thread = await startReviewer(builder, `Second review of #${r.pr.number}: ${r.pr.title}`, r.pr.branch, second.model, true, asked);
       return { ...r, second: { kind: "claude", rule: second.rule, thread: thread.id, model: second.model, expect, asked, since: now(), nudges: 0, outbox: null } };
     } catch (err) {
       if (!(err instanceof Refusal)) throw err;
