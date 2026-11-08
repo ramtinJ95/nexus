@@ -1216,13 +1216,15 @@ The control plane stores none of an item's progress. It reads `PipelineItem.phas
 | Its review ended for the person | `held` | `its review ended for the person: <the first reason>` |
 | Its review merges, deploys or rolls back, or is approved and lands | `landing` | `PR #<n> is merging`, `deploying`, `rolling back` or `approved`, and `PR #<n> is merging, waiting while <reason>` for a landing that waits its turn |
 | Its review is approved and stops at approval | `held` | `PR #<n> is approved, and lands once the person runs nexus land <thread>` |
-| Its review reviews, waits on the builder's fixes, waits on the reviewer's quote of what could not be checked live or runs the checks | `reviewing` | `PR #<n>, round <k>: reviewing`, with what its check does beside the reviewer as `show` says it, `fixing`, `quoting` (since 0.59.0) or `checking`, or, since 0.38.0, the live check's line of `show`, such as `live check running .nexus/verify at <commit> in verify pylon <thread>` |
+| Its review reviews, waits on the builder's fixes, waits on the reviewer's quote of what could not be checked live or runs the checks | `reviewing`, or `landing` for a quote, and for checks run once it was asked to land | `PR #<n>, round <k>: reviewing`, with what its check does beside the reviewer as `show` says it, `fixing`, `quoting` (since 0.59.0) or `checking`, or, since 0.38.0, the live check's line of `show`, such as `live check running .nexus/verify at <commit> in verify pylon <thread>` |
 | A linked pull request merged and none is open | `landed` | `PR #<n> merged` |
 | Its thread is archived or deleted | `archived` | `its thread is archived` |
 | Its thread's attention is `failed` or `decision` | `held` | `its thread failed`, `its thread needs the person's decision` |
 | Every linked pull request closed without merging | `held` | `PR #<n> closed without merging` |
 | A linked pull request is open, with no review yet | `reviewing` | `PR #<n> is open, before its review` |
 | Otherwise | `building` | `no pull request yet` |
+
+An item whose thread has anything that waits on the person, a card in the dashboard's Needs you, is `held` whatever row it took above, so the dashboard's home page shows it at the phase this prints. The `why` is `its thread needs the person's decision` for a review, question, nudge or resume, `its thread failed`, `its thread is parked`, `its thread is stopped on its usage limit` or `its thread is waiting for input`, or `its archive's disk is kept for its usage`. A row above that already says `held` keeps its `why`.
 
 A review that ended `closed` or `cancelled` says nothing of the pull request since, so such an item reads the rows after it, and a pull request reopened and merged later lands it. A landed item stays `landed` once the review loop archives its builder and reviewer. `held` is the person's to move: approve the item, start or archive its blocked thread, answer its thread, or land its pull request.
 
