@@ -24,7 +24,7 @@ import { promisify } from "node:util";
 import { packagedDaemon } from "@earendil-works/pi-env";
 import { createDockerBackend } from "../../../../src/backends/docker-backend.ts";
 import { scriptedModel, scriptedModels } from "../../../../src/control/harness/test-fixture.ts";
-import { checkoutDir } from "../../../../src/protocol/spawn.ts";
+import { checkoutDir } from "../../../../src/guest-contract.ts";
 import { startControlPlane } from "../../../../src/control/main.ts";
 import { openRegistry } from "../../../../src/control/registry.ts";
 import { nodeSecrets } from "../../../../src/probe/config.ts";
