@@ -2,6 +2,10 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.72.0
+
+Adds `Question.kind`, which names what a question is about and how it is answered: `proposal`, `ask`, `holds`, `judgment` or `cleanup`, as [Questions](cli.md#questions) describes. `reserved` is still on every question, and null on every kind but `holds`. Every other field is as before. A control plane older than 0.72.0 sends no `kind`, which the CLI does not need.
+
 ## 0.71.0
 
 Adds what the clients worked out from the stored records to the replies. `ThreadDetail` gains `reviewView`, the merge policy's answer for the thread's review: its holds, what a Land press does, and the review's open question about its holds. It also gains `keptPastDay`, why an archived thread's disk is kept past its 24 hours. `ReleaseView` gains `controlNode`, the node the control plane runs on. Each frame of `GET /v1/threads/<thread>/events` gains `busy`, whether the agent's run is working and how many messages wait for it, on the first frame and whenever it changed. `review` and every other field are as before. A control plane older than 0.71.0 sends none of the four, so the CLI's `show` prints no disk line there, and `land --waive` refuses.
