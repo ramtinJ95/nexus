@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import { maxRecordBytes, type ClaudeConversation } from "./claude-transcript.ts";
-import { claudeTurn } from "../../images/pylon/nexus-contract.ts";
+import { claudeProjects, claudeTurn } from "../../images/pylon/nexus-contract.ts";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ThreadRow } from "./wire.ts";
@@ -14,7 +14,6 @@ import { processStream } from "../process-stream.ts";
 import { stoppedPylon, testObservation, until } from "../test-support/kit.ts";
 import type { CommandResult, InterruptClaudeOutcome, PylonCommand } from "../protocol/commands.ts";
 import { node, claudeSession, fixture, withThread, localCheckout, pngBytes, withClaude, sent } from "../test-support/api-kit.ts";
-import { claudeProjects } from "../guest-contract.ts";
 
 const usageLimitRecord = (await readFile(new URL("../fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n")[0]! + "\n";
 
@@ -63,7 +62,7 @@ test("a Claude worker thread's latest turn is the one its newest turn-started na
   const s = await withClaude(t);
   const { repo } = await localCheckout(t, s);
   const route = `/v1/threads/${s.thread.id}/changes?base=turn`;
-  const helper = fileURLToPath(new URL("../checkout-files.py", import.meta.url));
+  const helper = fileURLToPath(new URL("../../images/pylon/checkout-files.py", import.meta.url));
   let sequence = 0;
   const started = (session: string, at: number) => s.registry.reportSession(node, { sequence: ++sequence, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-started", session, at } });
   const turn = async (session: string, at: number) => {

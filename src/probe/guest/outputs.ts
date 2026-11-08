@@ -76,7 +76,7 @@ export async function addOutput(guest: Guest, declaration: OutputDeclaration): P
     output = { id, kind: "file", path, title, sha256: digest.output.slice(0, 64) };
   } else {
     const file = `${outputsDir}/${id}.diff`;
-    helper ??= readFileSync(new URL("../../checkout-files.py", import.meta.url), "utf8");
+    helper ??= readFileSync(new URL("../../../images/pylon/checkout-files.py", import.meta.url), "utf8");
     const diff = await guest.exec(["python3", "-c", helper, checkoutDir, "diff-to", file, "head"], { cwd: "/", timeoutMs: diffTimeoutMs });
     if (diff.exitCode === 3) throw new OutputRefused(parseJson(diffRefusal, diff.output, "the working tree diff's refusal").message);
     if (diff.exitCode !== 0) throw new Error(`snapshotting the working tree failed with exit ${diff.exitCode}: ${diff.output}`);

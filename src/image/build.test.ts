@@ -65,7 +65,7 @@ test("each helper the Dockerfile installs in /usr/local/bin finds every module i
   assert.doesNotMatch(await readFile(join(pylonRecipeDir, "nexus-contract.ts"), "utf8"), /^(import\b|export [^;]* from )/m);
 });
 
-test("a recipe is its declared files under its directory and the shared checkout helper, nested ones by posix path, sorted", async (t) => {
+test("a recipe is its declared files under its directory, nested ones by posix path, sorted", async (t) => {
   const dir = await recipeDir(t, {
     "pins.json": JSON.stringify(pins),
     "build.sh": "echo runner",
@@ -77,7 +77,6 @@ test("a recipe is its declared files under its directory and the shared checkout
   assert.deepEqual(await loadImageRecipe(dir, ["nexus", "dotfiles-common/pi/AGENTS.md", "Dockerfile"]), {
     files: [
       { path: "Dockerfile", mode: 0o644, content: "FROM scratch\n" },
-      { path: "checkout-files.py", mode: 0o644, content: await readFile(new URL("../checkout-files.py", import.meta.url), "utf8") },
       { path: "dotfiles-common/pi/AGENTS.md", mode: 0o644, content: "pi rules" },
       { path: "nexus", mode: 0o755, content: "#!/bin/sh\n" },
     ],

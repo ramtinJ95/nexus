@@ -15,7 +15,7 @@ import { imageType } from "./image-types.ts";
 import { openPython, type OpenPipe } from "./pipe.ts";
 import type { ByteStream } from "./protocol/streams.ts";
 
-const helper = readFileSync(new URL("./checkout-files.py", import.meta.url));
+const helper = readFileSync(new URL("../images/pylon/checkout-files.py", import.meta.url));
 
 /** `start` is what the pylon booted at, which its first boot records as refs/nexus/base. */
 type ChangesBase = "start" | "head" | "turn";
