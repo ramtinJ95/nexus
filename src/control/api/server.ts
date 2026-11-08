@@ -163,7 +163,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const sse = eventStreams(streamStallMs);
   const { open } = sse;
 
-  const draining = () => isDraining(registry.drain());
+  const draining = () => isDraining(registry.drain(), registry.now());
   const { gate } = options;
   const kit: ApiKit = { ...access, ...pylon, ...views, ...sse, registry, harness, startThread, claude, agents, agentOf, draining, gate };
 
