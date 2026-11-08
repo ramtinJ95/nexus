@@ -25,6 +25,8 @@ test("a missing file or field reads as undefined, and a field of another kind th
     assert.deepEqual(controlFields(missing, "control.json"), { db: undefined, callers: undefined, harnessCredentials: undefined, githubTokenFile: undefined });
   }
   assert.deepEqual(probeFields({ backend: {} }, "probe.json"), { node: undefined, secretsFile: undefined, gitKeyFile: undefined });
+  assert.deepEqual(controlFields({ harness: { credentials: null }, callers: null }, "control.json").harnessCredentials, undefined, "a null field takes the default, as `??` gave it");
+  assert.deepEqual(probeFields({ secretsFile: null, backend: { gitSsh: { privateKeyFile: null } } }, "probe.json"), { node: undefined, secretsFile: undefined, gitKeyFile: undefined });
   assert.throws(() => controlFields({ callers: ["nA", 7] }, "/etc/nexus/control.json"), /^Error: \/etc\/nexus\/control\.json's callers is not a list of strings$/);
   assert.throws(() => probeFields({ backend: { gitSsh: { privateKeyFile: 1 } } }, "probe.json"), /^Error: probe\.json's backend\.gitSsh\.privateKeyFile is not a string$/);
   assert.throws(() => listenAddress({ listen: { host: "::1", port: "7480" } }, "probe.json"), /probe\.json's listen\.port is not a number/);

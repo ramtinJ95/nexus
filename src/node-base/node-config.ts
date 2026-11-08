@@ -1,8 +1,8 @@
 /**
  * The fields of control.json and probe.json that the deployer and the installers read. They run before npm ci, so they
  * have neither zod nor the configs' schemas in src/control/main.ts and src/probe/config.ts, and read only these. A field
- * is undefined where the file or a step of its path is missing, and the reader throws, naming both, when it holds
- * another kind of value.
+ * is undefined where the file, a step of its path or its value is missing or null, and the reader throws, naming both,
+ * when it holds another kind of value.
  */
 
 export interface Listen { host: string; port: number }
@@ -28,7 +28,7 @@ function field(config: unknown, file: string, path: string, kind: Kind): unknown
     if (typeof value !== "object" || value === null) return undefined;
     value = (value as Record<string, unknown>)[key];
   }
-  if (value === undefined) return undefined;
+  if (value === undefined || value === null) return undefined;
   if (kind === "strings" ? Array.isArray(value) && value.every((item) => typeof item === "string") : typeof value === kind) return value;
   throw new Error(`${file}'s ${path} is not ${kind === "strings" ? "a list of strings" : `a ${kind}`}`);
 }
