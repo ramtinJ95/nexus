@@ -26,10 +26,10 @@ test("a line after a backslash continuation, a space after a backslash and a non
 
 test("an edit bash's reprint normalizes away still counts", () => {
   assert.ok(!same("#!/bin/sh\nf() { echo ok; }; f\n", "#!/bin/sh\nfunction f { echo ok; }; f\n"));
-  assert.ok(!same('shopt -s expand_aliases\nalias a="echo ok"\na\n', 'shopt -s expand_aliases; alias a="echo ok"; a\n'));
 });
 
-test("bash only reads the script, and refuses one that would close its wrapper", () => {
+test("bash only reads the script, and the check refuses one that would close its wrapper or names alias", () => {
   assert.throws(() => shell("}\ntouch /nonexistent/ran\n{\n"));
   assert.doesNotThrow(() => shell("exit 3\n"));
+  assert.throws(() => shell('shopt -s expand_aliases\nalias a="cat <<EOF"\na\n# data\nEOF\n'), /alias/);
 });

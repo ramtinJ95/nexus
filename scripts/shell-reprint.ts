@@ -11,6 +11,8 @@ const reprint = 'bash -n -c "$1" && eval "__script() {\n$1\n}" && declare -f __s
  * its command, so it stays in the lines, and so does a trailing comment. Throws on a syntax error.
  */
 export const shellReprint = (source: string) => {
+  // An alias can expand to a heredoc's start, which neither the lines nor the reprint see, so neither proves anything.
+  if (/\balias\b/.test(source)) throw new Error("it names alias, which this check cannot follow");
   const lines = source.split("\n").filter((line, at, all) => (at === 0 && line.startsWith("#!")) || !/^[ \t]*#/.test(line) || all[at - 1]?.endsWith("\\"));
   return `${lines.join("\n")}\n${execFileSync("bash", ["-c", reprint, "_", source], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })}`;
 };
