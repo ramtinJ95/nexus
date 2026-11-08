@@ -1,11 +1,13 @@
 /**
- * The usage store: each recorded call, their sums per day, how far each source was read, when counting began, and the
- * backfill's run and threads.
+ * The usage store: each recorded call, their sums per day, how far each source was read, when counting began, the
+ * backfill's run and threads, and the one pylon the run or an archive's settle holds to read whole.
  */
 import type { Db, Holding, Row } from "./db.ts";
 import type { ProjectId, ThreadId } from "../ids.ts";
 import { roleOf } from "./agent-protocol.ts";
 import type { AgentCall } from "./agent-usage.ts";
+import type { ActivityFacts } from "./reconcile.ts";
+import type { Thread, ThreadParticipant } from "./thread-store.ts";
 import type { BackfillThread, Breakdown, UsageBackfill, UsageReport, UsageTotals } from "../contract/usage.ts";
 
 /**
@@ -14,11 +16,30 @@ import type { BackfillThread, Breakdown, UsageBackfill, UsageReport, UsageTotals
  */
 interface UsageCursor { source: string; key: string; position: number; before: string }
 
+/**
+ * An archived thread's pylon held to be read whole, by the backfill's run or an archive's settle: woken to be read, or
+ * read or given up on and waiting for its pause, since `since`.
+ */
+export interface UsageHold { by: "run" | "settle"; thread: ThreadId; phase: "reading" | "pausing"; since: number }
+
 export const holding = { tables: { usage_records: {}, usage_days: {}, usage_cursors: {}, usage_since: {}, usage_backfill: {}, usage_backfill_threads: {} } } as const satisfies Holding;
 
-export function usageStore(db: Db, threadRecord: (id: ThreadId) => Row | undefined) {
+export function usageStore(db: Db, threads: {
+  threadRecord(id: ThreadId): Row | undefined;
+  archivedAt(thread: ThreadId): number | undefined;
+  /** Records the archive's settle, of the archive at `archivedAt`, or of any with null. */
+  recordSettle(thread: ThreadId, failure: string | null, at: number, archivedAt: number | null): void;
+}) {
   db.hold(holding);
   const { transaction, sql } = db;
+  const { threadRecord } = threads;
+  /**
+   * The pylon an archive's settle holds. It is held in memory, because a restart that loses it only lets the pylon pause,
+   * and the settle is tried again from the start.
+   */
+  let settle: (Omit<UsageHold, "by"> & { archivedAt: number }) | null = null;
+  /** Why each archive's next settle waits, held in memory as the hold is, since the settle's next step says it again. */
+  const settleWaits = new Map<ThreadId, string>();
   /**
    * Each breakdown's grouping, and its order: biggest first, or newest day first. A report over threads reads the
    * calls, and any other the sums per day, which stay few however many calls there are.
@@ -54,6 +75,29 @@ export function usageStore(db: Db, threadRecord: (id: ThreadId) => Row | undefin
     };
   }
 
+  const settleHold = (): Omit<UsageHold, "by"> | null => settle && { thread: settle.thread, phase: settle.phase, since: settle.since };
+
+  /**
+   * The archive's settle read its pylon's usage to the end at `at`, with a null `failure`, or failed for `failure`. A
+   * settle that holds the pylon now waits for its pause.
+   */
+  function finishSettle(thread: ThreadId, failure: string | null, at: number) {
+    // A read the hold started before an unarchive and a new archive may have missed the turns between them.
+    threads.recordSettle(thread, failure, at, settle?.thread === thread ? settle.archivedAt : null);
+    if (settle?.thread === thread) settle = { ...settle, phase: "pausing", since: at };
+  }
+
+  /**
+   * The thread was read, or skipped for `reason`, and keeps what its reads recovered. A run that holds its pylon now
+   * waits for its pause.
+   */
+  function finishUsageBackfillThread(thread: ThreadId, state: "done" | "skipped", reason: string | null, now: number) {
+    transaction(() => {
+      sql("UPDATE usage_backfill_threads SET state = ?, reason = ?, at = ? WHERE thread = ?").run(state, reason, now, thread);
+      sql("UPDATE usage_backfill SET phase = 'pausing', since = ? WHERE state = 'running' AND thread = ?").run(now, thread);
+    });
+  }
+
   function endUsageBackfill(state: "stopped" | "done", now: number) {
     sql("UPDATE usage_backfill SET state = ?, finished_at = ?, thread = NULL, phase = NULL, since = NULL, waiting = NULL WHERE state = 'running'").run(state, now);
   }
@@ -61,9 +105,19 @@ export function usageStore(db: Db, threadRecord: (id: ThreadId) => Row | undefin
   const sums = (calls: string) => `coalesce(sum(input), 0) AS input, coalesce(sum(output), 0) AS output, coalesce(sum(cache_write), 0) AS cache_write,
     coalesce(sum(cache_read), 0) AS cache_read, ${calls} AS calls, coalesce(sum(input + output + cache_write + cache_read), 0) AS total`;
 
+  /** Each held thread the planner wakes for reading, and why each archive's settle waits. */
+  const participant: ThreadParticipant = {
+    facts(of: readonly Thread[]) {
+      const reading = new Set([sql("SELECT thread FROM usage_backfill WHERE state = 'running' AND phase = 'reading'").get()?.thread, settle?.phase === "reading" ? settle.thread : undefined]);
+      return new Map(of.map((t): [ThreadId, Partial<ActivityFacts>] => {
+        const waiting = t.archivedAt === undefined || t.usageSettledAt !== undefined ? undefined : settleWaits.get(t.id);
+        return [t.id, { ...(reading.has(t.id) ? { readingUsage: true } : {}), ...(waiting === undefined ? {} : { settleWaiting: waiting }) }];
+      }));
+    },
+  };
+
   return {
-    /** The thread the usage backfill is reading, for the thread core. */
-    readingUsage: () => sql("SELECT thread FROM usage_backfill WHERE state = 'running' AND phase = 'reading'").get()?.thread,
+    participant,
     /**
      * Records each call under the thread it was read from, with the thread's project and role, and moves each cursor
      * to where its read ended. A call recorded before keeps its thread and time, and each count the larger of the two
@@ -157,19 +211,38 @@ export function usageStore(db: Db, threadRecord: (id: ThreadId) => Row | undefin
     holdUsageBackfill(thread: ThreadId, now: number) {
       sql("UPDATE usage_backfill SET thread = ?, phase = 'reading', since = ?, waiting = NULL WHERE state = 'running'").run(thread, now);
     },
-    /** The run lets go of the pylon it holds, once it is paused. */
-    releaseUsageBackfill() {
-      sql("UPDATE usage_backfill SET thread = NULL, phase = NULL, since = NULL").run();
+    finishUsageBackfillThread,
+    finishSettle,
+    settleHold,
+    /** A settle holds the thread's pylon, which it wants woken to read. */
+    holdSettle(thread: ThreadId, now: number) {
+      settleWaits.delete(thread);
+      const archivedAt = threads.archivedAt(thread);
+      if (archivedAt !== undefined) settle = { thread, phase: "reading", since: now, archivedAt };
+    },
+    /** Why the archive's next settle waits, or null once it does not. */
+    waitSettle(thread: ThreadId, reason: string | null) {
+      if (reason === null) settleWaits.delete(thread);
+      else settleWaits.set(thread, reason);
+    },
+    /** The pylon held to be read whole: a settle's, which goes first, or the running run's. */
+    usageHold(): UsageHold | null {
+      if (settle !== null) return { by: "settle", thread: settle.thread, phase: settle.phase, since: settle.since };
+      const run = usageBackfill();
+      return run.state === "running" && run.current !== null ? { by: "run", ...run.current } : null;
     },
     /**
-     * The thread was read, or skipped for `reason`, and keeps what its reads recovered. A run that holds its pylon now
-     * waits for its pause.
+     * The holder records the thread read, with a null reason, or given up on, and its hold then waits for the pause. A
+     * settle's failure keeps its first line, as a pylon's failure ends with its log.
      */
-    finishUsageBackfillThread(thread: ThreadId, state: "done" | "skipped", reason: string | null, now: number) {
-      transaction(() => {
-        sql("UPDATE usage_backfill_threads SET state = ?, reason = ?, at = ? WHERE thread = ?").run(state, reason, now, thread);
-        sql("UPDATE usage_backfill SET phase = 'pausing', since = ? WHERE state = 'running' AND thread = ?").run(now, thread);
-      });
+    finishUsageHold(hold: Pick<UsageHold, "by" | "thread">, reason: string | null, now: number) {
+      if (hold.by === "run") finishUsageBackfillThread(hold.thread, reason === null ? "done" : "skipped", reason, now);
+      else finishSettle(hold.thread, reason === null ? null : reason.split("\n")[0]!, now);
+    },
+    /** The holder lets go of the pylon it holds, once it is paused. */
+    releaseUsageHold(hold: Pick<UsageHold, "by">) {
+      if (hold.by === "run") sql("UPDATE usage_backfill SET thread = NULL, phase = NULL, since = NULL").run();
+      else settle = null;
     },
   };
 }

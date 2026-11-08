@@ -77,9 +77,6 @@ export interface Thread extends StoredThread, ActivityFacts {
   turnDied?: { at: number; cause: "session-ended" | "model-error"; reason: string };
 }
 
-/** An archived thread's pylon held to be read whole: woken to be read, or read or given up on and waiting for its pause, since `since`. */
-export interface UsageHold { thread: ThreadId; phase: "reading" | "pausing"; since: number }
-
 /**
  * Nexus resuming a Claude worker whose turn died (resume.ts). `turn` is the `turnDied.at` of the turn it answers, and
  * `count` the resumes in a row that turn makes. A resume `waiting` goes at `due`, one `sending` is saved before it is
@@ -208,6 +205,8 @@ export interface ThreadParticipant {
   outputs?(thread: ThreadId): Output[];
   /** A queued thread starts at `at`, in the transaction that creates it. Throws when it may not start. */
   startQueued?(thread: ThreadId, at: number): void;
+  /** What the feature says of each of `threads` beyond their rows, which the planner reads. */
+  facts?(threads: readonly Thread[]): ReadonlyMap<ThreadId, Partial<ActivityFacts>>;
 }
 
 interface AwaitWindow { from: number; until: number }
@@ -223,7 +222,7 @@ export const holding = {
   settings: ["backed-up-at"],
 } as const satisfies Holding;
 
-export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, "node" | "saveObservation" | "saveNodeState">, participants: readonly ThreadParticipant[], readingUsage: () => unknown) {
+export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, "node" | "saveObservation" | "saveNodeState">, participants: readonly ThreadParticipant[]) {
   const { transaction, sql, deleteThreadRows } = db;
   const { setting, setSetting } = db.hold(holding);
   const { node } = nodes;
@@ -241,13 +240,6 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
    * because a start that a crash ended took no room.
    */
   const reservations = new Map<PylonId, { node: NodeName; resources: BootInputs["resources"] }>();
-  /**
-   * The pylon an archive's settle holds. It is held in memory, because a restart that loses it only lets the pylon pause,
-   * and the settle is tried again from the start.
-   */
-  let settling: (UsageHold & { archivedAt: number }) | null = null;
-  /** Why each archive's next settle waits, held in memory as the hold is, since the settle's next step says it again. */
-  const settleWaits = new Map<ThreadId, string>();
   /**
    * Holds placement released for room other work needs, by the `until` each had, so a later hold of the thread counts
    * again. Held in memory, because a restart that loses them only holds the pylons until placement releases them again.
@@ -313,7 +305,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     return (sql("SELECT thread FROM pylons WHERE id = ?").get(pylonId) as Row | undefined)?.thread as ThreadId | undefined;
   }
 
-  /** The threads of `rows` with what their sessions and the usage backfill say, read in a few queries however many rows there are. */
+  /** The threads of `rows` with what their sessions and the participants say, read in a few queries however many rows there are. */
   function withSessions(rows: readonly Row[]): Thread[] {
     if (rows.length === 0) return [];
     const ids = JSON.stringify(rows.map((r) => r.id));
@@ -322,26 +314,27 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       .all(ids, clock() - sessionActivityTtlMs).map((r) => [r.thread as ThreadId, r]));
     const waiting = new Map(sql(`SELECT thread, message FROM (SELECT thread, message, row_number() OVER (PARTITION BY thread ORDER BY updated_at DESC, rowid DESC) AS n
       FROM session_activity WHERE thread IN (SELECT value FROM json_each(?)) AND state = 'session.waiting') WHERE n = 1`).all(ids).map((r) => [r.thread as ThreadId, r]));
-    const reading = new Set([readingUsage(), settling?.phase === "reading" ? settling.thread : undefined]);
     const archived = new Map(sql("SELECT * FROM thread_archives WHERE thread IN (SELECT value FROM json_each(?))").all(ids).map((r) => [r.thread as ThreadId, r]));
     const backedUp = backedUpAt();
     const stops = claudeStops(rows.map((r) => r.id as ThreadId).filter((id) => !live.has(id)));
     const holds = participants.flatMap((p) => [...p.awaited?.(rows.map((r) => r.id as ThreadId)) ?? []]);
     const now = clock();
-    return rows.map((row): Thread => {
+    const threads = rows.map((row): Thread => {
       const thread = threadRow(row);
       const working = (live.get(thread.id)?.at ?? null) as number | null;
       const wait = waiting.get(thread.id);
       const starts = [thread.agentTurnRunning ? row.agent_turn_started_at : null, live.get(thread.id)?.since].filter((at): at is number => typeof at === "number");
       const archive = archived.get(thread.id);
-      return withHold({
+      return {
         ...thread, working: thread.agentTurnRunning || working !== null,
         ...(working === null ? {} : { sessionTurnRunning: true, sessionActiveUntil: working + sessionActivityTtlMs }), ...(wait === undefined ? {} : { sessionWaiting: true }),
         ...(typeof wait?.message === "string" ? { sessionWaitingMessage: wait.message } : {}),
         ...(starts.length === 0 ? {} : { workingSince: Math.min(...starts) }), ...stops.get(thread.id),
-        ...(reading.has(thread.id) ? { readingUsage: true } : {}), ...(archive === undefined ? {} : archiveFacts(archive, backedUp, settleWaits.get(thread.id))),
-      }, holds.flatMap(([id, hold]) => id === thread.id ? [hold] : []), now);
+        ...(archive === undefined ? {} : archiveFacts(archive, backedUp)),
+      };
     });
+    const facts = participants.flatMap((p) => p.facts === undefined ? [] : [p.facts(threads)]);
+    return threads.map((t) => withHold(Object.assign(t, ...facts.map((f) => f.get(t.id))), holds.flatMap(([id, hold]) => id === t.id ? [hold] : []), now));
   }
 
   /** `t` with the latest of `holds` that has not ended or been released, and began while its pylon was up. */
@@ -351,11 +344,10 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
   }
 
   /** What the thread's archive row says, and when the newest backup began, which only an archived thread's disk waits on. */
-  function archiveFacts(r: Row, backedUp: number | null, waiting: string | undefined): Pick<ActivityFacts, "archivedAt" | "usageSettledAt" | "settleFailure" | "backedUpAt" | "settleWaiting" | "usageUnread"> {
+  function archiveFacts(r: Row, backedUp: number | null): Pick<ActivityFacts, "archivedAt" | "usageSettledAt" | "settleFailure" | "backedUpAt" | "usageUnread"> {
     return {
       archivedAt: r.archived_at as number,
       ...(r.usage_unread === null ? {} : { usageUnread: r.usage_unread as string }),
-      ...(waiting === undefined || r.usage_settled_at !== null ? {} : { settleWaiting: waiting }),
       ...(r.usage_settled_at === null ? {} : { usageSettledAt: r.usage_settled_at as number }),
       ...(r.settle_failure === null ? {} : { settleFailure: { reason: r.settle_failure as string, at: r.settle_failed_at as number, count: r.settle_failures as number } }),
       ...(backedUp === null ? {} : { backedUpAt: backedUp }),
@@ -621,23 +613,14 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
      */
     keptArchives: (): Thread[] => withSessions(sql(`SELECT t.* FROM threads t JOIN thread_archives a ON a.thread = t.id
       WHERE t.status = 'archived' AND (a.usage_settled_at IS NULL OR a.usage_settled_at >= coalesce(?, a.usage_settled_at)) ORDER BY a.archived_at, t.id`).all(backedUpAt())),
+    archivedAt: (thread: ThreadId): number | undefined => sql("SELECT archived_at FROM thread_archives WHERE thread = ?").get(thread)?.archived_at as number | undefined,
     /**
-     * The archive's settle read its pylon's usage to the end at `at`, with a null `failure`, which forgets the settles
-     * that failed, or failed for `failure`. A settled archive stays settled. A settle that holds the pylon now waits for its pause.
+     * The settle of the archive at `archive`, or of any with null, read its pylon's usage to the end at `at`, with a null
+     * `failure`, which forgets the settles that failed, or failed for `failure`. A settled archive stays settled.
      */
-    finishSettle(thread: ThreadId, failure: string | null, at: number) {
-      // A read the hold started before an unarchive and a new archive may have missed the turns between them.
-      const archive = settling?.thread === thread ? settling.archivedAt : null;
+    recordSettle(thread: ThreadId, failure: string | null, at: number, archive: number | null) {
       if (failure === null) sql("UPDATE thread_archives SET usage_settled_at = ?, settle_failures = 0, settle_failure = NULL, settle_failed_at = NULL, usage_unread = NULL WHERE thread = ? AND usage_settled_at IS NULL AND archived_at = coalesce(?, archived_at)").run(at, thread, archive);
       else sql("UPDATE thread_archives SET settle_failures = settle_failures + 1, settle_failure = ?, settle_failed_at = ? WHERE thread = ? AND usage_settled_at IS NULL AND usage_unread IS NULL AND archived_at = coalesce(?, archived_at)").run(failure, at, thread, archive);
-      if (settling?.thread === thread) settling = { ...settling, phase: "pausing", since: at };
-    },
-    settleHold: (): UsageHold | null => settling && { thread: settling.thread, phase: settling.phase, since: settling.since },
-    /** A settle holds the thread's pylon, which it wants woken to read. */
-    holdSettle(thread: ThreadId, now: number) {
-      settleWaits.delete(thread);
-      const archivedAt = sql("SELECT archived_at FROM thread_archives WHERE thread = ?").get(thread)?.archived_at as number | undefined;
-      if (archivedAt !== undefined) settling = { thread, phase: "reading", since: now, archivedAt };
     },
     /**
      * The archive's usage cannot be read, for `reason`, so its disk goes at its 24 hours with it unread, or can be read
@@ -654,13 +637,6 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
      */
     sealBoot(pylonId: PylonId, bootedAt: string) { sql("UPDATE pylons SET sealed_boot = ? WHERE id = ?").run(bootedAt, pylonId); },
     sealedBoot: (pylonId: PylonId): string | undefined => (sql("SELECT sealed_boot FROM pylons WHERE id = ?").get(pylonId)?.sealed_boot ?? undefined) as string | undefined,
-    /** Why the archive's next settle waits, or null once it does not. */
-    waitSettle(thread: ThreadId, reason: string | null) {
-      if (reason === null) settleWaits.delete(thread);
-      else settleWaits.set(thread, reason);
-    },
-    /** The settle lets go of the pylon it holds, once it is paused. */
-    releaseSettle() { settling = null; },
     /** The newest verified backup began at `at`. A backup older than one recorded changes nothing. */
     recordBackedUp(at: number) {
       if (at > (backedUpAt() ?? -Infinity)) setSetting("backed-up-at", String(at));
