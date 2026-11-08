@@ -6,7 +6,6 @@
 import { z } from "zod";
 import { chatgptTokenGrant, type SecretGrant } from "./secret-grants.ts";
 
-export const defaultClaudeModel = "claude-opus-5-5";
 /** The host a Claude token or Anthropic API key is sent to. */
 export const anthropicApiHost = "api.anthropic.com";
 

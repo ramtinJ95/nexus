@@ -8,7 +8,7 @@
  * phase is derived on every read from the records that thread has: the queued record, the thread, its pull request
  * links, its review and its attention.
  */
-import { defaultClaudeModel } from "../protocol/agent-kinds.ts";
+import { defaultClaudeModel } from "../protocol/models.ts";
 import { singleFlight } from "../single-flight.ts";
 import { newItemId, requestIds, type ItemId, type ProjectId, type ThreadId } from "../ids.ts";
 import { Refusal } from "./refusal.ts";

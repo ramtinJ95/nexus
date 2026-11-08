@@ -15,7 +15,7 @@ import { holdRule, personOnly, reservedNames, type Hold, type HoldCode } from ".
 import { carryWaiver, headHolds, heldBy, landingHolds, landPress, secondReviewRule } from "./policy.ts";
 import { landing } from "./dashboard/cards.ts";
 import { cannotLand, changeOf, checkBeside, ended, findingsOf, humanLabel, landable, liveNote, personPhase, phaseNote, roundNote, roundsSpent, type HoldCause, type Review, type Verdict, type Waiver } from "./review-model.ts";
-import { reviewLoop, secondReviewerFor, type ReviewDeps } from "./review.ts";
+import { reviewerFor, reviewLoop, secondReviewerFor, type ReviewDeps } from "./review.ts";
 import { upgradeReview } from "./record-upgrade.ts";
 import { reviewText } from "../cli/thread-text.ts";
 import { defaultSecondReview } from "./project.ts";
@@ -4607,6 +4607,24 @@ test("the second reviewer's rule names a change by its lines, tests and docs inc
   assert.match(secondReviewRule(reserved, sized(1, ".nexus/check"), false)!, /check-changed/);
   assert.equal(secondReviewRule(reserved, sized(400, "src/a.ts"), true), null);
   assert.equal(secondReviewRule({ always: true }, sized(1, "src/a.ts"), true), "the project gives every pull request one");
+});
+
+test("each builder model gets the same first and second reviewer", () => {
+  const table: [builder: { claude: boolean; model: string }, first: string, second: string][] = [
+    [{ claude: true, model: "claude-opus-5-5" }, "gpt-6-astra", "claude-fable-5-1"],
+    [{ claude: true, model: "claude-opus-5-5[1m]" }, "gpt-6-astra", "claude-fable-5-1"],
+    [{ claude: true, model: "opus" }, "gpt-6-astra", "claude-fable-5-1"],
+    [{ claude: true, model: "claude-fable-5-1" }, "gpt-6-astra", "claude-opus-5-5"],
+    [{ claude: true, model: "claude-sonnet-5-5" }, "gpt-6-astra", "claude-opus-5-5"],
+    [{ claude: true, model: "claude-haiku-5-5" }, "gpt-6-astra", "claude-opus-5-5"],
+    [{ claude: false, model: "gpt-6-astra" }, "claude-opus-5-5", "claude-fable-5-1"],
+    [{ claude: false, model: "gpt-6-astra-mini" }, "claude-opus-5-5", "claude-fable-5-1"],
+  ];
+  for (const [builder, first, second] of table) {
+    const reviewer = reviewerFor(builder, claudeToken, "gpt-6-astra");
+    assert.deepEqual(reviewer, { claude: !builder.claude, model: first }, builder.model);
+    assert.deepEqual(secondReviewerFor([builder.model, first], claudeToken), { model: second }, builder.model);
+  }
 });
 
 test("the second reviewer runs another model than the builder's and the first reviewer's, or says why none can", () => {

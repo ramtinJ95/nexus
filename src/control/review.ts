@@ -23,7 +23,8 @@ import { checkCaller, latest, mint, reviewerCaller, reviewPrefix, startedByNexus
 import { releaseOutcome, type ReleaseView } from "../protocol/deploy.ts";
 import { scopedFlight } from "../single-flight.ts";
 import type { SecretGrant } from "../protocol/secret-grants.ts";
-import { agentKinds, defaultClaudeModel } from "../protocol/agent-kinds.ts";
+import { agentKinds } from "../protocol/agent-kinds.ts";
+import { defaultClaudeModel, modelFamily, secondReviewerModels } from "../protocol/models.ts";
 import type { ChangedFile, GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { Refusal } from "./refusal.ts";
 import type { Inbox } from "./inbox.ts";
@@ -297,19 +298,14 @@ export function reviewerFor(builder: { claude: boolean; model: string }, secrets
   return { why: `no reviewer on another model can run for this thread: its agent runs ${builder.model} in the harness, and its project grants no Claude token. Grant CLAUDE_CODE_OAUTH_TOKEN for api.anthropic.com to the project (\`nexus project edit\`), or start the builder as a Claude worker` };
 }
 
-/** The Claude models a second reviewer may run, the strongest first. */
-const secondModels = [defaultClaudeModel, "claude-fable-5-1", "claude-sonnet-5-5"];
-
 /**
  * The second reviewer's model, another than `taken`, the builder's and the first reviewer's, or why none can run. The
  * harness runs one model for every thread, which one of the two already runs, so the second is a Claude worker.
  */
 export function secondReviewerFor(taken: readonly string[], secrets: readonly SecretGrant[]): { model: string } | { why: string } {
   if (!grantsClaude(secrets)) return { why: `the harness runs only ${taken.join(" and ")}, and the project grants no Claude token for a Claude worker on another model. Grant CLAUDE_CODE_OAUTH_TOKEN for api.anthropic.com to the project (\`nexus project edit\`)` };
-  // A Claude worker may run an alias, such as `opus`, or a variant, such as `claude-opus-5-5[1m]`, of a model by its family.
-  const family = (m: string) => /opus|fable|sonnet|haiku/i.exec(m)?.[0].toLowerCase() ?? m;
-  const model = secondModels.find((m) => !taken.some((t) => family(t) === family(m)));
-  return model === undefined ? { why: `every Claude model Nexus offers a second reviewer, ${secondModels.join(", ")}, is the builder's or the first reviewer's` } : { model };
+  const model = secondReviewerModels.find((m) => !taken.some((t) => modelFamily(t) === modelFamily(m)));
+  return model === undefined ? { why: `every Claude model Nexus offers a second reviewer, ${secondReviewerModels.join(", ")}, is the builder's or the first reviewer's` } : { model };
 }
 
 export function reviewLoop(deps: ReviewDeps & { startThread(request: StartRequest, caller: string): Promise<Thread>; harnessModel: string }) {
