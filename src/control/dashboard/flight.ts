@@ -16,6 +16,7 @@ import { prose } from "./markdown.ts";
 import { deployedForMs, lifeOfItem, phaseTone, pipelineItems, lifeOfThread, roleLine, stages, type Life, type Stage } from "./lifecycle.ts";
 import { lifeTrack } from "./timeline.ts";
 import { lastActive, queuedLook, threadTitle } from "./shell.ts";
+import { isOpenStatus } from "../reconcile.ts";
 
 /** An item's Approve, while its project waits for the person to approve each item, and its Cancel, until it has a thread. */
 export const itemActions = (i: PipelineItem, p: Project): Part => i.thread === null && i.phase.kind !== "cancelled" && html`<div class="need-act">${[
@@ -45,7 +46,7 @@ const itemLine = (c: Context, i: PipelineItem): Line => ({ key: i.id, title: i.t
  * on their builder's line.
  */
 export function flightLines(c: Context, h: HomeView): Map<Stage, Line[]> {
-  const recent = (t: Thread) => t.status === "active" || t.status === "idle" || (t.status === "archived" && t.archivedAt !== undefined && c.now - t.archivedAt < deployedForMs);
+  const recent = (t: Thread) => isOpenStatus(t.status) || (t.status === "archived" && t.archivedAt !== undefined && c.now - t.archivedAt < deployedForMs);
   const lines = [
     ...pipelineItems(c).filter((i) => i.thread === null).map((i) => itemLine(c, i)),
     ...h.projects.flatMap((p) => c.queuedIn(p.id)).map((q) => queuedLine(c, q)),

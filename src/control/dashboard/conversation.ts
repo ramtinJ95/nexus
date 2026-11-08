@@ -11,6 +11,7 @@ import { Html, html, dot, icon, unseen, ago, grows, type Tone } from "./view.ts"
 import { prose } from "./markdown.ts";
 import { promptLabel, type Item, type ToolItem, type AskItem, type UserItem } from "./items.ts";
 import { shotsView, stepsView } from "./tools.ts";
+import { isOpenStatus } from "../reconcile.ts";
 
 /**
  * What the agent's run is doing. Busy comes from the view rather than agentTurnRunning, which a parked run
@@ -53,7 +54,7 @@ function working(d: ThreadDetail, items: readonly Item[], asks: (item: UserItem)
  * attach has a terminal one click away, which a dialog waiting in the terminal offers too.
  */
 export function stateBar(t: Thread, run: Run, now: number): Html {
-  const open = t.status === "active" || t.status === "idle";
+  const open = isOpenStatus(t.status);
   const abort = html`<button type="button" class="btn btn-xs btn-abort" id="abort" data-action="abort" data-thread="${t.id}">Abort</button>`;
   // The abort route presses Esc in a Claude worker's pane, as a person at its terminal interrupts a turn.
   const interrupt = html`<button type="button" class="btn btn-xs btn-abort" id="abort" data-action="abort" data-thread="${t.id}" title="Presses Esc in Claude's terminal">Interrupt</button>`;

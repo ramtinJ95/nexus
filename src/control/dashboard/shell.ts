@@ -16,6 +16,7 @@ import type { Context } from "./context.ts";
 import { assetUrl } from "./assets.ts";
 import { problemsText } from "../plain-wording.ts";
 import { tickMs } from "../loop.ts";
+import { isOpenStatus } from "../reconcile.ts";
 
 /** How often the client refetches a page. The loop ticks no faster, so polling faster shows nothing new. */
 const pollMs = tickMs;
@@ -82,7 +83,7 @@ export const lastActive = (t: Thread) => Math.max(t.createdAt, t.lastHumanActivi
  */
 export function threadsOf(c: Context, project: string) {
   const threads = c.threadsIn(project).toReversed();
-  const closed = (t: Thread) => t.status === "archived" || t.status === "deleted";
+  const closed = (t: Thread) => !isOpenStatus(t.status);
   const quiet = (t: Thread) => {
     const state = c.row(t).pylon.actualState;
     return (state === "paused" || state === "absent") && !t.working && c.now - lastActive(t) > quietAfterMs;
