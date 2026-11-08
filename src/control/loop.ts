@@ -1,6 +1,6 @@
 /**
  * The reconcile loop. It follows every node's observe stream, folds each event into the registry, and ticks
- * every pylon on a node after each event and every 5 seconds. Each pass first moves the node's template builds along
+ * every pylon on a node after each event and at each poll, every 5 seconds. Each pass first moves the node's template builds along
  * (template-builds.ts).
  *
  * Each node has one pass at a time. A pass that is asked for while one runs is coalesced into a single
@@ -42,7 +42,7 @@ type LoopRegistry = Pick<Registry, "allocatePreviews" | "appendEvent" | "buildin
  */
 export type Ingest = (event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number, unlisted: ReadonlySet<PylonId>) => readonly RegistryWrite[];
 
-/** How often the loop ticks unless its options say otherwise. */
+/** How often the loop polls unless its options say otherwise. */
 export const tickMs = 5_000;
 
 export interface LoopOptions {
@@ -77,8 +77,11 @@ export interface Loop {
   readGit(node: NodeName, pylonId: PylonId, waitMs?: number): Promise<void>;
   /** Follows one more node's probe, such as a node that joined. A node already followed keeps its probe. */
   follow(probe: ProbeClient): void;
-  /** Resolves at the next wake of any node: after each event the loop ingests, each wake asked for, and each interval. */
+  /** Resolves at the next wake of any node: after each event the loop ingests, each wake asked for, and each poll. */
   woken(): Promise<void>;
+  readonly everyMs: number;
+  /** Wakes every node. */
+  poll(): void;
   close(): Promise<void>;
 }
 
@@ -95,7 +98,6 @@ interface Link {
 
 export function startLoop(options: LoopOptions): Loop {
   const { registry, ingest, previewPorts } = options;
-  const intervalMs = options.intervalMs ?? tickMs;
   const offlineAfterMs = options.offlineAfterMs ?? 30_000;
   const reconnectMs = options.reconnectMs ?? 2_000;
   const silenceMs = options.silenceMs ?? 90_000;
@@ -330,16 +332,16 @@ export function startLoop(options: LoopOptions): Loop {
   }
 
   for (const probe of options.probes) followProbe(probe);
-  const timer = setInterval(() => { for (const node of links.keys()) void wake(node); }, intervalMs);
 
   return {
     wake,
     readGit,
     follow: followProbe,
     woken,
+    everyMs: options.intervalMs ?? tickMs,
+    poll() { for (const node of links.keys()) void wake(node); },
     async close() {
       shutdown.abort();
-      clearInterval(timer);
       for (const link of links.values()) {
         if (link.offline !== null) clearTimeout(link.offline);
         for (const w of link.waiters) w.done(false);

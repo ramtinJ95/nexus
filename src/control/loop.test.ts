@@ -24,6 +24,7 @@ import type { ProjectId } from "../ids.ts";
 import type { ReportedEvent } from "../protocol/observations.ts";
 import { transcriptStart } from "./claude-transcript.ts";
 import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation, until, watch } from "../test-support/kit.ts";
+import { polled } from "../test-support/service-kit.ts";
 
 const firebat = "rj-firebat" as NodeName;
 const node = firebat;
@@ -282,12 +283,12 @@ function seed(registry: Registry, activity: Partial<Pick<Thread, "agentTurnRunni
 }
 
 function run(t: import("node:test").TestContext, registry: Registry, probe: ProbeClient | readonly ProbeClient[], overrides: { gitIdentity?: { name: string; email: string }; offlineAfterMs?: number; silenceMs?: number; ingest?: Ingest; previewPorts?: PortRange; log?: (line: string) => void; claudeLaunchRetryMs?: number; intervalMs?: number } = {}): Loop {
-  const loop = startLoop({
+  const loop = polled(startLoop({
     ...(overrides.claudeLaunchRetryMs === undefined ? {} : { claudeLaunchRetryMs: overrides.claudeLaunchRetryMs }),
     gitIdentity: overrides.gitIdentity,
     registry, probes: Array.isArray(probe) ? probe : [probe], ingest: overrides.ingest ?? ingest, previewPorts: overrides.previewPorts ?? previewPorts, intervalMs: overrides.intervalMs ?? 10, reconnectMs: 10,
     offlineAfterMs: overrides.offlineAfterMs ?? 30_000, silenceMs: overrides.silenceMs ?? 30_000, log: overrides.log ?? assert.fail,
-  });
+  }));
   t.after(async () => {
     await loop.close();
     registry.close();
@@ -395,7 +396,7 @@ test("a pylon whose archive's last read was missed is woken for reading once pau
     reads.push(`${id} ${fake.pylons.get(thread.pylonId)?.phase}`);
     return { calls: 0, tokens: 0 };
   };
-  const settler = usageBackfill({ registry, counter: { readWhole }, wake: (n) => void loop.wake(n), intervalMs: 10, log: () => {} });
+  const settler = polled(usageBackfill({ registry, counter: { readWhole }, wake: (n) => void loop.wake(n), intervalMs: 10, log: () => {} }));
   t.after(() => settler.close());
   await until("the settle lets go of the pylon it read", () => registry.thread(thread.id)?.usageSettledAt !== undefined && registry.settleHold() === null);
   await settler.close();
@@ -451,7 +452,7 @@ test("a failed archived pylon, whose usage cannot be read, is deleted 24 hours a
   assert.equal(fake.pylons.get(thread.pylonId)?.phase, "stopped", "until a settle finds its usage cannot be read, the disk stays");
 
   const reads: string[] = [];
-  const settler = usageBackfill({ registry, counter: { readWhole: async (id) => { reads.push(id); return { calls: 0, tokens: 0 }; } }, wake: (n) => void loop.wake(n), intervalMs: 10, log: () => {} });
+  const settler = polled(usageBackfill({ registry, counter: { readWhole: async (id) => { reads.push(id); return { calls: 0, tokens: 0 }; } }, wake: (n) => void loop.wake(n), intervalMs: 10, log: () => {} }));
   t.after(() => settler.close());
   await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.pylon(thread.pylonId)?.submitted === null);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "delete"]);
@@ -469,7 +470,7 @@ test("a pylon archived 24 hours ago is deleted, its thread and conversation kept
   const entries = [{ kind: "reply" as const, at: 1, text: "kept" }];
   assert.ok(registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt: 1 }));
   const fake = fakeNode({ autoFinish: true });
-  const first = startLoop({ registry, probes: [fake.probe], ingest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail });
+  const first = polled(startLoop({ registry, probes: [fake.probe], ingest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail }));
   t.after(() => first.close());
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
 
@@ -626,7 +627,7 @@ test("a disk delete the probe forgot across a control-plane and probe restart st
   const entries = [{ kind: "reply" as const, at: 1, text: "kept" }];
   assert.ok(registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt: 1 }));
   const fake = fakeNode({ autoFinish: false });
-  const first = startLoop({ registry, probes: [fake.probe], ingest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail });
+  const first = polled(startLoop({ registry, probes: [fake.probe], ingest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail }));
   t.after(() => first.close());
   await until("the spawn runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!);
@@ -697,7 +698,7 @@ test(`a stale ${listed} listing of a pylon whose delete the probe forgot keeps t
   const entries = [{ kind: "reply" as const, at: 1, text: "kept" }];
   assert.ok(registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt: 1 }));
   const fake = fakeNode({ autoFinish: false });
-  const first = startLoop({ registry, probes: [fake.probe], ingest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail });
+  const first = polled(startLoop({ registry, probes: [fake.probe], ingest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail }));
   t.after(() => first.close());
   await until("the spawn runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!);
@@ -1377,7 +1378,7 @@ test("a restarted control plane writes each pylon's session list on its first ob
   const fake = fakeNode({ autoFinish: true });
   const before = openRegistry(path);
   const thread = seed(before);
-  const first = startLoop({ registry: before, probes: [fake.probe], ingest: realIngest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail });
+  const first = polled(startLoop({ registry: before, probes: [fake.probe], ingest: realIngest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail }));
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   const review: SessionFact = { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", status: "idle", title: "review" };
   fake.setSessions(thread.pylonId, [review]);
@@ -1554,7 +1555,7 @@ test("a job in flight survives a control-plane restart: the new process asks the
 
   const before = openRegistry(path);
   const thread = seed(before);
-  const first = startLoop({ registry: before, probes: [fake.probe], ingest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail });
+  const first = polled(startLoop({ registry: before, probes: [fake.probe], ingest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail }));
   await until("the spawn is accepted", () => fake.running().length === 1);
   await first.close();
   before.close();
@@ -1746,7 +1747,7 @@ test("preview ports are unique on a node and keep their port across pause, a con
   const before = openRegistry(path);
   const a = seed(before);
   const b = seed(before);
-  const first = startLoop({ registry: before, probes: [fake.probe], ingest: realIngest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail });
+  const first = polled(startLoop({ registry: before, probes: [fake.probe], ingest: realIngest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail }));
   await until("both pylons run", () => [a, b].every((th) => fake.pylons.get(th.pylonId)?.phase === "running"));
   fake.setServices(a.pylonId, [web]);
   await until("a's preview is ready", () => before.previews(a.pylonId)[0]?.ready === true);
@@ -1896,7 +1897,7 @@ test("a deleted thread's pylon removed by hand while the control plane was down 
   const fake = fakeNode({ autoFinish: true });
   const before = openRegistry(path);
   const thread = seed(before);
-  const first = startLoop({ registry: before, probes: [fake.probe], ingest: realIngest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail });
+  const first = polled(startLoop({ registry: before, probes: [fake.probe], ingest: realIngest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail }));
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   fake.setSessions(thread.pylonId, [{ id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", status: "idle", title: "review" }]);
   before.setThreadStatus(thread.id, "archived");
@@ -1980,7 +1981,7 @@ test("a node reporting a pylon the registry places on another node gets no ports
   registry.upsertNode({ name: peer, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
   const home = fakeNode({ autoFinish: true });
   const elsewhere = fakeNode({ autoFinish: true, node: peer });
-  const loop = startLoop({ registry, probes: [home.probe, elsewhere.probe], ingest: realIngest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail });
+  const loop = polled(startLoop({ registry, probes: [home.probe, elsewhere.probe], ingest: realIngest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail }));
   t.after(async () => {
     await loop.close();
     registry.close();

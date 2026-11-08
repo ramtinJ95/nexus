@@ -48,6 +48,8 @@ export interface ImageRollout {
   rollback(caller: TailnetNodeId): ImageOperation;
   /** Advances the operation. Resolves once a pass that began after this call has finished. */
   wake(): Promise<void>;
+  readonly everyMs: number;
+  poll(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -203,7 +205,6 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
   let closed = false;
   const passes = singleFlight(pass, () => closed);
   const wake = passes.rerun;
-  const timer = setInterval(() => void wake(), options.intervalMs ?? 2_000);
 
   return {
     async build(caller) {
@@ -227,9 +228,10 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
       return rollout(previous, caller);
     },
     wake,
+    everyMs: options.intervalMs ?? 2_000,
+    poll: wake,
     async close() {
       closed = true;
-      clearInterval(timer);
       await passes.settled();
     },
   };

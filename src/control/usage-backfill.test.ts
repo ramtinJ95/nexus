@@ -11,6 +11,7 @@ import { archivedDiskMs, desiredPhase, diskKept, envelope } from "./reconcile.ts
 import type { ImageId, JobId, LiveHash, NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
 import { runningPylon, stoppedPylon, tempDir, testCapacity } from "../test-support/kit.ts";
+import { polled } from "../test-support/service-kit.ts";
 
 const image: ImageId = "img-000000000000";
 const n1 = "rj-firebat" as NodeName;
@@ -65,7 +66,7 @@ function fakeCounter(registry: Registry) {
 
 function backfill(t: TestContext, registry: Registry, counter = fakeCounter(registry), over: { bootMs?: number; pauseMs?: number; settleRetryMs?: number } = {}) {
   const woken: NodeName[] = [];
-  const job = usageBackfill({ registry, counter, wake: (node) => woken.push(node), intervalMs: 5, log: () => {}, ...over });
+  const job = polled(usageBackfill({ registry, counter, wake: (node) => woken.push(node), intervalMs: 5, log: () => {}, ...over }));
   t.after(() => job.close());
   return { job, woken, counter };
 }
@@ -328,7 +329,7 @@ test("a control plane restarted mid-run goes on with the pylon it held, and a se
   const a = addThread(first, n1, "first");
   const b = addThread(first, n1, "second");
   observe(first, n1, [[a.pylonId, "stopped"], [b.pylonId, "stopped"]]);
-  const before = usageBackfill({ registry: first, counter: fakeCounter(first), wake: () => {}, intervalMs: 5, log: () => {} });
+  const before = polled(usageBackfill({ registry: first, counter: fakeCounter(first), wake: () => {}, intervalMs: 5, log: () => {} }));
   before.start();
   await held(first, a, "reading");
   await before.close();
@@ -490,7 +491,7 @@ test("a control plane restarted while a settle holds a pylon lets it pause, and 
   const first = seedRegistry(openRegistry(path), { nodes: [n1, n2] });
   const a = addThread(first, n1, "held", "archived", false);
   observe(first, n1, [[a.pylonId, "stopped"]]);
-  const before = usageBackfill({ registry: first, counter: fakeCounter(first), wake: () => {}, intervalMs: 5, log: () => {} });
+  const before = polled(usageBackfill({ registry: first, counter: fakeCounter(first), wake: () => {}, intervalMs: 5, log: () => {} }));
   await settling(first, a, "reading");
   await before.close();
   first.close();
@@ -542,7 +543,7 @@ test("after a restart lost a settle's hold, no other pylon is woken until the on
   const first = seedRegistry(openRegistry(path), { nodes: [n1, n2] });
   const a = addThread(first, n1, "held", "archived", false);
   observe(first, n1, [[a.pylonId, "stopped"]]);
-  const before = usageBackfill({ registry: first, counter: fakeCounter(first), wake: () => {}, intervalMs: 5, log: () => {} });
+  const before = polled(usageBackfill({ registry: first, counter: fakeCounter(first), wake: () => {}, intervalMs: 5, log: () => {} }));
   await settling(first, a, "reading");
   await before.close();
   first.close();
@@ -590,7 +591,7 @@ test("a run wakes nothing while a pylon a restart's lost settle woke is still up
   const first = seedRegistry(openRegistry(path), { nodes: [n1, n2] });
   const a = addThread(first, n1, "held", "archived", false);
   observe(first, n1, [[a.pylonId, "stopped"]]);
-  const before = usageBackfill({ registry: first, counter: fakeCounter(first), wake: () => {}, intervalMs: 5, log: () => {} });
+  const before = polled(usageBackfill({ registry: first, counter: fakeCounter(first), wake: () => {}, intervalMs: 5, log: () => {} }));
   await settling(first, a, "reading");
   await before.close();
   first.close();
@@ -619,7 +620,7 @@ test("a pylon stuck up for reading holds the settles back only for the pause's t
   observe(registry, n1, [[stuck.pylonId, "running"]]);
   observe(registry, n2, [[next.pylonId, "stopped"]]);
   const logs: string[] = [];
-  const job = usageBackfill({ registry, counter: fakeCounter(registry), wake: () => {}, intervalMs: 5, pauseMs: 200, log: (m) => logs.push(m) });
+  const job = polled(usageBackfill({ registry, counter: fakeCounter(registry), wake: () => {}, intervalMs: 5, pauseMs: 200, log: (m) => logs.push(m) }));
   t.after(() => job.close());
   await delay(50);
   assert.equal(registry.settleHold(), null);
