@@ -16,7 +16,7 @@ export type { Question } from "../control/questions.ts";
 export const landOption = "Land";
 export const holdOptions = [landOption, "Leave it"] as const;
 
-/** A review as its routes reply: the record, and its lines as `nexus` prints them. A control plane older than 0.72.0 sends no `said`. */
+/** A review as its routes reply: the record, and its lines as `nexus` prints them. A control plane older than 0.73.0 sends no `said`. */
 export type SaidReview = Review & { said?: readonly string[] };
 
 export const reviewRoutes = {

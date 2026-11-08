@@ -29,7 +29,7 @@ function setupText(s: ThreadSetup): string {
 
 /**
  * A review's state for a person: the lines the API words of its phase, round and reviewers, then what it needs from
- * them. A control plane older than 0.72.0 words none, so its review shows as its ID.
+ * them. A control plane older than 0.73.0 words none, so its review shows as its ID.
  */
 export function reviewText(r: Review, said: readonly string[] | null | undefined): string {
   const { live } = r.rounds.at(-1)!;

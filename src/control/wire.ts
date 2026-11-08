@@ -67,7 +67,7 @@ export interface ThreadDetail {
   attach: string;
   /** Null for a thread that has no conversation. A parked task holds the run until it is retried. */
   agent: { parkedTasks: number } | null;
-  /** A control plane older than 0.72.0 sends none. */
+  /** A control plane older than 0.73.0 sends none. */
   said?: ThreadSaid;
 }
 

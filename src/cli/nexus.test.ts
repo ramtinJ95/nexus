@@ -296,7 +296,7 @@ test("show says why an archived thread's disk is kept past its 24 hours, and not
   observeAbsent(s);
   assert.deepEqual(disk(await s.json(["show", id])), [], "the API's keptPastDay is null for an absent pylon");
   const { said: _said, ...older } = dayOld;
-  assert.deepEqual(disk(older), [], "a control plane older than 0.72.0 serves no said, and show prints no disk line");
+  assert.deepEqual(disk(older), [], "a control plane older than 0.73.0 serves no said, and show prints no disk line");
   const { settleFailure: _, ...unfailed } = dayOld.thread;
   assert.equal(keptPastDay({ ...unfailed, usageSettledAt: 1, backedUpAt: 2 }, Date.now()), null);
 });
@@ -314,7 +314,7 @@ test("show says a pylon's guest is not answering, since when and what to do, and
   ]);
 });
 
-test("show of a control plane older than 0.72.0, which serves no said, prints its review as its ID with what it needs from the person, and a paused session as paused", async (t) => {
+test("show of a control plane older than 0.73.0, which serves no said, prints its review as its ID with what it needs from the person, and a paused session as paused", async (t) => {
   const s = await setup(t);
   const { id } = await s.json(["start", "--project", "acme", "--title", "Old control"]);
   const detail: ThreadDetail = await s.json(["show", id]);
