@@ -3732,7 +3732,7 @@ test("for every hold, and for an approval, the land route takes a press exactly 
   const unescape = (attr: string) => attr.replace(/&(quot|#39|lt|gt|amp);/g, (_, e: string) => ({ quot: '"', "#39": "'", lt: "<", gt: ">", amp: "&" })[e]!);
   for (const [name, review] of reviews) {
     f.registry.saveReview(review);
-    const card = landing(c, { thread: f.registry.thread(f.builder)!, review, pullRequests: [f.pr], questions: [], prWatch: { enabled: true, stopped: false, error: null } } as never)?.text ?? "";
+    const card = landing(c, { thread: f.registry.thread(f.builder)!, review, pullRequests: [f.pr], questions: [], prWatch: { enabled: true, stopped: false, error: null } } as never, false)?.text ?? "";
     const offered = card.includes('data-action="land"');
     const waive = /data-holds="([^"]*)"/.exec(card)?.[1];
     let took = true;

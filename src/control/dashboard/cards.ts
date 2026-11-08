@@ -10,7 +10,6 @@ import { answerFinal } from "../plain-wording.ts";
 import { needLabels, reviewersNote, reviewPr, roundNote, roundOf, stoppedShort } from "../wording.ts";
 import { holdRule } from "../holds.ts";
 import { reservedNames } from "../../contract/reserved.ts";
-import { landsOnItsOwn } from "../project.ts";
 import { holdsAt, landPress } from "../policy.ts";
 import type { holdOptions } from "../../contract/reviews.ts";
 import { askingHolds, type AnswerRefusal, type ClaudeQuestion, type CleanupQuestion, type HoldsQuestion, type JudgmentQuestion, type ProposalQuestion, type Question, type ThreadQuestion } from "../questions.ts";
@@ -31,6 +30,11 @@ const answerRefusals: Record<AnswerRefusal, (caller: TailnetNodeId) => string> =
   "not a person": (caller) => `This device cannot answer: tailnet node ${caller} is the control plane or one of its nodes, whose pylons call under its identity, and only a person's device may answer. Answer it from your laptop or phone.`,
   "not a deployer": (caller) => `This device cannot answer: the answer may deploy, so only the control plane's deployers may, and this device (tailnet node ${caller}) is not one. Answer it from a deployer, or add this node to deployers in the control plane's config.`,
 };
+/** Where a thread's card shows: on its page, or in the Needs you inbox beside other threads' cards. */
+export type Place = "page" | "inbox";
+/** A card's element IDs, which the inbox suffixes with the thread's, as it shows several threads' cards. */
+const namer = (place: Place, thread: ThreadId) => (name: string) => place === "inbox" ? `${name}-${thread}` : name;
+
 const answerers: Record<Question["answerer"], string> = { person: "You answer.", deployer: "A deployer answers, as the answer may deploy." };
 
 /** An option's button: its label, and what pressing it asks the person to confirm, or null when it answers at once. */
@@ -159,13 +163,15 @@ ${aq.options.map((o, j) => html`<div class="ask-opt"><label><input type="${aq.mu
 /**
  * Above the composer, for a builder whose review the person can land or is landing: why it waits for them, with the
  * Land button, and then the landing's steps until it lands or ends for them again. The land route decides who may
- * land, and the page says so up front rather than offer a button that fails. `id` names its elements, so the inbox
- * can show several. A Needs you `card` leaves out the title and the pull request, which its head and strip say, and
- * folds what the person need not read to decide.
+ * land, and the page says so up front rather than offer a button that fails. In the inbox it leaves out the title and
+ * the pull request, which its head and strip say, and folds what the person need not read to decide. `lands` is whether
+ * the thread's project lands its reviews on its own.
  */
-export function landing(c: Context, d: ThreadDetail, id = (name: string) => name, card = false): Html | null {
+export function landing(c: Context, d: ThreadDetail, lands: boolean, place: Place = "page"): Html | null {
   const r = d.review;
   if (r == null) return null;
+  const card = place === "inbox";
+  const id = namer(place, d.thread.id);
   const prLink = html`<a href="${r.pr.url}" target="_blank" rel="noreferrer">#${r.pr.number} ${r.pr.title} ↗</a>`;
   const top = (title: string) => !card && html`<div class="land-top"><h2 id="${id("landing-h")}">${title}</h2>${prLink}</div>`;
   const named = (title: string) => card ? html`aria-label="${title}"` : html`aria-labelledby="${id("landing-h")}"`;
@@ -191,7 +197,7 @@ ${phase.kind === "quoting" ? html`<p class="land-note">The reviewer quotes, from
 </section>`;
   }
   const pr = reviewPr(d);
-  if (cannotLand(r, d.thread, pr) !== null) return r.phase.kind === "needs-person" ? heldReview(c, d, r, pr, id, card) : null;
+  if (cannotLand(r, d.thread, pr) !== null) return r.phase.kind === "needs-person" ? heldReview(c, d, r, pr, lands, place) : null;
   const round = r.rounds.at(-1)!;
   // The PR watch can read a push before the loop's next pass starts a round on it.
   const moved = pushedHead(r, pr);
@@ -244,9 +250,10 @@ ${moved !== null ? html`<p class="land-note">The PR watch last read the pull req
  * One that merged or closed outside the review has nothing left to review. Cancelling it ends it for the person, who
  * then owns the pull request, and archives its reviewer.
  */
-function heldReview(c: Context, d: ThreadDetail, r: Review, pr: ReturnType<typeof reviewPr>, id: (name: string) => string, card: boolean): Html {
+function heldReview(c: Context, d: ThreadDetail, r: Review, pr: ReturnType<typeof reviewPr>, land: boolean, place: Place): Html {
+  const card = place === "inbox";
+  const id = namer(place, d.thread.id);
   const outside = pr === undefined || pr.state === "open" ? null : pr.state;
-  const land = landsOnItsOwn(c.registry.project(d.thread.project)?.autoReview);
   const refusal = land || c.landRefusal === "no review loop" ? c.landRefusal : null;
   const again = outside === null && d.thread.status === "active";
   const confirm = `Review pull request #${r.pr.number}, "${r.pr.title}", again? A new reviewer thread starts at round 1${land ? ", and Nexus lands the pull request once it approves, as this project lands its reviews" : ""}.`;
@@ -270,23 +277,22 @@ ${again && refusal !== null && html`<p class="error">${landRefusals[refusal](c.c
 export const cancelReview = (thread: ThreadId, r: Review, look: string) => cancellable(r)
   && html`<button type="button" class="btn ${look}" data-action="cancel-review" data-thread="${thread}" data-confirm="Cancel review ${r.id} of pull request #${r.pr.number}?${r.phase.kind === "needs-person" && " It stops waiting on you."} Its reviewer thread is archived, and this thread stays as it is.">Cancel review</button>`;
 
-/** For a Claude worker whose turns kept dying after Nexus resumed them, which waits on the person. `id` as `landing`'s. */
-export function resumeCard(c: Context, t: Thread, id = (name: string) => name): Html | null {
-  const resume = c.registry.claudeResume(t.id);
-  if (resume?.state !== "person") return null;
+/** For a Claude worker whose turns kept dying after Nexus resumed them, which waits on the person, with why Nexus stopped resuming it. */
+export function resumeCard(t: Thread, why: string, place: Place = "page"): Html {
+  const id = namer(place, t.id);
   return html`<section class="landing nudge" aria-labelledby="${id("resume-h")}">
 <div class="land-top"><h2 id="${id("resume-h")}">${needLabels.resume}</h2></div>
-<p class="land-note">${resume.why} Write to it to resume it: your message makes the thread yours, and Nexus leaves it alone from then on.</p>
+<p class="land-note">${why} Write to it to resume it: your message makes the thread yours, and Nexus leaves it alone from then on.</p>
 <div class="land-act need-act"><a class="btn btn-primary" href="/threads/${t.id}#write" data-write>Write to it</a></div>
 </section>`;
 }
 
 /**
  * Above the landing card, for a builder that ended its turns short of a pull request after its nudges: Nexus stopped
- * nudging it and waits on the person, whose message makes the thread theirs. `id` names its elements, as `landing`'s.
+ * nudging it and waits on the person, whose message makes the thread theirs.
  */
-export function nudgeCard(c: Context, t: Thread, id = (name: string) => name): Html | null {
-  if (c.registry.nudge(t.id)?.state !== "person") return null;
+export function nudgeCard(t: Thread, place: Place = "page"): Html {
+  const id = namer(place, t.id);
   return html`<section class="landing nudge" aria-labelledby="${id("nudge-h")}">
 <div class="land-top"><h2 id="${id("nudge-h")}">${needLabels.nudge}</h2></div>
 <p class="land-note">${stoppedShort}, so Nexus stopped nudging it. Write to it to say what to do next: your message makes the thread yours, and Nexus leaves it alone from then on.</p>
