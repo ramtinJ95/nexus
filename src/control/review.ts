@@ -566,8 +566,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const round = r.rounds.at(-1)!;
     // A Land given early lands the change the person saw: a round carried from its head on its base keeps it, and any
     // other round at another head or base drops it.
-    if (r.land?.head !== undefined && (r.land.head !== round.head || (r.land.base ?? null) !== (round.base ?? null))) {
-      const same = round.carried?.from === r.land.head && (r.land.base ?? null) === (round.base ?? null);
+    if (r.land?.head !== undefined && (r.land.head !== round.head || r.land.base !== (round.base ?? null))) {
+      const same = round.carried?.from === r.land.head && r.land.base === (round.base ?? null);
       return { ...r, land: same ? { ...r.land, head: round.head } : null };
     }
     // A save since `r` was read, such as the person's cancel while GitHub answered, decides the question instead.
