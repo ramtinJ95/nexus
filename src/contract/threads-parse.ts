@@ -1,12 +1,13 @@
 /** The request schemas of the thread routes in threads.ts. They need zod, so they stay out of threads.ts, which a browser can bundle. */
 import { z } from "zod";
+import { maxPromptChars } from "../protocol/commands.ts";
 
 /** A pylon's size, which a project gives its threads and a thread's start may change. */
 export const resourcesSchema = z.strictObject({ cpus: z.int().positive(), memoryGiB: z.int().positive(), diskGiB: z.int().positive() });
 
 export const startSchema = z.strictObject({
   model: z.string().trim().min(1).max(200).optional(),
-  claude: z.string().trim().min(1).max(16_384).refine((prompt) => !prompt.includes("\0"), "a Claude prompt cannot hold a NUL character, which no command-line argument can").optional(),
+  claude: z.string().trim().min(1).max(maxPromptChars).refine((prompt) => !prompt.includes("\0"), "a Claude prompt cannot hold a NUL character, which no command-line argument can").optional(),
   project: z.string().min(1),
   title: z.string().min(1),
   node: z.string().min(1).optional(),

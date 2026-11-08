@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { fullCommit } from "../protocol/deploy.ts";
+import { maxPromptChars } from "../protocol/commands.ts";
 import type { HarnessHost } from "./harness/host.ts";
 import { chooseTemplate, setupHashOf, type ProjectMirror, type SetupInputs, type ThreadSetup } from "./templates.ts";
 import { bootSecrets, effectiveAllowedHosts, gitIdentityOf, hasRemote, withHttpsHosts, type Project, type RemoteProject } from "./project.ts";
@@ -20,8 +21,11 @@ type ThreadsRegistry = Pick<Registry, "createThread" | "currentImage" | "latestH
 /** A start's request ID with a hash of what it asks for, so a repeat of the ID with another body is told apart. */
 export const startKey = (requestId: string, fields: unknown): StartKey => ({ requestId, body: createHash("sha256").update(JSON.stringify(fields)).digest("hex") });
 
+/** The skill a Claude worker's first prompt runs, put in front unless the prompt is raw or already starts with it. */
+const claudeSkill = "/poteto-mode";
+const startsWithSkill = new RegExp(`^${claudeSkill}(?:\\s|$)`);
 const claudePromptOf = (request: StartRequest) =>
-  request.claude === undefined || request.raw === true || /^\/poteto-mode(?:\s|$)/.test(request.claude) ? request.claude : `/poteto-mode ${request.claude}`;
+  request.claude === undefined || request.raw === true || startsWithSkill.test(request.claude) ? request.claude : `${claudeSkill} ${request.claude}`;
 
 /**
  * What a start refuses before it places anything, which a queued start is checked against when it is queued too. A
@@ -29,12 +33,12 @@ const claudePromptOf = (request: StartRequest) =>
  */
 export function checkStart(registry: ThreadsRegistry, request: StartRequest, caller: string): Project {
   const claudePrompt = claudePromptOf(request);
-  if (claudePrompt !== undefined && claudePrompt.length > 16_384) throw new Refusal("invalid", "Claude prompt including /poteto-mode exceeds 16384 characters");
+  if (claudePrompt !== undefined && claudePrompt.length > maxPromptChars) throw new Refusal("invalid", `Claude prompt including ${claudeSkill} exceeds ${maxPromptChars} characters`);
   const project = registry.project(request.project as ProjectId);
   if (project === undefined) throw new Refusal("missing", `no project ${request.project}`);
   const rules = standingRulesFor(project, request, caller);
-  if (claudePrompt !== undefined && withStandingRules(claudePrompt, rules).length > 16_384) {
-    throw new Refusal("invalid", `Claude prompt including /poteto-mode and project ${project.id}'s standing rules exceeds 16384 characters. Shorten the brief, or the rules that nexus project show ${project.id} prints`, "too-long");
+  if (claudePrompt !== undefined && withStandingRules(claudePrompt, rules).length > maxPromptChars) {
+    throw new Refusal("invalid", `Claude prompt including ${claudeSkill} and project ${project.id}'s standing rules exceeds ${maxPromptChars} characters. Shorten the brief, or the rules that nexus project show ${project.id} prints`, "too-long");
   }
   if (request.node !== undefined && request.node !== "auto" && registry.node(request.node as NodeName) === undefined) throw new Refusal("invalid", `no node ${request.node}`);
   if (!hasRemote(project) && request.commit !== undefined) throw new Refusal("invalid", `project ${project.id} is a scratch project, so it has no commit to check out`);

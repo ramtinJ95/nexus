@@ -16,6 +16,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { mint, planningPrefix, tokenBlocks } from "./agent-protocol.ts";
+import { maxPromptChars } from "../protocol/commands.ts";
 import { singleFlight } from "../single-flight.ts";
 import { Refusal } from "./refusal.ts";
 import type { Pipeline } from "./pipeline.ts";
@@ -36,7 +37,7 @@ const blockSchema = z.object({
   items: z.array(z.object({
     key: z.string().trim().min(1).max(40),
     title: z.string().trim().min(1).max(200),
-    brief: z.string().trim().min(1).max(16_384),
+    brief: z.string().trim().min(1).max(maxPromptChars),
     after: z.array(z.string().trim().min(1)).max(32).default([]),
   })).min(1).max(20),
 }).superRefine(({ items }, ctx) => {
