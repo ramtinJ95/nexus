@@ -36,6 +36,7 @@ import type { CommandResult } from "../../src/protocol/commands.ts";
 import type { DoctorReport, Check } from "../../src/control/doctor-model.ts";
 import type { PullRequest } from "../../src/control/github.ts";
 import type { WatchedPr } from "../../src/control/pr-watch-store.ts";
+import type { Features } from "../../src/control/features.ts";
 import { claudeTalk, diffSnippet, failingTests, harnessTalk, longConversation, testOutput, typescriptSnippet } from "./talk.ts";
 
 type Demo = Awaited<ReturnType<typeof testApi>>;
@@ -702,29 +703,42 @@ function liveClock(d: Demo, world: World) {
   return () => clearInterval(tick);
 }
 
-/** A review loop that only records what the person asked: a land starts merging, a cancel cancels, and nothing reaches GitHub. */
-export function demoReviews(registryOf: () => Demo["registry"]) {
-  const reviewOf = (builder: string) => {
-    const r = registryOf().review(builder as ThreadId);
-    if (r === null || r === undefined) throw new Error(`thread ${builder} has no review`);
+/**
+ * The review loop's API seat, which only records what the person asked: a land, or a Land answer to a question about
+ * holds, starts merging, a cancel cancels, and nothing reaches GitHub. The real loop would step every review at once,
+ * and the demo's reviews name reviewer threads it never started.
+ */
+export function demoReviews(registryOf: () => Demo["registry"]): NonNullable<Features["reviews"]> {
+  const reviewOf = (builder: ThreadId) => {
+    const r = registryOf().review(builder);
+    if (r === null) throw new Error(`thread ${builder} has no review`);
     return r;
   };
   return {
-    deploys: (r: Review) => r.pr.repo === repos.nexus,
-    async start(builder: string) { return reviewOf(builder); },
-    cancel(builder: string, by: string) {
+    deploys: (r) => r.pr.repo === repos.nexus,
+    async start(builder) { return reviewOf(builder); },
+    cancel(builder, by) {
       const r = reviewOf(builder);
       const next: Review = { ...r, phase: { kind: "cancelled", who: "person", by } };
       registryOf().saveReview(next, [], r);
       return next;
     },
-    land(builder: string, by: string) {
+    land(builder, by) {
       const r = reviewOf(builder);
       const next: Review = { ...r, land: { requestedBy: by }, phase: { kind: "merging", authorized: null } };
       registryOf().saveReview(next, [], r);
       return next;
     },
-  } as never as import("../../src/control/review.ts").ReviewLoop;
+    answerHolds(question, option, by) {
+      const answered = registryOf().answerQuestion(question, { option, by, at: now() });
+      const r = reviewOf(question.thread);
+      if (option === "Land") {
+        const waiver = { head: question.holds.head, holds: question.holds.holds.map((h) => h.text), codes: question.holds.holds.map((h) => h.code), by, at: now(), change: null };
+        registryOf().saveReview({ ...r, waiver, land: { requestedBy: by }, phase: { kind: "merging", authorized: null } }, [], r);
+      }
+      return answered;
+    },
+  };
 }
 
 export async function seedDemo(d: Demo) {

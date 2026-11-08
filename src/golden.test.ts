@@ -65,18 +65,8 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
     deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: { [node]: tokenDigest(deployToken) }, resolveMain: async () => "b".repeat(40) },
     health: () => report(),
     doctor: async () => report()!,
-    reviews: { ...demoReviews(() => s.registry), answerHolds },
+    reviews: demoReviews(() => s.registry),
   });
-  /** As the demo's review loop does with a land: a Land answer waives the holds it names and starts merging, and nothing reaches GitHub. */
-  function answerHolds(question: import("./control/questions.ts").HoldsQuestion, option: string, by: TailnetNodeId) {
-    const answered = s.registry.answerQuestion(question, { option, by, at: Date.now() });
-    const r = s.registry.review(question.thread)!;
-    if (option === "Land") {
-      const waiver = { head: question.holds.head, holds: question.holds.holds.map((h) => h.text), codes: question.holds.holds.map((h) => h.code), by, at: Date.now(), change: null };
-      s.registry.saveReview({ ...r, waiver, land: { requestedBy: by }, phase: { kind: "merging", authorized: null } }, [], r);
-    }
-    return answered;
-  }
   // The demo seeds 31 days of five-minute samples, which cost most of this test's time. Every half hour of them still
   // fills each tier the metrics serve from.
   const record = s.registry.recordHealthSample.bind(s.registry);
