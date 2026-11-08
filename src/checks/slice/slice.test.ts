@@ -29,6 +29,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { createDockerBackend } from "../../backends/docker-backend.ts";
+import { docker, label, labelFilters } from "../../backends/docker-cli.ts";
 import { createPylonVmBackend } from "../../backends/pylon-vm/pylon-vm-backend.ts";
 import { run as pylonVm } from "../../pylon-vm/client.ts";
 import { nodeSecrets, type NodeSecrets } from "../../probe/config.ts";
@@ -105,7 +106,6 @@ interface SliceFixture {
 }
 
 function dockerFixture(): SliceFixture {
-  const docker = async (...args: string[]) => (await execFileAsync("docker", args, { maxBuffer: 64 << 20 })).stdout.trim();
   // What the test's image builds on. Node, for the in-pylon CLI.
   const baseImage = "node:24-bookworm-slim";
   const labels = { "nexus.test": `slice-${run}` };
@@ -113,8 +113,8 @@ function dockerFixture(): SliceFixture {
   const tag = `nexus-slice-test:${run}`;
   // Fixed for the run, because each container's NEXUS_API names it and the probe restarts.
   const bridgePort = 20_000 + Math.floor(Math.random() * 10_000);
-  const containers = async () => (await docker("ps", "-a", "-q", "--filter", `label=nexus.pylon=${pylonId}`, "--filter", `label=${testLabel}`)).split("\n").filter(Boolean);
-  const checkpointImage = async (checkpoint: string) => docker("images", "-q", "--filter", `label=nexus.pylon=${pylonId}`, "--filter", `label=nexus.checkpoint=${checkpoint}`, "--filter", `label=${testLabel}`);
+  const containers = async () => (await docker(["ps", "-a", "-q", ...labelFilters({ [label.pylon]: pylonId, ...labels })])).split("\n").filter(Boolean);
+  const checkpointImage = async (checkpoint: string) => docker(["images", "-q", ...labelFilters({ [label.pylon]: pylonId, [label.checkpoint]: checkpoint, ...labels })]);
   const image: ImageId = "img-slicetest0000";
   const repo: CloneRepo = { kind: "clone", url: sliceRepo, checkout: { branch: "main", commit: sliceCommits[1] } };
   // Docker execs run as root, and git refuses a repository root does not own, so the checks run as user.
@@ -127,8 +127,8 @@ function dockerFixture(): SliceFixture {
     backend: createDockerBackend({ images: { [image]: tag }, labels, hostBridgePort: bridgePort, previewHost: nodeHost }),
     image,
     async installCli(pylonJson) {
-      await docker("cp", cli, `${pylonId}:/usr/local/bin/nexus`);
-      await docker("exec", pylonId, "sh", "-c", `mkdir -p /home/user/.nexus && printf '%s' "$1" > ${pylonInfoFile}`, "sh", pylonJson);
+      await docker(["cp", cli, `${pylonId}:/usr/local/bin/nexus`]);
+      await docker(["exec", pylonId, "sh", "-c", `mkdir -p /home/user/.nexus && printf '%s' "$1" > ${pylonInfoFile}`, "sh", pylonJson]);
     },
     secrets: nodeSecrets({ value: () => undefined, names: () => [] }),
     boot: {
@@ -166,7 +166,7 @@ function dockerFixture(): SliceFixture {
           'RUN curl -fsSL https://herdr.dev/install.sh -o /tmp/herdr-install.sh && HERDR_INSTALL_DIR=/usr/local/bin sh /tmp/herdr-install.sh && rm /tmp/herdr-install.sh && test "$(herdr --version)" = "herdr ${HERDR_VERSION}"',
           "RUN mkdir -p /root/.config/herdr && printf 'onboarding = false\\n\\n[session]\\nresume_agents_on_restore = false\\n' > /root/.config/herdr/config.toml",
         ].join("\n") + "\n");
-        await docker("build", "--quiet", "--label", testLabel, "--build-arg", `HERDR_VERSION=${herdr}`, "--tag", tag, dir);
+        await docker(["build", "--quiet", "--label", testLabel, "--build-arg", `HERDR_VERSION=${herdr}`, "--tag", tag, dir]);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
@@ -204,8 +204,8 @@ function dockerFixture(): SliceFixture {
     },
     // The pause dies after `docker stop` and before `docker commit`.
     async partialPause() {
-      await docker("stop", pylonId);
-      assert.equal(await docker("inspect", "-f", "{{.State.Status}}", pylonId), "exited");
+      await docker(["stop", pylonId]);
+      assert.equal(await docker(["inspect", "-f", "{{.State.Status}}", pylonId]), "exited");
     },
     partialPauseResubmits: true,
     // The pause reads them from the stopped container's sessions file, which the last wake's relaunch wrote.
@@ -216,15 +216,15 @@ function dockerFixture(): SliceFixture {
     },
     async assertNothingRemains() {
       assert.deepEqual(await containers(), []);
-      assert.equal(await docker("images", "-q", "--filter", `label=nexus.pylon=${pylonId}`), "");
+      assert.equal(await docker(["images", "-q", ...labelFilters({ [label.pylon]: pylonId })]), "");
     },
     async cleanUp() {
-      const ids = (await docker("ps", "-a", "-q", "--filter", `label=${testLabel}`)).split("\n").filter(Boolean);
-      if (ids.length > 0) await docker("rm", "--force", ...ids);
+      const ids = (await docker(["ps", "-a", "-q", ...labelFilters(labels)])).split("\n").filter(Boolean);
+      if (ids.length > 0) await docker(["rm", "--force", ...ids]);
       for (;;) {
-        const images = (await docker("images", "-q", "--filter", `label=${testLabel}`)).split("\n").filter(Boolean);
+        const images = (await docker(["images", "-q", ...labelFilters(labels)])).split("\n").filter(Boolean);
         if (images.length === 0) break;
-        await docker("rmi", "--force", images[0]!);
+        await docker(["rmi", "--force", images[0]!]);
       }
     },
   };
