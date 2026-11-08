@@ -1065,7 +1065,8 @@ Use `show --json` to inspect `claudeWorker.state` and its optional failure `mess
 working), not task completion.
 Nexus waits up to 30 seconds after typing the launch command for a launch-specific local hook
 receipt. No receipt or live busy-process evidence means `stalled`, with the last 20 pane lines (up to 8 KiB) in
-the message and a `thread.failed` event. Attention is `failed`, ahead of other
+the message and a `thread.failed` event whose `cause` is `claude-worker`, where a
+pylon's failure gives `pylon`. Attention is `failed`, ahead of other
 attention values. The pane stays open for attach; no automatic resubmission occurs. A late
 turn-started report from this launch's session changes it to `started` and clears
 the current diagnostic, letting attention follow working/reply/seen normally.
@@ -1641,7 +1642,7 @@ A reply without a valid block, a block with another token, a run that ends witho
 
 The question's ID is `judgment:<failure>`, and only a person answers it. Its options are the actions that can run now: `Retry`, `Retry on another node`, and always `Leave it failed`. When only `Leave it failed` would be left, Nexus asks nothing, and the thread's failed pylon waits for the person as any failure does. An answer acts as the judgment's answer would, with no cap, and a retry counts as the person's activity. When the pylon is retried, or the thread archived or deleted, before Nexus acts, Nexus does nothing. Since 0.62.0 archiving the thread also withdraws the question, as [Questions](#questions) describes, and the thread's attention no longer reads `failed`: an archived thread's attention leaves out its failed pylon or Claude worker, as it leaves out the turns and dialogs of its paused pylon, so it is what the rest gives, `null` unless an unread reply, a parked run or another open question remains. Unarchiving it brings `failed` back while the pylon is still failed, and the withdrawn question stays withdrawn, so its judgment ends even when the unarchive comes before Nexus acts: `retry-pylon` retries it.
 
-A failure is the `thread.failed` event that the pylon's failure appended, and the judgment is keyed by that event's ID, which no other failure shares. A restart at any point goes on with the same judgment: the brief goes out under the request ID `judgment:<failure>`, which the harness admits once, and each action is written in the same transaction as the record that says it happened.
+A failure is the `thread.failed` event that the pylon's failure appended, the one with `cause` `pylon`, and the judgment is keyed by that event's ID, which no other failure shares. A restart at any point goes on with the same judgment: the brief goes out under the request ID `judgment:<failure>`, which the harness admits once, and each action is written in the same transaction as the record that says it happened.
 
 `ThreadDetail.judgments` lists the thread's judgments, oldest failure first. Each is a `JudgmentView`:
 
