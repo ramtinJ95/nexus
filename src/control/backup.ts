@@ -10,22 +10,22 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { readConfig, type ControlPlaneConfig } from "./main.ts";
-import { backupStatusFile, writeBackupStatus, type BackupStatus } from "./backup-status.ts";
+import { writeBackupStatus, type BackupStatus } from "./backup-status.ts";
+import { backupStatusFile, configFiles, etc, unitNames } from "../node-layout.ts";
 
 const exec = promisify(execFile);
 
 export const backupRoot = "/var/backups/nexus";
-export const etcDir = "/etc/nexus";
 export const kept = 7;
 const manifestFile = "manifest.json";
 const backupName = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z$/;
 /** Restore refuses while any of these runs. The deployer can restart the control plane, and a backup can prune the one restored. */
-const stoppedUnits = ["nexus-control.service", "nexus-deployer.service", "nexus-deployer.timer", "nexus-deployer.path", "nexus-backup.service", "nexus-backup.timer"] as const;
+const stoppedUnits = [unitNames.control, unitNames.deployer, unitNames.deployerTimer, unitNames.deployerPath, unitNames.backup, unitNames.backupTimer] as const;
 
 type Kind = "sqlite" | "file";
 /** One thing a backup copies: `name` is its path inside the backup, `path` where it lives. */
@@ -57,8 +57,7 @@ export async function sources(config: ControlPlaneConfig, etc: string): Promise<
     .sort();
   const tokenFile = config.github?.tokenFile;
   return [
-    // As nexus-control.service resolves a relative path, from its WorkingDirectory.
-    { name: "registry.db", path: resolve("/var/lib/nexus-control", config.db), kind: "sqlite" },
+    { name: "registry.db", path: config.db, kind: "sqlite" },
     { name: "harness.sqlite", path: config.harness.storage, kind: "sqlite" },
     { name: "harness-credentials.json", path: config.harness.credentials, kind: "file" },
     ...tokenFile !== undefined && relative(etc, tokenFile).startsWith("..") ? [{ name: "github-token", path: tokenFile, kind: "file" as const }] : [],
@@ -284,7 +283,7 @@ async function host(args: string[]) {
   }
   try {
     if (command === "backup") {
-      const dir = await runBackup({ configPath: argument ?? join(etcDir, "control.json"), root: backupRoot, etc: etcDir, statusFile: backupStatusFile, now: new Date(), keep: kept });
+      const dir = await runBackup({ configPath: argument ?? configFiles.control, root: backupRoot, etc, statusFile: backupStatusFile, now: new Date(), keep: kept });
       console.log(`backed up the control plane to ${dir}`);
     } else if (command === "check") {
       const result = await check({ root: backupRoot, now: new Date() });
@@ -294,7 +293,7 @@ async function host(args: string[]) {
     } else {
       const manifest = await restore({ root: backupRoot, name: argument!, unitState: systemctlState });
       for (const entry of manifest.entries) console.log(`restored ${entry.path}`);
-      console.log("Start the control plane with sudo systemctl start nexus-control.service, then sudo systemctl start nexus-deployer.timer nexus-deployer.path nexus-backup.timer");
+      console.log(`Start the control plane with sudo systemctl start ${unitNames.control}, then sudo systemctl start ${unitNames.deployerTimer} ${unitNames.deployerPath} ${unitNames.backupTimer}`);
     }
   } catch (err) {
     console.error(`backup: ${(err as Error).message}`);

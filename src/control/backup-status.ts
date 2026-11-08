@@ -8,8 +8,6 @@ import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
-export const backupStatusFile = "/var/lib/nexus-backup/status.json";
-
 const statusSchema = z.strictObject({
   ranAt: z.iso.datetime(),
   /** Whether that run wrote a backup that verified. */

@@ -18,7 +18,7 @@ import { parseWorkerConfig, type WorkerConfig } from "./worker.ts";
 import { readJson, saveJson } from "../json-file.ts";
 import { isImageId } from "../ids.ts";
 import { localApiWhois } from "../tailscale.ts";
-import { configFiles, rootPath, servicePath, stateDirs, users } from "../node-layout.ts";
+import { configFiles, ports, rootPath, servicePath, stateDirs, users } from "../node-layout.ts";
 import type { Whois } from "../protocol/http.ts";
 
 const exec = promisify(execFile);
@@ -33,8 +33,6 @@ export const paths = {
   gitKnownHosts: configFiles.gitKnownHosts,
   artifacts: `${stateDirs.probe}/artifacts`,
 } as const;
-
-export const controlPort = 7470;
 
 export type Json = null | boolean | number | string | readonly Json[] | { readonly [key: string]: Json };
 type JsonObject = { readonly [key: string]: Json };
@@ -236,13 +234,13 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
   const controlId = control?.id ?? self.id;
   const files: FileWrite[] = [];
 
-  let controlUrl = `http://${control?.host}:${controlPort}/`;
+  let controlUrl = `http://${control?.host}:${ports.control}/`;
   if (control === undefined) {
     const nodeEntry = (d: Device) => ({ name: d.name, tailnetHost: d.host, tailnetNodeId: d.id });
     const generated: JsonObject = {
       ...tsNet.test(self.host) ? { https: { hostname: self.host } } : {},
       db: `${stateDirs.control}/registry.db`,
-      listen: { host: self.ip, port: controlPort, hostnames: [self.name, self.host, self.ip] },
+      listen: { host: self.ip, port: ports.control, hostnames: [self.name, self.host, self.ip] },
       self: { tailnetNodeId: self.id },
       nodes: [nodeEntry(self), ...addNodes.map((a) => nodeEntry(a.node))],
       // Only a new config names this machine: an existing one without it builds on the default node, as it did.
@@ -271,7 +269,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
   const existingBackend = isObject(existing.probe) ? existing.probe.backend : undefined;
   files.push(file(paths.probe, 0o644, existing.probe, {
     node: self.name,
-    listen: { host: self.ip, port: 7480 },
+    listen: { host: self.ip, port: ports.probe },
     auth: { peers: [...control === undefined ? [] : [control.id], ...addNodes.map((a) => a.node.id), ...peers.map((d) => d.id)] },
     backend: {
       kind: "pylon-vm",
@@ -281,7 +279,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
       ...existing.gitKey ? { gitSsh: { privateKeyFile: paths.gitKey, knownHostsFile: paths.gitKnownHosts } } : {},
     },
     secretsFile: paths.secrets,
-    previews: { gatewayPort: 7481 },
+    previews: { gatewayPort: ports.gateway },
   }));
 
   files.push(file(paths.deployer, 0o600, existing.deployer, { token, drainTimeoutMs: 300_000, healthTimeoutMs: 60_000 }));

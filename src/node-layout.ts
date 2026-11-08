@@ -5,7 +5,7 @@
  * builtins and modules that do too.
  */
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fullCommit } from "./protocol/deploy.ts";
 
 export const prefix = "/opt/nexus";
@@ -32,7 +32,25 @@ export const servicePath = "/usr/local/bin:/usr/bin";
 /** What a root child process of the installers and the deployer searches. */
 export const rootPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
-export const unitNames = { probe: "nexus-probe.service", control: "nexus-control.service", backup: "nexus-backup.service" } as const;
+/** Every unit file in deploy/, by role. */
+export const unitNames = {
+  probe: "nexus-probe.service",
+  control: "nexus-control.service",
+  backup: "nexus-backup.service",
+  backupTimer: "nexus-backup.timer",
+  deployer: "nexus-deployer.service",
+  deployerTimer: "nexus-deployer.timer",
+  deployerPath: "nexus-deployer.path",
+} as const;
+
+/**
+ * The ports a node listens on: the control plane's API over HTTP and the dashboard's HTTPS, the probe's API and its
+ * preview gateway. The control plane reaches every probe on `probe`, which src/protocol/routes.ts names as probePort.
+ */
+export const ports = { control: 7470, dashboard: 7443, probe: 7480, gateway: 7481 } as const;
+
+/** A path in control.json as the control plane opens it, from its unit's WorkingDirectory, its state directory. */
+export const controlPath = (path: string) => resolve(stateDirs.control, path);
 
 /** The links under the prefix into releases/, and who runs the release each names. */
 export const links = { current: "the probe", "control-current": "the control plane", "deployer-current": "the deployer's worker" } as const;

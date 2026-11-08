@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import * as layout from "./node-layout.ts";
-import { backupStatusFile, configFiles, deployerFiles, deployerLink, deployerWakeFile, etc, prefix, releasesDir, roleLinks, servicePath, stateDirs, unitNames, users } from "./node-layout.ts";
+import { backupStatusFile, configFiles, controlPath, deployerFiles, deployerLink, deployerWakeFile, etc, ports, prefix, releasesDir, roleLinks, servicePath, stateDirs, unitNames, users } from "./node-layout.ts";
+import { defaultPreviewPorts, parseConfig } from "./control/main.ts";
+import { probePort } from "./protocol/routes.ts";
 import { stores } from "./deploy/credentials.ts";
 import { backupBudgetMs, drainYieldMs } from "./deploy/worker.ts";
 import { shutdownPauseMs } from "./probe/shutdown.ts";
@@ -33,7 +35,16 @@ test("each layout constant is the literal it replaced", () => {
     },
     servicePath: "/usr/local/bin:/usr/bin",
     rootPath: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-    unitNames: { probe: "nexus-probe.service", control: "nexus-control.service", backup: "nexus-backup.service" },
+    unitNames: {
+      probe: "nexus-probe.service",
+      control: "nexus-control.service",
+      backup: "nexus-backup.service",
+      backupTimer: "nexus-backup.timer",
+      deployer: "nexus-deployer.service",
+      deployerTimer: "nexus-deployer.timer",
+      deployerPath: "nexus-deployer.path",
+    },
+    ports: { control: 7470, dashboard: 7443, probe: 7480, gateway: 7481 },
     links: { current: "the probe", "control-current": "the control plane", "deployer-current": "the deployer's worker" },
     roleLinks: { probe: "current", control: "control-current" },
     deployerLink: "deployer-current",
@@ -44,6 +55,8 @@ test("each layout constant is the literal it replaced", () => {
     releaseName: /^(?:[0-9a-f]{12}|[0-9a-f]{40})$/,
   });
   assert.equal(layout.deployJournal("control"), "control-deploy.json");
+  assert.equal(controlPath("registry.db"), "/var/lib/nexus-control/registry.db");
+  assert.equal(controlPath("/srv/registry.db"), "/srv/registry.db");
   assert.equal(layout.releaseCommitFile("/opt/nexus/releases/x"), "/opt/nexus/releases/x/release-commit");
   assert.deepEqual(stores, {
     harness: { machines: "control", file: "/var/lib/nexus-control/harness-credentials.json", owner: "nexus-control:nexus-control", mode: 0o600 },
@@ -101,4 +114,26 @@ test("the deployer's and the probe's own deadlines fit inside the timeouts their
   assert.ok(backupBudgetMs < worker * 1000 && drainYieldMs < worker * 1000, "a backup or a drain wait yields before the supervisor's timeout");
   assert.ok(2 * (worker + kill) <= seconds(read("deploy/nexus-deployer.service"), "TimeoutStartSec"), "the unit outlasts a failed worker and the bootstrap after it");
   assert.ok(shutdownPauseMs / 1000 + 30 <= seconds(read(`deploy/${unitNames.probe}`), "TimeoutStopSec"), "the probe's stop timeout leaves 30 s for the close after the pauses");
+});
+
+test("unitNames names every unit file in deploy/", () => {
+  const files = readdirSync(new URL("../deploy/", import.meta.url)).filter((name) => /\.(service|timer|path)$/.test(name));
+  assert.deepEqual([...Object.values(unitNames)].sort(), files.sort());
+});
+
+test("the example configs and the probe protocol use the layout's ports, and the default preview ports stay clear of them", () => {
+  const control = JSON.parse(read("deploy/control.example.json")) as { listen: { port: number } };
+  const probe = JSON.parse(read("deploy/probe.example.json")) as { listen: { port: number }; previews: { gatewayPort: number } };
+  assert.equal(control.listen.port, ports.control);
+  assert.equal(ports.probe, probePort, "src/protocol may not import the layout, so routes.ts keeps its own copy");
+  assert.equal(probe.listen.port, ports.probe);
+  assert.equal(probe.previews.gatewayPort, ports.gateway);
+  for (const port of Object.values(ports)) assert.ok(port < defaultPreviewPorts.first || port > defaultPreviewPorts.last, `${port} is outside the preview range`);
+});
+
+test("control.json's db is opened from the control plane's working directory", () => {
+  const example = JSON.parse(read("deploy/control.example.json")) as Record<string, unknown>;
+  assert.equal(parseConfig(JSON.stringify({ ...example, db: "registry.db" })).db, `${stateDirs.control}/registry.db`);
+  assert.equal(parseConfig(JSON.stringify(example)).db, "/var/lib/nexus-control/registry.db");
+  assert.equal(parseConfig(JSON.stringify({ ...example, db: "/srv/nexus/registry.db" })).db, "/srv/nexus/registry.db");
 });

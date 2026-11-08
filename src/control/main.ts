@@ -49,7 +49,8 @@ import { runningCommit } from "../deploy/health.ts";
 import { chatgptTokenHandoff } from "./chatgpt-token.ts";
 import { isDraining, turnGate } from "./drain.ts";
 import { checkEveryMs, healthPasses, runDoctor, servedCertificate } from "./doctor-run.ts";
-import { backedUpAt, backupStatusFile, readBackupStatus } from "./backup-status.ts";
+import { backedUpAt, readBackupStatus } from "./backup-status.ts";
+import { backupStatusFile, controlPath, ports } from "../node-layout.ts";
 import { backgroundReadMs, recordingHealth, sampleOf } from "./node-metrics.ts";
 import { drainNodeMetrics } from "./node-metrics-store.ts";
 import { healthSampling } from "./health-sampling.ts";
@@ -58,11 +59,11 @@ import { followEvents } from "./follow-events.ts";
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
 const port = z.int().min(1).max(65_535);
 
-/** Clear of the probe's port and its gateway's, 7480 and 7481 by default. */
+/** Clear of every port in the node layout. */
 export const defaultPreviewPorts = { first: 10200, last: 10999 } as const;
 
 const configSchema = z.strictObject({
-  db: z.string().min(1),
+  db: z.string().min(1).transform(controlPath),
   https: z.strictObject({ hostname: z.string().regex(tsNet) }).optional(),
   gitIdentity: gitIdentitySchema.optional(),
   github: z.strictObject({ tokenFile: absolutePath }).optional(),
@@ -98,7 +99,7 @@ const configSchema = z.strictObject({
   tailscaledSocket: z.string().min(1).optional(),
   /** The https ports previews are published on. Each node gives a port to one pylon at a time. */
   previewPorts: z.strictObject({ first: port, last: port })
-    .refine((range) => range.first <= range.last && !(range.first <= 7443 && range.last >= 7443), "first must not be above last, and port 7443 is reserved for the dashboard")
+    .refine((range) => range.first <= range.last && !(range.first <= ports.dashboard && range.last >= ports.dashboard), `first must not be above last, and port ${ports.dashboard} is reserved for the dashboard`)
     .default(defaultPreviewPorts),
   /** Type "continue" into a Claude worker that stopped on its usage limit, once the limit resets. Off unless set. */
   resumeAfterUsageLimit: z.boolean().default(false),
@@ -258,14 +259,13 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   every(15_000, () => judgments.poll());
   const cleanup = cleanupPass({ registry, probes: probeMap, log });
   every(cleanupEveryMs, () => cleanup.poll());
-  const dashboardPort = 7443;
   const startedAt = Date.now();
   const doctor = () => runDoctor({
     registry, self: config.self.tailnetNodeId, startedAt,
     backupStatus: () => readBackupStatus(backupStatusFile),
     login: () => loginState(models, config.harness.model),
     // The API listens on one address, or on every one, where the loopback reaches it too.
-    certificate: async () => config.https ? servedCertificate(config.listen.host === "0.0.0.0" ? "127.0.0.1" : config.listen.host === "::" ? "::1" : config.listen.host, dashboardPort, config.https.hostname) : { kind: "none" },
+    certificate: async () => config.https ? servedCertificate(config.listen.host === "0.0.0.0" ? "127.0.0.1" : config.listen.host === "::" ? "::1" : config.listen.host, ports.dashboard, config.https.hostname) : { kind: "none" },
   });
   // An archived disk kept for its usage goes once a backup that began after its read verified.
   every(60_000, () => readBackupStatus(backupStatusFile).then((s) => {
@@ -278,7 +278,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   every(backgroundReadMs, () => sampling.poll());
   every(60_000, () => drainNodeMetrics(registry.pruneNodeMetrics, Date.now()).catch((err: unknown) => log(`pruning node metrics failed: ${(err as Error).message}`)));
   const api = await startApi({
-    ...(config.https ? { https: { port: dashboardPort, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
+    ...(config.https ? { https: { port: ports.dashboard, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
     prWatchEnabled: token !== null,
     reviews,
     ...threads.api,
