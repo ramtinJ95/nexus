@@ -49,8 +49,8 @@ export function openDb(path: string) {
     for (const fn of after) fn();
     return result;
   };
-  /** Runs `fn` once the transaction it is called in commits, and never if it rolls back. */
-  const afterCommit = (fn: () => void) => { committed.push(fn); };
+  /** Runs `fn` once the transaction it is called in commits, and never if it rolls back. Outside a transaction it runs at once. */
+  const afterCommit = (fn: () => void) => { if (transactionDepth > 0) committed.push(fn); else fn(); };
   const statements = new Map<string, StatementSync>();
   const sql = (text: string): StatementSync => {
     let statement = statements.get(text);

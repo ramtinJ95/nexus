@@ -63,7 +63,8 @@ test("work deferred to a commit runs once the outermost transaction commits, and
     throw new Error("abort");
   }), /abort/);
   db.transaction(() => db.afterCommit(() => ran.push("next")));
-  assert.deepEqual(ran, ["inner", "next"]);
+  db.afterCommit(() => ran.push("outside"));
+  assert.deepEqual(ran, ["inner", "next", "outside"]);
   db.db.close();
 });
 
