@@ -78,6 +78,7 @@ async function runSetup(container: string, commands: readonly string[]): Promise
   let output = "";
   for (const command of commands) {
     const left = deadline - Date.now();
+    if (left <= 0) return { exitCode: null, output };
     const step = await dockerExec(container, asRoot(command, left), { cwd: workspaceDir, timeoutMs: left + execGraceMs });
     output += step.output;
     if (step.exitCode !== 0) return { exitCode: step.exitCode, output };
