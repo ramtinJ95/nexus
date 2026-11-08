@@ -177,11 +177,15 @@ export const commandPolicies: { readonly [K in CommandKind]: CommandPolicy<K> } 
   "unlink-port": { lock: null, remembered: false, publishes: true },
 };
 
-/**
- * The caller has checked that the pylon runs. Sessions open in the checkout. A send-claude-outcome never comes here,
- * since the probe answers it from its own record of its sends.
- */
-export async function runCommand(pylonId: PylonId, command: Exclude<PylonCommand, { kind: "send-claude-outcome" }>, deps: ProbeDeps): Promise<CommandResult> {
+/** The probe's record of its sends to Claude sessions, by request ID. */
+export interface ClaudeSends {
+  outcome(pylonId: PylonId, requestId: string): Promise<Extract<CommandResult, { kind: "send-claude-outcome" }>>;
+}
+
+/** The caller has checked that the pylon runs. Sessions open in the checkout. */
+export async function runCommand(pylonId: PylonId, command: PylonCommand, deps: ProbeDeps, sends: ClaudeSends): Promise<CommandResult> {
+  // The probe's own record answers it, so it reaches no guest and works for a pylon whose guest cannot be had.
+  if (command.kind === "send-claude-outcome") return sends.outcome(pylonId, command.requestId);
   const guest = deps.backend.guest(pylonId);
   switch (command.kind) {
     case "exec":

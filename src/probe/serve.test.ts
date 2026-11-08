@@ -5,8 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { JobFailure } from "../protocol/jobs.ts";
 import type { PylonId } from "../ids.ts";
-import { startGateway } from "./gateway.ts";
-import { createTailscaleServe, readRoutes, tailscaleCli } from "./serve.ts";
+import { readRoutes, startPreviews, tailscaleCli } from "./serve.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./fake-tailscale.ts";
 
 const a = "pylon-a" as PylonId;
@@ -17,11 +16,16 @@ async function setup(t: import("node:test").TestContext, initial?: (gatewayOrigi
   const dir = await mkdtemp(join(tmpdir(), "nexus-serve-"));
   t.after(() => rm(dir, { recursive: true }));
   const routesFile = join(dir, "routes.json");
-  const gateway = await startGateway({ port: 0, routes: new Map(), origin: () => ({ unavailable: "unused" }), onHit: () => {} });
-  t.after(() => gateway.close());
-  const tailscale = fakeTailscale(initial && await initial(gateway.origin));
-  const warm = viaGateway(() => gateway.origin);
-  const serve = createTailscaleServe({ cli: tailscale.cli, gateway, routesFile, get: warm.get });
+  // The fake's first serve config names the gateway origin, which is known once the gateway listens.
+  let tailscale: ReturnType<typeof fakeTailscale> | undefined;
+  const warm = viaGateway(() => serve.origin);
+  const serve = await startPreviews({
+    port: 0, origin: () => ({ unavailable: "unused" }), onHit: () => {},
+    cli: (args, signal) => tailscale!.cli(args, signal), routesFile, get: warm.get,
+  });
+  t.after(() => serve.close());
+  tailscale = fakeTailscale(initial && await initial(serve.origin));
+  const gateway = { origin: serve.origin, routes: () => new Map(serve.routes().map(({ httpsPort, ...route }) => [httpsPort, route])) };
   const signal = AbortSignal.timeout(5000);
   return { gateway, tailscale, warm, serve, signal, routesFile };
 }
@@ -102,7 +106,7 @@ test("a converge that failed partway converges on retry", async (t) => {
   assert.deepEqual(tailscale.entries(), { 10000: gateway.origin });
   await serve.converge(a, previews, signal);
   assert.deepEqual(tailscale.entries(), { 10000: gateway.origin, 10001: gateway.origin });
-  assert.deepEqual([...gateway.routes].sort(), [[10000, { pylonId: a, service: "web" }], [10001, { pylonId: a, service: "api" }]]);
+  assert.deepEqual([...gateway.routes()].sort(), [[10000, { pylonId: a, service: "web" }], [10001, { pylonId: a, service: "api" }]]);
 });
 
 test("every converge writes the route table, a missing file reads as empty, and a malformed one is refused", async (t) => {
@@ -186,7 +190,7 @@ test("a spawn that carries a released port another pylon now holds fails, and le
 
   await assert.rejects(serve.converge(a, stale, signal), (err) => err instanceof JobFailure && err.code === "backend" && /10001 routes to pylon-b/.test(err.message));
   await serve.converge(a, [{ service: "web", httpsPort: 10000 }], signal);
-  assert.deepEqual(gateway.routes.get(10001), { pylonId: b, service: "web" });
+  assert.deepEqual(gateway.routes().get(10001), { pylonId: b, service: "web" });
   assert.deepEqual(tailscale.entries(), { 10000: gateway.origin, 10001: gateway.origin });
   assert.equal(await warm.get(`https://${nodeHost}:10001/`, { "x-nexus-warm": "pylon-b/web" }, signal), 204);
 });
@@ -200,7 +204,7 @@ test("two pylons that each want the port the other still routes drop their own f
   assert.deepEqual(tailscale.entries(), { 10002: gateway.origin }, "a's own obsolete entry went before its converge failed");
   await serve.converge(b, [{ service: "web", httpsPort: 10001 }], signal);
   await serve.converge(a, [{ service: "web", httpsPort: 10002 }], signal);
-  assert.deepEqual([gateway.routes.get(10001), gateway.routes.get(10002)], [{ pylonId: b, service: "web" }, { pylonId: a, service: "web" }]);
+  assert.deepEqual([gateway.routes().get(10001), gateway.routes().get(10002)], [{ pylonId: b, service: "web" }, { pylonId: a, service: "web" }]);
 });
 
 test("a withdraw whose write failed writes the table when it is asked again", async (t) => {

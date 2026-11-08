@@ -5,7 +5,7 @@
  * Ownership:
  * - An entry is Nexus's when its only handler proxies `/` to the gateway origin. Nothing else is ever changed,
  *   and a wanted port held by anything else fails the job. So the gateway port must stay fixed across restarts.
- * - Which pylon an entry belongs to is the gateway's route table. Every converge writes it to the routes file and
+ * - Which pylon an entry belongs to is the gateway's route table, which only startPreviews holds. Every converge writes it to the routes file and
  *   the probe loads it at start, because a paused pylon keeps its previews and is not re-spawned after a probe
  *   restart. An entry of Nexus's that the table does not map was withdrawn, or is left from a converge that stopped
  *   between adding it and writing the file, and any converge removes it.
@@ -20,7 +20,7 @@ import { readJson, saveJson } from "../json-file.ts";
 import type { PreviewAssignment } from "../protocol/spawn.ts";
 import type { PylonId } from "../ids.ts";
 import { serialQueue } from "../single-flight.ts";
-import { warmHeader, type PreviewGateway, type PreviewRoute } from "./gateway.ts";
+import { startGateway, warmHeader, type GatewayOptions, type PreviewGateway, type PreviewRoute } from "./gateway.ts";
 
 /** Runs the tailscale CLI and resolves to its stdout. Rejects when it exits nonzero. */
 export type TailscaleCli = (args: readonly string[], signal: AbortSignal) => Promise<string>;
@@ -42,42 +42,66 @@ export const fetchGet: HttpsGet = async (url, headers, signal) => {
 /** S4's first request hung in TLS for 15 s and a retry passed, so attempts are short and repeated. */
 const warm = { attemptMs: 10_000, budgetMs: 60_000, pauseMs: 500 } as const;
 
-export function createTailscaleServe(options: {
+/** The preview gateway and the serve entries in front of it, over the route table that only they share. */
+export interface Previews extends TailscaleServe {
+  readonly origin: PreviewGateway["origin"];
+  /** Each https port the gateway routes, with the pylon and service it routes to. */
+  routes(): RouteRecord[];
+  /** The URL of each https port whose serve entry is Nexus's. */
+  urls(signal: AbortSignal): Promise<Map<number, string>>;
+  close(): Promise<void>;
+}
+
+export async function startPreviews(options: Omit<GatewayOptions, "route"> & {
   cli: TailscaleCli;
-  gateway: Pick<PreviewGateway, "origin" | "routes">;
-  /** Where the route table is kept between probe runs. Load it with readRoutes before the gateway starts. */
+  /** Where the route table is kept between probe runs. */
   routesFile: string;
   get?: HttpsGet | undefined;
-}): TailscaleServe {
-  const { cli, gateway } = options;
-  const get = options.get ?? fetchGet;
+}): Promise<Previews> {
+  const { cli, routesFile, get, ...gatewayOptions } = options;
+  const routes = await readRoutes(routesFile);
+  const gateway = await startGateway({ ...gatewayOptions, route: (port) => routes.get(port) });
+  const serve = tailscaleServe(cli, gateway.origin, routes, routesFile, get ?? fetchGet);
+  return {
+    ...serve,
+    origin: gateway.origin,
+    routes: () => routeRecords(routes),
+    async urls(signal) {
+      const served = parseServeStatus(await cli(["serve", "status", "--json"], signal), gateway.origin);
+      return new Map([...served].flatMap(([httpsPort, entry]) => entry.kind === "nexus" ? [[httpsPort, entry.url]] : []));
+    },
+    close: () => gateway.close(),
+  };
+}
+
+function tailscaleServe(cli: TailscaleCli, origin: PreviewGateway["origin"], routes: Map<number, PreviewRoute>, routesFile: string, get: HttpsGet): TailscaleServe {
   const changes = serialQueue();
 
   async function status(signal: AbortSignal): Promise<Map<number, Listener>> {
-    return parseServeStatus(await cli(["serve", "status", "--json"], signal), gateway.origin);
+    return parseServeStatus(await cli(["serve", "status", "--json"], signal), origin);
   }
 
   async function apply(pylonId: PylonId, previews: readonly PreviewAssignment[], signal: AbortSignal): Promise<Map<number, string>> {
     signal.throwIfAborted();
     const listeners = await status(signal);
-    const { add, remove, taken } = planServe(pylonId, previews, listeners, gateway.routes);
+    const { add, remove, taken } = planServe(pylonId, previews, listeners, routes);
     try {
       // Before a taken port fails the job, so two pylons that each want a port the other still routes do not both wait.
       for (const port of remove) {
         await cli(["serve", `--https=${port}`, "off"], signal);
-        gateway.routes.delete(port);
+        routes.delete(port);
       }
-      for (const [port, route] of gateway.routes) {
-        if (route.pylonId === pylonId && !previews.some((p) => p.httpsPort === port)) gateway.routes.delete(port);
+      for (const [port, route] of routes) {
+        if (route.pylonId === pylonId && !previews.some((p) => p.httpsPort === port)) routes.delete(port);
       }
       // A spawn that carries a port its pylon has since released, which another pylon now holds. Retried, the
       // pylon's next spawn carries its current previews.
       const [first] = taken;
       if (first !== undefined) throw new JobFailure("backend", `https port ${first.port} routes to ${first.owner}, so it cannot also route to ${pylonId}`);
-      for (const { service, httpsPort } of previews) gateway.routes.set(httpsPort, { pylonId, service });
-      for (const port of add) await cli(["serve", "--bg", `--https=${port}`, gateway.origin], signal);
+      for (const { service, httpsPort } of previews) routes.set(httpsPort, { pylonId, service });
+      for (const port of add) await cli(["serve", "--bg", `--https=${port}`, origin], signal);
     } finally {
-      await writeRoutes(options.routesFile, gateway.routes);
+      await writeRoutes(routesFile, routes);
     }
     const after = add.length + remove.length === 0 ? listeners : await status(signal);
     const urls = new Map<number, string>();
@@ -115,16 +139,16 @@ export function createTailscaleServe(options: {
       // The entry is then Nexus's and unmapped, which the next converge of any pylon removes. Written even when the
       // table no longer maps it, because an earlier withdraw may have failed to write.
       await changes.run(async () => {
-        for (const [port, route] of gateway.routes) {
-          if (route.pylonId === pylonId && route.service === service) gateway.routes.delete(port);
+        for (const [port, route] of routes) {
+          if (route.pylonId === pylonId && route.service === service) routes.delete(port);
         }
-        await writeRoutes(options.routesFile, gateway.routes);
+        await writeRoutes(routesFile, routes);
       });
     },
   };
 }
 
-interface RouteRecord extends PreviewRoute { httpsPort: number }
+export interface RouteRecord extends PreviewRoute { httpsPort: number }
 
 /** A missing file is an empty table: the probe's first start on this node. */
 export async function readRoutes(file: string): Promise<Map<number, PreviewRoute>> {
@@ -135,8 +159,10 @@ export async function readRoutes(file: string): Promise<Map<number, PreviewRoute
   return new Map((records as RouteRecord[]).map(({ httpsPort, pylonId, service }) => [httpsPort, { pylonId, service }]));
 }
 
+const routeRecords = (routes: ReadonlyMap<number, PreviewRoute>) => [...routes].map(([httpsPort, route]): RouteRecord => ({ httpsPort, ...route }));
+
 async function writeRoutes(file: string, routes: ReadonlyMap<number, PreviewRoute>): Promise<void> {
-  await saveJson(file, [...routes].map(([httpsPort, route]): RouteRecord => ({ httpsPort, ...route })));
+  await saveJson(file, routeRecords(routes));
 }
 
 /** What `tailscale serve status --json` says about one https port. */

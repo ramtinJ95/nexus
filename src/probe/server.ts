@@ -13,29 +13,30 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { Duplex } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { type BackendPylon, type VmBackend } from "../backends/backend.ts";
-import { commandPolicies, runCommand, type CommandPolicy, type ProbeDeps } from "./run.ts";
+import type { ProbeDeps } from "./run.ts";
 import { createJobTable } from "./jobs.ts";
-import { isPortableArtifactId, shutdownCheckpointId, type JobId, type PortableArtifactId, type NodeName, type PylonId, type TailnetNodeId } from "../ids.ts";
+import { isPortableArtifactId, type JobId, type NodeName, type PylonId, type TailnetNodeId } from "../ids.ts";
 import { jobDeadlineMs, JobFailure, type Job } from "../protocol/jobs.ts";
 import { encodeProbeEvent, heldSecrets, type NodeObservation, type ProbeEvent } from "../protocol/observations.ts";
-import { parsePylonCommand, type CommandResult, type PylonCommand } from "../protocol/commands.ts";
+import { parsePylonCommand, type PylonCommand } from "../protocol/commands.ts";
 import { notAnswering, parseStreamRequest, serveByteStream, streamUpgradeResponse, type ByteStream } from "../protocol/streams.ts";
 import { artifactHeaders, fetchArtifact } from "../protocol/artifacts.ts";
-import { dropRequestSchema, type ArtifactUsage, type DeleteOutcome, type DropRequest } from "../protocol/cleanup.ts";
+import { dropRequestSchema, type DropRequest } from "../protocol/cleanup.ts";
 import { peersSchema, probePort, probeRoutes, routeRole, type CallerRole, type GitReadReply, type ParamsOf, type ProbeAuthConfig, type ProbeRoute } from "../protocol/routes.ts";
 import { linkedName, type ServiceName } from "../services-file.ts";
-import { claudeSessionLock } from "./guest/session-wake.ts";
 import type { Whois } from "../protocol/http.ts";
-import { readBody } from "../request-body.ts";
+import { BodyTooLarge, readBody } from "../request-body.ts";
 import { redact } from "./redact.ts";
 import { hostCapacity, readNodeHealth } from "./host.ts";
-import { rawResponse, startGateway } from "./gateway.ts";
+import { rawResponse } from "./gateway.ts";
 import { createPylonApi } from "./pylon-api.ts";
-import { createTailscaleServe, parseServeStatus, readRoutes, type HttpsGet, type TailscaleCli } from "./serve.ts";
+import { startPreviews, type HttpsGet, type TailscaleCli } from "./serve.ts";
 import { serialQueue, singleFlight } from "../single-flight.ts";
 import type { NodeSecrets } from "./config.ts";
 import { createPylonStates } from "./pylon-facts.ts";
-import { afterShutdown, readShutdownRecord, saveShutdownRecord, type DrainOutcome, type ShutdownRecord } from "./shutdown.ts";
+import { probeShutdown, type DrainOutcome } from "./shutdown.ts";
+import { artifactCleanup } from "./artifacts-route.ts";
+import { createCommands } from "./commands-route.ts";
 
 export interface ProbeOptions {
   node: NodeName;
@@ -94,9 +95,6 @@ const maxSecretBytes = 16_384;
 /** RFC 6750's b64token, the alphabet bearer tokens are written in. */
 const tokenAlphabet = /^[A-Za-z0-9\-._~+/]+=*$/;
 const sum = (pylons: readonly BackendPylon[], resource: keyof NonNullable<BackendPylon["holds"]>) => pylons.reduce((total, p) => total + (p.holds?.[resource] ?? 0), 0);
-const claudeSendMemoryMs = 60 * 60_000;
-/** How long a drain waits for its last events to leave for each observer. */
-const observerFlushMs = 1_000;
 
 /** A probe without a preview gateway. An empty set is already converged. */
 const noPreviews: ProbeDeps["serve"] = {
@@ -115,29 +113,24 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   const streamTiming = options.streamTiming ?? { startMs: 8_000, hangUpMs: 10_000 };
   const peerAddress = options.peerAddress ?? ((peer: NodeName) => ({ host: peer, port: probePort }));
   const bootId = randomUUID();
-  /**
-   * The node's last shutdown, as its record says: each pylon it found running that no spawn or delete has dealt with
-   * since. Snapshots mark these for a wake. A drain writes a record of its own, which only the next boot's probe loads.
-   */
-  const lastShutdown: ShutdownRecord = options.shutdownFile === undefined ? new Map() : await readShutdownRecord(options.shutdownFile);
+  const log = options.log ?? console.error;
+  const nodeShutdown = await probeShutdown(options.shutdownFile, log);
   if (backend.eventJournal !== undefined) await mkdir(dirname(backend.eventJournal), { recursive: true, mode: 0o700 });
   const journal = eventJournal(backend.eventJournal ?? ":memory:");
   const shutdown = new AbortController();
-  const log = options.log ?? console.error;
-  const previews = options.previews === undefined ? null : {
-    ...options.previews,
-    gateway: await startGateway({
-      port: options.previews.gatewayPort,
-      routes: await readRoutes(options.previews.routesFile),
-      origin: ({ pylonId, service }) => backend.guest(pylonId).previewOrigin(service),
-      onHit: (hit) => emit({ type: "preview-hit", ...hit }),
-      log,
-    }),
-  };
+  const previews = options.previews === undefined ? null : await startPreviews({
+    port: options.previews.gatewayPort,
+    origin: ({ pylonId, service }) => backend.guest(pylonId).previewOrigin(service),
+    onHit: (hit) => emit({ type: "preview-hit", ...hit }),
+    log,
+    cli: options.previews.tailscale,
+    routesFile: options.previews.routesFile,
+    get: options.previews.get,
+  });
   /** What leaves the node in a failure, with every value this probe holds, and what looks like a secret, redacted. */
   const redacted = (text: string) => redact(text, options.secrets.names().flatMap((name) => options.secrets.value(name) ?? []));
   const pylons = createPylonStates({ backend, log, redacted });
-  const serve = previews === null ? noPreviews : createTailscaleServe({ cli: previews.tailscale, gateway: previews.gateway, routesFile: previews.routesFile, get: previews.get });
+  const serve = previews ?? noPreviews;
   const deps: ProbeDeps = {
     backend,
     secrets: options.secrets,
@@ -151,19 +144,6 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   };
   /** `flushed` settles once the observer's last write has left the probe, or failed to. */
   const observers = new Set<{ write(event: ProbeEvent): void; drop(err: Error): void; flushed(): Promise<void> }>();
-  /** Aborted once the node's shutdown drains the probe, which then starts no job but the drain's own pauses. */
-  const draining = new AbortController();
-
-  /** Saves run in the order they were asked for, so the drain's record, asked for last, is the one the file keeps. */
-  const recordSaves = serialQueue();
-  function saveRecord(record: ShutdownRecord): Promise<void> {
-    const copy = new Map(record);
-    return recordSaves.run(async () => { if (options.shutdownFile !== undefined) await saveShutdownRecord(options.shutdownFile, copy); })
-      .catch((err: Error) => log(`shutdown record: ${err.message}`));
-  }
-  function forgetShutdown(pylonId: PylonId) {
-    if (lastShutdown.delete(pylonId) && !draining.signal.aborted) void saveRecord(lastShutdown);
-  }
   /** Upgraded sockets, which the HTTP server no longer tracks, so close() ends them itself. */
   const streamSockets = new Set<Duplex>();
 
@@ -174,16 +154,12 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     published: pylons.published,
     changed: () => void publishSnapshot(),
     ports: deps.ports,
-    async previewUrls() {
-      if (previews === null) return new Map();
-      const served = parseServeStatus(await previews.tailscale(["serve", "status", "--json"], shutdown.signal), previews.gateway.origin);
-      return new Map([...served].flatMap(([httpsPort, entry]) => entry.kind === "nexus" ? [[httpsPort, entry.url]] : []));
-    },
+    previewUrls: async () => previews === null ? new Map() : previews.urls(shutdown.signal),
   });
 
   const jobs = createJobTable({
-    node, deadlines, deps, closed: shutdown.signal, draining: draining.signal, emit, redacted, publishSnapshot: () => publishSnapshot(),
-    effects: { pylons, republished: () => api.republished(), forgetShutdown },
+    node, deadlines, deps, closed: shutdown.signal, draining: nodeShutdown.draining, emit, redacted, publishSnapshot: () => publishSnapshot(),
+    effects: { pylons, republished: () => api.republished(), forgetShutdown: nodeShutdown.forget },
   });
 
   /** Between snapshots, a change in what a running pylon listens on publishes one. Without observers nobody would see it, so nothing is read. */
@@ -194,43 +170,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
 
   const storage = backend.storage ?? null;
   const watched = options.watched ?? [];
-  // An artifact never changes once published, so its size is read once.
-  const artifactBytes = new Map<PortableArtifactId, number>();
-  // What each cleanup delete freed, so a resent delete whose first reply was lost, as to a timeout, still reports it,
-  // and each delete in flight, which a resend that arrives meanwhile waits for.
-  const deleted = new Map<PortableArtifactId, number>();
-  const deleting = new Map<PortableArtifactId, Promise<DeleteOutcome>>();
-  async function dropOnce(id: PortableArtifactId): Promise<DeleteOutcome> {
-    const run = (async (): Promise<DeleteOutcome> => {
-      // Read as the delete starts, since another request may have deleted it while this one waited on an earlier item.
-      // What the node lists is what its observation reported, and what the person was asked about.
-      if (!(await backend.artifacts.list()).includes(id)) {
-        // A delete a crash cut short left what it set aside, which the backend's drop of an absent artifact removes.
-        await backend.artifacts.drop(id).catch(() => undefined);
-        const freed = deleted.get(id);
-        return freed === undefined ? { state: "gone" } : { state: "deleted", bytes: freed };
-      }
-      const bytes = await sizeOf(id) ?? 0;
-      try {
-        await backend.artifacts.drop(id);
-      } catch (err) {
-        return { state: "skipped", reason: (err as Error).message };
-      }
-      artifactBytes.delete(id);
-      deleted.set(id, bytes);
-      log(`artifact ${id}: deleted by the person's cleanup, freeing ${bytes} bytes`);
-      return { state: "deleted", bytes };
-    })();
-    deleting.set(id, run);
-    try { return await run; } finally { deleting.delete(id); }
-  }
-  const sizeOf = async (id: PortableArtifactId): Promise<number | null> => {
-    const known = artifactBytes.get(id);
-    if (known !== undefined) return known;
-    const bytes = await backend.artifacts.bytes?.(id) ?? null;
-    if (bytes !== null) artifactBytes.set(id, bytes);
-    return bytes;
-  };
+  const cleanup = artifactCleanup(backend.artifacts, log);
 
   /**
    * Reads run one at a time, so snapshots resolve, and are published, in the order they were read. Otherwise a
@@ -262,27 +202,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     });
   }
 
-  /**
-   * Each send to a Claude session by its request ID, until an hour after it settles, so a control plane whose wait for
-   * one ran out, as behind a slow send to the same session, learns what became of it instead of typing it again. They
-   * are held in memory, so a restarted probe knows none.
-   */
-  const claudeSendsById = new Map<string, Promise<CommandResult>>();
-  function remember(pylonId: PylonId, requestId: string, sending: Promise<CommandResult>) {
-    const key = `${pylonId} ${requestId}`;
-    claudeSendsById.set(key, sending);
-    void sending.catch(() => undefined).then(() => setTimeout(() => { if (claudeSendsById.get(key) === sending) claudeSendsById.delete(key); }, claudeSendMemoryMs).unref());
-  }
-  async function outcomeOf(pylonId: PylonId, requestId: string): Promise<CommandResult> {
-    const sending = claudeSendsById.get(`${pylonId} ${requestId}`);
-    if (sending === undefined) return { kind: "send-claude-outcome", send: "unknown" };
-    try {
-      const { outcome, herdrPane, resumed } = await sending as Extract<CommandResult, { kind: "send-claude" }>;
-      return { kind: "send-claude-outcome", send: { outcome, herdrPane, resumed } };
-    } catch {
-      return { kind: "send-claude-outcome", send: "failed" };
-    }
-  }
+  const commands = createCommands(deps, () => void publishSnapshot());
 
   async function readSnapshot(): Promise<NodeObservation> {
     // Jobs before pylons, so the pylons show the result of every job listed as finished. See NodeObservation.jobs.
@@ -292,7 +212,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     const artifacts = [...await backend.artifacts.list(), ...listed.flatMap((p) => p.vm === "stopped" && p.checkpoint !== null ? [p.checkpoint] : [])];
     const present = new Set(listed.map((p) => p.pylonId));
     pylons.missing(present);
-    for (const id of lastShutdown.keys()) if (!present.has(id)) forgetShutdown(id);
+    nodeShutdown.listed(present);
     return {
       node,
       observedAt: new Date().toISOString(),
@@ -305,8 +225,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       },
       artifacts,
       jobs: retained,
-      pylons: await Promise.all(listed.map(async (p) => afterShutdown(await pylons.observation(p), lastShutdown.get(p.pylonId)))),
-      previewRoutes: previews === null ? [] : [...previews.gateway.routes].map(([httpsPort, route]) => ({ httpsPort, ...route })),
+      pylons: await Promise.all(listed.map(async (p) => nodeShutdown.marked(await pylons.observation(p)))),
+      previewRoutes: previews?.routes() ?? [],
       grants: { secrets: options.secrets.names(), gitSsh: backend.gitSsh ?? false },
       ...backend.nestedVirtualization === true ? { nestedVirtualization: true as const } : {},
       heldSecrets,
@@ -330,42 +250,6 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     }, (err: Error) => { for (const o of observers) o.drop(err); });
   }, () => shutdown.signal.aborted);
   const publishSnapshot = (): Promise<void> => publisher.rerun();
-
-  let drained: Promise<readonly DrainOutcome[]> | undefined;
-  async function drainPylons(withinMs: number): Promise<readonly DrainOutcome[]> {
-    const startedAt = Date.now();
-    const left = () => Math.max(0, startedAt + withinMs - Date.now());
-    const outOfTime = `it did not pause within the shutdown's ${withinMs / 1000} s`;
-    draining.abort(new Error("the node is shutting down"));
-    // A pause the control plane sent finishes as it would have, and its pylon is then no longer running.
-    const onPylons = [...jobs.running].filter(([, job]) => "pylonId" in job).map(([run]) => run);
-    await Promise.race([Promise.allSettled(onPylons), delay(left(), undefined, { ref: false })]);
-    const listed = await backend.list();
-    const present = new Set(listed.map((p) => p.pylonId));
-    // A broken disk is left as it is, as the planner leaves it (see retryRefusal in reconcile.ts).
-    const targets = listed.filter((p) => p.vm === "running" || p.vm === "booting" || p.vm === "stopping").map((p) => p.pylonId);
-    const record: ShutdownRecord = new Map([...lastShutdown].filter(([id]) => present.has(id)));
-    for (const pylonId of targets) record.set(pylonId, {});
-    await saveRecord(record);
-    const outcomes = await Promise.all(targets.map(async (pylonId): Promise<DrainOutcome> => {
-      const pausing = Date.now();
-      const budget = left();
-      // Busy only with a job the wait above gave up on, as it ran past the shutdown's time. The race bounds a backend
-      // that does not stop at the abort, as pylon-vm's stop does not.
-      const status = jobs.busy(pylonId) ? null : await Promise.race([jobs.start({
-        jobId: randomUUID() as JobId, node, issuedAt: new Date(pausing).toISOString(), notAfter: new Date(pausing).toISOString(),
-        job: { kind: "pause", pylonId, checkpoint: shutdownCheckpointId(pylonId, startedAt) },
-      }, pylonId, budget).ended, delay(budget, null, { ref: false })]);
-      if (status?.state === "succeeded") return { pylonId, pausedInMs: Date.now() - pausing };
-      const failed = status?.state === "failed" && status.code !== "deadline" ? status.message : outOfTime;
-      record.set(pylonId, { failed });
-      await saveRecord(record);
-      return { pylonId, failed };
-    }));
-    // close() destroys the observe streams at once, which would drop the snapshot that shows the pylons paused.
-    await Promise.race([Promise.all([...observers].map((o) => o.flushed())), delay(observerFlushMs, undefined, { ref: false })]);
-    return outcomes;
-  }
 
   async function observe(res: ServerResponse) {
     // Events that arrive while the first snapshot is built go out after it, in order, except older snapshots.
@@ -436,23 +320,13 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       return observe(res);
     },
     async command(req, res, params) {
-      const pylonId = params.pylonId as PylonId;
       let command: PylonCommand;
       try {
         command = parsePylonCommand(await readBody(req));
       } catch (err) {
         return send(res, 400, (err as Error).message);
       }
-      const asked = command;
-      // Each kind's policy takes its own kind of command and result, which command.kind picks.
-      const policy = commandPolicies[command.kind] as CommandPolicy<PylonCommand["kind"]>;
-      const run = () => asked.kind === "send-claude-outcome" ? outcomeOf(pylonId, asked.requestId) : runCommand(pylonId, asked, deps);
-      const session = typeof policy.lock === "function" ? policy.lock(command) : undefined;
-      const running = session !== undefined ? claudeSessionLock(pylonId)([session], run) : run();
-      if (policy.remembered && "requestId" in command && command.requestId !== undefined) remember(pylonId, command.requestId, running);
-      const result = await running;
-      if (typeof policy.publishes === "function" ? policy.publishes(result) : policy.publishes) void publishSnapshot();
-      return send(res, 200, JSON.stringify(result), "application/json");
+      return send(res, 200, JSON.stringify(await commands(params.pylonId as PylonId, command)), "application/json");
     },
     async readGit(_req, res, params) {
       const pylonId = params.pylonId as PylonId;
@@ -474,7 +348,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       let value: string;
       try {
         value = await readBody(req, maxSecretBytes);
-      } catch {
+      } catch (err) {
+        if (!(err instanceof BodyTooLarge)) throw err;
         return send(res, 400, `a secret value is at most ${maxSecretBytes} bytes`);
       }
       if (!tokenAlphabet.test(value)) return send(res, 400, "a secret value is a token: letters, digits and -._~+/ with optional = padding");
@@ -521,11 +396,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       return pipeline(stream, res).catch((err: Error) => log(`artifact ${id}: ${err.message}`));
     },
     async artifactUsage(_req, res) {
-      const sized = await Promise.all((await backend.artifacts.list()).map(async (id) => ({ id, bytes: await sizeOf(id) })));
-      const usage: ArtifactUsage = { artifacts: sized.filter((a): a is { id: PortableArtifactId; bytes: number } => a.bytes !== null) };
-      return send(res, 200, JSON.stringify(usage), "application/json");
+      return send(res, 200, JSON.stringify(await cleanup.usage()), "application/json");
     },
-    /** The backend refuses an artifact a pylon, a template or a create still needs, which leaves it skipped with the refusal. */
     async dropArtifacts(req, res) {
       let asked: DropRequest;
       try {
@@ -533,8 +405,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       } catch (err) {
         return send(res, 400, `a cleanup names the artifacts to delete, as {"drop": [...]}: ${(err as Error).message}`);
       }
-      const outcomes: Record<string, DeleteOutcome> = {};
-      for (const id of new Set(asked.drop)) outcomes[id] = await (deleting.get(id) ?? dropOnce(id));
+      const outcomes = await cleanup.drop(asked.drop);
       void publishSnapshot();
       return send(res, 200, JSON.stringify({ outcomes }), "application/json");
     },
@@ -593,6 +464,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
 
   const server = createServer((req, res) => {
     handle(req, res).catch((err: unknown) => {
+      // A request whose body broke off, or a reply that broke off, has nobody left to tell.
+      if (res.headersSent || res.destroyed) log(`${req.method} ${req.url}: ${(err as Error).message}`);
       if (res.headersSent) return res.destroy(err as Error);
       send(res, 500, (err as Error).message);
     });
@@ -617,13 +490,13 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     server.listen(options.port, options.host);
     await once(server, "listening");
   } catch (err) {
-    await previews?.gateway.close(); // its port is fixed, so a retry in this process needs it free
+    await previews?.close(); // its port is fixed, so a retry in this process needs it free
     throw err;
   }
   const address = server.address();
   if (address === null || typeof address === "string") throw new Error(`unexpected server address ${address}`);
   const bridge = await backend.hostBridge?.(api.answer).catch(async (err: unknown) => {
-    await Promise.all([new Promise((resolve) => server.close(resolve)), previews?.gateway.close()]);
+    await Promise.all([new Promise((resolve) => server.close(resolve)), previews?.close()]);
     throw err;
   });
   const listeningTimer = setInterval(() => void listeningPoll.join(), options.listeningPollMs ?? 10_000);
@@ -631,7 +504,10 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   return {
     port: address.port,
     bootId,
-    drain: (withinMs) => drained ??= drainPylons(withinMs),
+    drain: (withinMs) => nodeShutdown.drain(withinMs, {
+      node, backend, jobs,
+      flushed: async () => { await Promise.all([...observers].map((o) => o.flushed())); },
+    }),
     async close() {
       shutdown.abort(new Error("probe closed"));
       clearInterval(listeningTimer);
@@ -640,8 +516,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       for (const socket of streamSockets) socket.destroy();
       await Promise.allSettled([...jobs.running.keys()]);
       // A spawn that woke a pylon drops its mark, which a restart right after must not read back.
-      await recordSaves.run(async () => {});
-      await Promise.all([closed, previews?.gateway.close(), bridge?.close()]);
+      await nodeShutdown.saved();
+      await Promise.all([closed, previews?.close(), bridge?.close()]);
       journal.close();
     },
   };
