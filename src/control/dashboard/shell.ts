@@ -104,6 +104,10 @@ export function closedLabel(threads: readonly Thread[]): string {
   return [archived > 0 && `${archived} archived`, deleted > 0 && `${deleted} deleted`].filter(Boolean).join(", ");
 }
 
+/** How many threads a fold lists before it links to its own page, which keeps every page small however many threads close. */
+export const foldCap = 100;
+export const foldHref = (kind: "quiet" | "closed", project: string, page = 1) => `/threads/${kind}?project=${encodeURIComponent(project)}${page > 1 ? `&page=${page}` : ""}`;
+
 function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): Html {
   const projects = c.registry.projects();
   // A thread works in its own checkout, as a Jetline workspace does, so its row shows a branch with its state as a badge.
@@ -130,8 +134,8 @@ ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>`
 <summary class="group-h">${icon("chevron")}${icon("folder")}<span class="group-name"><span>${p.id}</span><span class="group-branch">${p.defaultBranch}</span></span></summary>
 <a class="group-new" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}" aria-label="New thread in ${p.id}" title="New thread in ${p.id}">${icon("plus")}</a>
 ${recent.length + queued.length > 0 && html`<ul>${recent.map(row)}${queued.map(queuedRow)}</ul>`}
-${quiet.length > 0 && html`<details class="archived" id="side-quiet-${p.id}"${quiet.some((t) => t.id === active) && " open"}><summary>${quietLabel(quiet)}</summary><ul>${quiet.map(row)}</ul></details>`}
-${closed.length > 0 && html`<details class="archived" id="archived-${p.id}"${closed.some((t) => t.id === active) && " open"}><summary>${closedLabel(closed)}</summary><ul>${closed.map(row)}</ul></details>`}
+${quiet.length > 0 && html`<details class="archived" id="side-quiet-${p.id}"${quiet.some((t) => t.id === active) && " open"}><summary>${quietLabel(quiet)}</summary><ul>${quiet.filter((t, i) => i < foldCap || t.id === active).map(row)}</ul>${quiet.length > foldCap && html`<a class="archived-link" href="${foldHref("quiet", p.id)}">All ${quiet.length} quiet</a>`}</details>`}
+${closed.length > 0 && html`<a class="archived-link" id="archived-${p.id}" href="${foldHref("closed", p.id)}">${closedLabel(closed)}</a>${closed.filter((t) => t.id === active).map((t) => html`<ul class="archived">${row(t)}</ul>`)}`}
 </details>`;
 })}
 </nav>

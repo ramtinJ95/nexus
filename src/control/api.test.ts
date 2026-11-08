@@ -597,7 +597,7 @@ test("only a person acts on a thread, its pylon or a project, never the control 
   assert.deepEqual(reviewed.map((r) => r[0]), ["start", "cancel"]);
 });
 
-test("the route table holds the routes it always has, and each path matches one route of its method, so their order is free except for /threads/new before the thread page", () => {
+test("the route table holds the routes it always has, and each path matches one route of its method, so their order is free except for /threads/new, /threads/closed and /threads/quiet before the thread page", () => {
   const table = featureRoutes({} as ApiKit, {} as ApiOptions, async () => { throw new Error("unused"); });
   const described = table.map((entry) => {
     const policy = entry[2];
@@ -618,7 +618,9 @@ test("the route table holds the routes it always has, and each path matches one 
     "GET ^\\/projects\\/new$ allowed",
     "GET ^\\/threads\\/([^/]+)$ allowed",
     "GET ^\\/threads\\/([^/]+)\\/stream$ allowed",
+    "GET ^\\/threads\\/closed$ allowed",
     "GET ^\\/threads\\/new$ allowed",
+    "GET ^\\/threads\\/quiet$ allowed",
     "GET ^\\/usage$ allowed",
     "GET ^\\/v1\\/checks$ allowed",
     "GET ^\\/v1\\/checks\\/changes$ allowed",
@@ -686,7 +688,7 @@ test("the route table holds the routes it always has, and each path matches one 
   for (const [method, regex] of routes) {
     const path = regex.source.slice(1, -1).replaceAll("\\/", "/").replaceAll("([^/]+)", "x").replaceAll("([\\w.-]+)", "x");
     const matching = routes.filter((other) => other[0] === method && other[1].test(path));
-    assert.equal(matching.length, path === "/threads/new" ? 2 : 1, `${method} ${path} matches ${matching.length} routes of its method`);
+    assert.equal(matching.length, ["/threads/new", "/threads/closed", "/threads/quiet"].includes(path) ? 2 : 1, `${method} ${path} matches ${matching.length} routes of its method`);
     assert.equal(matching[0]![1], regex);
   }
 });

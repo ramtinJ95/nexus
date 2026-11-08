@@ -1,6 +1,6 @@
 200 text/html; charset=utf-8
 what differs from pages/index.html:
-@@ -2105,8 +2105,8 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+@@ -2028,8 +2028,8 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
  </div>
  </details>
  </article>
@@ -11,7 +11,7 @@ what differs from pages/index.html:
  <summary class="need-sum" data-why="project storefront waits for the person to approve each item: nexus item approve it-giftcards">
  <svg class="i i-chevron" viewBox="0 0 16 16" aria-hidden="true">
  <path d="M6 4l4 4-4 4"/>
-@@ -2221,7 +2221,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+@@ -2144,7 +2144,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
  </a>
  </li>
  <li>

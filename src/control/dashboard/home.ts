@@ -11,7 +11,8 @@ import type { Context } from "./context.ts";
 import type { HeldWork, InboxNeed } from "../work.ts";
 import { prose, inline } from "./markdown.ts";
 import { cleanupCard, judgmentCards, questionCard, landing, nudgeCard, resumeCard } from "./cards.ts";
-import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, type Shell } from "./shell.ts";
+import { queuedView } from "../queue.ts";
+import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, foldCap, foldHref, type Shell } from "./shell.ts";
 import { lifeOfThread, roleLine, type Life } from "./lifecycle.ts";
 import { threadRole } from "../work-model.ts";
 import { flightLines, flightRows, flightStack, heldLine, inFlight, itemActions, itemBrief, peekHref, peekKey, peekView, type Peek } from "./flight.ts";
@@ -62,11 +63,10 @@ function autoReviewSwitch(c: Context, p: Project): Html {
 })}</span>`;
 }
 
-/** Each project's threads as a table of what each pylon is asked to be and is, with its queued threads and its quiet and closed folds. */
-function overview(c: Context): Html {
-  const projects = c.registry.projects();
+/** Threads as a table of what each pylon is asked to be and is. */
+function table(c: Context, threads: readonly Thread[]): Html {
   const nodes = new Map(c.registry.nodes().map((n) => [n.name, n]));
-  const table = (threads: readonly Thread[]) => html`<table class="ov">
+  return html`<table class="ov">
 <thead><tr><th>Thread</th><th class="wide">Desired</th><th>Observed</th><th class="wide">Node</th><th class="wide">Human</th><th class="wide">Agent</th></tr></thead>
 <tbody>${threads.map((t) => {
   const r = c.row(t);
@@ -82,12 +82,17 @@ function overview(c: Context): Html {
 </tr>`;
 })}</tbody>
 </table>`;
+}
+
+/** Each project's threads with its queued threads, its quiet fold capped and its closed threads as a link to their own page. */
+function overview(c: Context): Html {
+  const projects = c.registry.projects();
   return html`${projects.length === 0 ? html`<div class="first-project"><p class="empty">No projects yet. A project names the repository its threads clone and the node they run on.</p>${newProjectButton}</div>` : projects.map((p) => {
   const { recent, quiet, closed } = threadsOf(c, p.id);
   const queued = c.queuedIn(p.id);
   return html`<section aria-labelledby="project-${p.id}">
 <div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><code class="dim">${p.repoUrl ?? "scratch, no remote"}</code>${autoReviewSwitch(c, p)}<a class="btn btn-xs" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}">New thread</a></div>
-${recent.length > 0 ? table(recent) : quiet.length === 0 && html`<p class="empty">No open threads.</p>`}
+${recent.length > 0 ? table(c, recent) : quiet.length === 0 && html`<p class="empty">No open threads.</p>`}
 ${queued.length > 0 && html`<h3 class="ov-sub">Queued</h3><table class="ov ov-queued">
 <thead><tr><th>Thread</th><th>Waits for</th><th class="wide">Node</th></tr></thead>
 <tbody>${queued.map((q) => {
@@ -99,10 +104,39 @@ ${queued.length > 0 && html`<h3 class="ov-sub">Queued</h3><table class="ov ov-qu
 </tr>`;
 })}</tbody>
 </table>`}
-${quiet.length > 0 && html`<details class="ov-closed" id="quiet-${p.id}"><summary>${quietLabel(quiet)}</summary>${table(quiet)}</details>`}
-${closed.length > 0 && html`<details class="ov-closed" id="closed-${p.id}"><summary>${closedLabel(closed)}</summary>${table(closed)}</details>`}
+${quiet.length > 0 && html`<details class="ov-closed" id="quiet-${p.id}"><summary>${quietLabel(quiet)}</summary>${table(c, quiet.slice(0, foldCap))}${quiet.length > foldCap && html`<a class="link" href="${foldHref("quiet", p.id)}">All ${quiet.length} quiet</a>`}</details>`}
+${closed.length > 0 && html`<p class="ov-closed" id="closed-${p.id}"><a href="${foldHref("closed", p.id)}">${closedLabel(closed)}</a></p>`}
 </section>`;
 })}`;
+}
+
+const foldNames = { quiet: "Quiet threads", closed: "Archived and deleted threads" } as const;
+
+/** A fold's threads, newest first, `foldCap` to a page: a project's, or every project's when none is asked for. A closed fold also lists the queued threads cancelled or deleted before they started. */
+export function foldPage(c: Context, kind: "quiet" | "closed", project: Project | null, page: number): Html {
+  const paged = <T>(all: readonly T[]) => all.slice((page - 1) * foldCap, page * foldCap);
+  const cancelled = kind === "quiet" ? [] : c.registry.queuedThreads().filter((q) => q.status === "archived" || q.status === "deleted").toSorted((a, b) => b.createdAt - a.createdAt);
+  return layout(c, {
+    title: foldNames[kind],
+    main: html`<header class="bar">${menu}<div class="crumb"><a class="crumb-p" href="/">Threads</a><span class="sep" aria-hidden="true">/</span><h1>${foldNames[kind]}</h1></div></header>
+<div class="scroll"><div class="page">${(project === null ? c.registry.projects() : [project]).map((p) => {
+  const threads = threadsOf(c, p.id)[kind];
+  const queued = cancelled.filter((q) => q.project === p.id);
+  const older = threads.length > page * foldCap || queued.length > page * foldCap;
+  return html`<section aria-labelledby="project-${p.id}">
+<div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><span class="count">${threads.length + queued.length}</span></div>
+${threads.length + queued.length === 0 ? html`<p class="empty">No ${kind === "quiet" ? "quiet" : "archived or deleted"} threads.</p>` : html`${paged(threads).length > 0 && table(c, paged(threads))}
+${paged(queued).length > 0 && html`<h3 class="ov-sub">Never started</h3><table class="ov ov-queued">
+<thead><tr><th>Thread</th></tr></thead>
+<tbody>${paged(queued).map((record) => {
+  const [label, tone] = queuedLook(queuedView(c.registry, record));
+  return html`<tr><td><span class="ov-title">${dot(tone, label)}<a href="/threads/${record.id}">${record.title}</a><span class="tag">${label}</span></span></td></tr>`;
+})}</tbody>
+</table>`}`}
+${(page > 1 || older) && html`<p class="fold-pages">${page > 1 && html`<a class="link" href="${foldHref(kind, p.id, page - 1)}">Newer</a>`}${older && html`<a class="link" href="${foldHref(kind, p.id, page + 1)}">Show older</a>`}</p>`}
+</section>`;
+})}</div></div>`,
+  });
 }
 
 /** The key of the work a card is for, as the work in flight and the preview name it. A node's cleanup is no work's. */

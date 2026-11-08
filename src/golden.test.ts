@@ -281,6 +281,7 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
     ]),
 
     ...["/", "/pipeline", "/cluster", "/health", "/usage", "/usage?period=today", "/usage?period=30d", "/usage?period=all", "/usage?project=nexus", "/threads/th-000000000000", "/nodes/nosuch"].map(page),
+    ...["/threads/closed", "/threads/closed?project=nexus", "/threads/closed?project=nexus&page=2", "/threads/quiet?project=storefront", "/threads/closed?project=nosuch"].map(page),
     ...["/threads/new", "/threads/new?project=storefront", "/projects/new"].map(variant),
     ...threads.map(([, thread]) => page(`/threads/${thread.id}`)),
     ...threads.filter(([key]) => peeked.includes(key) || key.startsWith("rv-")).map(([, thread]) => variant(`/?peek=${thread.id}`)),

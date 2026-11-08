@@ -1,6 +1,6 @@
 200 text/html; charset=utf-8
 what differs from pages/index.html:
-@@ -848,7 +848,7 @@
+@@ -771,7 +771,7 @@
  <input type="radio" name="home-side" value="flight" id="side-flight">In flight<span class="seg-n" id="seg-flight-n" data-live>43</span>
  </label>
  </div>
@@ -9,7 +9,7 @@ what differs from pages/index.html:
  <p id="action-error" class="error split-error" role="alert" hidden>
  </p>
  <section class="split-needs" id="needs-you" aria-labelledby="needs-h" data-live>
-@@ -2183,6 +2183,83 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+@@ -2106,6 +2106,83 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
  </div>
  </section>
  <div class="split-peek" id="peek" data-live>
@@ -93,7 +93,7 @@ what differs from pages/index.html:
  </div>
  <section class="split-flight" id="in-flight" aria-labelledby="flight-h">
  <div class="ov-head flight-head">
-@@ -2212,7 +2289,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
+@@ -2135,7 +2212,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change
  </a>
  </li>
  <li>
