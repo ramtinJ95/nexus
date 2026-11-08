@@ -66,3 +66,16 @@ test("work deferred to a commit runs once the outermost transaction commits, and
   assert.deepEqual(ran, ["inner", "next"]);
   db.db.close();
 });
+
+test("an event a follower appends while handling a batch reaches it in the next batch", async (t) => {
+  const registry = testRegistry(t);
+  const batches: NexusEvent[][] = [];
+  t.after(registry.followEvents(["release.changed"], (events) => {
+    batches.push([...events]);
+    if (batches.length === 1) registry.appendEvent("release.changed", null, { reply: true });
+  }));
+  const first = registry.appendEvent("release.changed", null, {});
+  await until("the reply is delivered", () => batches.length === 2);
+  assert.deepEqual(batches[0], [first]);
+  assert.deepEqual(batches[1]!.map((e) => e.payload), [{ reply: true }]);
+});
