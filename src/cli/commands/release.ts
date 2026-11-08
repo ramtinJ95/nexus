@@ -1,16 +1,18 @@
 /** Landing and releasing: `release`, `review`, `land`, `deploy` and the image commands. */
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
+import type { ImageId } from "../../ids.ts";
 import { fullCommit, releaseOutcome, type ReleaseView } from "../../protocol/deploy.ts";
-import type { ImagesCurrent } from "../../control/wire.ts";
 import type { ImageEntry, ImagesView } from "../../control/image-rollout.ts";
 import type { ImageOperation } from "../../control/image-store.ts";
 import { ended, type Review } from "../../control/review-model.ts";
 import { landPress } from "../../control/policy.ts";
 import { isOpen } from "../../control/questions.ts";
 import { CliError } from "../transport.ts";
-import { type Api, type Result, type Command, str, thread, request, int, table, pollUntil } from "../kit.ts";
+import { type Api, type Result, type Command, str, request, int, table, pollUntil } from "../kit.ts";
 import { threadRoutes } from "../../contract/threads.ts";
+import { imageRoutes, releaseRoutes } from "../../contract/release.ts";
+import { questionRoutes, reviewRoutes } from "../../contract/reviews.ts";
 import { reviewText } from "../thread-text.ts";
 
 function releaseText(view: ReleaseView): string {
@@ -43,13 +45,13 @@ async function imageWait(api: Api, started: ImageOperation): Promise<Result> {
   const settled = async (): Promise<Result | undefined> => {
     if (operation.state === "failed") throw new CliError("failed", operationText(operation));
     if (operation.state !== "done") return undefined;
-    view ??= await api("GET", "/v1/images") as ImagesView;
+    view ??= await request(api, imageRoutes.list, {});
     return { json: view, text: imagesText(view) };
   };
   return await settled() ?? pollUntil({
     deadlineMs: 45 * 60_000, everyMs: 2_000, timedOut: () => new CliError("failed", `image wait timed out\n${operationText(operation)}`),
   }, async () => {
-    view = await api("GET", "/v1/images") as ImagesView;
+    view = await request(api, imageRoutes.list, {});
     const now = view.operation;
     if (now === null || now.kind !== started.kind || now.image !== started.image || now.requestedAt !== started.requestedAt) {
       throw new CliError("conflict", `another image operation replaced the ${started.kind} of ${started.image}${now === null ? "" : `\n${operationText(now)}`}`);
@@ -61,10 +63,10 @@ async function imageWait(api: Api, started: ImageOperation): Promise<Result> {
 }
 
 /** Starts an image operation, and with --wait follows it until it ends. */
-const imageCommand = (path: string, args: Command["args"], body: (positionals: readonly string[]) => unknown): Command => ({
+const imageCommand = (args: Command["args"], start: (api: Api, positionals: readonly string[]) => Promise<ImageOperation>): Command => ({
   args, options: { wait: { type: "boolean" } },
   async run(api, positionals, v) {
-    const operation = await api("POST", path, body(positionals)) as ImageOperation;
+    const operation = await start(api, positionals);
     return v.wait === true ? imageWait(api, operation) : { json: operation, text: operationText(operation) };
   },
 });
@@ -124,7 +126,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
   release: {
     args: [0, 0],
     async run(api) {
-      const view = await api("GET", "/v1/release") as ReleaseView;
+      const view = await request(api, releaseRoutes.release, {});
       return { json: view, text: releaseText(view) };
     },
   },
@@ -133,13 +135,13 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
     async run(api, [id], v) {
       if (v.cancel === true) {
         if (v.pr !== undefined || v.rounds !== undefined || v.land !== undefined) throw new CliError("invalid", "--cancel takes no --pr, --rounds or --land");
-        const r = await api("POST", `${thread(id!)}/review/cancel`, {}) as Review;
+        const r = await request(api, reviewRoutes.cancel, { thread: id! });
         return { json: r, text: `Cancelled ${reviewText(r)}` };
       }
       const pr = str(v, "pr");
       const rounds = str(v, "rounds");
       const body = { ...pr === undefined ? {} : { pr: int(pr, "--pr", 0) }, ...rounds === undefined ? {} : { rounds: int(rounds, "--rounds", 0) }, ...v.land === true ? { land: true } : {} };
-      const r = await api("POST", `${thread(id!)}/review`, body) as Review;
+      const r = await request(api, reviewRoutes.start, { thread: id!, body });
       return { json: r, text: `Started ${reviewText(r)}` };
     },
   },
@@ -148,11 +150,11 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
     async run(api, [id], v) {
       const { question, running, ...press } = v.waive === true ? await pressOf(api, id!, { input: process.stdin, output: process.stderr }) : {};
       if (question !== undefined) {
-        await api("POST", `/v1/questions/${encodeURIComponent(question)}/answer`, { option: "Land" });
+        await request(api, questionRoutes.answer, { question, body: { option: "Land" } });
         const { review } = await request(api, threadRoutes.show, { thread: id! });
         return { json: review, text: answeredText(review!, running === true) };
       }
-      const r = await api("POST", `${thread(id!)}/land`, press) as Review;
+      const r = await request(api, reviewRoutes.land, { thread: id!, body: press });
       return { json: r, text: `Landing ${reviewText(r)}` };
     },
   },
@@ -160,7 +162,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
     args: [1, 1], options: { wait: { type: "boolean" } },
     async run(api, [commit], values) {
       if (commit !== "main" && !fullCommit.test(commit!)) throw new CliError("invalid", "deploy takes main or a full lower-case commit hash");
-      let view = await api("PUT", "/v1/release", { commit }) as ReleaseView;
+      let view = await request(api, releaseRoutes.deploy, { body: { commit: commit! } });
       const target = view.desired!.commit;
       const settled = (): ReleaseView | undefined => {
         const outcome = releaseOutcome(view, target);
@@ -170,27 +172,27 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
       };
       if (values.wait === true) {
         view = settled() ?? await pollUntil({ deadlineMs: 30 * 60_000, everyMs: 1_000, timedOut: () => new CliError("failed", `deployment wait timed out\n${releaseText(view)}`) }, async () => {
-          view = await api("GET", "/v1/release") as ReleaseView;
+          view = await request(api, releaseRoutes.release, {});
           return settled();
         });
       }
       return { json: view, text: releaseText(view) };
     },
   },
-  "image build": imageCommand("/v1/images/build", [0, 0], () => ({})),
-  "image rollout": imageCommand("/v1/images/rollout", [1, 1], ([image]) => ({ image })),
-  "image rollback": imageCommand("/v1/images/rollback", [0, 0], () => ({})),
+  "image build": imageCommand([0, 0], (api) => request(api, imageRoutes.build, {})),
+  "image rollout": imageCommand([1, 1], (api, [image]) => request(api, imageRoutes.rollout, { body: { image: image as ImageId } })),
+  "image rollback": imageCommand([0, 0], (api) => request(api, imageRoutes.rollback, {})),
   "image list": {
     args: [0, 0],
     async run(api) {
-      const view = await api("GET", "/v1/images") as ImagesView;
+      const view = await request(api, imageRoutes.list, {});
       return { json: view, text: imagesText(view) };
     },
   },
   "image current": {
     args: [0, 0],
     async run(api) {
-      const images = await api("GET", "/v1/images/current") as ImagesCurrent;
+      const images = await request(api, imageRoutes.current, {});
       const rows = (["current", "previous"] as const).flatMap((role) => images[role] === null ? [] : [imageRow(images[role], role)]);
       return { json: images, text: rows.length === 0 ? "No image is current." : table(rows) };
     },

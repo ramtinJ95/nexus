@@ -1,6 +1,7 @@
 /** `nexus doctor`: every check of each node and the control plane, run now. */
 import type { DoctorReport } from "../../control/doctor-model.ts";
-import { type Command, table } from "../kit.ts";
+import { type Command, request, table } from "../kit.ts";
+import { doctorRoutes } from "../../contract/reports.ts";
 
 /** One line per check under its node, or under the control plane, with the statuses in one column. */
 export function doctorText(report: DoctorReport): string {
@@ -21,7 +22,7 @@ export const doctorCommands: Readonly<Record<string, Command>> = {
   doctor: {
     args: [0, 0],
     async run(api) {
-      const report = await api("GET", "/v1/doctor") as DoctorReport;
+      const report = await request(api, doctorRoutes.doctor, {});
       return { json: report, text: doctorText(report), ...report.status === "fail" ? { exit: "failed" as const } : {} };
     },
   },
