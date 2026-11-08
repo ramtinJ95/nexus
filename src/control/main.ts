@@ -223,12 +223,12 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   }));
   const { startThread, queue, pipeline, planning } = threads.api;
   const deployment = { self: config.self.tailnetNodeId, deployers: new Set(config.deployers ?? []), keys: config.deployKeys ?? {} };
-  const gateRuns = { registry, probes: probeMap, startThread, wake: wakeThread };
+  const checkRunDeps = { registry, probes: probeMap, startThread, wake: wakeThread };
   const reviews = services.start(github === null ? null : { everyMs: passMs, ...reviewLoop({
     registry, github, inbox, harnessModel: config.harness.model.modelId, startThread,
     agentState: agents.state,
     brief: agents.brief,
-    runs: (ended) => ({ checks: checkRuns({ ...gateRuns, ended }), live: checkRuns({ ...gateRuns, gate: verifyGate, ended }) }),
+    runs: (ended) => ({ checks: checkRuns({ ...checkRunDeps, ended }), live: checkRuns({ ...checkRunDeps, gate: verifyGate, ended }) }),
     release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)! },
     mayLand: (caller) => isDeployer(registry, deployment, caller as TailnetNodeId),
     wake: wakeThread,
