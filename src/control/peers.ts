@@ -7,12 +7,13 @@
 import type { NodeName } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { singleFlight, type SingleFlight } from "../single-flight.ts";
+import type { Log } from "./log-once.ts";
 import type { Registry } from "./registry.ts";
 
 type PeersRegistry = Pick<Registry, "nodeIds">;
 
-export function peerHandoff(options: { registry: PeersRegistry; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "putPeers">>; log?: (message: string) => void }) {
-  const { registry, probes, log = (message: string) => console.error(message) } = options;
+export function peerHandoff(options: { registry: PeersRegistry; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "putPeers">>; log: Log }) {
+  const { registry, probes, log } = options;
   const boots = new Map<NodeName, string>();
   /** The list and probe boot of each node's last put that succeeded. */
   const sent = new Map<NodeName, { peers: string; bootId: string | undefined }>();

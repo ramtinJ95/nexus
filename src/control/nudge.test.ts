@@ -50,7 +50,7 @@ function fixture(t: import("node:test").TestContext) {
   const typed: Extract<PylonCommand, { kind: "send-claude" }>[] = [];
   let outcome: "sent" | "blocked" = "sent";
   const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command as Extract<PylonCommand, { kind: "send-claude" }>); return { kind: "send-claude", outcome, herdrPane: "w1:p1", resumed: false }; } };
-  const inbox: Inbox = agentInbox({ registry, harness: fake.harness, probes: new Map([[node, probe]]), wake() {} });
+  const inbox: Inbox = agentInbox({ log: assert.fail, registry, harness: fake.harness, probes: new Map([[node, probe]]), wake() {} });
   const prs = new Map<string, { number: number; state: PullRequest["state"] }[]>();
   const finds: string[] = [];
   let findFails = false;
@@ -535,7 +535,7 @@ test("a harness builder's nudge refused by a deploy's drain is kept and goes out
   const gate = turnGate(() => draining);
   const gated = builderNudger({
     registry: f.registry, personWroteTo: agentReader(f.registry, f.fake.harness).personWrote, watch: f.watch, log: () => {}, github: f.github,
-    inbox: agentInbox({ registry: f.registry, harness: { send: (...args) => gate.run(() => f.fake.harness.send(...args)) }, probes: new Map(), wake() {} }),
+    inbox: agentInbox({ log: assert.fail, registry: f.registry, harness: { send: (...args) => gate.run(() => f.fake.harness.send(...args)) }, probes: new Map(), wake() {} }),
   });
   f.turn(id);
   f.tick(gitPollMs);
@@ -551,7 +551,7 @@ test("a harness builder's nudge refused by a deploy's drain is kept and goes out
 test("a nudge delivered just before a crash still counts after the builder ended another turn", async (t) => {
   const f = fixture(t);
   const id = await f.add("th-1");
-  const inbox = agentInbox({ registry: f.registry, harness: f.fake.harness, probes: new Map(), wake() {} });
+  const inbox = agentInbox({ log: assert.fail, registry: f.registry, harness: f.fake.harness, probes: new Map(), wake() {} });
   const nudger = (crash: boolean) => builderNudger({
     registry: f.registry, personWroteTo: agentReader(f.registry, f.fake.harness).personWrote, watch: f.watch, log: () => {}, github: f.github,
     inbox: async (th, message) => { const result = await inbox(th, message); if (crash) throw new Error("the control plane stopped"); return result; },
@@ -585,7 +585,7 @@ test("a nudge the drain held goes to neither a running turn nor a thread the per
   const gate = turnGate(() => draining);
   const gated = builderNudger({
     registry: f.registry, personWroteTo: agentReader(f.registry, f.fake.harness).personWrote, watch: f.watch, log: () => {}, github: f.github,
-    inbox: agentInbox({ registry: f.registry, harness: { send: (...args) => gate.run(() => f.fake.harness.send(...args)) }, probes: new Map(), wake() {} }),
+    inbox: agentInbox({ log: assert.fail, registry: f.registry, harness: { send: (...args) => gate.run(() => f.fake.harness.send(...args)) }, probes: new Map(), wake() {} }),
   });
   const running = await f.add("th-running");
   const theirs = await f.add("th-theirs");

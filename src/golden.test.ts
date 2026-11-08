@@ -78,10 +78,6 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
     }
     return answered;
   }
-  // The demo's probes refuse transcript reads, which the control plane logs once per Claude pylon. The captures show the refusal.
-  const log = console.error;
-  console.error = (...args: unknown[]) => { if (!String(args[0]).includes("reading Claude's transcript failed")) log(...args); };
-  t.after(() => { console.error = log; });
   // The demo seeds 31 days of five-minute samples, which cost most of this test's time. Every half hour of them still
   // fills each tier the metrics serve from.
   const record = s.registry.recordHealthSample.bind(s.registry);

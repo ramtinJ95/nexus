@@ -55,7 +55,7 @@ export const claudeSession = "11111111-2222-4333-8444-555555555501";
 export const fixture = (await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").map((line) => `${line}\n`);
 
 /** Every API option but the services the kit builds, which a test asks for by flag or factory. */
-export type TestApiOptions = Omit<Partial<ApiOptions>, "deployment" | "features"> & Partial<Pick<Features, "reviews" | "cleanup" | "doctor">> & {
+export type TestApiOptions = Omit<Partial<ApiOptions>, "deployment" | "features" | "log"> & Partial<Pick<Features, "reviews" | "cleanup" | "doctor">> & {
   /** null leaves deployments off. */
   deployment?: DeploymentOptions | null;
   images?(registry: Registry): ImageRollout;
@@ -81,6 +81,8 @@ export async function testApi(t: import("node:test").TestContext, options: TestA
   let admitted = Promise.resolve();
   let asked = () => {};
   const woken: NodeName[] = [];
+  /** What the control plane logged. */
+  const logged: string[] = [];
   /** What `POST /v1/join` recorded, and the MagicDNS name whois gives each caller that joins. */
   const joined: JoinedNode[] = [];
   const hosts = new Map<TailnetNodeId, string>();
@@ -139,6 +141,7 @@ export async function testApi(t: import("node:test").TestContext, options: TestA
       health: () => health(),
     }]]),
     previewPorts: { first: 10200, last: 10299 },
+    log: (message) => { logged.push(message); },
     ...apiOptions,
   });
   let api = await startApi(optionsAt(0));
@@ -164,7 +167,7 @@ export async function testApi(t: import("node:test").TestContext, options: TestA
     });
   }
   return {
-    registry, images, queue, plans, call, raw, woken, joined, hosts, calls, commands, streams, reads, fake, startThread,
+    registry, images, queue, plans, call, raw, woken, logged, joined, hosts, calls, commands, streams, reads, fake, startThread,
     get api() { return api; }, get port() { return api.port; }, get httpsPort() { return api.httpsPort; }, close: () => api.close(),
     /** How many requests the API has admitted. */
     requests: () => requests,

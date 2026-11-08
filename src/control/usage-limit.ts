@@ -4,6 +4,7 @@
  * stop the thread still shows never sends a second.
  */
 import type { Inbox } from "./inbox.ts";
+import { logOnce, type Log } from "./log-once.ts";
 import type { Registry } from "./registry.ts";
 import { singleFlight } from "../single-flight.ts";
 import { senders } from "./agent-protocol.ts";
@@ -14,8 +15,9 @@ const text = `${senders["usage-limit"].prefix} The usage limit reset. Continue w
 /** Claude Code continues a session it still runs about 90 s after the reset, so only a session that did not, such as one whose pylon paused, is typed into. */
 const defaultGraceMs = 180_000;
 
-export function usageLimitResumer(options: { registry: UsageLimitRegistry; inbox: Inbox; clock?: () => number; graceMs?: number }) {
+export function usageLimitResumer(options: { registry: UsageLimitRegistry; inbox: Inbox; clock?: () => number; graceMs?: number; log: Log }) {
   const { registry, inbox, clock = Date.now, graceMs = defaultGraceMs } = options;
+  const failures = logOnce(options.log);
   async function tick() {
     for (const { id: thread } of registry.storedThreads({ status: ["active", "idle"] })) {
       // Read again after the sends before it, which another thread's archive or continue may have outrun. From here to
@@ -32,8 +34,9 @@ export function usageLimitResumer(options: { registry: UsageLimitRegistry; inbox
         if (await inbox(t, { id, text, sender: "usage-limit" }) === "delivered") {
           registry.appendEvent("usage-limit.continued", t.id, { session, stoppedAt: limit.stoppedAt, resetsAt: limit.resetsAt, requestId: id });
         }
+        failures.ok(t.id);
       } catch (err) {
-        console.error(`${t.id}: continuing after the usage limit failed: ${(err as Error).message}`);
+        failures.failed(t.id, `${t.id}: continuing after the usage limit failed: ${(err as Error).message}`);
       }
     }
   }

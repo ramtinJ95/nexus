@@ -115,6 +115,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   const briefs = new Map<ThreadId, string>();
   const deployers = new Set(["nLAPTOP"]);
   const woken: ThreadId[] = [];
+  const logged: string[] = [];
   const loop = () => reviewLoop({
     registry, harnessModel: "gpt-6-astra",
     github: {
@@ -167,7 +168,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     release: { self, repo: "ramtinJ95/nexus" },
     mayLand: (caller) => deployers.has(caller),
     wake: (target) => { woken.push(target.id); },
-    log: () => {},
+    log: (message) => { logged.push(message); },
     now: () => clock,
     brief: async (target) => { const agent = registry.agent(target); return agent.kind === "claude" ? agent.worker.prompt : briefs.get(target.id) ?? null; },
     async startThread(request, caller) {
@@ -194,7 +195,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     clock += 61_000;
   };
   return {
-    registry, builder, pr, loop, add, sent, started, merges, replies, reply, failedTurn, deployers, woken, others,
+    registry, builder, pr, loop, add, sent, started, merges, replies, reply, failedTurn, deployers, woken, logged, others,
     get snapshot() { return snapshot; }, set snapshot(s) { snapshot = s; },
     /** How many times the loop has read the PR from GitHub. */
     get polls() { return polls; },
@@ -1738,6 +1739,7 @@ test("a check that cannot start beside the reviewer leaves the reviewer's remind
   await loop.poll();
   assert.match(f.sent.at(-1)!.message.text, /no nexus-review block/);
   assert.equal(f.review().nudges, 1);
+  assert.deepEqual(f.logged, [`review ${f.review().id} of ${f.builder}: the check beside the reviewer did not start and will be tried again (Error)`], "the passes it failed in log it once");
   f.checkStartFails = false;
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
@@ -2967,7 +2969,7 @@ test("a harness, a Claude worker and a bare thread each give the replies and tak
   assert.ok(!fake.calls.some(([, id]) => id === claude.id), "nothing of a Claude worker's reaches the harness");
 
   const woken: ThreadId[] = [];
-  const inbox = agentInbox({ registry: f.registry, harness: fake.harness, probes: new Map(), wake: (th) => { woken.push(th.id); } });
+  const inbox = agentInbox({ log: assert.fail, registry: f.registry, harness: fake.harness, probes: new Map(), wake: (th) => { woken.push(th.id); } });
   const message = { id: "rv-1:1", text: "Review this", sender: "review" as const };
   assert.equal(await inbox(harness, message), "delivered");
   assert.deepEqual(fake.calls.at(-1), ["send", harness.id, "Review this", "rv-1:1", "followUp", "review"]);
@@ -3998,6 +4000,19 @@ test("a retargeted landing held for the person shows the holds read at the new b
   assert.deepEqual(f.merges, []);
   assert.equal(f.review().phase.kind, "needs-person");
   assert.deepEqual(holdsAt(f.review()).map((h) => h.text), reservedHolds, "the egress hold the old base's files met is gone");
+});
+
+test("a step that fails the same way every pass is logged once, by its error's name", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "running" };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  f.check = { kind: "done", passed: true, output: "ok" };
+  f.onFiles = () => { throw new Error("GitHub is down"); };
+  for (let i = 0; i < 3; i++) await loop.poll();
+  assert.deepEqual(f.logged, [`review ${f.review().id} of ${f.builder}: a step failed and will be retried (Error)`]);
 });
 
 test("a check that passed keeps its thread until the holds of its head are read", async (t) => {

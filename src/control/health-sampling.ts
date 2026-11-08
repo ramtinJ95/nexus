@@ -6,27 +6,23 @@
  */
 import type { NodeName } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
+import { logOnce, type Log } from "./log-once.ts";
 import type { Registry } from "./registry.ts";
 
 export function healthSampling(options: {
   registry: Pick<Registry, "nodes">;
   /** The recording clients main.ts makes, one per node. */
   probes: ReadonlyMap<NodeName, Pick<ProbeClient, "health">>;
-  log?: (message: string) => void;
+  log: Log;
 }) {
-  const { registry, probes, log = (message: string) => console.error(message) } = options;
+  const { registry, probes } = options;
   const reading = new Map<NodeName, Promise<void>>();
-  /** The last failure each node's read hit, so a node that stays unreachable is logged once. */
-  const failures = new Map<NodeName, string>();
+  const failures = logOnce(options.log);
 
   function read(node: NodeName, probe: Pick<ProbeClient, "health">) {
     const read = probe.health().then(
-      () => { failures.delete(node); },
-      (err: unknown) => {
-        const message = (err as Error).message;
-        if (failures.get(node) !== message) log(`${node}: reading its health for its history failed, and the next pass tries again: ${message}`);
-        failures.set(node, message);
-      },
+      () => { failures.ok(node); },
+      (err: unknown) => { failures.failed(node, `${node}: reading its health for its history failed, and the next pass tries again: ${(err as Error).message}`); },
     ).finally(() => { reading.delete(node); });
     reading.set(node, read);
   }

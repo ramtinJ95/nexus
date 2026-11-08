@@ -20,6 +20,7 @@ import { pipeOutput, type OpenPipe } from "../pipe.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { runningProbe } from "./locator.ts";
+import { logOnce, type Log, type LogOnce } from "./log-once.ts";
 import { reportedAsks, type WaitingAsk } from "./questions.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
@@ -49,10 +50,8 @@ interface Reader {
   timer: NodeJS.Timeout | null;
   /** Whether a turn ran when the watchers were last told, so they hear when it starts or ends. */
   working: boolean;
-  /** The failure logged last, so a pylon that keeps failing is logged once. */
-  failure: string | null;
-  /** The same, for pulls of the asks that wait. */
-  askFailure: string | null;
+  /** Keyed by "transcript" and "asks". */
+  failures: LogOnce;
   /** Whether a pull is due while a turn runs or waits: since the reader started, a session event, or a failed pull. */
   asksDue: boolean;
   /**
@@ -76,14 +75,14 @@ async function readWaitingAsks(open: OpenPipe): Promise<WaitingAsk[]> {
 /** One refresh takes this many reads at most. A transcript with more to read goes on in the refresh after it. */
 const maxReadsPerRefresh = 16;
 
-export function claudeConversations(options: { registry: ClaudeConversationRegistry; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "stream">>; workingReadMs?: number }): ClaudeConversations {
-  const { registry, probes, workingReadMs = 2_000 } = options;
+export function claudeConversations(options: { registry: ClaudeConversationRegistry; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "stream">>; workingReadMs?: number; log: Log }): ClaudeConversations {
+  const { registry, probes, workingReadMs = 2_000, log } = options;
   const readers = new Map<ThreadId, Reader>();
   let closed = false;
 
   const readerOf = (id: ThreadId): Reader => {
     let r = readers.get(id);
-    if (r === undefined) readers.set(id, r = { reading: null, next: null, watchers: new Set(), timer: null, working: false, failure: null, askFailure: null, asksDue: true, storedNone: false, kept: null });
+    if (r === undefined) readers.set(id, r = { reading: null, next: null, watchers: new Set(), timer: null, working: false, failures: logOnce(log), asksDue: true, storedNone: false, kept: null });
     return r;
   };
 
@@ -146,12 +145,10 @@ export function claudeConversations(options: { registry: ClaudeConversationRegis
       try {
         found = await readTranscript((argv) => probe.stream(t.pylonId, argv), session, from);
       } catch (err) {
-        const message = (err as Error).message;
-        if (r.failure !== message) console.error(`${t.pylonId}: reading Claude's transcript failed, so it shows the last read: ${message}`);
-        r.failure = message;
+        r.failures.failed("transcript", `${t.pylonId}: reading Claude's transcript failed, so it shows the last read: ${(err as Error).message}`);
         return;
       }
-      r.failure = null;
+      r.failures.ok("transcript");
       // A delete meanwhile removed the transcript, which this read must not bring back.
       if (closed || registry.thread(id)?.status === "deleted") return;
       // A read that reaches the transcript's end dates it by its start, so every reply recorded before then is stored.
@@ -187,12 +184,10 @@ export function claudeConversations(options: { registry: ClaudeConversationRegis
       asks = await readWaitingAsks((argv) => probe.stream(pylonId, argv));
     } catch (err) {
       r.asksDue = true;
-      const message = (err as Error).message;
-      if (r.askFailure !== message) console.error(`${pylonId}: asking which of Claude's questions wait failed, so the last report stands: ${message}`);
-      r.askFailure = message;
+      r.failures.failed("asks", `${pylonId}: asking which of Claude's questions wait failed, so the last report stands: ${(err as Error).message}`);
       return;
     }
-    r.askFailure = null;
+    r.failures.ok("asks");
     if (closed || registry.thread(id)?.status === "deleted") return;
     if (asks.length === 0 && r.storedNone) return;
     r.storedNone = asks.length === 0;
@@ -208,7 +203,7 @@ export function claudeConversations(options: { registry: ClaudeConversationRegis
     const r = readerOf(id);
     if (r.reading === null) {
       return r.reading = catchUp(id, r)
-        .catch((err: unknown) => console.error(`${id}: following Claude's transcript failed: ${(err as Error).message}`))
+        .catch((err: unknown) => log(`${id}: following Claude's transcript failed: ${(err as Error).message}`))
         .finally(() => {
           r.reading = null;
           release(id, r);
