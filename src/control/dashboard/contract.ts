@@ -16,7 +16,7 @@ export const actions = [
 export type Action = (typeof actions)[number];
 
 /**
- * What a thread page's `#facts` says, which checkout.js reads to decide when to read the checkout's changes. `open`
+ * What a thread page's `#facts` says, which changes-tree.js reads to decide when to read the checkout's changes. `open`
  * is false for an archived or deleted thread, whose pylon stays paused.
  */
 export interface Facts { pylon: ActualState; turn: boolean; agentAt: number; status: ThreadStatus; open: boolean }
@@ -54,7 +54,7 @@ export const pages = ["home", "cluster"] as const;
 export type Page = (typeof pages)[number];
 
 /**
- * The icons a page's `#icons` template holds, which checkout.js clones into the trees it draws. shell.ts draws each
+ * The icons a page's `#icons` template holds, which changes-tree.js clones into the trees it draws. shell.ts draws each
  * through view.ts `icon`, which types its name.
  */
 export const clonedIcons = ["chevron", "folder"] as const;
