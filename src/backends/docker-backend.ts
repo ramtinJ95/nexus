@@ -331,8 +331,14 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
 
   return {
     artifacts,
+    gitSsh: false,
+    nestedVirtualization: false,
+    eventJournal: null,
     // Each container's NEXUS_API names the port, so only a backend given a fixed one answers it.
-    ...(options.hostBridgePort === undefined ? {} : { hostBridge: dockerHostBridge(options.hostBridgePort, options.labels) }),
+    hostBridge: options.hostBridgePort === undefined ? null : dockerHostBridge(options.hostBridgePort, options.labels),
+    // Docker keeps the containers' disks, and a container's process is in Docker's namespace, not the probe's.
+    storage: null,
+    async processes() { return null; },
 
     async ensureRunning(boot, live, signal, relaunch = true) {
       const urls = publicUrls(boot.pylonId, live.previews, options.previewHost);

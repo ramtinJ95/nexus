@@ -51,18 +51,18 @@ export interface VmBackend {
    * the pylons it could not reach and why. A pylon booting meanwhile starts with whatever value it was given.
    */
   updateSecret(name: string, value: string, signal?: AbortSignal): Promise<readonly { pylonId: PylonId; reason: string }[]>;
-  /** Whether the node has a git SSH key, so a pylon can clone over SSH. Omitted: it has none. */
-  readonly gitSsh?: boolean;
-  /** Whether a pylon whose boot asks for nested virtualization gets KVM of its own here. Omitted: it does not. */
-  readonly nestedVirtualization?: boolean;
-  /** The SQLite file the probe journals its pylons' events in. Omitted: the journal is in memory, and a restart loses it. */
-  readonly eventJournal?: string;
-  /** Its end of NEXUS_API, which the in-pylon `nexus` CLI calls. Omitted: those calls go unanswered. */
-  readonly hostBridge?: HostBridge;
-  /** The directory it keeps pylon disks in, whose filesystem's free space the node reports. Omitted: `/`. */
-  readonly storage?: string;
-  /** The process each running pylon runs under on the host. Omitted: a backend that cannot name them. */
-  processes?(): Promise<readonly { pylonId: PylonId; pid: number }[]>;
+  /** Whether the node has a git SSH key, so a pylon can clone over SSH. */
+  readonly gitSsh: boolean;
+  /** Whether a pylon whose boot asks for nested virtualization gets KVM of its own here. */
+  readonly nestedVirtualization: boolean;
+  /** The SQLite file the probe journals its pylons' events in. Null: the journal is in memory, and a restart loses it. */
+  readonly eventJournal: string | null;
+  /** Its end of NEXUS_API, which the in-pylon `nexus` CLI calls. Null: those calls go unanswered. */
+  readonly hostBridge: HostBridge | null;
+  /** The directory it keeps pylon disks in, whose filesystem's free space the node reports. Null: it keeps none, so health reports `/` and refuses no boot for disk. */
+  readonly storage: string | null;
+  /** The process each running pylon runs under on the host, or null from a backend that cannot name them. */
+  processes(): Promise<readonly { pylonId: PylonId; pid: number }[] | null>;
 }
 
 /** What every backend reports of a pylon, whatever its VM's state. */
@@ -136,8 +136,8 @@ export interface ArtifactStore {
   import(manifest: ArtifactManifest, stream: Readable, signal: AbortSignal): Promise<void>;
   /** Refuses while a VM, template or checkpoint on this node still depends on it. Checkpoints are not droppable. */
   drop(id: PortableArtifactId): Promise<void>;
-  /** The bytes its files take on disk, or null for one this backend holds none of or never drops. Omitted: it sizes none. */
-  bytes?(id: PortableArtifactId): Promise<number | null>;
+  /** The bytes its files take on disk, or null for one this backend holds none of or never drops. */
+  bytes(id: PortableArtifactId): Promise<number | null>;
 }
 
 /** Node-local secret values, from a root-owned file such as /etc/nexus/secrets.env. */

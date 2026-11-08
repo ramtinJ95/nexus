@@ -14,7 +14,7 @@ export function artifactCleanup(artifacts: VmBackend["artifacts"], log: (message
   async function sizeOf(id: PortableArtifactId): Promise<number | null> {
     const known = artifactBytes.get(id);
     if (known !== undefined) return known;
-    const bytes = await artifacts.bytes?.(id) ?? null;
+    const bytes = await artifacts.bytes(id);
     if (bytes !== null) artifactBytes.set(id, bytes);
     return bytes;
   }

@@ -33,6 +33,7 @@ test("the probe sizes each artifact in its directory, deletes those it is sent u
   const backend: VmBackend = {
     ensureRunning: fail, ensurePaused: fail, ensureDeleted: fail, buildTemplate: fail, buildImage: fail, guest: fail,
     list: async () => [], state: async () => "absent", updateSecret: async () => [],
+    gitSsh: false, nestedVirtualization: false, eventJournal: null, hostBridge: null, storage: null, processes: async () => null,
     artifacts: {
       list: () => store.list(), has: fail, manifest: async () => null, export: fail, import: fail,
       bytes: async (id) => existsSync(store.path(id)) ? diskBytes(store.path(id)) : null,
