@@ -3,8 +3,9 @@
  * probe runs spawn, pause and delete with a real backend. One test body runs against one backend fixture:
  *
  * - Docker (the default), against the local Docker, in an image the test builds on Node (for the in-pylon CLI)
- *   with Herdr, tini and python3 from Debian and Herdr's installer, so it needs the network once. Everything it
- *   creates carries the label nexus.test=<run>, and cleanup removes only that.
+ *   with Herdr, git, tini and python3 from Debian and Herdr's installer, so it needs the network once. The pylon clones
+ *   and pulls its dotfiles from a repository in the image (slice-repo.ts). Everything it creates carries the label
+ *   nexus.test=<run>, and cleanup removes only that.
  * - pylon-vm, when NEXUS_SLICE_BACKEND=pylon-vm, with NEXUS_PYLON_VM_IMAGE=<an image's directory in an artifact store> and
  *   NEXUS_PYLON_VM_STATE=<state root>, and optionally NEXUS_PYLON_VM_MEMORY_GIB (default 4). It boots a
  *   Gondolin VM, clones a small public repo over HTTPS, and destroys the instance at the end. With
@@ -12,7 +13,7 @@
  *   it clones the same repo over SSH instead, through Gondolin's SSH termination on the host, so the key
  *   must be one GitHub accepts. Its secret checks send a fake secret to postman-echo.com, which echoes it,
  *   and call api.github.com, which only the wake allows. NEXUS_PYLON_VM_SESSIONS=shell,claude-code,pi names
- *   the sessions to carry through the pause, for an image with Herdr. The default slice image has none.
+ *   the sessions to carry through the pause, `shell` when unset.
  *
  * Both run the in-pylon `nexus` CLI from images/pylon/nexus inside the pylon, through the backend's host bridge.
  * Previews go through the probe's real gateway and a fake `tailscale`, so nothing touches the node's serve config.
@@ -46,7 +47,9 @@ import type { ProjectId } from "../../ids.ts";
 import { sessionFacts } from "../../probe/guest/sessions.ts";
 import type { SessionHarness } from "../../protocol/agent-kinds.ts";
 import { freePort } from "../../test-support/kit.ts";
-import { checkoutDir, pylonInfoFile, sessionsFile } from "../../../images/pylon/nexus-contract.ts";
+import { checkoutDir, dotfilesDir, pylonInfoFile, sessionsFile } from "../../../images/pylon/nexus-contract.ts";
+import { asUserIn } from "../../backends/pylon-boot.ts";
+import { sliceCommits, sliceRepo, sliceRepoStep } from "./slice-repo.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -69,14 +72,14 @@ interface SliceFixture {
   /** Boot inputs the wake changes, and node secrets it rotates. A pylon applies both at every boot. */
   wake(): Partial<SliceFixture["boot"]>;
   preSetup: string | null;
-  /** The overlay at each version of the live spec, or null for a backend that writes none. */
-  overlay: ((version: number) => OverlayFile[]) | null;
+  /** The overlay at each version of the live spec. */
+  overlay: (version: number) => OverlayFile[];
   /** Generous for the slowest step, a fresh boot. */
   convergeMs: number;
   /** Where Guest.exec writes the marker, and the cwd it runs in. */
   marker: string;
   cwd: string;
-  /** The sessions opened before the pause and expected back after the wake. Empty for an image without Herdr. */
+  /** The sessions opened before the pause and expected back after the wake. */
   sessions: readonly SessionHarness[];
   /** Who a supervised service runs as. */
   serviceUser: string;
@@ -113,6 +116,13 @@ function dockerFixture(): SliceFixture {
   const containers = async () => (await docker("ps", "-a", "-q", "--filter", `label=nexus.pylon=${pylonId}`, "--filter", `label=${testLabel}`)).split("\n").filter(Boolean);
   const checkpointImage = async (checkpoint: string) => docker("images", "-q", "--filter", `label=nexus.pylon=${pylonId}`, "--filter", `label=nexus.checkpoint=${checkpoint}`, "--filter", `label=${testLabel}`);
   const image: ImageId = "img-slicetest0000";
+  const repo: CloneRepo = { kind: "clone", url: sliceRepo, checkout: { branch: "main", commit: sliceCommits[1] } };
+  // Docker execs run as root, and git refuses a repository root does not own, so the checks run as user.
+  const asUser = (guest: Guest, script: string, cwd = checkoutDir) => guest.exec(["sh", "-c", asUserIn(script, cwd)], { cwd: "/", timeoutMs: 30_000 });
+  const containerLog = async () => {
+    const { stdout, stderr } = await execFileAsync("docker", ["logs", pylonId]);
+    return stdout + stderr;
+  };
   return {
     backend: createDockerBackend({ images: { [image]: tag }, labels, hostBridgePort: bridgePort, previewHost: nodeHost }),
     image,
@@ -123,12 +133,13 @@ function dockerFixture(): SliceFixture {
     secrets: nodeSecrets({ value: () => undefined, names: () => [] }),
     boot: {
       resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
+      gitIdentity: { name: "Example Person", email: "person@example.com" },
       network: { allowedHosts: [], secrets: [] },
-      repo: { kind: "clone", url: "git@example.com:slice.git", checkout: { branch: "main", commit: "0000000" } },
-      dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
+      repo,
+      dotfiles: { repo: sliceRepo, ref: "main" },
     },
-    wake: () => ({}),
-    preSetup: null,
+    wake: () => ({ dotfiles: { repo: sliceRepo, ref: sliceCommits[0] } }),
+    preSetup: "mkdir -p .nexus && printf '#!/bin/sh\\necho resumed >> /home/user/resume.log\\n' > .nexus/resume && chmod +x .nexus/resume",
     overlay: (version) => [
       { path: "/home/user/.nexus/PYLON.md", mode: 0o644, owner: "user", content: `slice ${run} overlay ${version}\n` },
       { path: "/home/user/.nexus/bin/slice-hello", mode: 0o755, owner: "user", content: "#!/bin/sh\necho hello\n" },
@@ -139,10 +150,7 @@ function dockerFixture(): SliceFixture {
     cwd: "/",
     sessions: ["shell"],
     serviceUser: "user",
-    pylonLog: async () => {
-      const { stdout, stderr } = await execFileAsync("docker", ["logs", pylonId]);
-      return stdout + stderr;
-    },
+    pylonLog: containerLog,
     // Docker execs run as root, so Herdr's config is root's. The pylon image turns off Herdr's agent resume the same way.
     async setUp() {
       const { herdr } = JSON.parse(await readFile(new URL("../../../images/pylon/pins.json", import.meta.url), "utf8")) as { herdr: string };
@@ -150,9 +158,10 @@ function dockerFixture(): SliceFixture {
       try {
         await writeFile(join(dir, "Dockerfile"), [
           `FROM ${baseImage}`,
-          "RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl tini python3 && rm -rf /var/lib/apt/lists/*",
+          "RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl git tini python3 && rm -rf /var/lib/apt/lists/*",
           // The base image's `node` already has uid 1000.
           `RUN useradd --create-home --shell /bin/bash user && install -d -o user -g user /home/user/workspace ${checkoutDir}`,
+          sliceRepoStep,
           "ARG HERDR_VERSION",
           'RUN curl -fsSL https://herdr.dev/install.sh -o /tmp/herdr-install.sh && HERDR_INSTALL_DIR=/usr/local/bin sh /tmp/herdr-install.sh && rm /tmp/herdr-install.sh && test "$(herdr --version)" = "herdr ${HERDR_VERSION}"',
           "RUN mkdir -p /root/.config/herdr && printf 'onboarding = false\\n\\n[session]\\nresume_agents_on_restore = false\\n' > /root/.config/herdr/config.toml",
@@ -163,9 +172,23 @@ function dockerFixture(): SliceFixture {
       }
     },
     async checkFreshBoot(guest) {
+      assert.deepEqual(await asUser(guest, "git config --global user.name && git config --global user.email"), { exitCode: 0, output: "Example Person\nperson@example.com\n", truncated: false });
+      assert.deepEqual(await asUser(guest, "git rev-parse HEAD refs/nexus/base && git symbolic-ref --short HEAD && git remote get-url origin"), {
+        exitCode: 0, output: `${repo.checkout.commit}\n${repo.checkout.commit}\n${repo.checkout.branch}\n${repo.url}\n`, truncated: false,
+      }, "setup cloned the pylon's commit and recorded it as the base");
+      assert.equal((await asUser(guest, "test -e /home/user/resume.log")).exitCode, 1, "the boot that ran setup skips .nexus/resume");
+      assert.deepEqual(await asUser(guest, `git -C ${dotfilesDir} rev-parse HEAD`), { exitCode: 0, output: `${sliceCommits[1]}\n`, truncated: false }, "the boot pulled the dotfiles");
+      assert.match(await containerLog(), /^dotfiles: pulled /m, "the pull's outcome is logged");
       await this.checkOverlay(guest, 1);
     },
-    async checkWake() {},
+    async checkWake(guest) {
+      // A resume runs in the background, as in a pylon.
+      let resumed = await asUser(guest, "cat /home/user/resume.log");
+      for (let tries = 0; resumed.exitCode !== 0 && tries < 50; tries++) resumed = await asUser(guest, "sleep 0.2; cat /home/user/resume.log");
+      assert.deepEqual(resumed, { exitCode: 0, output: "resumed\n", truncated: false }, "the wake ran .nexus/resume once");
+      assert.match(await containerLog(), /^resume: exited 0$/m, "the resume's outcome is logged");
+      assert.deepEqual(await asUser(guest, `git -C ${dotfilesDir} rev-parse HEAD`), { exitCode: 0, output: `${sliceCommits[0]}\n`, truncated: false }, "the wake pulled the new dotfiles ref");
+    },
     // Docker execs are not login shells, so the profile.d file is read by hand.
     async checkOverlay(guest, version) {
       const sh = (script: string) => guest.exec(["sh", "-c", script], { cwd: "/home/user", timeoutMs: 30_000 });
@@ -225,7 +248,7 @@ function pylonVmFixture(): SliceFixture {
   // The first line of the key's body is unique to the key.
   const keyLine = gitSsh === undefined ? [] : [readFileSync(gitSsh.privateKeyFile, "utf8").split("\n")[1]!];
   const secret = { name: "NEXUS_SLICE_SECRET", value: secretValues[0] as string, host: "postman-echo.com" };
-  const sessions = (process.env["NEXUS_PYLON_VM_SESSIONS"] ?? "").split(",").filter(Boolean) as SessionHarness[];
+  const sessions = (process.env["NEXUS_PYLON_VM_SESSIONS"] || "shell").split(",").filter(Boolean) as SessionHarness[];
   // The hosts a project with a Claude login gets, which Claude Code needs to start at all.
   const allowedHosts = ["github.com", secret.host, ...sessions.includes("claude-code") ? loginHosts.claude : []];
   const python = (script: string) => `python3 -c ${JSON.stringify(script)}`;
@@ -386,7 +409,7 @@ const pylon: PylonRecord = newPylonRecord({
   desired: "running",
   boot: { pylonId, image: fixture.image, ...fixture.boot },
   firstBoot: { kind: "fresh", preSetup: fixture.preSetup },
-  live: { previews: [], overlay: fixture.overlay?.(1) ?? [] },
+  live: { previews: [], overlay: fixture.overlay(1) },
   liveHash: "live-slice-1" as LiveHash,
 });
 
@@ -516,7 +539,7 @@ test("running: the planner spawns a fresh pylon from the image", async () => {
   assert.deepEqual(await inGuest(`echo ${run} > ${fixture.marker}`), { exitCode: 0, output: "", truncated: false });
 });
 
-test("sessions open in the running pylon", { skip: fixture.sessions.length === 0 && "this image has no Herdr" }, async () => {
+test("sessions open in the running pylon", async () => {
   for (const harness of fixture.sessions) {
     const opened = await client.command(pylonId, { kind: "open-session", harness, title: `slice ${harness}` });
     assert.equal(opened.kind, "open-session");
@@ -592,7 +615,7 @@ test("running again: resumes from the checkpoint with the marker intact and the 
   assert.deepEqual(await visit(web.httpsPort), served(web.httpsPort), "the wake started the service again");
 });
 
-test("the sessions open before the pause come back after the wake", { skip: fixture.sessions.length === 0 && "this image has no Herdr" }, async () => {
+test("the sessions open before the pause come back after the wake", async () => {
   const guest = backend.guest(pylonId);
   assert.deepEqual((await sessionFacts(guest)).map((f) => f.harness).sort(), [...fixture.sessions].sort());
   const file = await guest.exec(["cat", sessionsFile], { cwd: "/", timeoutMs: 10_000 });
@@ -649,9 +672,9 @@ test("a new preview port restarts the service with the PUBLIC_URL on it", async 
   assert.equal((await visit(web.httpsPort)).status, 404, "the old port is no longer published");
 });
 
-test("a changed overlay is written into the running pylon", { skip: fixture.overlay === null && "this backend writes no overlay" }, async () => {
+test("a changed overlay is written into the running pylon", async () => {
   const before = await bootedAt();
-  pylon.live = { ...pylon.live, overlay: fixture.overlay!(2) };
+  pylon.live = { ...pylon.live, overlay: fixture.overlay(2) };
   pylon.liveHash = "live-slice-2" as LiveHash;
   assert.deepEqual(submitted(await converge()), ["spawn"]);
   assert.equal(await bootedAt(), before);
