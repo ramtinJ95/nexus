@@ -119,6 +119,8 @@
     "src/deploy/release-cleanup.ts: reserved-path:auth",
     "src/deploy/setup.ts: reserved-path:auth",
     "src/deploy/worker.ts: reserved-path:auth",
+    "src/probe/artifacts-route.ts: reserved-path:auth",
+    "src/probe/commands-route.ts: reserved-path:auth",
     "src/probe/event-journal.ts: reserved-path:auth",
     "src/probe/fake-tailscale.ts: reserved-path:auth",
     "src/probe/gateway.ts: reserved-path:auth",
