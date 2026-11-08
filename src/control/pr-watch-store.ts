@@ -7,7 +7,6 @@ import type { EventKind } from "./events.ts";
 import type { ThreadId } from "../ids.ts";
 import type { Output } from "./thread-store.ts";
 import type { PullRequest } from "./github.ts";
-import { wasRead } from "./pr-watch-model.ts";
 
 /** A PR as the PR watch last read it. `url` is empty until its first read. */
 export interface WatchedPr extends PullRequest {
@@ -16,6 +15,8 @@ export interface WatchedPr extends PullRequest {
   /** The opening of the PR's description at that read, for the dashboard's card of a held review. */
   summary?: string;
 }
+/** Whether the watch read the linked PR at least once. A link it has not read yet has an empty `url`. */
+export const wasRead = (pr: Pick<WatchedPr, "url">) => pr.url !== "";
 interface PrLink {
   pr: WatchedPr;
   seen: string[];
