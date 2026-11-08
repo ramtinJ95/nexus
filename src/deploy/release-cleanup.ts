@@ -4,9 +4,10 @@
  * neither delete one nor race an install. A release never changes once installed (deploy/release.sh), so the bytes
  * it takes are read once and kept in `deployer/release-bytes.json`.
  */
-import { lstat, readdir, readFile, readlink, rename, rm, stat } from "node:fs/promises";
+import { readdir, readFile, readlink, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { readJson, saveJson } from "../node-base/json-file.ts";
+import { diskBytes } from "../node-base/disk-bytes.ts";
 import type { DeleteOutcome } from "../protocol/cleanup.ts";
 import type { Role } from "../protocol/deploy.ts";
 import { deployerFiles, deployJournal, links, prefix as nodePrefix, readReleaseCommit, releaseName, releasesDir, roleLinks, type LinkName } from "../node-base/node-layout.ts";
@@ -45,18 +46,6 @@ export function releaseKeeps(inventory: ReleaseInventory): Map<string, string> {
     keep(before, `a rollback of ${links[roleLinks[role]]} needs it, as the release before the one it runs`);
   }
   return keeps;
-}
-
-/**
- * The bytes the files under `path` take on disk, links not followed. As src/disk-space.ts's, which the bootstrap worker,
- * holding only src/deploy and the files install-deployer.sh lists, cannot import.
- */
-async function diskBytes(path: string): Promise<number> {
-  const info = await lstat(path);
-  if (!info.isDirectory()) return info.blocks * 512;
-  let total = info.blocks * 512;
-  for (const entry of await readdir(path)) total += await diskBytes(join(path, entry));
-  return total;
 }
 
 /** What each process runs from: its arguments and its working directory. One that ends meanwhile, or that root cannot read, runs nothing. */
