@@ -1426,11 +1426,12 @@ A question is something a thread asks the person, with a fixed set of answers. T
 
 | Field | Type | Meaning |
 |---|---|---|
+| `kind` | `"proposal" \| "ask" \| "holds" \| "judgment" \| "cleanup"` | Since 0.72.0, what the question is: a planning thread's proposal, a Claude worker's ask, a review's holds, a failure judgment's or a node's cleanup. Each kind has its own field below, and only a `judgment` is ever `withdrawn` |
 | `id` | `string` | Chosen by the asker, such as `qn-<uuid>`. Asking again with the same ID asks nothing new |
 | `thread` | `string` | The thread that asked it |
 | `text` | `string` | What is asked, in the markdown replies use. It may be several lines |
 | `options` | `string[]` | Two or more distinct labels. The answer is one of them. None for an `ask`, which is answered with `choices` |
-| `reserved` | `string \| null` | The merge policy's reserved case the question is, such as `image-rebuild`, or null |
+| `reserved` | `string \| null` | The merge policy's reserved case a `holds` question's holds are, such as `auth`, or null. Always null for any other kind |
 | `answerer` | `"person" \| "deployer"` | Who may answer it |
 | `askedAt` | `number` | When it was asked |
 | `proposal` | `Proposal`, absent | Since 0.40.0, the item a planning thread proposed, which an `accept` adds to the pipeline |
@@ -1440,7 +1441,7 @@ A question is something a thread asks the person, with a fixed set of answers. T
 | `withdrawn` | `{ by: "archive", at: number }`, absent | Since 0.62.0, set when archiving the thread closed the failure question unanswered. It is kept, takes no answer and holds no attention |
 | `answer` | `{ option: string, by: string, at: number, choices?: Choice[] } \| null` | The option chosen, the tailnet node ID of the device that chose it, and when. Null until it is answered. An ask's answer has `choices`, and its `option` sums them up in one line |
 
-A question can be about a node instead of a thread: the control plane's [cleanup](design.md#cleanup-the-person-confirms) asks one per node about what it could delete. It has `node`, the node's name, in place of `thread`, never both, options `Delete` and `Keep`, and `cleanup`: `items`, each a template (`kind`, `id`, `project`), an image (`kind`, `id`) or a release (`kind`, `name`, `commit`) with the `bytes` it takes, and `outcomes`, what each delete did once the answer is `Delete`, keyed by the item's ID or `release-<name>`: `{"state": "deleted", "bytes": number}`, `{"state": "gone"}` or `{"state": "skipped", "reason": string}`. No `ThreadDetail` lists one. The dashboard shows it on the Cluster page and in Needs you, and the route below answers it as it answers any other.
+A question can be about a node instead of a thread: the control plane's [cleanup](design.md#cleanup-the-person-confirms) asks one per node about what it could delete. Its `kind` is `cleanup`. It has `node`, the node's name, in place of `thread`, never both, options `Delete` and `Keep`, and `cleanup`: `items`, each a template (`kind`, `id`, `project`), an image (`kind`, `id`) or a release (`kind`, `name`, `commit`) with the `bytes` it takes, and `outcomes`, what each delete did once the answer is `Delete`, keyed by the item's ID or `release-<name>`: `{"state": "deleted", "bytes": number}`, `{"state": "gone"}` or `{"state": "skipped", "reason": string}`. No `ThreadDetail` lists one. The dashboard shows it on the Cluster page and in Needs you, and the route below answers it as it answers any other.
 
 `POST /v1/questions/<id>/answer` with `{"option": string}` answers it, and answers 200 with the `Question` as stored. The answerer is always the caller, so the body has no other field. Only a person's device answers: an allowed caller that is neither the control node nor any node's tailnet identity, since a pylon's requests carry its node's. A `deployer` question also needs a deployer, as [`deploy`](#deployments) does. A control plane with no deployment settings does not know its own node, so it refuses every answer. The route answers:
 

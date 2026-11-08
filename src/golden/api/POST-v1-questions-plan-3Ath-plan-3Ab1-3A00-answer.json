@@ -1,5 +1,6 @@
 200 application/json
 {
+  "kind": "proposal",
   "id": "plan:th-plan:b1:00",
   "thread": "th-plan",
   "reserved": null,

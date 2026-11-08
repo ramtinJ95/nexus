@@ -4139,7 +4139,7 @@ for (const reason of ["agent turn still running at drain timeout", "Error: agent
 const imageHold = "Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile.";
 const dockerfile: ChangedFile[] = [{ path: "images/pylon/Dockerfile", previous: null, patch: "@@ -1 +1 @@\n-FROM a\n+FROM b" }];
 /** The builder's questions about its review's holds, oldest first. */
-const holdQuestions = (f: ReturnType<typeof fixture>) => f.registry.questions(f.builder).filter((q) => q.holds !== undefined);
+const holdQuestions = (f: ReturnType<typeof fixture>) => f.registry.questions(f.builder).filter((q) => q.kind === "holds");
 const openHolds = (f: ReturnType<typeof fixture>) => holdQuestions(f).filter((q) => q.answer === null);
 
 test("a round asks the person about the holds its head's paths decide as it starts, and Land then lands it once the reviewer approves and the check passes", async (t) => {
@@ -4153,7 +4153,7 @@ test("a round asks the person about the holds its head's paths decide as it star
   const [question, ...more] = holdQuestions(f);
   assert.deepEqual(more, []);
   assert.deepEqual({ ...question!, id: "", askedAt: 0 }, {
-    id: "", thread: f.builder, askedAt: 0, answer: null, options: ["Land", "Leave it"], reserved: "image-rebuild", answerer: "deployer",
+    kind: "holds", id: "", thread: f.builder, askedAt: 0, answer: null, options: ["Land", "Leave it"], reserved: "image-rebuild", answerer: "deployer",
     text: `Land pull request #7, "Add the cache", at ${head1.slice(0, 12)}, waiving pylon image rebuilds?\n- ${imageHold}\nLand waives these at ${head1.slice(0, 12)}, and at a rebase of it that leaves the change as it is. Nexus still lands it only once the reviewer approves it and its checks pass, then deploys it. Leave it, and nothing is waived.`,
     holds: { review: f.review().id, head: head1, base: "main", holds: [{ code: "reserved-path:image-rebuild", text: imageHold }] },
   }, "one question names the hold by its case, while the reviewer reads and the check runs");
@@ -4161,7 +4161,7 @@ test("a round asks the person about the holds its head's paths decide as it star
   await loop.poll();
   assert.equal(holdQuestions(f).length, 1, "a pass that finds the same holds asks nothing new");
 
-  loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  loop.answerHolds(question!, "Land", "nLAPTOP" as TailnetNodeId);
   assert.equal(f.review().phase.kind, "reviewing", "an early Land waits for the reviewer and the check");
   assert.deepEqual({ ...f.review().waiver!, at: 0 }, { head: head1, holds: [imageHold], codes: ["reserved-path:image-rebuild"], by: "nLAPTOP", at: 0, change: null }, "the waiver a Land press at that head gives");
   assert.deepEqual(f.review().land, { requestedBy: "nLAPTOP", head: head1, base: "main" }, "for the head and base the person saw");
@@ -4193,11 +4193,11 @@ test("holds known only later ask again: the reviewer's reserved case replaces th
   assert.equal(f.registry.question(first!.id), null, "the question the person never answered is gone, so an answer to it finds nothing");
   const [second, ...more] = openHolds(f);
   assert.deepEqual(more, []);
-  assert.deepEqual(second!.holds!.holds, [cli, { code: "reserved-path:image-rebuild", text: imageHold }]);
+  assert.deepEqual(second!.holds.holds, [cli, { code: "reserved-path:image-rebuild", text: imageHold }]);
   assert.match(second!.text, /^Land pull request #7, "Add the cache", at 111111111111, waiving breaking changes to the CLI's contract and pylon image rebuilds\?\n/);
   assert.equal(second!.reserved, "cli-breaking");
 
-  loop.answerHolds({ ...second!, holds: second!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  loop.answerHolds(second!, "Land", "nLAPTOP" as TailnetNodeId);
   assert.equal(f.review().phase.kind, "checking", "as a Land press does");
   assert.deepEqual(f.review().waiver!.codes, ["reserved:cli-breaking", "reserved-path:image-rebuild"]);
   await loop.poll();
@@ -4211,13 +4211,13 @@ test("a Land answer given before a hold appears does not cover it: the landing h
   await loop.start(f.builder, { land: null });
   await loop.poll();
   const [first] = openHolds(f);
-  loop.answerHolds({ ...first!, holds: first!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  loop.answerHolds(first!, "Land", "nLAPTOP" as TailnetNodeId);
   f.reply(f.review().reviewer, verdict(f.review(), { reserved: [{ case: "irreversible", why: "it drops a table" }] }));
   await loop.poll();
   assert.deepEqual(f.merges, [], "a waiver of the set the person saw never lands a larger one");
   assert.equal(f.review().phase.kind, "needs-person");
   const [again] = openHolds(f);
-  assert.deepEqual(again!.holds!.holds.map((h) => h.code), ["reserved:irreversible", "reserved-path:image-rebuild"]);
+  assert.deepEqual(again!.holds.holds.map((h) => h.code), ["reserved:irreversible", "reserved-path:image-rebuild"]);
   assert.match(again!.text, /waiving anything irreversible and pylon image rebuilds\?/);
 });
 
@@ -4271,7 +4271,7 @@ test("a project switched from yolo to land answers no more holds questions, and 
   assert.deepEqual(f.merges, []);
   const [open, ...more] = openHolds(f);
   assert.deepEqual(more, []);
-  assert.deepEqual(open!.holds!.holds.map((h) => h.code), ["reserved:cli-breaking", "reserved-path:image-rebuild"], "the new holds wait on the person");
+  assert.deepEqual(open!.holds.holds.map((h) => h.code), ["reserved:cli-breaking", "reserved-path:image-rebuild"], "the new holds wait on the person");
   assert.equal(f.registry.question(first!.id)?.answer?.option, "Land");
 });
 
@@ -4313,7 +4313,7 @@ test("Leave it waives nothing, and the review holds for the person without askin
   await loop.start(f.builder, { land: "nLAPTOP" });
   await loop.poll();
   const [question] = openHolds(f);
-  loop.answerHolds({ ...question!, holds: question!.holds! }, "Leave it", "nLAPTOP" as TailnetNodeId);
+  loop.answerHolds(question!, "Leave it", "nLAPTOP" as TailnetNodeId);
   assert.equal(f.review().waiver, null);
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
@@ -4333,7 +4333,7 @@ test("a review held for the person before it asked about its holds asks on the n
   const restarted = f.loop();
   await restarted.poll();
   const [question] = openHolds(f);
-  assert.deepEqual(question!.holds!.holds.map((h) => h.text), [imageHold]);
+  assert.deepEqual(question!.holds.holds.map((h) => h.text), [imageHold]);
   restarted.land(f.builder, "nLAPTOP", head1, [imageHold]);
   assert.deepEqual({ option: f.registry.question(question!.id)!.answer?.option, by: f.registry.question(question!.id)!.answer?.by }, { option: "Land", by: "nLAPTOP" });
   await restarted.poll();
@@ -4353,9 +4353,9 @@ test("an answer to a question about holds at a head the review left waives nothi
   f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
   await loop.poll();
   assert.equal(f.review().rounds.at(-1)!.head, head2);
-  assert.throws(() => loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId), { kind: "conflict", message: /moved on/ });
+  assert.throws(() => loop.answerHolds(question!, "Land", "nLAPTOP" as TailnetNodeId), { kind: "conflict", message: /moved on/ });
   assert.equal(f.review().waiver, null);
-  assert.deepEqual(openHolds(f).map((q) => q.holds!.head), [head2], "the new head asks for itself");
+  assert.deepEqual(openHolds(f).map((q) => q.holds.head), [head2], "the new head asks for itself");
 });
 
 test("a review that cannot land, or ended, asks nothing, and a cancel drops its open question", async (t) => {
@@ -4387,8 +4387,8 @@ test("a waiver given while the reviewer reads carries to a rebase that keeps the
   await loop.start(f.builder, { land: "nLAPTOP" });
   await loop.poll();
   const [question] = openHolds(f);
-  assert.deepEqual(question!.holds!.holds.map((h) => h.text), reservedHolds);
-  loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  assert.deepEqual(question!.holds.holds.map((h) => h.text), reservedHolds);
+  loop.answerHolds(question!, "Land", "nLAPTOP" as TailnetNodeId);
   await loop.poll();
   assert.equal(f.review().waiver!.change?.kind, "known", "the change the person waived is read at once, as a landing reads it");
   f.reply(f.review().reviewer, verdict(f.review(), {}));
@@ -4408,10 +4408,10 @@ test("an answer to a question asked against another base waives nothing, as a re
   f.files = dockerfile;
   const loop = await approved(f, null);
   const [question] = openHolds(f);
-  assert.equal(question!.holds!.base, "main");
+  assert.equal(question!.holds.base, "main");
   const round = f.review().rounds.at(-1)!;
   f.registry.saveReview({ ...f.review(), rounds: [...f.review().rounds, { head: round.head, base: "release", verdict: null, check: null, answers: null }], phase: { kind: "reviewing" }, waiver: null });
-  assert.throws(() => loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId), { kind: "conflict", message: /moved on/ });
+  assert.throws(() => loop.answerHolds(question!, "Land", "nLAPTOP" as TailnetNodeId), { kind: "conflict", message: /moved on/ });
   assert.equal(f.review().waiver, null);
   assert.throws(() => loop.land(f.builder, "nLAPTOP", head1, [imageHold]), { kind: "conflict" });
 });
@@ -4449,8 +4449,8 @@ test("a Land answer to an early question lands a review the live check left with
   assert.equal(f.review().phase.kind, "needs-person", "the live check gave no verdict");
   assert.equal(f.review().rounds.at(-1)!.heldAt, undefined, "its holds were never recorded");
   const [question] = openHolds(f);
-  assert.deepEqual(question!.holds!.holds.map((h) => h.text), [imageHold], "the early question is still the one to answer");
-  loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  assert.deepEqual(question!.holds.holds.map((h) => h.text), [imageHold], "the early question is still the one to answer");
+  loop.answerHolds(question!, "Land", "nLAPTOP" as TailnetNodeId);
   assert.deepEqual(f.review().waiver!.codes, ["reserved-path:image-rebuild"]);
   f.live = { kind: "done", passed: true, output: "fleet ok" };
   await loop.poll();
@@ -4482,7 +4482,7 @@ test("an early Land asks for the landing of the head it named only: a new head t
   await loop.start(f.builder, { land: null });
   await loop.poll();
   const [question] = openHolds(f);
-  loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  loop.answerHolds(question!, "Land", "nLAPTOP" as TailnetNodeId);
   assert.deepEqual(f.review().land, { requestedBy: "nLAPTOP", head: head1, base: "main" }, "the request names the head and base the person saw");
   f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
   await loop.poll();
@@ -4506,7 +4506,7 @@ test("an early Land on a review started with --land keeps its request, and one f
   await gLoop.start(g.builder, { land: "nLAPTOP" });
   await gLoop.poll();
   const [asked] = openHolds(g);
-  gLoop.answerHolds({ ...asked!, holds: asked!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  gLoop.answerHolds(asked!, "Land", "nLAPTOP" as TailnetNodeId);
   assert.deepEqual(g.review().land, { requestedBy: "nLAPTOP" });
 
   const f = fixture(t);
@@ -4517,7 +4517,7 @@ test("an early Land on a review started with --land keeps its request, and one f
   await loop.start(f.builder, { land: null });
   await loop.poll();
   const [question] = openHolds(f);
-  loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  loop.answerHolds(question!, "Land", "nLAPTOP" as TailnetNodeId);
   await loop.poll();
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   conflicting(f);
@@ -4537,7 +4537,7 @@ test("the same holds in another order are the same question, so a Leave it is no
   f.reply(f.review().reviewer, verdict(f.review(), { reserved: [{ case: "cli-breaking", why: "it renames a flag" }] }));
   await loop.poll();
   const [question] = openHolds(f);
-  loop.answerHolds({ ...question!, holds: question!.holds! }, "Leave it", "nLAPTOP" as TailnetNodeId);
+  loop.answerHolds(question!, "Leave it", "nLAPTOP" as TailnetNodeId);
   const phase = f.review().phase as Extract<Review["phase"], { kind: "needs-person" }>;
   f.registry.saveReview({ ...f.review(), phase: { ...phase, ...personPhase("policy", ...[...phase.holds].reverse()) } });
   await f.loop().poll();
@@ -4564,7 +4564,7 @@ test("an early Land is for the base it was asked against too: a retarget at the 
   await loop.start(f.builder, { land: null });
   await loop.poll();
   const [question] = openHolds(f);
-  loop.answerHolds({ ...question!, holds: question!.holds! }, "Land", "nLAPTOP" as TailnetNodeId);
+  loop.answerHolds(question!, "Land", "nLAPTOP" as TailnetNodeId);
   assert.deepEqual(f.review().land, { requestedBy: "nLAPTOP", head: head1, base: "main" });
   f.files = [{ path: "src/cache.ts", previous: null, patch: "@@ -0,0 +1 @@\n+export {};" }];
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "release" } };

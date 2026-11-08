@@ -233,7 +233,7 @@ ${card}`];
     case "resume": return [label, resumeCard(c, t, named)!];
     case "question": {
       const q = n.question;
-      if (q.holds !== undefined) return [label, html`${questionCard(c, q)}${landing(c, d, named, true)}`];
+      if (q.kind === "holds") return [label, html`${questionCard(c, q)}${landing(c, d, named, true)}`];
       const judgment = d.judgments.filter((j) => j.question === q.id);
       return [label, html`${judgment.length > 0 && judgmentCards(c, { ...d, judgments: judgment })}${questionCard(c, q)}`];
     }

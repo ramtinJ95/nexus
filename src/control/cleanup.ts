@@ -12,7 +12,7 @@ import { releaseKeeps, type ReleaseInventory } from "../deploy/release-cleanup.t
 import { singleFlight } from "../single-flight.ts";
 import { lowDisk } from "../disk-space.ts";
 import type { Registry } from "./registry.ts";
-import type { NodeQuestion } from "./questions.ts";
+import type { CleanupQuestion } from "./questions.ts";
 import { artifactKept, bytesText, cleanupCandidates, cleanupDue, cleanupQuestion, grew, itemKey, undeleted, type CleanupItem, type NodeFacts } from "./cleanup-model.ts";
 
 type CleanupRegistry = Pick<Registry, "askQuestion" | "currentImage" | "imageOperation" | "node" | "nodeQuestions" | "nodes" | "previousImage" | "projects" | "pylonsWithThreadsOn"
@@ -72,7 +72,7 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
    * checked again just before its batch, and records what each delete did. One the node no longer lists goes too, so
    * the probe reports it gone and removes what a delete a crash cut short left of it.
    */
-  async function deleteArtifacts(node: NodeName, q: NodeQuestion) {
+  async function deleteArtifacts(node: NodeName, q: CleanupQuestion) {
     const probe = probes.get(node);
     if (probe === undefined) return;
     const ids = undeleted(q).flatMap((i) => i.kind === "release" ? [] : [i.id]);

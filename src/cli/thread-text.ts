@@ -54,7 +54,7 @@ function questionText(q: Question): string {
   const [first, ...rest] = q.text.split("\n");
   return [
     `question ${q.id}: ${first}`,
-    ...q.ask === undefined ? [] : rest.map((line) => `  ${line}`),
+    ..."ask" in q ? rest.map((line) => `  ${line}`) : [],
     ...q.options.length === 0 ? [] : [`  options: ${q.options.map((o) => JSON.stringify(o)).join(", ")}`],
     ...q.reserved === null ? [] : [`  reserved: ${reservedNames[q.reserved]}`],
     q.withdrawn !== undefined ? `  withdrawn when the thread was archived at ${new Date(q.withdrawn.at).toISOString()}`

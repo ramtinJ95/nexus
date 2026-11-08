@@ -301,4 +301,10 @@ export const migrations: readonly string[] = [
   // a worker whose turn died. A worker from before has neither, so no turn of it died that Nexus saw.
   `ALTER TABLE claude_workers ADD COLUMN died_at INTEGER;
    ALTER TABLE claude_workers ADD COLUMN resume TEXT;`,
+  // A question names its kind, which before was the one field of its kind it held: a node's is a cleanup, and a
+  // thread's with no ask, holds or proposal is a failure judgment's. Applied again, it changes nothing.
+  `UPDATE questions SET record = json_set(record, '$.kind', CASE WHEN node IS NOT NULL THEN 'cleanup'
+     WHEN json_extract(record, '$.ask') IS NOT NULL THEN 'ask' WHEN json_extract(record, '$.holds') IS NOT NULL THEN 'holds'
+     WHEN json_extract(record, '$.proposal') IS NOT NULL THEN 'proposal' ELSE 'judgment' END)
+     WHERE json_extract(record, '$.kind') IS NULL;`,
 ];

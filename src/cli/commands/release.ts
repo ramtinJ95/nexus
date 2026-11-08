@@ -7,7 +7,7 @@ import { CliError } from "../transport.ts";
 import { type Api, type Result, type Command, str, request, int, table, pollUntil } from "../kit.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { deployWaitMs, imageRoutes, releaseRoutes, type ImageEntry, type ImageOperation, type ImagesView } from "../../contract/release.ts";
-import { questionRoutes, reviewRoutes, type Review } from "../../contract/reviews.ts";
+import { landOption, questionRoutes, reviewRoutes, type Review } from "../../contract/reviews.ts";
 import { reviewText } from "../thread-text.ts";
 
 function releaseText(view: ReleaseView): string {
@@ -153,7 +153,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
     async run(api, [id], v) {
       const { question, running, ...press } = v.waive === true ? await pressOf(api, id!, { input: process.stdin, output: process.stderr }) : {};
       if (question !== undefined) {
-        await request(api, questionRoutes.answer, { question, body: { option: "Land" } });
+        await request(api, questionRoutes.answer, { question, body: { option: landOption } });
         const { review } = await request(api, threadRoutes.show, { thread: id! });
         return { json: review, text: answeredText(review!, running === true) };
       }

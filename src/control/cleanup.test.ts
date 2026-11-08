@@ -56,7 +56,7 @@ function setUp(t: import("node:test").TestContext) {
 
 const asked = (registry: Registry) => registry.nodeQuestions(testNode);
 const keysOf = (registry: Registry) => asked(registry).map((q) => q.cleanup.items.map((i) => i.kind === "release" ? i.name.slice(0, 1) : i.id));
-const answer = (registry: Registry, option: "Delete" | "Keep") => registry.answerQuestion(asked(registry).at(-1)!.id, { option, by: "nLAPTOP" as TailnetNodeId, at: now });
+const answer = (registry: Registry, option: "Delete" | "Keep") => registry.answerQuestion(asked(registry).at(-1)!, { option, by: "nLAPTOP" as TailnetNodeId, at: now });
 
 test("one question per node, asked again only once a new candidate joins, with each item's space and the total", async (t) => {
   const { registry, pass, observe, later } = setUp(t);

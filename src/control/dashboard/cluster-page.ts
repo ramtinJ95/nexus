@@ -14,6 +14,7 @@ import { releaseView } from "../releases.ts";
 import { utc } from "../../contract/usage.ts";
 import { seriesKey, seriesLabel, seriesOf, type Series } from "../node-metrics.ts";
 import { bytesText, lastCleanup } from "../cleanup-model.ts";
+import { isOpen } from "../questions.ts";
 import { charts, ranges } from "./graph-data.ts";
 import { Html, html, menu, dot, icon, ago, type Part } from "./view.ts";
 import { duration } from "../wording.ts";
@@ -52,7 +53,7 @@ const graphs = (name: NodeName) => html`<section id="node-graphs" class="graphs"
 
 /** The open cleanup question, which the person answers. What an answered one did is in the cleanup line. */
 function cleanup(c: Context, name: NodeName): Html {
-  const open = c.registry.nodeQuestions(name).findLast((q) => q.answer === null);
+  const open = c.registry.nodeQuestions(name).findLast(isOpen);
   return html`<section aria-labelledby="node-cleanup-h"><div class="ov-head"><h2 id="node-cleanup-h">Cleanup</h2></div>
 <p id="action-error" class="error" role="alert" hidden></p>
 ${open === undefined ? html`<p class="empty">No cleanup question waits on you.</p>` : cleanupCard(c, open)}

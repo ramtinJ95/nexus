@@ -354,7 +354,7 @@ export function judgmentPass(options: {
     ].join("\n\n");
     return {
       next: { ...j, phase: { kind: "asked", verdict } },
-      act: () => { registry.askQuestion({ id: judgmentId(j.failure), thread: j.thread, failure: j.failure, text, options: choices, reserved: null, answerer: "person", askedAt: now() }); },
+      act: () => { registry.askQuestion({ kind: "judgment", id: judgmentId(j.failure), thread: j.thread, failure: j.failure, text, options: choices, reserved: null, answerer: "person", askedAt: now() }); },
       nodes: [],
     };
   }

@@ -12,7 +12,8 @@ import { holdRule } from "../holds.ts";
 import { reservedNames } from "../../contract/reserved.ts";
 import { landsOnItsOwn } from "../project.ts";
 import { holdsAt, landPress } from "../policy.ts";
-import { isOpen, type AnswerRefusal, type AskedQuestion, type NodeQuestion, type Question } from "../questions.ts";
+import { landOption } from "../../contract/reviews.ts";
+import { askingHolds, type AnswerRefusal, type ClaudeQuestion, type CleanupQuestion, type Question, type ThreadQuestion } from "../questions.ts";
 import { bytesText, itemKey, itemText } from "../cleanup-model.ts";
 import { Html, html, ago, short } from "./view.ts";
 import type { LandRefusal, Context } from "./context.ts";
@@ -53,11 +54,11 @@ ${j.brief !== null && html`<details><summary>What the judgment was asked and ans
  * conversation instead. As with landing, the page says up front when the answer route would refuse this device.
  */
 export function questionCards(c: Context, d: ThreadDetail): Html[] {
-  return d.questions.filter((q) => q.ask === undefined || q.answer === null).map((q) => questionCard(c, q));
+  return d.questions.filter((q) => q.kind !== "ask" || q.answer === null).map((q) => questionCard(c, q));
 }
 
-export function questionCard(c: Context, q: Question): Html {
-  if (q.ask !== undefined) return askCard(c, q, q.ask.questions);
+export function questionCard(c: Context, q: ThreadQuestion): Html {
+  if (q.kind === "ask") return askCard(c, q);
   if (q.withdrawn !== undefined) {
     return html`<section class="landing question answered" data-question="${q.id}" aria-label="Withdrawn question"><div class="question-text">${prose(q.text)}</div>
 <p class="land-meta">Withdrawn when the thread was archived, ${ago(q.withdrawn.at, c.now)}</p></section>`;
@@ -68,12 +69,12 @@ export function questionCard(c: Context, q: Question): Html {
   }
   const refusal = c.answerRefusal(q);
   // Land on a question about holds is a Land press, so its confirmation says what it waives and merges.
-  const confirm = (option: string) => q.holds !== undefined && option === "Land" ? `${q.text.split("\n")[0]} ${answerFinal}` : `Answer "${option}"? ${answerFinal}`;
+  const confirm = (option: string) => q.kind === "holds" && option === landOption ? `${q.text.split("\n")[0]} ${answerFinal}` : `Answer "${option}"? ${answerFinal}`;
   const buttons = q.options.map((option) => refusal === null
     ? html`<button type="button" class="btn" data-action="answer" data-thread="${q.thread}" data-question="${q.id}" data-option="${option}" data-confirm="${confirm(option)}">${option}</button>`
     : html`<button type="button" class="btn" data-question="${q.id}" data-option="${option}" disabled>${option}</button>`);
   return html`<section class="landing question" data-question="${q.id}" aria-label="${needLabels.question}">
-<div class="land-top"><h2>${needLabels.question}</h2>${q.reserved !== null && html`<span class="tag">reserved: ${reservedNames[q.reserved]}</span>`}</div>
+<div class="land-top"><h2>${needLabels.question}</h2>${q.kind === "holds" && q.reserved !== null && html`<span class="tag">reserved: ${reservedNames[q.reserved]}</span>`}</div>
 <div class="question-text">${prose(q.text)}</div>
 <p class="land-meta">Asked ${ago(q.askedAt, c.now)}. ${answerers[q.answerer]}</p>
 <div class="land-act"><div class="question-options">${buttons}</div>${refusal !== null && html`<p class="error">${answerRefusals[refusal](c.caller)}</p>`}</div>
@@ -84,7 +85,7 @@ export function questionCard(c: Context, q: Question): Html {
  * A node's open question about what it could delete: each item and the space it takes, and the total, with Delete and
  * Keep. What an answered one did is the Cluster page's cleanup line.
  */
-export function cleanupCard(c: Context, q: NodeQuestion): Html {
+export function cleanupCard(c: Context, q: CleanupQuestion): Html {
   const { items } = q.cleanup;
   const total = items.reduce((sum, i) => sum + i.bytes, 0);
   const table = html`<table class="ov cleanup-items"><thead><tr><th class="wide">What</th><th>Space</th></tr></thead>
@@ -107,7 +108,8 @@ ${table}
  * takes several, each option's preview, an answer of the person's own, and notes. client.js sends it as the answer's
  * choices. The terminal's dialog stays open meanwhile, and whichever answers first is the answer.
  */
-function askCard(c: Context, q: Question, asked: readonly AskedQuestion[]): Html {
+function askCard(c: Context, q: ClaudeQuestion): Html {
+  const asked = q.ask.questions;
   const refusal = c.answerRefusal(q);
   // Each field has an ID, so a swap of the region keeps the focus in it.
   const field = (i: number, name: string) => `${q.id}-${i}-${name}`;
@@ -175,7 +177,7 @@ ${phase.kind === "quoting" ? html`<p class="land-note">The reviewer quotes, from
   const press = landPress(r);
   const waived = press.kind === "lands" ? press.waives.map((h) => h.text) : [];
   // The review's question about these holds is how the person waives them, so the card does not offer a second way.
-  const asking = d.questions.find((q) => isOpen(q) && q.holds?.review === r.id && q.holds.head === round.head);
+  const asking = askingHolds(d.questions, r.id)?.holds.head === round.head;
   // A hold that meets every landing again, and that the person cannot waive, leaves only merging on GitHub.
   const stuck = press.kind === "stuck";
   const checks = press.kind === "lands" && press.quotes ? "Nexus first asks the reviewer to quote, from the description as it is now, what could not be checked live, then checks" : "Nexus checks";
@@ -206,7 +208,7 @@ ${found}
 </details>`}
 ${moved !== null ? html`<p class="land-note">The PR watch last read the pull request at ${short(moved)}, not ${short(round.head)}, so ${short(round.head)} is not offered for landing. Nexus confirms the head with GitHub, and a new head gets a new round, or holds for you when no round is left.</p>`
   : stuck ? html`<p class="land-note">Landing checks the merge policy again, and what is marked "holds again" holds every landing of this commit. Only you can get past it, by merging the pull request on GitHub${c.deploys(r) && " and deploying it with nexus deploy"}.</p>`
-  : asking !== undefined ? html`<p class="land-note">Answer the question about its holds${!card && " above"} to waive them and land it.</p>`
+  : asking ? html`<p class="land-note">Answer the question about its holds${!card && " above"} to waive them and land it.</p>`
   : c.landRefusal === null ? html`<div class="land-act"><button type="button" class="btn btn-primary" id="${id("land")}" data-action="land" data-thread="${d.thread.id}" data-head="${round.head}"${waived.length > 0 && html` data-holds="${JSON.stringify(waived)}"`} data-confirm="${confirm}">Land #${r.pr.number}</button>${waived.length > 0 && html`<p class="land-note">Pressing Land waives what is marked "you may waive", for commit ${short(round.head)} and any rebase of it that leaves the change as it is. Landing checks everything else again.</p>`}</div>`
   : html`<div class="land-act"><button type="button" class="btn" id="${id("land")}" disabled>Land #${r.pr.number}</button><p class="error">${landRefusals[c.landRefusal](c.caller)}</p></div>`}
 </section>`;

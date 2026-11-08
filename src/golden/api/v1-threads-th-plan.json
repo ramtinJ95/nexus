@@ -68,6 +68,7 @@
   "reviewView": null,
   "questions": [
     {
+      "kind": "proposal",
       "id": "plan:th-plan:b1:00",
       "thread": "th-plan",
       "reserved": null,
@@ -89,6 +90,7 @@
       "answer": null
     },
     {
+      "kind": "proposal",
       "id": "plan:th-plan:b1:01",
       "thread": "th-plan",
       "reserved": null,
@@ -110,6 +112,7 @@
       "answer": null
     },
     {
+      "kind": "proposal",
       "id": "plan:th-plan:b1:02",
       "thread": "th-plan",
       "reserved": null,

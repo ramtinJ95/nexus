@@ -14,6 +14,7 @@ import { openRegistry, type Registry } from "./registry.ts";
 import { observeNode, testPylon, testThread } from "../test-support/registry-kit.ts";
 import { tempDir } from "../test-support/kit.ts";
 import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
+import type { JudgmentQuestion } from "./questions.ts";
 
 const nodeA = "node-a" as NodeName;
 const nodeB = "node-b" as NodeName;
@@ -180,7 +181,7 @@ test("a move goes to the person when the failed node still lists the pylon or ho
   for (const [id, why] of [[listed, "node-a still lists it broken, and Nexus has no move job"], [paused, "its disk is on node-a, and Nexus has no move job"]] as const) {
     const j = only(w.registry, id);
     assert.deepEqual(j.phase, { kind: "asked", verdict: { answer: "person", why: `the judgment answered retry-elsewhere, which cannot run: ${why}`, by: "control plane" } });
-    const question = w.registry.question(`judgment:${j.failure}`)!;
+    const question = w.registry.question(`judgment:${j.failure}`) as JudgmentQuestion;
     assert.deepEqual([question.thread, question.answerer, question.answer, question.options], [id, "person", null, ["Retry", "Leave it failed"]]);
     assert.equal(w.registry.pylon(`pylon-${id}` as PylonId)!.node, nodeA);
     assert.equal(w.registry.attention(id), "failed");
@@ -199,7 +200,7 @@ test("a person answer asks with the actions that can run, and each answer does w
   }
 
   const answered = Date.now();
-  for (const [q, option] of questions.map((q, i) => [q, q.options[i]!] as const)) w.registry.answerQuestion(q.id, { option, by: laptop, at: answered });
+  for (const [q, option] of questions.map((q, i) => [q, q.options[i]!] as const)) w.registry.answerQuestion(q, { option, by: laptop, at: answered });
   await w.until(() => ids.every((id) => phaseOf(w, id) === "done"));
 
   const outcomes = ids.map((id) => { const p = only(w.registry, id).phase; return p.kind === "done" ? p.outcome : null; });
@@ -214,7 +215,7 @@ test("archiving a thread withdraws its failure's open question and drops the fai
   fail(w.registry, id, brokenWith("person"));
   await w.until(() => phaseOf(w, id) === "asked");
   const asked = `judgment:${only(w.registry, id).failure}`;
-  assert.equal(w.registry.question(asked)?.failure, only(w.registry, id).failure);
+  assert.equal((w.registry.question(asked) as JudgmentQuestion).failure, only(w.registry, id).failure);
   assert.equal(w.registry.attention(id), "failed");
 
   const archivedAt = Date.now();
@@ -225,7 +226,7 @@ test("archiving a thread withdraws its failure's open question and drops the fai
   assert.ok(withdrawn.withdrawn.at >= archivedAt);
   assert.equal(w.registry.attention(id), null);
   assert.deepEqual(w.registry.events("0", { thread: id, kinds: ["attention.changed"] }).map((e) => e.payload.attention), ["failed", null]);
-  assert.deepEqual(w.registry.answerQuestion(asked, { option: "Retry", by: laptop, at: Date.now() }), withdrawn, "a withdrawn question takes no answer");
+  assert.deepEqual(w.registry.answerQuestion(w.registry.question(asked)!, { option: "Retry", by: laptop, at: Date.now() }), withdrawn, "a withdrawn question takes no answer");
   await w.until(() => phaseOf(w, id) === "done");
   const phase = only(w.registry, id).phase;
   assert.deepEqual(phase.kind === "done" && phase.outcome, { kind: "left", why: "the thread is archived" });
@@ -264,7 +265,7 @@ test("a thread archived before archives withdrew failure questions has its open 
   rewindTo(join(dir, "registry.db"), versionBefore(/'\$\.withdrawn', json_object\('by', 'archive'/));
 
   const w = await open(t, dir);
-  const q = w.registry.question(asked)!;
+  const q = w.registry.question(asked) as JudgmentQuestion;
   assert.deepEqual([q.failure, q.answer, q.withdrawn], [only(w.registry, id).failure, null, { by: "archive", at: 1234 }]);
   assert.equal(w.registry.attention(id), null);
 });
@@ -446,7 +447,7 @@ test("an answer to a judgment whose failure Nexus can no longer tell from a late
   fail(w.registry, id, brokenWith("person"));
   for (let i = 0; i < 10_000; i++) w.registry.appendEvent("attention.changed", null, {});
   assert.equal(w.registry.failure(id), null, "both failures' events are pruned");
-  w.registry.answerQuestion(`judgment:${failure}`, { option: "Retry", by: laptop, at: Date.now() });
+  w.registry.answerQuestion(w.registry.question(`judgment:${failure}`)!, { option: "Retry", by: laptop, at: Date.now() });
   await w.until(() => phaseOf(w, id) === "done");
 
   const j = only(w.registry, id);

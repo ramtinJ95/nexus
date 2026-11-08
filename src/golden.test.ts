@@ -69,8 +69,8 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
     reviews: { ...demoReviews(() => s.registry), answerHolds },
   });
   /** As the demo's review loop does with a land: a Land answer waives the holds it names and starts merging, and nothing reaches GitHub. */
-  function answerHolds(question: import("./control/questions.ts").ThreadQuestion & { holds: import("./control/questions.ts").HeldQuestion }, option: string, by: TailnetNodeId) {
-    const answered = s.registry.answerQuestion(question.id, { option, by, at: Date.now() });
+  function answerHolds(question: import("./control/questions.ts").HoldsQuestion, option: string, by: TailnetNodeId) {
+    const answered = s.registry.answerQuestion(question, { option, by, at: Date.now() });
     const r = s.registry.review(question.thread)!;
     if (option === "Land") {
       const waiver = { head: question.holds.head, holds: question.holds.holds.map((h) => h.text), codes: question.holds.holds.map((h) => h.code), by, at: Date.now(), change: null };

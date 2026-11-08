@@ -93,7 +93,7 @@ test("the Cluster page says in one line what each node's latest cleanup freed an
   const deleted = (bytes: number): DeleteOutcome => ({ state: "deleted", bytes });
   const ask = (on: NodeName, askedAt: number, items: Parameters<typeof cleanupQuestion>[1]) => s.registry.askQuestion(cleanupQuestion(on, items, askedAt));
   const answer = (id: string, option: "Delete" | "Keep", at: number, outcomes: Record<string, DeleteOutcome> = {}) => {
-    s.registry.answerQuestion(id, { option, by: laptop, at });
+    s.registry.answerQuestion(s.registry.question(id)!, { option, by: laptop, at });
     if (Object.keys(outcomes).length > 0) s.registry.recordCleanup(id, outcomes);
   };
   const old = ask(testbench, now - 50 * hour, [{ kind: "image", id: older, bytes: 9 * 1024 ** 3 }]);

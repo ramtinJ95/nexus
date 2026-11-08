@@ -8,7 +8,8 @@ import type { testApi } from "../test-support/api-kit.ts";
 import type { PullRequest } from "../control/github.ts";
 import { caseOf, personOnly, waivedName, type Hold } from "../control/holds.ts";
 import { reservedNames } from "../contract/reserved.ts";
-import { holdOptions, type HeldQuestion } from "../control/questions.ts";
+import type { HeldQuestion } from "../control/questions.ts";
+import { holdOptions } from "../contract/reviews.ts";
 import { personPhase, type ModelFailure, type Review, type Round, type SecondReviewer, type Verdict } from "../control/review-model.ts";
 import type { Thread } from "../control/thread-store.ts";
 import type { ThreadId } from "../ids.ts";
@@ -176,7 +177,7 @@ const specs: Spec[] = [
 ${holds.map((h) => `- ${h.text}`).join("\n")}
 Land waives these at ${short}, and at a rebase of it that leaves the change as it is. Nexus still lands it only once the reviewer approves it and its checks pass. Leave it, and nothing is waived.`;
       d.registry.askQuestion({
-        id, thread: t.id, text, options: holdOptions, reserved: holds.map((h) => caseOf(h.code)).find((c) => c !== null) ?? null,
+        kind: "holds", id, thread: t.id, text, options: holdOptions, reserved: holds.map((h) => caseOf(h.code)).find((c) => c !== null) ?? null,
         answerer: "deployer", askedAt: Date.now() - 8 * minute, holds: asked,
       });
     },

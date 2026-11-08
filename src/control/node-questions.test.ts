@@ -1,10 +1,12 @@
-/** Questions whose subject is a node, and the migration that lets a question name no thread. */
+/** Questions whose subject is a node, the migration that lets a question name no thread, and the one that names each question's kind. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openRegistry } from "./registry.ts";
+import { migrations } from "./schema.ts";
+import { askRecord, type Question } from "./questions.ts";
 import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
 import { seedRegistry, testPylon, testRegistry, testThread } from "../test-support/registry-kit.ts";
 import { tempDir } from "../test-support/kit.ts";
@@ -21,11 +23,11 @@ test("the migration keeps every thread question as it was, in its order, answere
   const before = openRegistry(path);
   seedRegistry(before);
   before.createThread(thread, testPylon(thread));
-  const ask = { thread: thread.id, options: ["Yes", "No"], reserved: null, answerer: "person" as const, askedAt: 5 };
-  before.askQuestion({ ...ask, id: "qn-b", text: "First?" });
-  before.askQuestion({ ...ask, id: "qn-a", text: "Second?", reserved: "image-rebuild", answerer: "deployer" });
-  before.askQuestion({ ...ask, id: "qn-c", text: "Third?", askedAt: 4 });
-  before.answerQuestion("qn-c", { option: "No", by: "nLAPTOP" as TailnetNodeId, at: 6 });
+  const ask = { thread: thread.id, options: ["Yes", "No"], answerer: "person" as const, askedAt: 5 };
+  before.askQuestion({ kind: "judgment", ...ask, id: "qn-b", text: "First?", failure: 0, reserved: null });
+  before.askQuestion({ kind: "holds", ...ask, id: "qn-a", text: "Second?", reserved: "image-rebuild", answerer: "deployer", holds: { review: "rv-1", head: "h", base: null, holds: [] } });
+  before.askQuestion({ kind: "judgment", ...ask, id: "qn-c", text: "Third?", askedAt: 4, failure: 0, reserved: null });
+  before.answerQuestion(before.question("qn-c")!, { option: "No", by: "nLAPTOP" as TailnetNodeId, at: 6 });
   const questions = before.questions(thread.id);
   before.close();
   rewindTo(path, versionBefore(migration));
@@ -58,7 +60,7 @@ test("a node question round-trips with its items and outcomes, holds no thread's
   assert.equal(registry.attention(thread.id), null, "a node question is no thread's decision");
 
   const answer = { option: "Delete", by: "nLAPTOP" as TailnetNodeId, at: 8 };
-  registry.answerQuestion(stored.id, answer);
+  registry.answerQuestion(stored, answer);
   registry.recordCleanup(stored.id, { "tpl-0000000000a1": { state: "deleted", bytes: 2048 } });
   registry.recordCleanup(stored.id, { "tpl-0000000000a1": { state: "gone" }, [`release-${"a".repeat(40)}`]: { state: "skipped", reason: "process 7 runs from it" } });
   registry.close();
@@ -75,4 +77,40 @@ test("a node question round-trips with its items and outcomes, holds no thread's
   const insert = raw.prepare("INSERT INTO questions (id, thread, node, record) VALUES (?, ?, ?, '{}')");
   assert.throws(() => insert.run("both", thread.id, node), /CHECK constraint failed/);
   assert.throws(() => insert.run("neither", null, null), /CHECK constraint failed/);
+});
+
+test("the kind migration names each stored question's kind from the field it held, keeps every other field, and changes nothing applied again", (t) => {
+  const path = join(dir, `${randomUUID()}.db`);
+  const before = seedRegistry(openRegistry(path));
+  before.createThread(thread, testPylon(thread));
+  const base = { thread: thread.id, text: "Go?", options: ["Yes", "No"], reserved: null, answerer: "person" as const, askedAt: 5 };
+  before.askQuestion({ ...base, kind: "proposal", id: "plan:th-1:b1:01", proposal: { block: "b1", index: 1, key: "a", title: "A", brief: "Build A.", after: [] } });
+  before.askQuestion(askRecord(thread.id, { session: "s1", toolUseId: "toolu_1", questions: [{ question: "Which?", header: "Pick", multiSelect: false, options: [{ label: "One", description: "" }] }] }, 6));
+  before.askQuestion({ ...base, kind: "holds", id: "holds-rv-1-a", reserved: "auth", answerer: "deployer", holds: { review: "rv-1", head: "a".repeat(40), base: "main", holds: [{ code: "reserved-path:auth", text: "Always needs the person." }] } });
+  before.askQuestion({ ...base, kind: "judgment", id: "judgment:7", failure: 7 });
+  before.askQuestion({ ...base, kind: "judgment", id: "judgment:8", failure: 8 });
+  before.askQuestion(cleanupQuestion(node, [{ kind: "image", id: "img-000000000001" as never, bytes: 1 }], 7));
+  before.answerQuestion(before.question("judgment:8")!, { option: "Yes", by: "nLAPTOP" as TailnetNodeId, at: 9 });
+  before.close();
+
+  const stripped = new DatabaseSync(path);
+  stripped.prepare("UPDATE questions SET record = json_set(record, '$.withdrawn', json(?)) WHERE id = 'judgment:7'").run(JSON.stringify({ by: "archive", at: 10 }));
+  const asked = (stripped.prepare("SELECT id, record FROM questions ORDER BY rowid").all() as { id: string; record: string }[]).map((r) => JSON.parse(r.record) as Question);
+  stripped.exec("UPDATE questions SET record = json_remove(record, '$.kind')");
+  stripped.close();
+  const kindMigration = /json_set\(record, '\$\.kind'/;
+  rewindTo(path, versionBefore(kindMigration));
+
+  const after = testRegistry(t, path);
+  assert.deepEqual(asked.map((q) => after.question(q.id)), asked, "each question has the kind it was asked with, and every other field as it was");
+  assert.deepEqual(asked.map((q) => q.kind), ["proposal", "ask", "holds", "judgment", "judgment", "cleanup"]);
+  assert.deepEqual(after.openNodeQuestions().map((q) => q.id), [asked[5]!.id]);
+  assert.equal(after.attention(thread.id), "decision", "the open proposal, ask and holds questions still need the person");
+
+  const raw = new DatabaseSync(path);
+  t.after(() => raw.close());
+  const rows = () => raw.prepare("SELECT rowid, id, thread, node, record FROM questions ORDER BY rowid").all();
+  const migrated = rows();
+  raw.exec(migrations[versionBefore(kindMigration)]!);
+  assert.deepEqual(rows(), migrated, "applied again, it changes nothing");
 });

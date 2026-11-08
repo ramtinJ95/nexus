@@ -141,7 +141,7 @@ interface NeedRow<K extends NeedKind> {
   fix?(n: NeedOf<K>, now: number): NeedFix;
 }
 
-const asked = (n: NeedOf<"question">) => firstLine(n.question.ask?.questions[0]?.question ?? n.question.proposal?.title ?? n.question.text);
+const asked = ({ question: q }: NeedOf<"question">) => firstLine(q.kind === "ask" ? q.ask.questions[0]!.question : q.kind === "proposal" ? q.proposal.title : q.text);
 const button = (action: string, label: string, confirm?: string): NeedAction => ({ kind: "button", action, label, ...confirm === undefined ? {} : { confirm } });
 
 const needRows: { [K in NeedKind]: NeedRow<K> } = {
@@ -189,7 +189,7 @@ export function needKind(n: ThreadNeed): NeedKind {
     }
     case "question": {
       const q = n.question;
-      return q.holds !== undefined ? "holds" : q.ask !== undefined ? "ask" : q.proposal !== undefined ? "proposal" : n.d.judgments.some((j) => j.question === q.id) ? "judgment" : "question";
+      return q.kind !== "judgment" ? q.kind : n.d.judgments.some((j) => j.question === q.id) ? "judgment" : "question";
     }
     case "thread": return n.attention;
     default: return n.kind;

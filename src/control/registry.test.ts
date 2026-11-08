@@ -544,7 +544,7 @@ test("a PR watch's save fires pull-request.linked once for each PR it has read, 
 test("asking a question twice keeps one, its thread needs a decision until it is answered, and an answer is never replaced", (t) => {
   const path = tempDb();
   const registry = seed(openRegistry(path));
-  const ask = { id: "qn-1", thread: threadId, text: "Rebuild the image?", options: ["Rebuild", "Not now"], reserved: "image-rebuild" as const, answerer: "deployer" as const, askedAt: 5 };
+  const ask = { kind: "holds" as const, id: "qn-1", thread: threadId, text: "Rebuild the image?", options: ["Rebuild", "Not now"], reserved: "image-rebuild" as const, answerer: "deployer" as const, askedAt: 5, holds: { review: "rv-1", head: "h", base: null, holds: [] } };
   const asked = registry.askQuestion(ask);
   assert.deepEqual(asked, { ...ask, answer: null });
   assert.deepEqual(registry.askQuestion({ ...ask, text: "Something else?", askedAt: 6 }), asked, "asking again under one ID answers the first question");
@@ -552,9 +552,9 @@ test("asking a question twice keeps one, its thread needs a decision until it is
   assert.equal(registry.attention(threadId), "decision");
 
   const answer = { option: "Not now", by: "nLAPTOP" as TailnetNodeId, at: 7 };
-  assert.deepEqual(registry.answerQuestion("qn-1", answer), { ...asked, answer });
+  assert.deepEqual(registry.answerQuestion(registry.question("qn-1")!, answer), { ...asked, answer });
   assert.equal(registry.attention(threadId), null);
-  assert.deepEqual(registry.answerQuestion("qn-1", { option: "Rebuild", by: "nPHONE" as TailnetNodeId, at: 8 }).answer, answer, "the first answer stays");
+  assert.deepEqual(registry.answerQuestion(registry.question("qn-1")!, { option: "Rebuild", by: "nPHONE" as TailnetNodeId, at: 8 }).answer, answer, "the first answer stays");
   assert.deepEqual(registry.events("0", { kinds: ["attention.changed"] }).map((e) => e.payload), [{ attention: "decision" }, { attention: null }]);
   registry.close();
   const reopened = testRegistry(t, path);
@@ -564,12 +564,12 @@ test("asking a question twice keeps one, its thread needs a decision until it is
 
 test("questions asked in one millisecond list in the order they were asked, before and after an answer", (t) => {
   const registry = seeded(t, tempDb());
-  const ask = { thread: threadId, options: ["Yes", "No"], reserved: null, answerer: "person" as const, askedAt: 5 };
+  const ask = { kind: "judgment" as const, thread: threadId, failure: 0, options: ["Yes", "No"], reserved: null, answerer: "person" as const, askedAt: 5 };
   registry.askQuestion({ ...ask, id: "qn-b", text: "First?" });
   registry.askQuestion({ ...ask, id: "qn-a", text: "Second?" });
   assert.deepEqual(registry.questions(threadId).map((q) => q.id), ["qn-b", "qn-a"]);
   for (const id of ["qn-b", "qn-a"]) {
-    registry.answerQuestion(id, { option: "Yes", by: "nLAPTOP" as TailnetNodeId, at: 6 });
+    registry.answerQuestion(registry.question(id)!, { option: "Yes", by: "nLAPTOP" as TailnetNodeId, at: 6 });
     assert.deepEqual(registry.questions(threadId).map((q) => q.id), ["qn-b", "qn-a"], `answering ${id} keeps the order`);
   }
 });
@@ -852,7 +852,7 @@ test("opening the registry stores the attention of a thread whose attention was 
 test("opening the registry asks the features whether a thread whose attention was never stored needs a decision", (t) => {
   const path = tempDb();
   const first = seed(openRegistry(path));
-  first.askQuestion({ id: "qn-1", thread: threadId, text: "Rebuild the image?", options: ["Rebuild", "Not now"], reserved: "image-rebuild", answerer: "deployer", askedAt: 5 });
+  first.askQuestion({ kind: "holds", id: "qn-1", thread: threadId, text: "Rebuild the image?", options: ["Rebuild", "Not now"], reserved: "image-rebuild", answerer: "deployer", askedAt: 5, holds: { review: "rv-1", head: "h", base: null, holds: [] } });
   first.close();
   const db = new DatabaseSync(path);
   db.exec("DELETE FROM thread_attention");
@@ -1357,7 +1357,7 @@ test("a Claude worker's AskUserQuestion is a question while its pylon reports th
   append({ kind: "prompt", at: 40, text: "Make me a drink", from: "person" });
   assert.equal(waiting(waitingAsk("t1", 50)), true);
   assert.deepEqual(registry.questions(threadId), [{
-    id: "ask-t1", thread: threadId, text: "Drink: Which drink?", options: [], reserved: null, answerer: "person", askedAt: 50,
+    kind: "ask", id: "ask-t1", thread: threadId, text: "Drink: Which drink?", options: [], reserved: null, answerer: "person", askedAt: 50,
     ask: { session: "s1", toolUseId: "t1", questions: [drink] }, answer: null,
   }]);
   assert.equal(registry.attention(threadId), "decision");
@@ -1382,7 +1382,7 @@ test("an answered ask stays answered whatever the pylon reports, and a withdrawn
   const registry = seeded(t, tempDb());
   const { waiting, append, asks } = claudeAsking(registry);
   waiting(waitingAsk("t1", 50));
-  registry.answerQuestion("ask-t1", { option: "Drink: Tea", by: "nLAPTOP" as TailnetNodeId, at: 55, choices: [{ picked: ["Tea"] }] });
+  registry.answerQuestion(registry.question("ask-t1")!, { option: "Drink: Tea", by: "nLAPTOP" as TailnetNodeId, at: 55, choices: [{ picked: ["Tea"] }] });
   waiting();
   registry.withdrawAsk("ask-t1");
   assert.deepEqual(asks(), [["ask-t1", "Drink: Tea"]]);
