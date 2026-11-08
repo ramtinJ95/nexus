@@ -35,6 +35,7 @@ test("the bootstrap that install-deployer.sh copies loads without the repo's nod
   const [, list, skip] = script.match(/^for source in (.+); do\n {2}\[\[ "\$source" = (\S+) \]\] \|\| install /m) ?? assert.fail("the copy loop comes from the script");
   const copied = (await command("bash", ["-c", `for source in ${list}; do [[ "$source" = ${skip} ]] || echo "$source"; done`], repo)).split("\n");
   assert.ok(copied.includes("src/deploy/worker.ts") && copied.includes("src/node-base/json-file.ts"), copied.join(" "));
+  assert.deepEqual(copied.filter((file) => !/^src\/(deploy|node-base)\/[\w-]+\.ts$/.test(file)), ["src/protocol/deploy.ts"], "the bootstrap is src/deploy and src/node-base whole, and the deploy protocol");
   assert.deepEqual(copied.filter((file) => file.endsWith(".test.ts")), [], "the root-only bootstrap holds no tests");
   for (const file of copied) {
     await mkdir(join(dir, dirname(file)), { recursive: true });
