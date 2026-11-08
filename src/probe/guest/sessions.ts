@@ -21,15 +21,11 @@ import type { Guest } from "../../backends/backend.ts";
 import type { HerdrStatus, PausedSession, SessionFact, SessionIdentity } from "../../protocol/observations.ts";
 import type { CommandResult, InterruptClaudeOutcome } from "../../protocol/commands.ts";
 import { nonEmpty, parse, parseJson } from "../../parse.ts";
-import { callTimeoutMs, claudeCode, home, launchers, type Launcher } from "./launchers.ts";
-import { checkoutDir } from "../../protocol/spawn.ts";
+import { claudeCode, launchers, type Launcher } from "./launchers.ts";
 import { agentKinds, claudeSessionId, sessionHarnessSchema, type SessionHarness } from "../../protocol/agent-kinds.ts";
-
-export const herdrSession = "nexus";
-export const sessionsFile = "/home/user/.nexus/sessions.json";
+import { callTimeoutMs, checkoutDir, claudeLaunchesDir, herdrServerStartMs, herdrSession, home, sessionsFile, startHerdrServer } from "../../guest-contract.ts";
 
 const agentStartTimeoutMs = 30_000;
-const serverStartMs = 5_000;
 /** pi-shepherdr's launch.ts: a new pane's shell can still be starting when the first agent start lands. */
 const paneBusyRetryMs = 3_000;
 const shellPromptMs = 10_000;
@@ -134,8 +130,6 @@ export async function openSession(guest: Guest, session: { harness: SessionHarne
   return opened.pane;
 }
 
-const launchesDir = `${home}/.nexus/claude-launches`;
-
 /**
  * How far a prompted Claude Code launch got: `opened` once its workspace exists, `typed` once the command to start
  * Claude is on its way into the pane, and `submitted` once Claude took the first prompt. `typed` is written by the
@@ -147,7 +141,7 @@ type ClaudeLaunch = { dir: `/${string}` } & ({ progress: "none" } | { progress: 
 
 async function claudeLaunch(guest: Guest, session: string): Promise<ClaudeLaunch> {
   if (!claudeSessionId.test(session)) throw new Error(`a prompted Claude launch needs a session ID of letters, digits and dashes, not ${JSON.stringify(session)}`);
-  const dir = `${launchesDir}/${session}` as const;
+  const dir = `${claudeLaunchesDir}/${session}` as const;
   const { exitCode, output } = await guest.exec(["sh", "-c", 'test -f "$0/opened" || exit 0; cat "$0/opened"; test -e "$0/typed" && echo typed; exit 0', dir], { cwd: home, timeoutMs: callTimeoutMs });
   if (exitCode !== 0) throw new Error(`reading Claude launch ${dir} failed with exit ${exitCode}: ${output}`);
   const [opened, ...stages] = output.trim().split("\n");
@@ -632,30 +626,6 @@ async function launchArgs(guest: Guest, pane: string, { kind, modelFlag, session
 }
 
 /**
- * setsid detaches the server from the exec, and the redirects let the exec return without waiting on its output.
- * In an image built before rootfs-init-extra.sh made tini PID 1, PID 1 is Gondolin's sandboxd, which never
- * reaps the orphans it adopts, so an agent whose pane shell exits first would stay a zombie. tini -s is the
- * subreaper for everything under Herdr there. It is unconditional because the base image guarantees /usr/bin/tini.
- */
-const startServer = `setsid -f tini -s -- herdr --session ${herdrSession} server </dev/null >/dev/null 2>&1`;
-
-/**
- * The shell command that focuses the pane its first argument names, and exits 1 when no such pane is open. Herdr's
- * focus is the server's, so every attached client shows the pane. A pane Herdr runs no agent in is focused by its tab.
- */
-export const focusScript = `herdr --session ${herdrSession} agent focus "$1" >/dev/null 2>&1 || { tab=$(herdr --session ${herdrSession} pane get "$1" 2>/dev/null | sed -n 's/.*"tab_id":"\\([^"]*\\)".*/\\1/p'); [ -n "$tab" ] && herdr --session ${herdrSession} tab focus "$tab" >/dev/null 2>&1; }`;
-
-/**
- * The shell command a human's terminal runs in the pylon to attach to its Herdr session. With no server yet, it
- * starts one as a session open does, so the server outlives the terminal and runs under tini, and waits for it.
- * `herdr --session nexus` is the whole command line of each attached client, which attachedTerminals counts.
- *
- * Its first argument, when not empty, is the pane the terminal lands in, such as a Claude worker's, which it focuses
- * as focusScript does. A pane that has closed focuses nothing, and the terminal lands where Herdr was.
- */
-export const attachScript = `herdr --session ${herdrSession} workspace list >/dev/null 2>&1 || { ${startServer}; i=0; until herdr --session ${herdrSession} workspace list >/dev/null 2>&1; do i=$((i + 1)); [ $i -lt ${serverStartMs / 100} ] || break; sleep 0.1; done; }; [ -z "$1" ] || { ${focusScript}; }; exec herdr --session ${herdrSession}`;
-
-/**
  * How many terminals are attached to the pylon's Herdr session, such as `nexus attach` from a Mac, which count as
  * a human's presence. Rejects when the guest cannot be counted, so the caller decides what that means.
  */
@@ -671,11 +641,11 @@ export async function attachedTerminals(guest: Guest, timeoutMs = callTimeoutMs)
 
 async function ensureServer(guest: Guest): Promise<void> {
   if (await serverRunning(guest)) return;
-  const start = await guest.exec(["sh", "-c", startServer], { cwd: home, timeoutMs: callTimeoutMs });
+  const start = await guest.exec(["sh", "-c", startHerdrServer], { cwd: home, timeoutMs: callTimeoutMs });
   if (start.exitCode !== 0) throw new Error(`starting the Herdr server failed with exit ${start.exitCode}: ${start.output}`);
-  const deadline = Date.now() + serverStartMs;
+  const deadline = Date.now() + herdrServerStartMs;
   while (!await serverRunning(guest)) {
-    if (Date.now() >= deadline) throw new Error(`the Herdr server did not answer within ${serverStartMs} ms of starting`);
+    if (Date.now() >= deadline) throw new Error(`the Herdr server did not answer within ${herdrServerStartMs} ms of starting`);
     await delay(100);
   }
 }

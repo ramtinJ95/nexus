@@ -17,7 +17,6 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { CodingTools } from "@earendil-works/pi-durable/tools";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { checkoutReader } from "../../checkout-files.ts";
-import { checkoutDir } from "../../protocol/spawn.ts";
 import type { PylonId } from "../../ids.ts";
 import { trackActivity, type AgentFacts, type HarnessActivity } from "./activity.ts";
 import { pylonEnvs, type PylonLocator } from "./pylon-env.ts";
@@ -25,6 +24,7 @@ import { latestTurn, turnSnapshots } from "./turn-snapshot.ts";
 import { writeThread } from "./thread-doc.ts";
 import type { AgentCall } from "../agent-usage.ts";
 import { senderNames, type Sender } from "../agent-protocol.ts";
+import { checkoutDir } from "../../guest-contract.ts";
 
 export type { ConversationId };
 

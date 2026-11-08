@@ -1,9 +1,9 @@
 /** Renders an agent's tool calls: each tool's look and diff, a run of steps, and screenshots. */
-import { checkoutDir } from "../../protocol/spawn.ts";
 import { clock } from "./elapsed.ts";
 import { Html, html, icon, grows, type Part } from "./view.ts";
 import { prose } from "./markdown.ts";
 import type { ToolItem, Shot } from "./items.ts";
+import { checkoutDir } from "../../guest-contract.ts";
 
 /** Each image links to its full size in a new tab. A broken one becomes a note, which client.js writes. */
 export const shotsView = (images: readonly Shot[] = []) => images.length > 0 && html`<div class="shots">${images.map((shot) =>

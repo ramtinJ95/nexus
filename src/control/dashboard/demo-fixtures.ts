@@ -13,7 +13,6 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { Message } from "@earendil-works/pi-ai";
 import { processStream } from "../../process-stream.ts";
-import { checkoutDir } from "../../protocol/spawn.ts";
 import type { ByteStream } from "../../protocol/streams.ts";
 import { observeNode, image, laptop, type testApi } from "../../test-support/api-kit.ts";
 import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../../test-support/kit.ts";
@@ -35,6 +34,7 @@ import type { CommandResult } from "../../protocol/commands.ts";
 import type { DoctorReport, Check } from "../doctor-model.ts";
 import type { PullRequest } from "../github.ts";
 import { claudeTalk, diffSnippet, failingTests, harnessTalk, longConversation, testOutput, typescriptSnippet } from "./demo-talk.ts";
+import { checkoutDir } from "../../guest-contract.ts";
 
 type Demo = Awaited<ReturnType<typeof testApi>>;
 

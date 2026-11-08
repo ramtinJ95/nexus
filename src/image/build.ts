@@ -26,6 +26,7 @@ import { imageIdOf, pinsSchema, type ImageManifest, type ImageRecipe } from "../
 import { loadImageRecipe } from "./recipe.ts";
 import { shellQuote } from "../shell.ts";
 import type { ImageId, NodeName } from "../ids.ts";
+import { agentSetupInstaller, asUser, bakedDotfilesDir, home, nexusKvm, nexusTurn, piEnv, pylonGuideFile } from "../guest-contract.ts";
 
 const gondolinBuild = fileURLToPath(new URL("./gondolin-build.ts", import.meta.url));
 
@@ -369,7 +370,8 @@ interface SmokeCheck {
   expect: string | RegExp;
 }
 
-const asUser = (script: string): readonly string[] => ["runuser", "-l", "user", "-c", `exec 2>&1; ${script}`];
+/** Stderr joins stdout, so a check's `expect` sees both. */
+const userSmoke = (script: string): readonly string[] => asUser(`exec 2>&1; ${script}`);
 const literal = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** The nexus CLI has no pin. Its script declares the version that `nexus --version` prints. */
@@ -390,11 +392,11 @@ function versionChecks(recipe: ImageRecipe): SmokeCheck[] {
     ["claude", "claude --version", `${pins.claudeCode} (Claude Code)`],
     ["pi", "pi --version", pins.pi],
     ["herdr", "herdr --version", `herdr ${pins.herdr}`],
-    ["pi-env", "/usr/local/libexec/nexus/pi-env --version", `pi-env ${pins.piEnv}`],
+    ["pi-env", `${piEnv} --version`, `pi-env ${pins.piEnv}`],
     ["nexus", "nexus --version", `nexus ${nexusCliVersion(recipe)}`],
     ["nvim", "nvim --version | head -n 1", `NVIM v${pins.neovim}`],
   ];
-  return versions.map(([tool, script, output]) => ({ name: `${tool} version`, argv: asUser(script), expect: `${output}\n` }));
+  return versions.map(([tool, script, output]) => ({ name: `${tool} version`, argv: userSmoke(script), expect: `${output}\n` }));
 }
 
 /** Plain execs run with sandboxd's environment, and `runuser -l` gives the login shell that SSH and Herdr panes get. */
@@ -409,19 +411,19 @@ export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
     },
     {
       name: "user",
-      argv: asUser("id; stat -c '%a %U' /usr/bin/sudo; sudo -n true && echo sudo ok; stat -c '%U %a' workspace; cat /proc/sys/kernel/hostname; getent hosts pylon; getent ahostsv4 pylon | head -n 1"),
+      argv: userSmoke("id; stat -c '%a %U' /usr/bin/sudo; sudo -n true && echo sudo ok; stat -c '%U %a' workspace; cat /proc/sys/kernel/hostname; getent hosts pylon; getent ahostsv4 pylon | head -n 1"),
       expect: /^uid=1000\(user\) gid=1000\(user\) [^\n]*\n4755 root\nsudo ok\nuser 755\npylon\n::1\s+pylon\n127\.0\.[01]\.1\s+STREAM pylon\n$/,
     },
     {
       // Ahead of the agent setup check, whose pi starts a Claude session on this throwaway disk.
       name: "no build sessions",
-      argv: asUser("ls -d .nexus .claude/projects .claude/session-env .pi/agent/sessions 2>/dev/null; echo clean"),
+      argv: userSmoke("ls -d .nexus .claude/projects .claude/session-env .pi/agent/sessions 2>/dev/null; echo clean"),
       expect: "clean\n",
     },
     ...versionChecks(recipe),
     {
       name: "guest tools",
-      argv: asUser("command -v ssh sshd sandboxssh rg fd; grep -c '^Include /etc/ssh/ssh_config.d/\\*.conf' /etc/ssh/ssh_config; herdr integration status | grep -E '^(pi|claude):'"),
+      argv: userSmoke("command -v ssh sshd sandboxssh rg fd; grep -c '^Include /etc/ssh/ssh_config.d/\\*.conf' /etc/ssh/ssh_config; herdr integration status | grep -E '^(pi|claude):'"),
       expect: /^\/usr\/bin\/ssh\n\/usr\/sbin\/sshd\n\/usr\/bin\/sandboxssh\n\/usr\/bin\/rg\n\/usr\/local\/bin\/fd\n1\npi: current[^\n]*\nclaude: current/,
     },
     {
@@ -434,32 +436,32 @@ export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
       // The check reruns Herdr's integrations first, as every boot does, so it proves that the settings.json they
       // rewrite still holds the plugins. The layout comes from the recipe's manifest, not the copy in the image.
       name: "agent setup",
-      argv: asUser(`node /opt/nexus/agent-setup/install.ts check ${shellQuote(JSON.stringify(agentSetup))}`),
+      argv: userSmoke(`node ${agentSetupInstaller} check ${shellQuote(JSON.stringify(agentSetup))}`),
       expect: "ok\n",
     },
     {
       // Gondolin's rootfs copy rewrites the Dockerfile's absolute link as ../../.nexus/PYLON.md, so this checks
       // where the link leads, not its text. PYLON.md itself appears only on spawn, hence -m.
       name: "pylon guide",
-      argv: asUser("cat ~/.claude/CLAUDE.md; realpath -m ~/.pi/agent/AGENTS.md"),
-      expect: "@~/.nexus/PYLON.md\n/home/user/.nexus/PYLON.md\n",
+      argv: userSmoke("cat ~/.claude/CLAUDE.md; realpath -m ~/.pi/agent/AGENTS.md"),
+      expect: `@~${pylonGuideFile.slice(home.length)}\n${pylonGuideFile}\n`,
     },
     {
       // gh's version line carries a release date that the pin does not know. The token is read when git asks.
       name: "gh and git credentials",
-      argv: asUser("gh --version | head -n 1; printf 'protocol=https\\nhost=github.com\\n\\n' | GIT_TERMINAL_PROMPT=0 GH_TOKEN=nexus-smoke git credential fill"),
+      argv: userSmoke("gh --version | head -n 1; printf 'protocol=https\\nhost=github.com\\n\\n' | GIT_TERMINAL_PROMPT=0 GH_TOKEN=nexus-smoke git credential fill"),
       expect: new RegExp(`^gh version ${literal(pins.gh)} \\(\\d{4}-\\d{2}-\\d{2}\\)\\n(?:[^\\n]*\\n)*password=nexus-smoke\\n$`),
     },
     {
       name: "Herdr leaves resume to Nexus and skips onboarding",
-      argv: asUser("cat ~/.config/herdr/config.toml"),
+      argv: userSmoke("cat ~/.config/herdr/config.toml"),
       expect: /^onboarding = false\n\n\[session\]\nresume_agents_on_restore = false\n$/,
     },
     {
       // The subshell exits at once, so tini adopts its `sleep 0`. A second later tini's only child is sh, not
       // sh and a zombie.
       name: "tini reaps orphans",
-      argv: asUser(`tini --version; tini -s -- sh -c '(sleep 0 &); sleep 1; ps -o stat= --ppid "$PPID"'`),
+      argv: userSmoke(`tini --version; tini -s -- sh -c '(sleep 0 &); sleep 1; ps -o stat= --ppid "$PPID"'`),
       expect: /^tini version \d+\.\d+\.\d+[^\n]*\n[^Z\n]+\n$/,
     },
     {
@@ -476,30 +478,30 @@ export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
     },
     {
       name: "baked dotfiles",
-      argv: asUser("stat -c %U /opt/nexus/dotfiles && git clone -q /opt/nexus/dotfiles \"$(mktemp -d)/dotfiles\" && echo cloned && git -C /opt/nexus/dotfiles log -1 --format=%s"),
+      argv: userSmoke(`stat -c %U ${bakedDotfilesDir} && git clone -q ${bakedDotfilesDir} "$(mktemp -d)/dotfiles" && echo cloned && git -C ${bakedDotfilesDir} log -1 --format=%s`),
       expect: new RegExp(`^user\\ncloned\\ndotfiles common layer at ${literal(pins.dotfilesCommon)}\\n$`),
     },
     {
       // The harness starts the daemon this way, through a login shell, and reads its sync line.
       name: "pi-env daemon",
-      argv: asUser("bash -lc 'exec /usr/local/libexec/nexus/pi-env \"$@\"' pi-env serve --token 00ff </dev/null"),
+      argv: userSmoke(`bash -lc 'exec ${piEnv} "$@"' pi-env serve --token 00ff </dev/null`),
       expect: /^PI-ENV 00ff\n/,
     },
     {
       name: "Claude turn snapshot",
-      argv: asUser(`d="$(mktemp -d)" && git -C "$d" init -q && echo a > "$d/a" && node --input-type=module -e "const { snapshotTurn } = await import('/usr/local/bin/nexus-turn.ts'); console.log(await snapshotTurn(process.argv[1], 'smoke', 60_000))" "$d" && git -C "$d" log -1 --format=%s refs/nexus/turn`),
+      argv: userSmoke(`d="$(mktemp -d)" && git -C "$d" init -q && echo a > "$d/a" && node --input-type=module -e "const { snapshotTurn } = await import('${nexusTurn}'); console.log(await snapshotTurn(process.argv[1], 'smoke', 60_000))" "$d" && git -C "$d" log -1 --format=%s refs/nexus/turn`),
       expect: "true\nNexus turn smoke\n",
     },
     {
       name: "TLS through Gondolin's interception",
-      argv: asUser(`curl -sS -o /dev/null -w '%{http_code}\\n' https://${smokeHost}/v1/models && node -e "fetch('https://${smokeHost}/v1/models').then((r) => console.log(r.status))"`),
+      argv: userSmoke(`curl -sS -o /dev/null -w '%{http_code}\\n' https://${smokeHost}/v1/models && node -e "fetch('https://${smokeHost}/v1/models').then((r) => console.log(r.status))"`),
       expect: /^401\n401\n$/,
     },
     {
       // Last, because it leaves the guest with KVM loaded. The build node's host must pass nested virtualization
       // through, as infra-testbench's does, or no verify pylon could run on it either.
       name: "nexus-kvm loads KVM for user",
-      argv: ["sh", "-c", "/usr/local/libexec/nexus/nexus-kvm && cut -d ' ' -f 1 /proc/modules | grep -E '^(irqbypass|kvm|kvm_intel|kvm_amd|overlay)$' | sort && runuser -u user -- python3 -c 'import os; os.close(os.open(\"/dev/kvm\", os.O_RDWR))' && echo user opens /dev/kvm"],
+      argv: ["sh", "-c", `${nexusKvm} && cut -d ' ' -f 1 /proc/modules | grep -E '^(irqbypass|kvm|kvm_intel|kvm_amd|overlay)$' | sort && runuser -u user -- python3 -c 'import os; os.close(os.open(\"/dev/kvm\", os.O_RDWR))' && echo user opens /dev/kvm`],
       expect: /^irqbypass\nkvm\nkvm_(?:intel|amd)\noverlay\nuser opens \/dev\/kvm\n$/,
     },
   ];
@@ -550,15 +552,15 @@ async function smokeBoot(assets: string, checks: readonly SmokeCheck[], id: Imag
     const after = await exec(["true"]).catch((err: Error) => fail("stdin to a closed pipe", `the next exec failed: ${err.message}`));
     if (after.exitCode !== 0) fail("stdin to a closed pipe", `the next exec exited ${after.exitCode}`, after.output);
 
-    const server = vm.exec([...asUser(`exec herdr --session ${smokeSession} server`)], { signal: AbortSignal.any([signal, stopServer.signal]) });
+    const server = vm.exec([...userSmoke(`exec herdr --session ${smokeSession} server`)], { signal: AbortSignal.any([signal, stopServer.signal]) });
     server.catch(() => {});
     let status = { exitCode: -1, output: "" };
     for (let attempt = 0; attempt < 50 && status.exitCode !== 0; attempt++) {
       await delay(200);
-      status = await exec(asUser(`herdr --session ${smokeSession} status server`));
+      status = await exec(userSmoke(`herdr --session ${smokeSession} status server`));
     }
     if (status.exitCode !== 0) fail("Herdr server as user", "not running after 10 s", status.output);
-    const stop = await exec(asUser(`herdr --session ${smokeSession} server stop`));
+    const stop = await exec(userSmoke(`herdr --session ${smokeSession} server stop`));
     if (stop.exitCode !== 0) fail("Herdr server as user", `stop exited ${stop.exitCode}`, stop.output);
   } finally {
     stopServer.abort();

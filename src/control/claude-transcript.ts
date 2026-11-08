@@ -13,6 +13,7 @@
 import { createHash } from "node:crypto";
 import { pipeOutput, type OpenPipe } from "../pipe.ts";
 import { claudeSessionId } from "../protocol/agent-kinds.ts";
+import { claudeProjects, onClaudeTranscript } from "../guest-contract.ts";
 
 /**
  * Who a prompt came from: the person, a slash command, or something else, such as a plugin. A finished background
@@ -112,8 +113,6 @@ export const maxRecordBytes = 4 << 20;
 /** Cuts for each entry's text, so a transcript of many megabytes keeps to a bounded model. */
 export const textLimits = { prompt: 32 << 10, reply: 64 << 10, input: 4 << 10, output: 8 << 10, summary: 500 } as const;
 
-/** Where Claude Code keeps every project's transcripts in a pylon. */
-export const claudeProjects = "/home/user/.claude/projects";
 /** Far longer than reading maxRecordBytes of a local file takes, even on a busy pylon. */
 export const transcriptDeadlineMs = 20_000;
 /** The header line, the bytes before the cursor and one read's bytes. A reply longer than this is not the script's. */
@@ -122,17 +121,17 @@ const maxReplyBytes = 64 + beforeBytes + maxRecordBytes;
 /** One read's result. `reset` means the file was replaced, so `entries` start from its beginning and replace any read before. */
 export interface TranscriptRead { entries: ClaudeEntry[]; cursor: TranscriptCursor; more: boolean; reset: boolean }
 
-/** Runs `body` on "$f", the session $0's transcript under whichever project in $1 holds it. Exits 3 when none does. */
-const onTranscript = (body: string) => `for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; ${body}; exit 0; done; exit 3`;
+/** The scripts' exit when no project holds the session's transcript. */
+const noTranscript = 3;
 
 /**
  * Prints the transcript's size, the offset this read starts at and how many bytes before it follow, then those bytes
  * and at most $3 bytes from the offset. A file smaller than the cursor's offset, or whose $5 bytes before it do not
  * hash to $4, was replaced, so the read starts over at 0.
  */
-const readScript = onTranscript(`size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5))
+const readScript = onClaudeTranscript(`size=$(($(wc -c < "$f"))); start=$2; n=$((start < $5 ? start : $5))
 { [ "$size" -lt "$start" ] || [ "$(tail -c +$((start - n + 1)) "$f" | head -c $n | sha256sum)" != "$4  -" ]; } && start=0 n=0
-echo "$size $start $n"; tail -c +$((start - n + 1)) "$f" | head -c $((n + $3))`);
+echo "$size $start $n"; tail -c +$((start - n + 1)) "$f" | head -c $((n + $3))`, noTranscript);
 
 /**
  * Reads the session's transcript from `cursor` over one raw pipe and parses the complete lines it gets. Null when the
@@ -142,8 +141,8 @@ echo "$size $start $n"; tail -c +$((start - n + 1)) "$f" | head -c $((n + $3))`)
 export async function readTranscript(open: OpenPipe, session: string, cursor: TranscriptCursor, projects = claudeProjects, deadlineMs = transcriptDeadlineMs): Promise<TranscriptRead | null> {
   checkSession(session);
   const stream = await open(["sh", "-c", readScript, session, projects, String(cursor.offset), String(maxRecordBytes), cursor.before, String(beforeBytes)]);
-  const { code, out } = await pipeOutput(stream, { deadlineMs, maxBytes: maxReplyBytes, what: "the transcript", okCodes: [0, 3] });
-  if (code === 3) return null;
+  const { code, out } = await pipeOutput(stream, { deadlineMs, maxBytes: maxReplyBytes, what: "the transcript", okCodes: [0, noTranscript] });
+  if (code === noTranscript) return null;
   const newline = out.indexOf(0x0a);
   const header = newline < 0 ? null : /^(\d{1,15}) (\d{1,15}) (\d{1,15})$/.exec(out.subarray(0, newline).toString("latin1"));
   const size = Number(header?.[1]);
@@ -160,7 +159,7 @@ export async function readTranscript(open: OpenPipe, session: string, cursor: Tr
 }
 
 /** Prints at most $3 bytes of the session's transcript from offset $2. */
-const imageScript = onTranscript(`tail -c +$(($2 + 1)) "$f" | head -c $3`);
+const imageScript = onClaudeTranscript(`tail -c +$(($2 + 1)) "$f" | head -c $3`, noTranscript);
 
 function checkSession(session: string): void {
   if (!claudeSessionId.test(session)) throw new Error(`${JSON.stringify(session.slice(0, 200))} is not a Claude Code session ID`);
@@ -174,8 +173,8 @@ export async function readTranscriptImage(open: OpenPipe, session: string, image
   checkSession(session);
   if (image.bytes > maxRecordBytes) return null;
   const stream = await open(["sh", "-c", imageScript, session, projects, String(image.offset), String(image.bytes)]);
-  const { code, out } = await pipeOutput(stream, { deadlineMs, maxBytes: image.bytes, what: "the transcript's image", okCodes: [0, 3] });
-  if (code === 3) return null;
+  const { code, out } = await pipeOutput(stream, { deadlineMs, maxBytes: image.bytes, what: "the transcript's image", okCodes: [0, noTranscript] });
+  if (code === noTranscript) return null;
   if (out.length !== image.bytes || sha256(out) !== image.sha256) return null;
   let record: unknown;
   try {

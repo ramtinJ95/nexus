@@ -5,9 +5,9 @@
  */
 import { readFileSync } from "node:fs";
 import { z } from "zod";
-import { claudeProjects } from "./claude-transcript.ts";
 import { parseJson } from "../parse.ts";
 import { openPython, pipeOutput, type OpenPipe } from "../pipe.ts";
+import { claudeProjects, piSessions } from "../guest-contract.ts";
 
 export type AgentKind = "claude" | "pi";
 export interface Tokens { input: number; output: number; cacheWrite: number; cacheRead: number }
@@ -23,7 +23,7 @@ const helper = readFileSync(new URL("./agent-usage.py", import.meta.url));
 const sealHelper = readFileSync(new URL("./agent-seal.py", import.meta.url));
 
 /** Where a pylon's agents keep their transcripts. */
-export const agentLogs = { claude: claudeProjects, pi: "/home/user/.pi/agent/sessions" };
+export const agentLogs = { claude: claudeProjects, pi: piSessions };
 /** The calls one read prints at most, roughly. A pylon with more is read again from where this read stopped. */
 const limitBytes = 1 << 20;
 const maxReplyBytes = 4 * limitBytes;

@@ -23,6 +23,7 @@ import { shellQuote as q } from "../shell.ts";
 import { saveJson } from "../json-file.ts";
 import { serialQueue } from "../single-flight.ts";
 import { existsError } from "./storage.ts";
+import { nexusKvm } from "../guest-contract.ts";
 
 /**
  * Logs a resume's output and then one `resume:` line with its outcome, however long it runs. A failed resume
@@ -72,7 +73,7 @@ async function runToEnd(processes: GuestProcesses, pid: string): Promise<number 
 export async function loadKvm(vm: VM, resources: BootSpec["resources"]): Promise<void> {
 	if (!resources.nestedVirtualization) return;
 	try {
-		await checked(vm, "/usr/local/libexec/nexus/nexus-kvm", "/", 60000);
+		await checked(vm, nexusKvm, "/", 60000);
 	} catch (error) {
 		throw new Error(`This pylon asked for nested virtualization, and its guest has no /dev/kvm. ${error instanceof Error ? error.message : String(error)}`);
 	}

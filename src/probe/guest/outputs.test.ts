@@ -8,8 +8,9 @@ import { promisify } from "node:util";
 import type { Guest } from "../../backends/backend.ts";
 import type { DeclaredOutput } from "../../protocol/observations.ts";
 import { fakeGuest } from "../../backends/fake-guest.ts";
-import { addOutput, listOutputs, OutputRefused, outputsDir } from "./outputs.ts";
+import { addOutput, listOutputs, OutputRefused } from "./outputs.ts";
 import { tempDir } from "../../test-support/kit.ts";
+import { outputsDir } from "../../guest-contract.ts";
 
 const run = promisify(execFile);
 const home = "/home/user";

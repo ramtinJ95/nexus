@@ -8,13 +8,13 @@ import type { ThreadDetail, ThreadRow } from "../wire.ts";
 import { actualState, desiredPhase, retryRefusal } from "../reconcile.ts";
 import { agentView, type AgentView } from "../conversation-view.ts";
 import { bootNetwork } from "../threads.ts";
-import { herdrSession } from "../../probe/guest/sessions.ts";
 import { judgmentView } from "../judgment.ts";
 import { linkedName } from "../../services-file.ts";
 import type { BootInputs } from "../../protocol/spawn.ts";
 import type { Project } from "../project.ts";
 import { observedPylon } from "../observed.ts";
 import { watchStopped } from "../pr-watch-model.ts";
+import { herdrSession } from "../../guest-contract.ts";
 
 function networkGrantsKey(network: BootInputs["network"]): string {
   const sorted = (values: Iterable<string>) => [...new Set(values)].sort();

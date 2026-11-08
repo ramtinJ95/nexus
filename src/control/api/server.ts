@@ -40,7 +40,6 @@ import { joinNode, joinRequestSchema } from "../join.ts";
 import type { Registry } from "../registry.ts";
 import type { JoinedNode } from "../node-store.ts";
 import type { PortRange, StoredPylon, Thread } from "../thread-store.ts";
-import { attachScript } from "../../probe/guest/sessions.ts";
 import { claudeConversations } from "../claude-conversation.ts";
 import { noConversation, threadAgents, type ThreadAgents, type ThreadHarness } from "../thread-agent.ts";
 import type { Whoami } from "../wire.ts";
@@ -77,6 +76,7 @@ import type { Planning } from "../planning.ts";
 import type { CleanupPass } from "../cleanup.ts";
 import type { ThreadQueue } from "../queue.ts";
 import type { ReviewLoop } from "../review.ts";
+import { attachScript } from "../../guest-contract.ts";
 
 export interface ApiOptions {
   https?: { port: number; certificate(): Promise<Certificate>; renewalMs?: number; retryMs?: number };

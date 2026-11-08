@@ -18,7 +18,7 @@ import { artifactDirectory, manifestFiles, tarCodec } from "../../image/artifact
 import { type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type SecretSource, type VmBackend } from "../backend.ts";
 import { JobFailure } from "../../protocol/jobs.ts";
 import { buildImage as buildPylonImage } from "../../image/build.ts";
-import { checkoutDir, requiredArtifacts, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit } from "../../protocol/spawn.ts";
+import { requiredArtifacts, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit } from "../../protocol/spawn.ts";
 import { shellQuote as q } from "../../shell.ts";
 import { type CheckpointId, type ImageId, isCheckpointId, isImageId, isTemplateId, maxPylonIdLength, type PortableArtifactId, type PylonId } from "../../ids.ts";
 import { pylonIdSchema } from "../../protocol/fields.ts";
@@ -33,11 +33,12 @@ import { controlSocket, run, socketPathLimit, stopForRetry } from "../../pylon-v
 import { imageLabel, inspectionSchema, settled, statusSchema, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
 import { bridgePylonHeader, hostBridgeSocket } from "../../pylon-vm/host-bridge.ts";
 import { listenHostBridge, type HostBridge } from "../../host-bridge.ts";
-import { asUser, controllerLog, controllerLogTail, pylonGuest, type ShellFlights, type StatusCache } from "./pylon-guest.ts";
+import { asUserIn, controllerLog, controllerLogTail, pylonGuest, type ShellFlights, type StatusCache } from "./pylon-guest.ts";
 import { readJson, saveJson } from "../../json-file.ts";
 import { diskBytes } from "../../disk-space.ts";
 import { alive, readIdentity } from "../../pylon-vm/identity.ts";
 import { directory, existsError, privateDirectory, readRecord } from "../../pylon-vm/storage.ts";
+import { bakedDotfilesDir, checkoutDir, dotfilesDir, home, workspaceDir } from "../../guest-contract.ts";
 
 export interface PylonVmBackendOptions {
   /**
@@ -69,10 +70,6 @@ export interface PylonVmBackendOptions {
   previewHost?: string;
 }
 
-const workspace = "/home/user/workspace";
-const dotfilesDir = "/home/user/.nexus/dotfiles";
-/** Where the image bakes the common dotfiles layer, as a git repository owned by user. */
-const bakedDotfiles = "/opt/nexus/dotfiles";
 const checkpointFile = "nexus-checkpoint.json";
 /** Each controller's limit, so a stuck one cannot hold the update past the control plane's 10 s wait for the probe. */
 const secretUpdateMs = 5_000;
@@ -148,8 +145,8 @@ function checkSshRemotes(subject: string, remotes: readonly SshRemote[]): void {
  */
 function dotfilesPull({ repo, ref }: BootInputs["dotfiles"]): string {
   const at = `$(git -C ${dotfilesDir} rev-parse --short HEAD 2>/dev/null || echo nothing)`;
-  return asUser([
-    `test -d ${dotfilesDir}/.git || git clone --quiet ${bakedDotfiles} ${dotfilesDir} || git init --quiet ${dotfilesDir}`,
+  return asUserIn([
+    `test -d ${dotfilesDir}/.git || git clone --quiet ${bakedDotfilesDir} ${dotfilesDir} || git init --quiet ${dotfilesDir}`,
     `if timeout 60 git -C ${dotfilesDir} fetch --quiet --depth 1 ${q(repo)} ${q(ref)} && git -C ${dotfilesDir} checkout --quiet --detach FETCH_HEAD`,
     `then echo ${q(`dotfiles: pulled ${repo} ${ref} at`)} "${at}"`,
     `else echo ${q(`dotfiles: the pull of ${repo} ${ref} failed, keeping`)} "${at}"`,
@@ -161,7 +158,7 @@ function dotfilesPull({ repo, ref }: BootInputs["dotfiles"]): string {
     "if ! command -v herdr >/dev/null; then echo 'herdr: not installed, integrations skipped'",
     "elif herdr integration install pi && herdr integration install claude; then echo 'herdr: reinstalled the pi and claude integrations'",
     "else echo 'herdr: reinstalling the pi and claude integrations failed'; fi",
-  ].join("\n"), "/home/user");
+  ].join("\n"), home);
 }
 
 /** Every boot's hooks, in order. The agents' logins follow the dotfiles pull, whose install may replace their files. */
@@ -171,9 +168,9 @@ export function bootHooks(boot: Pick<BootInputs, "dotfiles" | "gitIdentity" | "n
     dotfilesPull(boot.dotfiles),
     ...sessionHarnessSchema.options.flatMap((harness) => {
       const login = launchers[harness]?.login;
-      return login !== undefined && granted(harness) ? [asUser(login, "/home/user")] : [];
+      return login !== undefined && granted(harness) ? [asUserIn(login, home)] : [];
     }),
-    ...boot.gitIdentity === undefined ? [] : [asUser(`git config --global user.name ${q(boot.gitIdentity.name)} && git config --global user.email ${q(boot.gitIdentity.email)}`, "/home/user")],
+    ...boot.gitIdentity === undefined ? [] : [asUserIn(`git config --global user.name ${q(boot.gitIdentity.name)} && git config --global user.email ${q(boot.gitIdentity.email)}`, home)],
   ];
 }
 
@@ -189,10 +186,10 @@ const recordBase = (repo: string, object: string) => `git -C ${q(repo)} update-r
  */
 function setupCommands(repo: RepoInit, preSetup: string | null): string[] {
   return [
-    `chown user:user ${q(workspace)}`,
-    asUser(repoInitCommand(repo), workspace),
-    ...(preSetup === null ? [] : [asUser(`bash -c ${q(preSetup)}`, checkoutDir)]),
-    asUser("if test -e .nexus/setup; then ./.nexus/setup; fi", checkoutDir),
+    `chown user:user ${q(workspaceDir)}`,
+    asUserIn(repoInitCommand(repo), workspaceDir),
+    ...(preSetup === null ? [] : [asUserIn(`bash -c ${q(preSetup)}`, checkoutDir)]),
+    asUserIn("if test -e .nexus/setup; then ./.nexus/setup; fi", checkoutDir),
   ];
 }
 
@@ -213,7 +210,7 @@ function bootRemotes(repo: RepoInit): string[] {
 
 /** The setup of a pylon booted from a template, run once: the template's clone moves to the pylon's remote and commit. */
 function checkoutCommands({ url, checkout }: CloneRepo): string[] {
-  return [asUser(`git remote set-url origin ${q(url)} && git fetch --quiet origin && git checkout --quiet -B ${q(checkout.branch)} ${q(checkout.commit)} && ${recordBase(checkoutDir, "HEAD")}`, checkoutDir)];
+  return [asUserIn(`git remote set-url origin ${q(url)} && git fetch --quiet origin && git checkout --quiet -B ${q(checkout.branch)} ${q(checkout.commit)} && ${recordBase(checkoutDir, "HEAD")}`, checkoutDir)];
 }
 
 /**
@@ -360,11 +357,11 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         version: 1,
         diskGiB: boot.resources.diskGiB,
         image: assetsOf(boot.image),
-        workspace,
+        workspace: workspaceDir,
         setup,
         retrySetup: boot.source.kind === "template",
         // The fork runs resume on every boot from a disk: each wake, and a template boot after its checkout.
-        resume: [asUser("if test -e .nexus/resume; then ./.nexus/resume; fi", checkoutDir)],
+        resume: [asUserIn("if test -e .nexus/resume; then ./.nexus/resume; fi", checkoutDir)],
         services: {},
       };
       const spec = await bootSpec(boot, live);
@@ -626,7 +623,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       if (resources.memoryGiB < minMemoryGiB) throw new JobFailure("invalid", `template ${template} asks for ${resources.memoryGiB} GiB, but pylon VMs need at least ${minMemoryGiB} GiB`);
       const remote = sshRemoteOf(repo.url);
       await holding([key.image], async () => templates.buildTemplate(stateRoot, store, {
-        config: { version: 1, diskGiB: resources.diskGiB, image: assetsOf(key.image), workspace, setup: setupCommands({ kind: "clone", url: repo.url, checkout: { branch: repo.branch, commit: repo.commit } }, inputs.preSetup), retrySetup: false, resume: [], services: {} },
+        config: { version: 1, diskGiB: resources.diskGiB, image: assetsOf(key.image), workspace: workspaceDir, setup: setupCommands({ kind: "clone", url: repo.url, checkout: { branch: repo.branch, commit: repo.commit } }, inputs.preSetup), retrySetup: false, resume: [], services: {} },
         // No secrets and no overlay during setup, so a template never holds either. No pylon owns the build, so nexus.pylon is blocked like any unlisted host.
         boot: { resources: { cpus: resources.cpus, memoryGiB: resources.memoryGiB }, allowedHosts: [...inputs.allowedHosts], secrets: {}, ssh: await gitSshOf(template, remote === null ? [] : [remote]), files: [], hooks: [], publicUrls: {}, hostBridge: null },
         manifest: { id: template, key, commit: repo.commit },

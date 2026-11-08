@@ -3,11 +3,12 @@ import { isPortableArtifactId, type NodeName, type PortableArtifactId, type Pylo
 import { JobFailure, type Job } from "../protocol/jobs.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { ArtifactCopy } from "../protocol/artifacts.ts";
-import { checkoutDir, type PreviewAssignment } from "../protocol/spawn.ts";
+import { type PreviewAssignment } from "../protocol/spawn.ts";
 import type { ServiceName } from "../services-file.ts";
 import { closeSession, dropFailedSession, interruptClaude, LaunchStalled, openSession, sendToClaude } from "./guest/sessions.ts";
 import { type SecretSource, type VmBackend } from "../backends/backend.ts";
 import { refuseShortDisk } from "../disk-space.ts";
+import { checkoutDir } from "../guest-contract.ts";
 
 /** Linking or unlinking a pylon's port together with its preview route, so no snapshot read overlaps either. */
 export interface PortLinks {

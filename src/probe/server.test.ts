@@ -28,11 +28,10 @@ import type { BootInputs } from "../protocol/spawn.ts";
 import type { ProjectId } from "../ids.ts";
 import type { ArtifactManifest, ImageManifest, TemplateManifest } from "../protocol/images.ts";
 import { fakeGuest, herdrArgs, herdrCall, herdrError, herdrOk, herdrPane, herdrSnapshot } from "../backends/fake-guest.ts";
-import { outputsDir } from "./guest/outputs.ts";
-import { sessionsFile } from "./guest/sessions.ts";
 import { checkoutReader } from "../checkout-files.ts";
 import type { HostBridge, HostBridgeAnswer } from "../host-bridge.ts";
 import { tempDir, testImage, until } from "../test-support/kit.ts";
+import { outputsDir, sessionsFile } from "../guest-contract.ts";
 
 const node = "test-node" as NodeName;
 const controlPlane = "nCONTROL" as TailnetNodeId;

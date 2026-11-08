@@ -19,7 +19,7 @@ import { bootHooks, createPylonVmBackend, hostNestsKvm, type PylonVmBackendOptio
 import { launchers } from "../../probe/guest/launchers.ts";
 import { settled, type Inspection } from "../../pylon-vm/contracts.ts";
 import { groupMembers, identityOf } from "../../pylon-vm/identity.ts";
-import { asUser, imageEnv, pylonGuest } from "./pylon-guest.ts";
+import { asUserIn, imageEnv, pylonGuest } from "./pylon-guest.ts";
 import { saveJson } from "../../json-file.ts";
 import { chatgptTokenGrant } from "../../protocol/secret-grants.ts";
 import type { BootInputs } from "../../protocol/spawn.ts";
@@ -213,7 +213,7 @@ test("a secret grant whose value this node lacks fails as secret-missing", async
 test("a boot granted the ChatGPT token signs pi in after the dotfiles pull, as user, and only such a boot", () => {
   const gitIdentity = { name: "Example Person", email: "person@example.com" };
   const granted = bootHooks(bootOf("pylon-pi", { gitIdentity, network: { allowedHosts: ["api.openai.com"], secrets: [chatgptTokenGrant] } }));
-  const signIn = asUser(launchers.pi!.login!, "/home/user");
+  const signIn = asUserIn(launchers.pi!.login!, "/home/user");
   assert.equal(granted.length, 3);
   assert.match(granted[0]!, /dotfiles: pulled/);
   assert.equal(granted[1], signIn, "after the pull, whose install may replace ~/.pi/agent files");
