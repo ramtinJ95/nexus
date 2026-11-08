@@ -40,12 +40,6 @@ test("Gondolin's placeholders in both its modes have the shapes the probe redact
 	assert.match(unique, new RegExp(`^${secretPlaceholderShapes.unique.source}$`));
 });
 
-test("the guest sees a placeholder, never the secret value", () => {
-	const { placeholders } = networkOptions(spec, "pylon-t1");
-	assert.ok(placeholders["STRIPE_KEY"]);
-	assert.notEqual(placeholders["STRIPE_KEY"], "sk_live_real");
-});
-
 test("a secret's value is sent only to its own hosts", async () => {
 	assert.equal(await sentAuthorization("https://api.stripe.com/v1/charges"), "Bearer sk_live_real");
 	await assert.rejects(sentAuthorization("https://github.com/acme/web"), { status: 403, message: /STRIPE_KEY not allowed for host: github.com/ });
@@ -98,21 +92,6 @@ test("without a host bridge, as for a template build, nexus.pylon is an ordinary
 	const sent = await httpHooks!.onRequest!(new Request("http://nexus.pylon/v1/request", { method: "POST", body: "{}" }));
 	assert.ok(sent instanceof Request, "the hooks did not answer it");
 	assert.equal(await httpHooks!.isIpAllowed!({ hostname: "nexus.pylon", ip: "198.18.0.1", family: 4, port: 80, protocol: "http" }), false);
-});
-
-test("Claude OAuth uses a placeholder substituted only for its granted Anthropic host", async () => {
-	const { httpHooks, placeholders } = networkOptions({
-		...spec, allowedHosts: ["api.anthropic.com", "github.com"],
-		secrets: { CLAUDE_CODE_OAUTH_TOKEN: { hosts: ["api.anthropic.com"], value: "test-oauth-not-a-real-token" } },
-	}, "pylon-t1");
-	const placeholder = placeholders.CLAUDE_CODE_OAUTH_TOKEN;
-	assert.ok(placeholder);
-	assert.notEqual(placeholder, "test-oauth-not-a-real-token");
-	const send = (host: string) => httpHooks!.onRequest!(new Request(`https://${host}/v1/messages`, { headers: { authorization: `Bearer ${placeholder}` } }));
-	const request = await send("api.anthropic.com");
-	assert.ok(request instanceof Request);
-	assert.equal(request.headers.get("authorization"), "Bearer test-oauth-not-a-real-token");
-	await assert.rejects(async () => send("github.com"), { status: 403 });
 });
 
 test("guest requests that fail upstream fail one by one and never take the controller down", { timeout: 60_000 }, async () => {

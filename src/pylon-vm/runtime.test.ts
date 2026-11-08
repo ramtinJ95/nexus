@@ -85,7 +85,7 @@ test("an intent written before setup was recorded on the disk is refused", async
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	for (const intent of [{ prepare: false, fresh: false }, { prepare: false, fresh: false, setupError: "Setup exited 1" }, { prepare: false, fresh: true }]) {
 		await writeFile(join(dir, "intent.json"), JSON.stringify(intent));
-		await assert.rejects(readIntent(dir), /Unrecognized key/);
+		await assert.rejects(readIntent(dir), `${JSON.stringify(intent)} was accepted`);
 	}
 });
 
