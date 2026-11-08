@@ -2,7 +2,7 @@ import { test } from "node:test";
 import type { ThreadId } from "../ids.ts";
 import type { Finding, Review, Round, Verdict } from "./review-model.ts";
 import { testReview } from "../test-support/registry-kit.ts";
-import { builderFindings, builderNotes, nextRound, quoteRequest, reminder, reviewerRequest } from "./review.ts";
+import { builderFindings, builderNotes, nextRound, quoteRequest, reminder, reviewerRequest } from "./prompts.ts";
 
 const [h1, h2] = ["1".repeat(40), "2".repeat(40)];
 const f1: Finding = { id: "F1", priority: "P1", where: "src/a.ts:3", summary: "Off by one", detail: "The loop stops early.\nStart at 0." };
