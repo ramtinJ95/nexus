@@ -10,7 +10,7 @@ import { answerFinal } from "../plain-wording.ts";
 import { needLabels, reviewersNote, reviewPr, roundNote, roundOf, stoppedShort } from "../wording.ts";
 import { holdRule, reservedNames } from "../holds.ts";
 import { landsOnItsOwn } from "../project.ts";
-import { heldBy, landPress } from "../policy.ts";
+import { holdsAt, landPress } from "../policy.ts";
 import { isOpen, type AnswerRefusal, type AskedQuestion, type NodeQuestion, type Question } from "../questions.ts";
 import { bytesText, itemKey, itemText } from "../cleanup-model.ts";
 import { Html, html, ago, short } from "./view.ts";
@@ -169,7 +169,7 @@ ${phase.kind === "quoting" ? html`<p class="land-note">The reviewer quotes, from
   // The PR watch can read a push before the loop's next pass starts a round on it.
   const moved = pushedHead(r, pr);
   const held = r.phase.kind === "needs-person";
-  const reasons = heldBy(r);
+  const reasons = holdsAt(r);
   const rules = reasons.map((h) => ({ reason: h.text, ...holdRule(h.code) }));
   const press = landPress(r);
   const waived = press.kind === "lands" ? press.waives.map((h) => h.text) : [];

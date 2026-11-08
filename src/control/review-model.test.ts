@@ -5,7 +5,7 @@ import {
   type Finding, type Phase, type PhaseKind, type Review, type Round, type SecondReviewer, type Verdict,
 } from "./review-model.ts";
 import type { PrSnapshot } from "./github.ts";
-import { landingHolds } from "./policy.ts";
+import { holdsAt } from "./policy.ts";
 import { roundNote } from "./wording.ts";
 import { upgradeReview } from "./record-upgrade.ts";
 import type { ThreadId } from "../ids.ts";
@@ -173,7 +173,7 @@ test("approval by seat gives every verdict combination of two rounds the approva
       const name = `${reviewerName}; round 1: ${prevName}, second ${prevSecondName}; round 2${moved ? " at a new head" : ""}: ${firstName}, second ${secondName}, check ${passed ? "passed" : "failed"}`;
       assert.deepEqual(r.rounds.map(reviewerApproved), was.rounds.map(approvedBefore), `${name}: approval`);
       assert.deepEqual(r.rounds.map((x) => findingsOf(x).map((f) => f.id)), was.rounds.map(findingsBefore), `${name}: findings`);
-      const held = landingHolds({ review: r, pr, heldAt: { base: "main", holds: [] } }).filter((h) => h.code === "not-approved" || h.code === "open-findings");
+      const held = holdsAt(r, { pr }).filter((h) => h.code === "not-approved" || h.code === "open-findings");
       assert.equal(held.length, conditionOneBefore(was).length, `${name}: landing condition one holds`);
       if (contradicted(was)) {
         changed++;
@@ -199,6 +199,6 @@ test("a stored approval with a P1 open is no approval to the rounds spent, the r
   assert.deepEqual([roundsSpent(r), spentBefore(was)], [2, 1], "main counted a round after it as one that reviewed nothing new");
   assert.deepEqual([roundNote(r), noteBefore(was) !== null], [null, true], "main said the round after it followed an approval");
   const latest = upgradeReview(testReview({ rounds: [{ head, base: "main", verdict: stored, check: { passed: true, output: "" }, answers: null }] }));
-  assert.deepEqual(landingHolds({ review: latest, pr, heldAt: { base: "main", holds: [] } }).filter((h) => h.code === "not-approved" || h.code === "open-findings").map((h) => h.code), ["not-approved"],
+  assert.deepEqual(holdsAt(latest, { pr }).filter((h) => h.code === "not-approved" || h.code === "open-findings").map((h) => h.code), ["not-approved"],
     "a landing holds on it as not approved, where main held it as open findings, a hold with the same rule");
 });

@@ -14,14 +14,7 @@
 import type { ChangedFile, PrSnapshot } from "./github.ts";
 import type { SecondReview } from "./project.ts";
 import { holdRule, personOnly, remedyOf, reservedNames, waivable, type Hold, type HoldCode, type ReservedCase } from "./holds.ts";
-import { answered, blocks, changedPaths, descriptionDigest, findingsOf, seatsFor, unapprovedSeat, type Change, type HeldAt, type Review, type Round } from "./review-model.ts";
-
-interface LandingFacts {
-  review: Review;
-  pr: PrSnapshot;
-  /** The holds the latest round's head decides, as the loop recorded them against the PR's base now. */
-  heldAt: HeldAt;
-}
+import { answered, blocks, changedPaths, descriptionDigest, findingsOf, seatsFor, unapprovedSeat, type Change, type Review, type Round } from "./review-model.ts";
 
 /** What the approved head alone decides its holds from: the review's record and the PR's files at that head. */
 interface HeadFacts {
@@ -132,22 +125,6 @@ function pathHolds(files: readonly ChangedFile[]): Hold[] {
   return [...hits].map(([c, paths]) => hold(`reserved-path:${c}`, `${personOnly}${reservedNames[c]}, as it changes ${paths.join(", ")}.`));
 }
 
-/**
- * The holds the latest round's head decides, as recorded, or the record's alone until the loop records them: for a
- * round whose checks have not passed yet, and for one approved before Nexus recorded them, until the loop reads them.
- */
-const headHeld = (review: Review): Hold[] => review.rounds.at(-1)!.heldAt?.holds ?? [...sameModel(review), ...recordedHolds(review)];
-
-/**
- * What the holds currently on a review are: those its head decides, and for one held for the person, those its
- * landing met, or what held it first.
- */
-export const heldBy = (review: Review): Hold[] => {
-  if (review.phase.kind !== "needs-person") return headHeld(review);
-  const codes = new Set(review.phase.holds.map((h) => h.code));
-  return [...review.phase.holds, ...(review.rounds.at(-1)!.heldAt?.holds ?? []).filter((h) => !codes.has(h.code))];
-};
-
 const squash = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
 /** The reviewer's quote of what could not be checked live at the round, or null when it quoted nothing long enough to count. */
 const quoteOf = (round: Round) => {
@@ -163,10 +140,12 @@ export const staleQuote = (round: Round, body: string) => quoteOf(round) !== nul
  * the holds that meet every landing of the approved head again and that the person may not waive, which no press gets
  * past. Otherwise it lands past the holds it `waives`, and `quotes` first when no live check ran and the landing needs
  * the reviewer's quote of what could not be checked live, which only a description the reviewer reads again can give.
+ * `early` is what the head alone decides, read from its change before the loop recorded it, so the person can answer
+ * while the reviewer and the check run.
  */
 type LandPress = { kind: "stuck"; holds: Hold[] } | { kind: "lands"; waives: Hold[]; quotes: boolean };
-export function landPress(review: Review): LandPress {
-  const holds = heldBy(review);
+export function landPress(review: Review, early: readonly Hold[] | null = null): LandPress {
+  const holds = holdsAt(review, { early });
   const stuck = holds.filter((h) => holdRule(h.code).holdsAgain && !holdRule(h.code).waivable);
   if (stuck.length) return { kind: "stuck", holds: stuck };
   const round = review.rounds.at(-1)!;
@@ -174,19 +153,7 @@ export function landPress(review: Review): LandPress {
   return { kind: "lands", waives: holds.filter((h) => waivable(h.code)), quotes };
 }
 
-/**
- * The holds a Land press at the review's latest head would waive, which the person is asked about, or none when no
- * press there lands. `early` is what the head alone decides, read from its change before the loop recorded it, so the
- * person can answer while the reviewer and the check run.
- */
-export function askedHolds(review: Review, early: readonly Hold[] | null): Hold[] {
-  const round = review.rounds.at(-1)!;
-  const read = round.heldAt !== undefined || early === null ? review : { ...review, rounds: [...review.rounds.slice(0, -1), { ...round, heldAt: { base: round.base ?? "", holds: [...early] } }] };
-  const press = landPress(read);
-  return press.kind === "lands" ? press.waives : [];
-}
-
-const conditions: readonly ((facts: LandingFacts) => Hold[])[] = [
+const conditions: readonly ((facts: { review: Review; pr: PrSnapshot }) => Hold[])[] = [
   ({ review }) => {
     const round = review.rounds.at(-1)!;
     // The seats are the review's, so a round that lost its second verdict has no approval.
@@ -223,12 +190,20 @@ const conditions: readonly ((facts: LandingFacts) => Hold[])[] = [
     if (quoted === null) return [hold("not-checked-live", "No live check ran, and the pull request does not say what could not be checked live.")];
     return squash(pr.detail.body).includes(squash(quoted)) ? [] : [hold("not-checked-live", "The reviewer's quote of what could not be checked live is not in the pull request's description.")];
   },
-  ({ heldAt }) => heldAt.holds,
 ];
 
-/** Why the policy holds this landing for the person, or nothing when an agent may merge and deploy it. */
-export function landingHolds(facts: LandingFacts): Hold[] {
-  return conditions.flatMap((condition) => condition(facts));
+/**
+ * The holds on the review now. First, given `pr`, GitHub's read of it, the conditions a landing checks. Then those its
+ * head alone decides: as the loop recorded them, or `early` until it does, or else the record's alone, for a round
+ * whose checks have not passed yet and for one approved before Nexus recorded them. One held for the person has the
+ * holds its landing met, or what held it first, ahead of its head's.
+ */
+export function holdsAt(review: Review, { early = null, pr }: { early?: readonly Hold[] | null; pr?: PrSnapshot } = {}): Hold[] {
+  const head = review.rounds.at(-1)!.heldAt?.holds ?? early;
+  const { phase } = review;
+  const held = phase.kind !== "needs-person" ? [...head ?? [...sameModel(review), ...recordedHolds(review)]]
+    : [...phase.holds, ...(head ?? []).filter((h) => !phase.holds.some((p) => p.code === h.code))];
+  return pr === undefined ? held : [...conditions.flatMap((condition) => condition({ review, pr })), ...held];
 }
 
 /** The holds that still hold the review's landing once the person's waiver at the approved head lets it past those it names. */
