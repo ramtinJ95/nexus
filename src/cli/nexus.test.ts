@@ -26,6 +26,7 @@ import type { ThreadDetail } from "../control/wire.ts";
 import { detailText } from "./thread-text.ts";
 import { personPhase, type Review } from "../control/review-model.ts";
 import { reviewView } from "../control/review-view.ts";
+import { reviewSaid } from "../control/wording.ts";
 import type { Question } from "../control/questions.ts";
 import { keptPastDay } from "../control/reconcile.ts";
 import { testPr, testReview } from "../test-support/registry-kit.ts";
@@ -292,9 +293,10 @@ test("show says why an archived thread's disk is kept past its 24 hours, and not
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() + 25 * 60 * 60_000 });
   const dayOld: ThreadDetail = await s.json(["show", id]);
   assert.deepEqual(disk(dayOld), ["disk: kept past its 24 hours, as its token usage is not read to its end yet, and reading it failed once, the last because its pylon did not boot within 10 minutes"]);
-  assert.deepEqual(disk({ ...dayOld, keptPastDay: null }), [], "the API's keptPastDay is null for an absent pylon");
-  const { keptPastDay: _kept, ...older } = dayOld;
-  assert.deepEqual(disk(older), [], "a control plane older than 0.71.0 serves no keptPastDay, and show prints no disk line");
+  observeAbsent(s);
+  assert.deepEqual(disk(await s.json(["show", id])), [], "the API's keptPastDay is null for an absent pylon");
+  const { said: _said, ...older } = dayOld;
+  assert.deepEqual(disk(older), [], "a control plane older than 0.72.0 serves no said, and show prints no disk line");
   const { settleFailure: _, ...unfailed } = dayOld.thread;
   assert.equal(keptPastDay({ ...unfailed, usageSettledAt: 1, backedUpAt: 2 }, Date.now()), null);
 });
@@ -306,7 +308,8 @@ test("show says a pylon's guest is not answering, since when and what to do, and
   const guest = (d: ThreadDetail) => detailText(d).split("\n").filter((line) => line.startsWith("guest:"));
   assert.deepEqual(guest(detail), []);
   const since = new Date(Date.now() - 3 * 60_000).toISOString();
-  assert.deepEqual(guest({ ...detail, pylon: { ...detail.pylon, notAnswering: { since, timeouts: 5 } } }), [
+  observeRunning(s, detail.thread, [], [], { since, timeouts: 5 });
+  assert.deepEqual(guest(await s.json(["show", id])), [
     `guest: not answering since 3m ago, as its last 5 guest commands got no answer, so messages, files and diffs fail. \`nexus archive ${id}\` and \`nexus unarchive ${id}\` give it a fresh VM. If the guest does not answer the pause either, the pylon breaks and \`nexus retry-pylon ${id}\` resumes its last saved disk, losing the changes since, so push or copy what you can first`,
   ]);
 });
@@ -322,7 +325,8 @@ test("show says an archived thread's usage is unread when its pylon could not be
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() + 25 * 60 * 60_000 });
   const dayOld: ThreadDetail = await s.json(["show", id]);
   assert.deepEqual(lines(dayOld), ["usage: unread, as its pylon failed: gave up after 5 failed attempts, so its disk goes 24 hours after the archive without it"], "a disk whose usage cannot be read is not kept for it");
-  assert.deepEqual(lines({ ...dayOld, pylon: { ...dayOld.pylon, actualState: "absent" } }), ["usage: unread, as its pylon failed: gave up after 5 failed attempts, so its disk went without it"]);
+  observeAbsent(s);
+  assert.deepEqual(lines(await s.json(["show", id])), ["usage: unread, as its pylon failed: gave up after 5 failed attempts, so its disk went without it"]);
 });
 
 test("each failure has its own exit code, and with --json its error is one JSON line on stderr", async (t) => {
@@ -494,12 +498,18 @@ function watchLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: 
   };
 }
 
-/** Reports the node online with the thread's pylon running these services and listening on these ports. */
-function observeRunning(s: Awaited<ReturnType<typeof setup>>, thread: Thread, services: ServiceFact[], ports: number[]) {
+/** Reports the node online with the thread's pylon running these services and listening on these ports, and its guest not answering if given. */
+function observeRunning(s: Awaited<ReturnType<typeof setup>>, thread: Thread, services: ServiceFact[], ports: number[], notAnswering?: { since: string; timeouts: number }) {
   s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
   s.registry.ingested(testObservation(node, {
-    pylons: [runningPylon(thread.pylonId, { liveHash: s.registry.pylon(thread.pylonId)!.liveHash, bootedFrom: { image: image.id, checkpoint: null }, services, listening: ports.map((port) => ({ port })) })],
+    pylons: [runningPylon(thread.pylonId, { liveHash: s.registry.pylon(thread.pylonId)!.liveHash, bootedFrom: { image: image.id, checkpoint: null }, services, listening: ports.map((port) => ({ port })), ...notAnswering === undefined ? {} : { notAnswering } })],
   }), []);
+}
+
+/** Reports the node online with no pylon on it, so each thread's pylon is absent. */
+function observeAbsent(s: Awaited<ReturnType<typeof setup>>) {
+  s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  s.registry.ingested(testObservation(node), []);
 }
 
 test("ports lists what the pylon listens on, and preview publishes one and waits until it is served", async (t) => {
@@ -1779,8 +1789,9 @@ test("land --waive answers the review's question about its holds, once the perso
   const api = (async () => ({ review, reviewView: reviewView(review, [question]), questions: [question] })) as Api;
   const yes = confirmingTerminal("yes");
   assert.deepEqual(await pressOf(api, "th-builder", yes.terminal), { question: question.id, running: true });
-  assert.match(answeredText(review, true), /^Waived the holds at 111111111111\. It lands once the reviewer approves and its checks pass\.\nreview rv-\S+ of PR #7: reviewing,/, "a review still under way is not landing yet");
-  assert.match(answeredText({ ...review, phase: { kind: "checking", startedAt: 1, thread: null } }, false), /^Landing review /);
+  assert.match(answeredText(review, reviewSaid(review), true), /^Waived the holds at 111111111111\. It lands once the reviewer approves and its checks pass\.\nreview rv-\S+ of PR #7: reviewing,/, "a review still under way is not landing yet");
+  const checking: Review = { ...review, phase: { kind: "checking", startedAt: 1, thread: null } };
+  assert.match(answeredText(checking, reviewSaid(checking), false), /^Landing review /);
   assert.equal(yes.shown(), `Land pull request #7 at ${approvedRound.head}, waiving the holds the merge policy reserves for you:\n  ${egress}\nType yes to waive them and land: `);
   await assert.rejects(pressOf(api, "th-builder", confirmingTerminal("no").terminal), (err: CliError) => err.kind === "failed");
   const answeredQuestion: Question = { ...question, answer: { option: "Leave it", by: laptop, at: 2 } };

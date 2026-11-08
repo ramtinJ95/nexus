@@ -111,9 +111,9 @@ export async function pressOf(api: Api, id: string, terminal: Terminal): Promise
 }
 
 /** What `land --waive` prints once it answered the review's question: a landing, or a waiver for a review still under way. */
-export const answeredText = (r: Review, running: boolean) => running
-  ? `Waived the holds at ${r.rounds.at(-1)!.head.slice(0, 12)}. It lands once the reviewer approves and its checks pass.\n${reviewText(r)}`
-  : `Landing ${reviewText(r)}`;
+export const answeredText = (r: Review, said: readonly string[] | null | undefined, running: boolean) => running
+  ? `Waived the holds at ${r.rounds.at(-1)!.head.slice(0, 12)}. It lands once the reviewer approves and its checks pass.\n${reviewText(r, said)}`
+  : `Landing ${reviewText(r, said)}`;
 
 export const releaseCommands: Readonly<Record<string, Command>> = {
   release: {
@@ -135,13 +135,13 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
       if (v.cancel === true) {
         if (v.pr !== undefined || v.rounds !== undefined || v.land !== undefined) throw new CliError("invalid", "--cancel takes no --pr, --rounds or --land");
         const r = await request(api, reviewRoutes.cancel, { thread: id! });
-        return { json: r, text: `Cancelled ${reviewText(r)}` };
+        return { json: r, text: `Cancelled ${reviewText(r, r.said)}` };
       }
       const pr = str(v, "pr");
       const rounds = str(v, "rounds");
       const body = { ...pr === undefined ? {} : { pr: int(pr, "--pr", 0) }, ...rounds === undefined ? {} : { rounds: int(rounds, "--rounds", 0) }, ...v.land === true ? { land: true } : {} };
       const r = await request(api, reviewRoutes.start, { thread: id!, body });
-      return { json: r, text: `Started ${reviewText(r)}` };
+      return { json: r, text: `Started ${reviewText(r, r.said)}` };
     },
   },
   land: {
@@ -154,11 +154,11 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
       const { question, running, ...press } = v.waive === true ? await pressOf(api, id!, { input: process.stdin, output: process.stderr }) : {};
       if (question !== undefined) {
         await request(api, questionRoutes.answer, { question, body: { option: landOption } });
-        const { review } = await request(api, threadRoutes.show, { thread: id! });
-        return { json: review, text: answeredText(review!, running === true) };
+        const { review, said } = await request(api, threadRoutes.show, { thread: id! });
+        return { json: review, text: answeredText(review!, said?.review, running === true) };
       }
       const r = await request(api, reviewRoutes.land, { thread: id!, body: press });
-      return { json: r, text: `Landing ${reviewText(r)}` };
+      return { json: r, text: `Landing ${reviewText(r, r.said)}` };
     },
   },
   deploy: {

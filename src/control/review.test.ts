@@ -15,11 +15,11 @@ import { holdRule, personOnly, type Hold, type HoldCode } from "./holds.ts";
 import { reservedNames } from "../contract/reserved.ts";
 import { carryWaiver, headHolds, holdsAt, landPress, secondReviewRule } from "./policy.ts";
 import { landing } from "./dashboard/cards.ts";
-import { checkBeside, liveNote, phaseNote, roundNote } from "./wording.ts";
+import { checkBeside, liveNote, phaseNote, reviewSaid, roundNote } from "./wording.ts";
 import { cannotLand, changeOf, ended, findingsOf, humanLabel, landable, personPhase, roundsSpent, type HoldCause, type Review, type Verdict, type Waiver } from "./review-model.ts";
 import { reviewerFor, reviewLoop, secondReviewerFor, type ReviewDeps } from "./review.ts";
 import { upgradeReview } from "./record-upgrade.ts";
-import { reviewText } from "../cli/thread-text.ts";
+import { reviewText as cliReviewText } from "../cli/thread-text.ts";
 import { defaultSecondReview } from "../contract/projects.ts";
 import { agentConversation, agentReader, harnessView, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
@@ -32,6 +32,9 @@ import { desiredPhase, idlePolicy } from "./reconcile.ts";
 import type { CheckState } from "./gate.ts";
 import type { StartRequest } from "./start-request.ts";
 import { Refusal } from "./refusal.ts";
+
+/** A review as `nexus` prints it from the lines the API words of it. */
+const reviewText = (r: Review) => cliReviewText(r, reviewSaid(r));
 
 const node = "node" as NodeName;
 const self = "nCONTROL" as TailnetNodeId;
