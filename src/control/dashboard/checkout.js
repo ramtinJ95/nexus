@@ -3,6 +3,7 @@ import { request } from "./request.js";
 import { changesBases, pylonRoutes, statusLetters } from "../../contract/pylon.ts";
 import { afterSwap, el, end, main, present, retryShots, scroller, showError } from "./page.js";
 import { bases, checkoutText } from "./checkout-text.js";
+import { factsOf } from "./contract.ts";
 
 // A template's icons are in its content, outside the document.
 const iconOf = (name) => document.getElementById("icons").content.querySelector(`.i-${name}`).cloneNode(true);
@@ -29,26 +30,24 @@ export const checkout = {
 };
 export const factsNow = () => {
   const span = document.querySelector("#facts span");
-  return span === null ? null : { pylon: span.dataset.pylon, turn: span.dataset.turn === "true", agentAt: span.dataset.agentAt, status: span.dataset.threadStatus };
+  return span === null ? null : factsOf(span.dataset);
 };
 
 function showChanges(...nodes) {
   document.getElementById("changes-body")?.replaceChildren(...present(nodes));
 }
 
-/** An archived or deleted thread, whose pylon stays paused, so its checkout cannot be read. */
-const threadClosed = (facts) => facts.status !== "active" && facts.status !== "idle";
 
 const { unreadable } = checkoutText({ el, checkout });
 
 
 export function changesUnreadable(facts) {
   // A closed thread keeps no reply, so nothing shows its stale tree again and an unarchive's start reads anew.
-  if (threadClosed(facts)) checkout.changes = null;
+  if (!facts.open) checkout.changes = null;
   showChanges(...unreadable(facts, "its changes", () => { void readChanges(true); }));
 }
 
-export const canRead = (facts) => facts.pylon === "running" && !threadClosed(facts);
+export const canRead = (facts) => facts.pylon === "running" && facts.open;
 
 let reading = null;
 /**
@@ -58,7 +57,7 @@ let reading = null;
 export async function readChanges(wake = false) {
   const facts = factsNow();
   if (thread === undefined || facts === null) return;
-  if (threadClosed(facts)) return changesUnreadable(facts);
+  if (!facts.open) return changesUnreadable(facts);
   if (facts.pylon !== "running") {
     if (!wake && !checkout.wanted) return changesUnreadable(facts);
     checkout.wanted = true;
@@ -72,7 +71,7 @@ export async function readChanges(wake = false) {
       checkout.wanted = false;
       if (base !== checkout.base) return;
       // The thread closed while the read was out, so the reply is stale.
-      if (threadClosed(factsNow())) return changesUnreadable(factsNow());
+      if (!factsNow().open) return changesUnreadable(factsNow());
       checkout.changes = changes;
       // An open tab takes the file's new counts, and keeps its place when the file is no longer changed.
       openTabs = openTabs.map((tab) => changes.files.find((f) => f.path === tab.path) ?? tab);
@@ -82,7 +81,7 @@ export async function readChanges(wake = false) {
     } catch (err) {
       if (base !== checkout.base) return;
       // The thread closed while the read was out, so the closing, not the failure it caused, is what to show.
-      if (threadClosed(factsNow())) return changesUnreadable(factsNow());
+      if (!factsNow().open) return changesUnreadable(factsNow());
       // A pylon that is not running refuses the read as retryable while the read wakes it, even one the page still
       // shows running, as the page's state lags the node's. So the read happens again once the page shows it running.
       if (err.retryable) {
@@ -182,9 +181,9 @@ function noticeFacts() {
   const started = now.pylon === "running" && before.pylon !== "running";
   const agentDone = !now.turn && (before.turn || now.agentAt !== before.agentAt);
   // An unarchive can land before the pylon pauses, so no start follows to read again.
-  const reopened = threadClosed(before) && !threadClosed(now);
+  const reopened = !before.open && now.open;
   if ((started && checkout.changes === null) || ((checkout.wanted || agentDone || reopened) && canRead(now))) void readChanges();
-  else if (!canRead(now) && (checkout.changes === null || threadClosed(now))) changesUnreadable(now);
+  else if (!canRead(now) && (checkout.changes === null || !now.open)) changesUnreadable(now);
 }
 afterSwap(noticeFacts);
 
@@ -301,7 +300,7 @@ function terminalFollows() {
   const tab = tabsBar?.querySelector('[data-tab="term"]');
   const facts = factsNow();
   if (tab == null || facts === null) return;
-  tab.hidden = threadClosed(facts);
+  tab.hidden = !facts.open;
   if (tab.hidden && activeTab === terminalTab) showTab(null);
 }
 afterSwap(terminalFollows);

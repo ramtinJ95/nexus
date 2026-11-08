@@ -1235,7 +1235,7 @@ test("the inspector's tabs pick the changes, the previews or the pylon, and the 
   assert.ok(regions.includes('id="pane-previews"') && regions.includes('id="pane-pylon"'), "the previews and the pylon refresh with the page");
   assert.match(page, /id="changes-turn"><span class="switch-label">Latest turn<\/span>/);
   assert.ok(!regions.includes('id="pane-changes"') && page.includes(`<section class="ipane" id="pane-changes" aria-labelledby="changes-h" data-thread="${fix.id}">`), "no refresh replaces what the client read");
-  assert.match(page, /<div id="facts" data-live hidden><span data-pylon="running" data-turn="false" data-agent-at="0" data-thread-status="(active|idle)"><\/span><\/div>/, "the client learns when the pylon runs and a turn ends");
+  assert.match(page, /<div id="facts" data-live hidden><span data-pylon="running" data-turn="false" data-agent-at="0" data-thread-status="(active|idle)" data-open="true"><\/span><\/div>/, "the client learns when the pylon runs and a turn ends");
   assert.match(page, /<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="[^"]+"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">.*Fix checkout<\/span><\/button><button type="button" class="tab tab-tl" role="tab" aria-selected="false" aria-controls="timeline-view" data-tab="timeline">.*Timeline<\/span><\/button><button type="button" class="tab tab-term" role="tab" aria-selected="false" aria-controls="term-view" data-tab="term"[^>]*>.*Terminal<\/span><\/button><\/div>/, "the conversation is the first tab, and the terminal is one click away beside it");
 });
 

@@ -12,8 +12,9 @@ import type { ThreadId } from "../../ids.ts";
 import { freshVm, liveNote, plannerGaveUp, prWatchText, reviewersNote, reviewLine, roundNote, sessionPaused } from "../wording.ts";
 import type { QueuedThread, Wait } from "../../contract/threads.ts";
 import { tokenCount, type UsageTotals } from "../../contract/usage.ts";
+import { factsData } from "./contract.ts";
 import { attentionLabels } from "../plain-wording.ts";
-import { Html, html, act, attentionTone, actualBadge, desiredTone, sessionTone, outputLabel, dot, state, icon, menu, threadState, ago, workingFor, type Part, type Tone } from "./view.ts";
+import { Html, html, act, dataset, attentionTone, actualBadge, desiredTone, sessionTone, outputLabel, dot, state, icon, menu, threadState, ago, workingFor, type Part, type Tone } from "./view.ts";
 import type { Context, ThreadView } from "./context.ts";
 import { prose } from "./markdown.ts";
 import { modelOf } from "./items.ts";
@@ -178,12 +179,12 @@ ${q.lastError !== null && html`<p class="error">The last start attempt failed: $
 const outputsOf = (d: ThreadDetail) => d.outputs.filter((o) => o.kind !== "pull-request" && (o.kind !== "preview" || !d.previews.some((p) => p.service === o.ref)));
 
 /**
- * What client.js reads to decide when to read the checkout's changes: once the pylon runs, and again when its
+ * What checkout.js reads to decide when to read the checkout's changes: once the pylon runs, and again when its
  * agent was active and no turn runs, as that is when the checkout has changed. The agent's last activity catches a
  * turn that began and ended between two polls.
  */
 function facts({ thread: t, pylon }: ThreadDetail): Html {
-  return html`<span data-pylon="${pylon.actualState}" data-turn="${String(t.working)}" data-agent-at="${t.lastAgentActivityAt}" data-thread-status="${t.status}"></span>`;
+  return html`<span${dataset(factsData({ pylon: pylon.actualState, turn: t.working, agentAt: t.lastAgentActivityAt, status: t.status, open: isOpenStatus(t.status) }))}></span>`;
 }
 
 /** The phone's stand-in for the inspector: the pylon, each preview as a link where it has one, and the outputs. */
