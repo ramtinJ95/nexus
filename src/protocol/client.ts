@@ -13,7 +13,7 @@ import type { JobId, NodeName, PortableArtifactId, PylonId, TailnetNodeId } from
 import { jobStatusSchema, parseSubmitReply, type JobEnvelope, type JobStatus, type SubmitReply } from "./jobs.ts";
 import { parseProbeEvent, type DiskFact, type ProbeEvent } from "./observations.ts";
 import { parseCommandResult, type CommandResult, type PylonCommand } from "./commands.ts";
-import { clientByteStream, streamPath, type ByteStream } from "./streams.ts";
+import { clientByteStream, streamAnswerMs, streamPath, type ByteStream } from "./streams.ts";
 import { parseArtifactManifest } from "./artifacts.ts";
 import { artifactUsageSchema, dropReplySchema, type ArtifactUsage, type DropReply, type DropRequest } from "./cleanup.ts";
 import { gitReadReplySchema, probePort, probeRoutes, type ProbeRoute } from "./routes.ts";
@@ -90,7 +90,7 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
   const port = options.port ?? probePort;
   const { whois } = options;
   const agent = new Agent({ keepAlive: false });
-  const streamTimeoutMs = options.streamTimeoutMs ?? requestTimeoutMs;
+  const streamTimeoutMs = options.streamTimeoutMs ?? streamAnswerMs;
 
   /** A silent socket for `requestTimeoutMs` fails the call as unreachable. Observe lifts the limit once its stream starts. */
   function open(method: ProbeRoute["method"], path: string, body: string | null, signal?: AbortSignal, timeoutMs = requestTimeoutMs, contentType = "application/json"): Promise<IncomingMessage> {

@@ -24,6 +24,9 @@ import { routePath } from "../util/route-path.ts";
  * `interrupted` result appears only when the harness process itself died mid-call. A terminal's relay hangs up
  * when its stdin ends, so Herdr's client detaches and the session stays.
  */
+/** How long the control plane waits for the probe to answer a stream request. */
+export const streamAnswerMs = 10_000;
+
 export type StreamEnd = { kind: "exited"; code: number } | { kind: "lost" };
 export interface ByteStream extends AsyncIterable<Uint8Array> {
   write(chunk: Uint8Array): Promise<void>;

@@ -19,7 +19,7 @@ import { isPortableArtifactId, type JobId, type NodeName, type PylonId, type Tai
 import { jobDeadlineMs, JobFailure, type Job } from "../protocol/jobs.ts";
 import { encodeProbeEvent, heldSecrets, type NodeObservation, type ProbeEvent } from "../protocol/observations.ts";
 import { parsePylonCommand, type PylonCommand } from "../protocol/commands.ts";
-import { notAnswering, parseStreamRequest, serveByteStream, streamUpgradeResponse, type ByteStream } from "../protocol/streams.ts";
+import { notAnswering, parseStreamRequest, serveByteStream, streamAnswerMs, streamUpgradeResponse, type ByteStream } from "../protocol/streams.ts";
 import { artifactHeaders, fetchArtifact } from "../protocol/artifacts.ts";
 import { dropRequestSchema, type DropRequest } from "../protocol/cleanup.ts";
 import { peersSchema, probePort, probeRoutes, routeRole, type CallerRole, type GitReadReply, type ProbeAuthConfig, type ProbeRoute } from "../protocol/routes.ts";
@@ -110,8 +110,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
   /** probe.json's peers until the control plane puts its list, which a restart forgets until the next put. */
   let peers = auth.peers;
   const deadlines = options.jobDeadlineMs ?? jobDeadlineMs;
-  // Under the control plane's 10 s, so a slow guest gets an answer that names it, not the control plane's timeout.
-  const streamTiming = options.streamTiming ?? { startMs: 8_000, hangUpMs: 10_000 };
+  // Under the control plane's wait, so a slow guest gets an answer that names it, not the control plane's timeout.
+  const streamTiming = options.streamTiming ?? { startMs: streamAnswerMs - 2_000, hangUpMs: 10_000 };
   const peerAddress = options.peerAddress ?? ((peer: NodeName) => ({ host: peer, port: probePort }));
   const bootId = randomUUID();
   const log = options.log ?? console.error;
