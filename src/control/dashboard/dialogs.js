@@ -1,7 +1,9 @@
 // The start and new-project dialogs, which start a thread and add a project, and the page's keyboard shortcuts.
 import { startHint } from "./start-hint.ts";
 import { titleOf } from "../../thread-title.ts";
-import { api } from "./request.js";
+import { request } from "./request.js";
+import { threadRoutes } from "../../contract/threads.ts";
+import { projectRoutes } from "../../contract/projects.ts";
 import { onSwap, refreshAfter, showError } from "./page.js";
 import { setOpen } from "./nav.js";
 import { startForm } from "./start-form.js";
@@ -96,7 +98,7 @@ document.addEventListener("submit", async (event) => {
   if (body.planning !== undefined) body.planning = true;
   form.querySelector("button[type=submit]").disabled = true;
   try {
-    const thread = await api("POST", "/v1/threads", body);
+    const thread = await request(threadRoutes.start, { body });
     location.assign(`/threads/${thread.id}`);
   } catch (err) {
     starting = false;
@@ -152,11 +154,11 @@ document.addEventListener("submit", async (event) => {
   const submit = form.querySelector("button[type=submit]");
   submit.disabled = true;
   try {
-    const project = await api("POST", "/v1/projects", {
+    const project = await request(projectRoutes.add, { body: {
       id: field("id"), repoUrl: form.elements.repoKind.value === "scratch" ? null : field("repoUrl"), defaultBranch: field("defaultBranch"), defaultNode: field("defaultNode"),
       resources: JSON.parse(form.dataset.resources), allowedHosts: [], secrets: form.elements.github.checked ? [JSON.parse(form.dataset.githubGrant)] : [],
       logins: [], preSetup: null,
-    });
+    } });
     form.reset();
     syncRepoKind(form);
     showError("project-error", null);

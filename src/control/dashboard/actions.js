@@ -1,38 +1,41 @@
 // The buttons that act on a thread, an item or a question, each as the CLI's command does.
-import { api, request } from "./request.js";
+import { request } from "./request.js";
 import { pylonRoutes } from "../../contract/pylon.ts";
+import { threadRoutes } from "../../contract/threads.ts";
+import { itemRoutes, projectRoutes } from "../../contract/projects.ts";
+import { questionRoutes, reviewRoutes } from "../../contract/reviews.ts";
 import { refreshAfter, showError, whenRunning } from "./page.js";
 import { setOpen } from "./nav.js";
 import { showSession } from "./checkout.js";
 
 const actions = {
-  archive: (thread) => api("POST", `/v1/threads/${thread}/archive`),
-  unarchive: (thread) => api("POST", `/v1/threads/${thread}/unarchive`),
+  archive: (thread) => request(threadRoutes.archive, { thread }),
+  unarchive: (thread) => request(threadRoutes.unarchive, { thread }),
   // A started thread's page has a conversation and an inspector, which the queued page has no regions for.
   "start-queued": async (thread) => {
-    await api("POST", `/v1/threads/${thread}/start`);
+    await request(threadRoutes.startQueued, { thread });
     location.assign(`/threads/${thread}`);
   },
-  delete: (thread) => api("DELETE", `/v1/threads/${thread}`),
-  abort: (thread) => api("POST", `/v1/threads/${thread}/abort`),
-  retry: (thread) => api("POST", `/v1/threads/${thread}/retry`),
-  "retry-pylon": (thread) => api("POST", `/v1/threads/${thread}/pylon/retry`),
+  delete: (thread) => request(threadRoutes.delete, { thread }),
+  abort: (thread) => request(threadRoutes.abort, { thread }),
+  retry: (thread) => request(threadRoutes.retry, { thread }),
+  "retry-pylon": (thread) => request(threadRoutes.retryPylon, { thread }),
   // Publishes the port. The next refresh shows its preview, which links once the node serves it.
   "link-port": (thread, { port }) => request(pylonRoutes.preview, { thread, body: { port: Number(port) } }),
   // As `nexus unpreview`.
   unpublish: (thread, { port }) => whenRunning(thread, () => request(pylonRoutes.unpreview, { thread, port })),
   // As `nexus review --cancel`.
-  "cancel-review": (thread) => api("POST", `/v1/threads/${thread}/review/cancel`, {}),
+  "cancel-review": (thread) => request(reviewRoutes.cancel, { thread }),
   // As `nexus land`, for the commit the confirmation named, waiving the holds the card names the person may waive. The
   // page then shows the landing's steps as the review moves through them.
-  land: (thread, { head, holds }) => api("POST", `/v1/threads/${thread}/land`, holds === undefined ? { head } : { head, waive: JSON.parse(holds) }),
+  land: (thread, { head, holds }) => request(reviewRoutes.land, { thread, body: holds === undefined ? { head } : { head, waive: JSON.parse(holds) } }),
   // As `nexus review --pr <pr>`, with --land when the project lands its reviews.
-  "review-again": (thread, { pr, land }) => api("POST", `/v1/threads/${thread}/review`, { pr: Number(pr), land: land === "true" }),
-  "approve-item": (_, { item }) => api("POST", `/v1/items/${encodeURIComponent(item)}/approve`, {}),
-  "cancel-item": (_, { item }) => api("POST", `/v1/items/${encodeURIComponent(item)}/cancel`, {}),
+  "review-again": (thread, { pr, land }) => request(reviewRoutes.start, { thread, body: { pr: Number(pr), land: land === "true" } }),
+  "approve-item": (_, { item }) => request(itemRoutes.approve, { item }),
+  "cancel-item": (_, { item }) => request(itemRoutes.cancel, { item }),
   // As `nexus project edit --auto-review`.
-  "auto-review": (_, { project, mode }) => api("PATCH", `/v1/projects/${encodeURIComponent(project)}`, { autoReview: mode === "off" ? null : { mode } }),
-  answer: (_, { question, option }) => api("POST", `/v1/questions/${encodeURIComponent(question)}/answer`, { option }),
+  "auto-review": (_, { project, mode }) => request(projectRoutes.edit, { project, body: { autoReview: mode === "off" ? null : { mode } } }),
+  answer: (_, { question, option }) => request(questionRoutes.answer, { question, body: { option } }),
   // As `nexus session open`, then shows the session in the terminal.
   "open-session": async (thread, { harness }) => {
     const { herdrPane } = await whenRunning(thread, () => request(pylonRoutes.openSession, { thread, body: { harness } }));

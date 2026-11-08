@@ -2,7 +2,8 @@
 // toggled, its visit, and the markup the features build. Features hook into a swap through `onSwap` and `afterSwap`.
 import { agoText, clock } from "./elapsed.ts";
 import { atEnd, endFollower } from "./scroll.js";
-import { api } from "./request.js";
+import { request } from "./request.js";
+import { threadRoutes } from "../../contract/threads.ts";
 import { toggledBy } from "./folds.js";
 
 export const main = document.querySelector("main");
@@ -190,7 +191,7 @@ export function recordVisit() {
   const thread = main?.dataset.activity;
   if (thread === undefined) return;
   // A visit wakes a paused pylon, so a failed record is worth saying.
-  api("POST", `/v1/threads/${thread}/activity`, { kind: "human" }).catch((err) => {
+  request(threadRoutes.activity, { thread, body: { kind: "human" } }).catch((err) => {
     showError("action-error", new Error(`This visit was not recorded, so a paused pylon stays paused: ${err.message}`));
   });
 }
@@ -207,7 +208,7 @@ export async function whenRunning(thread, send, waiting = () => {}) {
       return await send();
     } catch (err) {
       if (!err.retryable || Date.now() >= deadline) throw err;
-      const detail = await api("GET", `/v1/threads/${thread}`);
+      const detail = await request(threadRoutes.show, { thread });
       if (detail.thread.status === "archived" || detail.thread.status === "deleted") throw err;
       waiting(err, detail);
     }
