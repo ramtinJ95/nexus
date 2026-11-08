@@ -546,7 +546,7 @@ interface Review {
     | { kind: "deploying"; commit: string; previous: string | null; requested: boolean; deadline: number }
     | { kind: "rolling-back"; commit: string; previous: string; why: string; requested: boolean; deadline: number }
     | { kind: "landed"; commit: string }
-    | { kind: "needs-person"; reasons: string[]; holds?: Hold[]; label?: Label; unreviewed?: string }  // holds additive
+    | { kind: "needs-person"; reasons: string[]; holds: Hold[]; label?: Label; unreviewed?: string }
     | { kind: "merged" | "closed" }
     | { kind: "cancelled"; who: "builder" | "reviewer"; status: "archived" | "deleted" }
     | { kind: "cancelled"; who: "person"; by: string };  // since 0.45.0
