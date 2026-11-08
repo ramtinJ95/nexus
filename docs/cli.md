@@ -564,7 +564,7 @@ Since 0.48.0 a turn that ends because the agent's model failed is not a turn wit
 
 `Verdict` and `Answer` are in [`src/control/review-model.ts`](../src/control/review-model.ts). Each of a verdict's findings has a `priority` of `"P0"` to `"P3"`, as [the merge policy](merge-policy.md) defines them, in place of the `severity` before 0.24.0. A stored finding with `severity` reads `"serious"` as `"P1"` and `"minor"` as `"P3"`. Only P0 to P2 findings block, and the builder answers only those. A verdict's `verdict` is `"approve"` exactly when none of its findings is P0 to P2, whatever the reviewer wrote.
 
-Since 0.71.0 `ThreadDetail.reviewView` says what the merge policy makes of `review` now, so a client shows it without running the policy. It is null when `review` is:
+Since 0.71.0 `ThreadDetail.reviewView` says what the merge policy makes of `review` now, so a client shows it without running the policy. It is null when `review` is null. `question` may have been asked at an earlier head than `head`, between a push and the loop's next pass, and Land on it is refused then, so a client that offers it compares the two:
 
 ```ts
 interface ReviewView {

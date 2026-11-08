@@ -15,7 +15,10 @@ export interface ReviewView {
   /** The holds on the review now, each with whether it meets every landing of the head again and whether the person may waive it. */
   holds: readonly (Hold & ReturnType<typeof holdRule>)[];
   press: ReturnType<typeof landPress>;
-  /** The review's open question about its holds, which the person answers Land to waive them, at the head it was asked at. */
+  /**
+   * The review's open question about its holds, which the person answers Land to waive them, at the head it was asked
+   * at. Between a push and the loop's next pass that head is older than `head`, and Land on it is refused.
+   */
   question: { id: string; head: string; holds: readonly Hold[] } | null;
 }
 
