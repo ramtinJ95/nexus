@@ -2,13 +2,14 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { parseConfig } from "../control/main.ts";
 import { parseProbeConfig } from "../probe/config.ts";
 import { parseControlPlane } from "./control-plane.ts";
 import { parseTailscaleStatus } from "../tailscale.ts";
-import { formatLeft, holdsImage, left, paths, parseFlags, report, tailnetDevices, setup, type Existing, type Facts, type FileWrite, type Json, type Setup } from "./setup.ts";
+import type { FollowUp } from "./credentials.ts";
+import { formatLeft, holdsImage, install, left, paths, parseFlags, report, tailnetDevices, setup, type Existing, type Facts, type FileWrite, type InstallSteps, type Json, type Setup } from "./setup.ts";
 
 const status = JSON.stringify({
   Version: "1.90.0",
@@ -386,4 +387,97 @@ test("a store holds an image only once an image ID is in it, not a crashed fill'
   assert.equal(await holdsImage(store), false);
   await mkdir(join(store, "img-0123456789ab"));
   assert.equal(await holdsImage(store), true);
+});
+
+const repo = resolve(import.meta.dirname, "../..");
+
+/**
+ * Runs install with stand-ins for what it runs, each recorded as it ran. The credentials step adds `next` to the
+ * follow-ups. `refuse` names the step that fails: a config write with exit code 2, the join, or the credentials.
+ */
+async function installing(args: readonly string[], next: readonly FollowUp[] = [], refuse?: "write" | "join" | "credentials"): Promise<{ code: number | Error; ran: string[]; said: string[] }> {
+  const ran: string[] = [];
+  const said: string[] = [];
+  const steps: InstallSteps = {
+    async run(program, rest) {
+      ran.push([program, ...rest].join(" ").replace(process.execPath, "node").replaceAll(repo, "."));
+      return refuse === "write" && rest.includes("write") ? 2 : 0;
+    },
+    async join(token) {
+      ran.push(`join ${token}`);
+      if (refuse === "join") throw new Error("the control plane at http://100.64.0.2:7470/ did not take the join: the token is spent");
+    },
+    async credentials(found) {
+      ran.push("credentials");
+      for (const step of next) found.add(step);
+      if (refuse === "credentials") throw new Error("NEXUS_GH_TOKEN: a GitHub token is letters, digits and underscores");
+    },
+    async left() {
+      ran.push("left");
+    },
+  };
+  const { error, log } = console;
+  console.error = (line: string) => said.push(line);
+  console.log = () => {};
+  try {
+    return { code: await install(parseFlags(["install", ...args]).flags, args, steps).catch((err: Error) => err), ran, said };
+  } finally {
+    Object.assign(console, { error, log });
+  }
+}
+const lockDir = "install -d -o root -g root -m 0700 /opt/nexus/deployer";
+const write = (args: string) => `flock -x /opt/nexus/deployer/lock node ./src/deploy/setup.ts write ${args}`;
+
+test("install writes the configs under the deployer's lock, runs each role's installer, gives the agents their credentials, then says what is left", async () => {
+  const args = ["--admit", "macbook", "--dotfiles", dotfiles];
+  assert.deepEqual(await installing(args), {
+    code: 0, said: [],
+    ran: [lockDir, write(args.join(" ")), "bash ./deploy/install-control.sh", "bash ./deploy/install-probe.sh", "bash ./deploy/install-deployer.sh control probe", "credentials", "left"],
+  });
+  assert.deepEqual((await installing(["--node", "firebat", "--non-interactive"])).ran, [
+    lockDir, write("--node firebat --non-interactive"), "bash ./deploy/install-probe.sh", "bash ./deploy/install-deployer.sh probe", "credentials", "left",
+  ]);
+});
+
+test("after the credentials, a new git key rewrites the configs and reinstalls the probe, a new secret restarts the probe if it runs, and a signed-in harness installs the control plane again", async () => {
+  const after = async (next: readonly FollowUp[]) => {
+    const { code, ran } = await installing(["--dotfiles", dotfiles], next);
+    assert.equal(code, 0);
+    return ran.slice(ran.indexOf("credentials") + 1, -1);
+  };
+  assert.deepEqual(await after(["config", "probe", "control"]), [lockDir, write(`--dotfiles ${dotfiles}`), "bash ./deploy/install-probe.sh", "bash ./deploy/install-control.sh"]);
+  assert.deepEqual(await after(["watch", "probe", "control"]), [
+    lockDir, write(`--dotfiles ${dotfiles} --github-watch`), "systemctl try-restart nexus-probe.service", "bash ./deploy/install-control.sh",
+  ], "control.json gains github.tokenFile under the deployer's lock, from the file as it is then");
+  assert.deepEqual(await after(["config", "watch"]), [lockDir, write(`--dotfiles ${dotfiles} --github-watch`), "bash ./deploy/install-probe.sh"], "one config write does both");
+  assert.deepEqual(await after(["probe"]), ["systemctl try-restart nexus-probe.service"]);
+  assert.deepEqual(await after([]), [], "a run that changed no credential restarts nothing");
+});
+
+test("a failed credentials step still restarts what its writes need, then stops before it says what is left", async () => {
+  const { code, ran, said } = await installing(["--node", "firebat"], ["probe"], "credentials");
+  assert.match(String(code), /the credentials step failed, after the restarts its writes needed/);
+  assert.equal(ran.at(-1), "systemctl try-restart nexus-probe.service");
+  assert.deepEqual(said, ["install: NEXUS_GH_TOKEN: a GitHub token is letters, digits and underscores"]);
+});
+
+test("a join runs after the role installers and before the credentials, and a refused one stops the run", async () => {
+  const args = ["--join", "tok3n", "--node", "firebat"];
+  assert.deepEqual((await installing(args)).ran, [
+    lockDir, write(args.join(" ")), "bash ./deploy/install-probe.sh", "bash ./deploy/install-deployer.sh probe", "join tok3n", "credentials", "left",
+  ]);
+  const refused = await installing(args, [], "join");
+  assert.match(String(refused.code), /the configs are written and the probe runs, but the control plane did not take the join/);
+  assert.deepEqual(refused.said, ["install: the control plane at http://100.64.0.2:7470/ did not take the join: the token is spent"]);
+  assert.ok(!refused.ran.includes("credentials"), refused.ran.join("\n"));
+});
+
+test("a config write that refuses, such as --join without --node, stops install before anything else runs, with its exit code", async () => {
+  assert.match(errors(run(["--join", "tok3n", "--dotfiles", dotfiles])).join("\n"), /--join needs --node/);
+  assert.deepEqual(await installing(["--join", "tok3n"], [], "write"), { code: 2, said: [], ran: [lockDir, write("--join tok3n")] });
+});
+
+test("install.sh names the package manager it found, and parseFlags refuses one it does not know", () => {
+  assert.equal(parseFlags(["install", "--package-manager", "dnf"]).flags.packageManager, "dnf");
+  assert.throws(() => parseFlags(["install", "--package-manager", "pacman"]), /--package-manager pacman: give apt, dnf, other/);
 });

@@ -72,7 +72,7 @@ test("release.sh and the role installers name the layout's prefix, releases, rel
   for (const line of [
     `prefix=${prefix}`, `etc=${etc}`, `service_path=${servicePath}`,
     `make_state ${users.control} ${stateDirs.control}`, `make_state ${users.probe} ${stateDirs.probe} pylons artifacts`,
-    `exec 9>"$prefix/${deployerFiles.lock}"`, `flock -x "$prefix/${deployerFiles.lock}" "$@"`,
+    `exec 9>"$prefix/${deployerFiles.lock}"`,
     `install -d -o root -g root -m 0755 "$prefix" "$prefix/${releasesDir}"`, `mv "$staging" "$prefix/${releasesDir}/$release"`,
     "| sha256sum | cut -c1-12)", '[[ "$NEXUS_COMMIT" =~ ^[0-9a-f]{40}$ ]]',
     `install -o root -g ${stores.claude.owner.split(":")[1]} -m 0${stores.claude.mode.toString(8)} "$1/deploy/secrets.example.env" "$etc/secrets.env"`,

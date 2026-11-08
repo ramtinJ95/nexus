@@ -123,9 +123,10 @@ test("Node older than 26 is a miss, and the fix fits the package manager", async
   assert.match((await misses({ ...complete, node: "20", manager: "other" }, "node")).join("\n"), /https:\/\/nodejs\.org\/en\/download/);
 });
 
-test("QEMU is looked for under the machine's architecture, and either binary missing is a miss", async () => {
-  const arm = { ...complete, arch: "aarch64", commands: ["qemu-system-x86_64", "qemu-img", "tailscale"] };
-  assert.match((await misses(arm, "node")).join("\n"), /qemu-system-aarch64 or qemu-img[^\n]*\n {4}sudo apt-get install -y qemu-system-arm qemu-utils/);
+test("pylon images are x86_64, so another architecture is a miss, and either QEMU binary missing is a miss", async () => {
+  const arm = { ...complete, arch: "aarch64" };
+  assert.deepEqual(await misses(arm, "node"), ["- Pylons run x86_64 images under KVM, and this machine is aarch64.\n    Install on an x86_64 Linux machine."]);
+  assert.match((await misses({ ...complete, commands: ["qemu-img", "tailscale"] }, "node")).join("\n"), /qemu-system-x86_64 or qemu-img[^\n]*\n {4}sudo apt-get install -y qemu-system-x86 qemu-utils/);
   assert.match((await misses({ ...complete, manager: "dnf", commands: ["qemu-system-x86_64", "tailscale"] }, "node")).join("\n"), /sudo dnf install -y qemu-system-x86_64-core qemu-img/);
 });
 
@@ -186,104 +187,34 @@ main --admit macbook`);
   assert.doesNotMatch(run.stderr, /^(node|bash) /m);
 });
 
-/**
- * Stand-ins for what main runs, each saying on stderr what it ran. `setup.ts credentials` prints `next`, the installer's
- * next steps. `setup.ts check` is the prerequisites' own, so it runs.
- */
-function steps(next: readonly string[] = []): string {
-  return `
-node() { [ "$2" != check ] || { command node "$@"; return; }; echo "node \${*//$repo/.}" >&2; [ "$2" != credentials ] || printf '%s\\n' ${next.join(" ")}; }
-bash() { echo "bash \${*//$repo/.}" >&2; }
-systemctl() { echo "systemctl $*" >&2; }
-install() { :; }
-flock() { echo "flock $1 \${2//$prefix/<prefix>}" >&2; shift 2; "$@"; }
+/** Stand-ins for what main runs, each saying on stderr what it ran. `setup.ts check` is the prerequisites' own, so it runs. */
+const steps = `
+node() { [ "$2" != check ] || { command node "$@"; return; }; echo "node \${*//$repo/.}" >&2; }
 `;
-}
 const ran = (stderr: string) => stderr.trim().split("\n");
 
-test("a complete machine writes the configs, runs each role's installer, gives the agents their credentials, then says what is left", async () => {
-  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps()}
+test("a complete machine hands every argument to setup.ts install, with the package manager it found", async () => {
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps}
 main --admit macbook --dotfiles https://github.com/example/dotfiles.git`);
   assert.equal(run.code, 0, run.stderr);
-  const args = "--admit macbook --dotfiles https://github.com/example/dotfiles.git";
-  assert.deepEqual(ran(run.stderr), [
-    "flock -x <prefix>/deployer/lock",
-    `node ./src/deploy/setup.ts write ${args}`,
-    "bash ./deploy/install-control.sh",
-    "bash ./deploy/install-probe.sh",
-    "bash ./deploy/install-deployer.sh control probe",
-    `node ./src/deploy/setup.ts credentials ${args}`,
-    `node ./src/deploy/setup.ts left ${args}`,
-  ]);
-  const node = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps()}
+  assert.deepEqual(ran(run.stderr), ["node ./src/deploy/setup.ts install --package-manager apt --admit macbook --dotfiles https://github.com/example/dotfiles.git"]);
+  const node = await bash(`. "$1/deploy/install.sh"; ${stubs({ ...complete, manager: "dnf", tailscaled: [] })} ${steps}
 main --node firebat --non-interactive`);
   assert.equal(node.code, 0, node.stderr);
-  assert.deepEqual(ran(node.stderr), [
-    "flock -x <prefix>/deployer/lock",
-    "node ./src/deploy/setup.ts write --node firebat --non-interactive",
-    "bash ./deploy/install-probe.sh",
-    "bash ./deploy/install-deployer.sh probe",
-    "node ./src/deploy/setup.ts credentials --node firebat --non-interactive",
-    "node ./src/deploy/setup.ts left --node firebat --non-interactive",
-  ]);
+  assert.deepEqual(ran(node.stderr), ["node ./src/deploy/setup.ts install --package-manager dnf --node firebat --non-interactive"], "a node needs no certificate drop-in");
 });
 
-test("after the credentials, a new git key rewrites the configs and reinstalls the probe, a new secret restarts the probe if it runs, and a signed-in harness installs the control plane again", async () => {
-  const after = async (next: readonly string[]) => {
-    const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps(next)}
-main --dotfiles https://github.com/example/dotfiles.git`);
+test("the prerequisites read the role and the dotfiles from the arguments, in either form parseArgs takes", async () => {
+  for (const args of ["--dotfiles https://github.com/example/dotfiles.git", "--dotfiles=https://github.com/example/dotfiles.git", "--node=firebat"]) {
+    const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps}
+main ${args}`);
     assert.equal(run.code, 0, run.stderr);
-    const lines = ran(run.stderr);
-    return lines.slice(lines.findIndex((line) => line.includes("setup.ts credentials")) + 1, -1);
-  };
-  const args = "--dotfiles https://github.com/example/dotfiles.git";
-  assert.deepEqual(await after(["config", "probe", "control"]), [
-    "flock -x <prefix>/deployer/lock", `node ./src/deploy/setup.ts write ${args}`, "bash ./deploy/install-probe.sh", "bash ./deploy/install-control.sh",
-  ]);
-  assert.deepEqual(await after(["watch", "probe", "control"]), [
-    "flock -x <prefix>/deployer/lock", `node ./src/deploy/setup.ts write ${args} --github-watch`, "systemctl try-restart nexus-probe.service", "bash ./deploy/install-control.sh",
-  ], "control.json gains github.tokenFile under the deployer's lock, from the file as it is then");
-  assert.deepEqual(await after(["config", "watch"]), [
-    "flock -x <prefix>/deployer/lock", `node ./src/deploy/setup.ts write ${args} --github-watch`, "bash ./deploy/install-probe.sh",
-  ], "one config write does both");
-  assert.deepEqual(await after(["probe"]), ["systemctl try-restart nexus-probe.service"]);
-  assert.deepEqual(await after([]), [], "a run that changed no credential restarts nothing");
-});
-
-test("a failed credentials step still restarts what its writes need, then stops before it says what is left", async () => {
-  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps()}
-node() { echo "node \${*//$repo/.}" >&2; [ "$2" != credentials ] || { echo probe; return 1; }; }
-main --node firebat`);
-  assert.notEqual(run.code, 0);
-  assert.ok(ran(run.stderr).includes("systemctl try-restart nexus-probe.service"), run.stderr);
-  assert.match(run.stderr, /the credentials step failed/);
-  assert.doesNotMatch(run.stderr, /setup\.ts left/);
-});
-
-test("a join runs after the role installers and before the credentials, and a refused one stops the run", async () => {
-  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps()}
-main --join tok3n --node firebat`);
-  assert.equal(run.code, 0, run.stderr);
-  assert.deepEqual(ran(run.stderr), [
-    "flock -x <prefix>/deployer/lock",
-    "node ./src/deploy/setup.ts write --join tok3n --node firebat",
-    "bash ./deploy/install-probe.sh",
-    "bash ./deploy/install-deployer.sh probe",
-    "node ./src/deploy/setup.ts join --join tok3n --node firebat",
-    "node ./src/deploy/setup.ts credentials --join tok3n --node firebat",
-    "node ./src/deploy/setup.ts left --join tok3n --node firebat",
-  ]);
-  const refused = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps()}
-node() { echo "node \${*//$repo/.}" >&2; [ "$2" != join ]; }
-main --join tok3n --node firebat`);
-  assert.notEqual(refused.code, 0);
-  assert.match(refused.stderr, /the control plane did not take the join/);
-  assert.doesNotMatch(refused.stderr, /setup\.ts credentials/);
-  const alone = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps()}
-main --join tok3n`);
-  assert.notEqual(alone.code, 0);
-  assert.match(alone.stderr, /--join needs --node/);
-  assert.doesNotMatch(alone.stderr, /setup\.ts/);
+  }
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps}
+main --admit macbook`);
+  assert.equal(run.code, 1);
+  assert.match(run.stderr, /A first control plane install needs the dotfiles repository/);
+  assert.doesNotMatch(run.stderr, /setup\.ts install/);
 });
 
 test("only root on a machine with a control plane mints a join token, from the control plane's release", async (t) => {

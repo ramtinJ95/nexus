@@ -71,13 +71,6 @@ take_deployer_lock() {
   flock -x 9
 }
 
-# Runs the command $@ under the deployer's lock, which it holds only until the command exits. A script that runs the
-# role installers takes the lock this way, because each installer takes it itself.
-with_deployer_lock() {
-  install -d -o root -g root -m 0700 "$prefix/deployer"
-  flock -x "$prefix/deployer/lock" "$@"
-}
-
 # Writes $etc/control-plane.json from probe.json and deployer.json on the first release that reads it, and checks it after.
 adopt_control_plane() { PATH=$service_path node "$1/src/deploy/control-plane.ts" adopt "$etc"; }
 

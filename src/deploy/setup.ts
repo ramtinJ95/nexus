@@ -1,15 +1,18 @@
 /**
- * Writes /etc/nexus/{control,control-plane,probe,deployer}.json for `deploy/install.sh`, joins a node to its control plane with a
- * join token, gives the agents their credentials (src/deploy/credentials.ts) and says what is left for the person:
- * `node src/deploy/setup.ts write|join|credentials|left [--node <control device>] [--join <token>] [--admit <device>]...
- * [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--github-watch]`.
+ * The installer once `deploy/install.sh` has checked the prerequisites: `node src/deploy/setup.ts install --package-manager
+ * apt|dnf|other [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]...
+ * [--peer <device>]... [--dotfiles <git url>] [--non-interactive]` writes /etc/nexus/{control,control-plane,probe,deployer}.json,
+ * runs the role installers, joins a node to its control plane with a join token, gives the agents their credentials
+ * (src/deploy/credentials.ts) and says what is left for the person. `write`, with the same flags and `--github-watch`, writes
+ * the configs alone, which `install` runs under the deployer's lock.
  * `node src/deploy/setup.ts signed-in <control.json>` exits 0 when the harness that config names is signed in.
  * `tailscale status --json | node src/deploy/setup.ts check` prints the tailscale settings install.sh reports as missing.
  * It runs as root from a checkout before `npm ci`, so it imports only Node's builtins and modules that do too.
  */
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readdir } from "node:fs/promises";
+import { dirname, join, resolve as resolvePath } from "node:path";
 import { text } from "node:stream/consumers";
 import { promisify, isDeepStrictEqual, parseArgs } from "node:util";
 import { claudeNames, harnessSignedIn, locations, provision, scripted, stores, system, terminal, heldNames, type FollowUp } from "./credentials.ts";
@@ -22,7 +25,7 @@ import { controlFields } from "../node-base/node-config.ts";
 import { isImageId } from "../ids.ts";
 import { parseTailscaleStatus, tailscaleCli, tailscaleStatus, type TailnetDevice, type TailscaleStatus } from "../tailscale.ts";
 import { localApiWhois } from "../node-base/tailscaled.ts";
-import { configFiles, ports, rootPath, servicePath, stateDirs, users } from "../node-base/node-layout.ts";
+import { configFiles, deployerFiles, ports, prefix, rootPath, servicePath, stateDirs, unitNames, users } from "../node-base/node-layout.ts";
 import type { Whois } from "../protocol/http.ts";
 import { defaultHarnessModel } from "../protocol/models.ts";
 
@@ -80,9 +83,14 @@ export interface Flags {
   nonInteractive: boolean;
   /** Names the control plane's GitHub token file as github.tokenFile, which the credentials step wrote. */
   githubWatch: boolean;
+  /** install.sh's, which it needs before Node is installed. */
+  packageManager?: PackageManager;
 }
 
-export function parseFlags(args: readonly string[]): { command: string | undefined; flags: Flags } {
+export type PackageManager = "apt" | "dnf" | "other";
+const packageManagers: readonly string[] = ["apt", "dnf", "other"] satisfies PackageManager[];
+
+export function parseFlags(args: readonly string[]): { command: string | undefined; operands: readonly string[]; flags: Flags } {
   const { values, positionals } = parseArgs({
     args: [...args],
     allowPositionals: true,
@@ -95,15 +103,19 @@ export function parseFlags(args: readonly string[]): { command: string | undefin
       dotfiles: { type: "string" },
       "non-interactive": { type: "boolean", default: false },
       "github-watch": { type: "boolean", default: false },
+      "package-manager": { type: "string" },
     },
   });
+  const manager = values["package-manager"];
+  if (manager !== undefined && !packageManagers.includes(manager)) throw new Error(`--package-manager ${manager}: give ${packageManagers.join(", ")}`);
   const flags: Flags = {
     admit: values.admit, addNode: values["add-node"], peer: values.peer, nonInteractive: values["non-interactive"], githubWatch: values["github-watch"],
     ...values.node === undefined ? {} : { node: values.node },
     ...values.join === undefined ? {} : { join: values.join },
     ...values.dotfiles === undefined ? {} : { dotfiles: values.dotfiles },
+    ...manager === undefined ? {} : { packageManager: manager as PackageManager },
   };
-  return { command: positionals[0], flags };
+  return { command: positionals[0], operands: positionals.slice(1), flags };
 }
 
 function resolve(tailnet: Tailnet, flag: string, name: string, errors: string[]): Device | undefined {
@@ -320,7 +332,7 @@ export function report(files: readonly FileWrite[]): string {
 export type Docker =
   | { kind: "missing" | "ready" }
   /** `from` is where this Docker's packages came from: Docker's repository or the distribution's, which name buildx differently. */
-  | { kind: "no-buildx"; manager: "apt" | "dnf" | "other"; from: "docker" | "distribution" };
+  | { kind: "no-buildx"; manager: PackageManager; from: "docker" | "distribution" };
 
 const buildxPackage = { docker: "docker-buildx-plugin", distribution: "docker-buildx" } as const;
 const packageInstall = { apt: "sudo apt-get install -y", dnf: "sudo dnf install -y" } as const;
@@ -450,20 +462,19 @@ async function write(flags: Flags): Promise<number> {
   return 0;
 }
 
-/** The package manager, and whether Docker's own docker-ce-cli package is installed or the distribution's Docker is. */
-async function dockerSource(): Promise<Docker> {
+/** Whether Docker's own docker-ce-cli package is installed or the distribution's Docker is. */
+async function dockerSource(manager: PackageManager): Promise<Docker> {
   const env = { PATH: rootPath };
-  const succeeds = (program: string, args: string[]) => exec(program, args, { env }).then(() => true, () => false);
-  const from = (installed: boolean) => installed ? "docker" as const : "distribution" as const;
-  if (await succeeds("sh", ["-c", "command -v apt-get"])) return { kind: "no-buildx", manager: "apt", from: from(await exec("dpkg-query", ["-W", "-f=${db:Status-Status}", "docker-ce-cli"], { env }).then(({ stdout }) => stdout === "installed", () => false)) };
-  if (await succeeds("sh", ["-c", "command -v dnf"])) return { kind: "no-buildx", manager: "dnf", from: from(await succeeds("rpm", ["-q", "docker-ce-cli"])) };
-  return { kind: "no-buildx", manager: "other", from: "distribution" };
+  const installed = manager === "apt" ? await exec("dpkg-query", ["-W", "-f=${db:Status-Status}", "docker-ce-cli"], { env }).then(({ stdout }) => stdout === "installed", () => false)
+    : manager === "dnf" ? await exec("rpm", ["-q", "docker-ce-cli"], { env }).then(() => true, () => false)
+    : false;
+  return { kind: "no-buildx", manager, from: installed ? "docker" : "distribution" };
 }
 
 /** A crashed fill leaves `<id>.partial` beside the images (src/image/artifacts.ts), which is not an image. */
 export const holdsImage = (store: string) => readdir(store).then((entries) => entries.some(isImageId), () => false);
 
-async function gather(flags: Flags): Promise<Facts> {
+async function gather(flags: Flags, manager: PackageManager): Promise<Facts> {
   const net = await tailnet();
   const at = await locations(system);
   const secrets = parseSecretsFile(at.secrets, await system.read(at.secrets).catch(() => undefined) ?? "", heldNames);
@@ -479,7 +490,7 @@ async function gather(flags: Flags): Promise<Facts> {
   const credentials = await system.read(at.harness).catch(() => undefined);
   const groups = await exec("id", ["-nG", users.probe]).then(({ stdout }) => stdout.trim().split(/\s+/), (): string[] => []);
   const succeeds = (args: string[]) => exec("docker", args, { env: { PATH: servicePath } }).then(() => true, () => false);
-  const docker: Docker = !await succeeds(["--version"]) ? { kind: "missing" } : await succeeds(["buildx", "version"]) ? { kind: "ready" } : await dockerSource();
+  const docker: Docker = !await succeeds(["--version"]) ? { kind: "missing" } : await succeeds(["buildx", "version"]) ? { kind: "ready" } : await dockerSource(manager);
   const image = await holdsImage(paths.artifacts);
   return {
     ...common, role: "control", signedIn: credentials !== undefined && harnessSignedIn(credentials),
@@ -523,35 +534,104 @@ async function signedIn(path: string): Promise<boolean> {
   }
 }
 
-async function main(args: readonly string[]): Promise<number> {
-  const { command, flags } = parseFlags(args);
-  if (command === "write") return await write(flags);
-  if (command === "join" && flags.join !== undefined) {
-    const deployer = parseWorkerConfig(await readJson(paths.deployer), await readControlPlane(paths.controlPlane));
-    console.log(`joined the control plane as node ${await joinControlPlane(deployer, flags.join, localApiWhois())}. It follows this node's probe from now on`);
-    return 0;
+/** The steps `install` takes that act on the machine, so the tests can record them. */
+export interface InstallSteps {
+  /** Runs a program on this terminal and resolves its exit code. */
+  run(program: string, args: readonly string[]): Promise<number>;
+  join(token: string): Promise<void>;
+  /** Fills `next` as it goes, so a run that fails partway still says what its writes need. */
+  credentials(next: Set<FollowUp>): Promise<void>;
+  left(): Promise<void>;
+}
+
+class Exit extends Error {
+  readonly code: number;
+  constructor(code: number) {
+    super(`exited with ${code}`);
+    this.code = code;
   }
-  if (command === "credentials") {
-    if (!flags.nonInteractive && !process.stdin.isTTY) console.error("No terminal, so the credentials come from NEXUS_* variables, as deploy/README.md describes, and the rest are skipped.");
-    const answers = flags.nonInteractive || !process.stdin.isTTY ? scripted(process.env) : terminal();
-    const next = new Set<FollowUp>();
-    try {
-      await provision(flags.node === undefined ? "control" : "node", system, answers, (line) => console.error(line), next);
-    } finally {
-      for (const step of next) console.log(step);
+}
+
+const repo = resolvePath(import.meta.dirname, "../..");
+
+/** `args` are install's own, which each config write gets again. */
+export async function install(flags: Flags, args: readonly string[], steps: InstallSteps): Promise<number> {
+  const run = async (program: string, ...rest: string[]) => {
+    const code = await steps.run(program, rest);
+    if (code !== 0) throw new Exit(code);
+  };
+  const installer = (role: string, ...rest: string[]) => run("bash", join(repo, `deploy/install-${role}.sh`), ...rest);
+  // The deployer's lock, which every installer and the deployer's worker take, keeps two runs from merging at once.
+  // A write holds it alone, because each installer takes it itself.
+  const lock = join(prefix, deployerFiles.lock);
+  const write = async (more: readonly string[]) => {
+    await run("install", "-d", "-o", "root", "-g", "root", "-m", "0700", dirname(lock));
+    await run("flock", "-x", lock, process.execPath, join(repo, "src/deploy/setup.ts"), "write", ...args, ...more);
+  };
+  try {
+    await write([]);
+    if (flags.node === undefined) await installer("control");
+    await installer("probe");
+    await installer("deployer", ...flags.node === undefined ? ["control", "probe"] : ["probe"]);
+    // Before the credentials' prompts, so a refused token stops the run before the person answers them.
+    if (flags.join !== undefined) {
+      await steps.join(flags.join).catch((err: unknown) => {
+        console.error(`install: ${(err as Error).message}`);
+        throw new Error("the configs are written and the probe runs, but the control plane did not take the join. Mint a new token if it said so, then rerun with it");
+      });
     }
+    console.log();
+    const next = new Set<FollowUp>();
+    const failed = await steps.credentials(next).then(() => false, (err: unknown) => {
+      console.error(`install: ${(err as Error).message}`);
+      return true;
+    });
+    if (next.has("watch") || next.has("config")) await write(next.has("watch") ? ["--github-watch"] : []);
+    if (next.has("config")) await installer("probe");
+    else if (next.has("probe")) await run("systemctl", "try-restart", unitNames.probe);
+    if (next.has("control")) await installer("control");
+    if (failed) throw new Error("the credentials step failed, after the restarts its writes needed. Fix what it said, then rerun");
+    console.log();
+    await steps.left();
     return 0;
+  } catch (err) {
+    if (err instanceof Exit) return err.code;
+    throw err;
   }
+}
+
+function machineSteps(flags: Flags, manager: PackageManager): InstallSteps {
+  return {
+    run: (program, args) => new Promise((done, failed) => {
+      spawn(program, args, { stdio: "inherit" }).on("error", failed).on("exit", (code) => done(code ?? 1));
+    }),
+    async join(token) {
+      const deployer = parseWorkerConfig(await readJson(paths.deployer), await readControlPlane(paths.controlPlane));
+      console.log(`joined the control plane as node ${await joinControlPlane(deployer, token, localApiWhois())}. It follows this node's probe from now on`);
+    },
+    async credentials(next) {
+      const unattended = flags.nonInteractive || !process.stdin.isTTY;
+      if (!flags.nonInteractive && !process.stdin.isTTY) console.error("No terminal, so the credentials come from NEXUS_* variables, as deploy/README.md describes, and the rest are skipped.");
+      await provision(flags.node === undefined ? "control" : "node", system, unattended ? scripted(process.env) : terminal(), (line) => console.error(line), next);
+    },
+    async left() {
+      console.log(formatLeft(left(await gather(flags, manager))));
+    },
+  };
+}
+
+async function main(args: readonly string[]): Promise<number> {
+  const { command, operands, flags } = parseFlags(args);
+  if (command === "install" && operands.length === 0 && flags.packageManager !== undefined) {
+    return await install(flags, args.slice(1), machineSteps(flags, flags.packageManager));
+  }
+  if (command === "write") return await write(flags);
   if (command === "check") {
     for (const miss of tailnetMisses(await text(process.stdin))) console.log(miss);
     return 0;
   }
-  if (command === "signed-in" && args[1] !== undefined) return await signedIn(args[1]) ? 0 : 1;
-  if (command === "left") {
-    console.log(formatLeft(left(await gather(flags))));
-    return 0;
-  }
-  console.error("usage: node src/deploy/setup.ts write|join|credentials|left|signed-in|check [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--github-watch]");
+  if (command === "signed-in" && operands[0] !== undefined) return await signedIn(operands[0]) ? 0 : 1;
+  console.error("usage: node src/deploy/setup.ts install|write|signed-in|check [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--github-watch] [--package-manager apt|dnf|other]");
   return 1;
 }
 
