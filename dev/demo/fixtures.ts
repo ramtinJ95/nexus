@@ -12,30 +12,30 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { Message } from "@earendil-works/pi-ai";
-import { processStream } from "../../process-stream.ts";
-import type { ByteStream } from "../../protocol/streams.ts";
-import { observeNode, image, laptop, type testApi } from "../../test-support/api-kit.ts";
-import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../../test-support/kit.ts";
-import { sampleOf } from "../node-metrics.ts";
-import { personPhase, type Review, type Round } from "../review-model.ts";
-import { personOnly } from "../holds.ts";
-import { reservedNames } from "../../contract/reserved.ts";
-import { proposalQuestion } from "../planning.ts";
-import { startKey } from "../threads.ts";
-import { checkoutDir, claudeHook } from "../../../images/pylon/nexus-contract.ts";
-import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
-import { checkCaller, reviewerCaller, senders, verifyCaller } from "../agent-protocol.ts";
-import type { AgentCall } from "../agent-usage.ts";
-import { requestIds, type ImageId, type ItemId, type NodeName, type ProjectId, type PylonId, type ThreadId } from "../../ids.ts";
-import type { ItemRecord } from "../pipeline-store.ts";
-import type { Thread } from "../thread-store.ts";
-import type { NodeHealth } from "../../protocol/client.ts";
-import type { PylonObservation } from "../../protocol/observations.ts";
-import type { CommandResult } from "../../protocol/commands.ts";
-import type { DoctorReport, Check } from "../doctor-model.ts";
-import type { PullRequest } from "../github.ts";
-import type { WatchedPr } from "../pr-watch-store.ts";
-import { claudeTalk, diffSnippet, failingTests, harnessTalk, longConversation, testOutput, typescriptSnippet } from "./demo-talk.ts";
+import { processStream } from "../../src/process-stream.ts";
+import type { ByteStream } from "../../src/protocol/streams.ts";
+import { observeNode, image, laptop, type testApi } from "../../src/test-support/api-kit.ts";
+import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../../src/test-support/kit.ts";
+import { sampleOf } from "../../src/control/node-metrics.ts";
+import { personPhase, type Review, type Round } from "../../src/control/review-model.ts";
+import { personOnly } from "../../src/control/holds.ts";
+import { reservedNames } from "../../src/contract/reserved.ts";
+import { proposalQuestion } from "../../src/control/planning.ts";
+import { startKey } from "../../src/control/threads.ts";
+import { checkoutDir, claudeHook } from "../../images/pylon/nexus-contract.ts";
+import { transcriptStart, type ClaudeEntry } from "../../src/control/claude-transcript.ts";
+import { checkCaller, reviewerCaller, senders, verifyCaller } from "../../src/control/agent-protocol.ts";
+import type { AgentCall } from "../../src/control/agent-usage.ts";
+import { requestIds, type ImageId, type ItemId, type NodeName, type ProjectId, type PylonId, type ThreadId } from "../../src/ids.ts";
+import type { ItemRecord } from "../../src/control/pipeline-store.ts";
+import type { Thread } from "../../src/control/thread-store.ts";
+import type { NodeHealth } from "../../src/protocol/client.ts";
+import type { PylonObservation } from "../../src/protocol/observations.ts";
+import type { CommandResult } from "../../src/protocol/commands.ts";
+import type { DoctorReport, Check } from "../../src/control/doctor-model.ts";
+import type { PullRequest } from "../../src/control/github.ts";
+import type { WatchedPr } from "../../src/control/pr-watch-store.ts";
+import { claudeTalk, diffSnippet, failingTests, harnessTalk, longConversation, testOutput, typescriptSnippet } from "./talk.ts";
 
 type Demo = Awaited<ReturnType<typeof testApi>>;
 
@@ -726,7 +726,7 @@ export function demoReviews(registryOf: () => Demo["registry"]) {
       registryOf().saveReview(next, [], r);
       return next;
     },
-  } as never as import("../review.ts").ReviewLoop;
+  } as never as import("../../src/control/review.ts").ReviewLoop;
 }
 
 export async function seedDemo(d: Demo) {

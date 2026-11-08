@@ -1,6 +1,6 @@
 /** What the demo's threads say: harness conversations as pi-ai messages, and Claude worker transcripts as entries. */
 import type { AssistantMessage, Message, ToolCall } from "@earendil-works/pi-ai";
-import type { ClaudeEntry } from "../claude-transcript.ts";
+import type { ClaudeEntry } from "../../src/control/claude-transcript.ts";
 
 const minute = 60_000;
 

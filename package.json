@@ -14,7 +14,7 @@
     "test:slice": "node --test --test-concurrency=1 --test-timeout=600000 src/checks/slice/slice.test.ts src/checks/slice/template-slice.test.ts",
     "test:harness": "node --test --test-timeout=600000 src/control/harness/slice.test.ts",
     "probe": "node src/probe/main.ts",
-    "demo": "npm run build && node src/control/dashboard/demo.ts"
+    "demo": "npm run build && node dev/demo/main.ts"
   },
   "devDependencies": {
     "@pierre/diffs": "1.6.1",

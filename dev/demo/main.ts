@@ -1,13 +1,13 @@
 /**
  * The dashboard with made-up data, for design work: `npm run demo` serves the control plane's API and dashboard on
- * 127.0.0.1 over a fresh registry in a temp directory, seeded from demo-fixtures.ts. It wires the fakes the API
+ * 127.0.0.1 over a fresh registry in a temp directory, seeded from fixtures.ts. It wires the fakes the API
  * tests use, from outside: a fake harness, a whois that names the person for every caller, probes that answer from
  * memory, and no GitHub, deployer key or tailnet. A timer keeps the running threads working and a reply arriving.
  */
-import type { TailnetNodeId } from "../../ids.ts";
-import type { DoctorReport } from "../doctor-model.ts";
-import { laptop, testApi } from "../../test-support/api-kit.ts";
-import { demoCheckout, demoProbes, demoReviews, seedDemo } from "./demo-fixtures.ts";
+import type { TailnetNodeId } from "../../src/ids.ts";
+import type { DoctorReport } from "../../src/control/doctor-model.ts";
+import { laptop, testApi } from "../../src/test-support/api-kit.ts";
+import { demoCheckout, demoProbes, demoReviews, seedDemo } from "./fixtures.ts";
 
 const port = Number(process.env.PORT ?? 8080);
 const closers: (() => unknown)[] = [];

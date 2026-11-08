@@ -1,6 +1,6 @@
 /**
  * Golden captures: the API's JSON, the CLI's text and --json, the dashboard's pages and the first frames of its
- * streams, read from the demo's world (dashboard/demo-fixtures.ts, with golden/reviews.ts's reviews) under a stopped
+ * streams, read from the demo's world (dev/demo/fixtures.ts, with golden/reviews.ts's reviews) under a stopped
  * clock, each kept as a file under src/golden/. Then the main writes, one capture each, in order, and a refusal of
  * each role. A change that keeps behavior leaves every file as it is.
  *
@@ -28,7 +28,7 @@ await import("./golden/frozen.ts");
 const { deployToken, laptop, phone, reporterHeaders, testApi } = await import("./test-support/api-kit.ts");
 const { tokenDigest } = await import("./protocol/deploy.ts");
 const { tempDir } = await import("./test-support/kit.ts");
-const { demoCheckout, demoProbes, demoReviews, seedDemo } = await import("./control/dashboard/demo-fixtures.ts");
+const { demoCheckout, demoProbes, demoReviews, seedDemo } = await import("../dev/demo/fixtures.ts");
 const { seedReviews } = await import("./golden/reviews.ts");
 const { utc } = await import("./contract/usage.ts");
 const { version } = await import("./version.ts");

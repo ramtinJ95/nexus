@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
-const files = ["src", "images"].flatMap((dir) =>
+const files = ["src", "images", "dev"].flatMap((dir) =>
   readdirSync(join(root, dir), { recursive: true, encoding: "utf8" })
     .filter((path) => /\.[jt]s$/.test(path) && !path.split("/").includes("node_modules"))
     .map((path) => join(root, dir, path)),
@@ -14,7 +14,7 @@ const specifier = /(?:\bfrom\s+|\bimport\s+|\bimport\s*\(\s*)["'](\.{1,2}\/[^"']
 const edges = new Map(files.map((file) => [file, [...readFileSync(file, "utf8").matchAll(specifier)]
   .map((match) => resolve(dirname(file), match[1]!)).filter((target) => known.has(target))]));
 
-test("no import cycle runs through src/ or images/, tests and type-only imports included", () => {
+test("no import cycle runs through src/, images/ or dev/, tests and type-only imports included", () => {
   const done = new Set<string>();
   const walk = (file: string, path: string[]) => {
     if (done.has(file)) return;
