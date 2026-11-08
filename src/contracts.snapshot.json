@@ -70,6 +70,7 @@
     "src/image/agent-setup.ts: reserved-path:image-rebuild",
     "src/node-base/secrets-env.test.ts: reserved-path:secrets",
     "src/node-base/secrets-env.ts: reserved-path:secrets",
+    "src/node-base/tailscaled.ts: reserved-path:tailnet",
     "src/probe/config.ts: reserved-path:auth",
     "src/probe/fake-tailscale.ts: reserved-path:tailnet",
     "src/probe/redact.ts: reserved-path:secrets",

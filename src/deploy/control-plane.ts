@@ -11,7 +11,7 @@ import { rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { isDeepStrictEqual, promisify } from "node:util";
 import { readJson, saveJson } from "../node-base/json-file.ts";
-import { tailnetNodeIdPattern } from "../tailscale.ts";
+import { tailnetNodeIdPattern } from "../node-base/tailscaled.ts";
 import { configFiles, unitNames } from "../node-base/node-layout.ts";
 
 export interface ControlPlane { tailnetNodeId: string; url: string }

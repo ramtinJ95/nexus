@@ -14,7 +14,7 @@ import { isDeployer } from "./api/access.ts";
 import { gitIdentitySchema } from "../protocol/spawn.ts";
 import { gitUrl } from "./project.ts";
 import { ingest } from "./reconcile.ts";
-import { linuxTailscaledSocket, localApiWhois, localApiWhoisNode, localApiCertificate } from "../tailscale.ts";
+import { linuxTailscaledSocket, localApiWhois, localApiWhoisNode, localApiCertificate } from "../node-base/tailscaled.ts";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { chatgptToken, harnessModels, loginState, openCredentials, requireModel } from "./harness/credentials.ts";
 import { openHarnessHost, type ConversationId } from "./harness/host.ts";

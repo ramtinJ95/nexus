@@ -1,6 +1,6 @@
 import { request } from "node:http";
 import { BodyTooLarge, readBody } from "../node-base/request-body.ts";
-import { PeerRefused, verifyPeer } from "../tailscale.ts";
+import { PeerRefused, verifyPeer } from "../node-base/tailscaled.ts";
 import type { Whois } from "../protocol/http.ts";
 
 /** A deployment API answer other than 200. `body` is the whole response, and the message only its start. */

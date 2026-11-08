@@ -6,7 +6,8 @@ import { connect, createServer as createNetServer, type AddressInfo } from "node
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { localApiWhois, localApiWhoisNode, parseTailscaleStatus, PeerRefused, selfDnsName, tailnetNodeIdPattern, tailscaleCli, verifyPeer } from "./tailscale.ts";
+import { parseTailscaleStatus, selfDnsName, tailscaleCli } from "./tailscale.ts";
+import { localApiWhois, localApiWhoisNode, PeerRefused, tailnetNodeIdPattern, verifyPeer } from "./node-base/tailscaled.ts";
 import { tailnetDevices, tailnetMisses } from "./deploy/setup.ts";
 import { tailnetNodeIdSchema } from "./protocol/fields.ts";
 import type { Whois } from "./protocol/http.ts";
@@ -56,7 +57,7 @@ test("LocalAPI certificates use cert-only access, request renewal, and reject in
   const dir = await mkdtemp(join(tmpdir(), "nexus-cert-"));
   t.after(() => rm(dir, { recursive: true }));
   const { testCertificate } = await import("./test-certificate.ts");
-  const { localApiCertificate } = await import("./tailscale.ts");
+  const { localApiCertificate } = await import("./node-base/tailscaled.ts");
   const certificate = await testCertificate(dir);
   let status = 200;
   let body = certificate.key + certificate.cert;

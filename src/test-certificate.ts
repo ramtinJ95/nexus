@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
 import { isIP } from "node:net";
 import { join } from "node:path";
-import type { Certificate } from "./tailscale.ts";
+import type { Certificate } from "./node-base/tailscaled.ts";
 
 export async function testCertificate(dir: string, hostname = "dashboard.example.ts.net"): Promise<Certificate> {
   const key = join(dir, "key.pem");
