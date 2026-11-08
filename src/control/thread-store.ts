@@ -2,7 +2,7 @@
  * The thread core: each thread, its pylon, sessions, previews, outputs and jobs, the event log, each session's turn and
  * order, its Claude worker, its attention, each start's request ID, the harness conversations aborted, when each
  * archived thread was archived and whether its usage is settled, when the newest backup the control plane has seen
- * began, and the pylons whose disk that cleanup deletes. The features with per-thread state of their own take part
+ * began, and the pylons whose disk that settle deletes. The features with per-thread state of their own take part
  * through a ThreadParticipant each, which the registry registers.
  */
 import { attentionOf, type Attention, type Need } from "./attention.ts";
@@ -589,18 +589,18 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         return true;
       });
     },
-    /** Records, before the archived-disk cleanup sends its delete, that the pylon's disk is going. */
-    requestCleanup(pylonId: PylonId, thread: ThreadId) {
+    /** Records, before an archive's settle sends the delete of its disk, that the pylon's disk is going. */
+    requestDiskDelete(pylonId: PylonId, thread: ThreadId) {
       sql("INSERT OR IGNORE INTO disk_cleanups (pylon, thread, requested_at) VALUES (?, ?, ?)").run(pylonId, thread, clock());
     },
-    cleanupRequestedAt: (pylonId: PylonId): number | undefined => sql("SELECT requested_at FROM disk_cleanups WHERE pylon = ?").get(pylonId)?.requested_at as number | undefined,
+    diskDeleteRequestedAt: (pylonId: PylonId): number | undefined => sql("SELECT requested_at FROM disk_cleanups WHERE pylon = ?").get(pylonId)?.requested_at as number | undefined,
     /**
      * Once the node no longer has the pylon, the disk took the Claude transcript and whatever failed on it. The thread's
      * transcript is read from the start again, keeping the stored entries, so the session's new file appends after them
      * rather than reading as a replaced one, and the pylon's failure and failed attempts are cleared, so an unarchive boots
      * it fresh.
      */
-    finishCleanup(pylonId: PylonId) {
+    finishDiskDelete(pylonId: PylonId) {
       transaction(() => {
         const thread = sql("DELETE FROM disk_cleanups WHERE pylon = ? RETURNING thread").get(pylonId)?.thread as ThreadId | undefined;
         if (thread === undefined) return;
@@ -611,7 +611,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       });
     },
     /** An unarchive came before the delete ran, and the old disk booted since, so nothing of it is forgotten. */
-    dropCleanup(pylonId: PylonId) { sql("DELETE FROM disk_cleanups WHERE pylon = ?").run(pylonId); },
+    dropDiskDelete(pylonId: PylonId) { sql("DELETE FROM disk_cleanups WHERE pylon = ?").run(pylonId); },
     /**
      * The archived threads whose disk outlives its 24 hours for want of their usage: not settled, or settled no earlier
      * than the newest backup began, as diskKept in reconcile.ts reads them, oldest archive first.

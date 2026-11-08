@@ -1185,20 +1185,20 @@ test("a Claude worker's transcript survives reopening, keeps its newest entries,
   assert.deepEqual(second.claudeTranscript(threadId), { session: "s2", cursor: cursorAt(0), dropped: 0, readAt: 400 });
 });
 
-test("a finished disk cleanup restarts the transcript, keeping its entries for the new file, and clears that pylon's failure, once", (t) => {
+test("a finished disk delete restarts the transcript, keeping its entries for the new file, and clears that pylon's failure, once", (t) => {
   const registry = seeded(t, tempDb());
   const read = (from: number, entries: ClaudeEntry[], to: number, reset = false) => ({ session: "s1", from: cursorAt(from), entries, cursor: cursorAt(to), reset, readAt: to });
   assert.equal(registry.appendClaudeRead(threadId, read(0, [reply(0), reply(1)], 100)), true);
   registry.savePylon({ ...registry.pylon(pylonId)!, failed: "gave up", attempts: { count: 5, last: { at: 1, code: "backend", message: "boom" } }, retrying: true });
-  registry.finishCleanup(pylonId);
-  assert.deepEqual(registry.claudeTranscript(threadId)?.cursor, cursorAt(100), "no cleanup was requested, so nothing changes");
+  registry.finishDiskDelete(pylonId);
+  assert.deepEqual(registry.claudeTranscript(threadId)?.cursor, cursorAt(100), "no disk delete was requested, so nothing changes");
   assert.equal(registry.pylon(pylonId)?.failed, "gave up");
 
-  registry.requestCleanup(pylonId, threadId);
-  registry.requestCleanup(pylonId, threadId);
-  assert.notEqual(registry.cleanupRequestedAt(pylonId), undefined);
-  registry.finishCleanup(pylonId);
-  assert.equal(registry.cleanupRequestedAt(pylonId), undefined);
+  registry.requestDiskDelete(pylonId, threadId);
+  registry.requestDiskDelete(pylonId, threadId);
+  assert.notEqual(registry.diskDeleteRequestedAt(pylonId), undefined);
+  registry.finishDiskDelete(pylonId);
+  assert.equal(registry.diskDeleteRequestedAt(pylonId), undefined);
   assert.deepEqual(registry.claudeTranscript(threadId), { session: "s1", cursor: transcriptStart, dropped: 0, readAt: 100 });
   assert.deepEqual([registry.pylon(pylonId)?.failed, registry.pylon(pylonId)?.attempts, registry.pylon(pylonId)?.retrying], [null, { count: 0, last: null }, false]);
   assert.deepEqual(registry.claudeEntries(threadId), [reply(0), reply(1)]);
@@ -1209,18 +1209,18 @@ test("a finished disk cleanup restarts the transcript, keeping its entries for t
   assert.equal(registry.appendClaudeRead(threadId, read(50, [reply(3)], 10, true)), true);
   assert.deepEqual(registry.claudeEntries(threadId), [reply(3)], "a later replaced file still starts the transcript over");
 
-  registry.requestCleanup(pylonId, threadId);
-  registry.dropCleanup(pylonId);
-  assert.equal(registry.cleanupRequestedAt(pylonId), undefined);
-  assert.deepEqual(registry.claudeTranscript(threadId)?.cursor, cursorAt(10), "a dropped cleanup leaves the read where it stands");
+  registry.requestDiskDelete(pylonId, threadId);
+  registry.dropDiskDelete(pylonId);
+  assert.equal(registry.diskDeleteRequestedAt(pylonId), undefined);
+  assert.deepEqual(registry.claudeTranscript(threadId)?.cursor, cursorAt(10), "a dropped disk delete leaves the read where it stands");
 });
 
-test("a thread delete clears a requested disk cleanup with everything else it clears", (t) => {
+test("a thread delete clears a requested disk delete with everything else it clears", (t) => {
   const registry = seeded(t, tempDb());
   assert.equal(registry.appendClaudeRead(threadId, { session: "s1", from: transcriptStart, entries: [reply(0)], cursor: cursorAt(9), reset: false, readAt: 9 }), true);
-  registry.requestCleanup(pylonId, threadId);
+  registry.requestDiskDelete(pylonId, threadId);
   registry.setThreadStatus(threadId, "deleted");
-  assert.equal(registry.cleanupRequestedAt(pylonId), undefined);
+  assert.equal(registry.diskDeleteRequestedAt(pylonId), undefined);
   assert.equal(registry.claudeTranscript(threadId), undefined);
   assert.deepEqual(registry.claudeEntries(threadId), []);
 });
