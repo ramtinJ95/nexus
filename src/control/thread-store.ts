@@ -232,18 +232,23 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
   const { setting, setSetting } = db.hold(holding);
   const { node } = nodes;
   const reconcile = (thread: ThreadId) => { for (const p of participants) p.reconcile?.(thread); };
-  // Each pylon's attempts and job sent that an older control plane saved are upgraded once, with no event, so every tick reads this code's shape.
-  const readFailures: [ThreadId, FailedAttempt][] = [];
-  transaction(() => {
-    for (const row of sql("SELECT id, thread, attempts, submitted FROM pylons").all()) {
-      const upgraded = upgradeAttempts(json(row.attempts));
-      if (upgraded.readFailure !== null) readFailures.push([row.thread as ThreadId, upgraded.readFailure]);
-      const attempts = JSON.stringify(upgraded.attempts);
-      if (attempts !== row.attempts) sql("UPDATE pylons SET attempts = ? WHERE id = ?").run(attempts, row.id as string);
-      const submitted = row.submitted === null ? null : JSON.stringify(upgradeSubmitted(json(row.submitted)));
-      if (submitted !== row.submitted) sql("UPDATE pylons SET submitted = ? WHERE id = ?").run(submitted, row.id as string);
-    }
-  });
+  /**
+   * Each pylon's attempts and job sent that an older control plane saved are upgraded once, with no event, so every tick
+   * reads this code's shape. A failed wake for reading the attempts drop goes to `readFailed` in the same transaction,
+   * so no crash loses it.
+   */
+  function upgradePylons(readFailed: (thread: ThreadId, failure: FailedAttempt) => void) {
+    transaction(() => {
+      for (const row of sql("SELECT id, thread, attempts, submitted FROM pylons").all()) {
+        const upgraded = upgradeAttempts(json(row.attempts));
+        if (upgraded.readFailure !== null) readFailed(row.thread as ThreadId, upgraded.readFailure);
+        const attempts = JSON.stringify(upgraded.attempts);
+        if (attempts !== row.attempts) sql("UPDATE pylons SET attempts = ? WHERE id = ?").run(attempts, row.id as string);
+        const submitted = row.submitted === null ? null : JSON.stringify(upgradeSubmitted(json(row.submitted)));
+        if (submitted !== row.submitted) sql("UPDATE pylons SET submitted = ? WHERE id = ?").run(submitted, row.id as string);
+      }
+    });
+  }
 
   /**
    * Room a start placed a pylon in before its row exists, so an overlapping start sees it taken. It is held in memory,
@@ -515,8 +520,9 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     threadRecord,
     saveStartKey,
     /** The registry runs it once the participants are registered, since the recompute asks them. */
-    /** Returns each failed wake for reading the upgrade took off a pylon's attempts, for the usage hold to give up on. */
-    start(): readonly [ThreadId, FailedAttempt][] {
+    /** `readFailed` is handed each failed wake for reading the upgrade takes off a pylon's attempts, for the usage hold to give up on. */
+    start(readFailed: (thread: ThreadId, failure: FailedAttempt) => void) {
+      upgradePylons(readFailed);
       pruneSessions();
       // A release that computes attention differently, or a thread from before attention was stored, is right from the start.
       // A thread deleted before deletes cleared the parked flag kept it, and the harness no longer tracks it to report.
@@ -524,7 +530,6 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         sql("UPDATE thread_attention SET parked = 0 WHERE thread IN (SELECT id FROM threads WHERE status = 'deleted')").run();
         for (const { id } of sql("SELECT id FROM threads").all()) updateAttention(id as ThreadId);
       });
-      return readFailures;
     },
     appendEvent,
     pruneSessions,
