@@ -191,6 +191,8 @@
     "src/pylon-vm/storage.ts: reserved-path:egress"
   ],
   "pylonVmImporters": [
+    "src/backends/docker-backend.ts",
+    "src/backends/docker-service-guest.ts",
     "src/backends/pylon-vm/pylon-guest.check.ts",
     "src/backends/pylon-vm/pylon-guest.ts",
     "src/backends/pylon-vm/pylon-vm-backend.ts",

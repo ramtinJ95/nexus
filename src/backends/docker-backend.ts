@@ -28,6 +28,7 @@ import { checkedIn, serviceRoot } from "../pylon-vm/guest.ts";
 import { startRelay } from "../pylon-vm/relay.ts";
 import { configSchema } from "../pylon-vm/contracts.ts";
 import { parse, parseJson } from "../parse.ts";
+import { serialQueue } from "../single-flight.ts";
 import { processStream } from "../process-stream.ts";
 import { installFileCommand, shellQuote as q } from "../shell.ts";
 import type { OverlayFile } from "../protocol/spawn.ts";
@@ -118,40 +119,57 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
   /** Each running container's supervisor, and the guest it runs on, from the first spawn that reached it since the probe started. */
   const supervisors = new Map<PylonId, { services: GuestServices; guest: ReturnType<typeof dockerServiceGuest> }>();
   const servicesState = (pylonId: PylonId) => join(tmpdir(), "nexus-docker-services", pylonId);
-
   const unsupervised = (pylonId: PylonId) => `${pylonId} is not running, or no spawn has reached it since the probe started`;
-  function supervisor(pylonId: PylonId): GuestServices {
+
+  /** One supervisor call at a time per container, as the pylon VM controller's lifecycle queue runs them. */
+  const queues = new Map<PylonId, ReturnType<typeof serialQueue>>();
+  function serially<T>(pylonId: PylonId, work: () => Promise<T>): Promise<T> {
+    let queue = queues.get(pylonId);
+    if (queue === undefined) queues.set(pylonId, queue = serialQueue());
+    return queue.run(work);
+  }
+  const supervised = <T>(pylonId: PylonId, work: (services: GuestServices) => Promise<T>): Promise<T> => serially(pylonId, async () => {
     const found = supervisors.get(pylonId);
     if (found === undefined) throw new Error(unsupervised(pylonId));
-    return found.services;
-  }
+    return work(found.services);
+  });
 
-  async function forget(pylonId: PylonId): Promise<void> {
+  async function close(pylonId: PylonId): Promise<void> {
     const found = supervisors.get(pylonId);
     supervisors.delete(pylonId);
     await found?.services.close();
     await found?.guest.close();
   }
+  const forget = (pylonId: PylonId) => serially(pylonId, () => close(pylonId));
 
   /**
-   * After every spawn. A boot, or the first spawn since the probe started, makes the container's supervisor and
-   * ensures its services, as a pylon's boot does. A boot also starts the relay, after clearing the pid files its disk
-   * carried. A later spawn gives the supervisor the new URLs, which restart each service whose env they change.
+   * After every spawn. A boot, or the first spawn since the probe started, makes the container's supervisor, as a
+   * pylon's boot does. A boot clears the pid files its disk carried, starts the relay and ensures every service. The
+   * first spawn since the probe started restarts every service instead, because the probe forgot which were stopped on
+   * purpose and the env each started with. A later spawn gives the supervisor the new URLs, which restart each service
+   * whose env they change. A supervisor that fails to come up is dropped, so the next spawn tries again.
    */
-  async function supervise(pylonId: PylonId, urls: Record<string, string>, booted: boolean): Promise<void> {
-    const current = supervisors.get(pylonId);
-    if (current !== undefined && !booted) return current.services.setPublicUrls(urls);
-    await forget(pylonId);
-    const guest = dockerServiceGuest(pylonId);
-    if (booted) {
-      await checkedIn(guest, `rm -f ${serviceRoot}/*.pid`);
-      await startRelay(guest);
-    }
-    await mkdir(servicesState(pylonId), { recursive: true });
-    const services = new GuestServices(guest, servicesState(pylonId), servicesFile, checkoutDir, "user", urls);
-    supervisors.set(pylonId, { services, guest });
-    await services.initialize();
-    await services.operate("ensure");
+  function supervise(pylonId: PylonId, urls: Record<string, string>, booted: boolean): Promise<void> {
+    return serially(pylonId, async () => {
+      const current = supervisors.get(pylonId);
+      if (current !== undefined && !booted) return current.services.setPublicUrls(urls);
+      await close(pylonId);
+      const guest = dockerServiceGuest(pylonId);
+      const services = new GuestServices(guest, servicesState(pylonId), servicesFile, checkoutDir, "user", urls);
+      supervisors.set(pylonId, { services, guest });
+      try {
+        if (booted) {
+          await checkedIn(guest, `rm -f ${serviceRoot}/*.pid`);
+          await startRelay(guest);
+        }
+        await mkdir(servicesState(pylonId), { recursive: true });
+        await services.initialize();
+        await services.operate(booted ? "ensure" : "restart");
+      } catch (err) {
+        await close(pylonId);
+        throw err;
+      }
+    });
   }
   const checkpointRef = (pylonId: PylonId, checkpoint: CheckpointId) => `nexus-checkpoint/${pylonId}:${checkpoint}`;
 
@@ -227,21 +245,21 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
         }
       },
       async services(op, name, lines) {
-        const services = supervisor(pylonId);
+        const status = () => supervised(pylonId, (services) => services.operate("status"));
         if (op === "logs") {
           if (name === undefined) throw new Error("service logs needs the service's name");
-          const { output } = await services.logs(name, lines ?? 100);
-          return { services: await services.operate("status", name), logs: output };
+          const { output } = await supervised(pylonId, (services) => services.logs(name, lines ?? 100));
+          return { services: await supervised(pylonId, (services) => services.operate("status", name)), logs: output };
         }
-        const facts = await services.operate(op === "list" ? "status" : op, name);
-        return { services: op === "ensure" || op === "restart" ? await settled(facts, () => services.operate("status")) : facts };
+        const facts = await supervised(pylonId, (services) => services.operate(op === "list" ? "status" : op, name));
+        return { services: op === "ensure" || op === "restart" ? await settled(facts, status) : facts };
       },
       async startService(name, decl) {
-        const services = supervisor(pylonId);
-        return settled(await services.adHoc(name, parse(configSchema.shape.services, { [name]: decl }, "service-start")[name]!), () => services.operate("status"));
+        const service = parse(configSchema.shape.services, { [name]: decl }, "service-start")[name]!;
+        return settled(await supervised(pylonId, (services) => services.adHoc(name, service)), () => supervised(pylonId, (services) => services.operate("status")));
       },
-      linkPort: async (port) => supervisor(pylonId).attach(port),
-      unlinkPort: async (port) => supervisor(pylonId).detach(port),
+      linkPort: (port) => supervised(pylonId, (services) => services.attach(port)),
+      unlinkPort: (port) => supervised(pylonId, (services) => services.detach(port)),
       previewOrigin(service) {
         const services = supervisors.get(pylonId)?.services;
         if (services === undefined) return { unavailable: unsupervised(pylonId) };
@@ -381,6 +399,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
 
     async ensureDeleted(pylonId, signal) {
       await forget(pylonId);
+      queues.delete(pylonId);
       await rm(servicesState(pylonId), { recursive: true, force: true });
       const existing = await container(pylonId, signal);
       if (existing !== null) await docker(["rm", "--force", existing.Id], { signal });
