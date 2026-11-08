@@ -21,7 +21,7 @@ import { localApiWhois } from "../../node-base/tailscaled.ts";
 import { nodePreviews, readNodeFacts } from "./node-facts.ts";
 import { callText } from "../../test-support/kit.ts";
 import type { ThreadDetail } from "../../control/wire.ts";
-import { defaultPreviewPorts, startControlPlane, type ControlPlaneConfig } from "../../control/main.ts";
+import { defaultImageBuildNode, defaultPreviewPorts, startControlPlane, type ControlPlaneConfig } from "../../control/main.ts";
 import { openRegistry } from "../../control/registry.ts";
 import type { PortRange } from "../../control/thread-store.ts";
 
@@ -55,6 +55,7 @@ export async function openNodeCheck(options: { image: string | undefined; opens:
     listen: { host, port: 0, hostnames: [host] },
     self: { tailnetNodeId: self },
     nodes: [{ name: probeConfig.node, tailnetHost: dnsName, tailnetNodeId: self }],
+    imageBuildNode: defaultImageBuildNode,
     callers: [checkPerson],
     tailscaledSocket,
     dotfiles: { repo: "https://github.com/octocat/Spoon-Knife.git", ref: "main" },
