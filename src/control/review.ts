@@ -279,8 +279,6 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   let closed = false;
   const poll = passes.poll;
 
-  /** Whether the agent replied or ended a turn since the loop's last message to it, the only time its replies can hold an answer. */
-  const answeredSince = (state: AgentState) => state.ended !== null || state.replied;
   /** Each PR as GitHub said it in this pass, which a step reads rather than GitHub again. A landing reads it afresh. */
   let reads = new Map<string, Promise<PrSnapshot>>();
   const prKey = (r: Pick<Review, "pr">) => `${r.pr.repo}:${r.pr.number}`;
@@ -634,8 +632,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     // Until the request goes again, `since` is before `retryAt`, and the turn that ended is the failure already counted,
     // whose end a Claude worker's transcript and its hook may each report at another time.
     if (failing !== undefined && since < failing.retryAt) return now() < failing.retryAt ? r : on.resend();
-    const { ended, running, failure: failed } = state;
-    if (ended === null || running || now() - ended <= replyGraceMs) return r;
+    const { over, failure: failed } = state;
+    if (over === null || now() - over <= replyGraceMs) return r;
     if (failed !== null) {
       const count = (failing?.count ?? 0) + 1;
       if (count > retryMs.length) return toPerson(r, "agent", `The ${who}'s model failed ${count} times in a row (last: ${failed}), in round ${r.rounds.length}. Run nexus review again once the provider recovers.`);
@@ -651,10 +649,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const reading = r.rounds.at(-1)!;
       // Each reviewer's verdict is recorded as it comes, and the round goes on once both are in.
       const state = reading.verdict === null ? await agentState(reviewer, r.since) : null;
-      const verdict = state !== null && answeredSince(state) ? latest(state.replies, "nexus-review", verdictSchema, r.expect) : null;
+      const verdict = state !== null && state.mayAnswer ? latest(state.replies, "nexus-review", verdictSchema, r.expect) : null;
       const second = r.second?.kind === "claude" && reading.secondVerdict === null && r.second.outbox === null ? r.second : null;
       const secondState = second === null ? null : await agentState(registry.thread(second.thread)!, second.since);
-      const secondVerdict = second !== null && answeredSince(secondState!) ? latest(secondState!.replies, "nexus-review", verdictSchema, second.expect) : null;
+      const secondVerdict = second !== null && secondState!.mayAnswer ? latest(secondState!.replies, "nexus-review", verdictSchema, second.expect) : null;
       let next = r;
       if (verdict !== null) {
         const { failing: _, ...read } = phase;
@@ -698,7 +696,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const round = r.rounds.at(-1)!;
       const gate = gateFailure(round);
       const state = await agentState(builder, r.since);
-      const found = answeredSince(state) ? latest(state.replies, "nexus-review-answers", answersSchema, r.expect) : null;
+      const found = state.mayAnswer ? latest(state.replies, "nexus-review-answers", answersSchema, r.expect) : null;
       if (found === null) return waitOn(r, phase, state);
       // A turn after the request went again that did not fail ends the model's failures in a row, though the loop may
       // still wait for the push its answer promises. An answer from before, or from the failed turn itself, does not.
@@ -711,9 +709,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (snapshot.pr.state !== "open") return outside(withAnswers, snapshot.pr.state) ?? toPerson(withAnswers, "outside", `Pull request #${r.pr.number} was ${snapshot.pr.state} during the review.`);
       if (fixed && snapshot.detail.head === round.head) {
         // A push can land on GitHub a little after the turn that made it ends.
-        const { ended, running } = state;
-        if (ended === null || running) return waitOn(r, phase, state);
-        if (now() - ended < pushGraceMs) return r;
+        if (state.over === null) return waitOn(r, phase, state);
+        if (now() - state.over < pushGraceMs) return r;
         if (gate === null || gate.kind === "conflict") return waitOn(r, phase, state, `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
       }
       // The reviewer cannot change a gate's result, so a failed gate at an unmoved head is the person's.
@@ -737,7 +734,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         return send(r, "reviewer", (token) => quoteRequest(r, detail, token), { kind: "quoting", asked: descriptionDigest(detail.body) });
       }
       const state = await agentState(reviewer, r.since);
-      const quote = answeredSince(state) ? latest(state.replies, "nexus-quote", quoteSchema, r.expect) : null;
+      const quote = state.mayAnswer ? latest(state.replies, "nexus-quote", quoteSchema, r.expect) : null;
       if (quote === null) return waitOn(r, phase, state);
       const { verdict } = r.rounds.at(-1)!;
       return { ...withRound(r, { verdict: { ...verdict!, notCheckedLive: quote.notCheckedLive }, quotedFrom: phase.asked }), phase: checking(), nudges: 0 };
