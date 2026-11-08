@@ -1,9 +1,9 @@
 /** `nexus projects`, `project show`, `project edit` and `project add`. */
 import { readFileSync } from "node:fs";
-import { defaultProjectResources, defaultSecondReview, upgradeProject, type LoginKind, type Project, type SecondReview } from "../../control/project.ts";
+import { defaultSecondReview, upgradeProject, type LoginKind, type Project, type SecondReview } from "../../control/project.ts";
 import { secretHostPattern, secretNamePattern } from "../../protocol/secret-grants.ts";
 import { CliError } from "../transport.ts";
-import { type Command, str, strs, int, request, resourcesOf, resourceOptions, table } from "../kit.ts";
+import { type Command, str, strs, request, resourcesOf, resourceOptions, table } from "../kit.ts";
 import { projectRoutes } from "../../contract/projects.ts";
 
 /**
@@ -171,14 +171,15 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
       // A forgotten URL must not quietly make a scratch project.
       if ((url === undefined) === (v.scratch !== true)) throw new CliError("invalid", "project add takes a <repo-url> or --scratch, and not both");
       const repoUrl = url ?? null;
-      const resources = { cpus: int(str(v, "cpus"), "--cpus", defaultProjectResources.cpus), memoryGiB: int(str(v, "memory"), "--memory", defaultProjectResources.memoryGiB), diskGiB: int(str(v, "disk"), "--disk", defaultProjectResources.diskGiB) };
+      const resources = resourcesOf(v);
       const secrets = strs(v, "secret").map(secretGrantOf);
       const rulesFile = str(v, "rules-file");
       const auto = autoReviewOf(v);
+      const [branch, node] = [str(v, "branch"), str(v, "node")];
       const added = await request(api, projectRoutes.add, { body: {
-        id: id!, repoUrl, defaultBranch: str(v, "branch") ?? "main", defaultNode: str(v, "node") ?? "auto", resources,
+        id: id!, repoUrl, ...branch === undefined ? {} : { defaultBranch: branch }, ...node === undefined ? {} : { defaultNode: node }, ...resources === undefined ? {} : { resources },
         // The API refuses a login it does not know.
-        allowedHosts: strs(v, "allow-host"), secrets, logins: strs(v, "login") as LoginKind[], preSetup: null,
+        allowedHosts: strs(v, "allow-host"), secrets, logins: strs(v, "login") as LoginKind[],
         ...rulesFile === undefined ? {} : { standingRules: rulesFileOf(rulesFile) },
       } });
       // Only an edit records who turned auto review on, so a new project's add cannot name someone else.

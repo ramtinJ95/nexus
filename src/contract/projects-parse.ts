@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { NodeName, ProjectId } from "../ids.ts";
 import { chatgptTokenGrant, secretHostPattern, secretNamePattern } from "../protocol/secret-grants.ts";
 import { gitIdentitySchema } from "../protocol/spawn.ts";
-import { gitUrl } from "../control/project.ts";
+import { defaultProjectResources, gitUrl } from "../control/project.ts";
 import { standingRulesLimit } from "../control/standing-rules.ts";
 import { briefSchema, itemRules, resourcesSchema, startFields } from "./threads-parse.ts";
 
@@ -24,8 +24,19 @@ export const projectSchema = z.strictObject({
   gitIdentity: gitIdentitySchema.nullable().optional(),
 });
 const rulesText = z.string().trim().min(1).max(standingRulesLimit).refine((text) => !text.includes("\0"), "standing rules cannot hold a NUL character, which no Claude prompt can");
-/** A caller gives standing rules as their text, and Nexus counts their revisions. */
-export const projectAddSchema = projectSchema.extend({ standingRules: rulesText.optional() });
+/** A caller gives standing rules as their text, and Nexus counts their revisions. What it leaves out takes the defaults. */
+export const projectAddSchema = projectSchema.extend({
+  defaultBranch: projectSchema.shape.defaultBranch.default("main"),
+  defaultNode: projectSchema.shape.defaultNode.default("auto"),
+  resources: resourcesSchema.partial().optional().transform((size) => ({
+    cpus: size?.cpus ?? defaultProjectResources.cpus, memoryGiB: size?.memoryGiB ?? defaultProjectResources.memoryGiB, diskGiB: size?.diskGiB ?? defaultProjectResources.diskGiB,
+  })),
+  allowedHosts: projectSchema.shape.allowedHosts.default([]),
+  secrets: projectSchema.shape.secrets.default([]),
+  logins: projectSchema.shape.logins.default([]),
+  preSetup: projectSchema.shape.preSetup.default(null),
+  standingRules: rulesText.optional(),
+});
 const secondReviewSchema = z.union([
   z.strictObject({ always: z.literal(true) }),
   z.strictObject({ always: z.literal(false), lines: z.int().positive().nullable(), reserved: z.boolean() }).refine((rule) => rule.lines !== null || rule.reserved, "a second reviewer's rule names a size of change, reserved paths, or always"),

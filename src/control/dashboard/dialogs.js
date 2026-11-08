@@ -138,8 +138,8 @@ document.addEventListener("change", (event) => {
   if (event.target instanceof HTMLInputElement && event.target.name === "repoKind" && event.target.form?.matches("#project")) syncRepoKind(event.target.form);
 });
 
-// The project `nexus project add` sends: the dialog's fields, the resources the form names, and the GitHub grant
-// when asked for. Once added, the start dialog opens on it, as the dashboard's next step for a project is its first thread.
+// The project `nexus project add` sends: the dialog's fields, and the GitHub grant when asked for. The API fills
+// the rest with a project's defaults. Once added, the start dialog opens on it, as the dashboard's next step for a project is its first thread.
 let adding = false;
 document.addEventListener("submit", async (event) => {
   // Not event.target.id: a form's field named "id" shadows its id.
@@ -154,8 +154,7 @@ document.addEventListener("submit", async (event) => {
   try {
     const project = await request(projectRoutes.add, { body: {
       id: field("id"), repoUrl: form.elements.repoKind.value === "scratch" ? null : field("repoUrl"), defaultBranch: field("defaultBranch"), defaultNode: field("defaultNode"),
-      resources: JSON.parse(form.dataset.resources), allowedHosts: [], secrets: form.elements.github.checked ? [JSON.parse(form.dataset.githubGrant)] : [],
-      logins: [], preSetup: null,
+      ...form.elements.github.checked ? { secrets: [JSON.parse(form.dataset.githubGrant)] } : {},
     } });
     form.reset();
     syncRepoKind(form);
