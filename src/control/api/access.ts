@@ -95,6 +95,9 @@ const statusNeeds: Readonly<Record<"kept" | "open" | "pylon" | "active", { refus
 /** What a route needs of a thread: a status, and an agent of one kind. */
 interface Need { status?: keyof typeof statusNeeds; agent?: "harness" | "claude" }
 
+/** Wakes the loop for the node of the thread's pylon. */
+export const threadWaker = (registry: Pick<Registry, "pylon">, wake: (node: NodeName) => void) => (t: Pick<Thread, "pylonId">) => wake(registry.pylon(t.pylonId)!.node);
+
 export function apiAccess(registry: Registry, wake: (node: NodeName) => void, options: { deployment?: Deployment | undefined; allowed: ReadonlySet<TailnetNodeId> }) {
   /**
    * The roles a caller whois names holds. A person or a deployer is also allowed, and the control node is the reporter
@@ -148,11 +151,7 @@ export function apiAccess(registry: Registry, wake: (node: NodeName) => void, op
   /** The thread with its status now, which a request that waited may have seen change. */
   const current = (t: Thread): Thread => ({ ...t, status: registry.threadStatus(t.id)! });
 
-  function wakeThread(t: Thread) {
-    wake(registry.pylon(t.pylonId)!.node);
-  }
-
-  return { lookup, thread, threadRefusal, guard, current, wakeThread, roleOf };
+  return { lookup, thread, threadRefusal, guard, current, wakeThread: threadWaker(registry, wake), roleOf };
 }
 export type Access = ReturnType<typeof apiAccess>;
 
