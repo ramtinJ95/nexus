@@ -23,7 +23,7 @@ import type { CommandResult, InterruptClaudeOutcome } from "../../protocol/comma
 import { nonEmpty, parse, parseJson } from "../../parse.ts";
 import { claudeCode, launchers, type Launcher } from "./launchers.ts";
 import { agentKinds, claudeSessionId, sessionHarnessSchema, type SessionHarness } from "../../protocol/agent-kinds.ts";
-import { callTimeoutMs, checkoutDir, claudeLaunchesDir, herdrServerStartMs, herdrSession, home, sessionsFile, startHerdrServer } from "../../guest-contract.ts";
+import { callTimeoutMs, checkoutDir, claudeLaunchesDir, herdrClient, herdrServerStartMs, herdrSession, home, sessionsFile, startHerdrServer } from "../../guest-contract.ts";
 
 const agentStartTimeoutMs = 30_000;
 /** pi-shepherdr's launch.ts: a new pane's shell can still be starting when the first agent start lands. */
@@ -633,7 +633,7 @@ async function launchArgs(guest: Guest, pane: string, { kind, modelFlag, session
  * a human's presence. Rejects when the guest cannot be counted, so the caller decides what that means.
  */
 export async function attachedTerminals(guest: Guest, timeoutMs = callTimeoutMs): Promise<number> {
-  const { exitCode, output } = await guest.exec(["pgrep", "-c", "-x", "-f", `herdr --session ${herdrSession}`], { cwd: home, timeoutMs });
+  const { exitCode, output } = await guest.exec(["pgrep", "-c", "-x", "-f", herdrClient], { cwd: home, timeoutMs });
   // pgrep prints the count, 0 included, and exits 1 when it is 0.
   const count = Number(output.trim());
   if ((exitCode !== 0 && exitCode !== 1) || output.trim() === "" || !Number.isInteger(count)) {

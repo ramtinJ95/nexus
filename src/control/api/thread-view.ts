@@ -14,7 +14,7 @@ import type { BootInputs } from "../../protocol/spawn.ts";
 import type { Project } from "../project.ts";
 import { observedPylon } from "../observed.ts";
 import { watchStopped } from "../pr-watch-model.ts";
-import { herdrSession } from "../../guest-contract.ts";
+import { herdrClient } from "../../guest-contract.ts";
 
 function networkGrantsKey(network: BootInputs["network"]): string {
   const sorted = (values: Iterable<string>) => [...new Set(values)].sort();
@@ -87,7 +87,7 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
       questions: registry.questions(t.id),
       judgments: registry.judgments(t.id).map(judgmentView),
       planning: registry.planning(t.id) !== null,
-      attach: `herdr --session ${herdrSession}`,
+      attach: herdrClient,
       agent,
     };
   }
