@@ -9,6 +9,8 @@ export const stateFiles = (root: string) => ({
 	scratch: join(root, "tmp"),
 	/** Where the probe listens for the controllers' forwarded requests. Under the private state root, so only the probe's user reaches it. */
 	hostBridge: join(root, "host-bridge.sock"),
+	/** Nexus's adapter keeps its event journal here. */
+	events: join(root, "events.sqlite"),
 });
 
 export const directory = (root: string, kind: Kind, name: string): string => join(root, kind, name);
@@ -16,6 +18,7 @@ export const directory = (root: string, kind: Kind, name: string): string => joi
 export const stagingDirectory = (root: string, kind: Kind, name: string): string => join(root, kind, `.${name}.creating`);
 /** Where `destroy` renames an instance before it removes it. Hidden, so `list` skips it. */
 export const tombstoneDirectory = (root: string, kind: Kind, name: string): string => join(root, kind, `.${name}.deleting`);
+export const isTombstone = (name: string): boolean => name.startsWith(".") && name.endsWith(".deleting");
 export const stateRootOf = (dir: string): string => dirname(dirname(dir));
 /** The controller's TMPDIR. */
 export const scratchDirectory = (root: string, dir: string): string =>

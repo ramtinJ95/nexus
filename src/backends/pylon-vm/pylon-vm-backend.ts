@@ -498,7 +498,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     },
     gitSsh: options.gitSsh !== undefined,
     nestedVirtualization: hostNestsKvm(),
-    eventJournal: `${stateRoot}/events.sqlite`,
+    eventJournal: stateFiles(stateRoot).events,
     hostBridge: pylonVmHostBridge(stateRoot),
     storage: stateRoot,
 

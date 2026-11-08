@@ -26,7 +26,7 @@ import {
 	statusSchema,
 } from "./contracts.ts";
 import { alive, groupMembers, identityOf, identitySchema, type ProcessIdentity, publishIdentity, readIdentity } from "./identity.ts";
-import { directory, instanceFiles, kinds, scratchDirectory, stagingDirectory, stateFiles, tombstoneDirectory } from "./instance-layout.ts";
+import { directory, instanceFiles, isTombstone, kinds, scratchDirectory, stagingDirectory, stateFiles, tombstoneDirectory } from "./instance-layout.ts";
 import {
 	existsError,
 	privateDirectory,
@@ -482,7 +482,7 @@ export async function run(
 		// A tombstone is garbage whoever left it, and once its instance is gone no destroy of that name may follow.
 		await Promise.all(
 			names
-				.filter((name) => name.startsWith(".") && name.endsWith(".deleting"))
+				.filter(isTombstone)
 				.map((name) => rm(join(base, name), { recursive: true, force: true })),
 		);
 		const found = await Promise.all(

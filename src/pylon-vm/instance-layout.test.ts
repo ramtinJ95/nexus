@@ -1,17 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { directory, instanceFiles, scratchDirectory, stagingDirectory, stateFiles, stateRootOf, tombstoneDirectory } from "./instance-layout.ts";
+import { directory, instanceFiles, isTombstone, scratchDirectory, stagingDirectory, stateFiles, stateRootOf, tombstoneDirectory } from "./instance-layout.ts";
 
 // The names are on disk in every existing pylon, so a change here strands them.
 test("every state and instance file keeps the name it had on disk", () => {
 	const root = "/state";
 	const { kind, ...files } = stateFiles(root);
-	assert.deepEqual(files, { scratch: "/state/tmp", hostBridge: "/state/host-bridge.sock" });
+	assert.deepEqual(files, { scratch: "/state/tmp", hostBridge: "/state/host-bridge.sock", events: "/state/events.sqlite" });
 	assert.equal(kind("instances"), "/state/instances");
 	assert.equal(kind("templates"), "/state/templates");
 	assert.equal(directory(root, "instances", "p1"), "/state/instances/p1");
 	assert.equal(stagingDirectory(root, "templates", "t1"), "/state/templates/.t1.creating");
 	assert.equal(tombstoneDirectory(root, "instances", "p1"), "/state/instances/.p1.deleting");
+	assert.ok(isTombstone(".p1.deleting") && !isTombstone("p1.deleting") && !isTombstone(".p1.creating"));
 	assert.equal(stateRootOf("/state/instances/p1"), root);
 	assert.equal(scratchDirectory(root, "/state/instances/p1"), "/state/tmp/d8cbee5bc82e");
 	assert.deepEqual(instanceFiles("/state/instances/p1"), {
