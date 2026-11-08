@@ -6,13 +6,29 @@ import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { migrations } from "./schema.ts";
 
 export type Row = Record<string, unknown>;
-/** The tables that keep each record as JSON in a `record` column under one key. */
-type RecordTable = "reviews" | "pr_watches" | "nudges" | "planning_threads" | "pipeline_items" | "queued_threads" | "questions" | "judgments";
-type RecordKey = "builder" | "thread" | "id" | "failure";
 export const json = <T>(value: unknown): T => JSON.parse(value as string) as T;
 export const jsonOrNull = <T>(value: unknown): T | null => value === null ? null : json<T>(value);
 
 export type Db = ReturnType<typeof openDb>;
+
+/**
+ * What one store holds in the registry: its tables, and the keys of the `settings` table only it reads and writes, where
+ * a key ending in ":" holds every key it begins. `record` names the key column of a table that keeps each record as
+ * JSON in a `record` column. `deletedWithThread` deletes a thread's rows, by its `thread` column, with the thread.
+ */
+export interface Holding {
+  readonly tables: Readonly<Record<string, { readonly record?: string; readonly deletedWithThread?: true }>>;
+  readonly settings?: readonly string[];
+}
+type RecordTable<H extends Holding> = { [T in keyof H["tables"]]: H["tables"][T] extends { record: string } ? T : never }[keyof H["tables"]] & string;
+type SettingKey<H extends Holding> = H["settings"] extends readonly (infer K extends string)[] ? K | `${Extract<K, `${string}:`>}${string}` : never;
+
+export const holding = { tables: { settings: {} } } as const satisfies Holding;
+
+export const deletedWithThread = (holdings: readonly Holding[]): string[] =>
+  holdings.flatMap((h) => Object.entries(h.tables).flatMap(([table, t]) => t.deletedWithThread ? [table] : []));
+
+const overlap = (a: string, b: string) => a === b || (a.endsWith(":") && b.startsWith(a)) || (b.endsWith(":") && a.startsWith(b));
 
 /** Opens the file, creating it if needed, and applies any migrations it has not seen. */
 export function openDb(path: string) {
@@ -34,19 +50,39 @@ export function openDb(path: string) {
     return statement;
   };
 
-  const setting = (key: string): string | null => (sql("SELECT value FROM settings WHERE key = ?").get(key)?.value ?? null) as string | null;
-  const setSetting = (key: string, value: string) => sql("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(key, value);
+  const held: Holding[] = [];
+  /** Claims the store's tables and settings keys, which no other store may hold, and gives its records and settings. */
+  function hold<const H extends Holding>(holding: H) {
+    for (const other of held) {
+      for (const table of Object.keys(holding.tables)) if (table in other.tables) throw new Error(`two stores hold table ${table}`);
+      for (const key of holding.settings ?? []) if (other.settings?.some((k) => overlap(k, key))) throw new Error(`two stores hold setting ${key}`);
+    }
+    held.push(holding);
+    return {
+      /** The table and its key column are SQL, so they come only from the holding, never from input. */
+      records<R>(table: RecordTable<H>) {
+        const key = holding.tables[table]!.record!;
+        const stored = (k: string | number) => (sql(`SELECT record FROM ${table} WHERE ${key} = ?`).get(k)?.record ?? null) as string | null;
+        return {
+          get: (k: string | number): R | null => jsonOrNull<R>(stored(k)),
+          save(k: string | number, record: R) {
+            sql(`INSERT INTO ${table} (${key}, record) VALUES (?, ?) ON CONFLICT (${key}) DO UPDATE SET record = excluded.record`).run(k, JSON.stringify(record));
+          },
+          /** Whether the stored record is `previous`, or there is none when it is null, which a save checks in its transaction so it writes only over the record it read. */
+          isCurrent: (k: string | number, previous: R | null) => stored(k) === (previous === null ? null : JSON.stringify(previous)),
+        };
+      },
+      setting: (key: SettingKey<H>): string | null => (sql("SELECT value FROM settings WHERE key = ?").get(key)?.value ?? null) as string | null,
+      setSetting(key: SettingKey<H>, value: string) { sql("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(key, value); },
+    };
+  }
+  hold(holding);
 
-  /** The table and key column are SQL, so they come only from this code, never from input. */
-  function recordOf<T>(table: RecordTable, keyColumn: RecordKey, key: string | number): T | null {
-    return jsonOrNull<T>(sql(`SELECT record FROM ${table} WHERE ${keyColumn} = ?`).get(key)?.record ?? null);
+  function deleteThreadRows(thread: string) {
+    for (const table of deletedWithThread(held)) sql(`DELETE FROM ${table} WHERE thread = ?`).run(thread);
   }
 
-  function saveRecord(table: RecordTable, keyColumn: RecordKey, key: string | number, record: unknown) {
-    sql(`INSERT INTO ${table} (${keyColumn}, record) VALUES (?, ?) ON CONFLICT (${keyColumn}) DO UPDATE SET record = excluded.record`).run(key, JSON.stringify(record));
-  }
-
-  return { db, transaction, sql, setting, setSetting, recordOf, saveRecord };
+  return { db, transaction, sql, hold, deleteThreadRows };
 }
 
 function migrate(db: DatabaseSync) {

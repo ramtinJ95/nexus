@@ -1,8 +1,11 @@
-import { json, type Db, type Row } from "./db.ts";
+import { json, type Db, type Holding, type Row } from "./db.ts";
 import type { ProjectId } from "../ids.ts";
 import { upgradeProject, type Project } from "./project.ts";
 
+export const holding = { tables: { projects: {} } } as const satisfies Holding;
+
 export function projectStore(db: Db) {
+  db.hold(holding);
   const { transaction, sql } = db;
   function project(id: ProjectId): Project | undefined {
     const row = sql("SELECT record FROM projects WHERE id = ?").get(id);

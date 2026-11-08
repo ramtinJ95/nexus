@@ -1,21 +1,23 @@
 /**
- * The question store: each question asked about a thread or a node, in `questions`, and the asks each thread's pylon
- * last reported waiting, in `waiting_asks`. A write recomputes a thread's attention, in its transaction. Its
- * participant tells the thread core of an open question, drops a closed thread's asks, withdraws an archived thread's
- * open failure questions, and runs `reconcileAsks`
- * when a Claude worker, its transcript or its thread's status changes.
+ * The question store: each question asked about a thread or a node, and the asks each thread's pylon last reported
+ * waiting. A write recomputes a thread's attention, in its transaction. Its participant tells the thread core of an open
+ * question, drops a closed thread's asks, withdraws an archived thread's open failure questions, and runs
+ * `reconcileAsks` when a Claude worker, its transcript or its thread's status changes.
  */
-import { json, jsonOrNull, type Db } from "./db.ts";
+import { json, jsonOrNull, type Db, type Holding } from "./db.ts";
 import type { NodeName, ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "./reconcile.ts";
 import { askQuestionId, askRecord, isNodeQuestion, isOpen, type NodeQuestion, type Question, type ThreadQuestion, type Unanswered, type WaitingAsk } from "./questions.ts";
 import type { DeleteOutcome } from "../protocol/cleanup.ts";
 import type { Need } from "./attention.ts";
 
+export const holding = { tables: { questions: { record: "id" }, waiting_asks: {} } } as const satisfies Holding;
+
 export function questionStore(db: Db, clock: () => number, threadStatus: (id: ThreadId) => ThreadStatus | undefined, updateAttention: (thread: ThreadId) => void) {
-  const { transaction, sql, recordOf } = db;
+  const { transaction, sql } = db;
+  const questions = db.hold(holding).records<Question>("questions");
   function questionRecord(id: string): Question | null {
-    return recordOf<Question>("questions", "id", id);
+    return questions.get(id);
   }
 
   function waitingAsks(thread: ThreadId): WaitingAsk[] {

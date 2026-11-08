@@ -14,7 +14,7 @@ import { observedPylon } from "./observed.ts";
 import { nodeSummary } from "./placement.ts";
 import { releaseView } from "./releases.ts";
 import type { Registry } from "./registry.ts";
-import type { NewHealthChange } from "./report-store.ts";
+import type { NewHealthChange } from "./health-store.ts";
 
 export interface DoctorSources {
   registry: Pick<Registry, "nodes" | "node" | "pylon" | "keptArchives" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserved" | "desiredRelease" | "nodeByTailnetId" | "releaseReports">;

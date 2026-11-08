@@ -1,8 +1,7 @@
 /**
- * The nudge store: each builder's nudge record, in `nudges`. A save recomputes the thread's attention, in its
- * transaction.
+ * The nudge store: each builder's nudge record. A save recomputes the thread's attention, in its transaction.
  */
-import type { Db } from "./db.ts";
+import type { Db, Holding } from "./db.ts";
 import type { ThreadId } from "../ids.ts";
 import type { Need } from "./attention.ts";
 
@@ -27,23 +26,26 @@ export type Nudge =
    */
   | { state: "left-alone" };
 
+export const holding = { tables: { nudges: { record: "thread" } } } as const satisfies Holding;
+
 export function nudgeStore(db: Db, updateAttention: (thread: ThreadId) => void) {
-  const { transaction, sql, recordOf, saveRecord } = db;
+  const { transaction, sql } = db;
+  const nudges = db.hold(holding).records<Nudge>("nudges");
   return {
     participant: {
       needs(thread: ThreadId): Need[] {
-        const nudge = recordOf<Nudge>("nudges", "thread", thread);
+        const nudge = nudges.get(thread);
         return nudge?.state === "person" ? [{ kind: "nudge", since: nudge.turn }] : [];
       },
     },
-    nudge: (thread: ThreadId): Nudge | null => recordOf<Nudge>("nudges", "thread", thread),
+    nudge: (thread: ThreadId): Nudge | null => nudges.get(thread),
     /** The threads with a nudge record that a later pass may still change or clear, which is every one but left-alone. */
     nudgedThreads: (): ThreadId[] => sql("SELECT thread FROM nudges WHERE json_extract(record, '$.state') != 'left-alone' ORDER BY thread").all().map((r) => r.thread as ThreadId),
     /** Replaces the builder's nudge record, or with null deletes it. */
     saveNudge(thread: ThreadId, nudge: Nudge | null) {
       transaction(() => {
         if (nudge === null) sql("DELETE FROM nudges WHERE thread = ?").run(thread);
-        else saveRecord("nudges", "thread", thread, nudge);
+        else nudges.save(thread, nudge);
         updateAttention(thread);
       });
     },

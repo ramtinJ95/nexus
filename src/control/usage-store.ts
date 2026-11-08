@@ -1,9 +1,8 @@
 /**
- * The usage store: each recorded call, in `usage_records`, their sums per day, in `usage_days`, how far each source
- * was read, in `usage_cursors`, when counting began, in `usage_since`, and the backfill's run and threads, in
- * `usage_backfill` and `usage_backfill_threads`.
+ * The usage store: each recorded call, their sums per day, how far each source was read, when counting began, and the
+ * backfill's run and threads.
  */
-import type { Db, Row } from "./db.ts";
+import type { Db, Holding, Row } from "./db.ts";
 import type { ProjectId, ThreadId } from "../ids.ts";
 import { roleOf } from "./agent-protocol.ts";
 import type { AgentCall } from "./agent-usage.ts";
@@ -15,7 +14,10 @@ import type { BackfillThread, Breakdown, UsageBackfill, UsageReport, UsageTotals
  */
 interface UsageCursor { source: string; key: string; position: number; before: string }
 
+export const holding = { tables: { usage_records: {}, usage_days: {}, usage_cursors: {}, usage_since: {}, usage_backfill: {}, usage_backfill_threads: {} } } as const satisfies Holding;
+
 export function usageStore(db: Db, threadRecord: (id: ThreadId) => Row | undefined) {
+  db.hold(holding);
   const { transaction, sql } = db;
   /**
    * Each breakdown's grouping, and its order: biggest first, or newest day first. A report over threads reads the

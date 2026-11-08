@@ -1,8 +1,8 @@
 /**
- * The health store: each change of `nexus doctor`'s checks that two passes in a row confirmed, in `doctor_reports`,
- * with when the person saw it in its record.
+ * The health store: each change of `nexus doctor`'s checks that two passes in a row confirmed, with when the person saw
+ * it in its record. Its table keeps the name `doctor_reports` from when it held daily reports.
  */
-import { json, type Db } from "./db.ts";
+import { json, type Db, type Holding } from "./db.ts";
 import type { EventKind } from "./events.ts";
 import { checkKey, statuses, type HealthChange, type Status } from "./doctor-model.ts";
 
@@ -11,23 +11,34 @@ export type NewHealthChange = Omit<HealthChange, "id" | "seenAt">;
 const isStatus = (value: unknown): value is Status => (statuses as readonly unknown[]).includes(value);
 const iso = (ms: unknown) => new Date(ms as number).toISOString();
 
-/** Null for a row whose record does not parse, which every reader passes over rather than fail on. */
-function changeRow(r: Record<string, unknown>): HealthChange | null {
+/** Why the row's record is not a change, or the change. */
+function changeRow(r: Record<string, unknown>): HealthChange | string {
   try {
     const { node, name, status, from, text, seenAt = null } = json<Record<string, unknown>>(r.record) ?? {};
-    if (!(node === null || typeof node === "string") || typeof name !== "string" || !isStatus(status) || !isStatus(from) || typeof text !== "string" || !(seenAt === null || typeof seenAt === "string")) return null;
+    if (!(node === null || typeof node === "string") || typeof name !== "string" || !isStatus(status) || !isStatus(from) || typeof text !== "string" || !(seenAt === null || typeof seenAt === "string")) return "its fields are not a change's";
     return { id: r.id as number, at: iso(r.at), node, name, status, from, text, seenAt } as HealthChange;
-  } catch {
-    return null;
+  } catch (err) {
+    return (err as Error).message;
   }
 }
 
 /** Each check's latest change, in the order of those changes. */
 const latest = (changes: readonly HealthChange[]) => [...new Map(changes.map((c) => [checkKey(c), c])).values()].sort((a, b) => a.id - b.id);
 
-export function reportStore(db: Db, appendEvent: (kind: EventKind, thread: null, payload: Record<string, unknown>) => unknown) {
+export const holding = { tables: { doctor_reports: {} } } as const satisfies Holding;
+
+export function healthStore(db: Db, appendEvent: (kind: EventKind, thread: null, payload: Record<string, unknown>) => unknown, log: (message: string) => void) {
+  db.hold(holding);
   const { sql } = db;
-  const changes = () => sql("SELECT id, at, record FROM doctor_reports ORDER BY id").all().flatMap((r) => changeRow(r) ?? []);
+  /** Every reader passes over a row that is not a change rather than fail on it, and the log says so once per row. */
+  const logged = new Set<number>();
+  const changes = () => sql("SELECT id, at, record FROM doctor_reports ORDER BY id").all().flatMap((r) => {
+    const change = changeRow(r);
+    if (typeof change !== "string") return [change];
+    if (!logged.has(r.id as number)) log(`health history passes over change ${r.id as number}, whose record does not read: ${change}`);
+    logged.add(r.id as number);
+    return [];
+  });
   return {
     /** Each check's latest change, oldest first, which is its confirmed status. A check with none is ok. */
     healthStates: (): HealthChange[] => latest(changes()),

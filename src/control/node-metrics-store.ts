@@ -1,8 +1,8 @@
 /**
- * The node metrics store: each node's health samples, in `node_metrics`, one row per tier, time, node and series.
+ * The node metrics store: each node's health samples, one row per tier, time, node and series.
  */
 import { setImmediate } from "node:timers/promises";
-import type { Db } from "./db.ts";
+import type { Db, Holding } from "./db.ts";
 import { minSampleGapMs, seriesOf, servingOf, tiers, type HealthSample, type MetricSeries, type TierName } from "./node-metrics.ts";
 
 /** A node's series over a range, as the store serves them, before the API labels them. */
@@ -19,7 +19,10 @@ export const wholeRangeSql = "SELECT series, at, min, sum / n, max, n FROM node_
 export const regroupedRangeSql = `SELECT series, min(at), min(min), sum(sum) / sum(n), max(max), sum(n), at / CAST(? AS INTEGER) AS bucket FROM node_metrics
   WHERE node = ? AND tier = ? AND at >= ? AND at <= ? GROUP BY series, bucket ORDER BY series, bucket`;
 
+export const holding = { tables: { node_metrics: {} } } as const satisfies Holding;
+
 export function nodeMetricsStore(db: Db) {
+  db.hold(holding);
   const { transaction, sql } = db;
   // Rows as arrays, since a range is up to 1,000 points of every series, and an object per row costs more than reading it.
   const whole = db.db.prepare(wholeRangeSql);

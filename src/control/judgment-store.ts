@@ -1,8 +1,5 @@
-/**
- * The judgment store: each failure's judgment, in `judgments`, and the event judgments began at, in
- * `judgment_since`.
- */
-import { json, type Db } from "./db.ts";
+/** The judgment store: each failure's judgment, and the event judgments began at. */
+import { json, type Db, type Holding } from "./db.ts";
 import type { NodeName, ThreadId } from "../ids.ts";
 
 export const answers = ["retry", "retry-elsewhere", "person"] as const;
@@ -45,10 +42,13 @@ export interface Judgment {
   phase: Phase;
 }
 
+export const holding = { tables: { judgments: { record: "failure" }, judgment_since: {} } } as const satisfies Holding;
+
 export function judgmentStore(db: Db) {
-  const { transaction, sql, recordOf } = db;
+  const { transaction, sql } = db;
+  const judgments = db.hold(holding).records<Judgment>("judgments");
   return {
-    judgment: (failure: number): Judgment | null => recordOf<Judgment>("judgments", "failure", failure),
+    judgment: (failure: number): Judgment | null => judgments.get(failure),
     /** The thread's judgments, oldest failure first. */
     judgments: (thread: ThreadId): Judgment[] => sql("SELECT record FROM judgments WHERE thread = ? ORDER BY failure").all(thread).map((r) => json<Judgment>(r.record)),
     /** Every judgment not done, whatever its thread's status, oldest failure first. */
@@ -59,11 +59,10 @@ export function judgmentStore(db: Db) {
      */
     saveJudgment(next: Judgment, previous: Judgment | null, alongside: () => void = () => {}): boolean {
       return transaction(() => {
-        const { changes } = previous === null
-          ? sql("INSERT INTO judgments (failure, thread, record) VALUES (?, ?, ?) ON CONFLICT DO NOTHING").run(next.failure, next.thread, JSON.stringify(next))
-          : sql("UPDATE judgments SET record = ? WHERE failure = ? AND record = ?").run(JSON.stringify(next), next.failure, JSON.stringify(previous));
-        if (changes === 1) alongside();
-        return changes === 1;
+        if (!judgments.isCurrent(next.failure, previous)) return false;
+        sql("INSERT INTO judgments (failure, thread, record) VALUES (?, ?, ?) ON CONFLICT (failure) DO UPDATE SET record = excluded.record").run(next.failure, next.thread, JSON.stringify(next));
+        alongside();
+        return true;
       });
     },
     /** The newest event when judgments began. No failure at or below it is judged. */

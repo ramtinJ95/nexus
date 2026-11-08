@@ -1,8 +1,7 @@
 /**
- * The pipeline store: each pipeline item's record, in `pipeline_items`. An item's phase is derived, so it is
- * not stored.
+ * The pipeline store: each pipeline item's record. An item's phase is derived, so it is not stored.
  */
-import { json, type Db } from "./db.ts";
+import { json, type Db, type Holding } from "./db.ts";
 import type { ItemId, ProjectId } from "../ids.ts";
 import type { StartRequest } from "./start-request.ts";
 
@@ -26,11 +25,14 @@ export interface ItemRecord {
   lastError: string | null;
 }
 
+export const holding = { tables: { pipeline_items: { record: "id" } } } as const satisfies Holding;
+
 export function pipelineStore(db: Db) {
-  const { sql, recordOf, saveRecord } = db;
+  const { sql } = db;
+  const items = db.hold(holding).records<ItemRecord>("pipeline_items");
   return {
     items: (): ItemRecord[] => sql("SELECT record FROM pipeline_items ORDER BY rowid").all().map((r) => json<ItemRecord>(r.record)),
-    item: (id: ItemId): ItemRecord | undefined => recordOf<ItemRecord>("pipeline_items", "id", id) ?? undefined,
-    saveItem(record: ItemRecord) { saveRecord("pipeline_items", "id", record.id, record); },
+    item: (id: ItemId): ItemRecord | undefined => items.get(id) ?? undefined,
+    saveItem(record: ItemRecord) { items.save(record.id, record); },
   };
 }

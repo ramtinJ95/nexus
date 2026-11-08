@@ -1,8 +1,7 @@
 /**
- * The PR watch store: each thread's PR watch, in `pr_watches`. A save tells the event log what changed, in its
- * transaction.
+ * The PR watch store: each thread's PR watch. A save tells the event log what changed, in its transaction.
  */
-import type { Db } from "./db.ts";
+import type { Db, Holding } from "./db.ts";
 import type { EventKind } from "./events.ts";
 import type { ThreadId } from "../ids.ts";
 import type { Output } from "./thread-store.ts";
@@ -29,23 +28,26 @@ export interface PrWatchState {
   error: string | null;
 }
 
+export const holding = { tables: { pr_watches: { record: "thread" } } } as const satisfies Holding;
+
 export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: ThreadId, payload: Record<string, unknown>) => unknown) {
-  const { transaction, recordOf, saveRecord } = db;
+  const { transaction } = db;
+  const watches = db.hold(holding).records<PrWatchState>("pr_watches");
   return {
     participant: {
       outputs(thread: ThreadId): Output[] {
-        const watch = recordOf<PrWatchState>("pr_watches", "thread", thread);
+        const watch = watches.get(thread);
         return watch ? watch.links.filter((l) => wasRead(l.pr)).map((l): Output => ({ thread, kind: "pull-request", ref: l.pr.url })) : [];
       },
     },
-    prWatch: (thread: ThreadId): PrWatchState | null => recordOf<PrWatchState>("pr_watches", "thread", thread),
+    prWatch: (thread: ThreadId): PrWatchState | null => watches.get(thread),
     /**
      * Replaces the thread's PR watch, and tells the event log of new feedback, of each PR linked since the last save, and
      * of an error that starts or clears.
      */
     savePrWatch(thread: ThreadId, state: PrWatchState) {
       transaction(() => {
-        const previous = recordOf<PrWatchState>("pr_watches", "thread", thread);
+        const previous = watches.get(thread);
         if (state.pending !== null && previous?.pending?.id !== state.pending.id) appendEvent("pull-request.feedback", thread, { requestId: state.pending.id });
         // A placeholder link never fires.
         const linked = new Set(previous?.links.filter((l) => wasRead(l.pr)).map((l) => `${l.pr.repo}#${l.pr.number}`));
@@ -54,7 +56,7 @@ export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: Thre
         }
         if ((previous?.error ?? null) === null && state.error !== null) appendEvent("pull-request.error", thread, { error: state.error });
         if ((previous?.error ?? null) !== null && state.error === null) appendEvent("pull-request.error-cleared", thread, {});
-        saveRecord("pr_watches", "thread", thread, state);
+        watches.save(thread, state);
       });
     },
   };

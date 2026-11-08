@@ -2,31 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { openDb } from "./db.ts";
-
-const owners: Record<string, string[]> = {
-  "db.ts": ["settings"],
-  "thread-store.ts": [
-    "threads", "pylons", "sessions", "previews", "outputs", "jobs", "events", "event_receipts", "session_activity", "session_order",
-    "session_order_floor", "claude_workers", "claude_transcripts", "claude_entries", "claude_messages", "claude_senders",
-    "thread_attention", "start_requests", "aborted_conversations", "thread_archives", "disk_cleanups",
-  ],
-  "node-store.ts": ["nodes", "join_tokens", "joined_nodes"],
-  "node-metrics-store.ts": ["node_metrics"],
-  "project-store.ts": ["projects"],
-  "image-store.ts": ["images", "templates"],
-  "release-store.ts": ["release_reports"],
-  "report-store.ts": ["doctor_reports"],
-  "review-store.ts": ["reviews", "reviewed_prs"],
-  "question-store.ts": ["questions", "waiting_asks"],
-  "nudge-store.ts": ["nudges"],
-  "pr-watch-store.ts": ["pr_watches"],
-  "planning-store.ts": ["planning_threads"],
-  "judgment-store.ts": ["judgments", "judgment_since"],
-  "pipeline-store.ts": ["pipeline_items"],
-  "queue-store.ts": ["queued_threads"],
-  "usage-store.ts": ["usage_records", "usage_days", "usage_cursors", "usage_since", "usage_backfill", "usage_backfill_threads"],
-};
+import { deletedWithThread, openDb, type Holding } from "./db.ts";
 
 const foreignReads: Record<string, string[]> = {
   // previews joins each preview's node.
@@ -41,25 +17,37 @@ const foreignReads: Record<string, string[]> = {
 
 const tableNames = (source: string, pattern: RegExp) => [...source.matchAll(pattern)].map((match) => match[1]!);
 
-test("every registry table has one owning file, and only its owner writes it or names it, but for the listed reads", () => {
+const dir = import.meta.dirname;
+const files = readdirSync(dir, { recursive: true, encoding: "utf8" })
+  .filter((path) => path.endsWith(".ts") && !/\.(test|check)\.ts$/.test(path) && path !== "schema.ts");
+const holdings = new Map<string, Holding>();
+for (const file of files) {
+  if (readFileSync(join(dir, file), "utf8").includes("export const holding")) holdings.set(file, ((await import(join(dir, file))) as { holding: Holding }).holding);
+}
+const owners = Object.fromEntries([...holdings].map(([file, h]) => [file, Object.keys(h.tables)]));
+
+test("a deleted thread's rows go from the tables a thread's delete cleared by hand", () => {
+  assert.deepEqual(deletedWithThread([...holdings.values()]).sort(), ["session_order", "session_order_floor", "claude_transcripts", "claude_entries", "claude_messages", "claude_senders", "disk_cleanups"].sort());
+});
+
+test("no two stores hold one settings key", () => {
+  const keys = [...holdings.values()].flatMap((h) => h.settings ?? []);
+  assert.deepEqual(keys.sort(), ["backed-up-at", "current", "deploy-drain", "image-operation", "previous-image", "release", "releases:"]);
+});
+
+test("every registry table has one owning file, the one whose holding names it, and only its owner writes it or names it, but for the listed reads", () => {
   const { db } = openDb(":memory:");
   const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[]).map((r) => r.name).sort();
   db.close();
   const known = new Set(tables);
-  const dir = import.meta.dirname;
-  const files = readdirSync(dir, { recursive: true, encoding: "utf8" })
-    .filter((path) => path.endsWith(".ts") && !/\.(test|check)\.ts$/.test(path) && path !== "schema.ts");
   const named = new Map<string, Set<string>>();
   for (const file of files) {
     const source = readFileSync(join(dir, file), "utf8");
     const names = new Set([
       ...tableNames(source, /\b(?:FROM|JOIN|INTO|UPDATE)\s+(\w+)/g),
-      ...tableNames(source, /\b(?:recordOf|saveRecord)(?:<[^>]*>)?\(\s*"(\w+)"/g),
+      ...tableNames(source, /\brecords(?:<[^>]*>)?\(\s*"(\w+)"/g),
     ].filter((table) => known.has(table)));
-    const writes = [
-      ...tableNames(source, /\b(?:INTO|UPDATE|DELETE\s+FROM)\s+(\w+)/g),
-      ...tableNames(source, /\bsaveRecord\(\s*"(\w+)"/g),
-    ].filter((table) => known.has(table));
+    const writes = tableNames(source, /\b(?:INTO|UPDATE|DELETE\s+FROM)\s+(\w+)/g).filter((table) => known.has(table));
     const owned = owners[file] ?? [];
     for (const table of writes) assert.ok(owned.includes(table), `${file} writes ${table}, which it does not own`);
     for (const table of names) assert.ok(owned.includes(table) || foreignReads[file]?.includes(table), `${file} names ${table}, which it neither owns nor is listed as reading`);

@@ -1,13 +1,9 @@
 /**
- * The thread core: each thread, in `threads`, its pylon, sessions, previews, outputs and jobs, in `pylons`, `sessions`,
- * `previews`, `outputs` and `jobs`, the event log, in `events` and `event_receipts`, each session's turn and order, in
- * `session_activity`, `session_order` and `session_order_floor`, its Claude worker, in `claude_workers`,
- * `claude_transcripts`, `claude_entries`, `claude_messages` and `claude_senders`, its attention, in `thread_attention`,
- * each start's request ID, in `start_requests`, the harness conversations aborted, in `aborted_conversations`, when
- * each archived thread was archived and whether its usage is settled, in `thread_archives`, when the newest backup the
- * control plane has seen began, in the `backed-up-at` setting, and the pylons whose disk that cleanup deletes, in
- * `disk_cleanups`. The
- * features with per-thread state of their own take part through a ThreadParticipant each, which the registry registers.
+ * The thread core: each thread, its pylon, sessions, previews, outputs and jobs, the event log, each session's turn and
+ * order, its Claude worker, its attention, each start's request ID, the harness conversations aborted, when each
+ * archived thread was archived and whether its usage is settled, when the newest backup the control plane has seen
+ * began, and the pylons whose disk that cleanup deletes. The features with per-thread state of their own take part
+ * through a ThreadParticipant each, which the registry registers.
  */
 import { attentionOf, type Attention, type Need } from "./attention.ts";
 import { previewFailed } from "./plain-wording.ts";
@@ -16,7 +12,7 @@ import type { Sender } from "./agent-protocol.ts";
 import type { StartKey } from "./start-request.ts";
 import type { StandingRulesStamp } from "./standing-rules.ts";
 import { Refusal } from "./refusal.ts";
-import { json, jsonOrNull, type Db, type Row } from "./db.ts";
+import { json, jsonOrNull, type Db, type Holding, type Row } from "./db.ts";
 import { desiredPhase, noAttempts, type ActivityFacts, type RegistryWrite, type ThreadStatus } from "./reconcile.ts";
 import { pylonIdOf, type NodeName, type PylonId, type ThreadId } from "../ids.ts";
 import type { JobStatus, Subject } from "../protocol/jobs.ts";
@@ -215,8 +211,20 @@ export interface ThreadParticipant {
 
 interface AwaitWindow { from: number; until: number }
 
+const deleted = { deletedWithThread: true } as const;
+export const holding = {
+  tables: {
+    threads: {}, pylons: {}, sessions: {}, previews: {}, outputs: {}, jobs: {}, events: {}, event_receipts: {}, session_activity: {},
+    session_order: deleted, session_order_floor: deleted, claude_workers: {}, claude_transcripts: deleted, claude_entries: deleted,
+    claude_messages: deleted, claude_senders: deleted, thread_attention: {}, start_requests: {}, aborted_conversations: {},
+    thread_archives: {}, disk_cleanups: deleted,
+  },
+  settings: ["backed-up-at"],
+} as const satisfies Holding;
+
 export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, "node" | "saveObservation" | "saveNodeState">, participants: readonly ThreadParticipant[], readingUsage: () => unknown) {
-  const { transaction, sql, setting, setSetting } = db;
+  const { transaction, sql, deleteThreadRows } = db;
+  const { setting, setSetting } = db.hold(holding);
   const { node } = nodes;
   const reconcile = (thread: ThreadId) => { for (const p of participants) p.reconcile?.(thread); };
   // Each pylon's attempts an older control plane saved are upgraded once, with no event, so every tick reads this code's shape.
@@ -425,7 +433,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       if (status === "deleted") {
         // The delete aborts the run, so nothing is left to retry, and the harness stops tracking the thread without a report.
         sql("UPDATE thread_attention SET parked = 0 WHERE thread = ?").run(id);
-        for (const table of ["session_order", "session_order_floor", "claude_transcripts", "claude_entries", "claude_messages", "claude_senders", "disk_cleanups"]) sql(`DELETE FROM ${table} WHERE thread = ?`).run(id);
+        deleteThreadRows(id);
       }
       reconcile(id);
       updateAttention(id);

@@ -1,9 +1,8 @@
 /**
- * The review store: each builder's review, in `reviews`, and every pull request a review started for, in
- * `reviewed_prs`. A save archives the threads it names, appends its events and recomputes the builder's attention,
- * in its transaction.
+ * The review store: each builder's review, and every pull request a review started for. A save archives the threads it
+ * names, appends its events and recomputes the builder's attention, in its transaction.
  */
-import { json, type Db } from "./db.ts";
+import { json, type Db, type Holding } from "./db.ts";
 import type { ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "./reconcile.ts";
 import type { EventFilter, EventKind, NexusEvent } from "./events.ts";
@@ -12,8 +11,11 @@ import { builderAwaited, kindsWhere, waitsOnPerson, type Review, type Waiver } f
 import { upgradeReview } from "./record-upgrade.ts";
 import type { Need } from "./attention.ts";
 
+export const holding = { tables: { reviews: { record: "builder" }, reviewed_prs: {} } } as const satisfies Holding;
+
 export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, status: ThreadStatus) => void; appendEvent: (kind: EventKind, thread: ThreadId, payload: Record<string, unknown>) => unknown; updateAttention: (thread: ThreadId) => void; events: (since: string, filter: EventFilter) => NexusEvent[] }) {
-  const { transaction, sql, recordOf } = db;
+  const { transaction, sql } = db;
+  const reviews = db.hold(holding).records<Review>("reviews");
   const { setThreadStatus, appendEvent, updateAttention, events } = core;
   // Each record an older control plane saved is upgraded once, with no event, so every read below gets this code's shape.
   transaction(() => {
@@ -22,10 +24,10 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
       if (upgraded !== row.record) sql("UPDATE reviews SET record = ? WHERE builder = ?").run(upgraded, row.builder as string);
     }
   });
-  const reviewOf = (builder: ThreadId): Review | null => recordOf<Review>("reviews", "builder", builder);
+  const reviewOf = (builder: ThreadId): Review | null => reviews.get(builder);
   const awaitedKinds = JSON.stringify(kindsWhere((row) => row.awaitsBuilder));
   const settledKinds = JSON.stringify(kindsWhere((row) => row.settled));
-  const isCurrentReview = (review: Review) => JSON.stringify(reviewOf(review.builder)) === JSON.stringify(review);
+  const isCurrentReview = (review: Review) => reviews.isCurrent(review.builder, review);
   /**
    * When the review entered the phase it is in, from the oldest of the `review.changed` events in a row that record it
    * there, as a label change records one again. The review's own `since` stands in once those events are gone.
