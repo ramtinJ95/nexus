@@ -3,12 +3,12 @@
  */
 import { z } from "zod";
 import { HttpError } from "../http-error.ts";
-import { canDeploy, type DeploymentOptions } from "../releases.ts";
 import { imagesView, type ImageRollout } from "../image-rollout.ts";
 import type { ImageOperation } from "../image-store.ts";
-import { type ImageId, isImageId, type NodeName, type TailnetNodeId } from "../../ids.ts";
+import { type ImageId, isImageId, type NodeName } from "../../ids.ts";
 import { pinsSchema, type ImageManifest } from "../../protocol/images.ts";
 import { ok, created, parse, type Reply, type RouteEntry, type ApiKit } from "./kit.ts";
+import { anyAllowed, type Policy } from "./access.ts";
 
 const imageSchema = z.strictObject({
   id: z.custom<ImageId>(isImageId, "must be an image ID"),
@@ -20,8 +20,10 @@ const imageSchema = z.strictObject({
 });
 const rolloutSchema = z.strictObject({ image: imageSchema.shape.id });
 const noFields = z.strictObject({});
+/** An image becomes what every new pylon boots, so building and rolling one out takes the same right as `nexus deploy`. */
+const roll: Policy = { role: "deployer", action: "build, roll out or roll back an image" };
 
-export function imageRoutes(kit: ApiKit, options: { images?: ImageRollout | undefined; deployment?: DeploymentOptions | undefined }): readonly RouteEntry[] {
+export function imageRoutes(kit: ApiKit, options: { images?: ImageRollout | undefined }): readonly RouteEntry[] {
   const { registry } = kit;
 
   function recordImage(body: unknown): ImageManifest {
@@ -30,33 +32,31 @@ export function imageRoutes(kit: ApiKit, options: { images?: ImageRollout | unde
     return manifest;
   }
 
-  /** An image becomes what every new pylon boots, so building and rolling one out takes the same right as `nexus deploy`. */
-  function imageRollout(caller: TailnetNodeId): ImageRollout {
-    if (!canDeploy(registry, options.deployment, caller)) throw new HttpError(403, "caller may not build, roll out or roll back an image: only deployers may, never infrastructure nodes or pylons");
+  function imageRollout(): ImageRollout {
     if (options.images === undefined) throw new HttpError(409, "image builds are not configured");
     return options.images;
   }
   const started = (operation: ImageOperation): Reply => ({ status: operation.state === "running" ? 202 : 200, body: operation });
 
   return [
-    ["GET", /^\/v1\/images$/, () => ok(imagesView(registry))],
-    ["POST", /^\/v1\/images$/, { open: "recording an image boots nothing until a deployer rolls it out" }, async (_, r) => created(recordImage(await r.body()))],
-    ["GET", /^\/v1\/images\/current$/, () => {
+    ["GET", /^\/v1\/images$/, anyAllowed, () => ok(imagesView(registry))],
+    ["POST", /^\/v1\/images$/, { role: "allowed", why: "recording an image boots nothing until a deployer rolls it out" }, async (_, r) => created(recordImage(await r.body()))],
+    ["GET", /^\/v1\/images\/current$/, anyAllowed, () => {
       const view = imagesView(registry);
       const entry = (id: ImageId | null) => view.images.find((image) => image.id === id) ?? null;
       return ok({ current: entry(view.current), previous: entry(view.previous) });
     }],
-    ["POST", /^\/v1\/images\/build$/, { open: "deployers only, which imageRollout checks" }, async (_, r) => {
-      const images = imageRollout(r.caller);
+    ["POST", /^\/v1\/images\/build$/, roll, async (_, r) => {
+      const images = imageRollout();
       parse(noFields, await r.body({}));
       return started(await images.build(r.caller));
     }],
-    ["POST", /^\/v1\/images\/rollout$/, { open: "deployers only, which imageRollout checks" }, async (_, r) => {
-      const images = imageRollout(r.caller);
+    ["POST", /^\/v1\/images\/rollout$/, roll, async (_, r) => {
+      const images = imageRollout();
       return started(images.rollout(parse(rolloutSchema, await r.body()).image, r.caller));
     }],
-    ["POST", /^\/v1\/images\/rollback$/, { open: "deployers only, which imageRollout checks" }, async (_, r) => {
-      const images = imageRollout(r.caller);
+    ["POST", /^\/v1\/images\/rollback$/, roll, async (_, r) => {
+      const images = imageRollout();
       parse(noFields, await r.body({}));
       return started(images.rollback(r.caller));
     }],

@@ -22,7 +22,6 @@ import type { AgentView } from "../conversation-view.ts";
 import { queuedView, type QueuedThread } from "../queue.ts";
 import { periods, type Period } from "../usage.ts";
 import type { NodeHealth } from "../../protocol/client.ts";
-import { canDeploy, type DeploymentOptions } from "../releases.ts";
 import type { ReviewLoop } from "../review.ts";
 import type { Review } from "../review-model.ts";
 import { ok } from "../dashboard/view.ts";
@@ -42,9 +41,13 @@ import type { DoctorReport } from "../doctor-model.ts";
 import { threadPage, queuedPage } from "../dashboard/thread-page.ts";
 import { liveStreams } from "../dashboard/live-frames.ts";
 import type { ApiKit, RouteEntry } from "./kit.ts";
+import { anyAllowed, refusal, refusalOf, type Role } from "./access.ts";
+import { readHealth } from "./node-routes.ts";
+
+type Caller = { caller: TailnetNodeId; roles: ReadonlySet<Role> };
 
 /** The dashboard's pages, each a GET route, and the thread page's stream. */
-export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | null | undefined; deployment?: DeploymentOptions | undefined; health?: (() => DoctorReport | null) | undefined }, nodeHealth: (caller: TailnetNodeId, name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
+export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | null | undefined; health?: (() => DoctorReport | null) | undefined }, nodeHealth: (name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
   const { registry, detail } = kit;
   const deploys = (r: Review) => options.reviews?.deploys(r) ?? false;
   const live = liveStreams();
@@ -55,7 +58,7 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
     return kit.conversation(t).catch((err: unknown) => err as Error);
   }
 
-  const context = (caller: TailnetNodeId): Context => {
+  const context = ({ caller, roles }: Caller): Context => {
     // The sidebar and the home table show the same threads.
     const rows = new Map<ThreadId, ThreadRow>();
     const row = (t: Thread) => rows.get(t.id) ?? rows.set(t.id, kit.row(t)).get(t.id)!;
@@ -66,8 +69,8 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
     let byProject: Map<string, Thread[]> | undefined;
     let queued: Map<string, QueuedThread[]> | undefined;
     const c: Context = {
-      registry, row, deploys, now: Date.now(), caller, landRefusal: !options.reviews ? "no review loop" : canDeploy(registry, options.deployment, caller) ? null : "not a deployer",
-      answerRefusal: (question) => kit.refusalOf(caller, question),
+      registry, row, deploys, now: Date.now(), caller, landRefusal: !options.reviews ? "no review loop" : roles.has("deployer") ? null : "not a deployer",
+      answerRefusal: (question) => refusalOf(roles, question),
       threads: () => threads ??= registry.threads(),
       threadsIn: (project) => (byProject ??= Map.groupBy(c.threads(), (t) => t.project)).get(project) ?? [],
       reviews: () => reviews ??= registry.reviews(),
@@ -78,8 +81,10 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
   };
 
   /** The Cluster page with this node picked: what its probe reads of its host now, or why it could not. */
-  const cluster = async (c: Context, name: NodeName) =>
-    clusterPage(c, name, await nodeHealth(c.caller, name).catch((err: unknown) => err as Error), canDeploy(registry, options.deployment, c.caller));
+  const cluster = async (c: Context, roles: ReadonlySet<Role>, name: NodeName) => {
+    const refused = refusal(roles, readHealth);
+    return clusterPage(c, name, refused ?? await nodeHealth(name).catch((err: unknown) => err as Error), refused === null);
+  };
 
   /** The thread, queued thread or item the home page previews, with a thread's conversation as its page reads it. */
   async function peekOf(c: Context, key: string | null): Promise<Peek | null> {
@@ -98,31 +103,31 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
   }
 
   return [
-    ["GET", /^\/$/, async (_, r) => {
-      const c = context(r.caller);
+    ["GET", /^\/$/, anyAllowed, async (_, r) => {
+      const c = context(r);
       return ok(home(c, {}, await peekOf(c, r.query.get("peek")), r.query.get("card")));
     }],
-    ["GET", /^\/threads\/new$/, (_, r) => ok(home(context(r.caller), { start: { project: r.query.get("project") } }))],
-    ["GET", /^\/projects\/new$/, (_, r) => ok(home(context(r.caller), { addProject: true }))],
-    ["GET", /^\/usage$/, (_, r) => {
+    ["GET", /^\/threads\/new$/, anyAllowed, (_, r) => ok(home(context(r), { start: { project: r.query.get("project") } }))],
+    ["GET", /^\/projects\/new$/, anyAllowed, (_, r) => ok(home(context(r), { addProject: true }))],
+    ["GET", /^\/usage$/, anyAllowed, (_, r) => {
       const period = r.query.get("period") ?? "";
-      return ok(usagePage(context(r.caller), Object.hasOwn(periods, period) ? period as Period : "7d", (r.query.get("project") || null) as ProjectId | null));
+      return ok(usagePage(context(r), Object.hasOwn(periods, period) ? period as Period : "7d", (r.query.get("project") || null) as ProjectId | null));
     }],
     // The pipeline's items show on the home page's work in flight now, and on their threads.
-    ["GET", /^\/pipeline$/, () => ({ status: 303, headers: { location: "/#in-flight" }, body: "" })],
-    ["GET", /^\/cluster$/, async (_, r) => {
-      const c = context(r.caller);
+    ["GET", /^\/pipeline$/, anyAllowed, () => ({ status: 303, headers: { location: "/#in-flight" }, body: "" })],
+    ["GET", /^\/cluster$/, anyAllowed, async (_, r) => {
+      const c = context(r);
       const first = c.registry.nodes()[0];
       if (first === undefined) return { ...ok(notFound(c, "No nodes yet.")), status: 404 };
-      return ok(await cluster(c, first.name));
+      return ok(await cluster(c, r.roles, first.name));
     }],
-    ["GET", /^\/health$/, (_, r) => ok(healthPage(context(r.caller), options.health?.() ?? null))],
-    ["GET", /^\/threads\/([^/]+)$/, async (m, r) => {
+    ["GET", /^\/health$/, anyAllowed, (_, r) => ok(healthPage(context(r), options.health?.() ?? null))],
+    ["GET", /^\/threads\/([^/]+)$/, anyAllowed, async (m, r) => {
       const thread = registry.thread(m[1]! as ThreadId);
       if (thread === undefined) {
         const queued = registry.queuedThread(m[1]! as ThreadId);
-        if (queued !== undefined && queued.status !== "started") return ok(queuedPage(context(r.caller), queuedView(registry, queued)));
-        return { ...ok(notFound(context(r.caller), `No thread ${m[1]!}.`)), status: 404 };
+        if (queued !== undefined && queued.status !== "started") return ok(queuedPage(context(r), queuedView(registry, queued)));
+        return { ...ok(notFound(context(r), `No thread ${m[1]!}.`)), status: 404 };
       }
       // The reply known before this read is a safe watermark even if another turn ends during it. A Claude worker's
       // transcript is as of its last read that reached its end, which holds the reply only if it started after the
@@ -131,23 +136,23 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
       const repliedAt = view !== null && !(view instanceof Error) && view.kind === "claude" && (view.view.readAt ?? 0) < (thread.lastReplyAt ?? 0) ? null : thread.lastReplyAt;
       // After the read, so the facts are no older than the conversation, and a thread deleted meanwhile shows none.
       const d = detail(registry.thread(thread.id)!);
-      return ok(threadPage(context(r.caller), d, registry.node(d.pylon.node)!, d.thread.status === "deleted" ? null : view, repliedAt, r.query.has("streaming")));
+      return ok(threadPage(context(r), d, registry.node(d.pylon.node)!, d.thread.status === "deleted" ? null : view, repliedAt, r.query.has("streaming")));
     }],
-    ["GET", /^\/threads\/([^/]+)\/stream$/, ([, id]) => {
+    ["GET", /^\/threads\/([^/]+)\/stream$/, anyAllowed, ([, id]) => {
       const t = kit.thread(id!, { status: "kept" });
       const agent = kit.agentOf(t);
       const reader = live(t, registry.claudeWorker(t.id)?.model ?? null, () => registry.questions(t.id), () => promptSenders(registry, t.id));
       return { stream: (res) => kit.stream(res, t, () => agent.watch(t), reader.frames, reader.leave) };
     }],
-    ["GET", /^\/nodes\/([^/]+)$/, async (m, r) => {
-      const c = context(r.caller);
+    ["GET", /^\/nodes\/([^/]+)$/, anyAllowed, async (m, r) => {
+      const c = context(r);
       const name = m[1]! as NodeName;
       if (c.registry.node(name) === undefined) return { ...ok(notFound(c, `No node ${name}.`)), status: 404 };
-      return ok(await cluster(c, name));
+      return ok(await cluster(c, r.roles, name));
     }],
-    ["GET", /^\/assets\/([\w.-]+)$/, (m, r) => {
+    ["GET", /^\/assets\/([\w.-]+)$/, anyAllowed, (m, r) => {
       const asset = assets.get(m[1]!);
-      if (asset === undefined) return { ...ok(notFound(context(r.caller), `No asset ${m[1]!}.`)), status: 404 };
+      if (asset === undefined) return { ...ok(notFound(context(r), `No asset ${m[1]!}.`)), status: 404 };
       // Pages link each asset with its hash, and a chunk's name has its hash, so neither URL ever changes and the
       // phone keeps it.
       const cache = asset.version === null || r.query.get("v") === asset.version ? "public, max-age=31536000, immutable" : "no-cache";

@@ -13,6 +13,7 @@ import { maxRecordBytes, readTranscriptImage } from "../claude-transcript.ts";
 import { partHash } from "../conversation-view.ts";
 import { ok, created, noContent, parse, type Reply, type RouteEntry, type ApiKit } from "./kit.ts";
 import { checkoutDir, focusScript, herdrPanePattern } from "../../guest-contract.ts";
+import { anyAllowed } from "./access.ts";
 
 const previewSchema = z.strictObject({ port: z.int().min(1).max(65535).refine((port) => !reservedPorts.has(port), "is Nexus's own") });
 const sessionSchema = z.strictObject({
@@ -167,39 +168,39 @@ export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortR
   }
 
   return [
-    ["POST", /^\/v1\/threads\/([^/]+)\/previews$/, { person: "publish a preview" }, async (m, r) => {
+    ["POST", /^\/v1\/threads\/([^/]+)\/previews$/, { role: "person", action: "publish a preview" }, async (m, r) => {
       const body = await r.body();
       return ok(await linkPort(thread(m[1]!), body));
     }],
-    ["DELETE", /^\/v1\/threads\/([^/]+)\/previews\/([^/]+)$/, { person: "unpublish a preview" }, async (m) => {
+    ["DELETE", /^\/v1\/threads\/([^/]+)\/previews\/([^/]+)$/, { role: "person", action: "unpublish a preview" }, async (m) => {
       const { port } = parse(previewSchema, { port: /^\d+$/.test(m[2]!) ? Number(m[2]) : m[2] });
       await unlinkPort(thread(m[1]!), port);
       return noContent;
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/sessions$/, { person: "open a session in a thread's pylon" }, async (m, r) => {
+    ["POST", /^\/v1\/threads\/([^/]+)\/sessions$/, { role: "person", action: "open a session in a thread's pylon" }, async (m, r) => {
       const body = await r.body();
       return created(await openSession(thread(m[1]!), body));
     }],
-    ["DELETE", /^\/v1\/threads\/([^/]+)\/sessions\/([^/]+)$/, { person: "close a session in a thread's pylon" }, async (m) => {
+    ["DELETE", /^\/v1\/threads\/([^/]+)\/sessions\/([^/]+)$/, { role: "person", action: "close a session in a thread's pylon" }, async (m) => {
       await closeSession(thread(m[1]!), m[2]!);
       return noContent;
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/sessions\/([^/]+)\/focus$/, { person: "focus a session in a thread's pylon" }, async (m) => {
+    ["POST", /^\/v1\/threads\/([^/]+)\/sessions\/([^/]+)\/focus$/, { role: "person", action: "focus a session in a thread's pylon" }, async (m) => {
       await focusSession(thread(m[1]!), m[2]!);
       return noContent;
     }],
-    ["GET", /^\/v1\/threads\/([^/]+)\/files$/, async (m, r) => {
+    ["GET", /^\/v1\/threads\/([^/]+)\/files$/, anyAllowed, async (m, r) => {
       const path = parse(checkoutPath, r.query.get("path") ?? "");
       return ok(await inCheckout(thread(m[1]!), (c) => c.list(path)));
     }],
-    ["GET", /^\/v1\/threads\/([^/]+)\/files\/content$/, async (m, r) => checkoutFile(thread(m[1]!), parse(checkoutPath.min(1), r.query.get("path") ?? ""))],
-    ["GET", /^\/v1\/threads\/([^/]+)\/image$/, async (m, r) => conversationImage(thread(m[1]!), parse(imageSourceSchema, Object.fromEntries(r.query)))],
-    ["GET", /^\/v1\/threads\/([^/]+)\/changes$/, async (m, r) => {
+    ["GET", /^\/v1\/threads\/([^/]+)\/files\/content$/, anyAllowed, async (m, r) => checkoutFile(thread(m[1]!), parse(checkoutPath.min(1), r.query.get("path") ?? ""))],
+    ["GET", /^\/v1\/threads\/([^/]+)\/image$/, anyAllowed, async (m, r) => conversationImage(thread(m[1]!), parse(imageSourceSchema, Object.fromEntries(r.query)))],
+    ["GET", /^\/v1\/threads\/([^/]+)\/changes$/, anyAllowed, async (m, r) => {
       const base = parse(changesBaseSchema, r.query.get("base") ?? undefined);
       return ok(await inCheckout(thread(m[1]!), (c) => c.changes(base)));
     }],
     // Each `path` is a pathspec, so a renamed file needs its old path too.
-    ["GET", /^\/v1\/threads\/([^/]+)\/diff$/, async (m, r) => {
+    ["GET", /^\/v1\/threads\/([^/]+)\/diff$/, anyAllowed, async (m, r) => {
       const base = parse(changesBaseSchema, r.query.get("base") ?? undefined);
       const paths = parse(diffPaths, r.query.getAll("path"));
       return ok(await inCheckout(thread(m[1]!), (c) => c.diff(base, paths)));

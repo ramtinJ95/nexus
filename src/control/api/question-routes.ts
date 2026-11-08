@@ -12,6 +12,7 @@ import { HttpError } from "../http-error.ts";
 import { answerDelivered, answerExits, claudeHook } from "../../../images/pylon/nexus-contract.ts";
 import { askAnswer, choicesSchema, choicesSummary, type AnswerRefusal, type Choice, type ClaudeAsk, type Question } from "../questions.ts";
 import { ok, parse, type RouteEntry, type ApiKit } from "./kit.ts";
+import { refusalOf } from "./access.ts";
 
 /** An ask is answered with a choice per question it asks, and any other question with one of its options. */
 const answerSchema = z.union([z.strictObject({ option: z.string() }), z.strictObject({ choices: z.array(z.unknown()) })]);
@@ -22,7 +23,7 @@ const answerRefusals: Record<AnswerRefusal, string> = {
 };
 
 export function questionRoutes(kit: ApiKit, options: { planning?: Planning | null | undefined; pipeline?: Pipeline | null | undefined; cleanup?: CleanupPass | undefined; reviews?: ReviewLoop | null | undefined }): readonly RouteEntry[] {
-  const { refusalOf, execInPylon, registry, claude } = kit;
+  const { execInPylon, registry, claude } = kit;
 
   /**
    * Hands the person's choices to the Claude worker's AskUserQuestion dialog through the hook that waits in its pylon,
@@ -64,12 +65,12 @@ export function questionRoutes(kit: ApiKit, options: { planning?: Planning | nul
   }
 
   return [
-    ["POST", /^\/v1\/questions\/([^/]+)\/answer$/, { open: "each question says who may answer it, which refusalOf checks" }, async ([, id], r) => {
+    ["POST", /^\/v1\/questions\/([^/]+)\/answer$/, { role: "allowed", why: "each question says who may answer it, which refusalOf checks" }, async ([, id], r) => {
       const body = parse(answerSchema, await r.body());
       const question = registry.question(id!);
       if (question === null) throw new HttpError(404, `no question ${id}`);
       if (question.withdrawn !== undefined) throw new HttpError(409, `question ${question.id} was withdrawn when its thread was archived`);
-      const refused = refusalOf(r.caller, question);
+      const refused = refusalOf(r.roles, question);
       if (refused !== null) throw new HttpError(403, `caller may not answer this question: ${answerRefusals[refused]}`);
       if (question.ask !== undefined) {
         if (!("choices" in body)) throw new HttpError(400, `question ${question.id} is a Claude worker's AskUserQuestion, answered with {"choices": [...]}, a choice for each question it asks`);

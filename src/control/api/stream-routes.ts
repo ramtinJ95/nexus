@@ -4,12 +4,13 @@
 import { HttpError } from "../http-error.ts";
 import { eventCursor, eventKinds, type EventFilter } from "../../events.ts";
 import { ok, type RouteEntry, type ApiKit } from "./kit.ts";
+import { anyAllowed } from "./access.ts";
 
 export function streamRoutes(kit: ApiKit): readonly RouteEntry[] {
   const { thread, stream, followEvents, registry, agents } = kit;
 
   return [
-    ["GET", /^\/v1\/events$/, (_, r) => {
+    ["GET", /^\/v1\/events$/, anyAllowed, (_, r) => {
       // A follower that reads the state itself whenever it connects needs no history.
       const since = r.query.get("since") === "latest" ? registry.newestEvent() : r.query.get("since") ?? "0";
       try { eventCursor(since); } catch { throw new HttpError(400, "invalid event cursor"); }
@@ -21,11 +22,11 @@ export function streamRoutes(kit: ApiKit): readonly RouteEntry[] {
       if (r.query.get("follow") !== "true") return ok(first.events);
       return { stream: (res) => followEvents(res, first, read) };
     }],
-    ["GET", /^\/v1\/threads\/([^/]+)\/events$/, ([, id]) => {
+    ["GET", /^\/v1\/threads\/([^/]+)\/events$/, anyAllowed, ([, id]) => {
       const t = thread(id!, { status: "kept", agent: "harness" });
       return { stream: (res) => stream(res, t, () => agents.harness.watch(t), agents.harness.frames()) };
     }],
-    ["GET", /^\/v1\/threads\/([^/]+)\/claude\/events$/, ([, id]) => {
+    ["GET", /^\/v1\/threads\/([^/]+)\/claude\/events$/, anyAllowed, ([, id]) => {
       const t = thread(id!, { status: "kept", agent: "claude" });
       return { stream: (res) => stream(res, t, () => agents.claude.watch(t), agents.claude.frames()) };
     }],

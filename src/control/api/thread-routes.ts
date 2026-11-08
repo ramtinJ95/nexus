@@ -14,6 +14,7 @@ import { retryRefusal } from "../reconcile.ts";
 import { startKey } from "../threads.ts";
 import { sendWithStandingRules } from "../standing-rules.ts";
 import { ok, created, noContent, parse, type RouteEntry, type ApiKit } from "./kit.ts";
+import { anyAllowed } from "./access.ts";
 import { projectSchema } from "./project-routes.ts";
 
 export const startSchema = z.strictObject({
@@ -157,65 +158,65 @@ export function threadRoutes(kit: ApiKit, options: { queue?: ThreadQueue | null 
   }
 
   return [
-    ["GET", /^\/v1\/threads$/, (_, r) => {
+    ["GET", /^\/v1\/threads$/, anyAllowed, (_, r) => {
       const threads = registry.threads((r.query.get("project") ?? undefined) as ProjectId | undefined);
       return ok((r.query.get("deleted") === "false" ? threads.filter((t) => t.status !== "deleted") : threads).map(row));
     }],
-    ["POST", /^\/v1\/threads$/, { person: "start a thread", startsTurn: true }, async (_, r) => {
+    ["POST", /^\/v1\/threads$/, { role: "person", action: "start a thread", startsTurn: true }, async (_, r) => {
       return created(await start(await r.body(), r.caller));
     }],
-    ["GET", /^\/v1\/queued$/, (_, r) => {
+    ["GET", /^\/v1\/queued$/, anyAllowed, (_, r) => {
       const project = r.query.get("project");
       return ok(registry.queuedThreads().filter((q) => q.status !== "started" && (project === null || q.project === project)).map((q) => queuedView(registry, q)));
     }],
-    ["GET", /^\/v1\/queued\/([^/]+)$/, (m) => {
+    ["GET", /^\/v1\/queued\/([^/]+)$/, anyAllowed, (m) => {
       const queued = registry.queuedThread(m[1]! as ThreadId);
       if (queued === undefined || queued.status === "started") throw new HttpError(404, `no queued thread ${m[1]!}`);
       return ok(queuedView(registry, queued));
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/start$/, { person: "start a queued thread", startsTurn: true }, async (m, r) => {
+    ["POST", /^\/v1\/threads\/([^/]+)\/start$/, { role: "person", action: "start a queued thread", startsTurn: true }, async (m, r) => {
       return created(await queueOrRefuse().startNow(m[1]! as ThreadId, r.caller));
     }],
-    ["GET", /^\/v1\/threads\/([^/]+)$/, (m) => ok(detail(thread(m[1]!)))],
-    ["DELETE", /^\/v1\/threads\/([^/]+)$/, { person: "delete a thread" }, async (m) => {
+    ["GET", /^\/v1\/threads\/([^/]+)$/, anyAllowed, (m) => ok(detail(thread(m[1]!)))],
+    ["DELETE", /^\/v1\/threads\/([^/]+)$/, { role: "person", action: "delete a thread" }, async (m) => {
       const found = lookup(m[1]!);
       return ok("queued" in found ? queuedStatus(m[1]!, "deleted") : await setStatus(found.thread, "deleted"));
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/(seen|unseen)$/, { open: "what the person has read changes no thread or pylon" }, async (m, r) => {
+    ["POST", /^\/v1\/threads\/([^/]+)\/(seen|unseen)$/, { role: "allowed", why: "what the person has read changes no thread or pylon" }, async (m, r) => {
       const t = thread(m[1]!);
       const body = parse(seenSchema, await r.body({}));
       registry.markSeen(t.id, m[2] === "unseen", Date.now(), body.lastReplyAt);
       return noContent;
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/archive$/, { person: "archive a thread" }, async (m) => {
+    ["POST", /^\/v1\/threads\/([^/]+)\/archive$/, { role: "person", action: "archive a thread" }, async (m) => {
       const found = lookup(m[1]!);
       return ok("queued" in found ? queuedStatus(m[1]!, "archived") : await setStatus(found.thread, "archived"));
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/unarchive$/, { person: "unarchive a thread" }, (m) => {
+    ["POST", /^\/v1\/threads\/([^/]+)\/unarchive$/, { role: "person", action: "unarchive a thread" }, (m) => {
       const found = lookup(m[1]!);
       return ok("queued" in found ? queuedStatus(m[1]!, "queued") : unarchive(found.thread));
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/activity$/, { open: "a page open on the thread only keeps its pylon awake" }, async (m, r) => { recordActivity(thread(m[1]!), await r.body()); return noContent; }],
+    ["POST", /^\/v1\/threads\/([^/]+)\/activity$/, { role: "allowed", why: "a page open on the thread only keeps its pylon awake" }, async (m, r) => { recordActivity(thread(m[1]!), await r.body()); return noContent; }],
     // The body first, so the thread's status is read after the last await before the message is submitted.
-    ["POST", /^\/v1\/threads\/([^/]+)\/messages$/, { person: "message a thread", startsTurn: true }, async (m, r) => {
+    ["POST", /^\/v1\/threads\/([^/]+)\/messages$/, { role: "person", action: "message a thread", startsTurn: true }, async (m, r) => {
       const body = await r.body();
       const t = thread(m[1]!, { status: "open" });
       return { status: 202, body: await agentOf(t).send(t, parse(messageSchema, body)) };
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, { person: "abort a thread's turn" }, async (m) => {
+    ["POST", /^\/v1\/threads\/([^/]+)\/abort$/, { role: "person", action: "abort a thread's turn" }, async (m) => {
       const t = thread(m[1]!, { status: "kept" });
       await agents[registry.agent(t).kind].abort(t);
       return noContent;
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, { person: "retry a thread's turn", startsTurn: true }, async (m) => {
+    ["POST", /^\/v1\/threads\/([^/]+)\/retry$/, { role: "person", action: "retry a thread's turn", startsTurn: true }, async (m) => {
       await harness.retry(thread(m[1]!, { status: "open", agent: "harness" }).id);
       return noContent;
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/pylon\/retry$/, { person: "retry a thread's pylon" }, (m) => {
+    ["POST", /^\/v1\/threads\/([^/]+)\/pylon\/retry$/, { role: "person", action: "retry a thread's pylon" }, (m) => {
       retryPylon(thread(m[1]!));
       return noContent;
     }],
-    ["GET", /^\/v1\/threads\/([^/]+)\/conversation$/, async (m) => {
+    ["GET", /^\/v1\/threads\/([^/]+)\/conversation$/, anyAllowed, async (m) => {
       const t = thread(m[1]!, { status: "kept" });
       return ok(await agents[registry.agent(t).kind].read(t));
     }],

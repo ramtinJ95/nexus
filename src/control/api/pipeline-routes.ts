@@ -6,6 +6,7 @@ import { HttpError } from "../http-error.ts";
 import { itemView, type Pipeline } from "../pipeline.ts";
 import type { ItemId } from "../../ids.ts";
 import { ok, created, parse, type RouteEntry, type ApiKit } from "./kit.ts";
+import { anyAllowed } from "./access.ts";
 import { startSchema } from "./thread-routes.ts";
 
 /** A pipeline item: what its queued thread starts with, after the items whose threads must merge first. */
@@ -26,22 +27,22 @@ export function pipelineRoutes(kit: ApiKit, options: { pipeline?: Pipeline | nul
   }
 
   return [
-    ["GET", /^\/v1\/items$/, (_, r) => {
+    ["GET", /^\/v1\/items$/, anyAllowed, (_, r) => {
       const project = r.query.get("project");
       return ok(registry.items().filter((i) => project === null || i.project === project).map((i) => itemView(registry, i)));
     }],
-    ["POST", /^\/v1\/items$/, { person: "add an item" }, async (_, r) => {
+    ["POST", /^\/v1\/items$/, { role: "person", action: "add an item" }, async (_, r) => {
       const { after, message, ...request } = parse(itemSchema, await r.body());
       const pipeline = pipelineOrRefuse();
       const added = pipeline.add(request, message ?? null, after ?? [], r.caller);
       await pipeline.poll();
       return created(itemView(registry, added));
     }],
-    ["GET", /^\/v1\/items\/([^/]+)$/, ([, id]) => ok(item(id!))],
-    ["POST", /^\/v1\/items\/([^/]+)\/cancel$/, { person: "cancel an item" }, ([, id], r) => {
+    ["GET", /^\/v1\/items\/([^/]+)$/, anyAllowed, ([, id]) => ok(item(id!))],
+    ["POST", /^\/v1\/items\/([^/]+)\/cancel$/, { role: "person", action: "cancel an item" }, ([, id], r) => {
       return ok(itemView(registry, pipelineOrRefuse().cancel(id!, r.caller)));
     }],
-    ["POST", /^\/v1\/items\/([^/]+)\/approve$/, { person: "approve an item" }, async ([, id], r) => {
+    ["POST", /^\/v1\/items\/([^/]+)\/approve$/, { role: "person", action: "approve an item" }, async ([, id], r) => {
       const pipeline = pipelineOrRefuse();
       const approved = pipeline.approve(id!, r.caller);
       await pipeline.poll();

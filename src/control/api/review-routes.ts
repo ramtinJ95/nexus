@@ -7,6 +7,7 @@ import { HttpError } from "../http-error.ts";
 import { commitSchema } from "../releases.ts";
 import { maxRounds } from "../review-model.ts";
 import { ok, created, parse, type RouteEntry, type ApiKit } from "./kit.ts";
+import { landing, mayLand } from "./access.ts";
 
 const reviewSchema = z.strictObject({
   pr: z.int().positive().optional(),
@@ -21,7 +22,7 @@ const landSchema = z.strictObject({ head: commitSchema.optional(), waive: holdsS
   .refine((b) => b.waive === undefined || b.head !== undefined, "a waiver needs the head it confirmed");
 
 export function reviewRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | null | undefined }): readonly RouteEntry[] {
-  const { thread, mayLand } = kit;
+  const { thread } = kit;
 
   function reviewsOrRefuse(): ReviewLoop {
     if (!options.reviews) throw new HttpError(409, "the review loop needs the control plane's GitHub token (github.tokenFile), which is not configured");
@@ -29,19 +30,18 @@ export function reviewRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | null
   }
 
   return [
-    ["POST", /^\/v1\/threads\/([^/]+)\/review$/, { person: "start a review" }, async (m, r) => {
+    ["POST", /^\/v1\/threads\/([^/]+)\/review$/, { role: "person", action: "start a review" }, async (m, r) => {
       const body = parse(reviewSchema, await r.body({}));
       const t = thread(m[1]!);
-      if (body.land) mayLand(r.caller);
+      if (body.land) mayLand(r.roles);
       return created(await reviewsOrRefuse().start(t.id, { pr: body.pr, rounds: body.rounds, land: body.land ? r.caller : null }));
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/review\/cancel$/, { person: "cancel a review" }, (m, r) => {
+    ["POST", /^\/v1\/threads\/([^/]+)\/review\/cancel$/, { role: "person", action: "cancel a review" }, (m, r) => {
       return ok(reviewsOrRefuse().cancel(thread(m[1]!).id, r.caller));
     }],
-    ["POST", /^\/v1\/threads\/([^/]+)\/land$/, { open: "deployers only, which mayLand checks" }, async (m, r) => {
+    ["POST", /^\/v1\/threads\/([^/]+)\/land$/, landing, async (m, r) => {
       const body = parse(landSchema, await r.body({}));
       const t = thread(m[1]!);
-      mayLand(r.caller);
       return ok(reviewsOrRefuse().land(t.id, r.caller, body.head, body.waive));
     }],
   ];

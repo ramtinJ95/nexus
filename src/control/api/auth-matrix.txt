@@ -2,20 +2,23 @@ deployer GET /v1/health -> 200
 deployer GET /v1/health?x=1 -> 200
 deployer POST /v1/health -> 405 POST is not allowed on /v1/health
 deployer GET /v1/whoami -> 200 {"node":"nLAPTOP","allowed":true,"person":true,"deployer":true}
-deployer GET /v1/whoami?x=1 -> 404 no route /v1/whoami
-deployer POST /v1/whoami -> 404 no route /v1/whoami
+deployer GET /v1/whoami?x=1 -> 200 {"node":"nLAPTOP","allowed":true,"person":true,"deployer":true}
+deployer POST /v1/whoami -> 405 POST is not allowed on /v1/whoami
 deployer POST /v1/join -> 400 ✖ Invalid input: expected string, received undefined
   → at token
 ✖ Invalid input: expected string, received undefined
   → at deployKey
-deployer POST /v1/join?x=1 -> 404 no route /v1/join
-deployer GET /v1/join -> 404 no route /v1/join
+deployer POST /v1/join?x=1 -> 400 ✖ Invalid input: expected string, received undefined
+  → at token
+✖ Invalid input: expected string, received undefined
+  → at deployKey
+deployer GET /v1/join -> 405 GET is not allowed on /v1/join
 deployer GET /v1/nosuch -> 404 no route /v1/nosuch
 deployer GET /v1/nosuch?x=1 -> 404 no route /v1/nosuch
 deployer POST /v1/nosuch -> 404 no route /v1/nosuch
 deployer GET /v1/%zz -> 400 the request path "/v1/%zz" is not a valid URL path
-deployer GET /v1/deployer/nosuch -> 403 caller is not a tailnet node this control plane allows
-deployer POST /v1/deployer/nosuch -> 403 caller is not a tailnet node this control plane allows
+deployer GET /v1/deployer/nosuch -> 404 no route /v1/deployer/nosuch
+deployer POST /v1/deployer/nosuch -> 404 no route /v1/deployer/nosuch
 deployer GET /v1/deployer/release -> 403 caller is not a tailnet node this control plane allows
 deployer GET /v1/deployer/release?x=1 -> 403 caller is not a tailnet node this control plane allows
 deployer POST /v1/deployer/release -> 403 caller is not a tailnet node this control plane allows
@@ -158,20 +161,23 @@ person GET /v1/health -> 200
 person GET /v1/health?x=1 -> 200
 person POST /v1/health -> 405 POST is not allowed on /v1/health
 person GET /v1/whoami -> 200 {"node":"nPHONE","allowed":true,"person":true,"deployer":false}
-person GET /v1/whoami?x=1 -> 404 no route /v1/whoami
-person POST /v1/whoami -> 404 no route /v1/whoami
+person GET /v1/whoami?x=1 -> 200 {"node":"nPHONE","allowed":true,"person":true,"deployer":false}
+person POST /v1/whoami -> 405 POST is not allowed on /v1/whoami
 person POST /v1/join -> 400 ✖ Invalid input: expected string, received undefined
   → at token
 ✖ Invalid input: expected string, received undefined
   → at deployKey
-person POST /v1/join?x=1 -> 404 no route /v1/join
-person GET /v1/join -> 404 no route /v1/join
+person POST /v1/join?x=1 -> 400 ✖ Invalid input: expected string, received undefined
+  → at token
+✖ Invalid input: expected string, received undefined
+  → at deployKey
+person GET /v1/join -> 405 GET is not allowed on /v1/join
 person GET /v1/nosuch -> 404 no route /v1/nosuch
 person GET /v1/nosuch?x=1 -> 404 no route /v1/nosuch
 person POST /v1/nosuch -> 404 no route /v1/nosuch
 person GET /v1/%zz -> 400 the request path "/v1/%zz" is not a valid URL path
-person GET /v1/deployer/nosuch -> 403 caller is not a tailnet node this control plane allows
-person POST /v1/deployer/nosuch -> 403 caller is not a tailnet node this control plane allows
+person GET /v1/deployer/nosuch -> 404 no route /v1/deployer/nosuch
+person POST /v1/deployer/nosuch -> 404 no route /v1/deployer/nosuch
 person GET /v1/deployer/release -> 403 caller is not a tailnet node this control plane allows
 person GET /v1/deployer/release?x=1 -> 403 caller is not a tailnet node this control plane allows
 person POST /v1/deployer/release -> 403 caller is not a tailnet node this control plane allows
@@ -180,7 +186,7 @@ person GET /v1/deployer/report -> 403 caller is not a tailnet node this control 
 person POST /v1/deployer/releases -> 403 caller is not a tailnet node this control plane allows
 person POST /v1/deployer/drain -> 403 caller is not a tailnet node this control plane allows
 person GET /v1/release -> 200
-person PUT /v1/release -> 403 caller may not deploy; infrastructure nodes and pylons cannot deploy
+person PUT /v1/release -> 403 caller may not deploy: only deployers may, never infrastructure nodes or pylons
 person DELETE /v1/release -> 405 DELETE is not allowed on /v1/release
 person GET /v1/usage -> 200
 person GET /v1/usage?since=7d -> 200
@@ -193,8 +199,8 @@ person GET /v1/threads/th-000000000000/events -> 404 no thread th-000000000000
 person GET /v1/threads/th-000000000000/claude/events -> 404 no thread th-000000000000
 person POST /v1/threads/th-000000000000/review -> 404 no thread th-000000000000
 person POST /v1/threads/th-000000000000/review/cancel -> 409 the review loop needs the control plane's GitHub token (github.tokenFile), which is not configured
-person POST /v1/threads/th-000000000000/land -> 404 no thread th-000000000000
-person POST /v1/threads/th-000000000000/land -> 400 ✖ Unrecognized key: "bogus"
+person POST /v1/threads/th-000000000000/land -> 403 caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons
+person POST /v1/threads/th-000000000000/land -> 403 caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons
 person POST /v1/questions/q-nosuch/answer -> 404 no question q-nosuch
 person POST /v1/threads/th-000000000000/previews -> 404 no thread th-000000000000
 person DELETE /v1/threads/th-000000000000/previews/3000 -> 404 no thread th-000000000000
@@ -312,20 +318,23 @@ control-node GET /v1/health -> 200
 control-node GET /v1/health?x=1 -> 200
 control-node POST /v1/health -> 405 POST is not allowed on /v1/health
 control-node GET /v1/whoami -> 200 {"node":"nFIREBAT","allowed":true,"person":false,"deployer":false}
-control-node GET /v1/whoami?x=1 -> 404 no route /v1/whoami
-control-node POST /v1/whoami -> 404 no route /v1/whoami
+control-node GET /v1/whoami?x=1 -> 200 {"node":"nFIREBAT","allowed":true,"person":false,"deployer":false}
+control-node POST /v1/whoami -> 405 POST is not allowed on /v1/whoami
 control-node POST /v1/join -> 400 ✖ Invalid input: expected string, received undefined
   → at token
 ✖ Invalid input: expected string, received undefined
   → at deployKey
-control-node POST /v1/join?x=1 -> 404 no route /v1/join
-control-node GET /v1/join -> 404 no route /v1/join
+control-node POST /v1/join?x=1 -> 400 ✖ Invalid input: expected string, received undefined
+  → at token
+✖ Invalid input: expected string, received undefined
+  → at deployKey
+control-node GET /v1/join -> 405 GET is not allowed on /v1/join
 control-node GET /v1/nosuch -> 404 no route /v1/nosuch
 control-node GET /v1/nosuch?x=1 -> 404 no route /v1/nosuch
 control-node POST /v1/nosuch -> 404 no route /v1/nosuch
 control-node GET /v1/%zz -> 400 the request path "/v1/%zz" is not a valid URL path
-control-node GET /v1/deployer/nosuch -> 404 no deployer route /v1/deployer/nosuch
-control-node POST /v1/deployer/nosuch -> 404 no deployer route /v1/deployer/nosuch
+control-node GET /v1/deployer/nosuch -> 404 no route /v1/deployer/nosuch
+control-node POST /v1/deployer/nosuch -> 404 no route /v1/deployer/nosuch
 control-node GET /v1/deployer/release -> 200
 control-node GET /v1/deployer/release?x=1 -> 200
 control-node POST /v1/deployer/release -> 405 POST is not allowed on /v1/deployer/release
@@ -348,7 +357,7 @@ control-node POST /v1/deployer/drain -> 400 ✖ Unrecognized key: "bogus"
 ✖ Invalid input: expected string, received undefined
   → at commit
 control-node GET /v1/release -> 200
-control-node PUT /v1/release -> 403 caller may not deploy; infrastructure nodes and pylons cannot deploy
+control-node PUT /v1/release -> 403 caller may not deploy: only deployers may, never infrastructure nodes or pylons
 control-node DELETE /v1/release -> 405 DELETE is not allowed on /v1/release
 control-node GET /v1/usage -> 200
 control-node GET /v1/usage?since=7d -> 200
@@ -361,8 +370,8 @@ control-node GET /v1/threads/th-000000000000/events -> 404 no thread th-00000000
 control-node GET /v1/threads/th-000000000000/claude/events -> 404 no thread th-000000000000
 control-node POST /v1/threads/th-000000000000/review -> 403 caller may not start a review: only a person may, never the control plane, infrastructure nodes or pylons
 control-node POST /v1/threads/th-000000000000/review/cancel -> 403 caller may not cancel a review: only a person may, never the control plane, infrastructure nodes or pylons
-control-node POST /v1/threads/th-000000000000/land -> 404 no thread th-000000000000
-control-node POST /v1/threads/th-000000000000/land -> 400 ✖ Unrecognized key: "bogus"
+control-node POST /v1/threads/th-000000000000/land -> 403 caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons
+control-node POST /v1/threads/th-000000000000/land -> 403 caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons
 control-node POST /v1/questions/q-nosuch/answer -> 404 no question q-nosuch
 control-node POST /v1/threads/th-000000000000/previews -> 403 caller may not publish a preview: only a person may, never the control plane, infrastructure nodes or pylons
 control-node DELETE /v1/threads/th-000000000000/previews/3000 -> 403 caller may not unpublish a preview: only a person may, never the control plane, infrastructure nodes or pylons
@@ -472,20 +481,23 @@ control-node-without-key GET /v1/health -> 200
 control-node-without-key GET /v1/health?x=1 -> 200
 control-node-without-key POST /v1/health -> 405 POST is not allowed on /v1/health
 control-node-without-key GET /v1/whoami -> 200 {"node":"nFIREBAT","allowed":true,"person":false,"deployer":false}
-control-node-without-key GET /v1/whoami?x=1 -> 404 no route /v1/whoami
-control-node-without-key POST /v1/whoami -> 404 no route /v1/whoami
+control-node-without-key GET /v1/whoami?x=1 -> 200 {"node":"nFIREBAT","allowed":true,"person":false,"deployer":false}
+control-node-without-key POST /v1/whoami -> 405 POST is not allowed on /v1/whoami
 control-node-without-key POST /v1/join -> 400 ✖ Invalid input: expected string, received undefined
   → at token
 ✖ Invalid input: expected string, received undefined
   → at deployKey
-control-node-without-key POST /v1/join?x=1 -> 404 no route /v1/join
-control-node-without-key GET /v1/join -> 404 no route /v1/join
+control-node-without-key POST /v1/join?x=1 -> 400 ✖ Invalid input: expected string, received undefined
+  → at token
+✖ Invalid input: expected string, received undefined
+  → at deployKey
+control-node-without-key GET /v1/join -> 405 GET is not allowed on /v1/join
 control-node-without-key GET /v1/nosuch -> 404 no route /v1/nosuch
 control-node-without-key GET /v1/nosuch?x=1 -> 404 no route /v1/nosuch
 control-node-without-key POST /v1/nosuch -> 404 no route /v1/nosuch
 control-node-without-key GET /v1/%zz -> 400 the request path "/v1/%zz" is not a valid URL path
-control-node-without-key GET /v1/deployer/nosuch -> 403 caller is not a tailnet node this control plane allows
-control-node-without-key POST /v1/deployer/nosuch -> 403 caller is not a tailnet node this control plane allows
+control-node-without-key GET /v1/deployer/nosuch -> 404 no route /v1/deployer/nosuch
+control-node-without-key POST /v1/deployer/nosuch -> 404 no route /v1/deployer/nosuch
 control-node-without-key GET /v1/deployer/release -> 403 caller is not a tailnet node this control plane allows
 control-node-without-key GET /v1/deployer/release?x=1 -> 403 caller is not a tailnet node this control plane allows
 control-node-without-key POST /v1/deployer/release -> 403 caller is not a tailnet node this control plane allows
@@ -494,7 +506,7 @@ control-node-without-key GET /v1/deployer/report -> 403 caller is not a tailnet 
 control-node-without-key POST /v1/deployer/releases -> 403 caller is not a tailnet node this control plane allows
 control-node-without-key POST /v1/deployer/drain -> 403 caller is not a tailnet node this control plane allows
 control-node-without-key GET /v1/release -> 200
-control-node-without-key PUT /v1/release -> 403 caller may not deploy; infrastructure nodes and pylons cannot deploy
+control-node-without-key PUT /v1/release -> 403 caller may not deploy: only deployers may, never infrastructure nodes or pylons
 control-node-without-key DELETE /v1/release -> 405 DELETE is not allowed on /v1/release
 control-node-without-key GET /v1/usage -> 200
 control-node-without-key GET /v1/usage?since=7d -> 200
@@ -507,8 +519,8 @@ control-node-without-key GET /v1/threads/th-000000000000/events -> 404 no thread
 control-node-without-key GET /v1/threads/th-000000000000/claude/events -> 404 no thread th-000000000000
 control-node-without-key POST /v1/threads/th-000000000000/review -> 403 caller may not start a review: only a person may, never the control plane, infrastructure nodes or pylons
 control-node-without-key POST /v1/threads/th-000000000000/review/cancel -> 403 caller may not cancel a review: only a person may, never the control plane, infrastructure nodes or pylons
-control-node-without-key POST /v1/threads/th-000000000000/land -> 404 no thread th-000000000000
-control-node-without-key POST /v1/threads/th-000000000000/land -> 400 ✖ Unrecognized key: "bogus"
+control-node-without-key POST /v1/threads/th-000000000000/land -> 403 caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons
+control-node-without-key POST /v1/threads/th-000000000000/land -> 403 caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons
 control-node-without-key POST /v1/questions/q-nosuch/answer -> 404 no question q-nosuch
 control-node-without-key POST /v1/threads/th-000000000000/previews -> 403 caller may not publish a preview: only a person may, never the control plane, infrastructure nodes or pylons
 control-node-without-key DELETE /v1/threads/th-000000000000/previews/3000 -> 403 caller may not unpublish a preview: only a person may, never the control plane, infrastructure nodes or pylons
@@ -618,20 +630,23 @@ reporter GET /v1/health -> 403 caller is not a tailnet node this control plane a
 reporter GET /v1/health?x=1 -> 403 caller is not a tailnet node this control plane allows
 reporter POST /v1/health -> 403 caller is not a tailnet node this control plane allows
 reporter GET /v1/whoami -> 200 {"node":"nBENCH","allowed":false,"person":false,"deployer":false}
-reporter GET /v1/whoami?x=1 -> 403 caller is not a tailnet node this control plane allows
-reporter POST /v1/whoami -> 403 caller is not a tailnet node this control plane allows
+reporter GET /v1/whoami?x=1 -> 200 {"node":"nBENCH","allowed":false,"person":false,"deployer":false}
+reporter POST /v1/whoami -> 405 POST is not allowed on /v1/whoami
 reporter POST /v1/join -> 400 ✖ Invalid input: expected string, received undefined
   → at token
 ✖ Invalid input: expected string, received undefined
   → at deployKey
-reporter POST /v1/join?x=1 -> 403 caller is not a tailnet node this control plane allows
-reporter GET /v1/join -> 403 caller is not a tailnet node this control plane allows
-reporter GET /v1/nosuch -> 403 caller is not a tailnet node this control plane allows
-reporter GET /v1/nosuch?x=1 -> 403 caller is not a tailnet node this control plane allows
-reporter POST /v1/nosuch -> 403 caller is not a tailnet node this control plane allows
-reporter GET /v1/%zz -> 403 caller is not a tailnet node this control plane allows
-reporter GET /v1/deployer/nosuch -> 404 no deployer route /v1/deployer/nosuch
-reporter POST /v1/deployer/nosuch -> 404 no deployer route /v1/deployer/nosuch
+reporter POST /v1/join?x=1 -> 400 ✖ Invalid input: expected string, received undefined
+  → at token
+✖ Invalid input: expected string, received undefined
+  → at deployKey
+reporter GET /v1/join -> 405 GET is not allowed on /v1/join
+reporter GET /v1/nosuch -> 404 no route /v1/nosuch
+reporter GET /v1/nosuch?x=1 -> 404 no route /v1/nosuch
+reporter POST /v1/nosuch -> 404 no route /v1/nosuch
+reporter GET /v1/%zz -> 400 the request path "/v1/%zz" is not a valid URL path
+reporter GET /v1/deployer/nosuch -> 404 no route /v1/deployer/nosuch
+reporter POST /v1/deployer/nosuch -> 404 no route /v1/deployer/nosuch
 reporter GET /v1/deployer/release -> 200
 reporter GET /v1/deployer/release?x=1 -> 200
 reporter POST /v1/deployer/release -> 405 POST is not allowed on /v1/deployer/release
@@ -744,14 +759,17 @@ reporter-wrong-key GET /v1/health -> 403 caller is not a tailnet node this contr
 reporter-wrong-key GET /v1/health?x=1 -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key POST /v1/health -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /v1/whoami -> 200 {"node":"nBENCH","allowed":false,"person":false,"deployer":false}
-reporter-wrong-key GET /v1/whoami?x=1 -> 403 caller is not a tailnet node this control plane allows
-reporter-wrong-key POST /v1/whoami -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key GET /v1/whoami?x=1 -> 200 {"node":"nBENCH","allowed":false,"person":false,"deployer":false}
+reporter-wrong-key POST /v1/whoami -> 405 POST is not allowed on /v1/whoami
 reporter-wrong-key POST /v1/join -> 400 ✖ Invalid input: expected string, received undefined
   → at token
 ✖ Invalid input: expected string, received undefined
   → at deployKey
-reporter-wrong-key POST /v1/join?x=1 -> 403 caller is not a tailnet node this control plane allows
-reporter-wrong-key GET /v1/join -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key POST /v1/join?x=1 -> 400 ✖ Invalid input: expected string, received undefined
+  → at token
+✖ Invalid input: expected string, received undefined
+  → at deployKey
+reporter-wrong-key GET /v1/join -> 405 GET is not allowed on /v1/join
 reporter-wrong-key GET /v1/nosuch -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /v1/nosuch?x=1 -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key POST /v1/nosuch -> 403 caller is not a tailnet node this control plane allows
@@ -858,14 +876,17 @@ node-without-key GET /v1/health -> 403 caller is not a tailnet node this control
 node-without-key GET /v1/health?x=1 -> 403 caller is not a tailnet node this control plane allows
 node-without-key POST /v1/health -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /v1/whoami -> 200 {"node":"nBENCH","allowed":false,"person":false,"deployer":false}
-node-without-key GET /v1/whoami?x=1 -> 403 caller is not a tailnet node this control plane allows
-node-without-key POST /v1/whoami -> 403 caller is not a tailnet node this control plane allows
+node-without-key GET /v1/whoami?x=1 -> 200 {"node":"nBENCH","allowed":false,"person":false,"deployer":false}
+node-without-key POST /v1/whoami -> 405 POST is not allowed on /v1/whoami
 node-without-key POST /v1/join -> 400 ✖ Invalid input: expected string, received undefined
   → at token
 ✖ Invalid input: expected string, received undefined
   → at deployKey
-node-without-key POST /v1/join?x=1 -> 403 caller is not a tailnet node this control plane allows
-node-without-key GET /v1/join -> 403 caller is not a tailnet node this control plane allows
+node-without-key POST /v1/join?x=1 -> 400 ✖ Invalid input: expected string, received undefined
+  → at token
+✖ Invalid input: expected string, received undefined
+  → at deployKey
+node-without-key GET /v1/join -> 405 GET is not allowed on /v1/join
 node-without-key GET /v1/nosuch -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /v1/nosuch?x=1 -> 403 caller is not a tailnet node this control plane allows
 node-without-key POST /v1/nosuch -> 403 caller is not a tailnet node this control plane allows
@@ -972,14 +993,17 @@ stranger GET /v1/health -> 403 caller is not a tailnet node this control plane a
 stranger GET /v1/health?x=1 -> 403 caller is not a tailnet node this control plane allows
 stranger POST /v1/health -> 403 caller is not a tailnet node this control plane allows
 stranger GET /v1/whoami -> 200 {"node":"nSTRANGER","allowed":false,"person":false,"deployer":false}
-stranger GET /v1/whoami?x=1 -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/whoami -> 403 caller is not a tailnet node this control plane allows
+stranger GET /v1/whoami?x=1 -> 200 {"node":"nSTRANGER","allowed":false,"person":false,"deployer":false}
+stranger POST /v1/whoami -> 405 POST is not allowed on /v1/whoami
 stranger POST /v1/join -> 400 ✖ Invalid input: expected string, received undefined
   → at token
 ✖ Invalid input: expected string, received undefined
   → at deployKey
-stranger POST /v1/join?x=1 -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/join -> 403 caller is not a tailnet node this control plane allows
+stranger POST /v1/join?x=1 -> 400 ✖ Invalid input: expected string, received undefined
+  → at token
+✖ Invalid input: expected string, received undefined
+  → at deployKey
+stranger GET /v1/join -> 405 GET is not allowed on /v1/join
 stranger GET /v1/nosuch -> 403 caller is not a tailnet node this control plane allows
 stranger GET /v1/nosuch?x=1 -> 403 caller is not a tailnet node this control plane allows
 stranger POST /v1/nosuch -> 403 caller is not a tailnet node this control plane allows
@@ -1086,11 +1110,11 @@ unnamed GET /v1/health -> 403 caller is not a tailnet node this control plane al
 unnamed GET /v1/health?x=1 -> 403 caller is not a tailnet node this control plane allows
 unnamed POST /v1/health -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /v1/whoami -> 403 caller is not a tailnet node
-unnamed GET /v1/whoami?x=1 -> 403 caller is not a tailnet node this control plane allows
-unnamed POST /v1/whoami -> 403 caller is not a tailnet node this control plane allows
+unnamed GET /v1/whoami?x=1 -> 403 caller is not a tailnet node
+unnamed POST /v1/whoami -> 403 caller is not a tailnet node
 unnamed POST /v1/join -> 403 caller is not a tailnet node
-unnamed POST /v1/join?x=1 -> 403 caller is not a tailnet node this control plane allows
-unnamed GET /v1/join -> 403 caller is not a tailnet node this control plane allows
+unnamed POST /v1/join?x=1 -> 403 caller is not a tailnet node
+unnamed GET /v1/join -> 403 caller is not a tailnet node
 unnamed GET /v1/nosuch -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /v1/nosuch?x=1 -> 403 caller is not a tailnet node this control plane allows
 unnamed POST /v1/nosuch -> 403 caller is not a tailnet node this control plane allows
