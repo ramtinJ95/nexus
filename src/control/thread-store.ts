@@ -52,6 +52,9 @@ export interface Thread extends StoredThread, ActivityFacts, ArchiveFacts, Claud
   workingSince?: number;
 }
 
+/** Appends an event to the event log, which hands it to its followers once it commits. */
+export type AppendEvent = (kind: EventKind, thread: ThreadId | null, payload: Record<string, unknown>, time?: number) => NexusEvent;
+
 /**
  * A thread's agent: a conversation in the control plane's harness, a Claude Code worker in its pylon, or none, as a
  * check thread has. A thread's start gives it a conversation ID or a Claude worker, never both.
