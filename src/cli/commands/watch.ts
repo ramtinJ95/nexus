@@ -1,62 +1,22 @@
 /**
  * `nexus watch` and `nexus conversation`: a thread's conversation as it grows, and as it is now. The integrations read
- * the watch's events, whose types this exports.
+ * the watch's events, whose types src/contract/watch.ts holds.
  */
 import { setTimeout as sleep } from "node:timers/promises";
 import type { EntryRecord, LiveState } from "@earendil-works/pi-durable";
 import type { ListeningPort, ThreadDetail } from "../../control/wire.ts";
-import type { Thread } from "../../control/thread-store.ts";
 import { maxEntries, type ClaudeEntry } from "../../control/claude-transcript.ts";
 import { agentView, claudeFrames, queuedOf, type ClaudeFrame, type ViewFrame } from "../../control/conversation-view.ts";
-import type { ActualState } from "../../control/reconcile.ts";
 import { CliError } from "../transport.ts";
-import { type Api, type Follow, type Command, str, thread, request, int, clip, reconnectMs, untilConsumerGone } from "../kit.ts";
+import { type Api, type Follow, type Command, str, request, int, clip, reconnectMs, untilConsumerGone } from "../kit.ts";
 import { transient } from "../config.ts";
 import { threadRoutes } from "../../contract/threads.ts";
+import { streamRoutes } from "../../contract/streams.ts";
+import { callOf } from "../../contract/route.ts";
+import type { RenderedClaudeEntry, RenderedEntry, RunLiveEvent, ThreadStateEvent, WatchEvent } from "../../contract/watch.ts";
 import { entryText, type View, queuedTexts, busy, conversationText, claudeEntryText, claudeText } from "../conversation-text.ts";
 
-/** What watch reports of a thread, as one event whenever any of it changes. */
-export interface WatchState {
-  type: "state";
-  thread: string;
-  status: Thread["status"];
-  /** Parked when a task hit the restart limit and holds the run until `nexus retry`. */
-  run: "idle" | "working" | "parked";
-  parkedTasks: number;
-  /** Messages waiting for the current run to finish. */
-  queued: number;
-  pylon: ActualState;
-  failed: string | null;
-  /** ThreadDetail's ports. */
-  ports: ThreadDetail["ports"];
-}
-/** What watch reports of the run in flight, as one event whenever any of it changes. */
-export interface WatchLive {
-  type: "live";
-  thread: string;
-  /** The text of each message waiting for the current run to finish. */
-  queued: string[];
-  /** The output so far of each tool call still running, by the toolCall's id in the entries. */
-  tools: { callId: string; output: string }[];
-  /** The answer streaming now, its text parts joined. */
-  partial: string | null;
-  /** The error of a model request waiting to be retried. */
-  retry: string | null;
-}
-/** An entry with the CLI's plain rendering of its messages. */
-export interface RenderedEntry { entry: EntryRecord; text: string }
-/** A Claude worker's transcript entry with the CLI's plain rendering of it. */
-export interface RenderedClaudeEntry { entry: ClaudeEntry; text: string }
-export type WatchEvent =
-  | { type: "reset"; thread: string; entries: RenderedEntry[] }
-  | { type: "entry"; thread: string } & RenderedEntry
-  | { type: "claude-reset"; thread: string; session: string | null; dropped: number; entries: RenderedClaudeEntry[] }
-  | { type: "claude-entry"; thread: string } & RenderedClaudeEntry
-  | WatchState
-  | WatchLive
-  | { type: "error"; thread: string; kind: "unreachable" | "failed"; message: string };
-
-function stateOf(d: ThreadDetail, working: boolean, queued: number): WatchState {
+function stateOf(d: ThreadDetail, working: boolean, queued: number): ThreadStateEvent {
   const parkedTasks = d.agent?.parkedTasks ?? 0;
   return {
     type: "state", thread: d.thread.id, status: d.thread.status, run: parkedTasks > 0 ? "parked" : working ? "working" : "idle",
@@ -68,14 +28,14 @@ function stateOf(d: ThreadDetail, working: boolean, queued: number): WatchState 
 type Transcript = Omit<ClaudeFrame, "reset">;
 
 /** A Claude worker's run in flight: what Claude Code queued, and each call of the running turn without a result. */
-function claudeLiveOf(id: string, c: Transcript): WatchLive {
+function claudeLiveOf(id: string, c: Transcript): RunLiveEvent {
   const lastTurn = c.entries.findLastIndex((e) => e.kind === "turn");
   const done = new Set(c.entries.flatMap((e) => e.kind === "result" ? [e.toolUseId] : []));
   const running = c.working ? c.entries.slice(lastTurn + 1).flatMap((e) => e.kind === "tool" && !done.has(e.id) ? [{ callId: e.id, output: "" }] : []) : [];
   return { type: "live", thread: id, queued: queuedOf(c.entries).map((q) => q.text ?? ""), tools: running, partial: null, retry: null };
 }
 
-function liveOf(id: string, view: View | null): WatchLive {
+function liveOf(id: string, view: View | null): RunLiveEvent {
   const live = view?.docs["pi.live"] as LiveState | undefined;
   const generation = live?.generation;
   const partial = generation?.message?.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("") ?? "";
@@ -86,7 +46,7 @@ function liveOf(id: string, view: View | null): WatchLive {
   };
 }
 
-function stateText(s: WatchState): string {
+function stateText(s: ThreadStateEvent): string {
   const run = s.run === "working" ? ", agent working" : s.run === "parked" ? `, ${s.parkedTasks} parked tasks hold the run` : "";
   const ports = (s.ports ?? []).map((l: ListeningPort) => l.preview?.ready === true ? `${l.port} at ${l.preview.url}` : String(l.port));
   return `-- ${s.status}, pylon ${s.pylon}${s.failed === null ? "" : ` (${s.failed.split("\n")[0]})`}${run}${s.queued === 0 ? "" : `, ${s.queued} queued`}${ports.length === 0 ? "" : `, listening on ${ports.join(", ")}`}`;
@@ -139,7 +99,7 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
   };
 
   /** Prints what the harness conversation gained, and answers what its run does, or null until its first frame. */
-  function printConversation(d: ThreadDetail): { working: boolean; live: WatchLive } | null {
+  function printConversation(d: ThreadDetail): { working: boolean; live: RunLiveEvent } | null {
     // A thread with a conversation waits for its first frame.
     if (d.agent !== null && streamed === null) return null;
     const view = d.agent === null ? null : streamed;
@@ -163,7 +123,7 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
   }
 
   /** Prints what a Claude worker's transcript gained, and answers what its turn does, or null until its first frame. */
-  function printTranscript(d: ThreadDetail): { working: boolean; live: WatchLive } | null {
+  function printTranscript(d: ThreadDetail): { working: boolean; live: RunLiveEvent } | null {
     if (transcript === null) return null;
     if (transcript === "none") return { working: d.thread.sessionTurnRunning === true, live: { type: "live", thread: id, queued: [], tools: [], partial: null, retry: null } };
     const frame = claudePrinted(transcript);
@@ -229,7 +189,7 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
     for (let attempt = 0; !stop.signal.aborted; attempt++) {
       let first = true;
       try {
-        await follow(claude ? `${thread(id)}/claude/events` : `${thread(id)}/events`, (data) => {
+        await follow(callOf(claude ? streamRoutes.claudeEvents : streamRoutes.threadEvents, { thread: id }).path, (data) => {
           if (claude) onTranscript(data);
           else onView(data, first);
           first = false;

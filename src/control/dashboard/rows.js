@@ -1,6 +1,8 @@
 // The thread list's rows, read for every tab of the browser by the one that follows the events, and the seen mark
 // a thread page owes. The page passes its own pieces and a test its fakes, with the browser globals last.
 import { owedSeen } from "./notifications.js";
+import { callOf } from "../../contract/route.ts";
+import { streamRoutes } from "../../contract/streams.ts";
 
 export function startRows({ api, notifications, health = () => {}, caughtUp = () => {}, currentThread, focused, activeTab }, { window, navigator, document, BroadcastChannel, EventSource, Date, AbortSignal, setTimeout, clearTimeout, setInterval } = globalThis) {
   // The events that change a row's attention, its reply or whether it works, and a check's change, which every tab
@@ -60,8 +62,7 @@ export function startRows({ api, notifications, health = () => {}, caughtUp = ()
   function followEvents() {
     if (events !== null || (!sharing && document.visibilityState !== "visible")) return;
     // Each connection reads the list, so it needs none of the events before it.
-    const query = new URLSearchParams([["follow", "true"], ["since", "latest"], ...rowEvents.map((kind) => ["kind", kind])]);
-    events = new EventSource(`/v1/events?${query}`);
+    events = new EventSource(callOf(streamRoutes.events, { query: { since: "latest", kinds: rowEvents, follow: true } }).path);
     // A check's change has no state to read again, so a stream that opens again hands on each change it missed.
     events.onopen = () => {
       void readRows();

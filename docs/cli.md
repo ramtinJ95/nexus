@@ -316,6 +316,8 @@ Without `--json`, stderr gets one line, `nexus: <message>`. With `--json`, stder
 
 The conversation streams from `GET /v1/threads/<thread>/events`, as server-sent events whose data is a `ViewFrame` from [`src/control/conversation-view.ts`](../src/control/conversation-view.ts). pi-durable commits an answer as it is written at most every 100 ms, and the output of a running tool on the same throttle, so `live` comes up to ten times a second while the agent writes. A change to the conversation prints within one commit, and a change to the pylon, its ports or the thread's status within one interval.
 
+`src/contract/watch.ts` holds these types, with `state` as `ThreadStateEvent` and `live` as `RunLiveEvent`.
+
 ```ts
 type RenderedEntry = { entry: EntryRecord; text: string };
 type RenderedClaudeEntry = { entry: ClaudeEntry; text: string };

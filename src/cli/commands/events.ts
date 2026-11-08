@@ -3,7 +3,9 @@ import { once } from "node:events";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { NexusEvent } from "../../control/events.ts";
 import { CliError } from "../transport.ts";
-import { type Command, reconnectMs, str, strs, untilConsumerGone } from "../kit.ts";
+import { type Command, reconnectMs, request, str, strs, untilConsumerGone } from "../kit.ts";
+import { callOf } from "../../contract/route.ts";
+import { streamRoutes, type EventsQuery } from "../../contract/streams.ts";
 import { transient } from "../config.ts";
 
 export const eventsCommands: Readonly<Record<string, Command>> = {
@@ -11,25 +13,23 @@ export const eventsCommands: Readonly<Record<string, Command>> = {
     args: [0, 0],
     options: { follow: { type: "boolean" }, since: { type: "string" }, thread: { type: "string" }, project: { type: "string" }, kind: { type: "string", multiple: true } },
     async run(api, _, v, follow) {
-      const query = new URLSearchParams();
-      for (const key of ["since", "thread", "project"]) if (str(v, key) !== undefined) query.set(key, str(v, key)!);
-      for (const kind of strs(v, "kind")) query.append("kind", kind);
+      const query: EventsQuery = { since: str(v, "since"), thread: str(v, "thread"), project: str(v, "project"), kinds: strs(v, "kind") };
       const print = async (event: NexusEvent, signal?: AbortSignal) => {
         const line = v.json ? JSON.stringify(event) : `${event.id} ${new Date(event.time).toISOString()} ${event.thread ?? "-"} ${event.kind} ${JSON.stringify(event.payload)}`;
         if (!process.stdout.write(line + "\n")) await once(process.stdout, "drain", { signal });
-        query.set("since", event.id);
+        query.since = event.id;
       };
       if (v.follow !== true) {
-        for (const event of await api("GET", `/v1/events?${query}`) as NexusEvent[]) await print(event);
+        for (const event of await request(api, streamRoutes.events, { query }) as NexusEvent[]) await print(event);
         return;
       }
-      query.set("follow", "true");
+      query.follow = true;
       const stop = new AbortController();
       const dispose = untilConsumerGone(() => { stop.abort(); process.exit(0); });
       try {
         for (let failed = 0; !stop.signal.aborted; failed++) {
           const read = (data: unknown) => { failed = 0; return print(data as NexusEvent, stop.signal); };
-          try { await follow(`/v1/events?${query}`, read, stop.signal, (id) => query.set("since", id)); }
+          try { await follow(callOf(streamRoutes.events, { query }).path, read, stop.signal, (id) => { query.since = id; }); }
           catch (err) {
             if (err instanceof CliError && !transient(err)) throw err;
             if (!stop.signal.aborted) console.error(`nexus: ${(err as Error).message}; reconnecting`);
