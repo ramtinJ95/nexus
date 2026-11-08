@@ -8,6 +8,7 @@ import { logOnce, type Log } from "./log-once.ts";
 import type { Registry } from "./registry.ts";
 import { singleFlight } from "../single-flight.ts";
 import { senders } from "./agent-protocol.ts";
+import { isOpenStatus, openStatuses } from "./reconcile.ts";
 
 type UsageLimitRegistry = Pick<Registry, "appendEvent" | "claudeMessage" | "claudeWorker" | "storedThreads" | "thread">;
 
@@ -19,7 +20,7 @@ export function usageLimitResumer(options: { registry: UsageLimitRegistry; inbox
   const { registry, inbox, clock = Date.now, graceMs = defaultGraceMs } = options;
   const failures = logOnce(options.log);
   async function tick() {
-    for (const { id: thread } of registry.storedThreads({ status: ["active", "idle"] })) {
+    for (const { id: thread } of registry.storedThreads({ status: openStatuses })) {
       // Read again after the sends before it, which another thread's archive or continue may have outrun. From here to
       // the inbox fencing the request ID nothing awaits, so the stop and session it checks are the ones it sends for.
       const t = registry.thread(thread);
@@ -27,7 +28,7 @@ export function usageLimitResumer(options: { registry: UsageLimitRegistry; inbox
       const limit = t.usageLimit;
       const session = registry.claudeWorker(t.id)?.session ?? null;
       // A reset no later than the stop would stop the worker again at once, every pass. An archived thread's pylon stays paused until the person unarchives it, so the message would wake it.
-      if (limit === undefined || limit.resetsAt === null || limit.resetsAt <= limit.stoppedAt || clock() < limit.resetsAt + graceMs || (t.status !== "active" && t.status !== "idle") || session === null) continue;
+      if (limit === undefined || limit.resetsAt === null || limit.resetsAt <= limit.stoppedAt || clock() < limit.resetsAt + graceMs || !isOpenStatus(t.status) || session === null) continue;
       const id = `usage-limit:${session}:${limit.stoppedAt}`;
       if (registry.claudeMessage(t.id, id) !== undefined) continue;
       try {

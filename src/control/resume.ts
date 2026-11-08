@@ -22,6 +22,7 @@ import type { Thread } from "./thread-store.ts";
 import { requestIds, type ThreadId } from "../ids.ts";
 import type { PhaseKind } from "./review-model.ts";
 import { threadRole } from "./work-model.ts";
+import { isOpenStatus, openStatuses } from "./reconcile.ts";
 
 type ResumeRegistry = Pick<Registry, "agent" | "appendEvent" | "claudeResume" | "claudeTranscript" | "isReviewer" | "planning" | "resumedThreads" | "review" | "saveClaudeResume" | "storedThreads" | "thread">;
 
@@ -49,7 +50,7 @@ export function deadTurnResumer(options: {
   const { registry, inbox, personWroteTo, clock = Date.now, log = (message: string) => console.error(message) } = options;
 
   function covered(t: Thread): boolean {
-    if (t.status !== "active" && t.status !== "idle") return false;
+    if (!isOpenStatus(t.status)) return false;
     if (registry.agent(t).kind !== "claude" || threadRole(registry, t) !== "builder") return false;
     const phase = registry.review(t.id)?.phase.kind;
     if (phase === "needs-person") return false;
@@ -121,7 +122,7 @@ export function deadTurnResumer(options: {
 
   async function pass() {
     // A thread archived since its resume has its record cleared, so an unarchived one starts its count over.
-    const ids = new Set([...registry.storedThreads({ status: ["active", "idle"] }).map((t) => t.id), ...registry.resumedThreads()]);
+    const ids = new Set([...registry.storedThreads({ status: openStatuses }).map((t) => t.id), ...registry.resumedThreads()]);
     for (const id of ids) {
       // Read again after the passes before it, which another thread's sends may have outrun.
       const t = registry.thread(id as ThreadId);

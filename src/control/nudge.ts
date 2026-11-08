@@ -19,6 +19,7 @@ import { requestIds, type ThreadId } from "../ids.ts";
 import type { Nudge } from "./nudge-store.ts";
 import { deliverDurable } from "./durable-message.ts";
 import { prLocationOf, threadRole } from "./work-model.ts";
+import { isOpenStatus, openStatuses } from "./reconcile.ts";
 
 type NudgeRegistry = Pick<Registry, "isReviewer" | "node" | "nudge" | "nudgedThreads" | "outputs" | "planning" | "prWatch" | "project" | "pylon" | "review" | "saveNudge" | "storedThreads" | "thread">;
 
@@ -39,7 +40,7 @@ export function builderNudger(options: {
 
   /** The repository of a builder whose project reviews its pull requests on its own, or null for any other thread. */
   function builderRepo(t: Thread): string | null {
-    if (t.status !== "active" && t.status !== "idle") return null;
+    if (!isOpenStatus(t.status)) return null;
     if (threadRole(registry, t) !== "builder") return null;
     const project = registry.project(t.project);
     return project?.autoReview == null ? null : githubRepo(project.repoUrl);
@@ -127,7 +128,7 @@ export function builderNudger(options: {
 
   async function pass() {
     // A thread archived since its nudge has its record cleared, so an unarchived one starts its count over.
-    const ids = new Set([...registry.storedThreads({ status: ["active", "idle"] }).map((t) => t.id), ...registry.nudgedThreads()]);
+    const ids = new Set([...registry.storedThreads({ status: openStatuses }).map((t) => t.id), ...registry.nudgedThreads()]);
     for (const id of ids) {
       // Read again after the passes before it, which another thread's sends may have outrun.
       const t = registry.thread(id);

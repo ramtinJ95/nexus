@@ -23,6 +23,7 @@ import { checkStart, startKey } from "./threads.ts";
 import type { StartRequest } from "./start-request.ts";
 import type { ItemRecord } from "./pipeline-store.ts";
 import { brokenRule, itemRules } from "../contract/threads-parse.ts";
+import { isOpenStatus } from "./reconcile.ts";
 
 type PipelineRegistry = Pick<Registry, "attention" | "createThread" | "currentImage" | "isReviewer" | "item" | "items" | "latestHealthSample" | "needs" | "node" | "nodes" | "planning" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveItem" | "saveQueued" | "saveTemplate" | "startRequest" | "templates" | "thread">;
 
@@ -111,7 +112,7 @@ function startedPhase(registry: PipelineRegistry, t: Thread, review: Review | nu
   }
   const wait = waitOf(registry, id);
   if (wait.state === "landed") return phase("landed", wait.why);
-  if (t.status === "archived" || t.status === "deleted") return phase("archived", `its thread is ${t.status}`);
+  if (!isOpenStatus(t.status)) return phase("archived", `its thread is ${t.status}`);
   const attention = registry.attention(id);
   if (attention === "failed" || attention === "decision") return phase("held", attention === "failed" ? "its thread failed" : "its thread needs the person's decision");
   if (wait.state === "blocked") return phase("held", wait.why);

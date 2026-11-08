@@ -5,7 +5,7 @@
  */
 import { json, jsonOrNull, type Db, type Holding } from "./db.ts";
 import type { NodeName, ThreadId } from "../ids.ts";
-import type { ThreadStatus } from "./reconcile.ts";
+import { isOpenStatus, type ThreadStatus } from "./reconcile.ts";
 import { askQuestionId, askRecord, isOpen, type CleanupQuestion, type HoldsQuestion, type Question, type QuestionOf, type ThreadQuestion, type Unanswered, type WaitingAsk } from "./questions.ts";
 import type { DeleteOutcome } from "../protocol/cleanup.ts";
 import type { Need } from "./attention.ts";
@@ -90,7 +90,7 @@ export function questionStore(db: Db, clock: () => number, threadStatus: (id: Th
     setWaitingAsks(thread: ThreadId, asks: readonly WaitingAsk[]): boolean {
       return transaction(() => {
         const status = threadStatus(thread);
-        if (status === undefined || status === "archived" || status === "deleted") return false;
+        if (!isOpenStatus(status)) return false;
         sql("INSERT INTO waiting_asks (thread, report) VALUES (?, ?) ON CONFLICT (thread) DO UPDATE SET report = excluded.report").run(thread, JSON.stringify(asks));
         const changed = reconcileAsks(thread);
         updateAttention(thread);

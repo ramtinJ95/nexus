@@ -10,6 +10,7 @@ import { senders } from "./agent-protocol.ts";
 import { commentCap, pushedBranches, watchStopped } from "./pr-watch-model.ts";
 import { deliverDurable } from "./durable-message.ts";
 import { threadRole } from "./work-model.ts";
+import { isOpenStatus, openStatuses } from "./reconcile.ts";
 
 type PrWatchRegistry = Pick<Registry, "isReviewer" | "outputs" | "planning" | "prWatch" | "project" | "queuedThreads" | "savePrWatch" | "storedThreads" | "thread">;
 
@@ -23,7 +24,6 @@ export function summaryOf(body: string): string {
 const empty = (): PrWatchState => ({ links: [], commentWakes: 0, pending: null, error: null });
 /** An open PR the watch linked but has not read yet. */
 const unread = (repo: string, number: number): WatchedPr => ({ repo, number, title: "", url: "", state: "open", checks: "none", review: "none", conflict: null });
-const active = (t: Pick<Thread, "status"> | undefined) => t !== undefined && t.status !== "archived" && t.status !== "deleted";
 
 /**
  * `linked` hears of each PR the watch links that is open at its first read, before the link is saved, so a failed
@@ -37,7 +37,7 @@ export function prWatcher(options: {
   const { registry, github, inbox } = options;
   async function deliver(id: ThreadId, state: PrWatchState) {
     const t = registry.thread(id);
-    if (!active(t) || state.pending === null) return;
+    if (!isOpenStatus(t?.status) || state.pending === null) return;
     await deliverDurable(state.pending, (m) => inbox(t!, { ...m, sender: "pr-watch" }), () => {
       state.pending = null;
       registry.savePrWatch(id, state);
@@ -89,7 +89,7 @@ export function prWatcher(options: {
         }
       }
       // The watch's own pass reads an active thread's PRs unless its cap stopped it, so only that pass clears its error.
-      if (!active(registry.thread(t.id)) || watchStopped(saved)) saved.error = null;
+      if (!isOpenStatus(registry.thread(t.id)?.status) || watchStopped(saved)) saved.error = null;
       registry.savePrWatch(t.id, saved);
     }
     const failed = (id: ThreadId, error: string) => {
@@ -97,7 +97,7 @@ export function prWatcher(options: {
       saved.error = error;
       registry.savePrWatch(id, saved);
     };
-    const watched = registry.storedThreads({ status: ["active", "idle"] });
+    const watched = registry.storedThreads({ status: openStatuses });
     const waitedOn = [...awaited].filter((id) => !watched.some((t) => t.id === id)).flatMap((id) => registry.thread(id) ?? []);
     for (const t of [...watched, ...waitedOn]) {
       if (only !== null && !only.has(t.id)) continue;
@@ -107,7 +107,7 @@ export function prWatcher(options: {
       const settled = !awaited.has(t.id) || await settle(t).then(() => true, () => false);
       // Never include transport errors: a fetch implementation may put authorization headers in them.
       if (!settled) failed(t.id, "PR watch could not read the pull requests a queued thread waits for; it will retry.");
-      if (!active(t)) continue;
+      if (!isOpenStatus(t.status)) continue;
       const state = registry.prWatch(t.id) ?? empty();
       try {
         if (state.pending) { await deliver(t.id, state); continue; }
@@ -151,7 +151,7 @@ export function prWatcher(options: {
           if (events.length) news.push(`#${link.pr.number} ${link.pr.title} — ${link.pr.url}\n${events.join("\n\n")}`);
         }
         // An archive can race any GitHub await. Keep the cursor unchanged until the thread is eligible again.
-        if (!active(registry.thread(t.id))) continue;
+        if (!isOpenStatus(registry.thread(t.id)?.status)) continue;
         for (const pr of fresh) await options.linked?.(registry.thread(t.id)!, pr);
         if (settled) state.error = null;
         if (news.length) {
@@ -177,7 +177,7 @@ export function prWatcher(options: {
   /** Reads thread `id`'s pull requests now rather than at the next poll, as after its turn ended. */
   function turnEnded(id: ThreadId): Promise<void> {
     const t = registry.thread(id);
-    if (closed || github === null || !active(t) || threadRole(registry, t!) === "reviewer") return Promise.resolve();
+    if (closed || github === null || !isOpenStatus(t?.status) || threadRole(registry, t!) === "reviewer") return Promise.resolve();
     // The poll still reads branches a failed read missed.
     const run = (options.fresh?.(t!) ?? Promise.resolve()).catch(() => undefined).then(() => closed ? undefined : ticks.wake(id));
     ending.add(run);
