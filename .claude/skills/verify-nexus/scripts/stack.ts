@@ -180,7 +180,7 @@ closers.push(() => controlPlane.close());
 // One project on the node, through the API.
 const project: Project = {
   id: "spoon" as ProjectId, repoUrl: "https://github.com/octocat/Spoon-Knife.git", defaultBranch: "main", defaultNode: node,
-  resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
+  resources: { cpus: 1, memoryGiB: 3, diskGiB: 1 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
 };
 await call("POST", "/v1/projects", project);
 
