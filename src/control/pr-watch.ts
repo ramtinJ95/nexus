@@ -8,6 +8,7 @@ import { wasRead, type PrWatchState, type WatchedPr } from "./pr-watch-store.ts"
 import { scopedFlight } from "../single-flight.ts";
 import { prWatchPrefix } from "./agent-protocol.ts";
 import { commentCap, pushedBranches, watchStopped } from "./pr-watch-model.ts";
+import { deliverDurable } from "./durable-message.ts";
 
 type PrWatchRegistry = Pick<Registry, "isReviewer" | "outputs" | "prWatch" | "project" | "queuedThreads" | "savePrWatch" | "storedThreads" | "thread">;
 
@@ -36,9 +37,10 @@ export function prWatcher(options: {
   async function deliver(id: ThreadId, state: PrWatchState) {
     const t = registry.thread(id);
     if (!active(t) || state.pending === null) return;
-    if (await inbox(t!, { ...state.pending, sender: "pr-watch" }) === "later") return;
-    state.pending = null;
-    registry.savePrWatch(id, state);
+    await deliverDurable(state.pending, (m) => inbox(t!, { ...m, sender: "pr-watch" }), () => {
+      state.pending = null;
+      registry.savePrWatch(id, state);
+    });
   }
   let started = 0;
   let finished = 0;

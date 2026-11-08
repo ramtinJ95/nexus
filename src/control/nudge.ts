@@ -17,6 +17,7 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import { requestIds, type ThreadId } from "../ids.ts";
 import type { Nudge } from "./nudge-store.ts";
+import { deliverDurable } from "./durable-message.ts";
 
 type NudgeRegistry = Pick<Registry, "isReviewer" | "node" | "nudge" | "nudgedThreads" | "outputs" | "planning" | "prWatch" | "project" | "pylon" | "review" | "saveNudge" | "storedThreads" | "thread">;
 
@@ -119,9 +120,8 @@ export function builderNudger(options: {
     await deliver(fresh, sending);
   }
 
-  /** A send the inbox could not take yet stays saved, so the next pass sends it again under the same request ID. */
   async function deliver(t: Thread, { turn, count }: Extract<Nudge, { state: "sending" }>) {
-    if (await inbox(t, { id: requestIds.nudge(t.id, turn), text, sender: "nudge" }) === "delivered") registry.saveNudge(t.id, { state: "nudged", turn, count });
+    await deliverDurable({ id: requestIds.nudge(t.id, turn), text }, (m) => inbox(t, { ...m, sender: "nudge" }), () => registry.saveNudge(t.id, { state: "nudged", turn, count }));
   }
 
   async function pass() {
