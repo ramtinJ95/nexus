@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { maxServiceLogLines } from "../guest-contract.ts";
+import type { ServiceFact } from "../protocol/observations.ts";
 import { previewText, serviceDecl, serviceName } from "../services-file.ts";
 import { kinds } from "./instance-layout.ts";
 
@@ -130,6 +131,12 @@ export const actionSchema = z.discriminatedUnion("action", [
 	}),
 	z.strictObject({ action: z.literal("start"), ...identity, boot: bootSchema }),
 	z.strictObject({ action: z.enum(["stop", "inspect"]), ...identity }),
+	/** A failed boot's stop, which may end the controller's process group (FORK.md). The client runs it, never the controller. */
+	z.strictObject({ action: z.literal("retry-stop"), ...identity }),
+	/** Finishes the retry stop a crash or failure cut short, if one is journaled, so no caller reuses or relaunches its controller. The client runs it. */
+	z.strictObject({ action: z.literal("finish-retry-stop"), ...identity }),
+	/** The status the instance's controller last recorded, read without asking it. The client answers it, never the controller. */
+	z.strictObject({ action: z.literal("recorded"), ...identity }),
 	z.strictObject({
 		action: z.literal("shell"),
 		...identity,
@@ -256,9 +263,68 @@ export const replySchema = z.discriminatedUnion("ok", [
 	z.object({ ok: z.literal(true), result: z.unknown() }),
 	z.object({ ok: z.literal(false), error: z.string() }),
 ]);
-/** What inspect answers for one instance or template build, and list for each. */
-export const inspectionSchema = z.object({ name: z.string(), labels, status: statusSchema });
+/** What inspect answers for one instance or template build, and list for each. The fields Nexus does not read pass through. */
+export const inspectionSchema = z.looseObject({ name: z.string(), labels, status: statusSchema });
 export type Inspection = z.infer<typeof inspectionSchema>;
+const execReply = z.object({
+	pid: z.string(),
+	running: z.boolean(),
+	output: z.string(),
+	exitCode: z.number().int().optional(),
+	truncated: z.boolean().optional(),
+});
+const serviceFacts = z.array(z.strictObject({
+	name: z.string(),
+	state: z.enum(["starting", "ready", "failed", "stopped"]),
+	port: z.number().int(),
+	declared: z.boolean(),
+	wantsPreview: z.boolean(),
+	unrouted: z.string().exactOptional(),
+})) satisfies z.ZodType<ServiceFact[]>;
+/** Nexus reads nothing of the reply. */
+const ignored = z.unknown();
+/**
+ * Each action's reply, which `run` parses, and whether the controller runs it beside its lifecycle queue: one that
+ * waits on a process, only reads, or touches only the host, so that it never waits behind the queue. The client answers
+ * list, retry-stop, finish-retry-stop and recorded itself and never sends them, so no controller runs them.
+ */
+export const actions = {
+	list: { reply: z.array(inspectionSchema), beside: false },
+	prepare: { reply: ignored, beside: false },
+	create: { reply: ignored, beside: false },
+	start: { reply: ignored, beside: false },
+	stop: { reply: ignored, beside: false },
+	"retry-stop": { reply: ignored, beside: false },
+	"finish-retry-stop": { reply: ignored, beside: false },
+	recorded: { reply: z.object({ status: statusSchema }), beside: false },
+	inspect: { reply: inspectionSchema, beside: true },
+	/** The guest's sshd on a loopback port, and the key it lets in. */
+	shell: { reply: z.looseObject({ access: z.strictObject({ user: z.string(), port: z.number().int(), identityFile: z.string() }) }), beside: false },
+	destroy: { reply: ignored, beside: false },
+	exec: { reply: execReply, beside: true },
+	"exec-status": { reply: execReply, beside: true },
+	"exec-kill": { reply: ignored, beside: true },
+	"write-files": { reply: ignored, beside: true },
+	services: { reply: serviceFacts, beside: false },
+	"service-start": { reply: serviceFacts, beside: false },
+	"public-urls": { reply: ignored, beside: false },
+	preview: { reply: z.object({ service: z.string() }), beside: false },
+	unpreview: { reply: z.object({ refused: z.string().nullable() }), beside: false },
+	logs: { reply: z.looseObject({ output: z.string() }), beside: true },
+	"update-secret": { reply: ignored, beside: true },
+} as const satisfies Record<Action["action"], { reply: z.ZodType; beside: boolean }>;
+type Frozen<T> = T extends readonly (infer U)[] ? readonly Frozen<U>[] : T extends object ? { readonly [K in keyof T]: Frozen<T[K]> } : T;
+/** An action as `run` takes it, before its defaults. `run` never changes it, so readonly arrays pass. */
+export type ActionInput = Frozen<z.input<typeof actionSchema>>;
+export type Reply<A extends Action["action"]> = z.infer<(typeof actions)[A]["reply"]>;
+/**
+ * The shapes of Gondolin's placeholders for a secret, which the guest sees in place of its value (network.ts), in each
+ * of its modes: `shared`, its default, a marker the boot's secrets share followed by the secret's name, and `unique`.
+ */
+export const secretPlaceholderShapes = {
+	shared: /\b[0-9a-f]{48}(?=\.[a-z0-9_-]+)/,
+	unique: /(GONDOLIN_SECRET_)[0-9a-f]{16,}/,
+};
 /** The label naming the image an instance or template build was created from. */
 export const imageLabel = "nexus.image";
 /**

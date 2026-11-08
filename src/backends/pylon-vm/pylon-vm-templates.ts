@@ -8,16 +8,14 @@
 import { constants } from "node:fs";
 import { copyFile } from "node:fs/promises";
 import { join } from "node:path";
-import { z } from "zod";
 import { refuseShortDisk } from "../../disk-space.ts";
 import { JobFailure } from "../../protocol/jobs.ts";
 import type { ArtifactDirectory } from "../../image/artifacts.ts";
 import type { TemplateManifest } from "../../protocol/images.ts";
 import type { ImageId, TemplateId } from "../../ids.ts";
-import { run } from "../../pylon-vm/client.ts";
-import { imageLabel, inspectionSchema, settled, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
+import { imageLabel, settled, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
 import { directory, instanceFiles } from "../../pylon-vm/instance-layout.ts";
-import { controllerLogTail } from "./pylon-guest.ts";
+import { controllerLogTail, type Sandbox } from "./pylon-guest.ts";
 
 const diskFile = "disk.qcow2";
 
@@ -29,10 +27,10 @@ interface TemplatePrepare {
 }
 
 /** A failed setup, the 20-minute limit included, is setup-failed with the controller log's tail, and publishes nothing. */
-export async function buildTemplate(stateRoot: string, store: ArtifactDirectory, prepare: TemplatePrepare, signal: AbortSignal): Promise<void> {
+export async function buildTemplate(stateRoot: string, sandbox: Sandbox, store: ArtifactDirectory, prepare: TemplatePrepare, signal: AbortSignal): Promise<void> {
   const name = prepare.manifest.id;
   const dir = directory(stateRoot, "templates", name);
-  const destroy = () => run(stateRoot, { action: "destroy", kind: "templates", name, confirm: name });
+  const destroy = () => sandbox({ action: "destroy", kind: "templates", name, confirm: name });
   let failure: unknown = null;
   for (let attempts = 0; ; attempts++) {
     if (await store.manifest(name) !== null) {
@@ -40,7 +38,7 @@ export async function buildTemplate(stateRoot: string, store: ArtifactDirectory,
       await destroy();
       return;
     }
-    const found = await settled(async () => (await builds(stateRoot)).find((b) => b.name === name) ?? null, ["starting", "unavailable"], signal);
+    const found = await settled(async () => (await builds(sandbox)).find((b) => b.name === name) ?? null, ["starting", "unavailable"], signal);
     if (found?.status.state === "prepared") {
       await store.publish(name, async (into) => { await copyFile(instanceFiles(dir).disk, join(into, diskFile), constants.COPYFILE_FICLONE); return { ...prepare.manifest, builtAt: new Date().toISOString() }; }, signal);
       continue;
@@ -59,7 +57,7 @@ export async function buildTemplate(stateRoot: string, store: ArtifactDirectory,
     // Only here, so a replay that publishes or sweeps what an earlier build left is never refused.
     await refuseShortDisk(stateRoot, prepare.config.diskGiB);
     try {
-      await run(stateRoot, { action: "prepare", name, config: prepare.config, boot: prepare.boot, labels: { [imageLabel]: prepare.manifest.key.image } }, signal);
+      await sandbox({ action: "prepare", name, config: prepare.config, boot: prepare.boot, labels: { [imageLabel]: prepare.manifest.key.image } }, signal);
     } catch (err) {
       if (signal.aborted) throw err;
       failure = err; // the build's state on disk says what happened, on the next pass
@@ -76,8 +74,8 @@ export async function templateDisk(store: ArtifactDirectory, template: TemplateI
 }
 
 /** Template builds that are booted from `image` and not yet published or destroyed. */
-export async function buildsFrom(stateRoot: string, image: ImageId): Promise<string[]> {
-  return (await builds(stateRoot)).filter((b) => b.labels[imageLabel] === image).map((b) => `template build ${b.name}`);
+export async function buildsFrom(sandbox: Sandbox, image: ImageId): Promise<string[]> {
+  return (await builds(sandbox)).filter((b) => b.labels[imageLabel] === image).map((b) => `template build ${b.name}`);
 }
 
-const builds = async (stateRoot: string): Promise<Inspection[]> => z.array(inspectionSchema).parse(await run(stateRoot, { action: "list", kind: "templates" }));
+const builds = (sandbox: Sandbox): Promise<Inspection[]> => sandbox({ action: "list", kind: "templates" });

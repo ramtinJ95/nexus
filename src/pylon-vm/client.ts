@@ -20,8 +20,11 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
 	type Action,
+	type ActionInput,
+	actions,
 	actionSchema,
 	type BootSpec,
+	type Reply,
 	replySchema,
 	statusSchema,
 } from "./contracts.ts";
@@ -457,12 +460,16 @@ async function create(
 		);
 	}
 }
-export async function run(
+/** Runs one action, and parses its reply with the action's schema in `actions` in contracts.ts. */
+export async function run<I extends ActionInput>(
 	root: string,
-	input: unknown,
+	input: I,
 	signal?: AbortSignal,
-): Promise<unknown> {
+): Promise<Reply<I["action"]>> {
 	const action = actionSchema.parse(input);
+	return actions[action.action].reply.parse(await dispatch(root, action, signal)) as Reply<I["action"]>;
+}
+async function dispatch(root: string, action: Action, signal?: AbortSignal): Promise<unknown> {
 	await privateRoot(root);
 	if (action.action === "create" || action.action === "prepare")
 		return create(root, action, signal);
@@ -530,7 +537,10 @@ export async function run(
 		});
 		return { name: action.name, state: "destroyed" };
 	}
+	if (action.action === "finish-retry-stop" && !existsSync(instanceFiles(dir).retryStop)) return null;
+	if (action.action === "recorded") return { status: statusSchema.parse(JSON.parse(await readFile(instanceFiles(dir).status, "utf8"))) };
 	await readRecord(dir);
+	if (action.action === "retry-stop" || action.action === "finish-retry-stop") return stopForRetry(root, action.name, signal);
 	if (action.action === "logs" && !action.service) {
 		return {
 			name: action.name,
@@ -546,11 +556,9 @@ export async function run(
 	throw new Error(`${action.name} is not running. Use start first`);
 }
 /** Stop gets 30 s; group termination then gets 10 s before SIGKILL and 10 s to confirm exit. */
-export async function stopForRetry(root: string, name: string, signal: AbortSignal): Promise<void> {
-	await privateRoot(root);
+async function stopForRetry(root: string, name: string, signal?: AbortSignal): Promise<void> {
 	const dir = directory(root, "instances", name);
-	await readRecord(dir);
-	signal.throwIfAborted();
+	signal?.throwIfAborted();
 	const lock = instanceFiles(dir).launchLock;
 	const release = await holdLock(lock);
 	if (release === null) throw new Error("Sandbox start or recovery is already in progress. Retry stop shortly");
@@ -581,7 +589,7 @@ export async function stopForRetry(root: string, name: string, signal: AbortSign
 				throw new Error("The controller changed during retry stop; refusing to stop another boot");
 		}
 		try {
-			const reply = await send(dir, { action: "stop", name }, AbortSignal.any([signal, AbortSignal.timeout(30_000)]));
+			const reply = await send(dir, { action: "stop", name }, signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000));
 			if (reply === absent && owner === null) await settle(dir);
 		} catch (error) {
 			if (owner === null) throw error;
