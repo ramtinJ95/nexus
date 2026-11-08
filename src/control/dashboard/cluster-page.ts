@@ -161,6 +161,7 @@ ${health.pylons === null ? html`<p class="empty">This node's backend does not sa
   return layout(c, {
     title: `Cluster: ${name}`,
     nav: "cluster",
+    page: "cluster",
     main: html`<header class="bar">${menu}<div class="crumb"><a class="crumb-p" href="/cluster">Cluster</a><span class="sep" aria-hidden="true">/</span><h1>${name}</h1></div></header>
 <div class="scroll"><div class="page page-cluster"><section class="cluster" id="cluster-nodes" aria-label="Nodes" data-live>
 <div class="ov-head"><h2>Nodes</h2><span class="count">${nodes.length}</span><span class="dim">Desired release ${view.release.desired?.commit.slice(0, 12) ?? "manual"}</span></div>

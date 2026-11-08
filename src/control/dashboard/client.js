@@ -5,15 +5,15 @@
 // each changed file's diff as a tab beside the conversation.
 import { coordinator, notificationChannel, noticeText, noticeUrl } from "./notifications.js";
 import { api } from "./request.js";
-import { el, end, follow, pollMs, recordVisit, refreshNow, stream, tick, toggled } from "./page.js";
+import { el, end, follow, main, pollMs, recordVisit, refreshNow, stream, tick, toggled } from "./page.js";
 import { paneKey, pickPane, setOpen } from "./nav.js";
 import { dialog, openProject, openStart, projectDialog } from "./dialogs.js";
 import { activeTab, canRead, changesPane, changesUnreadable, checkout, factsNow, readChanges, renderTabs, showTab, tabsBar, terminalTab } from "./checkout.js";
 import "./composer.js";
 import "./actions.js";
 import { startRows } from "./rows.js";
-// The home page's preview and its two sides, which no other page has.
-if (document.getElementById("split") !== null) void import("./home.js");
+import { pageModules } from "./pages.js";
+void pageModules[main?.dataset.page]?.();
 
 for (const d of document.querySelectorAll("details[id]")) if (toggled.has(d.id)) d.open = toggled.get(d.id);
 const savedPane = localStorage.getItem(paneKey);
@@ -35,12 +35,6 @@ const writeTo = () => {
 writeTo();
 addEventListener("hashchange", writeTo);
 if (location.hash === "#terminal" && tabsBar?.querySelector('[data-tab="term"]')?.hidden === false) showTab(terminalTab);
-// The Cluster page's cards and its node's graphs, which bring uPlot, are chunks no other page needs.
-if (document.getElementById("cluster-nodes") !== null) {
-  void import("./node-cards.js");
-  void import("./node-switch.js");
-  void import("./node-graphs.js");
-}
 if (dialog?.dataset.autoopen !== undefined) void openStart(null);
 if (projectDialog?.dataset.autoopen !== undefined) openProject();
 setInterval(tick, 1000);

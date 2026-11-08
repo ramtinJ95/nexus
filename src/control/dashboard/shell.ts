@@ -13,6 +13,7 @@ import type { Status } from "../doctor-model.ts";
 import { span } from "./elapsed.ts";
 import { themeScript, Html, html, dot, icon, clonedIcons, menu, threadState, dims, workingFor, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
+import type { Page } from "./contract.ts";
 import { assetUrl } from "./assets.ts";
 import { problemsText } from "../plain-wording.ts";
 import { tickMs } from "../loop.ts";
@@ -30,6 +31,8 @@ export interface Shell {
   active?: ThreadId;
   /** The sidebar's link to mark as the open page. */
   nav?: "usage" | "cluster" | "health";
+  /** The page whose own modules client.js loads. */
+  page?: Page;
   main: Html;
   inspector?: Html;
   /** The thread whose visits count as human activity: an open thread's page. */
@@ -56,7 +59,7 @@ export function layout(c: Context, page: Shell): Html {
 <body>
 <div class="app${page.inspector !== undefined && " has-inspect"}">
 ${sidebar(c, page.active, page.nav)}
-<main class="main" data-poll-ms="${pollMs}"${page.activity !== undefined && html` data-activity="${page.activity}"`}>
+<main class="main" data-poll-ms="${pollMs}"${page.page !== undefined && html` data-page="${page.page}"`}${page.activity !== undefined && html` data-activity="${page.activity}"`}>
 ${page.main}
 </main>
 ${page.inspector}
