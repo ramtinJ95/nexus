@@ -72,9 +72,11 @@ export interface ReviewDeps {
   agentState(t: Thread, since: number): Promise<AgentState>;
   /** The builder's brief, its first message, or null when it has none (agent-conversation.ts). */
   brief(t: Thread): Promise<string | null>;
-  checks: CheckRuns;
-  /** The live check's runs, in verify pylons. */
-  live: CheckRuns;
+  /** The check runs, and the live check's in verify pylons. Each tells `ended` of a run that ended, so the review waiting on it steps at once. */
+  runs(ended: (thread: ThreadId) => void): { checks: CheckRuns; live: CheckRuns };
+  startThread(request: StartRequest, caller: string): Promise<Thread>;
+  /** The model the harness runs every thread on. */
+  harnessModel: string;
   /** The control plane's own node, for the release view, and the repository its releases come from. */
   release: { self: string | undefined; repo: string };
   /** Whether `caller` may land, which takes the right to deploy. A landing asks again before every merge. */
@@ -166,11 +168,14 @@ export function secondReviewerFor(taken: readonly string[], secrets: readonly Se
   return model === undefined ? { why: `every Claude model Nexus offers a second reviewer, ${secondReviewerModels.join(", ")}, is the builder's or the first reviewer's` } : { model };
 }
 
-export function reviewLoop(deps: ReviewDeps & { startThread(request: StartRequest, caller: string): Promise<Thread>; harnessModel: string }) {
-  const { registry, github, inbox, agentState, checks, live, release, log } = deps;
+export function reviewLoop(deps: ReviewDeps) {
+  const { registry, github, inbox, agentState, release, log } = deps;
   const now = deps.now ?? Date.now;
   const passes = scopedFlight(pass);
   let closed = false;
+  // A check's stream can end after close, and its wake then finds the registry closed.
+  const wake = (id: ThreadId) => closed ? Promise.resolve() : passes.wake(id);
+  const { checks, live } = deps.runs((id) => void wake(id));
   const poll = passes.poll;
 
   /** Each PR as GitHub said it in this pass, which a step reads rather than GitHub again. A landing reads it afresh. */
@@ -1000,8 +1005,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   return {
     poll,
     /** Steps the reviews thread `id` takes part in now rather than at the next poll, as after its turn or its check ended. */
-    // A check's stream can end after close, and its wake then finds the registry closed.
-    wake: (id: ThreadId) => closed ? Promise.resolve() : passes.wake(id),
+    wake,
     deploys,
     async close() {
       closed = true;

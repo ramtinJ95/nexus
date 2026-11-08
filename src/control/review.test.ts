@@ -141,27 +141,29 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       ...heard(target, registry.agent(target).kind === "claude" ? registry.claudeEntries(target.id) : null, since),
       replies: replies.get(target.id) ?? [], failure: failures.get(target.id) ?? null,
     })),
-    checks: {
-      async start(_, __, head, ifRoom) {
-        if (checkStartFails) throw new Error("no node took the check pylon");
-        if (checkRefused !== null) return { refused: checkRefused };
-        if (ifRoom && !checkRoom) return { refused: "no node has room for this pylon: node is overcommitted" };
-        checkIfRoom.push(ifRoom === true);
-        const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); checkHeads.push(head); return { thread: id };
+    runs: () => ({
+      checks: {
+        async start(_, __, head, ifRoom) {
+          if (checkStartFails) throw new Error("no node took the check pylon");
+          if (checkRefused !== null) return { refused: checkRefused };
+          if (ifRoom && !checkRoom) return { refused: "no node has room for this pylon: node is overcommitted" };
+          checkIfRoom.push(ifRoom === true);
+          const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); checkHeads.push(head); return { thread: id };
+        },
+        step: (id) => { steps.push(id); return forgotten.has(id) ? { kind: "void" } : check; },
+        result: (id) => forgotten.has(id) || check.kind !== "done" ? null : check,
+        discard(id) { discarded.push(id); registry.setThreadStatus(id, "deleted"); },
       },
-      step: (id) => { steps.push(id); return forgotten.has(id) ? { kind: "void" } : check; },
-      result: (id) => forgotten.has(id) || check.kind !== "done" ? null : check,
-      discard(id) { discarded.push(id); registry.setThreadStatus(id, "deleted"); },
-    },
-    live: {
-      async start() {
-        if (refuse !== null) return { refused: refuse };
-        const id = add(`th-verify-${liveThreads.length + 1}`, false, verifyCaller); liveThreads.push(id); return { thread: id };
+      live: {
+        async start() {
+          if (refuse !== null) return { refused: refuse };
+          const id = add(`th-verify-${liveThreads.length + 1}`, false, verifyCaller); liveThreads.push(id); return { thread: id };
+        },
+        step: () => live,
+        result: () => live.kind === "done" ? live : null,
+        discard(id) { archived.push(id); registry.setThreadStatus(id, "archived"); },
       },
-      step: () => live,
-      result: () => live.kind === "done" ? live : null,
-      discard(id) { archived.push(id); registry.setThreadStatus(id, "archived"); },
-    },
+    }),
     release: { self, repo: "ramtinJ95/nexus" },
     mayLand: (caller) => deployers.has(caller),
     wake: (target) => { woken.push(target.id); },
