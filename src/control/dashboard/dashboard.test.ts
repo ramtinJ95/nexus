@@ -257,7 +257,7 @@ test("a review the person cancelled says which thread they archived, and asks no
   const fix = await s.start("acme", "Fix checkout");
   s.registry.saveReview(testReview({ builder: fix.id, phase: { kind: "cancelled", who: "reviewer", status: "archived" } }));
   const page = textOf((await s.call("GET", `/threads/${fix.id}`)).text);
-  assert.match(page, /Nexus review rv-1: cancelled, round 1 of 5, by th-reviewer on gpt-6-astra, the reviewer thread th-reviewer was archived/);
+  assert.match(page, /Nexus review rv-1 of PR #7: cancelled, round 1 of 5, reviewer th-reviewer on gpt-6-astra, the reviewer thread th-reviewer was archived/);
 });
 
 test("a running review's line offers to cancel it behind a confirm, and one that ended or began deploying offers nothing", async (t) => {
@@ -272,7 +272,7 @@ test("a running review's line offers to cancel it behind a confirm, and one that
     assert.doesNotMatch((await s.call("GET", `/threads/${fix.id}`)).text, /data-action="cancel-review"/, phase.kind);
   }
   s.registry.saveReview({ ...review, phase: { kind: "cancelled", who: "person", by: "nPHONE" } });
-  assert.match(textOf((await s.call("GET", `/threads/${fix.id}`)).text), /Nexus review rv-1: cancelled, round 1 of 5, by th-reviewer on gpt-6-astra, cancelled by nPHONE/);
+  assert.match(textOf((await s.call("GET", `/threads/${fix.id}`)).text), /Nexus review rv-1 of PR #7: cancelled, round 1 of 5, reviewer th-reviewer on gpt-6-astra, cancelled by nPHONE/);
 });
 
 const phone = "nPHONE" as TailnetNodeId;
@@ -523,7 +523,7 @@ test("a held review whose PR the watch read at a new head offers no Land for the
 
   s.registry.saveReview({ ...held, rounds: [...held.rounds, { head: moved, verdict: null, check: null, answers: null }], phase: { kind: "reviewing" } });
   const page = textOf((await s.call("GET", `/threads/${fix.id}`)).text);
-  assert.match(page, new RegExp(`Nexus review rv-1: reviewing, round 3 of 5, .* a new round reviews ${moved.slice(0, 12)}, since the pull request's head moved from ${head.slice(0, 12)} after its approval`));
+  assert.match(page, new RegExp(`Nexus review rv-1 of PR #7: reviewing, round 3 of 5, .* a new round reviews ${moved.slice(0, 12)}, since the pull request's head moved from ${head.slice(0, 12)} after its approval`));
 });
 
 test("a hold the policy reserves for the person is marked waivable, and pressing Land waives it", async (t) => {
@@ -609,14 +609,14 @@ test("Needs you lists, oldest first, each held review, open question and ask, an
   for (const c of cards) assert.match(c.html, new RegExp(`<a class="need-thread" href="/threads/${c.thread}"[ >]`), "each card links its thread");
 
   const land = cards[0]!;
-  assert.match(land.text, /^Held review acme \/ Cache the list just now Planned Queued Building In review held for you Landing Deployed #7 round 2 of 5 .* Open thread Caches the thread list between polls\. Not checked live The cache's behaviour under load could not be checked live\. Head /);
+  assert.match(land.text, /^Review needs you acme \/ Cache the list just now Planned Queued Building In review held for you Landing Deployed #7 round 2 of 5 .* Open thread Caches the thread list between polls\. Not checked live The cache's behaviour under load could not be checked live\. Head /);
   assert.match(land.text, /pending\. not waivable .* src\/control\/api\.ts\. you may waive /);
   const button = /<button [^>]*data-action="land"[^>]*>/.exec(land.html)![0];
   assert.match(button, new RegExp(`id="land-${held.id}" data-action="land" data-thread="${held.id}" data-head="${head}"`), "the thread page's Land button, under an ID of the card's own");
   assert.deepEqual(JSON.parse(textOf(/data-holds="([^"]*)"/.exec(button)![1]!)), [reserved], "it waives what the thread page's would");
   assert.ok(!/id="(land|landing-h|land-why)"/.test(page), "no card takes the thread page's IDs");
 
-  assert.match(cards[1]!.text, /^Question acme \/ Rebuild the image .* Needs your decision Rebuild the pylon image\? .* Rebuild Not now$/);
+  assert.match(cards[1]!.text, /^Needs your decision acme \/ Rebuild the image .* Needs your decision Rebuild the pylon image\? .* Rebuild Not now$/);
   assert.match(cards[1]!.html, /data-action="answer" data-thread="[^"]+" data-question="qn-image" data-option="Rebuild"/);
   assert.match(cards[2]!.html, new RegExp(`<form class="ask" data-thread="${claude.id}" data-question="ask-toolu_1">`), "an ask is the thread page's form");
   const by = (thread: ThreadId) => cards.find((c) => c.thread === thread)!;
@@ -660,7 +660,7 @@ test("a thread in Needs you has its call to action once, in its card, with where
     assert.match(flight, new RegExp(`<a class="fl-row" href="/\\?peek=${thread.id}" data-peek="${thread.id}" aria-current="true">`), "its line leads to its card");
   }
   const land = needsOf((await s.call("GET", `/?peek=${held.id}`)).text).cards.find((c) => c.thread === held.id)!;
-  assert.match(land.text, /^Held review acme \/ Cache the list just now Planned Queued Building In review held for you Landing Deployed #7 round 2 of 5 .* Open thread Latest reply (.* )?Opened #7\. It waits for you to land\. Caches the thread list\./, "the strip has the pull request, its round and the latest reply in a line");
+  assert.match(land.text, /^Review needs you acme \/ Cache the list just now Planned Queued Building In review held for you Landing Deployed #7 round 2 of 5 .* Open thread Latest reply (.* )?Opened #7\. It waits for you to land\. Caches the thread list\./, "the strip has the pull request, its round and the latest reply in a line");
   assert.doesNotMatch(land.text, /#7 Cache|Held for you/, "nor names the pull request again under a title of its own");
   assert.equal(land.text.match(/Not checked live/g)!.length, 1);
   assert.match(land.html, /<details id="land-why-[^"]+"><summary>Findings and checks<\/summary>/, "the findings and checks are folded");
@@ -819,7 +819,7 @@ test("every source of a thread's decision has a card on its page with the action
   const after = (await s.call("GET", `/threads/${silent.id}`)).text;
   assert.notEqual(chipOf(after), "needs your decision");
   assert.equal(actionsOf(dockOf(after)).length, 0, "a cancelled review has no card");
-  assert.match(textOf(after), /Nexus review rv-1: cancelled, round 1 of 5, .* cancelled by nLAPTOP/);
+  assert.match(textOf(after), /Nexus review rv-1 of PR #7: cancelled, round 1 of 5, .* cancelled by nLAPTOP/);
   assert.equal(needsCount((await s.call("GET", "/")).text), String(sources.length - 1));
 });
 
@@ -850,7 +850,7 @@ test("a held review waits from when it was held, not from when its review last m
   s.registry.saveReview({ ...review, phase: { ...review.phase, label: { state: "added" } } as Review["phase"] });
   const { cards } = needsOf((await s.call("GET", "/")).text);
   assert.deepEqual(cards.map((c) => c.thread), [asked.id, held.id], "the label added after it was held does not date it again");
-  assert.match(cards[1]!.text, /^Held review acme \/ Cache the list just now /);
+  assert.match(cards[1]!.text, /^Review needs you acme \/ Cache the list just now /);
 });
 
 test("acting on a card through the route its button calls takes the card off the list and the count down", async (t) => {
@@ -1036,7 +1036,7 @@ test("a running pylon whose node reports its guest not answering says so in its 
   assert.deepEqual((JSON.parse((await s.call("GET", `/v1/threads/${fix.id}`)).text) as ThreadDetail).pylon.notAnswering, { since, timeouts: 5 });
   const page = textOf((await s.call("GET", `/threads/${fix.id}`)).text);
   assert.match(page, /The pylon's guest has not answered its commands since 3 min ago ?, so a message may fail\. Archive and unarchive the thread to give it a fresh VM\. If the guest does not answer the pause either, the changes since its last saved disk are lost, so push or copy what you can first\./);
-  assert.match(page, /The guest has not answered its last 5 commands, since 3 min ago ?\./);
+  assert.match(page, /The guest has not answered its last 5 commands, since 3 min ago ?\. Archive and unarchive the thread to give it a fresh VM\. If the guest does not answer the pause either, the changes since its last saved disk are lost, so push or copy what you can first\./);
   report();
   assert.equal("notAnswering" in (JSON.parse((await s.call("GET", `/v1/threads/${fix.id}`)).text) as ThreadDetail).pylon, false);
   assert.doesNotMatch(textOf((await s.call("GET", `/threads/${fix.id}`)).text), /has not answered/);
@@ -2935,7 +2935,7 @@ test("Needs you lists an approval the project leaves to the person to land, with
   s.registry.saveReview(approvedReview(fix.id, { kind: "approved" }, { auto: true }));
   const { cards } = needsOf((await s.call("GET", "/")).text);
   assert.deepEqual(cards.map((c) => [c.kind, c.thread, c.attention]), [["review", fix.id, "decision"]], "the approval waits on the person");
-  assert.match(cards[0]!.text, /^Approved review acme \/ Cache the list /);
+  assert.match(cards[0]!.text, /^Approved, yours to land acme \/ Cache the list /);
   assert.match(cards[0]!.html, new RegExp(`data-action="land" data-thread="${fix.id}" data-head="${head}"`));
 
   s.registry.saveReview(approvedReview(fix.id, { kind: "landed", commit: "m".repeat(40) }, { auto: true, merged: "m".repeat(40) }));

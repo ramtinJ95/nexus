@@ -8,7 +8,7 @@ what differs from pages/index.html:
 -<details class="need-fold" id="fold-need-th-cert-thread">
 +<article class="need need-thread picked" id="need-th-cert-thread" data-thread="th-cert" data-attention="failed" tabindex="-1" aria-label="Failed: Fix doctor&#39;s certificate check">
 +<details class="need-fold" id="fold-need-th-cert-thread" open>
- <summary class="need-sum" data-why="pylon is broken: the controller exited">
+ <summary class="need-sum" data-why="The planner gave up on its pylon: pylon is broken: the controller exited">
  <svg class="i i-chevron" viewBox="0 0 16 16" aria-hidden="true">
  <path d="M6 4l4 4-4 4"/>
 @@ -2357,7 +2357,7 @@ Land waives these at e0e0e0e0e0e0, and at a rebase of it that leaves the change

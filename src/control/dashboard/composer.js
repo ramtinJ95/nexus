@@ -1,5 +1,6 @@
 // The thread's composer, which sends a message and keeps its draft across a swap, and the forms that answer an ask.
 import { request } from "./request.js";
+import { answerFinal } from "../plain-wording.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { questionRoutes } from "../../contract/reviews.ts";
 import { end, onSwap, refreshAfter, showError, whenRunning } from "./page.js";
@@ -111,7 +112,7 @@ document.addEventListener("submit", async (event) => {
   const missing = choices.findIndex((c) => c.picked.length === 0 && c.own === undefined);
   if (missing !== -1) return void showError("action-error", new Error(`Answer "${headers[missing]}" first: pick an option or write your own answer.`));
   const summary = choices.map((c, i) => `${headers[i]}: ${[...c.picked, ...(c.own === undefined ? [] : [c.own])].join(", ")}`).join("; ");
-  if (!confirm(`Answer Claude "${summary}"? The answer cannot be changed.`)) return;
+  if (!confirm(`Answer Claude "${summary}"? ${answerFinal}`)) return;
   const submit = form.querySelector("button[type=submit]");
   submit.disabled = true;
   try {

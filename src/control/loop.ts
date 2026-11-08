@@ -42,6 +42,9 @@ type LoopRegistry = Pick<Registry, "allocatePreviews" | "appendEvent" | "buildin
  */
 export type Ingest = (event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number, unlisted: ReadonlySet<PylonId>) => readonly RegistryWrite[];
 
+/** How often the loop ticks unless its options say otherwise. */
+export const tickMs = 5_000;
+
 export interface LoopOptions {
   registry: LoopRegistry;
   gitIdentity?: GitIdentity | undefined;
@@ -92,7 +95,7 @@ interface Link {
 
 export function startLoop(options: LoopOptions): Loop {
   const { registry, ingest, previewPorts } = options;
-  const intervalMs = options.intervalMs ?? 5_000;
+  const intervalMs = options.intervalMs ?? tickMs;
   const offlineAfterMs = options.offlineAfterMs ?? 30_000;
   const reconnectMs = options.reconnectMs ?? 2_000;
   const silenceMs = options.silenceMs ?? 90_000;

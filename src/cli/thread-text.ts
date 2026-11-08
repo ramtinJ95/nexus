@@ -10,7 +10,7 @@ import type { Question } from "../control/questions.ts";
 import { reservedNames } from "../control/holds.ts";
 import { usageLimitText } from "../control/claude-transcript.ts";
 import { keptPastDay } from "../control/reconcile.ts";
-import { checkBeside, liveNote, phaseNote, reviewersNote, roundNote, roundsSpent } from "../control/review-model.ts";
+import { diskGoes, freshVm, keptPast, liveNote, prWatchText, reviewersNote, reviewLine, roundNote, sessionPaused } from "../control/wording.ts";
 import type { Changes, Listing } from "../contract/pylon.ts";
 import type { ThreadSetup } from "../control/templates.ts";
 import { ago, table, clip } from "./kit.ts";
@@ -40,9 +40,9 @@ export function reviewText(r: Review): string {
   const note = liveNote(r);
   const round = roundNote(r);
   const reviewers = reviewersNote(r);
-  const phase = r.phase.kind === "landed" ? `landed as ${r.phase.commit}` : r.phase.kind === "deploying" ? `deploying ${r.phase.commit}` : r.phase.kind;
+  const { lead, tail } = reviewLine(r);
   return [
-    `review ${r.id} of PR #${r.pr.number}${r.auto ? ", started on its own" : ""}: ${phase}, round ${roundsSpent(r)} of ${r.maxRounds}, reviewer ${r.reviewer} on ${r.models.reviewer}${r.land === null ? "" : ", landing when approved"}${phaseNote(r)}${checkBeside(r)}`,
+    `${lead}${r.reviewer}${tail}`,
     ...reviewers === null ? [] : [reviewers],
     ...round === null ? [] : [round],
     ...note === null ? [] : [note],
@@ -100,9 +100,9 @@ export function detailText({ thread: t, pylon: p, agent, sessions, previews, por
     ...t.usageLimit === undefined ? [] : [`usage limit: ${usageLimitText(t.usageLimit, Date.now())}. \`nexus send ${t.id} continue\` resumes it once the limit resets`],
     `status: ${t.status}${t.working ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,
-    ...p.notAnswering === undefined ? [] : [`guest: not answering since ${ago(Date.parse(p.notAnswering.since))}, as its last ${p.notAnswering.timeouts} guest commands got no answer, so messages, files and diffs fail. \`nexus archive ${t.id}\` and \`nexus unarchive ${t.id}\` give it a fresh VM. If the guest does not answer the pause either, the pylon breaks and \`nexus retry-pylon ${t.id}\` resumes its last saved disk, losing the changes since, so push or copy what you can first`],
-    ...kept === null ? [] : [`disk: kept past its 24 hours, as ${kept}`],
-    ...t.status !== "archived" || t.usageUnread === undefined ? [] : [`usage: unread, as ${t.usageUnread}, so ${p.actualState === "absent" ? "its disk went" : "its disk goes 24 hours after the archive"} without it`],
+    ...p.notAnswering === undefined ? [] : [`guest: not answering since ${ago(Date.parse(p.notAnswering.since))}, as its last ${p.notAnswering.timeouts} guest commands got no answer, so messages, files and diffs fail. ${freshVm(t.id)}`],
+    ...kept === null ? [] : [`disk: ${keptPast}, as ${kept}`],
+    ...t.status !== "archived" || t.usageUnread === undefined ? [] : [`usage: unread, as ${t.usageUnread}, so ${diskGoes(p.actualState === "absent")} without it`],
     ...t.status === "archived" || t.status === "deleted" ? [] : [`attach: nexus attach ${t.id}`],
     `size: ${p.resources.cpus} CPUs, ${p.resources.memoryGiB} GiB memory, ${p.resources.diskGiB} GiB disk${p.resources.nestedVirtualization === true ? ", nested virtualization" : ""}`,
     ...t.placement === undefined ? [] : [`placement: ${placementText(t.placement)}`],
@@ -112,11 +112,12 @@ export function detailText({ thread: t, pylon: p, agent, sessions, previews, por
     ...p.retryRefused === null ? [] : [`retry refused: ${p.retryRefused}`],
     ...(agent?.parkedTasks ?? 0) === 0 ? [] : [`parked tasks: ${agent!.parkedTasks}. \`nexus retry ${t.id}\` runs them again`],
     // A session in no pane is closed by its ID.
-    ...sessions.map((s) => `session: ${s.harness}${s.title === null ? "" : ` ${JSON.stringify(s.title)}`} ${s.herdrPane === null ? `as ${s.id}` : `in pane ${s.herdrPane}`}, ${s.state === "paused" ? `paused (resumes on ${t.status === "archived" ? "unarchive" : "wake"})`
+    ...sessions.map((s) => `session: ${s.harness}${s.title === null ? "" : ` ${JSON.stringify(s.title)}`} ${s.herdrPane === null ? `as ${s.id}` : `in pane ${s.herdrPane}`}, ${s.state === "paused" ? sessionPaused(t)
       : s.state === "failed" ? `failed: ${s.message}` : s.status}`),
     ...previews.map((v) => `preview: ${v.service} at ${v.url}${v.failed !== null ? `, not ready: ${v.failed}` : v.ready ? "" : ", not ready"}`),
     ...(ports ?? []).map((l) => `port: ${l.port}${l.service === null ? "" : `, service ${l.service}`}${l.preview === null ? "" : `, previewed at ${l.preview.url}`}`),
-    ...(prWatch.enabled ? [prWatch.stopped ? "PR watch: stopped (10 comment-only wakes)" : "PR watch: on", ...(prWatch.error ? [prWatch.error] : [])] : ["PR watch: off (no control-plane GitHub token configured)"]),
+    prWatchText(prWatch),
+    ...prWatch.enabled && prWatch.error ? [prWatch.error] : [],
     ...pullRequests.map((pr) => `PR #${pr.number}: ${pr.title} — ${pr.state}, checks ${pr.checks}, review ${pr.review} ${pr.url}`),
     ...review == null ? [] : [reviewText(review)],
     ...questions.map(questionText),

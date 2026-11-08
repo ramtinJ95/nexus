@@ -5,11 +5,9 @@ import type { NodeQuestion } from "./questions.ts";
 import type { QueuedThread } from "../contract/threads.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
-import type { ThreadDetail } from "./wire.ts";
-import { personNeeds, type PersonNeed } from "./work-model.ts";
+import type { ThreadDetail, ThreadNeed } from "./wire.ts";
+import { personNeeds } from "./work-model.ts";
 
-/** One card of the inbox for a thread. */
-export type ThreadNeed = PersonNeed & { d: ThreadDetail };
 export type HeldWork = { kind: "item"; item: PipelineItem } | { kind: "queued"; q: QueuedThread } | { kind: "thread"; thread: Thread; d: ThreadDetail };
 /** A thread's card, a node's cleanup question with its Cluster card, or work its pipeline phase holds for the person that no card acts on. */
 export type InboxNeed = ThreadNeed | { kind: "cleanup"; question: NodeQuestion; since: number } | { kind: "held"; work: HeldWork; since: number };

@@ -3,10 +3,11 @@ import { createHash } from "node:crypto";
 import type { ActualState, DesiredPhase } from "../reconcile.ts";
 import type { HerdrStatus } from "../../protocol/observations.ts";
 import type { ThreadRow } from "../wire.ts";
-import { attentions, needsPerson } from "../attention.ts";
+import { needsPerson, type Attention } from "../attention.ts";
+import { attentionLabels } from "../plain-wording.ts";
 import type { Output, Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
-import { usageLimitText } from "../claude-transcript.ts";
+import { limitText } from "../wording.ts";
 import { agoText, clock } from "./elapsed.ts";
 
 interface Page { status: number; headers: Record<string, string>; body: string }
@@ -89,14 +90,15 @@ export const menu = html`<button type="button" class="icon-btn menu" data-open="
 /** Text a screen reader says that the page shows another way, such as with an icon or a bubble's side. */
 export const unseen = (text: string) => html`<span class="vh">${text}</span>`;
 
-export const limitText = (t: Pick<Thread, "usageLimit">, now: number) => usageLimitText(t.usageLimit ?? { resetsAt: null }, now);
+
+export const attentionTone: Record<NonNullable<Attention>, Tone> = { failed: "bad", decision: "bad", parked: "bad", limited: "bad", reply: "reply", working: "work", waiting: "idle" };
 
 /** What a thread is doing, most urgent first: the agent mid-turn hides a running pylon, never a failed one. */
 export function threadState(t: ThreadRow, now: number): [label: string, tone: Tone] {
   const { attention, pylon } = t;
-  if (attention === "limited") return [limitText(t, now), attentions.limited.tone];
-  if (attention === "waiting") return [t.sessionWaitingMessage ?? attentions.waiting.label, attentions.waiting.tone];
-  if (attention !== null) return [attentions[attention].label, attentions[attention].tone];
+  if (attention === "limited") return [limitText(t, now), attentionTone.limited];
+  if (attention === "waiting") return [t.sessionWaitingMessage ?? attentionLabels.waiting, attentionTone.waiting];
+  if (attention !== null) return [attentionLabels[attention], attentionTone[attention]];
   if (t.status === "archived" || t.status === "deleted") return [t.status, "muted"];
   return actualBadge[pylon.actualState];
 }

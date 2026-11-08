@@ -15,6 +15,7 @@ import { seriesKey, seriesLabel, seriesOf, type Series } from "../node-metrics.t
 import { bytesText, lastCleanup } from "../cleanup-model.ts";
 import { charts, ranges } from "./graph-data.ts";
 import { Html, html, menu, dot, icon, ago, type Part } from "./view.ts";
+import { duration } from "../wording.ts";
 import type { Context } from "./context.ts";
 import { cleanupCard } from "./cards.ts";
 import { layout, statusTone } from "./shell.ts";
@@ -131,7 +132,7 @@ function nodeCard(c: Context, n: NodeRecord, reading: Reading | Error | null, re
   return html`<article class="node-card${picked && " picked"}" data-node="${n.name}" aria-labelledby="node-${n.name}-h">
 <header class="node-card-h"><span>${icon("server")}<a class="link" href="/nodes/${encodeURIComponent(n.name)}" id="node-${n.name}-h"${picked && html` aria-current="page"`} title="Health of ${n.name}">${n.name}</a>${dot(n.state === "online" ? "ok" : "muted")}${n.state === "offline" && html`<em>offline</em>`}${overcommitted(n.capacity) && html`<em>overcommitted</em>`}${lowDisks(n).length > 0 && html`<em title="${lowDisks(n).map(diskText).join("; ")}">disk low</em>`}</span>${memoryLine(c, n)}${releases.map((r) => html`<small title="${r.reason ?? ""}">${r.role}: ${r.commit?.slice(0, 12) ?? "unknown"} · ${r.state}</small>`)}</header>
 <dl class="meters">
-${meter("Load", read?.load ?? null, read?.cpus ?? null, read === null ? html`<span class="dim"${reading instanceof Error && html` title="${reading.message}"`}>${reading instanceof Error ? "not read" : "no reading in 5 minutes"}</span>` : read.load === null ? html`<span class="dim">unknown</span>` : `${read.load.toFixed(2)} on ${read.cpus} CPUs`)}
+${meter("Load", read?.load ?? null, read?.cpus ?? null, read === null ? html`<span class="dim"${reading instanceof Error && html` title="${reading.message}"`}>${reading instanceof Error ? "not read" : `no reading in ${duration(recentMs)}`}</span>` : read.load === null ? html`<span class="dim">unknown</span>` : `${read.load.toFixed(2)} on ${read.cpus} CPUs`)}
 ${meter("Memory", read?.memory === null || read === null ? null : read.memory.totalGiB - read.memory.availableGiB, read?.memory?.totalGiB ?? null, read?.memory == null ? html`<span class="dim">unknown</span>` : `${gib(read.memory.availableGiB)} of ${gib(read.memory.totalGiB)} GiB free`)}
 ${meter("Disk", disk === undefined ? null : disk.totalGiB - disk.freeGiB, disk?.totalGiB ?? null, disk === undefined ? html`<span class="dim">unknown</span>` : `${gib(disk.freeGiB)} of ${gib(disk.totalGiB)} GiB free`)}
 </dl>

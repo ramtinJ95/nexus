@@ -14,9 +14,11 @@ import { span } from "./elapsed.ts";
 import { themeScript, Html, html, dot, icon, clonedIcons, menu, threadState, dims, workingFor, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
 import { assetUrl } from "./assets.ts";
+import { problemsText } from "../plain-wording.ts";
+import { tickMs } from "../loop.ts";
 
-/** How often the client refetches a page. The loop ticks every 5 s, so polling faster shows nothing new. */
-export const pollMs = 5_000;
+/** How often the client refetches a page. The loop ticks no faster, so polling faster shows nothing new. */
+const pollMs = tickMs;
 
 /** The themes the sidebar's picker offers. Each but System is a block of style.css, and System is the device's light or dark. */
 export const themes = [["system", "System"], ["light", "Light"], ["dark", "Dark"], ["tokyo-night", "Tokyo Night"], ["catppuccin-mocha", "Catppuccin Mocha"], ["kanagawa-wave", "Kanagawa Wave"]] as const;
@@ -144,7 +146,7 @@ export const statusTone: Record<Status, Tone> = { ok: "ok", warn: "busy", fail: 
 function healthLink(c: Context, open: boolean): Html {
   const problems = c.registry.healthStates().filter((s) => s.status !== "ok");
   const unseen = problems.filter((p) => p.seenAt === null).length;
-  const title = problems.length === 0 ? "Every check is ok" : `${problems.length} open ${problems.length === 1 ? "problem" : "problems"}, ${unseen} not seen`;
+  const title = problems.length === 0 ? problemsText(0) : `${problemsText(problems.length)}, ${unseen} not seen`;
   return html`<a class="side-link${open && " active"}" id="health-link" href="/health" title="${title}" data-change="${Math.max(0, ...c.registry.healthChanges().map((h) => h.id))}"${open && html` aria-current="page"`}>${icon(problems.length === 0 ? "check" : "cross")}Health<span class="side-count">${unseen || ""}</span></a>`;
 }
 

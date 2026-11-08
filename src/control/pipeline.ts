@@ -13,10 +13,11 @@ import { singleFlight } from "../single-flight.ts";
 import { newItemId, requestIds, type ItemId, type ProjectId, type ThreadId } from "../ids.ts";
 import { Refusal } from "./refusal.ts";
 import { queuedView, waitOf, type ThreadQueue } from "./queue.ts";
-import { checkBeside, liveNote, phaseNote, trackStep, type Review } from "./review-model.ts";
+import { trackStep, type Review } from "./review-model.ts";
+import { checkBeside, liveNote, phaseNote } from "./wording.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
-import { attentions } from "./attention.ts";
+import { attentionLabels } from "./plain-wording.ts";
 import { personNeeds, prLocationOf, type PersonNeed } from "./work-model.ts";
 import { checkStart, startKey } from "./threads.ts";
 import type { StartRequest } from "./start-request.ts";
@@ -114,7 +115,7 @@ function startedPhase(registry: PipelineRegistry, t: Thread, review: Review | nu
 }
 
 const heldFor = (n: PersonNeed): ItemPhase => phase("held", n.kind === "disk" ? "its archive's disk is kept for its usage"
-  : n.kind !== "thread" ? "its thread needs the person's decision" : n.attention === "failed" ? "its thread failed" : `its thread is ${attentions[n.attention].label}`);
+  : n.kind !== "thread" ? "its thread needs the person's decision" : n.attention === "failed" ? "its thread failed" : `its thread is ${attentionLabels[n.attention]}`);
 
 /**
  * A thread's phase, and the step it reached of those every piece of work takes. A thread with anything that waits on

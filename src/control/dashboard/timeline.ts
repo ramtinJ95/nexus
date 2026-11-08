@@ -7,13 +7,14 @@ import type { ThreadDetail } from "../wire.ts";
 import { isOpen } from "../questions.ts";
 import type { ThreadId } from "../../ids.ts";
 import { keptPastDay } from "../reconcile.ts";
-import { blocks, checkBeside, findingsOf, phaseNote, reviewerApproved, reviewersNote, roundsSpent, type Review, type Round, type Verdict } from "../review-model.ts";
-import { Html, html, ago, short, dot, icon, limitText, type Part, type Tone } from "./view.ts";
+import { blocks, findingsOf, reviewerApproved, type Review, type Round, type Verdict } from "../review-model.ts";
+import { diskGoes, keptPast, limitText, needKind, needLabels, plannerGaveUp, reviewersNote, reviewLine } from "../wording.ts";
+import { Html, html, ago, short, dot, icon, type Part, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
 import { prose } from "./markdown.ts";
 import { promptLabel, type Item } from "./items.ts";
 import { clock } from "./elapsed.ts";
-import { landingTrack, pipelineItems, needLabel, stageLabel, stepStates, type Life, type StepState } from "./lifecycle.ts";
+import { landingTrack, pipelineItems, stageLabel, stepStates, type Life, type StepState } from "./lifecycle.ts";
 import { steps, type Step } from "../pipeline.ts";
 
 /** One turn of the conversation: what started it and from whom, the tools it ran, and the answer it ended on. */
@@ -104,7 +105,7 @@ export function timeline(c: Context, d: ThreadDetail, items: readonly Item[], li
   const r = d.review;
   const agent = c.registry.agent(t);
   const queued = c.registry.queuedThread(t.id as ThreadId);
-  const held = life.stage === "held" && html`<div class="tl-hold"><p class="tl-hold-h">Held for you${life.needs.length > 0 && html`: ${[...new Set(life.needs.map(needLabel))].join(", ")}`}</p><p>${life.why.replace(/\.$/, "")}.</p><p class="dim">The card under the timeline is what moves it on.</p></div>`;
+  const held = life.stage === "held" && html`<div class="tl-hold"><p class="tl-hold-h">Held for you${life.needs.length > 0 && html`: ${[...new Set(life.needs.map((n) => needLabels[needKind(n)]))].join(", ")}`}</p><p>${life.why.replace(/\.$/, "")}.</p><p class="dim">The card under the timeline is what moves it on.</p></div>`;
   const heldAt = (s: Step) => life.at === s && held;
   const asked = d.questions.filter((q) => q.ask === undefined || q.answer !== null);
   const outputs = d.outputs.filter((o) => o.kind === "branch" || o.kind === "diff" || o.kind === "file");
@@ -118,14 +119,14 @@ ${heldAt("planned")}`,
     building: html`${turnsList(turns, c.now)}
 ${t.working && html`<p class="tl-event tl-work">${dot("work")}<span>Its agent is working${t.workingSince !== undefined && html` for <time data-since="${t.workingSince}">${clock(c.now - t.workingSince)}</time>`}.</span></p>`}
 ${t.usageLimit !== undefined && html`<p class="tl-event tl-bad">${dot("bad")}<span>It ${limitText(t, c.now)}, ${ago(t.usageLimit.stoppedAt, c.now)}.</span></p>`}
-${d.pylon.failed !== null && html`<p class="tl-event tl-bad">${dot("bad")}<span>Its pylon failed: ${d.pylon.failed.split("\n")[0]}</span></p>`}
+${d.pylon.failed !== null && html`<p class="tl-event tl-bad">${dot("bad")}<span>${plannerGaveUp(d.pylon.failed)}</span></p>`}
 ${d.judgments.map((j) => html`<p class="tl-event">${dot(j.verdict === null ? "work" : "bad")}<span>Judged a failure on ${j.node} ${ago(j.startedAt, c.now)}: ${j.verdict === null ? "no answer yet" : html`<b>${j.verdict.answer}</b>, ${j.verdict.why}`}</span></p>`)}
 ${asked.map((q) => html`<p class="tl-event">${dot(isOpen(q) ? "bad" : "ok")}<span class="tl-quote">Asked ${ago(q.askedAt, c.now)}: ${firstLine(q.text || (q.ask?.questions[0]?.question ?? ""))}${q.answer !== null && html` Answered <b>${q.answer.option}</b> ${ago(q.answer.at, c.now)}.`}${q.withdrawn !== undefined && html` Withdrawn when the thread was archived ${ago(q.withdrawn.at, c.now)}.`}</span></p>`)}
 ${outputs.length > 0 && html`<p class="tl-meta">${outputs.map((o, i) => html`${i > 0 && " · "}${o.kind} <code>${o.ref}</code>`)}</p>`}
 <p class="tl-go"><button type="button" class="btn btn-xs" data-tab-go="convo">${icon("chat")}Open the conversation</button></p>
 ${heldAt("building")}`,
     review: html`${d.pullRequests.length === 0 && r === null ? html`<p class="empty">No pull request yet.</p>` : html`<ul class="tl-prs">${d.pullRequests.map((pr) => html`<li><a class="link" href="${pr.url}" target="_blank" rel="noreferrer">#${pr.number} ${pr.title} ↗</a> <span class="tag">${pr.state}</span> <span class="dim">checks ${pr.checks}${pr.review !== "" && ` · ${pr.review}`}</span></li>`)}</ul>`}
-${r !== null && html`<p class="tl-meta">Reviewed by <a class="link" href="/threads/${r.reviewer}">${r.reviewer}</a> on ${r.models.reviewer} (${r.reviewerKind}) · round ${roundsSpent(r)} of ${r.maxRounds}${r.land !== null && " · lands once approved"} · ${r.phase.kind.replace("-", " ")}${phaseNote(r)}${checkBeside(r)}</p>
+${r !== null && html`<p class="tl-meta">Nexus ${reviewLine(r).lead}<a class="link" href="/threads/${r.reviewer}">${r.reviewer}</a>${reviewLine(r).tail}</p>
 ${reviewersNote(r) !== null && html`<p class="tl-meta">${reviewersNote(r)}</p>`}
 ${r.rounds.length > 0 && html`<ol class="tl-rounds">${r.rounds.map((round, i) => roundView(r, round, i, i === r.rounds.length - 1))}</ol>`}`}
 ${heldAt("review")}`,
@@ -146,8 +147,8 @@ ${heldAt("landing")}`,
   const kept = d.pylon.actualState === "absent" ? null : keptPastDay(t, c.now);
   return html`<ol class="tl">${steps.map((s) => step(s, label[s], states[s], when[s], body[s]))}
 ${closed && step("archived", t.status === "archived" ? "Archived" : "Deleted", "done", t.archivedAt === undefined ? null : ago(t.archivedAt, c.now), html`<p class="tl-meta">${t.status === "archived" ? "Its pylon is paused. Unarchive it to pick the work up again." : "Its pylon and disk are gone."}</p>
-${kept !== null && html`<p class="tl-meta">Its disk is kept past its 24 hours, as ${kept}.</p>`}
-${t.status === "archived" && t.usageUnread !== undefined && html`<p class="tl-meta">Usage unread: ${d.pylon.actualState === "absent" ? "its disk went" : "its disk goes 24 hours after the archive"} with the token usage on it unread, as ${t.usageUnread}.</p>`}`)}
+${kept !== null && html`<p class="tl-meta">Its disk is ${keptPast}, as ${kept}.</p>`}
+${t.status === "archived" && t.usageUnread !== undefined && html`<p class="tl-meta">Usage unread: ${diskGoes(d.pylon.actualState === "absent")} with the token usage on it unread, as ${t.usageUnread}.</p>`}`)}
 </ol>`;
 }
 

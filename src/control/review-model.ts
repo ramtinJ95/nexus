@@ -427,63 +427,9 @@ export const roundsSpent = (r: Pick<Review, "rounds">) => r.rounds.filter((round
  */
 export const pushedHead = (r: Review, pr: Pick<PullRequest, "state"> & { head?: string } | undefined): string | null =>
   pr?.state !== "open" || pr.head === undefined || r.rounds.at(-1)!.head === pr.head || (r.phase.kind === "needs-person" && r.phase.unreviewed === pr.head) ? null : pr.head;
-/**
- * Why the latest round started, when it reviews a head pushed after the previous round's approval rather than the
- * builder's fixes, or carries that approval to the head.
- */
-export function roundNote(r: Review): string | null {
-  const [previous, round] = r.rounds.slice(-2);
-  if (round?.carried !== undefined) return `${round.carried.held ? "hold" : "approval"} carried from ${round.carried.from.slice(0, 12)} to ${round.head.slice(0, 12)}: same change after a rebase`;
-  if (round === undefined || previous!.answers !== null || !reviewerApproved(previous!)) return null;
-  if (round.head === previous!.head && round.base !== previous!.base) return `a new round reviews ${round.head.slice(0, 12)} against ${round.base}, since the pull request's base changed from ${previous!.base} after its approval`;
-  return `a new round reviews ${round.head.slice(0, 12)}, since the pull request's head moved from ${previous!.head.slice(0, 12)} after its approval`;
-}
-const labelStates = { adding: `, adding the label "${humanLabel}"`, added: `, labelled "${humanLabel}"`, failed: `, label "${humanLabel}" not added` } as const;
-/** How a review's line in `nexus show` and the dashboard ends. A refused label's why is already one of the reasons. */
-export const phaseNote = (r: Review) => r.phase.kind === "cancelled" ? r.phase.who === "person" ? `, cancelled by ${r.phase.by}` : `, the ${r.phase.who} thread ${r[r.phase.who]} was ${r.phase.status}`
-  : r.phase.kind === "merging" && r.phase.waiting !== undefined ? `, waiting while ${r.phase.waiting}`
-  : r.phase.kind === "needs-person" && r.phase.label ? labelStates[r.phase.label.state]
-  : `${(r.phase.kind === "reviewing" || r.phase.kind === "fixing" || r.phase.kind === "quoting") && r.phase.failing ? failingNote(r.phase.kind === "fixing" ? "builder" : "reviewer", r.phase.failing) : ""}${r.phase.kind === "reviewing" && r.second?.kind === "claude" && r.second.failing ? failingNote("second reviewer", r.second.failing) : ""}`;
-const failingNote = (who: string, failing: ModelFailure) => `, the ${who}'s model is failing (${failing.count} in a row, last: ${failing.last}), retrying at ${new Date(failing.retryAt).toISOString().slice(11, 16)} UTC`;
-const verdictWord = (v: Verdict | null | undefined) => v === undefined ? "did not review it" : v === null ? "has not answered" : v.verdict === "changes" ? `asks for changes (${v.findings.filter(blocks).map((f) => f.priority).join(", ")})` : "approves";
-/**
- * Both reviewers of a review the project's rule gave a second one, and their verdicts at the latest round, as `nexus
- * show` and the dashboard say them, or null for a review with one reviewer.
- */
-export function reviewersNote(r: Review): string | null {
-  if (r.second === undefined) return null;
-  const round = r.rounds.at(-1)!;
-  const first = `round ${r.rounds.length}: the reviewer ${r.reviewer} on ${r.models.reviewer} ${verdictWord(round.verdict)}`;
-  if (r.second.kind === "none") return `${first}. No second reviewer runs, though ${r.second.rule}: ${r.second.why}`;
-  if (r.second.kind === "starting") return `${first}, and the second reviewer on ${r.second.model} is starting${r.second.why === null ? "" : `, after a start that failed: ${r.second.why}`}. It reviews since ${r.second.rule}`;
-  return `${first}, and the second reviewer ${r.second.thread} on ${r.second.model} ${verdictWord(round.secondVerdict)}. It reviews since ${r.second.rule}`;
-}
 /** The gate run `phase` steps: a reviewing round's check beside the reviewer, the check, or the live check. */
 export const gateRun = (phase: Phase): GateRun | null => phase.kind === "checking" || phase.kind === "verifying" ? phase : phase.kind === "reviewing" ? phase.check ?? null : null;
 /** The check thread `phase` holds: a checking round's, or a reviewing round's, which runs beside the reviewer. */
 export const checkThread = (phase: Phase): ThreadId | null => phase.kind === "verifying" ? null : gateRun(phase)?.thread ?? null;
-/** What a reviewing round's check does beside the reviewer, which a review's line adds to its phase note, so it says whether the round waits on one or both. */
-export function checkBeside(r: Review): string {
-  if (r.phase.kind !== "reviewing") return "";
-  const { head, check } = r.rounds.at(-1)!;
-  if (check !== null) return `, .nexus/check ${check.passed ? "passed" : "failed"} at ${head.slice(0, 12)}`;
-  if (r.phase.check === undefined) return "";
-  if (r.phase.check.unrunnable !== undefined) return `, .nexus/check could not run at ${head.slice(0, 12)}`;
-  if (r.phase.check.refused !== undefined) return `, .nexus/check runs once the reviewer approves, since no node had room for it: ${r.phase.check.refused}`;
-  return r.phase.check.thread === null ? `, .nexus/check starting at ${head.slice(0, 12)}` : `, .nexus/check running at ${head.slice(0, 12)} in check thread ${r.phase.check.thread}`;
-}
-/** The latest round's live check, as `nexus show` and the dashboard say it, or null before its checks passed. */
-export function liveNote(r: Review): string | null {
-  const round = r.rounds.at(-1)!;
-  const head = round.head.slice(0, 12);
-  if (r.phase.kind === "verifying") {
-    if (r.phase.thread !== null) return `live check running .nexus/verify at ${head} in verify pylon ${r.phase.thread}`;
-    return r.phase.refused === undefined ? `live check starting at ${head}` : `live check waiting for a node to take its verify pylon: ${r.phase.refused}`;
-  }
-  if (round.live?.kind === "absent") return `no live check: ${head} has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live`;
-  if (round.live?.kind === "ran") return `live check ${round.live.passed ? "passed" : "failed"} at ${head}`;
-  if (round.check?.passed !== true) return null;
-  return (r.phase.kind === "reviewing" || r.phase.kind === "fixing") && !reviewerApproved(round) ? `no live check yet: it runs at ${head} once the reviewer approves it` : `no live check ran at ${head}`;
-}
 export const checkOutput = (output: string) => `The check's output:\n${output}`;
 export const liveOutput = (output: string) => `The live check's output:\n${output}`;

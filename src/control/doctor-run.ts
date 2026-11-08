@@ -85,7 +85,7 @@ function validTo(text: string): string {
 export const checkEveryMs = 5 * 60_000;
 export const changesKeptMs = 30 * 24 * 60 * 60_000;
 /** After a restart the loop reconnects to every probe before the first pass, so a pass never finds nodes not yet followed. */
-const settleMs = 5 * 60_000;
+export const settleMs = 5 * 60_000;
 
 const rank = (c: Pick<Check, "status">) => statuses.indexOf(c.status);
 
