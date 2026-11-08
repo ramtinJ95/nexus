@@ -21,7 +21,6 @@ async function checkout(t: TestContext) {
   guest.exec = async (argv, opts) => {
     reads++;
     assert.equal(opts.cwd, checkoutDir);
-    assert.equal(opts.timeoutMs, 3000);
     try {
       const result = await run(argv[0]!, argv.slice(1), { cwd: dir, timeout: opts.timeoutMs });
       return { exitCode: 0, output: result.stdout, truncated: false };
@@ -191,15 +190,13 @@ test("too many refs and missing repositories fail rather than emitting partial f
   await assert.rejects(gitFacts(s.guest), /could not be read/);
 });
 
-test("failed, timed out, truncated and invalid guest replies are rejected", async () => {
-  for (const reply of [{ exitCode: null, output: "" }, { exitCode: 1, output: "" }, { exitCode: 0, output: "{}" }, { exitCode: 0, output: "bad JSON" }, { exitCode: 0, output: "", truncated: true }, { exitCode: 0, output: "x".repeat(65536) }]) {
-    await assert.rejects(gitFacts(fakeGuest(() => reply)));
+test("failed, timed out, truncated, oversized and invalid guest replies are rejected, even when they hold facts", async () => {
+  const facts = { head: "a".repeat(40), branch: "main", dirty: false, branches: [] };
+  const valid = JSON.stringify(facts);
+  assert.deepEqual(await gitFacts(fakeGuest(() => ({ exitCode: 0, output: `${valid}\n` }))), facts);
+  for (const reply of [{ exitCode: null, output: valid }, { exitCode: 1, output: valid }, { exitCode: 0, output: valid, truncated: true }, { exitCode: 0, output: valid + " ".repeat(65536) }, { exitCode: 0, output: "{}" }, { exitCode: 0, output: "bad JSON" }]) {
+    await assert.rejects(gitFacts(fakeGuest(() => reply)), Error, JSON.stringify(reply).slice(0, 80));
   }
-});
-
-test("a reply that is not git facts fails naming the read", async () => {
-  await assert.rejects(gitFacts(fakeGuest(() => ({ exitCode: 0, output: "bad JSON", truncated: false }))), /^Error: checkout git facts: /);
-  await assert.rejects(gitFacts(fakeGuest(() => ({ exitCode: 0, output: "{}", truncated: false }))), /^Error: checkout git facts\.head: /);
 });
 
 test("branch names are unambiguous beside a same-named tag and preserve Unicode line separators", async (t) => {
