@@ -21,8 +21,8 @@ type OutputDeclaration = { kind: "file"; path: string; title?: string } | { kind
 export class OutputRefused extends Error {}
 
 /**
- * The pylon VM backend returns at most 64 KiB of a command's output (src/pylon-vm/processes.ts), and the listing
- * is one command. The probe is the only writer, so it refuses an output that would take the listing past this.
+ * The listing is one guest exec, so it must fit under execOutputMaxBytes. The probe is the only writer, so it refuses
+ * an output that would take the listing past this.
  */
 const listingBudgetBytes = 60_000;
 /** A diff of a large tree can take a while to write. Above the helper's 45 s for one git command, so a slow git is its refusal. */

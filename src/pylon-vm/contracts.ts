@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
+import { maxServiceLogLines } from "../guest-contract.ts";
 import { previewText, serviceDecl, serviceName } from "../services-file.ts";
 
 const nameSchema = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/);
@@ -200,7 +201,7 @@ export const actionSchema = z.discriminatedUnion("action", [
 		action: z.literal("logs"),
 		...identity,
 		service: serviceName.optional(),
-		lines: z.number().int().min(1).max(500).default(100),
+		lines: z.number().int().min(1).max(maxServiceLogLines).default(100),
 	}),
 	/** A new value for a secret this boot granted, swapped in on the running VM. It is never stored or logged. */
 	z.strictObject({

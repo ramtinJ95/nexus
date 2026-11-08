@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import type { VM } from "@earendil-works/gondolin";
 import { z } from "zod";
+import { execOutputMaxBytes } from "../guest-contract.ts";
 import { direct, readGuestFile } from "./guest.ts";
 
 /** Every boot makes it empty and private (runtime.ts), so a handle's directory and the worker never outlive the boot. */
@@ -20,7 +21,7 @@ const worker = [
 	"if cleanup: ctypes.CDLL(None).prctl(36,1,0,0,0)",
 	"try: p=subprocess.Popen(['/bin/sh','-lc',cmd],cwd=cwd,start_new_session=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)",
 	"except Exception as e:",
-	" open(path+'/output','wb').write(str(e).encode()[:65536]); open(path+'/done.tmp','w').write(json.dumps({'exitCode':127,'truncated':False})); os.rename(path+'/done.tmp',path+'/done'); sys.exit(0)",
+	` open(path+'/output','wb').write(str(e).encode()[:${execOutputMaxBytes}]); open(path+'/done.tmp','w').write(json.dumps({'exitCode':127,'truncated':False})); os.rename(path+'/done.tmp',path+'/done'); sys.exit(0)`,
 	"open(path+'/pid.tmp','w').write(str(p.pid)); os.rename(path+'/pid.tmp',path+'/pid')",
 	"os.set_blocking(p.stdout.fileno(),False)",
 	"size=0; truncated=False; started=time.monotonic(); expired=False; killed=None",
@@ -31,7 +32,7 @@ const worker = [
 	"  except BlockingIOError: data=b''",
 	"  if not data: time.sleep(0.05)",
 	"  if data:",
-	"   room=max(0,65536-size); out.write(data[:room]); size+=min(room,len(data)); truncated=truncated or len(data)>room",
+	`   room=max(0,${execOutputMaxBytes}-size); out.write(data[:room]); size+=min(room,len(data)); truncated=truncated or len(data)>room`,
 	"   if truncated and not os.path.exists(path+'/truncated'): open(path+'/truncated','w').close()",
 	"  if killed is None and os.path.exists(path+'/kill'):",
 	"   killed=time.monotonic()",
@@ -70,7 +71,7 @@ const worker = [
 	"  try: data=os.read(p.stdout.fileno(),65536)",
 	"  except BlockingIOError: break",
 	"  if not data: break",
-	"  room=max(0,65536-size); out.write(data[:room]); size+=min(room,len(data)); truncated=truncated or len(data)>room",
+	`  room=max(0,${execOutputMaxBytes}-size); out.write(data[:room]); size+=min(room,len(data)); truncated=truncated or len(data)>room`,
 	"p.stdout.close()",
 	"code=124 if expired else (p.returncode if p.returncode>=0 else 128-p.returncode)",
 	"open(path+'/done.tmp','w').write(json.dumps({'exitCode':code,'truncated':truncated}))",
