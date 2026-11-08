@@ -199,6 +199,9 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         const submitted = row.submitted === null ? null : JSON.stringify(upgradeSubmitted(json(row.submitted)));
         if (submitted !== row.submitted) sql("UPDATE pylons SET submitted = ? WHERE id = ?").run(submitted, row.id as string);
       }
+      // An older control plane's thread.failed named no cause, so the failure a pylon holds is the one with its message.
+      sql(`UPDATE events SET payload = json_set(payload, '$.cause', 'pylon') WHERE kind = 'thread.failed' AND json_extract(payload, '$.cause') IS NULL
+        AND json_extract(payload, '$.message') = (SELECT failed FROM pylons WHERE thread = events.thread)`).run();
     });
   }
 
@@ -555,12 +558,13 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     newestEvent: () => String(sql("SELECT max(id) AS id FROM events").get()?.id ?? 0),
     events: (since = "0", filter: EventFilter = {}) => eventBatch(since, filter).events,
     /**
-     * The failure the thread's pylon holds: the thread.failed event its pylon's `failed` appended. Null while the pylon
-     * has not failed, or once that event is pruned. A failed Claude launch appends one too, with another message.
+     * The failure the thread's pylon holds: the newest thread.failed event whose cause is the pylon, which its `failed`
+     * appended, since each new `failed` appends one. Null while the pylon has not failed, or once that event is pruned. A
+     * Claude worker's stall or failure appends one whose cause is the worker.
      */
     failure(thread: ThreadId): { event: number; at: number } | null {
-      const row = sql(`SELECT e.id, e.time FROM pylons p JOIN events e ON e.thread = p.thread AND e.kind = 'thread.failed' AND json_extract(e.payload, '$.message') = p.failed
-        WHERE p.thread = ? ORDER BY e.id DESC LIMIT 1`).get(thread);
+      const row = sql(`SELECT e.id, e.time FROM pylons p JOIN events e ON e.thread = p.thread AND e.kind = 'thread.failed' AND json_extract(e.payload, '$.cause') = 'pylon'
+        WHERE p.thread = ? AND p.failed IS NOT NULL ORDER BY e.id DESC LIMIT 1`).get(thread);
       return row === undefined ? null : { event: row.id as number, at: row.time as number };
     },
     /**
@@ -666,7 +670,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         if (previous === undefined) throw new Error(`no pylon ${saved.pylonId} to save`);
         sql(`UPDATE pylons SET thread = $thread, node = $node, boot = $boot, first_boot = $firstBoot, live = $live,
           live_hash = $liveHash, pauses = $pauses, submitted = $submitted, attempts = $attempts, failed = $failed, retrying = $retrying WHERE id = $id`).run(pylonParams(saved));
-        if (saved.failed !== null && previous.failed !== saved.failed) appendEvent("thread.failed", previous.thread, { message: saved.failed });
+        if (saved.failed !== null && previous.failed !== saved.failed) appendEvent("thread.failed", previous.thread, { message: saved.failed, cause: "pylon" });
         updateAttention(previous.thread);
       });
     },

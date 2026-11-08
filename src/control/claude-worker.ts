@@ -193,7 +193,7 @@ export function claudeWorkerStore(db: Db, on: ClaudeWorkerThread) {
           .run(move.to, "message" in move ? move.message : null, move.to === "starting" ? move.session : null, thread);
         on.reconcile(thread);
         on.updateAttention(thread);
-        if ("message" in move) on.appendEvent("thread.failed", thread, { message: move.message });
+        if ("message" in move) on.appendEvent("thread.failed", thread, { message: move.message, cause: "claude-worker" });
         return true;
       });
     },

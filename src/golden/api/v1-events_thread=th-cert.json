@@ -7,7 +7,8 @@
     "project": "nexus",
     "kind": "thread.failed",
     "payload": {
-      "message": "pylon is broken: the controller exited"
+      "message": "pylon is broken: the controller exited",
+      "cause": "pylon"
     }
   },
   {
@@ -27,7 +28,8 @@
     "project": "nexus",
     "kind": "thread.failed",
     "payload": {
-      "message": "pylon is broken: the controller exited"
+      "message": "pylon is broken: the controller exited",
+      "cause": "pylon"
     }
   }
 ]

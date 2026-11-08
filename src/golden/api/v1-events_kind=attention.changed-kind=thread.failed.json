@@ -77,7 +77,8 @@
     "project": "nexus",
     "kind": "thread.failed",
     "payload": {
-      "message": "pylon is broken: the controller exited"
+      "message": "pylon is broken: the controller exited",
+      "cause": "pylon"
     }
   },
   {
@@ -97,7 +98,8 @@
     "project": "nexus",
     "kind": "thread.failed",
     "payload": {
-      "message": "pylon is broken: the controller exited"
+      "message": "pylon is broken: the controller exited",
+      "cause": "pylon"
     }
   },
   {
@@ -327,7 +329,8 @@
     "project": "field-notes",
     "kind": "thread.failed",
     "payload": {
-      "message": "pylon is broken: Setup exited 1. pip could not resolve tagger==0.9.2"
+      "message": "pylon is broken: Setup exited 1. pip could not resolve tagger==0.9.2",
+      "cause": "pylon"
     }
   },
   {
@@ -347,7 +350,8 @@
     "project": "field-notes",
     "kind": "thread.failed",
     "payload": {
-      "message": "pylon is broken: Setup exited 1. pip could not resolve tagger==0.9.2"
+      "message": "pylon is broken: Setup exited 1. pip could not resolve tagger==0.9.2",
+      "cause": "pylon"
     }
   },
   {

@@ -11,7 +11,6 @@ const node = "rj-firebat" as NodeName;
 const laptop = "nLAPTOP" as TailnetNodeId;
 const image = testImage();
 
-/** A thread whose Claude worker runs in session `builder`, and a reporter of its pylon's session events. */
 /** A Claude worker thread whose launch opened session builder, and started it unless `failed` says why it failed. */
 async function claudeThread(t: TestContext, failed?: string) {
   const s = await testApi(t, { allowed: new Set([laptop]), probes: new Map() });

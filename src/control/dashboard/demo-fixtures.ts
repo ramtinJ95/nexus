@@ -266,7 +266,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
         .fail("pylon is broken: the controller exited\nqemu-system-x86_64: terminating on signal 15 from pid 1").messages);
       const reason = "pylon is broken: the controller exited";
       d.registry.savePylon({ ...d.registry.pylon(t.pylonId)!, failed: reason });
-      d.registry.appendEvent("thread.failed", t.id, { message: reason });
+      d.registry.appendEvent("thread.failed", t.id, { message: reason, cause: "pylon" });
       const failure = d.registry.failure(t.id)!.event;
       d.registry.saveJudgment({
         failure, thread: t.id, node: firebat, failed: `${reason}\nqemu: terminating on signal 15`, startedAt: now() - 40 * minute,
@@ -458,7 +458,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
       talk(d, t, harnessTalk(t.createdAt).person("The app crashes opening an empty notebook.").messages);
       const reason = "pylon is broken: Setup exited 1. pip could not resolve tagger==0.9.2";
       d.registry.savePylon({ ...d.registry.pylon(t.pylonId)!, failed: reason });
-      d.registry.appendEvent("thread.failed", t.id, { message: reason });
+      d.registry.appendEvent("thread.failed", t.id, { message: reason, cause: "pylon" });
     },
   },
   {

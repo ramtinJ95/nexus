@@ -302,7 +302,7 @@ past matching records they have not consumed.
 | `session.waiting` | Claude showed a permission or input prompt, its AskUserQuestion hook began waiting for an answer, or a background command still ran after 2 hours; optional `session` and `message` |
 | `session.ended` | Claude's SessionEnd hook ran; optional `session` and `message` |
 | `thread.turn-ended` | The control-plane harness completed a turn |
-| `thread.failed` | Pylon or worker launch failed; `message` |
+| `thread.failed` | Pylon or worker launch failed; `message`, and `cause`, which is `pylon` or `claude-worker`. An older event has no `cause`, unless it is the failure its pylon still held when the registry opened |
 | `thread.parked` | The harness has parked tasks |
 | `attention.changed` | The new nullable `attention` |
 | `pull-request.feedback` | New batched GitHub feedback; `requestId` |

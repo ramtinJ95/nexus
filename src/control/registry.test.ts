@@ -1617,6 +1617,35 @@ test("a pylon's failure is the thread.failed event its pylon appended, until a r
   assert.ok(registry.failure(threadId)!.event > first.event, "the same reason after a retry is a new failure");
 });
 
+test("a pylon's failure is found by its event's cause, not its message, so a Claude worker failure with the same text is not it", (t) => {
+  const registry = seeded(t, tempDb(), undefined, "hello");
+  const reason = "pylon is broken: the controller exited";
+  registry.savePylon({ ...pylon, failed: reason });
+  const failure = registry.failure(threadId)!;
+  claudeWorkerAt(registry, threadId, "failed", { message: reason });
+  assert.deepEqual(registry.events("0", { kinds: ["thread.failed"] }).map((e) => e.payload), [{ message: reason, cause: "pylon" }, { message: reason, cause: "claude-worker" }]);
+  assert.deepEqual(registry.failure(threadId), failure);
+});
+
+test("an older control plane's thread.failed, which names no cause, is the pylon's failure once the registry opens again", () => {
+  const path = tempDb();
+  const first = seed(openRegistry(path));
+  first.savePylon({ ...pylon, failed: "pylon is broken: the controller exited" });
+  first.appendEvent("thread.failed", threadId, { message: "something else failed" });
+  first.close();
+  const raw = new DatabaseSync(path);
+  raw.prepare("UPDATE events SET payload = json_remove(payload, '$.cause') WHERE kind = 'thread.failed'").run();
+  raw.close();
+  const registry = openRegistry(path);
+  try {
+    const events = registry.events("0", { kinds: ["thread.failed"] });
+    assert.deepEqual(events.map((e) => e.payload), [{ message: "pylon is broken: the controller exited", cause: "pylon" }, { message: "something else failed" }]);
+    assert.equal(registry.failure(threadId)?.event, Number(events[0]!.id));
+  } finally {
+    registry.close();
+  }
+});
+
 test("a judgment is saved only over the record as it was read, with what it does in the same transaction", (t) => {
   const registry = seeded(t, tempDb());
   const judgment = {
