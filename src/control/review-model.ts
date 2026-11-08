@@ -60,8 +60,8 @@ export const answered = (f: Pick<Finding, "id">, answers: readonly Answer[]) => 
  * round whose verdict is the reviewer's approval of head `from`, carried to `head` because the change at both is the
  * same, so no reviewer round ran for it and it counts against no limit. Its checks run as any round's do, since the
  * base under the change moved. With `held`, in a review whose rounds ran out, it carries whatever verdict it was held
- * with, and its hold, and runs nothing at the new head. `quotedFrom` is the digest of the description the reviewer last quoted from when a landing asked it
- * again, so a landing asks again only once the description changed since.
+ * with, and its hold, and runs nothing at the new head. `quotedFrom` is the digest of the description the reviewer
+ * last quoted from when a landing asked it again, so a landing asks again only once the description changed since.
  * `heldAt` holds those `head` alone decides (policy.ts's `headHolds`) against the PR's `base`, whose files they read,
  * recorded once its checks pass, so the person's Land and the landing read the same ones. A landing reads them again
  * when the PR's base changed since. A round that passed its checks before Nexus recorded them gets them on the

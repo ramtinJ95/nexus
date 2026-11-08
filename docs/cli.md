@@ -237,6 +237,8 @@ It is the value the thread's latest `attention.changed` event carries. An unread
 
 Reply timestamps also serve as reply identities: each recorded reply is at least one millisecond greater than both the preceding reply and the current seen marker. This preserves strict unread ordering for events in the same millisecond or after a clock correction. A client must use the returned timestamp, not reconstruct it from its own clock. Reply notifications compare this identity and working transitions as well as attention, so a follow-up can notify even while attention stays `"reply"`.
 
+In `ThreadDetail`, `sessions` is every Herdr pane in the pylon and every failed session, `previews` every preview of the thread, served or not, and `ports` the listening ports in port order, `[]` while the pylon is not running and null while its node could not read them.
+
 Each TypeScript block on this page is the declarations it shows, copied with their TSDoc from the source file named above them by [`scripts/docs-gen.ts`](../scripts/docs-gen.ts). An ID type such as `ThreadId`, `PylonId` or `NodeName` is a string in JSON.
 
 The sessions, previews and ports in `ThreadDetail` have these shapes:
@@ -590,10 +592,10 @@ interface Tally { pylons: number; cpus: number; memoryGiB: number }
 /**
  * The pylons in a node's latest observation, by what they hold. One that is up, in any phase but stopped, or broken by
  * anything but a controller that exited, holds its CPUs and memory, and a paused one, stopped with its thread not
- * archived or deleted, needs them back to wake. A crashed one, broken because its controller exited or failed to boot the VM, holds only
- * its disk, and needs its CPUs and memory back for a retry. An archived one, paused or crashed with its thread archived
- * or deleted, holds only its disk and boots only once the thread is unarchived. An orphaned VM is one the registry has
- * not placed on the node, whose CPUs and memory the control plane does not know.
+ * archived or deleted, needs them back to wake. A crashed one, broken because its controller exited or failed to boot
+ * the VM, holds only its disk, and needs its CPUs and memory back for a retry. An archived one, paused or crashed with
+ * its thread archived or deleted, holds only its disk and boots only once the thread is unarchived. An orphaned VM is
+ * one the registry has not placed on the node, whose CPUs and memory the control plane does not know.
  */
 interface NodePylons { up: Tally; paused: Tally; archived: Tally; crashed: Tally; orphaned: readonly PylonId[] }
 ```
@@ -708,8 +710,8 @@ type LandRequest =
  * round whose verdict is the reviewer's approval of head `from`, carried to `head` because the change at both is the
  * same, so no reviewer round ran for it and it counts against no limit. Its checks run as any round's do, since the
  * base under the change moved. With `held`, in a review whose rounds ran out, it carries whatever verdict it was held
- * with, and its hold, and runs nothing at the new head. `quotedFrom` is the digest of the description the reviewer last quoted from when a landing asked it
- * again, so a landing asks again only once the description changed since.
+ * with, and its hold, and runs nothing at the new head. `quotedFrom` is the digest of the description the reviewer
+ * last quoted from when a landing asked it again, so a landing asks again only once the description changed since.
  * `heldAt` holds those `head` alone decides (policy.ts's `headHolds`) against the PR's `base`, whose files they read,
  * recorded once its checks pass, so the person's Land and the landing read the same ones. A landing reads them again
  * when the PR's base changed since. A round that passed its checks before Nexus recorded them gets them on the
@@ -848,7 +850,7 @@ type Label = { state: "adding" } | { state: "added" } | { state: "failed"; why: 
 
 `holds` is the same list as `reasons`, one per reason in the same order, each with the code that decides whether the person may waive it, which [the merge policy](merge-policy.md#what-the-person-may-waive) lists. A waiver's `codes` are the codes of the holds it names in `holds`, and the landing matches a waiver by code at its head, so a waiver keeps covering its hold if the hold's wording changes. `reasons` and a waiver's `holds` stay the texts the person reads, and the Land route still takes `waive` as those texts. Both fields are additive: a control plane without them sends neither, and one with them reads a review stored before them with codes worked out from its texts.
 
-<!-- types: src/control/holds.ts Hold HoldCode reservedCases -->
+<!-- types: src/control/holds.ts Hold HoldCode ReservedCase reservedCases -->
 ```ts
 // src/control/holds.ts
 interface Hold { code: HoldCode; text: string }
@@ -863,10 +865,7 @@ type HoldCode =
   | "same-model" | "not-approved" | "open-findings" | "unanswered" | "check-failed" | "live-failed" | "github-checks"
   | "not-approved-head" | "conflict" | "pr-not-open" | "not-checked-live" | "claude-approved" | "check-changed"
   | "verify-changed" | "no-second-reviewer" | `reserved:${ReservedCase}` | `reserved-path:${ReservedCase}` | "stale-head" | "waiver-not-carried" | "loop";
-/**
- * The merge policy's hold vocabulary: the reserved cases, the hold codes, and each code's row: its rule, the name a
- * waiver of it goes by, and what the loop does about it alone.
- */
+type ReservedCase = typeof reservedCases[number];
 const reservedCases = ["secrets", "egress", "auth", "tailnet", "destructive-migration", "image-rebuild", "cli-breaking", "irreversible"] as const;
 ```
 
@@ -1372,7 +1371,7 @@ The control plane records every model call the agents of its threads make, one r
 
 `usage` prints the tokens spent since `--since`, in all and by each breakdown. `--since` is `today` (since midnight UTC), `7d` or `30d` (today and the 6 or 29 UTC days before it), `all`, or the UTC day to start at, such as `2026-10-01`, and `7d` when it is not given, as the dashboard's Usage page defaults to. `--project P` counts only that project's threads. `--by` prints only that breakdown, or those named, comma-separated, and every one when it is not given: `model`, `project`, `kind` (the agent), `role`, and `day`, a UTC day. The text starts with the period and when counting started, then the backfill's line, then a table of the totals, then a table per breakdown, each count shortened, such as `1.2M`. With `--json` it prints the report as the API answers it, every count exact:
 
-<!-- types: src/control/agent-usage.ts Tokens src/control/usage.ts UsageTotals UsageRow UsageReport breakdowns -->
+<!-- types: src/control/agent-usage.ts Tokens src/control/usage.ts UsageTotals UsageRow UsageReport Breakdown breakdowns -->
 ```ts
 // src/control/agent-usage.ts
 interface Tokens { input: number; output: number; cacheWrite: number; cacheRead: number }
@@ -1396,6 +1395,7 @@ interface UsageReport {
   by: Partial<Record<Breakdown, UsageRow[]>>;
   backfill: UsageBackfill;
 }
+type Breakdown = typeof breakdowns[number];
 const breakdowns = ["model", "project", "kind", "role", "day"] as const;
 ```
 
@@ -1641,7 +1641,7 @@ A failure is the `thread.failed` event that the pylon's failure appended, and th
 
 `ThreadDetail.judgments` lists the thread's judgments, oldest failure first. Each is a `JudgmentView`:
 
-<!-- types: src/control/judgment.ts JudgmentView src/control/judgment-store.ts Phase Verdict answers -->
+<!-- types: src/control/judgment.ts JudgmentView src/control/judgment-store.ts Phase Verdict Answer answers Outcome -->
 ```ts
 // src/control/judgment.ts
 /** A judgment as `nexus show` and the thread page show it. */
@@ -1677,7 +1677,14 @@ type Phase =
   | { kind: "done"; verdict: Verdict; outcome: Outcome };
 /** What was decided and by whom: the judgment's answer, or the control plane's own rule when no judgment ran or its answer could not stand. */
 interface Verdict { answer: Answer; why: string; by: "judgment" | "control plane" }
+type Answer = typeof answers[number];
 const answers = ["retry", "retry-elsewhere", "person"] as const;
+/** What Nexus did, on the verdict or on the person's answer to the question. */
+type Outcome =
+  | { kind: "retried"; node: NodeName; on: "verdict" | "answer" }
+  | { kind: "moved"; from: NodeName; to: NodeName; on: "verdict" | "answer" }
+  /** Nothing, for `why`. */
+  | { kind: "left"; why: string };
 ```
 
 `by` is `judgment` for the judgment's own answer. It is `control plane` when Nexus decided by its own rule: no judgment ran because the retries were spent, the answer was missing, malformed or late, the answer could not run, or the thread was archived or deleted before it came.
@@ -1814,7 +1821,7 @@ The reply takes about a second, for the CPU sample. Only a deployer may read it,
 
 Since 0.56.0 the control plane reads every online node's health once a minute, whether or not anyone watches, and keeps every health read it makes, that one, the Cluster page's, `node`'s and a failure judgment's, as a sample of the node, at most one per node every 4 seconds, for 31 days. So a node's history has a gap only where the node or the control plane was down, and the Cluster page, which reads the health of the node it shows every 5 seconds while it is open, adds a sample with each read. Its card for every other node shows that node's newest sample, or no reading when it has none from the last 5 minutes. The once-a-minute read skips a node whose last read has not answered until it does, and a slow node holds up no other. It keeps each sample whole for 2 hours, and as buckets of min, sum, max and count per minute for 7 hours, per 2 minutes for 25 hours, per 15 minutes for 8 days and per hour for 31 days. `GET /v1/nodes/<name>/metrics?from=<ms>&to=<ms>` serves the samples from `from` to `to`, in milliseconds since the epoch, with `to` now when it is left out, for the dashboard's Cluster page to graph, and the CLI does not call it. It reads the registry only, never the node. It serves the range from the coarsest tier that still holds `from` and fits, in buckets wide enough that no series has more than 1,000 points, so the Cluster page's 15 minutes and hour come whole, 6 hours by the minute, 24 hours by 2 minutes, 7 days by 15 minutes and 30 days by the hour. The 8 pylons with the highest CPU peak in the range have series of their own, and the rest are summed into `otherPylonsCpu` and `otherPylonsResident`, labelled such as `12 other pylons, summed`, which `otherPylons` names. Each of their points is the pylons' combined use averaged over the bucket's reads, a pylon not running counting 0, and its `min` and `max` are its `avg`, since a combined min or max cannot be told from each pylon's. Memory, swap and disk are in GiB, a pylon's CPU in percent of one CPU, and temperatures in °C.
 
-<!-- types: src/control/node-metrics.ts NodeMetrics MetricSeries Series tiers TierName -->
+<!-- types: src/control/node-metrics.ts NodeMetrics MetricSeries Series TierName Tier tiers -->
 ```ts
 // src/control/node-metrics.ts
 /**
@@ -1838,6 +1845,8 @@ type Series =
   | { kind: "pylonCpu" | "pylonResident"; pylon: PylonId; thread: ThreadId | null }
   /** The pylons past `maxPylons` in a range, summed, which only the API serves. */
   | { kind: "otherPylonsCpu" | "otherPylonsResident" };
+type TierName = Tier["name"];
+type Tier = typeof tiers[number];
 /**
  * How the registry keeps samples. `raw` keeps each sample. Each other tier keeps one bucket per series per `stepMs`,
  * which every sample in it adds to. Every tier holds the newest data, and each drops what is older than `keepMs`. Each
@@ -1851,7 +1860,6 @@ const tiers = [
   { name: "15m", stepMs: 15 * minute, keepMs: 8 * day },
   { name: "1h", stepMs: hour, keepMs: 31 * day },
 ] as const satisfies readonly { name: string; stepMs: number; keepMs: number }[];
-type TierName = Tier["name"];
 ```
 
 A pylon's key ends with an empty thread when no thread had the pylon. A sensor name the host repeats gets ` (2)`, ` (3)` and so on. Only a deployer may read it, as with `node`, and anyone else gets 403. An unknown node gets 404, and a `from` that is missing or not a whole number, a `to` that is not one, a `from` not before `to`, or a range longer than 31 days, 400.

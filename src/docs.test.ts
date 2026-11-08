@@ -68,8 +68,10 @@ test("docs-gen copies a declaration whole, with its TSDoc and its last line's co
     "  /** } and ; in a comment. */",
     "  value: T; // ;",
     "}",
-    "export type After = 1;",
+    "export type After = 1; // last",
   ].join("\n");
   assert.equal(declaration(source, "Quoted"), '/** A quote. */\ntype Quoted = "say\\";more" | `a;${"b"}`; // trailing');
   assert.equal(declaration(source, "Generic"), source.split("\n").slice(4, 8).join("\n").replace("export ", ""));
+  assert.equal(declaration(source, "After"), "type After = 1; // last");
+  assert.equal(declaration("/** A file's header. */\nexport type First = 1;", "First"), "type First = 1;");
 });

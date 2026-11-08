@@ -16,13 +16,13 @@ export function declaration(source: string, name: string): string {
   const head = new RegExp(`^(?:export )?(?:interface|type|const) ${name}\\b`, "m").exec(source);
   if (head === null) throw new Error(`no declaration of ${name}`);
   const doc = /\/\*\*(?:[^*]|\*(?!\/))*\*\/\n$/.exec(source.slice(0, head.index));
-  const start = doc?.index ?? head.index;
+  const start = doc === null || doc.index === 0 ? head.index : doc.index;
   const isInterface = head[0].includes("interface");
   let angle = 0;
   let depth = 0;
   for (let i = head.index; i < source.length; i++) {
     const c = source[i]!;
-    if (c === "/" && source[i + 1] === "/") i = source.indexOf("\n", i) - 1;
+    if (c === "/" && source[i + 1] === "/") i = (source.indexOf("\n", i) + 1 || source.length) - 2;
     else if (c === "/" && source[i + 1] === "*") i = source.indexOf("*/", i) + 1;
     else if (c === '"' || c === "'" || c === "`") while (source[++i] !== c) i += source[i] === "\\" ? 1 : 0;
     else if (isInterface && depth === 0 && (c === "<" || c === ">" && source[i - 1] !== "=")) angle += c === "<" ? 1 : -1;
