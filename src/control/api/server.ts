@@ -1,5 +1,5 @@
 import { DeployDraining, isDraining, turnGate, type TurnGate } from "../drain.ts";
-import { runningCommit } from "../../deploy/health.ts";
+import { answerLocalHealth, runningCommit } from "../../deploy/health.ts";
 import { version } from "../../version.ts";
 import { canDeploy, isPerson, isReporter, type DeploymentOptions } from "../releases.ts";
 /**
@@ -249,10 +249,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
-    if (req.method === "GET" && req.url === "/v1/health" && req.socket.remoteAddress !== undefined && req.socket.remoteAddress === req.socket.localAddress) {
-      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(health()));
-      return;
-    }
+    if (answerLocalHealth(req, res, health)) return;
     if (req.method === "GET" && req.url === "/v1/whoami") return void send(res, 200, await whoami(req));
     if (req.method === "POST" && req.url === "/v1/join" && options.joins !== undefined) return void send(res, 200, await join(req, options.joins));
     const caller = await admit(req);

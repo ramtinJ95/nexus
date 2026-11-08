@@ -1,10 +1,10 @@
-import { dirname } from "node:path";
-import { eventJournal } from "./event-journal.ts";
-import { runningCommit } from "../deploy/health.ts";
 /**
  * The probe's HTTP server: lifecycle jobs and observations. It keeps job results and applied live hashes in
  * memory only. Everything durable is the backend's, so a restart loses nothing a later job cannot rebuild.
  */
+import { dirname } from "node:path";
+import { eventJournal } from "./event-journal.ts";
+import { answerLocalHealth, runningCommit } from "../deploy/health.ts";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { once } from "node:events";
@@ -23,7 +23,7 @@ import { parsePylonCommand, type CommandResult, type PylonCommand } from "../pro
 import { notAnswering, parseStreamRequest, serveByteStream, streamUpgradeResponse, type ByteStream } from "../protocol/streams.ts";
 import { artifactHeaders, fetchArtifact } from "../protocol/artifacts.ts";
 import { dropRequestSchema, type ArtifactUsage, type DeleteOutcome, type DropRequest } from "../protocol/cleanup.ts";
-import { peersSchema, probePort, probeRoutes, routeRole, type CallerRole, type GitReadReply, type ProbeAuthConfig } from "../protocol/routes.ts";
+import { peersSchema, probePort, probeRoutes, routeRole, type CallerRole, type GitReadReply, type ParamsOf, type ProbeAuthConfig, type ProbeRoute } from "../protocol/routes.ts";
 import { linkedName, type ServiceName } from "../services-file.ts";
 import { claudeSessionLock } from "./guest/session-wake.ts";
 import type { Whois } from "../protocol/http.ts";
@@ -365,11 +365,6 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     };
   }
 
-  async function runningRefusal(pylonId: PylonId): Promise<string | null> {
-    const vm = await backend.state(pylonId);
-    return vm === "running" ? null : `${pylonId} is ${vm}, not running`;
-  }
-
   /** `ended` settles with the job's result once it is published. */
   function start(env: JobEnvelope, subject: Subject, deadlineMs = deadlines[env.job.kind]): { running: JobStatus; ended: Promise<JobStatus> } {
     const { job, jobId } = env;
@@ -514,37 +509,57 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     return role === "control-plane" ? caller === auth.controlPlane : peers.includes(caller);
   }
 
-  const routes: readonly ProbeRoute[] = [{
-    path: /^\/v1\/jobs\/([^/]+)$/, notAllowed: "",
-    async PUT(req, res, match) {
-      const jobId = decodeURIComponent(match[1]!) as JobId;
-      const reply = submit(jobId, await readBody(req));
+  /**
+   * The route a request reaches, or the status it is refused with. A route on a pylon is reached only while the pylon
+   * runs. `upgrade` is the protocol an upgrade asks for, which only a route that upgrades to it serves.
+   */
+  async function routeOf(req: IncomingMessage, path: string, upgrade?: string): Promise<Routed> {
+    const role = routeRole(path);
+    if (role === undefined) return { status: 404, reason: upgrade === undefined ? `no route ${path}` : `no upgrade route ${path}` };
+    if (!await authorized(req, role)) return { status: 403, reason: "caller is not the tailnet node this route allows" };
+    const noRoute = { status: 404, reason: upgrade === undefined ? `no route ${req.method} ${path}` : `no upgrade route ${path} for ${upgrade}` };
+    const at = tablePaths.find(({ pattern }) => pattern.test(path));
+    if (at === undefined) return noRoute;
+    const name = at.names.find((n) => probeRoutes[n].method === req.method && (probeRoutes[n] as ProbeRoute).upgrade === upgrade?.toLowerCase());
+    if (name === undefined) {
+      const suffix = upgrade === undefined ? at.names.map((n) => notAllowed[n]).find((r) => r !== undefined) : undefined;
+      return suffix === undefined ? noRoute : { status: 405, reason: `${req.method} is not allowed on ${path}${suffix}` };
+    }
+    let params: Record<string, string>;
+    try {
+      params = Object.fromEntries(Object.entries(at.pattern.exec(path)!.groups ?? {}).map(([key, value]) => [key, decodeURIComponent(value)]));
+    } catch (err) {
+      return { status: 400, reason: (err as Error).message };
+    }
+    if (params.pylonId !== undefined) {
+      const vm = await backend.state(params.pylonId as PylonId);
+      if (vm !== "running") return { status: 409, reason: `${params.pylonId} is ${vm}, not running` };
+    }
+    return { name, params };
+  }
+
+  const handlers: { [K in HttpRouteName]: (req: IncomingMessage, res: ServerResponse, params: ParamsOf<(typeof probeRoutes)[K]["path"]>) => Promise<unknown> | void } = {
+    async submit(req, res, { jobId }) {
+      const reply = submit(jobId as JobId, await readBody(req));
       return send(res, reply.status, reply.body, "application/json");
     },
-    GET(_req, res, match) {
-      const jobId = decodeURIComponent(match[1]!) as JobId;
-      const job = jobs.get(jobId);
+    job(_req, res, { jobId }) {
+      const job = jobs.get(jobId as JobId);
       return job ? send(res, 200, JSON.stringify(job.status), "application/json") : send(res, 404, `no job ${jobId}`);
     },
-  }, {
-    path: /^\/v1\/observe$/,
-    GET(req, res) {
+    observe(req, res) {
       // whois is async, so the caller or the probe may be gone by now, and nothing would remove the observer.
       if (req.socket.destroyed || shutdown.signal.aborted) return;
       return observe(res);
     },
-  }, {
-    path: /^\/v1\/pylons\/([^/]+)\/commands$/,
-    async POST(req, res, match) {
-      const pylonId = decodeURIComponent(match[1]!) as PylonId;
+    async command(req, res, params) {
+      const pylonId = params.pylonId as PylonId;
       let command: PylonCommand;
       try {
         command = parsePylonCommand(await readBody(req));
       } catch (err) {
         return send(res, 400, (err as Error).message);
       }
-      const refused = await runningRefusal(pylonId);
-      if (refused !== null) return send(res, 409, refused);
       const asked = command;
       // Each kind's policy takes its own kind of command and result, which command.kind picks.
       const policy = commandPolicies[command.kind] as CommandPolicy<PylonCommand["kind"]>;
@@ -556,12 +571,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       if (typeof policy.publishes === "function" ? policy.publishes(result) : policy.publishes) void publishSnapshot();
       return send(res, 200, JSON.stringify(result), "application/json");
     },
-  }, {
-    path: /^\/v1\/pylons\/([^/]+)\/git$/,
-    async POST(_req, res, match) {
-      const pylonId = decodeURIComponent(match[1]!) as PylonId;
-      const refused = await runningRefusal(pylonId);
-      if (refused !== null) return send(res, 409, refused);
+    async readGit(_req, res, params) {
+      const pylonId = params.pylonId as PylonId;
       // In the read queue, so no read in flight stores a git read from before the drop, and every snapshot published
       // after it reads git again.
       const before = await betweenReads(async () => { delete pylons.get(pylonId)?.git; return published; });
@@ -569,18 +580,12 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       if (published === before) return send(res, 503, "no snapshot was published, as nothing observes this node or the read failed");
       return send(res, 200, JSON.stringify({ observedAt: publishedAt! } satisfies GitReadReply), "application/json");
     },
-  }, {
-    path: /^\/v1\/manifests\/([^/]+)$/,
-    async GET(_req, res, match) {
-      const id = decodeURIComponent(match[1]!);
-      if (!isPortableArtifactId(id)) return send(res, 400, `${JSON.stringify(id)} is not an image or template ID`);
-      const manifest = await backend.artifacts.manifest(id);
-      return manifest === null ? send(res, 404, `this node holds no ${id}`) : send(res, 200, JSON.stringify(manifest), "application/json");
+    async manifest(_req, res, { artifact }) {
+      if (!isPortableArtifactId(artifact)) return send(res, 400, `${JSON.stringify(artifact)} is not an image or template ID`);
+      const manifest = await backend.artifacts.manifest(artifact);
+      return manifest === null ? send(res, 404, `this node holds no ${artifact}`) : send(res, 200, JSON.stringify(manifest), "application/json");
     },
-  }, {
-    path: /^\/v1\/secrets\/([^/]+)$/, notAllowed: "",
-    async PUT(req, res, match) {
-      const name = decodeURIComponent(match[1]!);
+    async putSecret(req, res, { name }) {
       if (!heldSecrets.includes(name)) return send(res, 404, `${name} is not a secret the control plane hands over`);
       // No reply or log carries the value, so a refusal says what a value must be, never what this one was.
       let value: string;
@@ -596,11 +601,8 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       res.writeHead(204).end();
       // Boots that need it wait for a snapshot that lists it.
       if (first) void publishSnapshot();
-      return;
     },
-  }, {
-    path: /^\/v1\/peers$/, notAllowed: "",
-    async PUT(req, res) {
+    async putPeers(req, res) {
       let next: readonly TailnetNodeId[];
       try {
         next = peersSchema.parse(JSON.parse(await readBody(req)));
@@ -611,9 +613,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       peers = next;
       return void res.writeHead(204).end();
     },
-  }, {
-    path: /^\/v1\/deployer\/wake$/, notAllowed: "",
-    async POST(_req, res) {
+    async wakeDeployer(_req, res) {
       if (options.deployerWakeFile === undefined) return send(res, 404, "this probe wakes no deployer");
       try {
         await writeFile(options.deployerWakeFile, `${new Date().toISOString()}\n`);
@@ -622,10 +622,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       }
       return void res.writeHead(204).end();
     },
-  }, {
-    path: /^\/v1\/artifacts\/([^/]+)$/,
-    async GET(req, res, match) {
-      const id = decodeURIComponent(match[1]!);
+    async fetchArtifact(req, res, { artifact: id }) {
       const wanted = new URL(req.url ?? "/", "http://probe").searchParams.get("sha256");
       if (wanted === null) return send(res, 400, "name the sha256 the copy must have, as ?sha256=");
       if (!isPortableArtifactId(id) || !await backend.artifacts.has(id)) return send(res, 404, `this node holds no image or template ${id}. A checkpoint never leaves its node`);
@@ -640,15 +637,13 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       // A failed archive destroys the response, so the peer's copy breaks off instead of ending as if complete.
       return pipeline(stream, res).catch((err: Error) => log(`artifact ${id}: ${err.message}`));
     },
-  }, {
-    path: /^\/v1\/cleanup$/,
-    async GET(_req, res) {
+    async artifactUsage(_req, res) {
       const sized = await Promise.all((await backend.artifacts.list()).map(async (id) => ({ id, bytes: await sizeOf(id) })));
       const usage: ArtifactUsage = { artifacts: sized.filter((a): a is { id: PortableArtifactId; bytes: number } => a.bytes !== null) };
       return send(res, 200, JSON.stringify(usage), "application/json");
     },
     /** The backend refuses an artifact a pylon, a template or a create still needs, which leaves it skipped with the refusal. */
-    async POST(req, res) {
+    async dropArtifacts(req, res) {
       let asked: DropRequest;
       try {
         asked = dropRequestSchema.parse(JSON.parse(await readBody(req)));
@@ -660,40 +655,26 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       void publishSnapshot();
       return send(res, 200, JSON.stringify({ outcomes }), "application/json");
     },
-  }, {
-    path: /^\/v1\/node-health$/, notAllowed: ": node health is read-only",
-    async GET(_req, res) {
+    async health(_req, res) {
       const health = await readNodeHealth(node, { root: "/", storage, watched, pylons: await backend.processes?.() ?? null, sampleMs: healthSampleMs });
       return send(res, 200, JSON.stringify(health), "application/json");
     },
-  }];
+  };
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
-    if (req.method === "GET" && req.url === "/v1/health" && req.socket.remoteAddress === req.socket.localAddress) {
-      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ commit: runningCommit }));
-      return;
-    }
-    const path = new URL(req.url ?? "/", "http://probe").pathname;
-    const role = routeRole(path);
-    if (role === undefined) return send(res, 404, `no route ${path}`);
-    if (!await authorized(req, role)) return send(res, 403, "caller is not the tailnet node this route allows");
-
-    for (const entry of routes) {
-      const match = entry.path.exec(path);
-      if (match === null) continue;
-      const handler = req.method === "GET" || req.method === "PUT" || req.method === "POST" ? entry[req.method] : undefined;
-      if (handler !== undefined) return handler(req, res, match);
-      if (entry.notAllowed !== undefined) return send(res, 405, `${req.method} is not allowed on ${path}${entry.notAllowed}`);
-      break;
-    }
-    return send(res, 404, `no route ${req.method} ${path}`);
+    if (answerLocalHealth(req, res, () => ({ commit: runningCommit }))) return;
+    const routed = await routeOf(req, new URL(req.url ?? "/", "http://probe").pathname);
+    if ("status" in routed) return send(res, routed.status, routed.reason);
+    // routeOf reaches an upgrade route only for an upgrade, and gives each route the parameters its path names.
+    const handler = handlers[routed.name as HttpRouteName] as (req: IncomingMessage, res: ServerResponse, params: Readonly<Record<string, string>>) => Promise<unknown> | void;
+    return handler(req, res, routed.params);
   }
 
   /** GET /v1/pylons/{id}/stream. The guest process starts before the 101, so a pylon that cannot run it gets an HTTP error instead. */
   async function stream(req: IncomingMessage, socket: Duplex, head: Buffer, left: AbortSignal) {
     const url = new URL(req.url ?? "/", "http://probe");
-    if (!url.pathname.startsWith("/v1/pylons/")) return refuse(socket, 404, `no upgrade route ${url.pathname}`);
-    if (!await authorized(req, probeRoutes.stream.role)) return refuse(socket, 403, "caller is not the tailnet node this route allows");
+    const routed = await routeOf(req, url.pathname, req.headers.upgrade ?? "");
+    if ("status" in routed) return refuse(socket, routed.status, routed.reason);
     let parsed: ReturnType<typeof parseStreamRequest>;
     try {
       parsed = parseStreamRequest(req.headers.upgrade, url);
@@ -702,8 +683,6 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     }
     if (parsed === null) return refuse(socket, 404, `no upgrade route ${url.pathname} for ${req.headers.upgrade}`);
     const { pylonId, argv } = parsed;
-    const refused = await runningRefusal(pylonId);
-    if (refused !== null) return refuse(socket, 409, refused);
     const gone = AbortSignal.any([left, shutdown.signal]);
     if (gone.aborted) return void socket.destroy();
     const slow = AbortSignal.timeout(streamTiming.startMs);
@@ -790,12 +769,16 @@ function refuse(socket: Duplex, status: number, body: string) {
   if (!socket.destroyed) socket.end(rawResponse(status, { "content-type": "text/plain; charset=utf-8", connection: "close" }, body));
 }
 
-type RouteHandler = (req: IncomingMessage, res: ServerResponse, match: RegExpExecArray) => Promise<unknown> | void;
-/**
- * A route under probeRoutes: its whole path and a handler per method. With `notAllowed`, any other method answers 405
- * with it after the reason. Without it, another method falls through to the 404.
- */
-interface ProbeRoute { path: RegExp; GET?: RouteHandler; PUT?: RouteHandler; POST?: RouteHandler; notAllowed?: string }
+type RouteName = keyof typeof probeRoutes;
+type Routed = { name: RouteName; params: Readonly<Record<string, string>> } | { status: number; reason: string };
+type HttpRouteName = { [K in RouteName]: (typeof probeRoutes)[K] extends { upgrade: string } ? never : K }[RouteName];
+/** Each path of probeRoutes as a pattern that names its parameters, with the routes that serve it. */
+const tablePaths = [...new Set(Object.values(probeRoutes).map((route) => route.path))].map((path) => ({
+  pattern: new RegExp(`^${path.split(/\{(\w+)\}/).map((part, i) => i % 2 === 1 ? `(?<${part}>[^/]+)` : RegExp.escape(part)).join("")}$`),
+  names: (Object.keys(probeRoutes) as RouteName[]).filter((name) => probeRoutes[name].path === path),
+}));
+/** A method no route of a path serves answers 405, with the entry after the reason, at these paths, and 404 at the others. */
+const notAllowed: Partial<Record<RouteName, string>> = { submit: "", putSecret: "", putPeers: "", wakeDeployer: "", health: ": node health is read-only" };
 
 function send(res: ServerResponse, status: number, body: string, contentType = "text/plain; charset=utf-8") {
   res.writeHead(status, { "content-type": contentType }).end(body);

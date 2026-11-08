@@ -48,7 +48,7 @@ export const probeRoutes = {
   fetchArtifact: { method: "GET", path: "/v1/artifacts/{artifact}", role: "peer-probe" },
 } as const satisfies Record<string, ProbeRoute>;
 
-type ParamsOf<P extends string> = P extends `${string}{${infer K}}${infer Rest}` ? Record<K, string> & ParamsOf<Rest> : unknown;
+export type ParamsOf<P extends string> = P extends `${string}{${infer K}}${infer Rest}` ? Record<K, string> & ParamsOf<Rest> : unknown;
 type IsUnion<T, U = T> = T extends unknown ? ([U] extends [T] ? false : true) : never;
 /** One route's literal path only, since a union of routes or a widened `ProbeRoute` cannot say which parameters it needs. */
 type PathArgs<P extends string> = string extends P ? never : true extends IsUnion<P> ? never : P extends `${string}{${string}` ? [ParamsOf<P>] : [];
