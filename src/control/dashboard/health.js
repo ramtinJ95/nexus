@@ -2,18 +2,18 @@
 // first script. It reads the page's pieces when it runs, so a test reads what a change says without a page.
 import { doctorRoutes } from "../../contract/reports.ts";
 import { checkName } from "../plain-wording.ts";
+import { statuses } from "../doctor-model.ts";
 
 const focused = () => document.visibilityState === "visible" && document.hasFocus();
 const refresh = async () => (await import("./page.js")).refreshNow();
 
-const ranks = ["ok", "warn", "fail"];
 /**
  * What a health change says. A check that went bad or got worse alerts, and one that got better says so quietly, as a
  * toast only. `key` names the check, so a later change of it replaces the notice.
  */
 export function healthNotice(change) {
   const check = checkName(change);
-  const worse = ranks.indexOf(change.status) > ranks.indexOf(change.from);
+  const worse = statuses.indexOf(change.status) > statuses.indexOf(change.from);
   const title = worse ? `${check}: ${change.status}` : change.status === "ok" ? `${check} recovered` : `${check}: ${change.status}, better than ${change.from}`;
   return { key: JSON.stringify([change.node, change.name]), title, body: change.text, url: "/health", quiet: !worse };
 }
