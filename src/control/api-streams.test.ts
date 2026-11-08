@@ -30,11 +30,11 @@ test("a thread's event stream sends the whole view, then each part a commit chan
   const res = await stream.response;
   assert.equal(res.statusCode, 200);
   assert.equal(res.headers["content-type"], "text/event-stream");
-  assert.deepEqual(await stream.next(), { entries: [], docs: { "pi.inbox": { items: [] } } }, "the first event is the whole view");
+  assert.deepEqual(await stream.next(), { entries: [], docs: { "pi.inbox": { items: [] } }, busy: { working: false, queued: 0 } }, "the first event is the whole view, with what its run does");
 
   transcript.docs["pi.live"] = { run: { taskId: 1, inputs: [] }, generation: { message: { role: "assistant", content: [{ type: "text", text: "Hal" }] } } };
   fake.commit(thread.id);
-  assert.deepEqual(await stream.next(), { docs: { "pi.live": transcript.docs["pi.live"] } }, "a commit to the live document sends only it, whole");
+  assert.deepEqual(await stream.next(), { docs: { "pi.live": transcript.docs["pi.live"] }, busy: { working: true, queued: 0 } }, "a commit to the live document sends only it, whole, and the run it starts");
   transcript.docs["pi.live"] = { run: { taskId: 1, inputs: [] }, generation: { message: { role: "assistant", content: [{ type: "text", text: "Half" }] } } };
   fake.commit(thread.id);
   assert.equal((await stream.next()).docs["pi.live"].generation.message.content[0].text, "Half", "the partial is a snapshot, not a delta");
@@ -45,7 +45,7 @@ test("a thread's event stream sends the whole view, then each part a commit chan
   assert.deepEqual(appended.entries.map((e: any) => e.model[0].content), ["and then?"]);
   delete transcript.docs["pi.live"];
   fake.commit(thread.id);
-  assert.deepEqual(await stream.next(), { docs: { "pi.live": null } }, "a document that is gone is null");
+  assert.deepEqual(await stream.next(), { docs: { "pi.live": null }, busy: { working: false, queued: 0 } }, "a document that is gone is null, and the run it held ends");
 
   assert.equal(fake.watching(thread.id), 1);
   stream.close();

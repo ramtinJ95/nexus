@@ -4,7 +4,7 @@
  */
 import { createHash } from "node:crypto";
 import type { ImageContent } from "@earendil-works/pi-ai";
-import type { ConversationView, EntryRecord, JsonObject } from "@earendil-works/pi-durable";
+import type { ConversationView, EntryRecord, InboxState, JsonObject, LiveState } from "@earendil-works/pi-durable";
 import type { ClaudeConversation, ClaudeEntry } from "./claude-transcript.ts";
 
 /** A thread's conversation, tagged with the kind of agent it is from. */
@@ -30,14 +30,24 @@ export interface Watch<V> {
   readonly closed: Promise<unknown>;
 }
 
+/** Whether a harness conversation's run is working, and how many messages wait for it to finish. */
+export interface Busy { working: boolean; queued: number }
+
+/** The run as the docs pi-durable keeps of it say: its live run, and the messages its inbox holds. */
+export function busyOf(view: Pick<ConversationView, "docs">): Busy {
+  const inbox = view.docs["pi.inbox"] as InboxState | undefined;
+  return { working: (view.docs["pi.live"] as LiveState | undefined)?.run !== undefined, queued: Array.isArray(inbox?.items) ? inbox.items.length : 0 };
+}
+
 /**
  * One event of `GET /v1/threads/:id/events`. The first carries the whole view. Each later one carries what changed
- * since the one before, each part whole: the active context when any entry changed, and each document that changed,
- * or null for one that is gone.
+ * since the one before, each part whole: the active context when any entry changed, each document that changed,
+ * or null for one that is gone, and the run's `busy` when it changed. A control plane older than 0.71.0 sends no `busy`.
  */
 export interface ViewFrame {
   entries?: readonly EntryRecord[];
   docs?: Record<string, JsonObject | null>;
+  busy?: Busy;
 }
 
 /** Maps each view to what one client has not seen yet, or null when nothing it shows changed. */
@@ -46,14 +56,18 @@ export type Frames<V = ConversationView> = (view: V) => unknown;
 /** The frames of one client of a thread's event stream. pi-durable's views share every part a commit left alone. */
 export function viewFrames(): Frames {
   let sent: ConversationView | null = null;
+  let sentBusy: Busy | null = null;
   return (view) => {
     const kinds = new Set([...Object.keys(view.docs), ...Object.keys(sent?.docs ?? {})]);
     const docs = Object.fromEntries([...kinds].flatMap((kind) => view.docs[kind] === sent?.docs[kind] ? [] : [[kind, view.docs[kind] ?? null]]));
+    const busy = busyOf(view);
     const frame: ViewFrame = {
       ...view.entries === sent?.entries ? {} : { entries: view.entries },
       ...Object.keys(docs).length === 0 ? {} : { docs },
+      ...sentBusy?.working === busy.working && sentBusy.queued === busy.queued ? {} : { busy },
     };
     sent = view;
+    sentBusy = busy;
     return Object.keys(frame).length === 0 ? null : frame;
   };
 }

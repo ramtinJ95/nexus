@@ -314,7 +314,7 @@ Without `--json`, stderr gets one line, `nexus: <message>`. With `--json`, stder
 
 `nexus watch <thread> --json` follows the thread's conversation, or a Claude worker thread's transcript, as the control plane streams it, polls the rest of the thread every `--interval` milliseconds, 2000 by default, and prints one compact JSON object per line. Each object has a `type` and the `thread` ID.
 
-The conversation streams from `GET /v1/threads/<thread>/events`, as server-sent events whose data is a `ViewFrame` from [`src/control/conversation-view.ts`](../src/control/conversation-view.ts). pi-durable commits an answer as it is written at most every 100 ms, and the output of a running tool on the same throttle, so `live` comes up to ten times a second while the agent writes. A change to the conversation prints within one commit, and a change to the pylon, its ports or the thread's status within one interval.
+The conversation streams from `GET /v1/threads/<thread>/events`, as server-sent events whose data is a `ViewFrame` from [`src/control/conversation-view.ts`](../src/control/conversation-view.ts). Since 0.71.0 a frame also carries `busy`, `{ working, queued }`, on the first frame and whenever it changed: whether the agent's run is working, and how many messages wait for it to finish, as the deploy drain reads them. pi-durable commits an answer as it is written at most every 100 ms, and the output of a running tool on the same throttle, so `live` comes up to ten times a second while the agent writes. A change to the conversation prints within one commit, and a change to the pylon, its ports or the thread's status within one interval.
 
 `src/contract/watch.ts` holds these types, with `state` as `ThreadStateEvent` and `live` as `RunLiveEvent`.
 

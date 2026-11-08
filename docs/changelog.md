@@ -4,7 +4,7 @@ What each version of the API contract and the Mac `nexus` CLI changed, newest fi
 
 ## 0.71.0
 
-Adds what the clients worked out from the stored records to the replies. `ThreadDetail` gains `reviewView`, the merge policy's answer for the thread's review: its holds, what a Land press does, and the review's open question about its holds. It also gains `keptPastDay`, why an archived thread's disk is kept past its 24 hours. `ReleaseView` gains `controlNode`, the node the control plane runs on. `review` and every other field are as before. A control plane older than 0.71.0 sends none of the three.
+Adds what the clients worked out from the stored records to the replies. `ThreadDetail` gains `reviewView`, the merge policy's answer for the thread's review: its holds, what a Land press does, and the review's open question about its holds. It also gains `keptPastDay`, why an archived thread's disk is kept past its 24 hours. `ReleaseView` gains `controlNode`, the node the control plane runs on. Each frame of `GET /v1/threads/<thread>/events` gains `busy`, whether the agent's run is working and how many messages wait for it, on the first frame and whenever it changed. `review` and every other field are as before. A control plane older than 0.71.0 sends none of the four.
 
 ## 0.70.0
 

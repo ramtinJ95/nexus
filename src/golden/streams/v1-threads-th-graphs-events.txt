@@ -1601,5 +1601,9 @@ data: {
         }
       ]
     }
-  ]
+  ],
+  "busy": {
+    "working": false,
+    "queued": 0
+  }
 }
