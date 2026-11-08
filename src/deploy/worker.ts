@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 import { command, checkoutMerged, type Command, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
 import { planDeploy, quarantined, schemaStep, type Attempt, type ReleaseHealth, type SchemaVersions } from "./plan.ts";
-import type { DrainBody, DrainReply, ReleaseReport, ReleaseView, ReportBody, Role } from "../protocol/deploy.ts";
+import { digestPattern, type DrainBody, type DrainReply, type ReleaseReport, type ReleaseView, type ReportBody, type Role } from "../protocol/deploy.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
 import { deleteReleases, readReleases } from "./release-cleanup.ts";
 import { checkControlPlaneFile, readControlPlane, type ControlPlane } from "./control-plane.ts";
@@ -23,7 +23,7 @@ export interface WorkerConfig {
 /** The control plane comes from control-plane.json. The controlUrl and controlNodeId an older deployer.json holds are left for older code. */
 export function parseWorkerConfig(deployer: unknown, control: ControlPlane): WorkerConfig {
   const v = deployer as WorkerConfig;
-  if (typeof v !== "object" || v === null || typeof v.token !== "string" || !/^[0-9a-f]{64}$/.test(v.token) ||
+  if (typeof v !== "object" || v === null || typeof v.token !== "string" || !digestPattern.test(v.token) ||
       !Number.isInteger(v.drainTimeoutMs) || v.drainTimeoutMs < 0 || v.drainTimeoutMs > 600_000 ||
       !Number.isInteger(v.healthTimeoutMs) || v.healthTimeoutMs < 1000 || v.healthTimeoutMs > 60_000) throw new Error("invalid deployer.json");
   return { controlUrl: control.url, controlNodeId: control.tailnetNodeId, token: v.token, drainTimeoutMs: v.drainTimeoutMs, healthTimeoutMs: v.healthTimeoutMs };
