@@ -1,9 +1,10 @@
 /** The request schemas of the thread routes in threads.ts. They need zod, so they stay out of threads.ts, which a browser can bundle. */
 import { z } from "zod";
 import { maxPromptChars } from "../protocol/commands.ts";
+import { minPylonMemoryGiB, minPylonMemoryReason } from "../protocol/spawn.ts";
 
 /** A pylon's size, which a project gives its threads and a thread's start may change. */
-export const resourcesSchema = z.strictObject({ cpus: z.int().positive(), memoryGiB: z.int().positive(), diskGiB: z.int().positive() });
+export const resourcesSchema = z.strictObject({ cpus: z.int().positive(), memoryGiB: z.int().min(minPylonMemoryGiB, minPylonMemoryReason), diskGiB: z.int().positive() });
 
 export const startSchema = z.strictObject({
   model: z.string().trim().min(1).max(200).optional(),

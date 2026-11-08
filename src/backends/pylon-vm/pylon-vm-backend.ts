@@ -18,7 +18,7 @@ import { artifactDirectory, manifestFiles, tarCodec } from "../../image/artifact
 import { type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type SecretSource, type VmBackend } from "../backend.ts";
 import { JobFailure } from "../../protocol/jobs.ts";
 import { buildImage as buildPylonImage } from "../../image/build.ts";
-import { requiredArtifacts, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit } from "../../protocol/spawn.ts";
+import { minPylonMemoryGiB, minPylonMemoryReason, requiredArtifacts, type BootInputs, type CloneRepo, type LiveSpec, type RepoInit } from "../../protocol/spawn.ts";
 import { shellQuote as q } from "../../shell.ts";
 import { type CheckpointId, type ImageId, isCheckpointId, isImageId, isTemplateId, maxPylonIdLength, type PortableArtifactId, type PylonId } from "../../ids.ts";
 import { pylonIdSchema } from "../../protocol/fields.ts";
@@ -73,8 +73,6 @@ export interface PylonVmBackendOptions {
 const checkpointFile = "nexus-checkpoint.json";
 /** Each controller's limit, so a stuck one cannot hold the update past the control plane's 10 s wait for the probe. */
 const secretUpdateMs = 5_000;
-/** Measured in the pylon-vm slice: 3 GiB boots, 4, 8, 12 and 16 GiB pass the whole slice, and 2 GiB hangs at "ACPI: Core revision". */
-const minMemoryGiB = 3;
 
 /** Whether the host's KVM lets a guest run VMs of its own, as its vendor module's `nested` parameter says, `Y` or `1`. */
 export function hostNestsKvm(read: (path: string) => string | null = (path) => { try { return readFileSync(path, "utf8"); } catch { return null; } }): boolean {
@@ -311,8 +309,8 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
 
   /** Everything a boot applies. Built only when a VM is about to boot, because a running VM ignores boot inputs. */
   async function bootSpec(boot: BootInputs, live: LiveSpec): Promise<BootSpec> {
-    if (boot.resources.memoryGiB < minMemoryGiB) {
-      throw new JobFailure("invalid", `${boot.pylonId} asks for ${boot.resources.memoryGiB} GiB, but pylon VMs need at least ${minMemoryGiB} GiB: a 2 GiB Gondolin 0.13.0 guest hangs at boot on infra-testbench`);
+    if (boot.resources.memoryGiB < minPylonMemoryGiB) {
+      throw new JobFailure("invalid", `${boot.pylonId} asks for ${boot.resources.memoryGiB} GiB, but ${minPylonMemoryReason}`);
     }
     const secrets: BootSpec["secrets"] = {};
     for (const grant of boot.network.secrets) {
@@ -620,7 +618,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
 
     async buildTemplate(template, inputs, signal) {
       const { key, repo, resources } = inputs;
-      if (resources.memoryGiB < minMemoryGiB) throw new JobFailure("invalid", `template ${template} asks for ${resources.memoryGiB} GiB, but pylon VMs need at least ${minMemoryGiB} GiB`);
+      if (resources.memoryGiB < minPylonMemoryGiB) throw new JobFailure("invalid", `template ${template} asks for ${resources.memoryGiB} GiB, but pylon VMs need at least ${minPylonMemoryGiB} GiB`);
       const remote = sshRemoteOf(repo.url);
       await holding([key.image], async () => templates.buildTemplate(stateRoot, store, {
         config: { version: 1, diskGiB: resources.diskGiB, image: assetsOf(key.image), workspace: workspaceDir, setup: setupCommands({ kind: "clone", url: repo.url, checkout: { branch: repo.branch, commit: repo.commit } }, inputs.preSetup), retrySetup: false, resume: [], services: {} },

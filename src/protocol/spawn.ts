@@ -13,6 +13,13 @@ export type GitIdentity = z.infer<typeof gitIdentitySchema>;
 /** The CPUs, memory and disk a pylon boots with. */
 export interface PylonResources { cpus: number; memoryGiB: number; diskGiB: number }
 
+/**
+ * The least memory a pylon VM boots with, which the pylon-vm backend enforces and the API refuses below. Measured in
+ * the pylon-vm slice: 3 GiB boots, 4, 8, 12 and 16 GiB pass the whole slice, and 2 GiB hangs at "ACPI: Core revision".
+ */
+export const minPylonMemoryGiB = 3;
+export const minPylonMemoryReason = `pylon VMs need at least ${minPylonMemoryGiB} GiB: a 2 GiB Gondolin 0.13.0 guest hangs at boot on infra-testbench`;
+
 export type PylonSource =
   | { kind: "template"; template: TemplateId }
   | { kind: "resume"; checkpoint: CheckpointId } // the pylon's own disk on this node

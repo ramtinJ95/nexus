@@ -5,7 +5,7 @@ import type { HarnessHost } from "./harness/host.ts";
 import { chooseTemplate, setupHashOf, type ProjectMirror, type SetupInputs, type ThreadSetup } from "./templates.ts";
 import { bootSecrets, effectiveAllowedHosts, gitIdentityOf, hasRemote, withHttpsHosts, type Project, type RemoteProject } from "./project.ts";
 import type { PylonOverlay } from "./overlay.ts";
-import { liveHashOf, type BootInputs, type RepoInit } from "../protocol/spawn.ts";
+import { liveHashOf, minPylonMemoryGiB, minPylonMemoryReason, type BootInputs, type RepoInit } from "../protocol/spawn.ts";
 import { newThreadId, pylonIdOf, type ImageId, type NodeName, type ProjectId, type TemplateId, type ThreadId } from "../ids.ts";
 import { newPylonRecord, type PylonRecord } from "./tick.ts";
 import { Refusal } from "./refusal.ts";
@@ -36,6 +36,8 @@ export function checkStart(registry: ThreadsRegistry, request: StartRequest, cal
   if (claudePrompt !== undefined && claudePrompt.length > maxPromptChars) throw new Refusal("invalid", `Claude prompt including ${claudeSkill} exceeds ${maxPromptChars} characters`);
   const project = registry.project(request.project as ProjectId);
   if (project === undefined) throw new Refusal("missing", `no project ${request.project}`);
+  const { memoryGiB } = resourcesOf(request.resources, project);
+  if (memoryGiB < minPylonMemoryGiB) throw new Refusal("invalid", `the pylon would get ${memoryGiB} GiB, but ${minPylonMemoryReason}`);
   const rules = standingRulesFor(project, request, caller);
   if (claudePrompt !== undefined && withStandingRules(claudePrompt, rules).length > maxPromptChars) {
     throw new Refusal("invalid", `Claude prompt including ${claudeSkill} and project ${project.id}'s standing rules exceeds ${maxPromptChars} characters. Shorten the brief, or the rules that nexus project show ${project.id} prints`, "too-long");
