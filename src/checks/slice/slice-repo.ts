@@ -15,7 +15,6 @@ function commitId(message: string, parent?: string): string {
 
 export const sliceRepo = "/srv/slice.git";
 const first = commitId("first");
-/** main's two commits, oldest first. */
 export const sliceCommits = [first, commitId("second", first)] as const;
 
 /** The Dockerfile step that makes the repository, after the one that adds `user`, who owns it. */

@@ -179,6 +179,7 @@ function dockerFixture(): SliceFixture {
       assert.equal((await asUser(guest, "test -e /home/user/resume.log")).exitCode, 1, "the boot that ran setup skips .nexus/resume");
       assert.deepEqual(await asUser(guest, `git -C ${dotfilesDir} rev-parse HEAD`), { exitCode: 0, output: `${sliceCommits[1]}\n`, truncated: false }, "the boot pulled the dotfiles");
       assert.match(await containerLog(), /^dotfiles: pulled /m, "the pull's outcome is logged");
+      assert.match((await asUser(guest, "echo $NEXUS_API")).output, new RegExp(`^http://host\\.docker\\.internal:${bridgePort}/[0-9a-f]{32}\n$`), "a login shell has the container's NEXUS_API");
       await this.checkOverlay(guest, 1);
     },
     async checkWake(guest) {

@@ -24,8 +24,8 @@ const execFileAsync = promisify(execFile);
 /**
  * A `docker` first on PATH that logs each argv and answers from `replies`, keyed by the longest leading run of its
  * arguments joined by spaces. Its `exec` runs the command on this host instead, with the container's checkout and
- * other directories under `root`, so a container's files are the test's. The boot policy's commands run as user through
- * runuser, which only root may call, so those are only logged, and one that names nexus-fails exits 3.
+ * other directories under `root`, so a container's files are the test's. The boot policy's commands call runuser and
+ * chown, which only root may, so those are only logged, and one that names nexus-fails exits 3.
  */
 async function fakeDocker(t: TestContext, replies: Record<string, Reply> = {}) {
   const bin = await realpath(await mkdtemp(join(tmpdir(), "nexus-fake-docker-")));
@@ -43,7 +43,7 @@ if (argv[0] === "exec") {
   let i = 1, cwd = ${JSON.stringify(bin)};
   for (; argv[i].startsWith("--"); i++) if (argv[i] === "--workdir") cwd = remap(argv[++i]); else if (argv[i] === "--env") i++;
   const command = argv.slice(i + 1);
-  if (command[0] === "sh" && command[1] === "-lc" && /^('runuser'|chown )/.test(command[2])) process.exit(command[2].includes("nexus-fails") ? 3 : 0);
+  if (command.some((arg) => /^('runuser'|chown )/.test(arg))) process.exit(command.some((arg) => arg.includes("nexus-fails")) ? 3 : 0);
   const [program, ...args] = command.map(remap);
   const child = spawn(program, args, { cwd, stdio: "inherit" });
   process.on("SIGTERM", () => { child.kill("SIGKILL"); process.exit(143); });
@@ -274,9 +274,10 @@ test("a boot runs the boot policy in the container: the hooks on every boot, a n
     dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, gitIdentity: { name: "Example Person", email: "person@example.com" },
   };
   const live = { previews: [], overlay: [] };
-  /** The boot policy's commands the container ran since `from` calls, with each background resume as `resume` and its commands. */
+  /** The boot policy's commands the container ran since `from` calls, with each resume as `resume` and its commands. */
   const policy = async (from: number) => (await docker.calls()).slice(from).filter((argv) => argv[0] === "exec").flatMap((argv) => {
-    if (argv.includes("--detach")) return [["resume", ...argv.slice(argv.indexOf("sh") + 4)]];
+    const resume = argv.findIndex((arg) => arg.includes("resume: exited"));
+    if (resume > 0) return [["resume", ...argv.slice(resume + 1)]];
     const lc = argv.indexOf("-lc");
     return lc > 0 && /^('runuser'|chown )/.test(argv[lc + 1]!) ? [[argv[lc + 1]!]] : [];
   });
@@ -300,7 +301,7 @@ test("a boot runs the boot policy in the container: the hooks on every boot, a n
     from = (await docker.calls()).length;
     await docker.answer({ images: { stdout: "nexus-test\n" }, "ps -a -q --filter name=^pylon-a$": { stdout: "c9\n" } });
     const failing = { ...boot, source: { kind: "fresh" as const, preSetup: "nexus-fails" } };
-    await assert.rejects(probe().ensureRunning(failing, live, AbortSignal.timeout(30_000)), { code: "setup-failed", message: "pylon-a: Setup exited 3. Read the container log. Its instance had no checkpoint, so it was removed, and a retry boots the pylon fresh" });
+    await assert.rejects(probe().ensureRunning(failing, live, AbortSignal.timeout(30_000)), { code: "setup-failed", message: "pylon-a: Setup exited 3. Its instance had no checkpoint, so it was removed, and a retry boots the pylon fresh" });
     const calls = (await docker.calls()).slice(from);
     assert.deepEqual(await policy(from), [...bootHooks(failing), ...diskSetup(failing).commands.slice(0, 3)].map((command) => [command]), "setup stops at the command that failed");
     assert.ok(calls.some((argv) => argv.join(" ") === "rm --force c9"), "the container is removed");

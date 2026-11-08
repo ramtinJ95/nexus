@@ -13,7 +13,7 @@ import { agentKinds, sessionHarnessSchema, type SessionHarness } from "../protoc
 import { launchers } from "../probe/guest/launchers.ts";
 import { bakedDotfilesDir, checkoutDir, dotfilesDir, home, workspaceDir } from "../../images/pylon/nexus-contract.ts";
 
-/** A login shell as `user`, in `cwd`, as one command string. Both backends run boot commands as root. */
+/** A login shell as `user`, in `cwd`, as one command string. Both backends run boot commands, and the fork its guest commands, as root. */
 export const asUserIn = (script: string, cwd: string) => asUser(`cd ${q(cwd)} && ${script}`).map(q).join(" ");
 
 /**
@@ -87,8 +87,7 @@ function checkoutCommands({ url, checkout }: CloneRepo): string[] {
 
 /**
  * The setup a boot's new disk runs once, as root from the workspace. `retry` marks a template boot's, which is only
- * Nexus's checkout and fails for reasons that pass, such as a fetch during an outage. A scratch project has no
- * template, so a template boot of one is invalid.
+ * Nexus's checkout and fails for reasons that pass, such as a fetch during an outage.
  */
 export function diskSetup(boot: BootInputs & { source: { kind: "fresh" | "template" } }): { commands: string[]; retry: boolean } {
   switch (boot.source.kind) {
@@ -99,7 +98,6 @@ export function diskSetup(boot: BootInputs & { source: { kind: "fresh" | "templa
   }
 }
 
-/** A template build's setup: a fresh boot's, at the template's commit. */
 export const templateSetup = ({ repo, preSetup }: Pick<TemplateBuildInputs, "repo" | "preSetup">) =>
   setupCommands({ kind: "clone", url: repo.url, checkout: { branch: repo.branch, commit: repo.commit } }, preSetup);
 

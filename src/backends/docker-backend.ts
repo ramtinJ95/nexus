@@ -54,16 +54,31 @@ const savedImage = "image.tar";
 const setupLimitMs = 20 * 60_000;
 /** A pylon's controller gives each boot hook as long. */
 const hookLimitMs = 120_000;
+const nexusApiProfile = "/etc/profile.d/nexus-api.sh";
+
+/** Runs each resume command in turn, and prints its outcome as a pylon's controller logs it. */
+const resumeScript = 'for c in "$@"; do sh -lc "$c" || { echo "resume: exited $?"; exit; }; done; echo "resume: exited 0"';
+/**
+ * Starts resumeScript ($0, with its commands) in the background, its output in the container log, and waits up to 10 s
+ * for it, as a pylon's controller does before the services start. A resume that runs longer goes on.
+ */
+const startResume = `sh -c "$0" sh "$@" >/proc/1/fd/1 2>&1 & pid=$!; i=0; while [ $i -lt 100 ] && kill -0 $pid 2>/dev/null && [ "$(cut -d ' ' -f 3 /proc/$pid/stat 2>/dev/null)" != Z ]; do sleep 0.1; i=$((i + 1)); done`;
 
 /**
- * Runs each command as the pylon's controller does, in a login shell as root from the workspace, until one fails. The
- * exit code is the failed command's, or null for one past the setup's limit.
+ * `command` in a login shell as root, as a pylon's controller runs it. Past `limitMs` the container's `timeout` stops its
+ * process group, as the controller's watchdog does, since killing the docker CLI would leave it running.
  */
+const asRoot = (command: string, limitMs: number) => ["timeout", "-k", "2", String(Math.max(1, Math.ceil(limitMs / 1000))), "sh", "-lc", command];
+/** How long past a command's own limit its docker exec is given up on, should `timeout` not stop it. */
+const execGraceMs = 10_000;
+
+/** Runs each command as the pylon's controller does, from the workspace, until one fails. */
 async function runSetup(container: string, commands: readonly string[]): Promise<{ exitCode: number | null; output: string }> {
   const deadline = Date.now() + setupLimitMs;
   let output = "";
   for (const command of commands) {
-    const step = await dockerExec(container, ["sh", "-lc", command], { cwd: workspaceDir, timeoutMs: Math.max(1, deadline - Date.now()) });
+    const left = deadline - Date.now();
+    const step = await dockerExec(container, asRoot(command, left), { cwd: workspaceDir, timeoutMs: left + execGraceMs });
     output += step.output;
     if (step.exitCode !== 0) return { exitCode: step.exitCode, output };
   }
@@ -195,9 +210,9 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
   }
   const checkpointRef = (pylonId: PylonId, checkpoint: CheckpointId) => `nexus-checkpoint/${pylonId}:${checkpoint}`;
 
-  /** The container's own log, `docker logs`, by way of the init process's stdout. */
+  /** The container's own log, `docker logs`, by way of the init process's stdout. Through stdin, so a setup's output fits. */
   const containerLog = (pylonId: PylonId): PylonLog => async (line) => {
-    await docker(["exec", pylonId, "sh", "-c", 'printf "%s\\n" "$1" > /proc/1/fd/1', "sh", line]);
+    await docker(["exec", "--interactive", pylonId, "sh", "-c", "cat > /proc/1/fd/1"], { input: `${line}\n` });
   };
 
   /**
@@ -233,11 +248,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
   /** A container made now from its image or its template, one booted from a disk it had, or one already running. */
   type Booted = "created" | "disk" | "running";
 
-  /**
-   * Writes the overlay, runs the boot policy of a container that just booted, applies the live spec's URLs to the
-   * services, and relaunches the sessions of a boot from a disk, unless `relaunch` is false, which leaves the mark for
-   * a later spawn.
-   */
+  /** With `relaunch` false, a boot from a disk leaves its relaunch mark for a later spawn instead of relaunching its sessions. */
   async function afterBoot(boot: BootInputs, live: LiveSpec, booted: Booted, relaunch: boolean): Promise<void> {
     const { pylonId, source } = boot;
     const log = containerLog(pylonId);
@@ -247,24 +258,25 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
     // Before the services and sessions start, as in a pylon, so both read this spawn's files.
     await guest(pylonId).writeFiles(live.overlay);
     if (booted !== "running") {
+      // Login shells, which the boot policy and the services run in, start from a clean env, without the container's.
+      if (options.hostBridgePort !== undefined) await dockerExec(pylonId, ["sh", "-c", `printf 'export NEXUS_API=%s\\n' "$NEXUS_API" > ${nexusApiProfile}`]);
       for (const hook of bootHooks(boot)) {
-        const { exitCode, output } = await dockerExec(pylonId, ["sh", "-lc", hook], { cwd: "/", timeoutMs: hookLimitMs });
+        const { exitCode, output } = await dockerExec(pylonId, asRoot(hook, hookLimitMs), { cwd: "/", timeoutMs: hookLimitMs + execGraceMs });
         if (output !== "") await log(output.trimEnd());
-        if (exitCode !== 0) await log(`Boot hook exited ${exitCode ?? `past its ${hookLimitMs / 1000} s limit`}`);
+        if (exitCode !== 0) await log(`Boot hook exited ${exitCode}`);
       }
     }
     if (booted === "created" && source.kind !== "resume") {
       const setup = diskSetup({ ...boot, source });
       const { exitCode, output } = await runSetup(pylonId, setup.commands);
-      if (output !== "") await log(output.trimEnd());
       if (exitCode !== 0) {
         await removeContainer(pylonId);
-        throw setupRemoved(pylonId, setup.retry, `Setup ${exitCode === null ? "passed its 20-minute limit" : `exited ${exitCode}`}. Read the container log`, output.slice(-4096));
+        throw setupRemoved(pylonId, setup.retry, `Setup ${exitCode === null ? "passed its 20-minute limit" : `exited ${exitCode}`}`, output.slice(-4096));
       }
+      if (output !== "") await log(output.trimEnd());
     }
-    // In the background, as a pylon's resume outlives its boot, with its outcome in the container log.
     if (booted === "disk" || booted === "created" && source.kind === "template") {
-      await docker(["exec", "--detach", "--workdir", workspaceDir, pylonId, "sh", "-c", 'for c in "$@"; do sh -lc "$c" || { echo "resume: exited $?"; exit; }; done >/proc/1/fd/1 2>&1; echo "resume: exited 0" >/proc/1/fd/1', "sh", ...resumeCommands]);
+      await dockerExec(pylonId, ["sh", "-c", startResume, resumeScript, ...resumeCommands], { cwd: workspaceDir, timeoutMs: 30_000 });
     }
     await supervise(pylonId, publicUrls(pylonId, live.previews, options.previewHost), booted !== "running");
     await finishRelaunch(pylonId, guest(pylonId), log, containerMark(pylonId), relaunch);
@@ -385,7 +397,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
     eventJournal: null,
     // Each container's NEXUS_API names the port, so only a backend given a fixed one answers it.
     hostBridge: options.hostBridgePort === undefined ? null : dockerHostBridge(options.hostBridgePort, options.labels),
-    // Docker keeps the containers' disks, and a container's process is in Docker's namespace, not the probe's.
+    // Docker keeps the containers' disks, and Docker Desktop runs their processes in its VM, where the probe cannot read them.
     storage: null,
     async processes() { return null; },
 
