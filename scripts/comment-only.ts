@@ -113,7 +113,7 @@ for (const [status, path] of files.map((entry) => entry.split("\t"))) {
     try {
       reprints = [shellReprint(before), shellReprint(after)];
     } catch (error) {
-      failures.push(`${path}: bash cannot read it: ${(error as { stderr?: string }).stderr?.trim()}`);
+      failures.push(`${path}: bash cannot read it: ${(error as { stderr?: string }).stderr?.trim() || String(error)}`);
       continue;
     }
     if (reprints[0] !== reprints[1]) failures.push(`${path}: commands differ: ${firstDifference(...reprints)}`);
