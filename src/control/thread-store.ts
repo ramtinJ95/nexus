@@ -52,6 +52,9 @@ export interface Thread extends StoredThread, ActivityFacts, ArchiveFacts, Claud
   workingSince?: number;
 }
 
+/** Appends an event to the event log, which hands it to its followers once it commits. */
+export type AppendEvent = (kind: EventKind, thread: ThreadId | null, payload: Record<string, unknown>, time?: number) => NexusEvent;
+
 /**
  * A thread's agent: a conversation in the control plane's harness, a Claude Code worker in its pylon, or none, as a
  * check thread has. A thread's start gives it a conversation ID or a Claude worker, never both.
@@ -170,7 +173,7 @@ export const holding = {
 
 export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, "node" | "saveObservation" | "saveNodeState">, participants: readonly ThreadParticipant[],
   holdReleased: (thread: ThreadId, until: number) => boolean) {
-  const { transaction, sql, deleteThreadRows } = db;
+  const { transaction, afterCommit, sql, deleteThreadRows } = db;
   const { setting, setSetting } = db.hold(holding);
   const { node } = nodes;
   const reconcile = (thread: ThreadId) => { for (const p of participants) p.reconcile?.(thread); };
@@ -358,14 +361,26 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     });
   }
 
+  const followers = new Set<{ kinds: ReadonlySet<EventKind>; onEvents: (events: readonly NexusEvent[]) => void; pending: NexusEvent[] }>();
+
   function appendEvent(kind: EventKind, thread: ThreadId | null, payload: Record<string, unknown>, time = clock()): NexusEvent {
     return transaction(() => {
-      pruneSessions();
       const project = thread === null ? null : (threadRecord(thread)?.project as string | undefined) ?? null;
       const result = sql("INSERT INTO events (time, thread, project, kind, payload) VALUES (?, ?, ?, ?, ?)").run(time, thread, project, kind, JSON.stringify(payload));
-      const id = Number(result.lastInsertRowid);
-      sql("DELETE FROM events WHERE id <= ?").run(id - 10_000);
-      return { id: String(id), time, thread, project, kind, payload };
+      const event: NexusEvent = { id: String(Number(result.lastInsertRowid)), time, thread, project, kind, payload };
+      // Each follower at the commit gets the event in its next batch, which a microtask hands it after the writer returns.
+      afterCommit(() => {
+        for (const f of followers) {
+          if (!f.kinds.has(kind)) continue;
+          if (f.pending.length === 0) queueMicrotask(() => {
+            const events = f.pending;
+            f.pending = [];
+            if (followers.has(f)) f.onEvents(events);
+          });
+          f.pending.push(event);
+        }
+      });
+      return event;
     });
   }
 
@@ -419,7 +434,15 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       });
     },
     appendEvent,
+    /** Hands `onEvents` each batch of the events of `kinds` that commit after now. Returns the function that stops it. */
+    followEvents(kinds: readonly EventKind[], onEvents: (events: readonly NexusEvent[]) => void): () => void {
+      const follower = { kinds: new Set(kinds), onEvents, pending: [] };
+      followers.add(follower);
+      return () => { followers.delete(follower); };
+    },
     pruneSessions,
+    /** Keeps the newest 10,000 events, so a cursor from before them expires. */
+    retainEvents() { sql("DELETE FROM events WHERE id <= (SELECT max(id) FROM events) - 10000").run(); },
     attention: (id: ThreadId): Attention => (sql("SELECT attention FROM thread_attention WHERE thread = ?").get(id)?.attention ?? null) as Attention,
     recordParked(id: ThreadId, parked: boolean) {
       // The harness reports each flip, but a process's first report for a thread may repeat what an earlier process stored.

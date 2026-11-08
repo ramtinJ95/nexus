@@ -16,7 +16,6 @@
  */
 import { claudeHook, maxAsksBytes, sessionKinds } from "../../images/pylon/nexus-contract.ts";
 import { readTranscript, transcriptDeadlineMs, transcriptStart, type ClaudeConversation, type ClaudeEntry, type TranscriptRead } from "./claude-transcript.ts";
-import { followEvents } from "./follow-events.ts";
 import { pipeOutput, type OpenPipe } from "../pipe.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
@@ -26,7 +25,7 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { Watch } from "./conversation-view.ts";
 
-type ClaudeConversationRegistry = Pick<Registry, "appendClaudeRead" | "claudeEntries" | "claudeTranscript" | "claudeWorker" | "eventBatch" | "newestEvent" | "node" | "pylon" | "questions" | "sealedBoot" | "setWaitingAsks" | "thread">;
+type ClaudeConversationRegistry = Pick<Registry, "appendClaudeRead" | "claudeEntries" | "claudeTranscript" | "claudeWorker" | "followEvents" | "node" | "pylon" | "questions" | "sealedBoot" | "setWaitingAsks" | "thread">;
 
 export interface ClaudeConversations {
   /** From the registry alone, so it never reaches the pylon. */
@@ -77,8 +76,8 @@ async function readWaitingAsks(open: OpenPipe): Promise<WaitingAsk[]> {
 /** One refresh takes this many reads at most. A transcript with more to read goes on in the refresh after it. */
 const maxReadsPerRefresh = 16;
 
-export function claudeConversations(options: { registry: ClaudeConversationRegistry; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "stream">>; workingReadMs?: number; followMs?: number }): ClaudeConversations {
-  const { registry, probes, workingReadMs = 2_000, followMs = 1_000 } = options;
+export function claudeConversations(options: { registry: ClaudeConversationRegistry; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "stream">>; workingReadMs?: number }): ClaudeConversations {
+  const { registry, probes, workingReadMs = 2_000 } = options;
   const readers = new Map<ThreadId, Reader>();
   let closed = false;
 
@@ -222,7 +221,7 @@ export function claudeConversations(options: { registry: ClaudeConversationRegis
   }
 
   // From the newest event, so a restart reads each thread at its next event or watch rather than every thread at once.
-  const stopFollowing = followEvents(registry, sessionKinds, followMs, (events) => {
+  const stopFollowing = registry.followEvents(sessionKinds, (events) => {
     for (const id of new Set(events.flatMap((e) => e.thread === null ? [] : [e.thread as ThreadId]))) {
       if (registry.claudeWorker(id) === undefined) continue;
       const r = readerOf(id);
@@ -230,10 +229,6 @@ export function claudeConversations(options: { registry: ClaudeConversationRegis
       update(id, r, false);
       void refreshOf(id);
     }
-  }, (err) => {
-    console.error(`following session events for Claude transcripts: ${err.message}. Following from the newest`);
-    // The events skipped may have told a reader that a dialog waits.
-    for (const r of readers.values()) r.asksDue = true;
   });
 
   return {

@@ -1,12 +1,12 @@
 import { json, jsonOrNull, type Db, type Holding } from "./db.ts";
-import type { EventKind } from "./events.ts";
+import type { AppendEvent } from "./thread-store.ts";
 import type { NodeName } from "../ids.ts";
 import type { DesiredRelease, Drain, ReleaseReport } from "../protocol/deploy.ts";
 import type { ReleaseInventory } from "../deploy/release-cleanup.ts";
 
 export const holding = { tables: { release_reports: {} }, settings: ["release", "deploy-drain", "releases:"] } as const satisfies Holding;
 
-export function releaseStore(db: Db, appendEvent: (kind: EventKind, thread: null, payload: Record<string, unknown>) => unknown) {
+export function releaseStore(db: Db, appendEvent: AppendEvent) {
   const { sql } = db;
   const { setting, setSetting } = db.hold(holding);
   return {

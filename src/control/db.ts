@@ -38,11 +38,19 @@ export function openDb(path: string) {
   migrate(db);
 
   let transactionDepth = 0;
+  let committed: (() => void)[] = [];
   const transaction = <T>(body: () => T): T => {
     if (transactionDepth > 0) return body();
     transactionDepth++;
-    try { return inTransaction(db, body); } finally { transactionDepth--; }
+    let result: T;
+    try { result = inTransaction(db, body); } catch (err) { committed = []; throw err; } finally { transactionDepth--; }
+    const after = committed;
+    committed = [];
+    for (const fn of after) fn();
+    return result;
   };
+  /** Runs `fn` once the transaction it is called in commits, and never if it rolls back. Outside a transaction it runs at once. */
+  const afterCommit = (fn: () => void) => { if (transactionDepth > 0) committed.push(fn); else fn(); };
   const statements = new Map<string, StatementSync>();
   const sql = (text: string): StatementSync => {
     let statement = statements.get(text);
@@ -82,7 +90,7 @@ export function openDb(path: string) {
     for (const table of deletedWithThread(held)) sql(`DELETE FROM ${table} WHERE thread = ?`).run(thread);
   }
 
-  return { db, transaction, sql, hold, deleteThreadRows };
+  return { db, transaction, afterCommit, sql, hold, deleteThreadRows };
 }
 
 function migrate(db: DatabaseSync) {

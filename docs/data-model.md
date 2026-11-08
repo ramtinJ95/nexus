@@ -366,8 +366,9 @@ without a session report, using control receipt time, never a guest timestamp.
 Waiting rows do not expire or refresh activity: an unanswered question stays
 waiting until a later session event, archive or deletion. They still count toward
 the 16-row cap.
-Pruning runs on registry open, reconcile passes and event retention writes, and
-publishes attention changes. Pre-migration working rows have no receipt time and
+Pruning runs on registry open, at the start of each reconcile pass and before each
+session report, and publishes attention changes. Event retention, which keeps the
+newest 10,000 events, is a separate maintenance pass every 15 seconds. Pre-migration working rows have no receipt time and
 expire on upgrade rather than receiving an invented fresh lease.
 
 A start gives a session a 30-minute working lease. A `session.heartbeat` renews

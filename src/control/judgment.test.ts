@@ -446,6 +446,7 @@ test("an answer to a judgment whose failure Nexus can no longer tell from a late
   assert.equal(w.registry.retryPylon(`pylon-${id}` as PylonId), true);
   fail(w.registry, id, brokenWith("person"));
   for (let i = 0; i < 10_000; i++) w.registry.appendEvent("attention.changed", null, {});
+  w.registry.retainEvents();
   assert.equal(w.registry.failure(id), null, "both failures' events are pruned");
   w.registry.answerQuestion(w.registry.question(`judgment:${failure}`)!, { option: "Retry", by: laptop, at: Date.now() });
   await w.until(() => phaseOf(w, id) === "done");

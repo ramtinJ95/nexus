@@ -853,8 +853,8 @@ prompt, and the answer their notification carries. Their own transcripts under
 `<session>/subagents/` are not read.
 
 The session events decide when to read rather than a timer. The service follows the
-retained event log, an indexed registry read once a second, and reads a Claude worker
-thread after each `session.*` event for it. Heartbeats are throttled to one per five
+event log, which hands it each batch of session events as the registry commits them,
+and reads a Claude worker thread after each `session.*` event for it. Heartbeats are throttled to one per five
 minutes, so while a turn runs and a dashboard watches the thread, it is also read
 every 2 seconds. That is what makes entries appear during a turn. These reads do not
 ask the hook which dialogs wait unless an ask is open, as [questions for the

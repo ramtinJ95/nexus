@@ -45,6 +45,7 @@ test("bounded retention reports an expired cursor instead of silently skipping",
   const registry = openRegistry(":memory:");
   try {
     for (let i = 0; i < 10_002; i++) registry.appendEvent("release.changed", null, {});
+    registry.retainEvents();
     assert.equal(registry.events().length, 10_000);
     assert.throws(() => registry.events("1"), /expired/);
     assert.equal(registry.events("2").length, 10_000);

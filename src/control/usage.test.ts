@@ -300,7 +300,7 @@ test("the Nexus agent's calls are read from the harness after the last entry rea
       return { calls, last: entries.length };
     },
   };
-  const counter = usageCounter({ registry, probes: new Map(), harness, sweepMs: 3_600_000, followMs: 10 });
+  const counter = usageCounter({ registry, probes: new Map(), harness, sweepMs: 3_600_000 });
   t.after(() => counter.close());
   await counter.sweep();
   assert.deepEqual(totals(registry), { calls: 3, input: 600, output: 6, cacheWrite: 0, cacheRead: 60 });
@@ -347,7 +347,7 @@ test("a deleted thread's harness read in flight through a sweep still runs one a
       return { calls: [], last: after };
     },
   };
-  const counter = usageCounter({ registry, probes: new Map(), harness, sweepMs: 3_600_000, followMs: 10 });
+  const counter = usageCounter({ registry, probes: new Map(), harness, sweepMs: 3_600_000 });
   t.after(() => { open(); return counter.close(); });
   await counter.sweep();
   registry.setThreadStatus(thread.id, "deleted");
@@ -423,28 +423,20 @@ test("a pylon's read is refused whole when a call claims another agent's ID or a
   assert.deepEqual(totals(registry), { calls: 2, input: 6, output: 1, cacheWrite: 0, cacheRead: 0 });
 });
 
-test("an event cursor that retention passed reads every thread and follows on from the newest", async (t) => {
+test("a pylon's turn end is read however many events come before it and however many retention drops", async (t) => {
   const registry = openOnline(t);
-  addThread(registry);
+  const thread = addThread(registry);
   const { logs } = pylonHome();
-  let expired = false;
-  const logged: string[] = [];
-  const watched = { ...registry, eventBatch: (...args: Parameters<Registry["eventBatch"]>) => {
-    if (expired) {
-      expired = false;
-      throw new Error("invalid event cursor");
-    }
-    return registry.eventBatch(...args);
-  } };
   const probe = localProbe();
-  const counter = usageCounter({ registry: watched, probes: new Map([[node, probe]]), harness: noHarness, logs, sweepMs: 3_600_000, followMs: 5, log: (m) => logged.push(m) });
+  const counter = usageCounter({ registry, probes: new Map([[node, probe]]), harness: noHarness, logs, sweepMs: 3_600_000 });
   t.after(() => counter.close());
   await counter.sweep();
   const reads = probe.reads;
-  expired = true;
+  for (let i = 0; i < 10_002; i++) registry.appendEvent("release.changed", null, {});
+  registry.retainEvents();
+  registry.appendEvent("session.turn-ended", thread.id, {});
   for (let i = 0; i < 200 && probe.reads === reads; i++) await delay(10);
-  assert.match(logged[0]!, /invalid event cursor\. Reading every thread/);
-  assert.equal(probe.reads, reads + 1, "the sweep after it read the pylon again");
+  assert.equal(probe.reads, reads + 1, "the turn end read the pylon again");
   assert.deepEqual(totals(registry), sum(claudeFixture, piFixture));
 });
 

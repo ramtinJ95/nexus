@@ -153,7 +153,7 @@ async function controlPlaneOf(t: import("node:test").TestContext, config: Record
     caller = as;
     return callJson({ host: "127.0.0.1", port: plane.port, method, path, body, headers });
   }
-  return { db, followed, peers, hosts, wakes, gitReads, call, port: plane.port, as(id: string) { caller = id; } };
+  return { db, followed, peers, hosts, wakes, gitReads, call, port: plane.port, registry: plane.registry, as(id: string) { caller = id; } };
 }
 
 /** The person's control.json as install.sh wrote it before join tokens: two nodes, the Mac as caller and deployer, and both deploy keys. */
@@ -223,11 +223,20 @@ test("a builder's turn end, from its Claude session or from the harness, has its
     threads.push(addThread(registry, { thread: { title: "claude" } }), addThread(registry, { thread: { title: "harness" } }));
     registry.close();
   } });
-  const registry = testRegistry(t, plane.db);
-  registry.appendEvent("session.turn-ended", threads[0]!.id, { at: Date.now() });
-  registry.appendEvent("thread.turn-ended", threads[1]!.id, {});
+  plane.registry.appendEvent("session.turn-ended", threads[0]!.id, { at: Date.now() });
+  plane.registry.appendEvent("thread.turn-ended", threads[1]!.id, {});
   await until("both pylons' git is read again", () => plane.gitReads.length === 2, 10_000);
   assert.deepEqual(plane.gitReads.sort(), threads.map((th) => th.pylonId).sort());
+});
+
+test("the control plane keeps the newest 10,000 events from its start", async (t) => {
+  const plane = await controlPlaneOf(t, today, { before: (db) => {
+    const registry = openRegistry(db);
+    for (let i = 0; i < 10_002; i++) registry.appendEvent("release.changed", null, {});
+    registry.close();
+  } });
+  await until("retention trims the log", () => plane.registry.events("0", { kinds: ["release.changed"] }).length === 10_000, 10_000);
+  assert.throws(() => plane.registry.events("1"), /expired/);
 });
 
 test("each read of a node's health is recorded, and its history read back", async (t) => {

@@ -1,6 +1,6 @@
 /** The table keeps the name `doctor_reports` from when it held daily reports. */
 import { json, type Db, type Holding } from "./db.ts";
-import type { EventKind } from "./events.ts";
+import type { AppendEvent } from "./thread-store.ts";
 import { checkKey, statuses, type HealthChange, type Status } from "./doctor-model.ts";
 
 export type NewHealthChange = Omit<HealthChange, "id" | "seenAt">;
@@ -24,7 +24,7 @@ const latest = (changes: readonly HealthChange[]) => [...new Map(changes.map((c)
 
 export const holding = { tables: { doctor_reports: {} } } as const satisfies Holding;
 
-export function healthStore(db: Db, appendEvent: (kind: EventKind, thread: null, payload: Record<string, unknown>) => unknown, log: (message: string) => void) {
+export function healthStore(db: Db, appendEvent: AppendEvent, log: (message: string) => void) {
   db.hold(holding);
   const { sql } = db;
   /** Every reader passes over a row that is not a change rather than fail on it, and the log says so once per row. */
