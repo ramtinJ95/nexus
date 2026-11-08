@@ -11,7 +11,7 @@ import { isOpen } from "../../control/questions.ts";
 import { CliError } from "../transport.ts";
 import { type Api, type Result, type Command, str, request, int, table, pollUntil } from "../kit.ts";
 import { threadRoutes } from "../../contract/threads.ts";
-import { imageRoutes, releaseRoutes } from "../../contract/release.ts";
+import { deployWaitMs, imageRoutes, releaseRoutes } from "../../contract/release.ts";
 import { questionRoutes, reviewRoutes } from "../../contract/reviews.ts";
 import { reviewText } from "../thread-text.ts";
 
@@ -182,7 +182,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
         return outcome === "healthy" ? view : undefined;
       };
       if (values.wait === true) {
-        view = settled() ?? await pollUntil({ deadlineMs: 30 * 60_000, everyMs: 1_000, timedOut: () => new CliError("failed", `deployment wait timed out\n${releaseText(view)}`) }, async () => {
+        view = settled() ?? await pollUntil({ deadlineMs: deployWaitMs, everyMs: 1_000, timedOut: () => new CliError("failed", `deployment wait timed out\n${releaseText(view)}`) }, async () => {
           view = await request(api, releaseRoutes.release, {});
           return settled();
         });

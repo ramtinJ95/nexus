@@ -215,6 +215,16 @@ export const verdictsFor = (seats: readonly Seat[], from?: Round): Pick<Round, "
   ({ verdict: from?.verdict ?? null, ...seats.includes("second") && { secondVerdict: from?.secondVerdict ?? null } });
 
 /**
+ * A request to land a review's PR once approved: the person's; the project's setting's, which each landing reads again
+ * and lands for whoever it names; or the person's Land answer to a question about holds while the review ran, which is
+ * for the change at `head` against `base` alone. Each is saved as its fields alone, as older control planes read it.
+ */
+export type LandRequest =
+  | { requestedBy: string; fromProject?: never; head?: never }
+  | { requestedBy: string; fromProject: true; head?: never }
+  | { requestedBy: string; head: string; base: string | null; fromProject?: never };
+
+/**
  * The review's own conversation is with the builder and the first reviewer, since only one of them owes an answer at
  * a time, and its outbox names which one its message is for.
  */
@@ -237,13 +247,8 @@ export interface Review extends Talk<Outbox & { to: "builder" | "reviewer" }> {
   /** The builder's brief, its first message, cut as the description is, which each reviewer's first request carries. */
   brief?: string | null;
   maxRounds: number;
-  /**
-   * Who asked for the PR to land once approved, or null to stop at approval. `fromProject` when the project's setting
-   * asked, so each landing reads that setting again and lands for whoever it names. `head` and `base` when the
-   * person's Land answer to a question about holds asked for it while the review ran, which is for the change at that
-   * head against that base alone.
-   */
-  land: { requestedBy: string; fromProject?: true; head?: string; base?: string | null } | null;
+  /** Who asked for the PR to land once approved, or null to stop at approval. */
+  land: LandRequest | null;
   /** Started on its own when the PR watch first linked the PR, as the project asks. */
   auto: boolean;
   rounds: Round[];

@@ -11,6 +11,9 @@ import type { ImageOperation } from "../control/image-store.ts";
 import type { deploySchema, drainSchema, imageSchema, releasesSchema, reportSchema, rolloutSchema } from "./release-parse.ts";
 import { route } from "./route.ts";
 
+/** How long a deploy has to report every service healthy: `nexus deploy --wait` waits so long, and a landing then rolls back. */
+export const deployWaitMs = 30 * 60_000;
+
 /** The current and previous images, each null when none is. */
 export interface ImagesCurrent { current: ImageEntry | null; previous: ImageEntry | null }
 

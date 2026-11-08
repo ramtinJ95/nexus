@@ -3,7 +3,8 @@
  * builder fixes or rejects each finding and pushes, and the reviewer reviews the new commits, until it approves or the
  * rounds run out. The control plane runs the repository's checks at each round's head while the reviewer reads it, and
  * once both the approval and the checks are in, its live check when the head has a `.nexus/verify`, and, when the person
- * asked for it, lands the PR under the merge policy (policy.ts): merge, deploy, and roll back if the fleet is not healthy.
+ * asked for it, lands the PR under the merge policy (policy.ts): merge, then deploy and roll back if the fleet is not
+ * healthy (landing.ts).
  *
  * The loop runs on the control plane, one pass every few seconds, from the record the registry keeps per builder. Each
  * phase's step reads what the world says now (the agents' replies, the PR, the release) and moves on only from that,
@@ -20,7 +21,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { z } from "zod";
 import { checkCaller, latest, mint, reviewerCaller, reviewPrefix, verifyCaller } from "./agent-protocol.ts";
-import { releaseOutcome, type ReleaseView } from "../protocol/deploy.ts";
 import { scopedFlight } from "../single-flight.ts";
 import type { SecretGrant } from "../protocol/secret-grants.ts";
 import { agentKinds } from "../protocol/agent-kinds.ts";
@@ -28,11 +28,9 @@ import { defaultClaudeModel, modelFamily, secondReviewerModels } from "../protoc
 import type { ChangedFile, GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { Refusal } from "./refusal.ts";
 import type { Inbox } from "./inbox.ts";
-import { isDraining } from "./drain.ts";
 import { caseOf, reservedCases, reservedNames, waivable, waivedName, type Hold } from "./holds.ts";
 import { askedHolds, carryWaiver, headHolds, heldBy, landingHolds, landPress, secondReviewRule, staleQuote, unwaived } from "./policy.ts";
 import type { CheckRuns } from "./gate.ts";
-import { releaseView } from "./releases.ts";
 import type { AgentState } from "./agent-conversation.ts";
 import { prWatchMs, reviewedPr, watchedPrs, watchStopped } from "./pr-watch-model.ts";
 import type { Registry } from "./registry.ts";
@@ -45,6 +43,7 @@ import {
   type Answer, type Finding, type GateRun, type HeldAt, type HoldCause, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type Seat, type SecondReviewer, type Talk, type Waiver,
 } from "./review-model.ts";
 import { landsOnItsOwn, type Project } from "./project.ts";
+import { landing } from "./landing.ts";
 import { deliverDurable } from "./durable-message.ts";
 import type { StartRequest } from "./start-request.ts";
 import { servesReview, threadRole } from "./work-model.ts";
@@ -63,8 +62,6 @@ const checkMs = 60 * 60_000;
 /** How long a second reviewer's start is tried, once a minute, before the review goes on without it. */
 const secondStartMs = 30 * 60_000;
 const secondRetryMs = 60_000;
-/** As long as `nexus deploy --wait` waits. */
-const deployMs = 30 * 60_000;
 
 export interface ReviewDeps {
   registry: ReviewRegistry;
@@ -87,9 +84,6 @@ export interface ReviewDeps {
   now?: () => number;
 }
 
-/** The nodes whose deploy of `commit` failed or rolled back, as a review's reasons name them. */
-const failedNodes = (view: ReleaseView, commit: string) => view.nodes.filter((n) => n.target === commit && (n.state === "failed" || n.state === "rolled-back"))
-  .map((n) => `${n.node} ${n.role} ${n.state}${n.reason ? ` (${n.reason})` : ""}`).join("; ");
 const findingLine = (f: Finding) => `${f.id} (${f.priority})${f.where ? ` ${f.where}` : ""}: ${f.summary}${f.detail ? `\n${f.detail.split("\n").map((l) => `    ${l}`).join("\n")}` : ""}`;
 
 /** The first request to a reviewer on `model`, which is the same for either reviewer, so neither hears of the other. */
@@ -340,19 +334,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     return { ...r, phase, outbox: null, ...r.second?.kind === "claude" && { second: { ...r.second, outbox: null } } };
   };
   const toPerson = (r: Review, cause: HoldCause, ...items: (Hold | string)[]): Review => end(r, personPhase(cause, ...items));
-  /** Only a PR of the repository releases come from deploys once it merges. */
-  const deploys = (r: { pr: Pick<Review["pr"], "repo"> }) => r.pr.repo.toLowerCase() === release.repo.toLowerCase();
-  /** Makes `commit` the desired release, unless it is already, and marks the deploy or rollback requested. */
-  const requestRelease = (r: Review, phase: Extract<Phase, { kind: "deploying" | "rolling-back" }>, commit: string, by: string): Review => {
-    if (registry.desiredRelease()?.commit !== commit) registry.setDesiredRelease({ commit, requestedBy: by, requestedAt: now() });
-    return { ...r, phase: { ...phase, requested: true } };
-  };
-  /** `r` while its release is pending before the deadline, which moves on while a node waits for idle to deploy, or null. */
-  const pending = (r: Review, phase: Extract<Phase, { kind: "deploying" | "rolling-back" }>, view: ReleaseView, outcome: ReturnType<typeof releaseOutcome>): Review | null => {
-    if (outcome !== "pending") return null;
-    if (view.nodes.some((n) => n.target === view.desired?.commit && n.state === "waiting-for-idle")) return { ...r, phase: { ...phase, deadline: now() + deployMs } };
-    return now() < phase.deadline ? r : null;
-  };
+  const landings = landing({ registry, release, mayLand: deps.mayLand, now, toPerson });
+  const { deploys } = landings;
   /** A review that lands still decides whether a merge made outside it deploys. */
   const outside = (r: Review, state: PullRequest["state"] | undefined): Review | null =>
     state === "closed" || (state === "merged" && r.land === null) ? end(r, { kind: state }) : null;
@@ -375,7 +358,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     reads.delete(prKey(r));
     const { detail } = await read(r);
     if (detail.head !== round.head || detail.base !== base) return null;
-    const heldAt = { base, holds: headHolds({ review: r, files, nexus: deploys(r) }) };
+    const heldAt = { base, holds: headHolds({ review: r, files, deploys: deploys(r) }) };
     return { review: withRound(r, { heldAt }), heldAt };
   };
   /** Past every check, a review records what holds its head, then stops at approval, or lands when asked to. */
@@ -537,16 +520,6 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   const rebase = (r: Review, base: string): Review => {
     return toBuilder(withRound(r, { conflict: { base } }));
   };
-  /**
-   * Why the caller a landing merges and deploys for may not, now. A landing the project's setting asked for lands for
-   * whoever turned it on, as long as it stays on.
-   */
-  const unauthorized = (r: Review, builder: Thread): Hold[] => {
-    const setting = registry.project(builder.project)?.autoReview;
-    if (r.land?.fromProject && !landsOnItsOwn(setting)) return [{ code: "loop", text: `Project ${builder.project} no longer lands its builders' pull requests on its own, so this one is the person's to land.` }];
-    const by = r.land?.fromProject ? setting!.enabledBy : r.land!.requestedBy;
-    return deps.mayLand(by) ? [] : [{ code: "loop", text: `${by}, who ${r.land?.fromProject ? `turned on landing for project ${builder.project}` : "asked for this landing"}, is not among the control plane's deployers, so only the person can land it.` }];
-  };
 
   /** Each review's latest head's change against its base, read once to ask about its holds before the loop records them. */
   const early = new Map<string, { at: string; files: readonly ChangedFile[] | null }>();
@@ -567,8 +540,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const round = r.rounds.at(-1)!;
     // A Land given early lands the change the person saw: a round carried from its head on its base keeps it, and any
     // other round at another head or base drops it.
-    if (r.land?.head !== undefined && (r.land.head !== round.head || (r.land.base ?? null) !== (round.base ?? null))) {
-      const same = round.carried?.from === r.land.head && (r.land.base ?? null) === (round.base ?? null);
+    if (r.land?.head !== undefined && (r.land.head !== round.head || r.land.base !== (round.base ?? null))) {
+      const same = round.carried?.from === r.land.head && r.land.base === (round.base ?? null);
       return { ...r, land: same ? { ...r.land, head: round.head } : null };
     }
     // A save since `r` was read, such as the person's cancel while GitHub answered, decides the question instead.
@@ -587,7 +560,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (early.get(r.id)?.at !== at) early.set(r.id, { at, files: await github.change(r.pr.repo, round.base, round.head) });
       files = early.get(r.id)!.files;
     }
-    const holds = askedHolds(r, files === null ? null : headHolds({ review: r, files, nexus: deploys(r) }));
+    const holds = askedHolds(r, files === null ? null : headHolds({ review: r, files, deploys: deploys(r) }));
     const base = async () => round.base ?? (await read(r)).detail.base;
     // As the landing does, the change a waiver is for is read once the person gave it, so a rebase can be compared with it.
     if (r.waiver !== null && r.waiver.change === null && r.waiver.head === round.head) return { ...r, waiver: { ...r.waiver, change: await changeAt(r, await base(), round.head) } };
@@ -810,10 +783,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (snapshot.pr.state === "closed") return end(r, { kind: "closed" });
       // The change the person pressed Land for is read at once, so a rebase after it can still be compared with it.
       if (r.waiver !== null && r.waiver.change === null && r.waiver.head === head) return { ...r, waiver: { ...r.waiver, change: await changeAt(r, snapshot.detail.base, head) } };
-      // Landings deploy one at a time, so each deploy's rollback target is a release that was healthy. One that has
-      // authorized its merge holds the turn, which every other waits for.
-      if (deploys(r) && phase.authorized !== head) {
-        const waiting = landingAhead(r);
+      // A landing that has authorized its merge holds the turn, which every other waits for.
+      if (phase.authorized !== head) {
+        const waiting = landings.ahead(r);
         if (waiting !== null) return phase.waiting === waiting ? r : { ...r, phase: { ...phase, waiting } };
       }
       // `left` is what the person's waiver does not get past, once carried to this head if its change is the one they
@@ -825,13 +797,13 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         const recorded = await recordHolds(r);
         if (recorded === null) throw new Error("the pull request's head moved while its files were read");
         const { review: held, heldAt } = recorded;
-        const all = [...unauthorized(held, builder), ...landingHolds({ review: held, pr: snapshot, heldAt })];
+        const all = [...landings.unauthorized(held, builder), ...landingHolds({ review: held, pr: snapshot, heldAt })];
         const left = unwaived(held, all);
         const { review, why } = left.length && held.waiver !== null && held.waiver.head !== head ? carryWaiver(held, await changeAt(held, snapshot.detail.base, head), all) : { review: held, why: null };
         return { all, left: unwaived(review, all), review, why: why === null ? [] : [why] };
       };
       let commit: string;
-      let landing = r;
+      let toLand = r;
       // A retargeted PR merges another change at the same head than the one the reviewer read against its round's base.
       const { base } = r.rounds.at(-1)!;
       const retargeted = base !== undefined && snapshot.detail.base !== base;
@@ -843,7 +815,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         if (phase.authorized !== head) {
           const { all, left, review, why } = await holds();
           if (left.length) return toPerson(review, "outside", `Pull request #${r.pr.number} was merged outside this review, so it is not deployed.`, ...why, ...all);
-          landing = review;
+          toLand = review;
         }
         commit = snapshot.detail.mergeCommit;
       } else {
@@ -869,59 +841,15 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         }
         commit = merged.commit;
       }
-      if (!deploys(r)) return { ...landing, merged: commit, phase: { kind: "landed", commit } };
-      return { ...landing, merged: commit, phase: { kind: "deploying", commit, previous: registry.desiredRelease()?.commit ?? null, requested: false, deadline: now() + deployMs } };
+      return landings.merged(toLand, commit);
     },
-    async deploying(r, phase) {
-      if (!phase.requested) return requestRelease(r, phase, phase.commit, `nexus review ${r.id}`);
-      const view = releaseView(registry, release.self, now());
-      const outcome = releaseOutcome(view, phase.commit);
-      if (outcome === "healthy") return { ...r, phase: { kind: "landed", commit: phase.commit } };
-      if (outcome === "superseded") return toPerson(r, "deploy", `Another release, ${view.desired?.commit ?? "none"}, replaced ${phase.commit} before every service reported healthy.`);
-      const waiting = pending(r, phase, view, outcome);
-      if (waiting !== null) return waiting;
-      const why = outcome === "failed"
-        ? `The deploy of ${phase.commit} failed: ${failedNodes(view, phase.commit)}.`
-        : `Not every service reported healthy at ${phase.commit} within ${deployMs / 60_000} minutes.`;
-      if (phase.previous === null) return toPerson(r, "deploy", why, "There is no previous release to roll back to.");
-      return { ...r, phase: { kind: "rolling-back", commit: phase.commit, previous: phase.previous, why, requested: false, deadline: now() + deployMs } };
-    },
-    async "rolling-back"(r, phase) {
-      if (!phase.requested) return requestRelease(r, phase, phase.previous, `nexus review ${r.id} rollback`);
-      const view = releaseView(registry, release.self, now());
-      const outcome = releaseOutcome(view, phase.previous);
-      const revert = phase.why.includes("agent turn still running at drain timeout")
-        ? `${phase.commit} is still on the default branch. The busy turn did not test the commit; retry deployment rather than revert it.`
-        : `${phase.commit} is still on the default branch, so revert it before the next deploy.`;
-      if (outcome === "healthy") return toPerson(r, "deploy", phase.why, `Rolled back to the previous release, ${phase.previous}, which every service reports healthy.`, revert);
-      if (outcome === "superseded") return toPerson(r, "deploy", phase.why, `Another release, ${view.desired?.commit ?? "none"}, replaced the rollback to ${phase.previous} before it was healthy.`, revert);
-      const waiting = pending(r, phase, view, outcome);
-      if (waiting !== null) return waiting;
-      const failed = outcome === "failed"
-        ? failedNodes(view, phase.previous)
-        : `not every service reported healthy within ${deployMs / 60_000} minutes`;
-      return toPerson(r, "deploy", phase.why, `The rollback to ${phase.previous} failed too: ${failed}. The fleet needs the person now.`, revert);
-    },
+    ...landings.steps,
   };
 
   const watchedPr = (r: Review) => {
     const watch = registry.prWatch(r.builder);
     return reviewedPr(r, watchedPrs(watch), watchStopped(watch));
   };
-
-  /** Why `r` may not merge yet, read fresh: a pass saves after every step, so it sees what earlier reviews did in it. */
-  function landingAhead(r: Review): string | null {
-    if (isDraining(registry.drain())) return "a deploy drains the control plane";
-    for (const other of registry.reviews()) {
-      const verb = other.id === r.id || !deploys(other) ? null : landingVerb(other);
-      if (verb !== null) return `${other.id} ${verb}`;
-    }
-    // A landing whose deploy and rollback both failed, or one with no release to roll back to, leaves its release
-    // desired, which must not become the next landing's rollback target.
-    const desired = registry.desiredRelease();
-    if (desired !== null && releaseOutcome(releaseView(registry, release.self, now()), desired.commit) !== "healthy") return `not every service reports ${desired.commit.slice(0, 12)} healthy`;
-    return null;
-  }
 
   /**
    * A head pushed after the review approved its last round or held it for the person. A review that would land gets a
@@ -1247,7 +1175,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
      * the reviewer's quote of what could not be checked live asks the reviewer for it first, at the same head.
      */
     land(builderId: ThreadId, requestedBy: string, head?: string, waive?: readonly string[]): Review {
-      const r = landableAt(builderId, head);
+      const r = landableAt(builderId);
+      if (head !== undefined && r.rounds.at(-1)!.head !== head) throw new Refusal("conflict", `review ${r.id} of ${builderId} is at ${r.rounds.at(-1)!.head}, not ${head}, so it was not landed. Look at it again before landing it`);
       const next = pressed(r, requestedBy, waive);
       // A press that waives the holds the review's question names answers it, as its Land does.
       const question = waive === undefined ? undefined : openQuestion(r, waive);
@@ -1299,7 +1228,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const waiver = { ...waiverOf(r, by, holds.holds.map((h) => h.text), holds.holds.map((h) => h.code)), ...yolo !== undefined && { yolo } };
     let next: Review;
     // A landing the project asked for stays the project's when its setting answers, so switching the setting off holds it again.
-    if (landable(r)) next = { ...pressWith(landableAt(question.thread, holds.head), by, waiver), ...yolo !== undefined && r.land?.fromProject && { land: r.land } };
+    if (landable(r)) next = { ...pressWith(landableAt(question.thread), by, waiver), ...yolo !== undefined && r.land?.fromProject && { land: r.land } };
     else {
       const builder = registry.thread(r.builder)!;
       if (builder.status !== "active") throw new Refusal("conflict", `thread ${r.builder} is ${builder.status}`);
@@ -1314,12 +1243,11 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     return answered;
   }
 
-  function landableAt(builderId: ThreadId, head: string | undefined): Review {
+  function landableAt(builderId: ThreadId): Review {
     const r = registry.review(builderId);
     if (r === null) throw new Refusal("conflict", `thread ${builderId} has no review. Start one with \`nexus review ${builderId} --land\``);
     const refusal = cannotLand(r, registry.thread(builderId)!, watchedPr(r));
     if (refusal !== null) throw new Refusal("conflict", refusal);
-    if (head !== undefined && r.rounds.at(-1)!.head !== head) throw new Refusal("conflict", `review ${r.id} of ${builderId} is at ${r.rounds.at(-1)!.head}, not ${head}, so it was not landed. Look at it again before landing it`);
     return r;
   }
 }
