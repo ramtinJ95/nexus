@@ -24,7 +24,10 @@ export function pipelineRoutes(kit: ApiKit, options: { pipeline?: Pipeline | nul
   }
 
   return [
-    on(routes.list, anyAllowed, (_, { query: { project } }) => ok(registry.items().filter((i) => project === undefined || i.project === project).map((i) => itemView(registry, i)))),
+    on(routes.list, anyAllowed, (_, { query: { project, cancelled } }) => {
+      const items = registry.items().filter((i) => project === undefined || i.project === project).map((i) => itemView(registry, i));
+      return ok(cancelled === false ? items.filter((i) => i.phase.kind !== "cancelled") : items);
+    }),
     on(routes.add, { role: "person", action: "add an item" }, async (_, r) => {
       const { after, message, ...request } = parse(itemSchema, await r.body());
       const pipeline = pipelineOrRefuse();

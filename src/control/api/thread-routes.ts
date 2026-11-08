@@ -139,8 +139,8 @@ export function threadRoutes(kit: ApiKit, options: { queue?: ThreadQueue | null 
       return created(await start(await r.body(), r.caller));
     }),
     on(routes.queued, anyAllowed, (_, r) => {
-      const { project } = r.query;
-      return ok(registry.queuedThreads().filter((q) => q.status !== "started" && (project === undefined || q.project === project)).map((q) => queuedView(registry, q)));
+      const { project, status } = r.query;
+      return ok(registry.queuedThreads().filter((q) => q.status !== "started" && (project === undefined || q.project === project) && (status === undefined || q.status === status)).map((q) => queuedView(registry, q)));
     }),
     on(routes.queuedThread, anyAllowed, ({ thread: id }) => {
       const queued = registry.queuedThread(id as ThreadId);

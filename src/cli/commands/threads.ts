@@ -65,7 +65,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     options: { project: { type: "string" }, all: { type: "boolean" }, queued: { type: "boolean" } },
     async run(api, _, v) {
       const project = str(v, "project");
-      const queuing = request(api, routes.queued, { query: { project } }).then((all) => all.filter((q) => v.all === true || q.status === "queued"));
+      const queuing = request(api, routes.queued, { query: { project, ...v.all === true ? {} : { status: "queued" } } });
       if (v.queued === true) {
         const queued = await queuing;
         return { json: queued, text: queued.length === 0 ? "No queued threads." : table(queued.map(queuedRow)) };

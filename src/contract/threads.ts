@@ -50,10 +50,11 @@ const threadsQuery: QueryCodec<ThreadsQuery> = {
   decode: (params) => ({ ...params.has("project") ? { project: params.get("project")! } : {}, ...params.get("deleted") === "false" ? { deleted: false } : {} }),
 };
 
-export interface QueuedQuery { project?: string | undefined }
+/** `status: "queued"` leaves out cancelled and deleted queued threads. */
+export interface QueuedQuery { project?: string | undefined; status?: "queued" }
 const queuedQuery: QueryCodec<QueuedQuery> = {
-  encode: ({ project }) => queryOf([["project", project]]),
-  decode: (params) => params.has("project") ? { project: params.get("project")! } : {},
+  encode: ({ project, status }) => queryOf([["project", project], ["status", status]]),
+  decode: (params) => ({ ...params.has("project") ? { project: params.get("project")! } : {}, ...params.get("status") === "queued" ? { status: "queued" } : {} }),
 };
 
 export const threadRoutes = {
