@@ -29,6 +29,7 @@ exit 0
   "seenAt": null,
   "lastReplyAt": null,
   "desired": "running",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-rv-closed",
@@ -110,6 +111,18 @@ exit 0
     "phase": {
       "kind": "closed"
     }
+  },
+  "reviewView": {
+    "id": "rv-99",
+    "head": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1",
+    "ended": true,
+    "holds": [],
+    "press": {
+      "kind": "lands",
+      "waives": [],
+      "quotes": false
+    },
+    "question": null
   },
   "questions": [],
   "judgments": [],

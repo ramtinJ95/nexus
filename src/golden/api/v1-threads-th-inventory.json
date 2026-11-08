@@ -30,6 +30,7 @@
   "seenAt": 1800012060000,
   "lastReplyAt": 1800012000000,
   "desired": "paused",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-inventory",
@@ -66,6 +67,7 @@
   },
   "pullRequests": [],
   "review": null,
+  "reviewView": null,
   "questions": [],
   "judgments": [],
   "planning": false,

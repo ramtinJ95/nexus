@@ -30,6 +30,7 @@ exit 0
   "seenAt": null,
   "lastReplyAt": null,
   "desired": "paused",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-rv-cancelled-builder",
@@ -119,6 +120,18 @@ exit 0
       "who": "builder",
       "status": "archived"
     }
+  },
+  "reviewView": {
+    "id": "rv-419",
+    "head": "f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3",
+    "ended": true,
+    "holds": [],
+    "press": {
+      "kind": "lands",
+      "waives": [],
+      "quotes": false
+    },
+    "question": null
   },
   "questions": [],
   "judgments": [],

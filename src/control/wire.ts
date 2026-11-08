@@ -15,6 +15,7 @@ import type { Question } from "./questions.ts";
 import type { JudgmentView } from "./judgment.ts";
 import type { NodePylons } from "./placement.ts";
 import type { Review } from "./review-model.ts";
+import type { ReviewView } from "./review-view.ts";
 
 /** One card of the inbox for a thread. */
 export type ThreadNeed = PersonNeed & { d: ThreadDetail };
@@ -50,6 +51,10 @@ export interface ThreadDetail {
   pullRequests: readonly WatchedPr[];
   /** The thread's latest review as a builder, or null. */
   review: Review | null;
+  /** What the person's Land press does to `review` now, and the holds it reads, or null without a review. A control plane older than 0.71.0 sends none. */
+  reviewView?: ReviewView | null;
+  /** Why the archived thread's disk is kept past its 24 hours, or null. A control plane older than 0.71.0 sends none. */
+  keptPastDay?: string | null;
   /** Every question the thread asked, answered or not, in the order they were asked. */
   questions: readonly Question[];
   /** Every judgment of the thread's failed pylon, oldest failure first. */

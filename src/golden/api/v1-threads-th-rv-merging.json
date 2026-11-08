@@ -28,6 +28,7 @@
   "seenAt": null,
   "lastReplyAt": null,
   "desired": "running",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-rv-merging",
@@ -138,6 +139,18 @@
       "kind": "merging",
       "authorized": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d"
     }
+  },
+  "reviewView": {
+    "id": "rv-413",
+    "head": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d",
+    "ended": false,
+    "holds": [],
+    "press": {
+      "kind": "lands",
+      "waives": [],
+      "quotes": false
+    },
+    "question": null
   },
   "questions": [],
   "judgments": [],

@@ -28,6 +28,7 @@
   "seenAt": null,
   "lastReplyAt": null,
   "desired": "running",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-rv-landed",
@@ -124,6 +125,18 @@
       "kind": "landed",
       "commit": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
     }
+  },
+  "reviewView": {
+    "id": "rv-417",
+    "head": "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0",
+    "ended": true,
+    "holds": [],
+    "press": {
+      "kind": "lands",
+      "waives": [],
+      "quotes": true
+    },
+    "question": null
   },
   "questions": [],
   "judgments": [],

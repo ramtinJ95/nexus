@@ -29,6 +29,7 @@ exit 0
   "seenAt": 1799996460000,
   "lastReplyAt": 1799996400000,
   "desired": "paused",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-lighthouse",
@@ -54,6 +55,7 @@ exit 0
   },
   "pullRequests": [],
   "review": null,
+  "reviewView": null,
   "questions": [],
   "judgments": [],
   "planning": false,

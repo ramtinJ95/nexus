@@ -29,6 +29,7 @@ exit 0
   "seenAt": null,
   "lastReplyAt": null,
   "desired": "running",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-rv-rolling-back",
@@ -129,6 +130,18 @@ exit 0
       "requested": true,
       "deadline": 1800014760000
     }
+  },
+  "reviewView": {
+    "id": "rv-416",
+    "head": "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
+    "ended": false,
+    "holds": [],
+    "press": {
+      "kind": "lands",
+      "waives": [],
+      "quotes": true
+    },
+    "question": null
   },
   "questions": [],
   "judgments": [],

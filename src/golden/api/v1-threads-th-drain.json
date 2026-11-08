@@ -28,6 +28,7 @@
   "seenAt": 1800011460000,
   "lastReplyAt": 1800011400000,
   "desired": "paused",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-drain",
@@ -173,6 +174,18 @@
       "requested": true,
       "deadline": 1800014880000
     }
+  },
+  "reviewView": {
+    "id": "rv-400",
+    "head": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
+    "ended": false,
+    "holds": [],
+    "press": {
+      "kind": "lands",
+      "waives": [],
+      "quotes": true
+    },
+    "question": null
   },
   "questions": [],
   "judgments": [],

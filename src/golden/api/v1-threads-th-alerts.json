@@ -29,6 +29,7 @@
   "seenAt": null,
   "lastReplyAt": null,
   "desired": "paused",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-alerts",
@@ -125,6 +126,18 @@
       "kind": "landed",
       "commit": "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4"
     }
+  },
+  "reviewView": {
+    "id": "rv-403",
+    "head": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
+    "ended": true,
+    "holds": [],
+    "press": {
+      "kind": "lands",
+      "waives": [],
+      "quotes": true
+    },
+    "question": null
   },
   "questions": [],
   "judgments": [],

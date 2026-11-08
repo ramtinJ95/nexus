@@ -29,6 +29,7 @@ exit 0
   "seenAt": null,
   "lastReplyAt": null,
   "desired": "paused",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-flaky",
@@ -225,6 +226,40 @@ exit 0
         "state": "added"
       }
     }
+  },
+  "reviewView": {
+    "id": "rv-398",
+    "head": "a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3",
+    "ended": true,
+    "holds": [
+      {
+        "code": "open-findings",
+        "text": "Finding F3 (P2) is still open after the last round.",
+        "holdsAgain": false,
+        "waivable": false,
+        "why": "Open P0 to P2 findings hold every landing until they are fixed and the reviewer approves."
+      },
+      {
+        "code": "unanswered",
+        "text": "The builder has not answered F3 in round 3.",
+        "holdsAgain": false,
+        "waivable": false,
+        "why": "Every P0 to P2 finding needs the builder's fix or its reason to reject."
+      },
+      {
+        "code": "github-checks",
+        "text": "The pull request's GitHub checks are pending.",
+        "holdsAgain": false,
+        "waivable": false,
+        "why": "Failing or pending GitHub checks hold every landing until they pass."
+      }
+    ],
+    "press": {
+      "kind": "lands",
+      "waives": [],
+      "quotes": false
+    },
+    "question": null
   },
   "questions": [],
   "judgments": [],

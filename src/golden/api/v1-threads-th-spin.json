@@ -28,6 +28,7 @@
   "seenAt": null,
   "lastReplyAt": 1800014040001,
   "desired": "paused",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-spin",
@@ -64,6 +65,7 @@
   },
   "pullRequests": [],
   "review": null,
+  "reviewView": null,
   "questions": [],
   "judgments": [],
   "planning": false,

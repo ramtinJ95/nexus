@@ -34,6 +34,7 @@ exit 0
   "seenAt": 1800000060000,
   "lastReplyAt": 1800000000000,
   "desired": "paused",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-export",
@@ -59,6 +60,7 @@ exit 0
   },
   "pullRequests": [],
   "review": null,
+  "reviewView": null,
   "questions": [],
   "judgments": [],
   "planning": false,

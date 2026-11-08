@@ -28,6 +28,7 @@
   "seenAt": null,
   "lastReplyAt": null,
   "desired": "running",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-rv-deploying",
@@ -127,6 +128,18 @@
       "requested": false,
       "deadline": 1800015000000
     }
+  },
+  "reviewView": {
+    "id": "rv-415",
+    "head": "bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf",
+    "ended": false,
+    "holds": [],
+    "press": {
+      "kind": "lands",
+      "waives": [],
+      "quotes": true
+    },
+    "question": null
   },
   "questions": [],
   "judgments": [],

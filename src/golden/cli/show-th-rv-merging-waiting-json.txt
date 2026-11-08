@@ -29,6 +29,7 @@ exit 0
   "seenAt": null,
   "lastReplyAt": null,
   "desired": "running",
+  "keptPastDay": null,
   "pylon": {
     "grantsOutdated": false,
     "id": "pylon-th-rv-merging-waiting",
@@ -126,6 +127,18 @@ exit 0
       "authorized": null,
       "waiting": "another landing that deploys is under way, #413"
     }
+  },
+  "reviewView": {
+    "id": "rv-414",
+    "head": "aeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeae",
+    "ended": false,
+    "holds": [],
+    "press": {
+      "kind": "lands",
+      "waives": [],
+      "quotes": true
+    },
+    "question": null
   },
   "questions": [],
   "judgments": [],
