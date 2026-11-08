@@ -14,9 +14,8 @@
  * asks once after each session event or the reader's start, since the hook reports an event once a dialog waits, and
  * at each read until the hook reports none, once it reported some. The working reads alone do not ask otherwise.
  */
-import { sessionKinds } from "../guest-contract.ts";
+import { claudeHook, maxAsksBytes, sessionKinds } from "../../images/pylon/nexus-contract.ts";
 import { readTranscript, transcriptDeadlineMs, transcriptStart, type ClaudeConversation, type ClaudeEntry, type TranscriptRead } from "./claude-transcript.ts";
-import { claudeHook, maxAsksBytes } from "../../images/pylon/nexus-contract.ts";
 import { followEvents } from "./follow-events.ts";
 import { pipeOutput, type OpenPipe } from "../pipe.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";

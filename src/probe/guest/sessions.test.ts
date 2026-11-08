@@ -8,7 +8,8 @@ import assert from "node:assert/strict";
 import { attachedTerminals, closeSession, dropFailedSession, interruptClaude, openSession, pausedSessionsIn, recordSessions, relaunchSessions, sendToClaude, sessionFacts, type ClaudeSessionLock, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
 import { claudeTextProblem } from "../../protocol/agent-kinds.ts";
 import { fakeGuest, herdrArgs, herdrCall, herdrError, herdrOk, herdrPane, herdrSnapshot, sessionsFileReply, type ExecReply, type FakeGuest, type HerdrArgs } from "../../backends/fake-guest.ts";
-import { attachScript, focusScript, sessionsFile } from "../../guest-contract.ts";
+import { attachScript, focusScript } from "../../guest-contract.ts";
+import { sessionsFile } from "../../../images/pylon/nexus-contract.ts";
 
 /** Nothing else runs here, so no call needs to wait for the relaunch. */
 const unlocked: ClaudeSessionLock = (_, work) => work();

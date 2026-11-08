@@ -8,7 +8,7 @@ import { shellQuote } from "../shell.ts";
 import { chatgptTokenGrant, githubTokenGrant, type SecretGrant } from "../protocol/secret-grants.ts";
 import type { GitIdentity, OverlayFile, RepoInit } from "../protocol/spawn.ts";
 import type { LoginKind } from "./project.ts";
-import { checkoutDir, nexusApi, pylonGuideFile, pylonInfoFile, type PylonInfo } from "../guest-contract.ts";
+import { checkoutDir, nexusApi, pylonGuideFile, pylonInfoFile, type PylonInfo } from "../../images/pylon/nexus-contract.ts";
 
 export interface PylonOverlay {
   gitIdentity?: GitIdentity | undefined;

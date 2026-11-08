@@ -5,6 +5,7 @@ import { createServer, type Server } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as wait } from "node:timers/promises";
+import { bridgeRequestPath, nexusApi } from "./nexus-contract.ts";
 
 export type OutboxEvent = { kind: string; at: number; session?: string; message?: string; id: string };
 export type Outcome = "delivered" | "rejected" | "retry";
@@ -46,7 +47,7 @@ export async function enqueue(event: Omit<OutboxEvent, "id">, dir = defaultDir):
 
 export async function deliver(event: OutboxEvent): Promise<Outcome> {
   try {
-    const res = await fetch(`${process.env.NEXUS_API || "http://nexus.pylon"}/v1/request`, {
+    const res = await fetch(`${process.env.NEXUS_API || nexusApi}${bridgeRequestPath}`, {
       method: "POST", signal: AbortSignal.timeout(5000), headers: { "content-type": "application/json" }, body: JSON.stringify({ op: "event", ...event }),
     });
     await res.body?.cancel();

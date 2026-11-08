@@ -14,14 +14,14 @@ test("every file under images/pylon is a declared recipe file, build.sh or pins.
   assert.deepEqual(files.sort(), [...recipePaths, "build.sh", "pins.json"].sort());
 });
 
-test("the checked-in recipe is every file git tracks under images/pylon but build.sh and pins.json, with git's mode, and the shared checkout helper", async () => {
+test("the checked-in recipe is every file git tracks under images/pylon but build.sh and pins.json, with git's mode", async () => {
   const tracked = execFileSync("git", ["ls-files", "-s", "--", "images/pylon"], { cwd: repo, encoding: "utf8" }).trim().split("\n").map((line) => {
     const [meta, path] = line.split("\t") as [string, string];
     return { path: path.slice("images/pylon/".length), mode: meta.startsWith("100755") ? 0o755 : 0o644 } as const;
   }).filter((f) => f.path !== "build.sh" && f.path !== "pins.json");
   const expected = {
-    files: await Promise.all([...tracked, { path: "checkout-files.py", mode: 0o644 } as const].map(async (f) => ({
-      ...f, content: await readFile(join(repo, f.path === "checkout-files.py" ? "src" : "images/pylon", f.path), "utf8"),
+    files: await Promise.all(tracked.map(async (f) => ({
+      ...f, content: await readFile(join(repo, "images/pylon", f.path), "utf8"),
     }))),
     pins: JSON.parse(await readFile(join(pylonRecipeDir, "pins.json"), "utf8")),
   };

@@ -19,6 +19,7 @@ export const recipePaths = [
   "agent-setup/install.ts",
   "agent-setup/manifest.json",
   "agent-setup/manifest.ts",
+  "checkout-files.py",
   "dotfiles/README.md",
   "gondolin.json",
   "nexus",
@@ -32,22 +33,13 @@ export const recipePaths = [
   "rootfs-init-extra.sh",
 ];
 
-/** Image inputs kept beside the control plane, which runs them too. The Claude hook snapshots turns with the checkout helper. */
-const sharedFiles = ["checkout-files.py"];
-
-/**
- * `paths` under `dir`, and the shared files, sorted by path, each executable when its owner may execute it, as git
- * checks it out, and pins.json parsed.
- */
+/** `paths` under `dir` sorted by path, each executable when its owner may execute it, as git checks it out, and pins.json parsed. */
 export async function loadImageRecipe(dir: string = pylonRecipeDir, paths: readonly string[] = recipePaths): Promise<ImageRecipe> {
   const files: ImageRecipe["files"][number][] = [];
-  const load = async (path: string, from: string | URL) => {
-    files.push({ path, mode: ((await stat(from)).mode & 0o100) === 0 ? 0o644 : 0o755, content: await readFile(from, "utf8") });
-  };
-  for (const path of sharedFiles) await load(path, new URL(`../${path}`, import.meta.url));
   for (const path of paths) {
-    if (!(await lstat(join(dir, path))).isFile()) throw new Error(`${path} in ${dir} is not a regular file`);
-    await load(path, join(dir, path));
+    const from = join(dir, path);
+    if (!(await lstat(from)).isFile()) throw new Error(`${path} in ${dir} is not a regular file`);
+    files.push({ path, mode: ((await stat(from)).mode & 0o100) === 0 ? 0o644 : 0o755, content: await readFile(from, "utf8") });
   }
   files.sort((a, b) => compare(a.path, b.path));
   return { files, pins: pinsSchema.parse(JSON.parse(await readFile(join(dir, "pins.json"), "utf8"))) };

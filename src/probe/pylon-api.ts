@@ -18,7 +18,8 @@ import type { PreviewAssignment } from "../protocol/spawn.ts";
 import type { PylonId } from "../ids.ts";
 import { pylonEventSchema, type DeclaredOutput, type PylonEvent, type ServiceFact } from "../protocol/observations.ts";
 import { parseJson } from "../parse.ts";
-import { callTimeoutMs, maxServiceLogLines, pylonInfoFile, servicesActions, type PylonInfo, type sessionKinds } from "../guest-contract.ts";
+import { callTimeoutMs, maxServiceLogLines, servicesActions } from "../guest-contract.ts";
+import { type PylonInfo, pylonInfoFile, type sessionKinds } from "../../images/pylon/nexus-contract.ts";
 
 const pylonInfoSchema = z.strictObject({
   pylonId: z.string(),

@@ -1,7 +1,7 @@
 import http from "node:http";
 import { join } from "node:path";
 import type { HttpHooks } from "@earendil-works/gondolin";
-import { bridgeHost } from "../guest-contract.ts";
+import { bridgeHost } from "../../images/pylon/nexus-contract.ts";
 
 /** Set by the controller, never taken from the guest: the instance whose VM the request came through. */
 export const bridgePylonHeader = "x-nexus-pylon";

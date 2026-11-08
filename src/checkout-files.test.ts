@@ -346,7 +346,7 @@ test("latest turn refuses an older pylon and a failed snapshot invalidates its p
   await assert.rejects(c.reader.diff("turn", []), refused("no-base", /snapshot failed/));
 });
 
-const helperPath = fileURLToPath(new URL("./checkout-files.py", import.meta.url));
+const helperPath = fileURLToPath(new URL("../images/pylon/checkout-files.py", import.meta.url));
 
 /** A clean filter on `*.slow` that waits while `slow` exists in the scratch directory, and then leaves `filtered` there. */
 async function slowFilter(c: Awaited<ReturnType<typeof checkout>>) {

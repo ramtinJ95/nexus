@@ -32,7 +32,7 @@ import { fakeGuest, herdrArgs, herdrCall, herdrError, herdrOk, herdrPane, herdrS
 import { checkoutReader } from "../checkout-files.ts";
 import type { HostBridge, HostBridgeAnswer } from "../host-bridge.ts";
 import { tempDir, testImage, until } from "../test-support/kit.ts";
-import { outputsDir, sessionsFile } from "../guest-contract.ts";
+import { outputsDir, sessionsFile } from "../../images/pylon/nexus-contract.ts";
 
 const node = "test-node" as NodeName;
 const controlPlane = "nCONTROL" as TailnetNodeId;

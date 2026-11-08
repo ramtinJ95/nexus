@@ -15,7 +15,7 @@ import type { NodeName, PylonId, TailnetNodeId } from "../../ids.ts";
 import type { ByteStream } from "../../protocol/streams.ts";
 import { connectProbe } from "../../protocol/client.ts";
 import { localApiWhois } from "../../tailscale.ts";
-import { piEnv } from "../../guest-contract.ts";
+import { piEnv } from "../../../images/pylon/nexus-contract.ts";
 
 /** How to reach and verify the pylon's probe. `tailscaled` is the control plane's LocalAPI socket. */
 export interface BridgeTarget {

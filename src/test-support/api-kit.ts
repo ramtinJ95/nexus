@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { claudeHook } from "../../images/pylon/nexus-contract.ts";
+import { checkoutDir, claudeHook, claudeProjects } from "../../images/pylon/nexus-contract.ts";
 import { request } from "node:http";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -32,7 +32,6 @@ import type { NodeObservation, ServiceFact } from "../protocol/observations.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { ByteStream } from "../protocol/streams.ts";
 import type { NodeHealth } from "../protocol/client.ts";
-import { checkoutDir, claudeProjects } from "../guest-contract.ts";
 
 export const node = "rj-firebat" as NodeName;
 export const laptop = "nLAPTOP" as TailnetNodeId;

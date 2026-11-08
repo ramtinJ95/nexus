@@ -8,7 +8,8 @@ import type { Guest } from "../../backends/backend.ts";
 import { defaultClaudeModel, type agentKinds, type SessionHarness } from "../../protocol/agent-kinds.ts";
 import { chatgptTokenGrant } from "../../protocol/secret-grants.ts";
 import { shellQuote as q } from "../../shell.ts";
-import { callTimeoutMs, checkoutDir, claudeProjects, home, onClaudeTranscript } from "../../guest-contract.ts";
+import { callTimeoutMs, onClaudeTranscript } from "../../guest-contract.ts";
+import { checkoutDir, claudeProjects, home } from "../../../images/pylon/nexus-contract.ts";
 
 export interface Launcher {
   /** Herdr's agent kind, which Herdr names after the agent's executable. */

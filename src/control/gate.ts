@@ -22,7 +22,7 @@ import { Refusal } from "./refusal.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { StartRequest } from "./start-request.ts";
-import { checkoutDir } from "../guest-contract.ts";
+import { checkoutDir } from "../../images/pylon/nexus-contract.ts";
 
 type GateRegistry = Pick<Registry, "node" | "project" | "pylon" | "recordActivity" | "sealedBoot" | "setThreadStatus" | "thread">;
 

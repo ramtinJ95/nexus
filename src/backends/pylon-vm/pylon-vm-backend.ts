@@ -38,7 +38,7 @@ import { readJson, saveJson } from "../../json-file.ts";
 import { diskBytes } from "../../disk-space.ts";
 import { alive, readIdentity } from "../../pylon-vm/identity.ts";
 import { directory, existsError, privateDirectory, readRecord } from "../../pylon-vm/storage.ts";
-import { bakedDotfilesDir, bridgeRequestPath, checkoutDir, dotfilesDir, home, workspaceDir } from "../../guest-contract.ts";
+import { bakedDotfilesDir, bridgeRequestPath, checkoutDir, dotfilesDir, home, workspaceDir } from "../../../images/pylon/nexus-contract.ts";
 
 export interface PylonVmBackendOptions {
   /**

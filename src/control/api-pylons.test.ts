@@ -12,7 +12,8 @@ import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation } fr
 import type { TailnetNodeId } from "../ids.ts";
 import type { PausedSession, ServiceFact } from "../protocol/observations.ts";
 import { node, laptop, withThread, observeRunning, git, localCheckout, pngBytes } from "../test-support/api-kit.ts";
-import { checkoutDir, focusScript } from "../guest-contract.ts";
+import { focusScript } from "../guest-contract.ts";
+import { checkoutDir } from "../../images/pylon/nexus-contract.ts";
 
 test("thread detail lists the pylon's listening ports with the service and preview of each", async (t) => {
   const s = await withThread(t);

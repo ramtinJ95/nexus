@@ -2,9 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
-/** The image's copy of src/checkout-files.py, which the control plane reads the snapshot back with. */
-export const checkoutHelper = "/usr/local/lib/nexus/checkout-files.py";
+import { checkoutHelper } from "./nexus-contract.ts";
 
 /**
  * Snapshots the checkout into refs/nexus/turn before Claude acts on the prompt. Claude kills a hook after two seconds,
