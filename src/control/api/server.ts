@@ -1,7 +1,7 @@
 import { DeployDraining, isDraining, turnGate, type TurnGate } from "../drain.ts";
 import { answerLocalHealth, runningCommit } from "../../deploy/health.ts";
 import { version } from "../../version.ts";
-import { canDeploy, isPerson, isReporter, type DeploymentOptions } from "../releases.ts";
+import type { DeploymentOptions } from "../releases.ts";
 /**
  * The control plane's HTTP API for the dashboard and the CLI. JSON in and out.
  *
@@ -49,8 +49,8 @@ import { openTerminal } from "../../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "../attach.ts";
 import { refusalStatus } from "../http-error.ts";
 import { Refusal, type RefusalCode, type RefusalKind } from "../refusal.ts";
-import { ok, parse, type ApiKit, type Policy, type Route, type RouteEntry } from "./kit.ts";
-import { apiAccess } from "./access.ts";
+import { ok, parse, type ApiKit, type RouteEntry } from "./kit.ts";
+import { admit, anyAllowed, apiAccess, refusal, type Policy, type Role } from "./access.ts";
 import { pylonAccess } from "./pylon-access.ts";
 import { eventStreams, maxStreams } from "./sse.ts";
 import { threadViews } from "./thread-view.ts";
@@ -134,15 +134,15 @@ export interface Api {
   close(): Promise<void>;
 }
 
-/** Every route but the health route, which reports the server's own state. Each feature's module holds its routes. */
-export function featureRoutes(kit: ApiKit, options: ApiOptions, nodeHealth: (caller: TailnetNodeId, name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
+/** Every route but those of the server's own state and the callers it knows. Each feature's module holds its routes. */
+export function featureRoutes(kit: ApiKit, options: ApiOptions, nodeHealth: (name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
   return [
     ...dashboardRoutes(kit, options, nodeHealth),
     ...releaseRoutes(kit, options),
     ...streamRoutes(kit),
     ...projectRoutes(kit, options),
     ...usageRoutes(kit, options),
-    ...nodeRoutes(kit, options, nodeHealth),
+    ...nodeRoutes(kit, nodeHealth),
     ...threadRoutes(kit, options),
     ...pipelineRoutes(kit, options),
     ...reviewRoutes(kit, options),
@@ -156,7 +156,7 @@ export function featureRoutes(kit: ApiKit, options: ApiOptions, nodeHealth: (cal
 export async function startApi(options: ApiOptions): Promise<Api> {
   const { registry, whois, allowed, hostnames, harness, startThread, wake, probes, streamStallMs = 30_000, attachTiming: timing = attachTiming, closeWaitMs = 5_000 } = options;
   const access = apiAccess(registry, wake, options);
-  const { thread, threadRefusal, guard, current, personOnly } = access;
+  const { thread, threadRefusal, guard, current, roleOf } = access;
   const pylon = pylonAccess({ registry, probes, wake, guard, current });
   const { inPylon, whileRunning } = pylon;
   const wakeThread = access.wakeThread;
@@ -172,9 +172,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return agents[kind];
   }
 
-  /** A node's health says what runs on it, so only a deployer reads it. Nothing reached from here acts on the node. */
-  async function nodeHealth(caller: TailnetNodeId, name: NodeName): Promise<NodeHealth> {
-    if (!canDeploy(registry, options.deployment, caller)) throw new Refusal("forbidden", "caller may not read a node's health: only deployers may, never infrastructure nodes or pylons");
+  /** Nothing reached from here acts on the node. */
+  async function nodeHealth(name: NodeName): Promise<NodeHealth> {
     const probe = registry.node(name) === undefined ? undefined : probes.get(name);
     if (probe === undefined) throw new Refusal("missing", `no node ${name}`);
     return probe.health();
@@ -187,7 +186,22 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const gate = options.gate ?? turnGate(draining);
   const kit: ApiKit = { ...access, ...pylon, ...views, ...sse, registry, harness, startThread, claude, agents, agentOf, draining, gate };
 
-  const routes: readonly RouteEntry[] = [["GET", /^\/v1\/health$/, () => ok(health())], ...featureRoutes(kit, options, nodeHealth)];
+  const routes: readonly RouteEntry[] = [
+    ["GET", /^\/v1\/health$/, anyAllowed, () => ok(health())],
+    // A device not yet allowed learns the node ID to allow. It learns only its own ID and its own access, which
+    // `tailscale status` and a refused request already tell it.
+    ["GET", /^\/v1\/whoami$/, { role: "tailnet" }, (_, { caller, roles }) => ok({ node: caller, allowed: roles.has("allowed"), person: roles.has("person"), deployer: roles.has("deployer") } satisfies Whoami)],
+    ...options.joins === undefined ? [] : [joinRoute(options.joins)],
+    ...featureRoutes(kit, options, nodeHealth),
+  ];
+
+  function joinRoute(joins: NonNullable<ApiOptions["joins"]>): RouteEntry {
+    return ["POST", /^\/v1\/join$/, { role: "joiner", why: "a token only root on the control plane's machine mints admits the machine that sends it" }, async (_, r) => {
+      const node = joinNode(registry, allowed, joins.configured, { id: r.caller, host: r.host! }, parse(joinRequestSchema, await r.body()));
+      joins.joined(node);
+      return ok({ node: node.name, tailnetNodeId: node.tailnetNodeId });
+    }];
+  }
 
   const httpsState: { status: "disabled" | "waiting" | "ready" | "degraded"; error: string | null; nextAttemptAt: number | null } = {
     status: options.https ? "waiting" : "disabled", error: null, nextAttemptAt: null,
@@ -214,61 +228,38 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (hostname === undefined || !hostnames.has(hostname)) throw new Refusal("forbidden", `the API does not answer to host ${req.headers.host}`);
   }
 
-  /** The caller, once it is allowed and asked under one of the API's names. Every request and upgrade passes here. */
-  async function admit(req: IncomingMessage): Promise<TailnetNodeId> {
-    const caller = await callerOf(req, whois);
-    const workerRoute = pathOf(req.url)?.startsWith("/v1/deployer/") ?? false;
-    if (caller === null || (workerRoute
-      ? !isReporter(registry, options.deployment, caller, req.headers.authorization)
-      : !allowed.has(caller))) throw new Refusal("forbidden", "caller is not a tailnet node this control plane allows");
-    checkHost(req);
-    return caller;
-  }
-
   /**
-   * Any tailnet node may ask who it is, so a device not yet allowed learns the node ID to allow. It learns only its
-   * own ID and its own access, which `tailscale status` and a refused request already tell it.
+   * The caller and its roles, once it may reach `policy`'s route, or with none any route, asked under one of the API's
+   * names. Every request and upgrade passes here.
    */
-  async function whoami(req: IncomingMessage): Promise<Whoami> {
-    const node = await callerOf(req, whois);
-    if (node === null) throw new Refusal("forbidden", "caller is not a tailnet node");
+  async function admitted(req: IncomingMessage, policy: Policy | undefined): Promise<{ caller: TailnetNodeId; roles: ReadonlySet<Role>; host: string | null }> {
+    const named = policy?.role === "joiner" ? await callerOf(req, options.joins!.whois) : await callerOf(req, whois).then((id) => id === null ? null : { id, host: null });
+    const roles: ReadonlySet<Role> = named === null ? new Set() : policy?.role === "joiner" ? new Set(["joiner"]) : roleOf(named.id, req.headers.authorization);
+    admit(roles, policy);
     checkHost(req);
-    const person = allowed.has(node) && isPerson(registry, options.deployment, node);
-    return { node, allowed: allowed.has(node), person, deployer: person && canDeploy(registry, options.deployment, node) };
-  }
-
-  /** A token only root on the control plane's machine mints is what lets a machine that is not yet admitted call this. */
-  async function join(req: IncomingMessage, joins: NonNullable<ApiOptions["joins"]>) {
-    const caller = await callerOf(req, joins.whois);
-    if (caller === null) throw new Refusal("forbidden", "caller is not a tailnet node");
-    checkHost(req);
-    requireJson(req);
-    const node = joinNode(registry, allowed, joins.configured, caller, parse(joinRequestSchema, await readJson(req)));
-    joins.joined(node);
-    return { node: node.name, tailnetNodeId: node.tailnetNodeId };
+    return { caller: named!.id, roles, host: named!.host };
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
     if (answerLocalHealth(req, res, health)) return;
-    if (req.method === "GET" && req.url === "/v1/whoami") return void send(res, 200, await whoami(req));
-    if (req.method === "POST" && req.url === "/v1/join" && options.joins !== undefined) return void send(res, 200, await join(req, options.joins));
-    const caller = await admit(req);
+    const path = pathOf(req.url);
+    const atPath = path === null ? [] : routes.flatMap((entry) => {
+      const m = entry[1].exec(path);
+      return m === null ? [] : [{ entry, m }];
+    });
+    const match = atPath.find(({ entry }) => entry[0] === req.method);
+    const { caller, roles, host } = await admitted(req, (match ?? atPath[0])?.entry[2]);
     if (req.method !== "GET") requireJson(req);
 
-    const path = pathOf(req.url);
     if (path === null) throw new Refusal("invalid", `the request path ${JSON.stringify(req.url)} is not a valid URL path`);
-    const url = new URL(req.url ?? "/", "http://nexus");
-    const matches = routes.flatMap((entry): { method: string; m: RegExpExecArray; policy?: Policy; route: Route }[] => {
-      const m = entry[1].exec(path);
-      if (m === null) return [];
-      return entry[0] === "GET" ? [{ method: entry[0], m, route: entry[2] }] : [{ method: entry[0], m, policy: entry[2], route: entry[3] }];
-    });
-    if (matches.length === 0) throw new Refusal("missing", path.startsWith("/v1/deployer/") ? `no deployer route ${path}` : `no route ${path}`, "no-route");
-    const match = matches.find((r) => r.method === req.method);
+    if (atPath.length === 0) throw new Refusal("missing", `no route ${path}`, "no-route");
     if (match === undefined) throw new Refusal("method", `${req.method} is not allowed on ${path}`);
-    if (match.policy !== undefined && "person" in match.policy) personOnly(caller, match.policy.person);
-    const route = () => match.route(match.m, { query: url.searchParams, caller, body: (empty) => readJson(req, empty) });
-    const reply = match.policy?.startsTurn ? await gate.run(async () => route()) : await route();
+    const { entry: [, , policy, route], m } = match;
+    const refused = refusal(roles, policy);
+    if (refused !== null) throw refused;
+    const url = new URL(req.url ?? "/", "http://nexus");
+    const run = () => route(m, { query: url.searchParams, caller, roles, host, body: (empty) => readJson(req, empty) });
+    const reply = policy.startsTurn ? await gate.run(async () => run()) : await run();
     if (reply.stream !== undefined) return reply.stream(res);
     if (reply.file !== undefined) sendFile(res, reply.file, reply.type, reply.cache);
     else if (reply.headers !== undefined) res.writeHead(reply.status, reply.headers).end(reply.body);
@@ -320,7 +311,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    * as it maps any route's. A terminal takes a place among the streams, so a delete ends it too.
    */
   async function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
-    personOnly(await admit(req), "attach to a thread's pylon");
+    const refused = refusal((await admitted(req, attach)).roles, attach);
+    if (refused !== null) throw refused;
     if (stopping) throw new Refusal("unavailable", "the control plane is stopping");
     // CORS does not guard a WebSocket handshake, and previews are served under the API's hostname on other ports, so
     // a preview's page could open a terminal from the browser of anyone allowed. A browser always sends Origin.
@@ -451,6 +443,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     },
   };
 }
+
+const attach = { role: "person", action: "attach to a thread's pylon" } satisfies Policy;
 
 function requireJson(req: IncomingMessage) {
   if (req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") throw new Refusal("unsupported", "requests that change state must have content-type application/json");

@@ -44,7 +44,7 @@ test("only a project edit turns on reviews of its own, landing needs a deployer,
   s.callAs("nFIREBAT" as TailnetNodeId);
   assert.deepEqual(await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: false } }), { status: 403, body: { error: "caller may not edit a project: only a person may, never the control plane, infrastructure nodes or pylons", code: null, retryable: false } });
   s.callAs(phone);
-  assert.deepEqual(await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } }), { status: 403, body: { error: "caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons", code: null, retryable: false } });
+  assert.deepEqual(await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } }), { status: 403, body: { error: "caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons", code: null, retryable: false } });
   const reviewing = await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: false } });
   assert.deepEqual(reviewing.body.autoReview, { mode: "review", enabledBy: phone }, "reviewing alone lands nothing, so it needs no deployer");
   s.callAs(laptop);

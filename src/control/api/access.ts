@@ -1,6 +1,6 @@
 /**
  * What every route asks of the caller and the thread it names, over the registry: the thread once it has what
- * the route needs, and whether a person or a deployer calls.
+ * the route needs, and the roles the caller holds.
  */
 import type { NodeName, TailnetNodeId, ThreadId } from "../../ids.ts";
 import type { QueuedRecord } from "../queue-store.ts";
@@ -9,8 +9,74 @@ import type { Thread } from "../thread-store.ts";
 import type { ThreadStatus } from "../reconcile.ts";
 import { HttpError } from "../http-error.ts";
 import { answerRefusal, type AnswerRefusal, type Question } from "../questions.ts";
-import { canDeploy, isPerson, type DeploymentOptions } from "../releases.ts";
+import type { DeploymentOptions } from "../releases.ts";
+import { tokenDigest } from "../../protocol/deploy.ts";
+import { Refusal } from "../refusal.ts";
 import { noConversation } from "../thread-agent.ts";
+
+/**
+ * Who may call a route: any machine whois names, or the join's whois names, a caller on the allowlist, a person, a
+ * deployer, a node's deployer sending its key, or the control node's. Threads, projects and items are the person's, so no pylon, harness thread or the control plane
+ * itself acts on a thread or its pylon, edits a project, or adds, approves or cancels an item. A thread never drives
+ * another. The control plane's own passes start, message, review and archive threads in-process.
+ */
+export type Role = "tailnet" | "joiner" | "allowed" | "person" | "deployer" | "reporter" | "control-node";
+/**
+ * A route's role, checked before it runs. A refusal names the action a person's, a deployer's or the control node's
+ * route takes, and a route any allowed caller changes state with says why it may. A route that starts a turn waits out a
+ * deploy's drain.
+ */
+export type Policy = ({ role: "person" | "deployer" | "control-node"; action: string } | { role: "tailnet" | "joiner" | "allowed" | "reporter"; why?: string }) & { startsTurn?: true };
+export const anyAllowed = { role: "allowed" } satisfies Policy;
+
+type AccessRegistry = Pick<Registry, "nodeByTailnetId">;
+
+/**
+ * Whether the caller is a person's device: neither the control node nor a node, whose pylons call as their node. Without
+ * deployment options the control node is unknown, so no caller is.
+ */
+function isPerson(registry: AccessRegistry, deployment: DeploymentOptions | undefined, caller: TailnetNodeId): boolean {
+  return deployment !== undefined && caller !== deployment.self && registry.nodeByTailnetId(caller) === undefined;
+}
+/** A person among the deployers, whatever the allowlist says, so a landing the review loop runs later can ask it. */
+export function isDeployer(registry: AccessRegistry, deployment: DeploymentOptions | undefined, caller: TailnetNodeId): boolean {
+  return deployment !== undefined && deployment.deployers.has(caller) && isPerson(registry, deployment, caller);
+}
+function isReporter(registry: AccessRegistry, deployment: DeploymentOptions | undefined, caller: TailnetNodeId, authorization: string | undefined): boolean {
+  if (deployment === undefined || !authorization?.startsWith("Bearer ") || authorization.length > 256) return false;
+  const node = registry.nodeByTailnetId(caller);
+  if (node === undefined) return false;
+  const key = deployment.keys[caller] ?? node.deployKey;
+  return tokenDigest(authorization.slice(7)) === key;
+}
+
+/** The role a caller must hold before a route says more than that it does not know the caller. */
+const admittedAs: Readonly<Record<Role, Role>> = {
+  tailnet: "tailnet", joiner: "joiner", allowed: "allowed", person: "allowed", deployer: "allowed", reporter: "reporter", "control-node": "reporter",
+};
+
+const unknown = (role: Role) => new Refusal("forbidden", role === "tailnet" || role === "joiner" ? "caller is not a tailnet node" : "caller is not a tailnet node this control plane allows");
+
+/**
+ * Refuses a caller holding `roles` that may not reach `policy`'s route, or, without one, any route: an unknown caller,
+ * whom the route's own refusal would tell more than that.
+ */
+export function admit(roles: ReadonlySet<Role>, policy: Policy | undefined) {
+  const role = policy === undefined ? null : admittedAs[policy.role];
+  if (role === null ? roles.has("allowed") || roles.has("reporter") : roles.has(role)) return;
+  throw unknown(role ?? "allowed");
+}
+
+/** The refusal of a caller holding `roles` that does not hold `policy`'s role, or null when it does. */
+export function refusal(roles: ReadonlySet<Role>, policy: Policy): Refusal | null {
+  if (roles.has(policy.role)) return null;
+  switch (policy.role) {
+    case "person": return new Refusal("forbidden", `caller may not ${policy.action}: only a person may, never the control plane, infrastructure nodes or pylons`);
+    case "deployer": return new Refusal("forbidden", `caller may not ${policy.action}: only deployers may, never infrastructure nodes or pylons`);
+    case "control-node": return new Refusal("forbidden", `only the control node ${policy.action}`);
+    default: return unknown(policy.role);
+  }
+}
 
 /**
  * What a route needs of a thread's status: the statuses it refuses, and whether the refusal says the pylon stays
@@ -26,7 +92,25 @@ const statusNeeds: Readonly<Record<"kept" | "open" | "pylon" | "active", { refus
 /** What a route needs of a thread: a status, and an agent of one kind. */
 interface Need { status?: keyof typeof statusNeeds; agent?: "harness" | "claude" }
 
-export function apiAccess(registry: Registry, wake: (node: NodeName) => void, options: { deployment?: DeploymentOptions | undefined }) {
+export function apiAccess(registry: Registry, wake: (node: NodeName) => void, options: { deployment?: DeploymentOptions | undefined; allowed: ReadonlySet<TailnetNodeId> }) {
+  /**
+   * The roles a caller whois names holds. A person or a deployer is also allowed, and the control node is the reporter
+   * the control plane runs as.
+   */
+  function roleOf(caller: TailnetNodeId, authorization?: string): ReadonlySet<Role> {
+    const roles = new Set<Role>(["tailnet"]);
+    if (options.allowed.has(caller)) {
+      roles.add("allowed");
+      if (isPerson(registry, options.deployment, caller)) roles.add("person");
+      if (isDeployer(registry, options.deployment, caller)) roles.add("deployer");
+    }
+    if (isReporter(registry, options.deployment, caller, authorization)) {
+      roles.add("reporter");
+      if (caller === options.deployment!.self) roles.add("control-node");
+    }
+    return roles;
+  }
+
   /** The thread `id` names, or the queue record of one that has not started, which has no row. */
   function lookup(id: string): { thread: Thread } | { queued: QueuedRecord } {
     const found = registry.thread(id as ThreadId);
@@ -61,28 +145,23 @@ export function apiAccess(registry: Registry, wake: (node: NodeName) => void, op
   /** The thread with its status now, which a request that waited may have seen change. */
   const current = (t: Thread): Thread => ({ ...t, status: registry.threadStatus(t.id)! });
 
-  /**
-   * Threads, projects and items are the person's, so no pylon, harness thread or the control plane itself acts on a
-   * thread or its pylon, edits a project, or adds, approves or cancels an item. A thread never drives another. The
-   * control plane's own passes start, message, review and archive threads in-process.
-   */
-  function personOnly(caller: TailnetNodeId, action: string) {
-    if (!isPerson(registry, options.deployment, caller)) throw new HttpError(403, `caller may not ${action}: only a person may, never the control plane, infrastructure nodes or pylons`);
-  }
-
   function wakeThread(t: Thread) {
     wake(registry.pylon(t.pylonId)!.node);
   }
 
-  /** Landing merges and may deploy, so it takes the same right as `nexus deploy`, whatever the repository. */
-  function mayLand(caller: TailnetNodeId) {
-    if (!canDeploy(registry, options.deployment, caller)) throw new HttpError(403, "caller may not land a pull request: landing deploys, and only deployers may, never infrastructure nodes or pylons");
-  }
-
-  function refusalOf(caller: TailnetNodeId, question: Question): AnswerRefusal | null {
-    return answerRefusal(question, { person: isPerson(registry, options.deployment, caller), deployer: canDeploy(registry, options.deployment, caller) });
-  }
-
-  return { lookup, thread, threadRefusal, guard, current, wakeThread, personOnly, mayLand, refusalOf };
+  return { lookup, thread, threadRefusal, guard, current, wakeThread, roleOf };
 }
 export type Access = ReturnType<typeof apiAccess>;
+
+/** Landing merges and may deploy, so it takes the same right as `nexus deploy`, whatever the repository. */
+export const landing = { role: "deployer", action: "land a pull request, which deploys" } satisfies Policy;
+
+/** For a route whose body asks for a landing, which the land route's own role checks otherwise. */
+export function mayLand(roles: ReadonlySet<Role>) {
+  const refused = refusal(roles, landing);
+  if (refused !== null) throw refused;
+}
+
+export function refusalOf(roles: ReadonlySet<Role>, question: Question): AnswerRefusal | null {
+  return answerRefusal(question, { person: roles.has("person"), deployer: roles.has("deployer") });
+}

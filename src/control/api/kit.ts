@@ -11,7 +11,7 @@ import type { Registry } from "../registry.ts";
 import type { Thread } from "../thread-store.ts";
 import type { ThreadAgents, ThreadHarness } from "../thread-agent.ts";
 import type { StartKey, StartRequest } from "../start-request.ts";
-import type { Access } from "./access.ts";
+import type { Access, Policy, Role } from "./access.ts";
 import type { PylonAccess } from "./pylon-access.ts";
 import type { EventStreams } from "./sse.ts";
 import type { ThreadViews } from "./thread-view.ts";
@@ -22,14 +22,11 @@ export type Reply =
   | { status: number; headers: Record<string, string>; body: string; file?: never; stream?: never }
   | { status: number; file: Buffer; type: string; cache?: string; stream?: never }
   | { stream(res: ServerResponse): Promise<void> | void; status?: never; file?: never };
-export type Route = (match: RegExpExecArray, req: { query: URLSearchParams; body(empty?: unknown): Promise<unknown>; caller: TailnetNodeId }) => Reply | Promise<Reply>;
-/**
- * Who may call a route that changes state: only a person, as `personOnly` checks before the route runs, or any
- * allowed caller, for the reason given, which names the check the route makes itself if it makes one. A route that
- * starts a turn waits out a deploy's drain.
- */
-export type Policy = ({ person: string } | { open: string }) & { startsTurn?: true };
-export type RouteEntry = readonly ["GET", RegExp, Route] | readonly ["POST" | "PUT" | "PATCH" | "DELETE", RegExp, Policy, Route];
+/** `roles` are what roleOf gives the caller, and `host` its MagicDNS name, which only the join's whois gives. */
+export type Route = (match: RegExpExecArray, req: { query: URLSearchParams; body(empty?: unknown): Promise<unknown>; caller: TailnetNodeId; roles: ReadonlySet<Role>; host: string | null }) => Reply | Promise<Reply>;
+/** A route any allowed caller or tailnet node changes state with says why it may. */
+type WritePolicy = Policy & ({ role: Exclude<Policy["role"], "allowed" | "tailnet"> } | { why: string });
+export type RouteEntry = readonly ["GET", RegExp, Policy, Route] | readonly ["POST" | "PUT" | "PATCH" | "DELETE", RegExp, WritePolicy, Route];
 export const ok = (body: unknown): Reply => ({ status: 200, body });
 export const created = (body: unknown): Reply => ({ status: 201, body });
 export const noContent: Reply = { status: 204 };

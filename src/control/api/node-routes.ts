@@ -2,12 +2,15 @@
  * The nodes and their pylons, and a node's health and its history, which only a deployer reads.
  */
 import type { NodeHealth } from "../../protocol/client.ts";
-import type { NodeName, TailnetNodeId } from "../../ids.ts";
+import type { NodeName } from "../../ids.ts";
 import { HttpError } from "../http-error.ts";
 import { foldPylons, seriesLabel, type MetricSeries, type NodeMetrics, type Series } from "../node-metrics.ts";
 import { nodeSummary } from "../placement.ts";
-import { canDeploy, type DeploymentOptions } from "../releases.ts";
 import { ok, type RouteEntry, type ApiKit } from "./kit.ts";
+import { anyAllowed, type Policy } from "./access.ts";
+
+/** A node's health says what runs on it, so only a deployer reads it. */
+export const readHealth = { role: "deployer", action: "read a node's health" } satisfies Policy;
 
 const maxSpanMs = 31 * 24 * 60 * 60 * 1000;
 
@@ -19,12 +22,11 @@ function whole(query: URLSearchParams, name: string): number | null {
   return value;
 }
 
-export function nodeRoutes(kit: ApiKit, options: { deployment?: DeploymentOptions | undefined }, nodeHealth: (caller: TailnetNodeId, name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
+export function nodeRoutes(kit: ApiKit, nodeHealth: (name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
   const { registry } = kit;
 
-  /** History holds what a node's health held, so it takes the same right, and is read from the registry alone. */
-  function nodeMetrics(caller: TailnetNodeId, name: NodeName, query: URLSearchParams): NodeMetrics {
-    if (!canDeploy(registry, options.deployment, caller)) throw new HttpError(403, "caller may not read a node's metrics: only deployers may, never infrastructure nodes or pylons");
+  /** Read from the registry alone. */
+  function nodeMetrics(name: NodeName, query: URLSearchParams): NodeMetrics {
     if (registry.node(name) === undefined) throw new HttpError(404, `no node ${name}`);
     const now = Date.now();
     const from = whole(query, "from");
@@ -39,8 +41,9 @@ export function nodeRoutes(kit: ApiKit, options: { deployment?: DeploymentOption
   }
 
   return [
-    ["GET", /^\/v1\/nodes$/, () => ok(registry.nodes().map((record) => nodeSummary(registry, record)))],
-    ["GET", /^\/v1\/nodes\/([^/]+)\/health$/, async ([, name], r) => ok(await nodeHealth(r.caller, name as NodeName))],
-    ["GET", /^\/v1\/nodes\/([^/]+)\/metrics$/, ([, name], r) => ok(nodeMetrics(r.caller, name as NodeName, r.query))],
+    ["GET", /^\/v1\/nodes$/, anyAllowed, () => ok(registry.nodes().map((record) => nodeSummary(registry, record)))],
+    ["GET", /^\/v1\/nodes\/([^/]+)\/health$/, readHealth, async ([, name]) => ok(await nodeHealth(name as NodeName))],
+    // History holds what a node's health held, so it takes the same right.
+    ["GET", /^\/v1\/nodes\/([^/]+)\/metrics$/, { role: "deployer", action: "read a node's metrics" }, ([, name], r) => ok(nodeMetrics(name as NodeName, r.query))],
   ];
 }

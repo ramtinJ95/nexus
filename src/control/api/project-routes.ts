@@ -10,6 +10,7 @@ import { gitIdentitySchema } from "../../protocol/spawn.ts";
 import { gitUrl, type AutoReviewMode, type Project } from "../project.ts";
 import { editedRules, standingRulesLimit } from "../standing-rules.ts";
 import { ok, created, parse, type RouteEntry, type ApiKit } from "./kit.ts";
+import { anyAllowed, mayLand } from "./access.ts";
 
 const name = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
 const host = z.string().min(1);
@@ -42,7 +43,7 @@ const projectEditSchema = projectSchema.omit({ id: true, repoUrl: true, preSetup
   }).partial();
 
 export function projectRoutes(kit: ApiKit, options: { pipeline?: Pipeline | null | undefined }): readonly RouteEntry[] {
-  const { mayLand, registry } = kit;
+  const { registry } = kit;
 
   function refuseUnknownNode(project: Project) {
     if (project.defaultNode !== "auto" && registry.node(project.defaultNode) === undefined) throw new HttpError(400, `no node ${project.defaultNode}`);
@@ -59,11 +60,11 @@ export function projectRoutes(kit: ApiKit, options: { pipeline?: Pipeline | null
   }
 
   return [
-    ["PATCH", /^\/v1\/projects\/([^/]+)$/, { person: "edit a project" }, async ([, id], r) => {
+    ["PATCH", /^\/v1\/projects\/([^/]+)$/, { role: "person", action: "edit a project" }, async ([, id], r) => {
       const { autoReview, pipeline, standingRules, secondReview, ...patch } = parse(projectEditSchema, await r.body());
       // A CLI older than modes sends `land`.
       const mode: AutoReviewMode | null | undefined = autoReview == null ? autoReview : "mode" in autoReview ? autoReview.mode : autoReview.land ? "land" : "review";
-      if (mode === "land" || mode === "yolo") mayLand(r.caller);
+      if (mode === "land" || mode === "yolo") mayLand(r.roles);
       const project = registry.editProject(id as ProjectId, ({ autoReview: kept, pipeline: running, standingRules: standing, secondReview: second, ...previous }) => {
         const updated: Project = parse(projectSchema, { ...previous, ...patch, resources: { ...previous.resources, ...patch.resources } });
         refuseUnknownNode(updated);
@@ -78,7 +79,7 @@ export function projectRoutes(kit: ApiKit, options: { pipeline?: Pipeline | null
       if (project === undefined) throw new HttpError(404, `no project ${id}`);
       return ok(project);
     }],
-    ["GET", /^\/v1\/projects$/, () => ok(registry.projects())],
-    ["POST", /^\/v1\/projects$/, { open: "adding a project changes no thread, pylon or project there is" }, async (_, r) => created(createProject(await r.body()))],
+    ["GET", /^\/v1\/projects$/, anyAllowed, () => ok(registry.projects())],
+    ["POST", /^\/v1\/projects$/, { role: "allowed", why: "adding a project changes no thread, pylon or project there is" }, async (_, r) => created(createProject(await r.body()))],
   ];
 }

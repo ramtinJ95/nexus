@@ -9,7 +9,8 @@ import { z } from "zod";
 import type { NodeName, TailnetNodeId, ThreadId } from "../ids.ts";
 import { nodeNameSchema, tailnetNodeIdSchema } from "../protocol/fields.ts";
 import { connectProbe, type ProbeClient } from "../protocol/client.ts";
-import { canDeploy, wakesDeployers } from "./releases.ts";
+import { wakesDeployers } from "./releases.ts";
+import { isDeployer } from "./api/access.ts";
 import { gitIdentitySchema } from "../protocol/spawn.ts";
 import { gitUrl } from "./project.ts";
 import { ingest } from "./reconcile.ts";
@@ -233,7 +234,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     checks: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread, ended: (id) => void reviews?.wake(id) }),
     live: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread, gate: verifyGate, ended: (id) => void reviews?.wake(id) }),
     release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)! },
-    mayLand: (caller) => canDeploy(registry, deployment, caller as TailnetNodeId),
+    mayLand: (caller) => isDeployer(registry, deployment, caller as TailnetNodeId),
     wake: wakeThread,
     log,
   });

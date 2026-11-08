@@ -2,13 +2,13 @@ import { z } from "zod";
 import type { NexusEvent } from "./events.ts";
 import type { TailnetNodeId } from "../ids.ts";
 import type { Registry } from "./registry.ts";
-import { busyDrainReason, fullCommit, reportStates, tokenDigest, type ReleaseView, type ReportBody, type Role } from "../protocol/deploy.ts";
+import { busyDrainReason, fullCommit, reportStates, type ReleaseView, type ReportBody, type Role } from "../protocol/deploy.ts";
 import { command, repository } from "../deploy/install.ts";
 import type { ReleaseInventory } from "../deploy/release-cleanup.ts";
 import { releaseName } from "../node-layout.ts";
 import { deleteOutcomeSchema } from "../protocol/cleanup.ts";
 
-type ReleasesRegistry = Pick<Registry, "desiredRelease" | "nodeByTailnetId" | "nodes" | "releaseReports">;
+type ReleasesRegistry = Pick<Registry, "desiredRelease" | "nodes" | "releaseReports">;
 
 export interface DeploymentOptions {
   self: TailnetNodeId;
@@ -37,23 +37,6 @@ export const releasesSchema = z.strictObject({
   outcomes: z.record(name, deleteOutcomeSchema).optional(),
 });
 
-/**
- * Whether the caller is a person's device: neither the control node nor a node, whose pylons call as their node. Without
- * deployment options the control node is unknown, so no caller is.
- */
-export function isPerson(registry: ReleasesRegistry, options: DeploymentOptions | undefined, caller: TailnetNodeId): boolean {
-  return options !== undefined && caller !== options.self && registry.nodeByTailnetId(caller) === undefined;
-}
-export function canDeploy(registry: ReleasesRegistry, options: DeploymentOptions | undefined, caller: TailnetNodeId): boolean {
-  return options !== undefined && options.deployers.has(caller) && isPerson(registry, options, caller);
-}
-export function isReporter(registry: ReleasesRegistry, options: DeploymentOptions | undefined, caller: TailnetNodeId, authorization: string | undefined): boolean {
-  if (options === undefined || !authorization?.startsWith("Bearer ") || authorization.length > 256) return false;
-  const node = registry.nodeByTailnetId(caller);
-  if (node === undefined) return false;
-  const key = options.keys[caller] ?? node.deployKey;
-  return tokenDigest(authorization.slice(7)) === key;
-}
 export function releaseView(registry: ReleasesRegistry, self: string | undefined, now = Date.now()): ReleaseView {
   const desired = registry.desiredRelease();
   const reports = registry.releaseReports();
