@@ -9,6 +9,7 @@ import type { Output, Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
 import { limitText } from "../wording.ts";
 import { agoText, clock } from "./elapsed.ts";
+import { storageKeys } from "./contract.ts";
 import { grow, type Action } from "./contract.ts";
 
 interface Page { status: number; headers: Record<string, string>; body: string }
@@ -17,7 +18,7 @@ interface Page { status: number; headers: Record<string, string>; body: string }
  * Sets the stored theme, or the device's light or dark, before the first paint, as theme.js does after it. A browser
  * that refuses the page its storage throws on reading it, and the device's theme stands.
  */
-export const themeScript = `{ let theme = null; try { theme = localStorage.getItem("nexus.theme"); } catch {} document.documentElement.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }`;
+export const themeScript = `{ let theme = null; try { theme = localStorage.getItem(${JSON.stringify(storageKeys.theme)}); } catch {} document.documentElement.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }`;
 
 const pageHeaders = {
   "content-type": "text/html; charset=utf-8",

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { factsData, factsOf, growParts, noticeHash, noticeOf, unticked, type Facts } from "./contract.ts";
+import { factsData, factsOf, growParts, keeping, noticeHash, noticeOf, storageKeys, unticked, type Facts, type Storage } from "./contract.ts";
 import { dataset, grows, growing, html, since } from "./view.ts";
 
 /** An element's `data-*` attributes as the browser's `dataset` reads them. */
@@ -30,4 +30,24 @@ test("a run clock's ticking is no change to its region, and a new start is", () 
 test("a notice's hash names the thread and the attention its card is for", () => {
   assert.deepEqual(noticeOf(noticeHash("th-0123456789ab", "decision")), { thread: "th-0123456789ab", attention: "decision" });
   assert.equal(noticeOf("#needs-you"), null);
+});
+
+test("storage that refuses reads or writes, or is missing, reads as nothing and keeps nothing, without throwing", () => {
+  const refused = (): never => { throw new DOMException("The operation is insecure.", "SecurityError"); };
+  const refusing: Storage = { getItem: refused, setItem: refused, removeItem: refused };
+  for (const storage of [() => refusing, () => undefined, refused]) {
+    const { read, write } = keeping(storage);
+    write(storageKeys.pane, "changes");
+    write(storageKeys.pane, null);
+    assert.equal(read(storageKeys.pane), null);
+  }
+});
+
+test("kept storage reads back what was written, and a null write removes it", () => {
+  const items = new Map<string, string>();
+  const { read, write } = keeping(() => ({ getItem: (k) => items.get(k) ?? null, setItem: (k, v) => void items.set(k, v), removeItem: (k) => void items.delete(k) }));
+  write(storageKeys.review("th-0123456789ab"), "{}");
+  assert.deepEqual([read(storageKeys.review("th-0123456789ab")), [...items.keys()]], ["{}", ["nexus.review.th-0123456789ab"]]);
+  write(storageKeys.review("th-0123456789ab"), null);
+  assert.equal(read(storageKeys.review("th-0123456789ab")), null);
 });

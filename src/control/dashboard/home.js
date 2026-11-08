@@ -4,11 +4,10 @@
 // card into view, as a notice's link does, and opening the card reads its latest reply into it.
 import { afterSwap, refreshAfter, refreshNow, toggled } from "./page.js";
 import { needSelectors } from "./notifications.js";
-import { narrow, peekParam } from "./contract.ts";
+import { kept, narrow, peekParam, storageKeys } from "./contract.ts";
 
 const split = document.getElementById("split");
 const phone = matchMedia(narrow);
-const viewKey = "nexus.flight-view";
 
 const cardOf = (key) => document.querySelector(`.need[data-thread="${key}"],.need[data-peek-key="${key}"]`);
 const keyOf = (card) => card.dataset.thread ?? card.dataset.peekKey;
@@ -43,7 +42,7 @@ function peek(key, card) {
 }
 
 if (split !== null) {
-  const view = document.getElementById(`view-${localStorage.getItem(viewKey)}`);
+  const view = document.getElementById(`view-${kept.read(storageKeys.flightView)}`);
   if (view !== null) view.checked = true;
   /**
    * Brings the inbox card a notice opened into view, or the inbox when that card is gone. A notice can come before the
@@ -77,7 +76,7 @@ if (split !== null) {
   document.addEventListener("click", (event) => {
     if (event.target instanceof Element && event.target.closest('a[href^="/#needs-you"]') !== null) document.getElementById("side-needs").checked = true;
   });
-  addEventListener("change", ({ target }) => { if (target.name === "flight-view") localStorage.setItem(viewKey, target.value); });
+  addEventListener("change", ({ target }) => { if (target.name === "flight-view") kept.write(storageKeys.flightView, target.value); });
 
   split.addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) return;

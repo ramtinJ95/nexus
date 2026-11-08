@@ -3,7 +3,7 @@ import { request } from "./request.js";
 import { changesBases, pylonRoutes, statusLetters } from "../../contract/pylon.ts";
 import { afterSwap, el, end, main, present, retryShots, scroller, showError } from "./page.js";
 import { bases, checkoutText } from "./checkout-text.js";
-import { factsOf, narrow } from "./contract.ts";
+import { factsOf, kept, keptForTab, narrow, storageKeys } from "./contract.ts";
 
 // A template's icons are in its content, outside the document.
 const iconOf = (name) => document.getElementById("icons").content.querySelector(`.i-${name}`).cloneNode(true);
@@ -17,9 +17,8 @@ const counts = (additions, deletions) => additions === null ? el("span", { class
 // agent ends, when the reader asks, and never on a paused pylon unless the reader says to wake it.
 export const changesPane = document.getElementById("pane-changes");
 const thread = changesPane?.dataset.thread;
-const baseKey = "nexus.base";
 export const checkout = {
-  base: changesBases.includes(localStorage.getItem(baseKey)) ? localStorage.getItem(baseKey) : "start",
+  base: changesBases.includes(kept.read(storageKeys.base)) ? kept.read(storageKeys.base) : "start",
   /** The last reply, kept so a fold the reader closed and the open tabs survive a read. */
   changes: null,
   /** Whether the reader asked to wake a paused pylon to read it, so the read happens once it runs. */
@@ -193,7 +192,7 @@ if (changesPane !== null) {
   const setBase = (next) => {
     for (const [base, box] of Object.entries(boxes)) box.checked = base === next;
     checkout.base = next;
-    localStorage.setItem(baseKey, next);
+    kept.write(storageKeys.base, next);
     checkout.changes = null;
     document.getElementById("changes-base").textContent = bases[next].label;
     void readChanges();
@@ -216,13 +215,13 @@ export const terminalTab = Symbol("terminal");
 const timelineTab = Symbol("timeline");
 const timelineView = document.getElementById("timeline-view");
 const fixedTabs = { convo: null, timeline: timelineTab, term: terminalTab };
-const tabsKey = `nexus.tabs.${thread}`;
+const tabsKey = storageKeys.tabs(thread);
 const maxTabs = 8;
-let openTabs = JSON.parse(sessionStorage.getItem(tabsKey) ?? "[]");
+let openTabs = JSON.parse(keptForTab.read(tabsKey) ?? "[]");
 export let activeTab = null;
 
 function saveTabs() {
-  sessionStorage.setItem(tabsKey, JSON.stringify(openTabs));
+  keptForTab.write(tabsKey, JSON.stringify(openTabs));
 }
 
 /** Draws the file tabs again, keeping focus on the control that had it, or on the tab that took its place. */
@@ -354,8 +353,7 @@ async function showTerminal() {
   opened?.focus();
 }
 
-const layoutKey = "nexus.diff-layout";
-let diffLayout = localStorage.getItem(layoutKey) === "split" ? "split" : "unified";
+let diffLayout = kept.read(storageKeys.diffLayout) === "split" ? "split" : "unified";
 /** A window as narrow as a phone's, which draws unified, as split leaves each side too few characters to read. */
 const phone = matchMedia(narrow);
 /** The open diff as last read, so a change of layout draws it again without reading the pylon. */
@@ -375,7 +373,7 @@ function layoutPicker() {
 
 function pickLayout(layout) {
   diffLayout = layout;
-  localStorage.setItem(layoutKey, layout);
+  kept.write(storageKeys.diffLayout, layout);
   for (const button of fileView.querySelectorAll(".fv-layout button")) button.setAttribute("aria-pressed", String(button.value === layout));
   redrawDiff();
 }
@@ -457,9 +455,9 @@ async function readDiff(path) {
 // The review: notes on rows of the open diff, kept per thread until they go to the composer and are sent, or are
 // discarded.
 // After t3code's AnnotatableCodeView and DiffCommentAnnotation. Copyright (c) 2026 T3 Tools Inc., MIT licence; see THIRD_PARTY_NOTICES.md.
-const reviewKey = `nexus.review.${thread}`;
-export let review = readReview(localStorage.getItem(reviewKey));
-const saveReview = () => localStorage.setItem(reviewKey, JSON.stringify(review));
+const reviewKey = storageKeys.review(thread);
+export let review = readReview(kept.read(reviewKey));
+const saveReview = () => kept.write(reviewKey, JSON.stringify(review));
 const newNoteId = () => `note:${Date.now().toString(36)}${[...crypto.getRandomValues(new Uint8Array(4))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 /** The diff on show, `{ view, path, rows }` with each entry's rows, or null when no diff's lines are drawn. */
 let annotated = null;
