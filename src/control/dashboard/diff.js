@@ -2,6 +2,8 @@
 // module only once a diff opens, so the library loads then, and each language's grammar once a file needs it.
 import { DiffHunksRenderer, parsePatchFiles, wrapCoreCSS, wrapThemeCSS } from "@pierre/diffs";
 import { isImage } from "../../image-types.ts";
+import { callOf } from "../../contract/route.ts";
+import { pylonRoutes } from "../../contract/pylon.ts";
 import { themeValue } from "./theme.js";
 
 /** A diff this long is shown up to here, so a huge one does not stall the page. */
@@ -122,7 +124,7 @@ export function imagePair(file, base, thread) {
       node.append(make("p", { className: "shot-gone", textContent: `${side.label}: ${side.none}` }));
       continue;
     }
-    const src = `/v1/threads/${thread}/image?${new URLSearchParams(side.query)}`;
+    const src = callOf(pylonRoutes.image, { thread, query: side.query }).path;
     const link = make("a", { className: "shot", href: src, target: "_blank", rel: "noopener" });
     link.append(make("img", { src, alt: side.label, loading: "lazy" }), make("span", { className: "shot-cap", textContent: side.label }));
     node.append(link);

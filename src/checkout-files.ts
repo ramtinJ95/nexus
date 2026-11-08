@@ -14,11 +14,9 @@ import { z } from "zod";
 import { imageType } from "./image-types.ts";
 import { openPython, type OpenPipe } from "./pipe.ts";
 import type { ByteStream } from "./protocol/streams.ts";
+import { changeStatuses, changesBases, type ChangesBase } from "./contract/pylon.ts";
 
 const helper = readFileSync(new URL("../images/pylon/checkout-files.py", import.meta.url));
-
-/** `start` is what the pylon booted at, which its first boot records as refs/nexus/base. */
-type ChangesBase = "start" | "head" | "turn";
 
 export const maxFileBytes = 10 << 20;
 /** The helper's caps are 2000 entries, 3000 files and 4 MiB of diff. A JSON reply within them stays far below this. */
@@ -54,14 +52,14 @@ const refusalSchema = z.strictObject({ refused: z.enum(refusalKinds), message: z
 const entrySchema = z.strictObject({ name: z.string().min(1), kind: z.enum(["file", "dir", "symlink", "other"]), size: z.number().int().nonnegative().nullable() });
 const listingSchema = z.strictObject({ path: z.string(), entries: z.array(entrySchema).max(2000), truncated: z.boolean() });
 const baseSchema = z.strictObject({
-  kind: z.enum(["start", "head", "turn"]),
+  kind: z.enum(changesBases),
   /** Null where the base is the empty tree: HEAD before the first commit, and the start of a pylon that booted an empty repository. */
   commit: z.string().regex(/^[0-9a-f]{40,64}$/).nullable(),
 });
 const changedSchema = z.strictObject({
   path: z.string().min(1),
   oldPath: z.string().min(1).nullable(),
-  status: z.enum(["added", "modified", "deleted", "renamed", "copied", "typechange"]),
+  status: z.enum(changeStatuses),
   /** Null for a binary file. */
   additions: z.number().int().nonnegative().nullable(),
   deletions: z.number().int().nonnegative().nullable(),
