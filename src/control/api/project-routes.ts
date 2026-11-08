@@ -1,5 +1,5 @@
 import type { ProjectId } from "../../ids.ts";
-import type { Pipeline } from "../pipeline.ts";
+import type { Features } from "../features.ts";
 import { HttpError } from "../http-error.ts";
 import type { AutoReviewMode, Project } from "../project.ts";
 import { editedRules } from "../standing-rules.ts";
@@ -9,7 +9,7 @@ import { projectRoutes as routes } from "../../contract/projects.ts";
 import { projectAddSchema, projectEditSchema, projectSchema } from "../../contract/projects-parse.ts";
 
 
-export function projectRoutes(kit: ApiKit, options: { pipeline?: Pipeline | null | undefined }): readonly RouteEntry[] {
+export function projectRoutes(kit: ApiKit, features: Features): readonly RouteEntry[] {
   const { registry } = kit;
 
   function refuseUnknownNode(project: Project) {
@@ -42,7 +42,7 @@ export function projectRoutes(kit: ApiKit, options: { pipeline?: Pipeline | null
         const reviewers = secondReview === undefined ? second : secondReview;
         return { ...updated, ...review == null ? {} : { autoReview: review }, ...items === undefined ? {} : { pipeline: items }, ...rules == null ? {} : { standingRules: rules }, ...reviewers == null ? {} : { secondReview: reviewers } };
       });
-      if (pipeline !== undefined) void options.pipeline?.poll();
+      if (pipeline !== undefined) void features.pipeline?.poll();
       if (project === undefined) throw new HttpError(404, `no project ${id}`);
       return ok(project);
     }),

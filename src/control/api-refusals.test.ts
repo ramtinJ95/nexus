@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { processStream } from "../process-stream.ts";
 import { probeError } from "../protocol/http.ts";
 import { BodyTooLarge } from "../node-base/request-body.ts";
-import { withThread } from "../test-support/api-kit.ts";
+import { deployment, reporterHeaders, testApi, withThread } from "../test-support/api-kit.ts";
+import type { TailnetNodeId } from "../ids.ts";
 import { errorReply } from "./api/server.ts";
 import { DeployDraining } from "./drain.ts";
 import { HttpError, type RefusalStatus } from "./http-error.ts";
@@ -45,4 +46,26 @@ test("each refusal of a checkout read keeps the status it had", async (t) => {
     const read = await s.call("GET", `/v1/threads/${s.thread.id}/files?path=src`);
     assert.deepEqual([read.status, read.body], [status, { error: `refused ${refused}`, code: null, retryable: false }], refused);
   }
+});
+
+test("each optional feature not configured refuses with the 409 it gave before the features shared one refusal", async (t) => {
+  const s = await testApi(t, { deployment });
+  const token = "the control plane's GitHub token (github.tokenFile), which is not configured";
+  const inventory = { releases: [], links: { current: null, "control-current": null, "deployer-current": null }, replaced: { probe: null, control: null }, running: {} };
+  const cases: [string, string, string, unknown, string][] = [
+    ["reviews", "POST", "/v1/threads/th-000000000000/review/cancel", {}, `the review loop needs ${token}`],
+    ["queue", "POST", "/v1/threads/th-000000000000/start", {}, `queued threads need ${token}`],
+    ["pipeline", "POST", "/v1/items/it-nosuch/cancel", {}, `pipeline items need ${token}`],
+    ["planning", "POST", "/v1/threads", { project: "acme", title: "Plan", planning: true }, "this control plane has no planning pass"],
+    ["images", "POST", "/v1/images/build", {}, "image builds are not configured"],
+    ["usageBackfill", "GET", "/v1/usage/backfill", undefined, "the usage backfill is not configured"],
+    ["doctor", "GET", "/v1/doctor", undefined, "this control plane runs no doctor"],
+  ];
+  for (const [feature, method, path, body, error] of cases) {
+    const reply = await s.call(method, path, body);
+    assert.deepEqual([reply.status, reply.body], [409, { error, code: null, retryable: false }], feature);
+  }
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  const releases = await s.call("POST", "/v1/deployer/releases", { inventory }, reporterHeaders);
+  assert.deepEqual([releases.status, releases.body], [409, { error: "this control plane runs no cleanup, so it records no releases", code: null, retryable: false }], "cleanup");
 });

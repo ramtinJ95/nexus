@@ -13,7 +13,8 @@ import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { startApi, type ApiOptions } from "../control/api/server.ts";
 import { threadServices } from "../control/thread-services.ts";
-import { turnGate } from "../control/drain.ts";
+import { isDraining, turnGate } from "../control/drain.ts";
+import { noFeatures, type Features } from "../control/features.ts";
 import type { AttachTiming } from "../control/attach.ts";
 import type { ReviewLoop } from "../control/review.ts";
 import { agentReader } from "../control/agent-conversation.ts";
@@ -54,7 +55,7 @@ export const claudeSession = "11111111-2222-4333-8444-555555555501";
 export const fixture = (await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").map((line) => `${line}\n`);
 
 /** Every API option but the services the kit builds, which a test asks for by flag or factory. */
-export type TestApiOptions = Omit<Partial<ApiOptions>, "deployment" | "images" | "usageBackfill" | "queue" | "pipeline" | "planning"> & {
+export type TestApiOptions = Omit<Partial<ApiOptions>, "deployment" | "features"> & Partial<Pick<Features, "reviews" | "cleanup" | "doctor">> & {
   /** null leaves deployments off. */
   deployment?: DeploymentOptions | null;
   images?(registry: Registry): ImageRollout;
@@ -69,7 +70,7 @@ export type TestApiOptions = Omit<Partial<ApiOptions>, "deployment" | "images" |
 };
 
 export async function testApi(t: import("node:test").TestContext, options: TestApiOptions = {}) {
-  const { deployment, images: imagesOf, usageBackfill: backfillOf, queue: queued, pipeline: piped, planning: planned = piped, dotfiles: dots, gitIdentity, ...apiOptions } = options;
+  const { deployment, images: imagesOf, usageBackfill: backfillOf, queue: queued, pipeline: piped, planning: planned = piped, dotfiles: dots, gitIdentity, reviews = null, cleanup = null, doctor = null, ...apiOptions } = options;
   const registry = openRegistry(join(dir, `${randomUUID()}.db`));
   const images = imagesOf?.(registry);
   const backfill = backfillOf?.(registry);
@@ -109,7 +110,7 @@ export async function testApi(t: import("node:test").TestContext, options: TestA
     registry, harness, mirror, dotfiles: dots ?? dotfiles, gitIdentity, wake, gate: turnGate(() => false),
     queue: queued === true || piped === true, planning: planned === true ? { replies: agentReader(registry, harness).replies } : null,
   });
-  const { startThread, queue, planning: plans } = services.api;
+  const { startThread, queue, pipeline, planning: plans } = services.api;
   /** The options of an API on `port`, so a restart serves the same registry and services. */
   const optionsAt = (port: number): ApiOptions => ({
     registry, host: "127.0.0.1", port,
@@ -125,9 +126,10 @@ export async function testApi(t: import("node:test").TestContext, options: TestA
     joins: { configured: new Set(["nFIREBAT", "nBENCH"] as TailnetNodeId[]), whois: async () => caller === null ? null : { id: caller, host: hosts.get(caller) ?? "unnamed.tail.ts.net" }, joined: (n) => { joined.push(n); } },
     // The control plane runs on rj-firebat and deploys nothing unless a test says so.
     ...(deployment === null ? {} : { deployment: deployment ?? { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} } }),
-    ...services.api,
-    ...(images === undefined ? {} : { images }),
-    ...(backfill === undefined ? {} : { usageBackfill: backfill }),
+    startThread,
+    features: { ...noFeatures, reviews, cleanup, doctor, queue, pipeline, planning: plans, images: images ?? null, usageBackfill: backfill ?? null },
+    gate: turnGate(() => isDraining(registry.drain())),
+    health: () => null,
     hostnames: new Set(["127.0.0.1"]),
     harness,
     wake,

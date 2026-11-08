@@ -1,12 +1,12 @@
 import type { z } from "zod";
-import type { Planning } from "../planning.ts";
 import { isPipelineRequestId, requestIds, type ProjectId, type ThreadId } from "../../ids.ts";
 import type { StartKey } from "../start-request.ts";
 import type { Thread } from "../thread-store.ts";
 import { HttpError } from "../http-error.ts";
 import { Refusal } from "../refusal.ts";
 import { observedPylon } from "../observed.ts";
-import { queuedView, type ThreadQueue } from "../queue.ts";
+import { queuedView } from "../queue.ts";
+import { feature, type Features } from "../features.ts";
 import { retryRefusal } from "../reconcile.ts";
 import { startKey } from "../threads.ts";
 import { sendWithStandingRules } from "../standing-rules.ts";
@@ -15,13 +15,10 @@ import { anyAllowed } from "./access.ts";
 import { threadRoutes as routes, type QueuedThread } from "../../contract/threads.ts";
 import { activitySchema, messageSchema, seenSchema, startSchema } from "../../contract/threads-parse.ts";
 
-export function threadRoutes(kit: ApiKit, options: { queue?: ThreadQueue | null | undefined; planning?: Planning | null | undefined }): readonly RouteEntry[] {
+export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEntry[] {
   const { lookup, thread, guard, wakeThread, row, detail, open, registry, harness, startThread, agents, agentOf } = kit;
 
-  function queueOrRefuse(): ThreadQueue {
-    if (!options.queue) throw new HttpError(409, "queued threads need the control plane's GitHub token (github.tokenFile), which is not configured");
-    return options.queue;
-  }
+  const queueOrRefuse = () => feature(features, "queue");
 
   const queuedStatus = (id: string, status: "archived" | "queued" | "deleted") => queuedView(registry, queueOrRefuse().setStatus(id as ThreadId, status));
 
@@ -96,13 +93,13 @@ export function threadRoutes(kit: ApiKit, options: { queue?: ThreadQueue | null 
   }
 
   async function startOnce({ after, message, planning, ...request }: Omit<z.infer<typeof startSchema>, "requestId">, caller: string, key?: StartKey, made?: ThreadId): Promise<Thread | QueuedThread> {
-    if (planning && !options.planning) throw new HttpError(409, "this control plane has no planning pass");
+    const plans = planning ? feature(features, "planning") : null;
     if (after === undefined) {
       const t = made === undefined ? await startThread({ ...request, planning }, caller, undefined, key) : registry.thread(made)!;
-      if (planning) options.planning!.begin(t);
+      plans?.begin(t);
       if (message !== undefined && t.status !== "archived" && t.status !== "deleted") {
         const requestId = requestIds.brief(t.id);
-        await sendWithStandingRules(registry, t.id, requestId, message, (brief) => harness.send(t.id, options.planning?.compose(t, requestId, brief) ?? brief, requestId, "followUp")).then(() => options.planning?.sent(t, requestId), (err: Error) => {
+        await sendWithStandingRules(registry, t.id, requestId, message, (brief) => harness.send(t.id, plans?.compose(t, requestId, brief) ?? brief, requestId, "followUp")).then(() => plans?.sent(t, requestId), (err: Error) => {
           const why = `started ${t.id}, but its first message was not sent: ${err.message}. ${key === undefined ? `Send it with POST /v1/threads/${t.id}/messages` : `Start it again under request ID ${key.requestId} to send it`}`;
           throw err instanceof Refusal ? new Refusal(err.kind, why) : new Error(why);
         });

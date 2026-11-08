@@ -143,7 +143,7 @@ async function controlPlaneOf(t: import("node:test").TestContext, config: Record
     ...config, db, tailscaledSocket: socket,
     listen: { host: "127.0.0.1", port: 0, hostnames: ["127.0.0.1"] },
     harness: { storage: join(dir, "harness.sqlite"), credentials: join(dir, "harness-credentials.json"), model: scriptedModel },
-  })), scriptedModels(), undefined, probe);
+  })), scriptedModels(), { probe });
   t.after(() => plane.close());
   function call(as: string, method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<{ status: number; body: any }> {
     caller = as;

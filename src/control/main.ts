@@ -10,7 +10,7 @@ import type { NodeName, TailnetNodeId, ThreadId } from "../ids.ts";
 import { nodeNameSchema, tailnetNodeIdSchema } from "../protocol/fields.ts";
 import { connectProbe, type ProbeClient } from "../protocol/client.ts";
 import { wakesDeployers } from "./releases.ts";
-import { isDeployer } from "./api/access.ts";
+import { isDeployer, threadWaker } from "./api/access.ts";
 import { gitIdentitySchema } from "../protocol/spawn.ts";
 import { gitUrl } from "./project.ts";
 import { ingest } from "./reconcile.ts";
@@ -24,7 +24,6 @@ import { jobDeadlineMs } from "../protocol/jobs.ts";
 import { startLoop } from "./loop.ts";
 import { openRegistry } from "./registry.ts";
 import type { NodeRecord } from "./node-store.ts";
-import type { Thread } from "./thread-store.ts";
 import { peerHandoff } from "./peers.ts";
 import { githubClient, githubRepo } from "./github.ts";
 import { reviewLoop } from "./review.ts";
@@ -137,12 +136,15 @@ const passMs = 15_000;
 
 type NodeAddress = Pick<NodeRecord, "name" | "tailnetHost" | "tailnetNodeId">;
 
-/**
- * Everything but the model login, so src/checks/control/thread-on-node.ts runs this same wiring with a scripted model.
- * `chatgptToken` reads the token every probe is handed for the chatgpt login. Without it, probes get none. Tests pass
- * `probe` to stand in for each node's probe.
- */
-export async function startControlPlane(config: ControlPlaneConfig, models: Models, chatgptToken?: () => Promise<string | undefined>, probe?: (node: NodeAddress) => ProbeClient): Promise<ControlPlane> {
+export interface ControlPlaneOptions {
+  /** Reads the token every probe is handed for the chatgpt login. Without it, probes get none. */
+  chatgptToken?: () => Promise<string | undefined>;
+  /** Stands in for each node's probe in tests. */
+  probe?: (node: NodeAddress) => ProbeClient;
+}
+
+/** Everything but the model login, so src/checks/control/thread-on-node.ts runs this same wiring with a scripted model. */
+export async function startControlPlane(config: ControlPlaneConfig, models: Models, { chatgptToken, probe }: ControlPlaneOptions = {}): Promise<ControlPlane> {
   const token = config.github ? (await readFile(config.github.tokenFile, "utf8")).trim() : null;
   if (token !== null && !/^[A-Za-z0-9_]+$/.test(token)) throw new Error("github.tokenFile must contain only a GitHub token");
   const tailscaled = config.tailscaledSocket ?? linuxTailscaledSocket;
@@ -166,17 +168,14 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const handoff = services.start(chatgptToken === undefined ? null : { everyMs: 60_000, ...chatgptTokenHandoff({ probes: () => [...probeMap.values()], token: chatgptToken }) });
   const peers = services.start(peerHandoff({ registry, probes: probeMap }));
   const loop = services.start(startLoop({
-    registry, probes: [...probeMap.values()], previewPorts: config.previewPorts, gitIdentity: config.gitIdentity,
-    ingest: (event, node, ...rest) => {
-      if (event.type === "snapshot") {
-        handoff?.observed(event.observation);
-        peers.observed(node, event.observation.probeBootId);
-      }
-      return ingest(event, node, ...rest);
+    registry, probes: [...probeMap.values()], previewPorts: config.previewPorts, gitIdentity: config.gitIdentity, ingest,
+    onSnapshot(node, observation) {
+      handoff?.observed(observation);
+      peers.observed(node, observation.probeBootId);
     },
   }));
   const wake = (node: NodeName) => { void loop.wake(node); };
-  const wakeThread = (t: Thread) => wake(registry.pylon(t.pylonId)!.node);
+  const wakeThread = threadWaker(registry, wake);
 
   const conversations = registry.harnessThreads().map((thread) => ({ thread, id: Number(thread.conversationId) as ConversationId }));
   const rawHarness = services.start(await openHarnessHost({
@@ -222,14 +221,14 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     registry, harness, mirror, dotfiles: config.dotfiles, gitIdentity: config.gitIdentity, wake, gate, log,
     queue: github !== null, planning: { replies: agents.replies },
   }));
-  const { startThread } = threads.api;
+  const { startThread, queue, pipeline, planning } = threads.api;
   const deployment = { self: config.self.tailnetNodeId, deployers: new Set(config.deployers ?? []), keys: config.deployKeys ?? {} };
+  const checkRunDeps = { registry, probes: probeMap, startThread, wake: wakeThread };
   const reviews = services.start(github === null ? null : { everyMs: passMs, ...reviewLoop({
     registry, github, inbox, harnessModel: config.harness.model.modelId, startThread,
     agentState: agents.state,
     brief: agents.brief,
-    checks: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread, ended: (id) => void reviews?.wake(id) }),
-    live: checkRuns({ registry, probes: probeMap, startThread, wake: wakeThread, gate: verifyGate, ended: (id) => void reviews?.wake(id) }),
+    runs: (ended) => ({ checks: checkRuns({ ...checkRunDeps, ended }), live: checkRuns({ ...checkRunDeps, gate: verifyGate, ended }) }),
     release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)! },
     mayLand: (caller) => isDeployer(registry, deployment, caller as TailnetNodeId),
     wake: wakeThread,
@@ -270,11 +269,10 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const api = services.start(await startApi({
     ...(config.https ? { https: { port: ports.dashboard, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
     prWatchEnabled: token !== null,
-    reviews,
-    ...threads.api,
+    features: { reviews, queue, pipeline, planning, cleanup, images, usageBackfill: backfill, doctor },
+    startThread,
     gate,
     deployment,
-    cleanup,
     registry, whois, host: config.listen.host, port: config.listen.port,
     allowed: new Set([config.self.tailnetNodeId, ...config.callers]),
     joins: {
@@ -291,9 +289,6 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     wake,
     probes: probeMap,
     previewPorts: config.previewPorts,
-    images,
-    usageBackfill: backfill,
-    doctor,
     health: health.latest,
   }));
   console.error(`nexus control plane: API on ${config.listen.host}:${api.port}, following ${[...probeMap.keys()].join(", ")}`);
@@ -315,7 +310,7 @@ async function main(configPath: string) {
   const credentials = await openCredentials(config.harness.credentials);
   const models = harnessModels(credentials);
   await requireModel(models, config.harness.model);
-  const controlPlane = await startControlPlane(config, models, () => chatgptToken(models, credentials));
+  const controlPlane = await startControlPlane(config, models, { chatgptToken: () => chatgptToken(models, credentials) });
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     process.once(signal, () => { controlPlane.close().then(() => process.exit(0), (err: unknown) => { console.error(err); process.exit(1); }); });
   }

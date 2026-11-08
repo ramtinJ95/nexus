@@ -25,6 +25,7 @@ import type { Proposal, ProposalQuestion, Unanswered } from "./questions.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import { isItemId, itemIdFrom, type ItemId, type ThreadId } from "../ids.ts";
+import { notConfigured } from "./not-configured.ts";
 
 type PlanningRegistry = Pick<Registry, "agent" | "askQuestion" | "planning" | "planningThreads" | "question" | "questions" | "savePlanning" | "thread">;
 
@@ -167,7 +168,7 @@ export function planning(options: { registry: PlanningRegistry; pipeline: Pick<P
      */
     answered(q: ProposalQuestion): ItemRecord | null {
       if (q.answer?.option !== proposalOptions.accept) return null;
-      if (options.pipeline === null) throw new Refusal("conflict", "pipeline items need the control plane's GitHub token (github.tokenFile), which is not configured");
+      if (options.pipeline === null) throw new Refusal("conflict", notConfigured.pipeline);
       const t = registry.thread(q.thread)!;
       return options.pipeline.add({ project: t.project, title: q.proposal.title }, q.proposal.brief, resolveAfter(q), q.answer.by, proposalItem(q.id));
     },

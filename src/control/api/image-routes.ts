@@ -1,5 +1,5 @@
-import { HttpError } from "../http-error.ts";
-import { imagesView, type ImageRollout } from "../image-rollout.ts";
+import { imagesView } from "../image-rollout.ts";
+import { feature, type Features } from "../features.ts";
 import type { ImageOperation } from "../image-store.ts";
 import type { ImageId } from "../../ids.ts";
 import type { ImageManifest } from "../../protocol/images.ts";
@@ -11,7 +11,7 @@ import { imageSchema, noFields, rolloutSchema } from "../../contract/release-par
 /** An image becomes what every new pylon boots, so building and rolling one out takes the same right as `nexus deploy`. */
 const roll = { role: "deployer", action: "build, roll out or roll back an image" } satisfies Policy;
 
-export function imageRoutes(kit: ApiKit, options: { images?: ImageRollout | undefined }): readonly RouteEntry[] {
+export function imageRoutes(kit: ApiKit, features: Features): readonly RouteEntry[] {
   const { registry } = kit;
 
   function recordImage(body: unknown): ImageManifest {
@@ -20,10 +20,7 @@ export function imageRoutes(kit: ApiKit, options: { images?: ImageRollout | unde
     return manifest;
   }
 
-  function imageRollout(): ImageRollout {
-    if (options.images === undefined) throw new HttpError(409, "image builds are not configured");
-    return options.images;
-  }
+  const imageRollout = () => feature(features, "images");
   const started = (operation: ImageOperation) => ({ status: operation.state === "running" ? 202 : 200, body: operation });
 
   return [

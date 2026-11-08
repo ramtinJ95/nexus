@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { chatgptTokenHandoff } from "./chatgpt-token.ts";
-import { startLoop, type Ingest, type Loop } from "./loop.ts";
+import { startLoop, type Ingest, type Loop, type LoopOptions } from "./loop.ts";
 import { nodePylons } from "./placement.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import { upgradeAttempts } from "./record-upgrade.ts";
@@ -283,10 +283,11 @@ function seed(registry: Registry, activity: Partial<Pick<Thread, "agentTurnRunni
   return addThread(registry, { node, boot: { image }, thread: activity, claudePrompt });
 }
 
-function run(t: import("node:test").TestContext, registry: Registry, probe: ProbeClient | readonly ProbeClient[], overrides: { gitIdentity?: { name: string; email: string }; offlineAfterMs?: number; silenceMs?: number; ingest?: Ingest; previewPorts?: PortRange; log?: (line: string) => void; claudeLaunchRetryMs?: number; intervalMs?: number } = {}): Loop {
+function run(t: import("node:test").TestContext, registry: Registry, probe: ProbeClient | readonly ProbeClient[], overrides: { gitIdentity?: { name: string; email: string }; offlineAfterMs?: number; silenceMs?: number; ingest?: Ingest; onSnapshot?: LoopOptions["onSnapshot"]; previewPorts?: PortRange; log?: (line: string) => void; claudeLaunchRetryMs?: number; intervalMs?: number } = {}): Loop {
   const loop = polled(startLoop({
     ...(overrides.claudeLaunchRetryMs === undefined ? {} : { claudeLaunchRetryMs: overrides.claudeLaunchRetryMs }),
     gitIdentity: overrides.gitIdentity,
+    ...(overrides.onSnapshot === undefined ? {} : { onSnapshot: overrides.onSnapshot }),
     registry, probes: Array.isArray(probe) ? probe : [probe], ingest: overrides.ingest ?? ingest, previewPorts: overrides.previewPorts ?? previewPorts, intervalMs: overrides.intervalMs ?? 10, reconnectMs: 10,
     offlineAfterMs: overrides.offlineAfterMs ?? 30_000, silenceMs: overrides.silenceMs ?? 30_000, log: overrides.log ?? assert.fail,
   }));
@@ -2025,10 +2026,17 @@ test("a boot asking for the ChatGPT token right after a probe restart boots once
   const fake = fakeNode({ autoFinish: true, heldSecrets: [chatgptTokenGrant.name] });
   let token: string | undefined;
   const handoff = chatgptTokenHandoff({ probes: () => [fake.probe], token: async () => token, log: assert.fail });
-  run(t, registry, fake.probe, { ingest: (event, ...rest) => {
-    if (event.type === "snapshot") handoff.observed(event.observation);
-    return ingest(event, ...rest);
-  } });
+  const heard: string[] = [];
+  run(t, registry, fake.probe, {
+    onSnapshot(n, observation) {
+      heard.push(`heard ${n}`);
+      handoff.observed(observation);
+    },
+    ingest: (event, ...rest) => {
+      if (event.type === "snapshot") heard.push("ingested");
+      return ingest(event, ...rest);
+    },
+  });
   await until("the node is online", () => registry.node(node)?.state === "online");
   token = "token";
 
@@ -2039,6 +2047,8 @@ test("a boot asking for the ChatGPT token right after a probe restart boots once
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh"]);
   assert.deepEqual(registry.node(node)?.observation?.grants?.secrets, [chatgptTokenGrant.name]);
+  assert.ok(heard.length >= 4, "the loop heard more than one snapshot");
+  assert.deepEqual(heard, heard.map((_, i) => i % 2 === 0 ? `heard ${node}` : "ingested"), "each snapshot is heard just before it is ingested");
   await handoff.close();
 });
 

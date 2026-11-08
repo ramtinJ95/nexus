@@ -51,6 +51,8 @@ export interface LoopOptions {
   /** One client per registry node. */
   probes: readonly ProbeClient[];
   ingest: Ingest;
+  /** Hears each snapshot a node sends, before it is ingested. */
+  onSnapshot?: (node: NodeName, observation: NodeObservation) => void;
   /** The https ports each node's previews are allocated from. */
   previewPorts: PortRange;
   intervalMs?: number;
@@ -307,6 +309,7 @@ export function startLoop(options: LoopOptions): Loop {
             // The journal replays reports the node already sent, and the receipt only grows, so reportSession would drop these.
             const receipt = registry.eventReceipt(node);
             for (const report of event.observation.events) if (receipt === null || report.sequence > receipt) registry.reportSession(node, report);
+            options.onSnapshot?.(node, event.observation);
           }
           if (event.type === "session-event") registry.reportSession(node, event.report);
           const writes = ingest(event, node, known, Date.now(), new Set([...known.keys()].filter((id) => !listed.has(id))));
