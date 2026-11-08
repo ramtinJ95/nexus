@@ -3,11 +3,8 @@
  * conversation images. The server registers its handlers against them, and the CLI and dashboard call them. It
  * imports nothing at run time, so a browser can bundle it. pylon-parse.ts holds the request schemas.
  */
-import type { z } from "zod";
-import type { Changes, Diff, Listing } from "../checkout-files.ts";
 import type { Preview } from "../control/thread-store.ts";
-import type { OpenedSession } from "../control/wire.ts";
-import type { previewSchema, sessionSchema } from "./pylon-parse.ts";
+import type { SessionHarness } from "../protocol/agent-kinds.ts";
 import { queryOf, route, type FileBytes, type QueryCodec } from "./route.ts";
 
 /**
@@ -21,6 +18,24 @@ export const changeStatuses = ["added", "modified", "deleted", "renamed", "copie
 export type ChangeStatus = (typeof changeStatuses)[number];
 /** The letter the dashboard's changes list shows for each status. */
 export const statusLetters: Readonly<Record<ChangeStatus, string>> = { added: "A", modified: "M", deleted: "D", renamed: "R", copied: "C", typechange: "T" };
+
+/** A directory's entries, sorted by name. `path` is relative to the checkout, and empty for the checkout itself. */
+export interface Listing { path: string; entries: { name: string; kind: "file" | "dir" | "symlink" | "other"; size: number | null }[]; truncated: boolean }
+export interface ChangesBaseAt {
+  kind: ChangesBase;
+  /** Null where the base is the empty tree: HEAD before the first commit, and the start of a pylon that booted an empty repository. */
+  commit: string | null;
+}
+export interface ChangedFile {
+  path: string;
+  oldPath: string | null;
+  status: ChangeStatus;
+  /** Null for a binary file. */
+  additions: number | null;
+  deletions: number | null;
+}
+export interface Changes { base: ChangesBaseAt; files: ChangedFile[]; truncated: boolean }
+export interface Diff { base: ChangesBaseAt; diff: string; truncated: boolean }
 
 /** Where an image of a thread's conversation is, as the dashboard's image links name it. */
 export type ImageSource =
@@ -56,10 +71,15 @@ const diffQuery: QueryCodec<DiffQuery, { base: string | undefined; paths: string
   decode: (params) => ({ base: params.get("base") ?? undefined, paths: params.getAll("path") }),
 };
 
+/** The Herdr workspace's label is the harness's name by default, and the harness is Claude Code's. */
+export interface SessionRequest { harness?: SessionHarness | undefined; title?: string | undefined }
+/** A session the route opened. Its observed state shows in ThreadDetail.sessions. */
+export interface OpenedSession { herdrPane: string; harness: SessionHarness; title: string }
+
 export const pylonRoutes = {
-  preview: route<Preview, z.input<typeof previewSchema>>()("POST", "/v1/threads/{thread}/previews"),
+  preview: route<Preview, { port: number }>()("POST", "/v1/threads/{thread}/previews"),
   unpreview: route<null>()("DELETE", "/v1/threads/{thread}/previews/{port}"),
-  openSession: route<OpenedSession, z.input<typeof sessionSchema>>()("POST", "/v1/threads/{thread}/sessions"),
+  openSession: route<OpenedSession, SessionRequest>()("POST", "/v1/threads/{thread}/sessions"),
   closeSession: route<null>()("DELETE", "/v1/threads/{thread}/sessions/{session}"),
   focusSession: route<null>()("POST", "/v1/threads/{thread}/sessions/{session}/focus"),
   files: route<Listing>()("GET", "/v1/threads/{thread}/files", pathQuery),

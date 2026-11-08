@@ -7,7 +7,6 @@ import type { ActualState, DesiredPhase } from "./reconcile.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
 import type { GuestNotAnswering } from "../protocol/observations.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
-import type { SessionHarness } from "../protocol/agent-kinds.ts";
 import type { ClaudeResume, ClaudeSent, Output, Preview, Session, Thread } from "./thread-store.ts";
 import type { NodeRecord } from "./node-store.ts";
 import type { PullRequest } from "./github.ts";
@@ -17,9 +16,6 @@ import type { NodePylons } from "./placement.ts";
 import type { Review } from "./review-model.ts";
 import type { ImageEntry } from "./image-rollout.ts";
 import type { BackfillPlanRow, UsageBackfill } from "./usage.ts";
-
-/** A session `POST /v1/threads/<id>/sessions` opened. Its observed state shows in ThreadDetail.sessions. */
-export interface OpenedSession { herdrPane: string; harness: SessionHarness; title: string }
 
 export interface ThreadDetail {
   claudeWorker?: { model: string | null; state: string; message?: string };

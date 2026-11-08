@@ -1,7 +1,6 @@
 /**
  * What a person does in a thread's pylon: previews, sessions, and reads of its checkout and conversation images.
  */
-import type { OpenedSession } from "../wire.ts";
 import type { PortRange, Preview, Thread } from "../thread-store.ts";
 import { HttpError } from "../http-error.ts";
 import { checkoutReader, contentType, maxFileBytes, type CheckoutReader } from "../../checkout-files.ts";
@@ -12,7 +11,7 @@ import { ok, created, noContent, parse, on, type Reply, type RouteEntry, type Ap
 import { focusScript, herdrPanePattern } from "../../guest-contract.ts";
 import { checkoutDir } from "../../../images/pylon/nexus-contract.ts";
 import { anyAllowed } from "./access.ts";
-import { pylonRoutes as routes, type ImageSource } from "../../contract/pylon.ts";
+import { pylonRoutes as routes, type ImageSource, type OpenedSession } from "../../contract/pylon.ts";
 import { changesBaseSchema, checkoutPath, diffPaths, imageSourceSchema, previewSchema, sessionSchema } from "../../contract/pylon-parse.ts";
 
 /** A transcript or harness image is named by its hash, so its link never serves other bytes. A file may change. */

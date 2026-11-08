@@ -14,7 +14,7 @@ import { z } from "zod";
 import { imageType } from "./image-types.ts";
 import { openPython, type OpenPipe } from "./pipe.ts";
 import type { ByteStream } from "./protocol/streams.ts";
-import { changeStatuses, changesBases, type ChangesBase } from "./contract/pylon.ts";
+import { changeStatuses, changesBases, type Changes, type ChangesBase, type Diff, type Listing } from "./contract/pylon.ts";
 
 const helper = readFileSync(new URL("../images/pylon/checkout-files.py", import.meta.url));
 
@@ -50,28 +50,21 @@ export class CheckoutRefused extends Error {
 
 const refusalSchema = z.strictObject({ refused: z.enum(refusalKinds), message: z.string() });
 const entrySchema = z.strictObject({ name: z.string().min(1), kind: z.enum(["file", "dir", "symlink", "other"]), size: z.number().int().nonnegative().nullable() });
-const listingSchema = z.strictObject({ path: z.string(), entries: z.array(entrySchema).max(2000), truncated: z.boolean() });
+const listingSchema = z.strictObject({ path: z.string(), entries: z.array(entrySchema).max(2000), truncated: z.boolean() }) satisfies z.ZodType<Listing>;
 const baseSchema = z.strictObject({
   kind: z.enum(changesBases),
-  /** Null where the base is the empty tree: HEAD before the first commit, and the start of a pylon that booted an empty repository. */
   commit: z.string().regex(/^[0-9a-f]{40,64}$/).nullable(),
 });
 const changedSchema = z.strictObject({
   path: z.string().min(1),
   oldPath: z.string().min(1).nullable(),
   status: z.enum(changeStatuses),
-  /** Null for a binary file. */
   additions: z.number().int().nonnegative().nullable(),
   deletions: z.number().int().nonnegative().nullable(),
 });
-const changesSchema = z.strictObject({ base: baseSchema, files: z.array(changedSchema).max(3000), truncated: z.boolean() });
-const diffSchema = z.strictObject({ base: baseSchema, diff: z.string(), truncated: z.boolean() });
+const changesSchema = z.strictObject({ base: baseSchema, files: z.array(changedSchema).max(3000), truncated: z.boolean() }) satisfies z.ZodType<Changes>;
+const diffSchema = z.strictObject({ base: baseSchema, diff: z.string(), truncated: z.boolean() }) satisfies z.ZodType<Diff>;
 
-/** A directory's entries, sorted by name. `path` is relative to the checkout, and empty for the checkout itself. */
-export type Listing = z.infer<typeof listingSchema>;
-export type Changes = z.infer<typeof changesSchema>;
-export type ChangedFile = z.infer<typeof changedSchema>;
-export type Diff = z.infer<typeof diffSchema>;
 
 export interface CheckoutReader {
   /** Captures once per durable run. A failed attempt invalidates the previous snapshot. */

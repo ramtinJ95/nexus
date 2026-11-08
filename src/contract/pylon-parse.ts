@@ -4,14 +4,13 @@ import { pathsFit } from "../checkout-files.ts";
 import { maxRecordBytes } from "../control/claude-transcript.ts";
 import { sessionHarnessSchema } from "../protocol/agent-kinds.ts";
 import { reservedPorts } from "../protocol/ports.ts";
-import { changesBases, type ImageSource } from "./pylon.ts";
+import { changesBases, type ImageSource, type SessionRequest } from "./pylon.ts";
 
-export const previewSchema = z.strictObject({ port: z.int().min(1).max(65535).refine((port) => !reservedPorts.has(port), "is Nexus's own") });
+export const previewSchema = z.strictObject({ port: z.int().min(1).max(65535).refine((port) => !reservedPorts.has(port), "is Nexus's own") }) satisfies z.ZodType<unknown, { port: number }>;
 export const sessionSchema = z.strictObject({
   harness: sessionHarnessSchema.default("claude-code"),
-  /** The Herdr workspace's label. The harness's name by default. */
   title: z.string().trim().min(1).max(80).optional(),
-});
+}) satisfies z.ZodType<unknown, SessionRequest>;
 
 /** A path in the checkout, relative to it. Empty is the checkout itself. */
 export const checkoutPath = z.string().refine((path) => !path.includes("\0"), "has a NUL byte").refine((path) => pathsFit([path]), "is too long");

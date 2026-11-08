@@ -11,7 +11,7 @@ import { reservedNames } from "../control/holds.ts";
 import { usageLimitText } from "../control/claude-transcript.ts";
 import { keptPastDay } from "../control/reconcile.ts";
 import { checkBeside, liveNote, phaseNote, reviewersNote, roundNote, roundsSpent } from "../control/review-model.ts";
-import type { Changes, Listing } from "../checkout-files.ts";
+import type { Changes, Listing } from "../contract/pylon.ts";
 import type { ThreadSetup } from "../control/templates.ts";
 import { ago, table, clip } from "./kit.ts";
 import { gib } from "../control/placement.ts";
