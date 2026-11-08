@@ -25,7 +25,7 @@ import { artifactHeaders, fetchArtifact } from "../protocol/artifacts.ts";
 import { dropRequestSchema, type ArtifactUsage, type DeleteOutcome, type DropRequest } from "../protocol/cleanup.ts";
 import { peersSchema, probePort, probeRoutes, routeRole, type CallerRole, type GitReadReply, type ProbeAuthConfig } from "../protocol/routes.ts";
 import { linkedName, type ServiceName } from "../services-file.ts";
-import { onePerClaudeSession } from "./guest/session-wake.ts";
+import { claudeSessionLock } from "./guest/session-wake.ts";
 import type { Whois } from "../protocol/http.ts";
 import { readBody } from "../request-body.ts";
 import { redact } from "./redact.ts";
@@ -550,7 +550,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       const policy = commandPolicies[command.kind] as CommandPolicy<PylonCommand["kind"]>;
       const run = () => asked.kind === "send-claude-outcome" ? outcomeOf(pylonId, asked.requestId) : runCommand(pylonId, asked, deps);
       const session = typeof policy.lock === "function" ? policy.lock(command) : undefined;
-      const running = session !== undefined ? onePerClaudeSession(pylonId, [session], run) : run();
+      const running = session !== undefined ? claudeSessionLock(pylonId)([session], run) : run();
       if (policy.remembered && "requestId" in command && command.requestId !== undefined) remember(pylonId, command.requestId, running);
       const result = await running;
       if (typeof policy.publishes === "function" ? policy.publishes(result) : policy.publishes) void publishSnapshot();

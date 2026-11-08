@@ -8,7 +8,7 @@
 import type { Guest } from "../../backends/backend.ts";
 import type { PylonId } from "../../ids.ts";
 import type { PausedSession } from "../../protocol/observations.ts";
-import { recordSessions, relaunchSessions, toPaused, type RelaunchOutcome } from "./sessions.ts";
+import { recordSessions, relaunchSessions, toPaused, type ClaudeSessionLock, type RelaunchOutcome } from "./sessions.ts";
 import { agentKinds } from "../../protocol/agent-kinds.ts";
 
 /** Appends one line to the pylon's log: the controller log of a pylon VM, the container log under Docker. */
@@ -63,15 +63,20 @@ export async function finishRelaunch(pylonId: PylonId, guest: Guest, log: PylonL
  * a launch sent again while the first still runs, as when the control plane lost its answer, waits for it and then
  * reads how far it got.
  */
-export function onePerClaudeSession<T>(pylonId: PylonId, sessions: readonly string[], work: () => Promise<T>): Promise<T> {
-  const keys = [...new Set(sessions)].map((session) => `${pylonId}:${session}`);
-  const next = Promise.all(keys.map((key) => claudeCalls.get(key))).then(work);
-  const settled = next.catch(() => undefined);
-  for (const key of keys) claudeCalls.set(key, settled);
-  void settled.then(() => { for (const key of keys) if (claudeCalls.get(key) === settled) claudeCalls.delete(key); });
-  return next;
+export const claudeSessionLock = claudeSessionLocks();
+
+/** One owner of every pylon's Claude calls, because the command route and both backends' wakes reach the same lock. */
+function claudeSessionLocks(): (pylonId: PylonId) => ClaudeSessionLock {
+  const calls = new Map<string, Promise<unknown>>();
+  return (pylonId) => (sessions, work) => {
+    const keys = [...new Set(sessions)].map((session) => `${pylonId}:${session}`);
+    const next = Promise.all(keys.map((key) => calls.get(key))).then(work);
+    const settled = next.catch(() => undefined);
+    for (const key of keys) calls.set(key, settled);
+    void settled.then(() => { for (const key of keys) if (calls.get(key) === settled) calls.delete(key); });
+    return next;
+  };
 }
-const claudeCalls = new Map<string, Promise<unknown>>();
 
 /**
  * After a boot from an existing disk. Returns the outcomes, also logged. A sessions file that cannot be read or
@@ -80,7 +85,7 @@ const claudeCalls = new Map<string, Promise<unknown>>();
 export async function relaunchAfterWake(pylonId: PylonId, guest: Guest, log: PylonLog): Promise<readonly RelaunchOutcome[]> {
   let outcomes: readonly RelaunchOutcome[];
   try {
-    outcomes = await relaunchSessions(guest, (sessions, work) => onePerClaudeSession(pylonId, sessions, work));
+    outcomes = await relaunchSessions(guest, claudeSessionLock(pylonId));
   } catch (err) {
     await log(`sessions: the relaunch failed, and the sessions file keeps every session for the next wake: ${(err as Error).message}`);
     return [];
