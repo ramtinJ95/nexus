@@ -508,6 +508,13 @@ test("a reply recorded after seen in the same millisecond is unread and has a ne
   assert.equal(registry.thread(threadId)!.lastReplyAt, 2002);
 });
 
+test("seen with no time given is the registry clock's now", (t) => {
+  const registry = seeded(t, tempDb(), () => 5000);
+  registry.recordReply(threadId, 2000);
+  registry.markSeen(threadId, false);
+  assert.equal(registry.thread(threadId)!.seenAt, 5000);
+});
+
 test("adding PR watches preserves the shared seen and reply markers from schema 8", (t) => {
   const path = tempDb();
   const first = seed(openRegistry(path));
