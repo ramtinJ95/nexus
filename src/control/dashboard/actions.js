@@ -6,7 +6,7 @@ import { itemRoutes, projectRoutes } from "../../contract/projects.ts";
 import { questionRoutes, reviewRoutes } from "../../contract/reviews.ts";
 import { refreshAfter, showError, whenRunning } from "./page.js";
 import { setOpen } from "./nav.js";
-import { showSession } from "./checkout.js";
+import { showSession } from "./terminal-tab.js";
 
 /** What each `data-action` in contract.ts does. */
 export const handlers = {
