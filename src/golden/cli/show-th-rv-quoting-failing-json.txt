@@ -150,6 +150,17 @@ exit 0
   "attach": "herdr --session nexus",
   "agent": {
     "parkedTasks": 0
+  },
+  "said": {
+    "guest": null,
+    "disk": null,
+    "usage": null,
+    "paused": "paused, resumes on wake",
+    "prWatch": "PR watch: off (no control-plane GitHub token configured)",
+    "review": [
+      "review rv-95 of PR #95, started on its own: quoting, round 1 of 5, reviewer th-rv-quoting-failing-review on gpt-6-astra, landing when approved, the reviewer's model is failing (4 in a row, last: 429 Too Many Requests: rate limit reached for gpt-6-astra), retrying at 12:03 UTC",
+      "no live check: 7b7b7b7b7b7b has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live"
+    ]
   }
 }
 --- stderr

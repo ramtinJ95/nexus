@@ -3,7 +3,7 @@
  * so a state reads one way wherever it shows. A sentence that names a limit or a period reads it from the constant
  * that enforces it.
  */
-import type { ThreadDetail, ThreadNeed } from "./wire.ts";
+import type { ThreadDetail, ThreadNeed, ThreadSaid } from "./wire.ts";
 import type { Thread } from "./thread-store.ts";
 import { usageLimitText } from "../contract/threads.ts";
 import { archivedDiskMs, keptPastDay } from "./reconcile.ts";
@@ -109,6 +109,25 @@ export function liveNote(r: Review): string | null {
   return (r.phase.kind === "reviewing" || r.phase.kind === "fixing") && !reviewerApproved(round) ? `no live check yet: it runs at ${head} once the reviewer approves it` : `no live check ran at ${head}`;
 }
 export const roundOf = (r: Pick<Review, "rounds" | "maxRounds">) => `round ${roundsSpent(r)} of ${r.maxRounds}`;
+
+/** A review's lines as `nexus` prints them: its line, then its reviewers', round's and live check's notes. */
+export const reviewSaid = (r: Review): string[] => {
+  const { lead, tail } = reviewLine(r);
+  return [`${lead}${r.reviewer}${tail}`, ...[reviewersNote(r), roundNote(r), liveNote(r)].filter((line) => line !== null)];
+};
+
+/** What `nexus show` says of a thread's state. */
+export function threadSaid(d: Omit<ThreadDetail, "said">): ThreadSaid {
+  const { thread: t, pylon: p } = d;
+  return {
+    guest: p.notAnswering === undefined ? null : `as its last ${p.notAnswering.timeouts} guest commands got no answer, so messages, files and diffs fail. ${freshVm(t.id)}`,
+    disk: d.keptPastDay == null ? null : `${keptPast}, as ${d.keptPastDay}`,
+    usage: t.status !== "archived" || t.usageUnread === undefined ? null : `unread, as ${t.usageUnread}, so ${diskGoes(p.actualState === "absent")} without it`,
+    paused: sessionPaused(t),
+    prWatch: prWatchText(d.prWatch),
+    review: d.review === null ? null : reviewSaid(d.review),
+  };
+}
 
 /**
  * A review's line, around its reviewer, which the dashboard links and `nexus show` names: its ID and pull request, its

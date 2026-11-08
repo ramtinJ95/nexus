@@ -79,5 +79,8 @@
     "kind": "cancelled",
     "who": "person",
     "by": "nLAPTOP"
-  }
+  },
+  "said": [
+    "review rv-88 of PR #88, started on its own: cancelled, round 2 of 5, reviewer th-applepay-review on gpt-6-astra, cancelled by nLAPTOP"
+  ]
 }

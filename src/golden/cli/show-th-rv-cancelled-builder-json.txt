@@ -139,6 +139,16 @@ exit 0
   "attach": "herdr --session nexus",
   "agent": {
     "parkedTasks": 0
+  },
+  "said": {
+    "guest": null,
+    "disk": null,
+    "usage": null,
+    "paused": "paused, resumes on unarchive",
+    "prWatch": "PR watch: off (no control-plane GitHub token configured)",
+    "review": [
+      "review rv-419 of PR #419, started on its own: cancelled, round 1 of 5, reviewer th-rv-cancelled-builder-review on gpt-6-astra, the builder thread th-rv-cancelled-builder was archived"
+    ]
   }
 }
 --- stderr

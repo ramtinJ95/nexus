@@ -152,6 +152,17 @@ exit 0
   "attach": "herdr --session nexus",
   "agent": {
     "parkedTasks": 0
+  },
+  "said": {
+    "guest": null,
+    "disk": null,
+    "usage": null,
+    "paused": "paused, resumes on wake",
+    "prWatch": "PR watch: off (no control-plane GitHub token configured)",
+    "review": [
+      "review rv-57 of PR #57, started on its own: verifying, round 1 of 5, reviewer th-sync-review on gpt-6-astra",
+      "live check running .nexus/verify at g1g1g1g1g1g1 in verify pylon th-sync-verify"
+    ]
   }
 }
 --- stderr

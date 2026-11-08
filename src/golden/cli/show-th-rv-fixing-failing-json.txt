@@ -182,6 +182,17 @@ exit 0
   "attach": "herdr --session nexus",
   "agent": {
     "parkedTasks": 0
+  },
+  "said": {
+    "guest": null,
+    "disk": null,
+    "usage": null,
+    "paused": "paused, resumes on wake",
+    "prWatch": "PR watch: off (no control-plane GitHub token configured)",
+    "review": [
+      "review rv-92 of PR #92, started on its own: fixing, round 1 of 5, reviewer th-rv-fixing-failing-review on gpt-6-astra, the builder's model is failing (1 in a row, last: 500 Internal Server Error from claude-opus-5-5), retrying at 12:03 UTC",
+      "round 1: the reviewer th-rv-fixing-failing-review on gpt-6-astra asks for changes (P2), and the second reviewer th-rv-fixing-failing-second on claude-sonnet-5-5 asks for changes (P1). It reviews since the change touches checkout"
+    ]
   }
 }
 --- stderr

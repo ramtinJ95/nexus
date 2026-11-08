@@ -267,6 +267,16 @@ exit 0
   "attach": "herdr --session nexus",
   "agent": {
     "parkedTasks": 0
+  },
+  "said": {
+    "guest": null,
+    "disk": null,
+    "usage": null,
+    "paused": "paused, resumes on wake",
+    "prWatch": "PR watch: off (no control-plane GitHub token configured)",
+    "review": [
+      "review rv-398 of PR #398, started on its own: needs-person, round 3 of 5, reviewer th-flaky-review on gpt-6-astra, labelled \"needs human review\""
+    ]
   }
 }
 --- stderr

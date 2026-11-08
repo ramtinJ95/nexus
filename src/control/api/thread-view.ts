@@ -16,6 +16,7 @@ import type { Project } from "../project.ts";
 import { observedPylon } from "../observed.ts";
 import { watchStopped } from "../pr-watch-model.ts";
 import { herdrClient } from "../../guest-contract.ts";
+import { threadSaid } from "../wording.ts";
 
 function networkGrantsKey(network: BootInputs["network"]): string {
   const sorted = (values: Iterable<string>) => [...new Set(values)].sort();
@@ -75,7 +76,7 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
     const review = registry.review(t.id);
     const questions = registry.questions(t.id);
     const now = Date.now();
-    return {
+    const d: Omit<ThreadDetail, "said"> = {
       thread: t,
       ...claudeWorker === undefined ? {} : { claudeWorker, resume: registry.claudeResume(t.id) },
       attention: registry.attention(t.id), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
@@ -97,6 +98,7 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
       attach: herdrClient,
       agent,
     };
+    return { ...d, said: threadSaid(d) };
   }
 
   /** What a thread page shows: a Claude worker's transcript as last read, the harness conversation's view, or none. */

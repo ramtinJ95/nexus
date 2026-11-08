@@ -229,6 +229,18 @@ exit 0
   "attach": "herdr --session nexus",
   "agent": {
     "parkedTasks": 0
+  },
+  "said": {
+    "guest": null,
+    "disk": null,
+    "usage": null,
+    "paused": "paused, resumes on wake",
+    "prWatch": "PR watch: off (no control-plane GitHub token configured)",
+    "review": [
+      "review rv-97 of PR #97, started on its own: needs-person, round 1 of 5, reviewer th-rv-needs-person-holds-review on gpt-6-astra",
+      "round 1: the reviewer th-rv-needs-person-holds-review on gpt-6-astra approves. No second reviewer runs, though the change touches migrations/: no Claude model other than the builder's and the reviewer's could run",
+      "no live check: e0e0e0e0e0e0 has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live"
+    ]
   }
 }
 --- stderr

@@ -226,5 +226,16 @@
   "attach": "herdr --session nexus",
   "agent": {
     "parkedTasks": 0
+  },
+  "said": {
+    "guest": null,
+    "disk": null,
+    "usage": null,
+    "paused": "paused, resumes on wake",
+    "prWatch": "PR watch: off (no control-plane GitHub token configured)",
+    "review": [
+      "review rv-408 of PR #408, started on its own: needs-person, round 2 of 5, reviewer th-tokens-review on gpt-6-astra",
+      "live check passed at 282d29de282d"
+    ]
   }
 }

@@ -156,5 +156,15 @@
   "attach": "herdr --session nexus",
   "agent": {
     "parkedTasks": 0
+  },
+  "said": {
+    "guest": null,
+    "disk": null,
+    "usage": null,
+    "paused": "paused, resumes on wake",
+    "prWatch": "PR watch: off (no control-plane GitHub token configured)",
+    "review": [
+      "review rv-90 of PR #90, started on its own: checking, round 1 of 5, reviewer th-refunds-review on gpt-6-astra"
+    ]
   }
 }

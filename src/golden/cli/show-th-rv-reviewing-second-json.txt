@@ -213,6 +213,17 @@ exit 0
   "attach": "herdr --session nexus",
   "agent": {
     "parkedTasks": 0
+  },
+  "said": {
+    "guest": null,
+    "disk": null,
+    "usage": null,
+    "paused": "paused, resumes on wake",
+    "prWatch": "PR watch: off (no control-plane GitHub token configured)",
+    "review": [
+      "review rv-412 of PR #412, started on its own: reviewing, round 2 of 5, reviewer th-rv-reviewing-second-review on claude-sonnet-5-5, the second reviewer's model is failing (3 in a row, last: overloaded_error: Overloaded), retrying at 12:03 UTC",
+      "round 2: the reviewer th-rv-reviewing-second-review on claude-sonnet-5-5 approves, and the second reviewer th-rv-reviewing-second-second on claude-haiku-5-5 has not answered. It reviews since the change touches src/control/"
+    ]
   }
 }
 --- stderr

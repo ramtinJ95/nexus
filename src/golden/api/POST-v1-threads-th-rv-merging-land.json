@@ -67,5 +67,9 @@
   "phase": {
     "kind": "merging",
     "authorized": null
-  }
+  },
+  "said": [
+    "review rv-413 of PR #413, started on its own: merging, round 1 of 5, reviewer th-rv-merging-review on gpt-6-astra, landing when approved",
+    "live check passed at 9d9d9d9d9d9d"
+  ]
 }

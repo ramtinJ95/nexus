@@ -70,5 +70,13 @@
   "judgments": [],
   "planning": false,
   "attach": "herdr --session nexus",
-  "agent": null
+  "agent": null,
+  "said": {
+    "guest": null,
+    "disk": null,
+    "usage": null,
+    "paused": "paused, resumes on wake",
+    "prWatch": "PR watch: off (no control-plane GitHub token configured)",
+    "review": null
+  }
 }
