@@ -16,7 +16,7 @@
  * human's visit, so they are read when asked for rather than with every poll.
  */
 import type { NodeName, ProjectId, TailnetNodeId, ThreadId } from "../../ids.ts";
-import type { ThreadRow } from "../wire.ts";
+import type { ThreadDetail, ThreadRow } from "../wire.ts";
 import type { Thread } from "../thread-store.ts";
 import type { AgentView } from "../../contract/threads.ts";
 import { queuedView } from "../queue.ts";
@@ -26,7 +26,7 @@ import type { NodeHealth } from "../../protocol/client.ts";
 import type { ReviewLoop } from "../review.ts";
 import type { Review } from "../review-model.ts";
 import { ok } from "../dashboard/view.ts";
-import type { Context } from "../dashboard/context.ts";
+import type { Context, FoldView, HomeView, Latest, Peek, ThreadView } from "../dashboard/context.ts";
 import { needsOf, type InboxNeed } from "../work.ts";
 import { assets } from "../dashboard/assets.ts";
 import { notFound } from "../dashboard/shell.ts";
@@ -35,8 +35,9 @@ import { usagePage } from "../dashboard/usage-page.ts";
 import { clusterPage } from "../dashboard/cluster-page.ts";
 import { itemView } from "../pipeline.ts";
 import { promptSenders } from "../inbox.ts";
-import { itemsOf } from "../dashboard/items.ts";
-import type { Peek } from "../dashboard/flight.ts";
+import { itemsOf, type Item } from "../dashboard/items.ts";
+import { threadRole } from "../work-model.ts";
+import { landsOnItsOwn } from "../project.ts";
 import { healthPage } from "../dashboard/health-page.ts";
 import type { DoctorReport } from "../doctor-model.ts";
 import { threadPage, queuedPage } from "../dashboard/thread-page.ts";
@@ -46,6 +47,18 @@ import { anyAllowed, landing, refusal, refusalOf, type Role } from "./access.ts"
 import { readHealth } from "./node-routes.ts";
 
 type Caller = { caller: TailnetNodeId; roles: ReadonlySet<Role> };
+
+/** The thread as the list would report it, from its detail, so its state agrees with the rest of the detail. */
+const rowOf = (d: ThreadDetail): ThreadRow => ({ ...d.thread, attention: d.attention, desired: d.desired, pylon: d.pylon });
+
+function latestOf(d: ThreadDetail, items: readonly Item[]): Latest {
+  const reply = items.findLast((i) => i.kind === "agent" && i.text.trim() !== "");
+  const asked = items.findLast((i) => i.kind === "user");
+  return {
+    reply: reply?.kind === "agent" ? { text: reply.text, at: d.thread.lastReplyAt } : null,
+    asked: asked?.kind === "user" ? { text: asked.text, at: asked.at } : null,
+  };
+}
 
 /** The dashboard's pages, each a GET route, and the thread page's stream. */
 export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | null | undefined; health?: (() => DoctorReport | null) | undefined }, nodeHealth: (name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
@@ -81,6 +94,13 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
     return c;
   };
 
+  const offline = () => new Set(registry.nodes().filter((n) => n.state === "offline").map((n) => n.name));
+  const homeView = (): HomeView => ({ projects: registry.projects(), offline: offline(), role: (t) => threadRole(registry, t) });
+
+  /** The conversation's items, which read the questions and the prompts' senders of a Claude worker's transcript. */
+  const itemsFor = (d: ThreadDetail, view: AgentView | Error | null): readonly Item[] =>
+    view === null || view instanceof Error ? [] : itemsOf(view, () => d.questions, d.thread.id, () => promptSenders(registry, d.thread.id));
+
   /** The Cluster page with this node picked: what its probe reads of its host now, or why it could not. */
   const cluster = async (c: Context, roles: ReadonlySet<Role>, name: NodeName) => {
     const refused = refusal(roles, readHealth);
@@ -94,8 +114,7 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
     if (thread !== undefined) {
       const view = await transcript(thread);
       const d = detail(registry.thread(thread.id)!);
-      const read = view === null || view instanceof Error ? null : view;
-      return { kind: "thread", d, items: read === null ? [] : itemsOf(read, () => d.questions, thread.id, () => promptSenders(registry, thread.id)) };
+      return { kind: "thread", d, row: rowOf(d), latest: latestOf(d, itemsFor(d, view)) };
     }
     const queued = registry.queuedThread(key as ThreadId);
     if (queued !== undefined && queued.status === "queued") return { kind: "queued", q: queuedView(registry, queued) };
@@ -106,10 +125,11 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
   return [
     ["GET", /^\/$/, anyAllowed, async (_, r) => {
       const c = context(r);
-      return ok(home(c, {}, await peekOf(c, r.query.get("peek")), r.query.get("card")));
+      const peek = await peekOf(c, r.query.get("peek"));
+      return ok(home(c, homeView(), {}, peek, r.query.get("card")));
     }],
-    ["GET", /^\/threads\/new$/, anyAllowed, (_, r) => ok(home(context(r), { start: { project: r.query.get("project") } }))],
-    ["GET", /^\/projects\/new$/, anyAllowed, (_, r) => ok(home(context(r), { addProject: true }))],
+    ["GET", /^\/threads\/new$/, anyAllowed, (_, r) => ok(home(context(r), homeView(), { start: { project: r.query.get("project") } }))],
+    ["GET", /^\/projects\/new$/, anyAllowed, (_, r) => ok(home(context(r), homeView(), { addProject: true }))],
     ["GET", /^\/usage$/, anyAllowed, (_, r) => {
       const period = r.query.get("period") ?? "";
       return ok(usagePage(context(r), Object.hasOwn(periods, period) ? period as Period : "7d", (r.query.get("project") || null) as ProjectId | null));
@@ -129,7 +149,9 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
       const project = id === null ? null : registry.project(id as ProjectId);
       if (project === undefined) return { ...ok(notFound(c, `No project ${id!}.`)), status: 404 };
       const page = Number(r.query.get("page"));
-      return ok(foldPage(c, kind, project, Number.isInteger(page) && page > 0 ? page : 1));
+      const cancelled = kind === "quiet" ? [] : registry.queuedThreads().filter((q) => q.status === "archived" || q.status === "deleted").toSorted((a, b) => b.createdAt - a.createdAt).map((q) => queuedView(registry, q));
+      const fold: FoldView = { projects: project === null ? registry.projects() : [project], offline: offline(), cancelled };
+      return ok(foldPage(c, kind, fold, Number.isInteger(page) && page > 0 ? page : 1));
     }]),
     ["GET", /^\/threads\/([^/]+)$/, anyAllowed, async (m, r) => {
       const thread = registry.thread(m[1]! as ThreadId);
@@ -145,7 +167,14 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
       const repliedAt = view !== null && !(view instanceof Error) && view.kind === "claude" && (view.view.readAt ?? 0) < (thread.lastReplyAt ?? 0) ? null : thread.lastReplyAt;
       // After the read, so the facts are no older than the conversation, and a thread deleted meanwhile shows none.
       const d = detail(registry.thread(thread.id)!);
-      return ok(threadPage(context(r), d, registry.node(d.pylon.node)!, d.thread.status === "deleted" ? null : view, repliedAt, r.query.has("streaming")));
+      const t = d.thread;
+      const shown = t.status === "deleted" ? null : view;
+      const page: ThreadView = {
+        d, row: rowOf(d), node: registry.node(d.pylon.node)!, role: threadRole(registry, t), agent: registry.agent(t),
+        usage: registry.usageReport({ since: null, thread: t.id }).total, view: shown, items: itemsFor(d, shown), renderedReplyAt: repliedAt,
+        nudged: registry.nudge(t.id)?.state === "person", lands: landsOnItsOwn(registry.project(t.project)?.autoReview),
+      };
+      return ok(threadPage(context(r), page, r.query.has("streaming")));
     }],
     ["GET", /^\/threads\/([^/]+)\/stream$/, anyAllowed, ([, id]) => {
       const t = kit.thread(id!, { status: "kept" });

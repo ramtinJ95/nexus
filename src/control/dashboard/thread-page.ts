@@ -5,26 +5,23 @@
 import { desiredPhase } from "../reconcile.ts";
 import { linkedPort } from "../../services-file.ts";
 import { harnessNamed, type SessionHarness } from "../../protocol/agent-kinds.ts";
-import type { ThreadDetail } from "../wire.ts";
+import type { ThreadDetail, ThreadRow } from "../wire.ts";
 import type { NodeRecord } from "../node-store.ts";
 import type { Preview, Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
-import { promptSenders } from "../inbox.ts";
-import type { AgentView } from "../../contract/threads.ts";
 import { freshVm, liveNote, plannerGaveUp, prWatchText, reviewersNote, reviewLine, roundNote, sessionPaused } from "../wording.ts";
 import type { QueuedThread, Wait } from "../../contract/threads.ts";
 import { tokenCount, type UsageTotals } from "../../contract/usage.ts";
 import { attentionLabels } from "../plain-wording.ts";
 import { Html, html, attentionTone, actualBadge, desiredTone, sessionTone, outputLabel, dot, state, icon, menu, threadState, ago, workingFor, type Part, type Tone } from "./view.ts";
-import type { Context } from "./context.ts";
+import type { Context, ThreadView } from "./context.ts";
 import { prose } from "./markdown.ts";
-import { itemsOf, modelOf } from "./items.ts";
+import { modelOf } from "./items.ts";
 import { runOf, stateBar, composer, type Run } from "./conversation.ts";
 import { convo, shownKey } from "./live-frames.ts";
 import { judgmentCards, questionCards, landing, cancelReview, nudgeCard, resumeCard } from "./cards.ts";
 import { layout, queuedLook, threadTitle } from "./shell.ts";
 import { lifeOfThread, roleLine } from "./lifecycle.ts";
-import { threadRole } from "../work-model.ts";
 import { lifeTrack, timeline } from "./timeline.ts";
 import { usageColumns, exact } from "./usage-page.ts";
 
@@ -56,18 +53,15 @@ function lookOf(d: ThreadDetail, p: Preview) {
 }
 
 /** `streaming` is a poll from a page whose stream shows the conversation. */
-export function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: AgentView | Error | null, renderedReplyAt: number | null, streaming = false): Html {
+export function threadPage(c: Context, { d, row, node, role, agent, usage, view, items, renderedReplyAt, nudged, lands }: ThreadView, streaming = false): Html {
   const { thread: t } = d;
-  const agent = c.registry.agent(t);
   const read = view === null || view instanceof Error ? null : view;
-  const items = read === null ? [] : itemsOf(read, () => d.questions, t.id, () => promptSenders(c.registry, t.id));
   const run = runOf(d, read, items, c.now);
   const model = d.claudeWorker !== undefined ? d.claudeWorker.model : read === null || read.kind === "claude" ? null : modelOf(read.view);
   const shows = streaming && read !== null ? shownKey(read, model) : null;
   const open = t.status === "active" || t.status === "idle";
-  const role = threadRole(c.registry, t);
   const life = role === "builder" ? lifeOfThread(c, t.id) : null;
-  const bar = threadBar(t, headState(d, run, c.now), [
+  const bar = threadBar(t, headState(d, row, run, c.now), [
     t.status !== "deleted" && archiveButton(t.id, t.status === "archived"),
     t.status !== "deleted" && html`<button type="button" class="btn btn-ghost danger" id="delete" data-action="delete" data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its pylon and disk are removed.">Delete</button>`,
   ], d.planning === true && html` <span class="tag" id="planning" title="Its proposed items become cards you accept or reject">planning</span>`);
@@ -89,13 +83,13 @@ ${t.status !== "deleted" && termView(t)}
 <p id="action-status" class="comp-note" role="status" hidden></p>
 <div id="judgments" data-live>${judgmentCards(c, d)}</div>
 <div id="questions" data-live>${questionCards(c, d)}</div>
-<div id="nudge" data-live>${nudgeCard(c, t)}</div>
-<div id="resume" data-live>${resumeCard(c, t)}</div>
-<div id="landing" data-live>${landing(c, d)}</div>
+<div id="nudge" data-live>${nudged && nudgeCard(t)}</div>
+<div id="resume" data-live>${d.resume?.state === "person" && resumeCard(t, d.resume.why)}</div>
+<div id="landing" data-live>${landing(c, d, lands)}</div>
 <div id="run" data-live>${(open || (t.status === "archived" && run.kind === "parked")) && stateBar(t, run, c.now)}</div>
 <div id="composer" data-live>${composer(d, agent.kind, run, model, read?.kind === "claude" ? read.view : null, c.now)}</div>
 </div>`,
-    inspector: inspector(d, node, c.now, c.registry.usageReport({ since: null, thread: t.id }).total, agent.kind === "claude" ? agent.worker.session : null),
+    inspector: inspector(d, node, c.now, usage, agent.kind === "claude" ? agent.worker.session : null),
   });
 }
 
@@ -117,8 +111,8 @@ function termView(t: Thread): Html {
  * agent's state, in the dock's words, since a running pylon above an idle agent reads as a contradiction. Otherwise it
  * is the thread's attention, its archive or its pylon's state, which the dock either agrees with or does not say.
  */
-function headState(d: ThreadDetail, run: Run, now: number): readonly [string, Tone] {
-  const own = threadState({ ...d.thread, attention: d.attention, desired: d.desired, pylon: d.pylon }, now);
+function headState(d: ThreadDetail, row: ThreadRow, run: Run, now: number): readonly [string, Tone] {
+  const own = threadState(row, now);
   const open = d.thread.status === "active" || d.thread.status === "idle";
   if (!open || d.pylon.actualState !== "running" || (d.attention !== null && d.attention !== "working")) return own;
   return run.kind === "working" ? [attentionLabels.working, attentionTone.working] : run.kind === "idle" ? ["agent idle", "idle"] : own;

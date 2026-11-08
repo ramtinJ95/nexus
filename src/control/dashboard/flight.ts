@@ -6,17 +6,14 @@
 import type { Thread } from "../thread-store.ts";
 import type { QueuedThread } from "../../contract/threads.ts";
 import type { Project } from "../project.ts";
-import type { ThreadDetail } from "../wire.ts";
 import type { PipelineItem } from "../pipeline.ts";
 import { needKind, needLabels, roundOf } from "../wording.ts";
 import { Html, html, dot, icon, ago, state, actualBadge, threadState, dims, type Part, type Tone } from "./view.ts";
-import type { Context } from "./context.ts";
+import type { Context, HomeView, Latest, Peek } from "./context.ts";
 import type { HeldWork } from "../work.ts";
 import { clock, span } from "./elapsed.ts";
 import { prose } from "./markdown.ts";
-import type { Item } from "./items.ts";
 import { deployedForMs, lifeOfItem, phaseTone, pipelineItems, lifeOfThread, roleLine, stages, type Life, type Stage } from "./lifecycle.ts";
-import { threadRole } from "../work-model.ts";
 import { lifeTrack } from "./timeline.ts";
 import { lastActive, queuedLook, threadTitle } from "./shell.ts";
 
@@ -47,12 +44,12 @@ const itemLine = (c: Context, i: PipelineItem): Line => ({ key: i.id, title: i.t
  * archived one only once it landed, for `deployedForMs` after its archive. A review's reviewer and check threads show
  * on their builder's line.
  */
-export function flightLines(c: Context): Map<Stage, Line[]> {
+export function flightLines(c: Context, h: HomeView): Map<Stage, Line[]> {
   const recent = (t: Thread) => t.status === "active" || t.status === "idle" || (t.status === "archived" && t.archivedAt !== undefined && c.now - t.archivedAt < deployedForMs);
   const lines = [
     ...pipelineItems(c).filter((i) => i.thread === null).map((i) => itemLine(c, i)),
-    ...c.registry.projects().flatMap((p) => c.queuedIn(p.id)).map((q) => queuedLine(c, q)),
-    ...c.threads().filter((t) => recent(t) && threadRole(c.registry, t) === "builder").map((t) => [t, threadLine(c, t)] as const).filter(([t, l]) => t.status !== "archived" || l.life.stage === "deployed").map(([, l]) => l),
+    ...h.projects.flatMap((p) => c.queuedIn(p.id)).map((q) => queuedLine(c, q)),
+    ...c.threads().filter((t) => recent(t) && h.role(t) === "builder").map((t) => [t, threadLine(c, t)] as const).filter(([t, l]) => t.status !== "archived" || l.life.stage === "deployed").map(([, l]) => l),
   ];
   const placed = Map.groupBy(lines.filter((l) => l.life.stage !== null), (l) => l.life.stage!);
   for (const stage of placed.values()) stage.sort((a, b) => a.order - b.order);
@@ -96,12 +93,6 @@ ${lines.length > 0 && html`<ul class="fl-list">${lines.map((l) => line(l, peeked
 /** How many lines the stack shows on their way, which its head and the phone's switch count: held and deployed work is not. */
 export const inFlight = (placed: Map<Stage, Line[]>) => [...placed].filter(([stage]) => stage !== "held" && stage !== "deployed").reduce((n, [, lines]) => n + lines.length, 0);
 
-/** What the preview shows, as the route read it: a thread with its conversation's items, a queued thread, or an item. */
-export type Peek =
-  | { kind: "thread"; d: ThreadDetail; items: readonly Item[] }
-  | { kind: "queued"; q: QueuedThread }
-  | { kind: "item"; item: PipelineItem };
-
 /** The key a preview goes by, which its close link and the stack's lines name. */
 export const peekKey = (p: Peek) => p.kind === "thread" ? p.d.thread.id : p.kind === "queued" ? p.q.id : p.item.id;
 
@@ -115,13 +106,11 @@ function next(life: Life, said?: Html): Html {
 }
 
 /** The latest reply of the thread's agent, or what it was last asked when it has not answered. */
-function latest(d: ThreadDetail, items: readonly Item[], now: number): Html {
-  const reply = items.findLast((i) => i.kind === "agent" && i.text.trim() !== "");
-  const asked = items.findLast((i) => i.kind === "user");
-  if (reply?.kind === "agent") {
-    return html`<div class="peek-reply"><p class="peek-k">Latest reply${d.thread.lastReplyAt !== null && html` <span class="dim">${ago(d.thread.lastReplyAt, now)}</span>`}</p><div class="peek-text">${prose(reply.text)}</div></div>`;
+function latest({ reply, asked }: Latest, now: number): Html {
+  if (reply !== null) {
+    return html`<div class="peek-reply"><p class="peek-k">Latest reply${reply.at !== null && html` <span class="dim">${ago(reply.at, now)}</span>`}</p><div class="peek-text">${prose(reply.text)}</div></div>`;
   }
-  if (asked?.kind === "user") return html`<div class="peek-reply"><p class="peek-k">Last asked <span class="dim">${ago(asked.at, now)}</span></p><div class="peek-text">${prose(asked.text)}</div><p class="empty">No reply yet.</p></div>`;
+  if (asked !== null) return html`<div class="peek-reply"><p class="peek-k">Last asked <span class="dim">${ago(asked.at, now)}</span></p><div class="peek-text">${prose(asked.text)}</div><p class="empty">No reply yet.</p></div>`;
   return html`<p class="empty">No conversation yet.</p>`;
 }
 
@@ -137,11 +126,11 @@ ${i.brief === null ? html`<p class="empty">No brief.</p>` : html`<div class="pee
 }
 
 /** The preview: where the work is, what moves it on, its latest reply, and the way to its page. */
-export function peekView(c: Context, p: Peek | null): Html | false {
+export function peekView(c: Context, h: HomeView, p: Peek | null): Html | false {
   if (p === null) return false;
   if (p.kind === "item") {
     const i = p.item;
-    const project = c.registry.project(i.project);
+    const project = h.projects.find((x) => x.id === i.project);
     const life = lifeOfItem(c, i);
     return html`<section class="peek" aria-labelledby="peek-h" data-peek-key="${i.id}">
 <header class="peek-head"><span class="peek-proj">${i.project}<span class="dim"> item </span><code>${i.id}</code></span><h2 id="peek-h">${dot(phaseTone[i.phase.kind], i.phase.kind)}<span>${i.title}</span></h2>${i.thread !== null && html`<a class="btn btn-xs" href="/threads/${i.thread}">Open thread</a>`}${close}</header>
@@ -163,11 +152,11 @@ ${next(life, q.waits.every((w) => w.state === "landed") ? undefined : html`<ul c
 <p class="peek-meta">Starts on ${q.node} with ${q.resources.cpus} CPUs, ${q.resources.memoryGiB} GiB of memory and ${q.resources.diskGiB} GiB of disk.</p>
 </section>`;
   }
-  const { d, items } = p;
+  const { d } = p;
   const t = d.thread;
-  const role = threadRole(c.registry, t);
+  const role = h.role(t);
   const life = role === "builder" ? lifeOfThread(c, t.id) : null;
-  const [label, tone] = threadState({ ...t, attention: d.attention, desired: d.desired, pylon: d.pylon }, c.now);
+  const [label, tone] = threadState(p.row, c.now);
   const r = d.review;
   const pr = d.pullRequests.find((x) => x.state === "open") ?? d.pullRequests.at(-1);
   return html`<section class="peek" aria-labelledby="peek-h" data-peek-key="${t.id}">
@@ -179,6 +168,6 @@ ${next(life!)}` : roleLine(c, t.id, role)}
 ${pr !== undefined && html`<dt>Pull request</dt><dd><a class="link" href="${pr.url}" target="_blank" rel="noreferrer">#${pr.number} ${pr.title}</a>${r !== null && r.rounds.length > 0 && html` <span class="dim">${roundOf(r)}</span>`}</dd>`}
 <dt>Pylon</dt><dd>${state(...actualBadge[d.pylon.actualState])} <span class="dim">on</span> ${d.pylon.node}</dd>
 </dl>
-${latest(d, items, c.now)}
+${latest(p.latest, c.now)}
 </section>`;
 }
