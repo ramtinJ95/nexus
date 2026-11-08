@@ -22,7 +22,7 @@ import { minPylonMemoryGiB, minPylonMemoryReason, requiredArtifacts, type BootIn
 import { shellQuote as q } from "../../shell.ts";
 import { type CheckpointId, type ImageId, isCheckpointId, isImageId, isTemplateId, maxPylonIdLength, type PortableArtifactId, type PylonId } from "../../ids.ts";
 import { pylonIdSchema } from "../../protocol/fields.ts";
-import type { PausedSession } from "../../protocol/observations.ts";
+import { pausedSessionsSchema, type PausedSession } from "../../protocol/observations.ts";
 import { imageIdOf, type TemplateManifest } from "../../protocol/images.ts";
 import * as templates from "./pylon-vm-templates.ts";
 import { publicUrls } from "../../public-urls.ts";
@@ -80,16 +80,13 @@ export function hostNestsKvm(read: (path: string) => string | null = (path) => {
 }
 
 const checkpointId = z.custom<CheckpointId>(isCheckpointId);
-const pausedSessionSchema = z.strictObject({
-  id: z.string(), herdrPane: z.string().nullable(), harness: sessionHarnessSchema, harnessSessionId: z.string().nullable(), title: z.string(),
-});
 /**
  * `relaunch` is set before a boot from the instance's own disk and cleared once its sessions are relaunched.
  * `sessions` is what the last pause recorded, which list() reports while the instance is stopped. Every boot drops it,
  * except one that leaves the relaunch for a later spawn: its sessions never came back, so its pause keeps the list.
  */
 const sidecarSchema = z.strictObject({
-  checkpoint: checkpointId.nullable(), pausing: checkpointId.optional(), relaunch: z.literal(true).optional(), sessions: z.array(pausedSessionSchema).optional(),
+  checkpoint: checkpointId.nullable(), pausing: checkpointId.optional(), relaunch: z.literal(true).optional(), sessions: pausedSessionsSchema.optional(),
 });
 type Sidecar = z.infer<typeof sidecarSchema>;
 /** What a VM that is up reports holding, from the boot it was started with. */
@@ -98,7 +95,7 @@ const setupFailed = (status: Inspection["status"]) => status.startupFailures?.so
 /** A controller older than startupFailures reports only the startupError, so whether setup failed is unknown. */
 const failureUnknown = (status: Inspection["status"]) => status.startupError !== undefined && status.startupFailures === undefined;
 
-const sessionsOf = (sessions: readonly PausedSession[] | null | undefined): Pick<Sidecar, "sessions"> => sessions === null || sessions === undefined ? {} : { sessions: [...sessions] };
+const keptSessions = (sessions: readonly PausedSession[] | null | undefined): Pick<Sidecar, "sessions"> => sessions === null || sessions === undefined ? {} : { sessions };
 
 /** A pylon's instance is named by its ID, which keeps within the pi-sandbox instance name rule (see PylonId). */
 function instanceName(pylonId: PylonId): string {
@@ -551,7 +548,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
             const spec = await bootSpec(bootInputs, live);
             await settleSidecar(pylonId, instance.status.state === "stopped");
             const sidecar = await readSidecar(pylonId);
-            await writeSidecar(pylonId, { checkpoint: sidecar.checkpoint, relaunch: true, ...relaunch ? {} : sessionsOf(sidecar.sessions) });
+            await writeSidecar(pylonId, { checkpoint: sidecar.checkpoint, relaunch: true, ...relaunch ? {} : keptSessions(sidecar.sessions) });
             await sandbox({ action: "start", name, boot: spec }, signal);
             continue;
           }
@@ -595,7 +592,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         const sessionRun: Sandbox = sessionSignal === undefined ? sandbox : (action) => sandbox(action, sessionSignal);
         const sessions = instance.status.state === "running"
           ? await pauseSessions(pylonGuest(pylonId, instanceDir(pylonId), sessionRun, statuses, shells), controllerLog(instanceDir(pylonId)), sidecarMark(pylonId, sidecar)) : sidecar.sessions;
-        await writeSidecar(pylonId, { ...sidecar, pausing: checkpoint, ...sessionsOf(sessions) });
+        await writeSidecar(pylonId, { ...sidecar, pausing: checkpoint, ...keptSessions(sessions) });
         switch (instance.status.state) {
           // A running VM checkpoints its disk. One whose controller died settles on its last completed checkpoint.
           case "running": case "interrupted": case "failed": case "starting": case "stopping": case "unavailable":
@@ -613,7 +610,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         }
       }
       const sidecar = await readSidecar(pylonId);
-      if (sidecar.checkpoint !== checkpoint || sidecar.pausing !== undefined) await writeSidecar(pylonId, { checkpoint, ...sessionsOf(sidecar.sessions) });
+      if (sidecar.checkpoint !== checkpoint || sidecar.pausing !== undefined) await writeSidecar(pylonId, { checkpoint, ...keptSessions(sidecar.sessions) });
     },
 
     async ensureDeleted(pylonId, signal) {

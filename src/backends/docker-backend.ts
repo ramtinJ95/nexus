@@ -25,7 +25,8 @@ import { processStream } from "../process-stream.ts";
 import { installFileCommand, shellQuote as q } from "../shell.ts";
 import type { OverlayFile } from "../protocol/spawn.ts";
 import { type CheckpointId, type ImageId, isImageId, isTemplateId, type PortableArtifactId, type PylonId, type TemplateId } from "../ids.ts";
-import type { PausedSession } from "../protocol/observations.ts";
+import { pausedSessionsSchema, type PausedSession } from "../protocol/observations.ts";
+import { parseJson } from "../parse.ts";
 import { publicUrls } from "../public-urls.ts";
 import { diskBytes } from "../node-base/disk-bytes.ts";
 import { finishRelaunch, pauseSessions, type PylonLog, type RelaunchMark } from "../probe/guest/session-wake.ts";
@@ -35,7 +36,7 @@ import { sessionsFile } from "../../images/pylon/nexus-contract.ts";
 const encoded = (sessions: readonly PausedSession[] | null) => sessions === null ? "" : Buffer.from(JSON.stringify(sessions)).toString("base64url");
 const decoded = (labels: Record<string, string>): readonly PausedSession[] | null => {
   const sessions = labels[label.sessions] ?? "";
-  return sessions === "" ? null : JSON.parse(Buffer.from(sessions, "base64url").toString("utf8")) as PausedSession[];
+  return sessions === "" ? null : parseJson(pausedSessionsSchema, Buffer.from(sessions, "base64url").toString("utf8"), `label ${label.sessions}`);
 };
 const savedImage = "image.tar";
 const setupLimitMs = 20 * 60_000;
