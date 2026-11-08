@@ -141,8 +141,9 @@ test("control.json's db is opened from the control plane's working directory", (
 
 test("the backup and the deployer units run as root, and the deployer's worker finds Node where the units do", () => {
   const backup = read(`deploy/${unitNames.backup}`);
-  for (const line of ["User=root", "Group=root", `Environment=PATH=${servicePath}`]) assert.match(backup, new RegExp(`^${RegExp.escape(line)}$`, "m"), line);
   const deployer = read(`deploy/${unitNames.deployer}`);
+  for (const unit of [backup, deployer]) for (const line of ["User=root", "Group=root"]) assert.match(unit, new RegExp(`^${line}$`, "m"), line);
+  assert.match(backup, new RegExp(`^Environment=PATH=${RegExp.escape(servicePath)}$`, "m"));
   const [, supervisor] = /^ExecStart=(\S+)$/m.exec(deployer) ?? assert.fail("the deployer unit runs one script");
   assert.ok(read("deploy/install-deployer.sh").includes(`install -o root -g root -m 0700 "$repo/deploy/supervise-deployer.sh" "${supervisor!.replace(prefix, "$prefix")}"`), `install-deployer.sh installs the supervisor at ${supervisor}`);
   const [, unitPath] = /^Environment=PATH=(\S+)$/m.exec(deployer) ?? assert.fail("the deployer unit sets PATH");
@@ -158,7 +159,7 @@ test("the units' groups, the probe's kvm and tailscale operator rights, and tail
   }
   assert.match(read(`deploy/${unitNames.probe}`), /^SupplementaryGroups=kvm$/m);
   const release = read("deploy/release.sh");
-  for (const line of [`usermod --append --groups kvm ${users.probe}`, `tailscale set --operator=${users.probe}`]) assert.ok(release.includes(line), line);
+  for (const line of [`usermod --append --groups kvm ${users.probe}`, `tailscale set --operator=${users.probe}`]) assert.match(release, new RegExp(`^\\s*${RegExp.escape(line)}$`, "m"), line);
   assert.ok(read("deploy/install.sh").includes(`grep -qx 'TS_PERMIT_CERT_UID=${users.control}'`), "the control plane's user fetches the dashboard's certificate");
 });
 
