@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   actualState, archivedDiskMs, backoffMs, desiredPhase, diskKept, envelope, idlePolicy, ingest, planPylon,
-  type ActivityFacts, type DesiredPhase, type PlanInput, type PlanStep, type RegistryWrite, type SessionRow,
+  type ActivityFacts, type ArchiveFacts, type DesiredPhase, type PlanInput, type PlanStep, type RegistryWrite, type SessionRow,
 } from "./reconcile.ts";
 import type { ArtifactId, CheckpointId, ImageId, JobId, LiveHash, NodeName, PylonId, TemplateId } from "../ids.ts";
 import { encodeSubmitReply, jobSubject, parseJobEnvelope, parseSubmitReply, type Job, type JobErrorCode, type JobStatus } from "../protocol/jobs.ts";
@@ -45,7 +45,7 @@ const phase = (p: "booting" | "stopping" | "deleting"): PylonObservation => ({ p
 const fresh: PylonSource & { kind: "fresh" } = { kind: "fresh", preSetup: null };
 const fromTemplate: PylonSource & { kind: "template" } = { kind: "template", template };
 const spawn = (source: PylonSource): PlanStep => ({ kind: "submit", job: { kind: "spawn", pylonId, boot: { ...boot, source }, live, liveHash } });
-const spawnForReading = (source: PylonSource): PlanStep => ({ kind: "submit", job: { kind: "spawn", pylonId, boot: { ...boot, source }, live, liveHash, relaunch: false } });
+const spawnForReading = (source: PylonSource): PlanStep => ({ kind: "submit", job: { kind: "spawn", pylonId, boot: { ...boot, source }, live, liveHash, relaunch: false }, uncounted: true });
 const asking = (names: readonly string[]): Omit<BootInputs, "source"> => ({ ...boot, network: { allowedHosts: [], secrets: names.map((name) => ({ name, hosts: ["api.example.com"] })) } });
 const spawnAsking = (names: readonly string[], source: PylonSource): PlanStep => ({ kind: "submit", job: { kind: "spawn", pylonId, boot: { ...asking(names), source }, live, liveHash } });
 const pause: PlanStep = { kind: "submit", job: { kind: "pause", pylonId, checkpoint: nextCheckpoint } };
@@ -58,8 +58,8 @@ const jobInFlight = (state: "running" | "succeeded"): JobStatus => state === "ru
   ? { jobId: "j1" as JobId, subject: pylonId, kind: "spawn", state, startedAt: "2027-01-01T00:00:00Z" }
   : { jobId: "j1" as JobId, subject: pylonId, kind: "spawn", state, finishedAt: "2027-01-01T00:00:00Z" };
 
-/** [count, failed this many ms before now, last code, and "reading" for a failed wake for reading, kept apart from the count]. */
-type Attempts = readonly [number, number | null, JobErrorCode | null, "reading"?];
+/** [count, failed this many ms before now, last code]. */
+type Attempts = readonly [number, number | null, JobErrorCode | null];
 
 interface Row {
   desired: DesiredPhase;
@@ -97,9 +97,9 @@ const rows: Record<string, Row> = {
   "delete does not wait for a transition": { desired: "deleted", observed: phase("stopping"), inFlight: null, attempts: none, online: true, present: imageOnly, expect: del },
   "a failed wake for reading waits rather than failing, whatever its code": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [1, 600_000, "setup-failed"], online: true, present: imageOnly, expect: wait("backoff") },
   "a wake for reading that failed past the attempt budget still waits": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [5, 600_000, "backend"], online: true, present: imageOnly, expect: wait("backoff") },
-  "a failed wake for reading still waits while the thread is read": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [0, 600_000, "setup-failed", "reading"], online: true, present: imageOnly, expect: wait("backoff") },
-  "a wake for reading that failed once the backfill let go of the pylon neither fails nor holds its pause": { desired: "paused", observed: running(null), inFlight: null, attempts: [0, 1_000, "setup-failed", "reading"], online: true, present: imageOnly, expect: pause },
-  "a wake for reading that failed is no failure for a later wake, which boots at once": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: [0, 1_000, "backend", "reading"], online: true, present: imageOnly, expect: spawn({ kind: "resume", checkpoint: lastCheckpoint }) },
+  "a failed wake for reading still waits within its backoff": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [1, 1_000, "setup-failed"], online: true, present: imageOnly, expect: wait("backoff") },
+  "a wake for reading whose failure went to the usage hold leaves no attempt, so its pause goes out at once": { desired: "paused", observed: running(null), inFlight: null, attempts: none, online: true, present: imageOnly, expect: pause },
+  "a wake for reading whose failure went to the usage hold leaves no attempt, so a later wake boots at once": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, expect: spawn({ kind: "resume", checkpoint: lastCheckpoint }) },
   // 4
   "a non-retryable code fails": { desired: "running", observed: "absent", inFlight: null, attempts: [1, 60_000, "setup-failed"], online: true, present: imageOnly, expect: { kind: "fail", code: "setup-failed", reason: "last job failed with setup-failed, which is not retryable: the probe's setup-failed message" } },
   "five failed attempts fail": { desired: "running", observed: "absent", inFlight: null, attempts: [5, 600_000, "backend"], online: true, present: imageOnly, expect: { kind: "fail", code: "backend", reason: "gave up after 5 failed attempts, the last with backend: the probe's backend message" } },
@@ -131,7 +131,7 @@ const rows: Record<string, Row> = {
   "a retried pylon whose probe cannot say why it broke fails, never pausing it": { desired: "running", observed: brokenUnknown, inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: { kind: "fail", code: "backend", reason: "pylon is broken: qcow2 header unreadable. The node did not say why the pylon broke in a way this control plane understands. Upgrade Nexus on the node and the control plane, or start again from the project" } },
   "a retried broken pylon still waits out its backoff": { desired: "running", observed: broken, inFlight: null, attempts: [1, 1_000, "backend"], online: true, present: imageOnly, retrying: true, expect: wait("backoff") },
   "reading and stopped resumes from the checkpoint without bringing the sessions back": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, expect: spawnForReading({ kind: "resume", checkpoint: lastCheckpoint }) },
-  "reading and broken fails like running, which is why the backfill wakes only a stopped pylon": { desired: "reading", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", code: "backend", reason: "pylon is broken: qcow2 header unreadable" } },
+  "reading and broken gives up like running, uncounted, which is why the backfill wakes only a stopped pylon": { desired: "reading", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", code: "backend", reason: "pylon is broken: qcow2 header unreadable", uncounted: true } },
   // 7b
   "a missing image is fetched before the template, from the first holder": {
     desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: [], firstBoot: fromTemplate,
@@ -166,7 +166,7 @@ const rows: Record<string, Row> = {
 };
 
 function input(row: Row): PlanInput {
-  const [count, failedAgo, lastCode, reading] = row.attempts;
+  const [count, failedAgo, lastCode] = row.attempts;
   const attempt = lastCode === null ? null : { at: now - failedAgo!, code: lastCode, message: `the probe's ${lastCode} message` };
   return {
     pylonId, node, live, liveHash, nextCheckpoint,
@@ -179,7 +179,7 @@ function input(row: Row): PlanInput {
     nodeArtifacts: new Set(row.present),
     nodeSecrets: new Set(row.secrets?.holds ?? []),
     inFlight: row.inFlight === null ? null : jobInFlight(row.inFlight),
-    attempts: { count, last: reading === undefined ? attempt : null, ...(reading === undefined || attempt === null ? {} : { readFailure: attempt }) },
+    attempts: { count, last: attempt },
     retrying: row.retrying ?? false,
     holders: (id) => row.holders?.[id] ?? [],
     artifactSha256: (id) => `sha-${id}`,
@@ -199,8 +199,8 @@ test("backoffMs follows 5 s, 15 s, 45 s, 2 min, 2 min", () => {
 
 test("desiredPhase", () => {
   const long = now - 3_600_000;
-  const facts = (f: Partial<ActivityFacts>): ActivityFacts => ({ status: "active", agentTurnRunning: false, lastAgentActivityAt: long, lastHumanActivityAt: long, ...f });
-  const cases: [Partial<ActivityFacts>, DesiredPhase][] = [
+  const facts = (f: Partial<ActivityFacts & ArchiveFacts>): ActivityFacts & ArchiveFacts => ({ status: "active", agentTurnRunning: false, lastAgentActivityAt: long, lastHumanActivityAt: long, ...f });
+  const cases: [Partial<ActivityFacts & ArchiveFacts>, DesiredPhase][] = [
     [{ status: "deleted", agentTurnRunning: true }, "deleted"],
     [{ status: "archived", lastHumanActivityAt: now }, "paused"],
     [{ status: "archived", readingUsage: true }, "reading"],
@@ -231,10 +231,10 @@ test("desiredPhase", () => {
 });
 
 test("an archived disk outlives its 24 hours until its token usage is read to the end and a backup that began after that read verified", () => {
-  const archived: ActivityFacts = { status: "archived", agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: 0, archivedAt: 0 };
+  const archived: ActivityFacts & ArchiveFacts = { status: "archived", agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: 0, archivedAt: 0 };
   const read = { ...archived, usageSettledAt: archivedDiskMs + 5 };
   const failed = { reason: "its pylon did not boot within 10 minutes", at: 7, count: 2 };
-  const cases: [string, ActivityFacts, DesiredPhase, RegExp | null][] = [
+  const cases: [string, ActivityFacts & ArchiveFacts, DesiredPhase, RegExp | null][] = [
     ["never read", archived, "paused", /^its token usage is not read to its end yet$/],
     ["read twice in vain", { ...archived, settleFailure: failed }, "paused", /not read to its end yet, and reading it failed 2 times in a row, the last because its pylon did not boot within 10 minutes$/],
     ["read once in vain", { ...archived, settleFailure: { ...failed, count: 1 } }, "paused", /reading it failed once, the last because/],
@@ -563,4 +563,39 @@ test("ingest: job events and preview hits", () => {
 test("ingest: a preview hit for a pylon the registry does not know writes nothing, not even activity", () => {
   const stranger = "pylon-x" as PylonId;
   assert.deepEqual(ingest({ type: "preview-hit", pylonId: stranger, service: "web", at: "2027-01-01T00:00:05Z", login: null }, node, knows(), now), []);
+});
+
+/** desiredPhase as reconcile.ts had it at 2739948, when ActivityFacts carried the archive's facts, kept as the proof's baseline. */
+function desiredPhaseAt2739948(a: ActivityFacts & ArchiveFacts, now: number): DesiredPhase {
+  if (a.status === "deleted") return "deleted";
+  if (a.status === "archived") {
+    return a.archivedAt !== undefined && now - a.archivedAt >= archivedDiskMs && diskKept(a) === null ? "deleted"
+      : a.readingUsage === true ? "reading" : "paused";
+  }
+  const busy = a.agentTurnRunning || (a.sessionActiveUntil ?? 0) > now || (a.awaitedUntil ?? 0) > now
+    || now - a.lastAgentActivityAt < idlePolicy.agentIdleMs
+    || now - a.lastHumanActivityAt < idlePolicy.humanIdleMs;
+  return busy ? "running" : "paused";
+}
+
+test("desiredPhase gives every fixture of activity and archive facts the phase it gave before the archive's facts left ActivityFacts", () => {
+  const at = 3 * archivedDiskMs;
+  const optional = <K extends keyof ArchiveFacts | keyof ActivityFacts>(key: K, ...values: unknown[]) => [{}, ...values.map((v) => ({ [key]: v }))];
+  const axes: Partial<ActivityFacts & ArchiveFacts>[][] = [
+    [{}, { agentTurnRunning: true }],
+    optional("sessionActiveUntil", at - 1, at + 1),
+    optional("awaitedUntil", at - 1, at + 1),
+    [{}, { lastAgentActivityAt: at - idlePolicy.agentIdleMs + 1 }, { lastHumanActivityAt: at - idlePolicy.humanIdleMs + 1 }],
+    optional("archivedAt", at - archivedDiskMs + 1, at - archivedDiskMs, 0),
+    optional("readingUsage", true, false),
+    optional("usageSettledAt", 10, at),
+    optional("backedUpAt", 5, 11, at + 1),
+    optional("usageUnread", "its pylon failed"),
+    optional("settleFailure", { reason: "its pylon did not boot within 10 minutes", at: 7, count: 3 }),
+    optional("settleWaiting", "rj-firebat is offline"),
+  ];
+  const statuses = (["active", "idle", "archived", "deleted"] as const).map((status): ActivityFacts & ArchiveFacts => ({ status, agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: 0 }));
+  const fixtures = axes.reduce<(ActivityFacts & ArchiveFacts)[]>((all, axis) => all.flatMap((f) => axis.map((v) => ({ ...f, ...v } as ActivityFacts & ArchiveFacts))), statuses);
+  assert.equal(fixtures.length, 4 * 2 * 3 * 3 * 3 * 4 * 3 * 3 * 4 * 2 * 2 * 2);
+  for (const f of fixtures) assert.equal(desiredPhase(f, at), desiredPhaseAt2739948(f, at), JSON.stringify(f));
 });

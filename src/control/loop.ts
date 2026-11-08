@@ -33,7 +33,7 @@ import type { Registry } from "./registry.ts";
 import type { PortRange, StoredPylon, Thread } from "./thread-store.ts";
 import { tickTemplateBuild } from "./template-builds.ts";
 
-type LoopRegistry = Pick<Registry, "allocatePreviews" | "appendEvent" | "buildingTemplates" | "claudeWorker" | "deleteTemplate" | "eventReceipt" | "image" | "ingested" | "latestHealthSample" | "markOffline" | "node" | "nodes" | "previews" | "project" | "pruneSessions" | "pylon" | "pylonIdsToTick" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseHold" | "releasePreview" | "releasePreviews" | "reserved" | "cleanupRequestedAt" | "dropCleanup" | "finishCleanup" | "reportSession" | "requestCleanup" | "savePylon" | "sealedBoot" | "saveTemplate" | "setClaudeWorker" | "thread" | "threadStatus">;
+type LoopRegistry = Pick<Registry, "allocatePreviews" | "appendEvent" | "buildingTemplates" | "claudeWorker" | "deleteTemplate" | "eventReceipt" | "image" | "ingested" | "latestHealthSample" | "markOffline" | "node" | "nodes" | "previews" | "project" | "pruneSessions" | "pylon" | "pylonIdsToTick" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseHold" | "releasePreview" | "releasePreviews" | "reserved" | "diskDeleteRequestedAt" | "dropDiskDelete" | "failUsageRead" | "finishDiskDelete" | "reportSession" | "requestDiskDelete" | "savePylon" | "sealedBoot" | "saveTemplate" | "setClaudeWorker" | "thread" | "threadStatus">;
 
 /**
  * reconcile.ts's ingest. `known` maps each registry pylon on the node that the pass would tick, given what the event and
@@ -197,15 +197,15 @@ export function startLoop(options: LoopOptions): Loop {
       const nodeObservation = observation(node);
       const seen = nodeObservation?.pylons.find((p) => p.pylonId === pylonId);
       const present = seen !== undefined;
-      const cleanupAt = registry.cleanupRequestedAt(pylonId);
-      if (nodeObservation !== null && cleanupAt !== undefined) {
+      const deleteAt = registry.diskDeleteRequestedAt(pylonId);
+      if (nodeObservation !== null && deleteAt !== undefined) {
         if (seen === undefined) {
-          registry.finishCleanup(pylonId);
+          registry.finishDiskDelete(pylonId);
           stored = withLive(registry.pylon(pylonId)!, thread, link);
         }
         // A listing may predate a delete the probe has since forgotten, so only a boot after the request proves the disk stayed.
-        else if (seen.phase === "running" && Date.parse(seen.bootedAt) > cleanupAt && stored.submitted?.job.kind !== "delete" && desiredPhase(thread, Date.now()) !== "deleted") {
-          registry.dropCleanup(pylonId);
+        else if (seen.phase === "running" && Date.parse(seen.bootedAt) > deleteAt && stored.submitted?.job.kind !== "delete" && desiredPhase(thread, Date.now()) !== "deleted") {
+          registry.dropDiskDelete(pylonId);
         }
       }
       const pylon = { ...stored, desired: desiredPhase(thread, Date.now()) };
@@ -215,15 +215,19 @@ export function startLoop(options: LoopOptions): Loop {
         holders: holders(node),
         artifactSha256,
         save: (p) => {
-          // Only the archived-disk cleanup deletes the pylon of a thread that is not deleted. Recorded before its delete goes
-          // out, so the cleanup ends on the node's report of the disk, whatever the probe forgets of the job.
+          // Only an archive's settle deletes the pylon of a thread that is not deleted, once its disk may go. Recorded before
+          // its delete goes out, so the delete ends on the node's report of the disk, whatever the probe forgets of the job.
           if (p.submitted?.job.kind === "delete" && p.desired === "deleted" && present && registry.threadStatus(thread.id) !== "deleted") {
-            registry.requestCleanup(pylonId, thread.id);
+            registry.requestDiskDelete(pylonId, thread.id);
           }
           registry.savePylon(p);
         },
         desired: () => desiredPhase(registry.thread(found.thread)!, Date.now()),
         sealedBoot: () => registry.sealedBoot(pylonId),
+        uncountedFailed: (failure) => {
+          registry.failUsageRead(thread.id, failure);
+          void wake(node);
+        },
       };
       try {
         const launch = launches.step(thread, pylonId, nodeObservation, { probe: link.probe, snapshot: (waitMs) => snapshot(link, () => true, waitMs) });

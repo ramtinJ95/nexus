@@ -198,7 +198,7 @@ test("a wake that fails, or does not boot in time, is skipped with why, its atte
 
   await held(registry, a, "reading");
   assert.deepEqual(registry.pylon(a.pylonId)!.attempts, { count: 0, last: null }, "the hold forgets a failure that was not its wake's");
-  registry.savePylon({ ...registry.pylon(a.pylonId)!, attempts: { count: 1, last: { at: Date.now(), code: "setup-failed", message: "the disk is full" } } });
+  registry.failUsageRead(a.id, { at: Date.now(), code: "setup-failed", message: "the disk is full" });
   await held(registry, a, "pausing");
   assert.deepEqual([row(registry, a)!.state, row(registry, a)!.reason], ["skipped", "the pylon did not boot: setup-failed: the disk is full"]);
   assert.deepEqual(registry.pylon(a.pylonId)!.attempts, { count: 0, last: null });
@@ -213,32 +213,32 @@ test("a wake that fails, or does not boot in time, is skipped with why, its atte
   assert.ok(run.state === "done" && run.read === 2 && run.skipped.length === 2);
 });
 
-test("a failed wake for reading is skipped with why, as the tick keeps it apart and as a record from before kept it in last", async (t) => {
+test("a failed wake for reading is skipped with why, as the loop hands it to the hold, and one of a thread unarchived meanwhile is skipped as unarchived", async (t) => {
   const registry = opened(t);
-  const apart = addThread(registry, n1, "apart");
-  const before = addThread(registry, n1, "before");
-  observe(registry, n1, [[apart.pylonId, "stopped"], [before.pylonId, "stopped"]]);
+  const failed = addThread(registry, n1, "failed");
+  const unarchived = addThread(registry, n1, "unarchived");
+  observe(registry, n1, [[failed.pylonId, "stopped"], [unarchived.pylonId, "stopped"]]);
   const failure = { at: Date.now(), code: "setup-failed" as const, message: "the disk is full" };
   backfill(t, registry).job.start();
 
-  await held(registry, apart, "reading");
-  registry.savePylon({ ...registry.pylon(apart.pylonId)!, attempts: { count: 0, last: null, readFailure: failure } });
-  await held(registry, apart, "pausing");
-  assert.deepEqual([row(registry, apart)!.state, row(registry, apart)!.reason], ["skipped", "the pylon did not boot: setup-failed: the disk is full"]);
-  assert.deepEqual(registry.pylon(apart.pylonId)!.attempts, { count: 0, last: null });
+  await held(registry, failed, "reading");
+  registry.failUsageRead(failed.id, failure);
+  await held(registry, failed, "pausing");
+  assert.deepEqual([row(registry, failed)!.state, row(registry, failed)!.reason], ["skipped", "the pylon did not boot: setup-failed: the disk is full"]);
+  assert.deepEqual(registry.pylon(failed.pylonId)!.attempts, { count: 0, last: null });
 
-  await held(registry, before, "reading");
-  registry.savePylon({ ...registry.pylon(before.pylonId)!, attempts: { count: 1, last: { ...failure, reading: true } as typeof failure } });
-  await held(registry, before, "pausing");
-  assert.deepEqual([row(registry, before)!.state, row(registry, before)!.reason], ["skipped", "the pylon did not boot: setup-failed: the disk is full"]);
-  assert.deepEqual(registry.pylon(before.pylonId)!.attempts, { count: 0, last: null });
+  await held(registry, unarchived, "reading");
+  registry.setThreadStatus(unarchived.id, "active");
+  registry.failUsageRead(unarchived.id, failure);
+  await held(registry, unarchived, "pausing");
+  assert.deepEqual([row(registry, unarchived)!.state, row(registry, unarchived)!.reason], ["skipped", "it was unarchived while it was read, so live counting reads it"]);
 });
 
 test("a failed wake for reading from an earlier run is cleared before the next run wakes the pylon", async (t) => {
   const registry = opened(t);
   const a = addThread(registry, n1, "earlier");
   observe(registry, n1, [[a.pylonId, "stopped"]]);
-  registry.savePylon({ ...registry.pylon(a.pylonId)!, attempts: { count: 0, last: null, readFailure: { at: Date.now(), code: "backend", message: "an earlier run's wake" } } });
+  registry.savePylon({ ...registry.pylon(a.pylonId)!, attempts: { count: 1, last: { at: Date.now(), code: "backend", message: "an earlier run's wake" } } });
   backfill(t, registry).job.start();
   await held(registry, a, "reading");
   assert.deepEqual(registry.pylon(a.pylonId)!.attempts, { count: 0, last: null }, "the hold forgets a failure that was not its wake's");

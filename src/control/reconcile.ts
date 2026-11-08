@@ -35,10 +35,17 @@ export interface ActivityFacts {
   agentTurnRunning: boolean; // the pi-durable turn for this thread, known locally
   lastAgentActivityAt: number; // pi-durable turns, Claude hooks and other observed sessions in `working`
   lastHumanActivityAt: number; // messages, attached terminals, preview hits, dashboard opens
-  /** The usage backfill, or the settle of this archive, reads this archived thread's pylon now. */
-  readingUsage?: boolean;
+}
+
+/**
+ * An archived thread's disk, as its archive row, the newest backup and the usage module say: whether its usage is read
+ * now, and how far it was read, which the disk's delete waits on.
+ */
+export interface ArchiveFacts {
   /** When the thread was archived, present only while it is. */
   archivedAt?: number;
+  /** The usage backfill, or the settle of this archive, reads this archived thread's pylon now. */
+  readingUsage?: boolean;
   /** When this archive's settle read every transcript on its pylon to the end, in a wake for reading after its pause. */
   usageSettledAt?: number;
   /** This archive's last settle that failed, why, and how many failed in a row. Present only while it is unsettled. */
@@ -66,7 +73,7 @@ export const settleFailuresFail = 3;
  * and in a backup of it before the only copy of their transcripts goes. A disk whose usage cannot be read, as a failed
  * pylon's, is not kept for it, as the person decided on 2026-11-02.
  */
-export function diskKept(a: ActivityFacts): string | null {
+export function diskKept(a: ArchiveFacts): string | null {
   if (a.usageUnread !== undefined) return null;
   const f = a.settleFailure;
   if (a.usageSettledAt === undefined) {
@@ -77,17 +84,17 @@ export function diskKept(a: ActivityFacts): string | null {
 }
 
 /** Why the archived thread's disk is kept past its 24 hours at `now`, or null while it is under them or may go. */
-export function keptPastDay(a: ActivityFacts, now: number): string | null {
+export function keptPastDay(a: Pick<ActivityFacts, "status"> & ArchiveFacts, now: number): string | null {
   return a.status === "archived" && a.archivedAt !== undefined && now - a.archivedAt >= archivedDiskMs ? diskKept(a) : null;
 }
 
 /** Whether the archive's usage will not be read without the person: its settles keep failing, or it is overdue. */
-export function settleStuck(a: ActivityFacts, now: number): boolean {
+export function settleStuck(a: Pick<ActivityFacts, "status"> & ArchiveFacts, now: number): boolean {
   return keptPastDay(a, now) !== null && a.usageSettledAt === undefined
     && ((a.settleFailure?.count ?? 0) >= settleFailuresFail || now - a.archivedAt! >= settleOverdueMs);
 }
 
-export function desiredPhase(a: ActivityFacts, now: number): DesiredPhase {
+export function desiredPhase(a: ActivityFacts & ArchiveFacts, now: number): DesiredPhase {
   if (a.status === "deleted") return "deleted";
   if (a.status === "archived") {
     return a.archivedAt !== undefined && now - a.archivedAt >= archivedDiskMs && diskKept(a) === null ? "deleted"
@@ -118,10 +125,7 @@ export interface PlanInput {
   /** The secrets the node holds: those in its secret file, and the held secrets the control plane has handed its probe. */
   nodeSecrets: ReadonlySet<string>;
   inFlight: JobStatus | null; // for this pylon, or for an artifact this pylon is waiting on
-  /**
-   * Consecutive failed jobs, and the last one's. A success clears both. `readFailure` is a failed wake for reading, which
-   * only the usage backfill acts on, so it neither counts nor fails the pylon.
-   */
+  /** Consecutive failed jobs, and the last one's. A success clears both. */
   attempts: Attempts;
   /** A human retried the pylon after the planner gave up, and no job has succeeded nor the planner finished or given up since. */
   retrying: boolean;
@@ -135,14 +139,18 @@ export interface PlanInput {
 
 /** `message` is the job's message and the end of its log, bounded by failureMessage. */
 export interface FailedAttempt { at: number; code: JobErrorCode; message: string }
-export interface Attempts { count: number; last: FailedAttempt | null; readFailure?: FailedAttempt }
+export interface Attempts { count: number; last: FailedAttempt | null }
 export const noAttempts: Readonly<Attempts> = Object.freeze({ count: 0, last: null });
 
+/**
+ * A failure of an `uncounted` step, its job's or the planner giving up, neither counts against the pylon nor fails it. It
+ * goes to the usage module, which woke the pylon only to read it.
+ */
 export type PlanStep =
   | { kind: "done" }
   | { kind: "wait"; reason: "node-offline" | "in-flight" | "backoff" | "transitioning" | "held-secret" }
-  | { kind: "submit"; job: Job }
-  | { kind: "fail"; code: JobErrorCode; reason: string }; // the registry marks the pylon failed until a human retries
+  | { kind: "submit"; job: Job; uncounted?: true }
+  | { kind: "fail"; code: JobErrorCode; reason: string; uncounted?: true }; // the registry marks the pylon failed until a human retries
 
 const maxAttempts = 5;
 const backoffScheduleMs = [5_000, 15_000, 45_000, 120_000, 120_000] as const;
@@ -172,8 +180,8 @@ const planRules: readonly Rule[] = [
   (i) => i.inFlight?.state === "running" ? wait("in-flight") : null,
   // 3. Delete ignores the attempt budget. A pylon removed by hand is absent but may still have previews published.
   (i) => i.desired !== "deleted" ? null : i.observed === "absent" && !i.previewsRouted ? done : submit({ kind: "delete", pylonId: i.pylonId }),
-  // A failed wake for reading is tried once and never fails the pylon. The backfill gives up on it and clears the attempt.
-  ({ desired, attempts: { last, readFailure } }) => desired === "reading" && (readFailure !== undefined || last !== null) ? wait("backoff") : null,
+  // A wake for reading retries no failure. Its own go to the usage hold, which gives up on the read (PlanStep).
+  ({ desired, attempts: { last } }) => desired === "reading" && last !== null ? wait("backoff") : null,
   // 4.
   ({ attempts: { last } }) => last !== null && !retryable[last.code] ? fail(last.code, `last job failed with ${last.code}, which is not retryable: ${last.message}`) : null,
   ({ attempts: { count, last } }) => last !== null && count >= maxAttempts ? fail(last.code, `gave up after ${count} failed attempts, the last with ${last.code}: ${last.message}`) : null,
@@ -254,7 +262,8 @@ export function failureMessage(message: string, logTail: string): string {
 export function planPylon(input: PlanInput, now: number): PlanStep {
   for (const rule of planRules) {
     const step = rule(input, now);
-    if (step !== null) return step;
+    if (step === null) continue;
+    return input.desired === "reading" && (step.kind === "submit" || step.kind === "fail") ? { ...step, uncounted: true } : step;
   }
   throw new Error("unreachable: the last plan rule always returns a step");
 }

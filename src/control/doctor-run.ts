@@ -46,7 +46,7 @@ export async function runDoctor(s: DoctorSources): Promise<DoctorReport> {
     release: releaseView(s.registry, s.self, now),
     controlNode: s.registry.nodeByTailnetId(s.self)?.name ?? null,
     backup, login, certificate,
-    // A pylon its node does not list has no disk to keep, as one the cleanup deleted before disks waited for their usage.
+    // A pylon its node does not list has no disk to keep, as one whose disk was deleted before disks waited for their usage.
     keptArchives: s.registry.keptArchives().filter((t) => {
       const p = s.registry.pylon(t.pylonId);
       return p !== undefined && observedPylon(s.registry, p) !== "absent";

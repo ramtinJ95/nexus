@@ -2,7 +2,7 @@
  * The thread core: each thread, its pylon, sessions, previews, outputs and jobs, the event log, each session's turn and
  * order, its Claude worker, its attention, each start's request ID, the harness conversations aborted, when each
  * archived thread was archived and whether its usage is settled, when the newest backup the control plane has seen
- * began, and the pylons whose disk that cleanup deletes. The features with per-thread state of their own take part
+ * began, and the pylons whose disk that settle deletes. The features with per-thread state of their own take part
  * through a ThreadParticipant each, which the registry registers.
  */
 import { attentionOf, type Attention, type Need } from "./attention.ts";
@@ -13,7 +13,7 @@ import type { StartKey } from "./start-request.ts";
 import type { StandingRulesStamp } from "./standing-rules.ts";
 import { Refusal } from "./refusal.ts";
 import { json, jsonOrNull, type Db, type Holding, type Row } from "./db.ts";
-import { desiredPhase, noAttempts, type ActivityFacts, type RegistryWrite, type ThreadStatus } from "./reconcile.ts";
+import { desiredPhase, noAttempts, type ActivityFacts, type ArchiveFacts, type FailedAttempt, type RegistryWrite, type ThreadStatus } from "./reconcile.ts";
 import { pylonIdOf, type NodeName, type PylonId, type ThreadId } from "../ids.ts";
 import type { JobStatus, Subject } from "../protocol/jobs.ts";
 import { pylonEventSchema, type HerdrStatus, type NodeObservation, type ReportedEvent } from "../protocol/observations.ts";
@@ -27,7 +27,7 @@ import { claudeTurn } from "../../images/pylon/nexus-contract.ts";
 import { errorStop, transcriptStart, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
 import { maxEntries } from "../contract/streams.ts";
 import type { NodeStore } from "./node-store.ts";
-import { upgradeAttempts } from "./record-upgrade.ts";
+import { upgradeAttempts, upgradeSubmitted } from "./record-upgrade.ts";
 
 /**
  * The node a thread's pylon boots on, and why. An `auto` placement keeps every node it weighed: the room a node that
@@ -59,7 +59,7 @@ export interface StoredThread extends Pick<ActivityFacts, "status" | "agentTurnR
   standingRulesRevision?: number;
 }
 
-export interface Thread extends StoredThread, ActivityFacts {
+export interface Thread extends StoredThread, ActivityFacts, ArchiveFacts {
   sessionWaiting?: boolean;
   /** What the most recently waiting session's report said, when it said anything. */
   sessionWaitingMessage?: string;
@@ -210,8 +210,8 @@ export interface ThreadParticipant {
   outputs?(thread: ThreadId): Output[];
   /** A queued thread starts at `at`, in the transaction that creates it. Throws when it may not start. */
   startQueued?(thread: ThreadId, at: number): void;
-  /** What the feature says of each of `threads` beyond their rows, which the planner reads. */
-  facts?(threads: readonly Thread[]): ReadonlyMap<ThreadId, Partial<ActivityFacts>>;
+  /** What the usage module says of each of `threads`' archive beyond its row, which the planner reads. */
+  facts?(threads: readonly Thread[]): ReadonlyMap<ThreadId, Pick<ArchiveFacts, "readingUsage" | "settleWaiting">>;
 }
 
 interface AwaitWindow { from: number; until: number }
@@ -232,13 +232,23 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
   const { setting, setSetting } = db.hold(holding);
   const { node } = nodes;
   const reconcile = (thread: ThreadId) => { for (const p of participants) p.reconcile?.(thread); };
-  // Each pylon's attempts an older control plane saved are upgraded once, with no event, so every tick reads this code's shape.
-  transaction(() => {
-    for (const row of sql("SELECT id, attempts FROM pylons").all()) {
-      const upgraded = JSON.stringify(upgradeAttempts(json(row.attempts)));
-      if (upgraded !== row.attempts) sql("UPDATE pylons SET attempts = ? WHERE id = ?").run(upgraded, row.id as string);
-    }
-  });
+  /**
+   * Each pylon's attempts and job sent that an older control plane saved are upgraded once, with no event, so every tick
+   * reads this code's shape. A failed wake for reading the attempts drop goes to `readFailed` in the same transaction,
+   * so no crash loses it.
+   */
+  function upgradePylons(readFailed: (thread: ThreadId, failure: FailedAttempt) => void) {
+    transaction(() => {
+      for (const row of sql("SELECT id, thread, attempts, submitted FROM pylons").all()) {
+        const upgraded = upgradeAttempts(json(row.attempts));
+        if (upgraded.readFailure !== null) readFailed(row.thread as ThreadId, upgraded.readFailure);
+        const attempts = JSON.stringify(upgraded.attempts);
+        if (attempts !== row.attempts) sql("UPDATE pylons SET attempts = ? WHERE id = ?").run(attempts, row.id as string);
+        const submitted = row.submitted === null ? null : JSON.stringify(upgradeSubmitted(json(row.submitted)));
+        if (submitted !== row.submitted) sql("UPDATE pylons SET submitted = ? WHERE id = ?").run(submitted, row.id as string);
+      }
+    });
+  }
 
   /**
    * Room a start placed a pylon in before its row exists, so an overlapping start sees it taken. It is held in memory,
@@ -349,7 +359,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
   }
 
   /** What the thread's archive row says, and when the newest backup began, which only an archived thread's disk waits on. */
-  function archiveFacts(r: Row, backedUp: number | null): Pick<ActivityFacts, "archivedAt" | "usageSettledAt" | "settleFailure" | "backedUpAt" | "usageUnread"> {
+  function archiveFacts(r: Row, backedUp: number | null): Omit<ArchiveFacts, "readingUsage" | "settleWaiting"> {
     return {
       archivedAt: r.archived_at as number,
       ...(r.usage_unread === null ? {} : { usageUnread: r.usage_unread as string }),
@@ -510,7 +520,9 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     threadRecord,
     saveStartKey,
     /** The registry runs it once the participants are registered, since the recompute asks them. */
-    start() {
+    /** `readFailed` is handed each failed wake for reading the upgrade takes off a pylon's attempts, for the usage hold to give up on. */
+    start(readFailed: (thread: ThreadId, failure: FailedAttempt) => void) {
+      upgradePylons(readFailed);
       pruneSessions();
       // A release that computes attention differently, or a thread from before attention was stored, is right from the start.
       // A thread deleted before deletes cleared the parked flag kept it, and the harness no longer tracks it to report.
@@ -589,18 +601,18 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         return true;
       });
     },
-    /** Records, before the archived-disk cleanup sends its delete, that the pylon's disk is going. */
-    requestCleanup(pylonId: PylonId, thread: ThreadId) {
+    /** Records, before an archive's settle sends the delete of its disk, that the pylon's disk is going. */
+    requestDiskDelete(pylonId: PylonId, thread: ThreadId) {
       sql("INSERT OR IGNORE INTO disk_cleanups (pylon, thread, requested_at) VALUES (?, ?, ?)").run(pylonId, thread, clock());
     },
-    cleanupRequestedAt: (pylonId: PylonId): number | undefined => sql("SELECT requested_at FROM disk_cleanups WHERE pylon = ?").get(pylonId)?.requested_at as number | undefined,
+    diskDeleteRequestedAt: (pylonId: PylonId): number | undefined => sql("SELECT requested_at FROM disk_cleanups WHERE pylon = ?").get(pylonId)?.requested_at as number | undefined,
     /**
      * Once the node no longer has the pylon, the disk took the Claude transcript and whatever failed on it. The thread's
      * transcript is read from the start again, keeping the stored entries, so the session's new file appends after them
      * rather than reading as a replaced one, and the pylon's failure and failed attempts are cleared, so an unarchive boots
      * it fresh.
      */
-    finishCleanup(pylonId: PylonId) {
+    finishDiskDelete(pylonId: PylonId) {
       transaction(() => {
         const thread = sql("DELETE FROM disk_cleanups WHERE pylon = ? RETURNING thread").get(pylonId)?.thread as ThreadId | undefined;
         if (thread === undefined) return;
@@ -611,7 +623,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       });
     },
     /** An unarchive came before the delete ran, and the old disk booted since, so nothing of it is forgotten. */
-    dropCleanup(pylonId: PylonId) { sql("DELETE FROM disk_cleanups WHERE pylon = ?").run(pylonId); },
+    dropDiskDelete(pylonId: PylonId) { sql("DELETE FROM disk_cleanups WHERE pylon = ?").run(pylonId); },
     /**
      * The archived threads whose disk outlives its 24 hours for want of their usage: not settled, or settled no earlier
      * than the newest backup began, as diskKept in reconcile.ts reads them, oldest archive first.

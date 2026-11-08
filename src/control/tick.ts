@@ -3,7 +3,7 @@
  * the node's latest observation, and submits it. The caller owns where the record lives: the control
  * plane's loop saves it to the registry, and the slice test keeps it in memory.
  */
-import { envelope, failureMessage, noAttempts, planPylon, type Attempts, type DesiredPhase, type FailedAttempt, type PlanInput, type PlanStep } from "./reconcile.ts";
+import { envelope, failureMessage, noAttempts, planPylon, type DesiredPhase, type FailedAttempt, type PlanInput, type PlanStep } from "./reconcile.ts";
 import { checkpointId, type CheckpointId, type JobId, type NodeName, type ThreadId } from "../ids.ts";
 import type { Job, JobEnvelope, JobStatus } from "../protocol/jobs.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
@@ -23,10 +23,10 @@ export interface PylonRecord {
   /** Completed pauses. The next checkpoint is numbered after them. */
   pauses: number;
   /**
-   * Saved before it is sent, so a control plane that restarts mid-submit still asks the probe about it. `reading` marks
-   * a job the planner sent to wake the pylon for reading, which the envelope the probe gets does not carry.
+   * Saved before it is sent, so a control plane that restarts mid-submit still asks the probe about it. `uncounted` is
+   * the step's (PlanStep), which the envelope the probe gets does not carry.
    */
-  submitted: (JobEnvelope & { reading?: true }) | null;
+  submitted: (JobEnvelope & { uncounted?: true }) | null;
   attempts: PlanInput["attempts"];
   /** Set when the planner gives up. Only a human clears it, through the API's pylon retry. */
   failed: string | null;
@@ -55,6 +55,8 @@ export interface TickContext {
   desired: () => DesiredPhase;
   /** The boot whose transcripts a settle sealed, read again with the desired phase. */
   sealedBoot: () => string | undefined;
+  /** An uncounted step failed (PlanStep). */
+  uncountedFailed(failure: FailedAttempt): void;
 }
 
 export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanStep> {
@@ -66,7 +68,7 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
   let inFlight: JobStatus | null = null;
   if (observation !== null && pylon.submitted !== null) {
     try {
-      const settled = await settle(pylon, probe, observation);
+      const settled = await settle(pylon, ctx, observation);
       if (settled === "wait") return { kind: "wait", reason: "in-flight" };
       if (settled === null) ctx.save(pylon);
       inFlight = settled;
@@ -102,10 +104,8 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
     artifactSha256: ctx.artifactSha256,
   }, Date.now());
 
-  if (step.kind === "fail" && pylon.desired === "reading") {
-    // A pylon woken only to be read is never failed. The backfill skips its thread with the reason and clears the attempt.
-    pylon.attempts = failedAttempt(pylon, step.code, step.reason, true);
-    ctx.save(pylon);
+  if (step.kind === "fail" && step.uncounted) {
+    ctx.uncountedFailed({ at: Date.now(), code: step.code, message: step.reason });
     return { kind: "wait", reason: "backoff" };
   }
   if (step.kind === "fail") {
@@ -120,12 +120,12 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
   if (step.kind !== "submit") return step;
 
   const sent = await submitJob(probe, step.job, pylon.node, (env) => {
-    pylon.submitted = pylon.desired === "reading" ? { ...env, reading: true } : env;
+    pylon.submitted = step.uncounted ? { ...env, uncounted: true } : env;
     ctx.save(pylon);
   });
   if (sent === "accepted") return step;
   pylon.submitted = null;
-  if (sent !== "retry") pylon.attempts = failedAttempt(pylon, "invalid", failureMessage(sent.invalid, ""), pylon.desired === "reading");
+  if (sent !== "retry") recordFailure(pylon, ctx, { at: Date.now(), code: "invalid", message: failureMessage(sent.invalid, "") }, step.uncounted === true);
   ctx.save(pylon);
   return step;
 }
@@ -172,10 +172,10 @@ export async function jobOutcome(probe: Pick<ProbeClient, "job">, jobId: JobId, 
  * - The probe does not know the job, but its envelope has not expired. A control plane that died mid-submit
  *   may have a request still on its way, and a new job planned now could land before it.
  */
-async function settle(pylon: PylonRecord, probe: ProbeClient, observation: NodeObservation): Promise<JobStatus | "wait" | null> {
+async function settle(pylon: PylonRecord, ctx: TickContext, observation: NodeObservation): Promise<JobStatus | "wait" | null> {
   const env = pylon.submitted!;
   const listed = observation.jobs.find((j) => j.jobId === env.jobId);
-  const status = await jobOutcome(probe, env.jobId, env.notAfter, listed);
+  const status = await jobOutcome(ctx.probe, env.jobId, env.notAfter, listed);
   if (status === "wait") return "wait";
   if (status === "expired") {
     // It did not fail, so no attempt is counted.
@@ -186,7 +186,7 @@ async function settle(pylon: PylonRecord, probe: ProbeClient, observation: NodeO
   if (listed === undefined) return "wait";
   pylon.submitted = null;
   if (status.state === "failed") {
-    pylon.attempts = failedAttempt(pylon, status.code, failureMessage(status.message, status.logTail), env.reading === true);
+    recordFailure(pylon, ctx, { at: Date.now(), code: status.code, message: failureMessage(status.message, status.logTail) }, env.uncounted === true);
     return null;
   }
   pylon.attempts = noAttempts;
@@ -195,10 +195,9 @@ async function settle(pylon: PylonRecord, probe: ProbeClient, observation: NodeO
   return null;
 }
 
-/** A wake for reading's failure is not one of a normal wake's tries, so it is kept apart from them. */
-function failedAttempt(pylon: PylonRecord, code: FailedAttempt["code"], message: string, reading: boolean): Attempts {
-  const failure = { at: Date.now(), code, message };
-  return reading ? { ...pylon.attempts, readFailure: failure } : { ...pylon.attempts, count: pylon.attempts.count + 1, last: failure };
+function recordFailure(pylon: PylonRecord, ctx: TickContext, failure: FailedAttempt, uncounted: boolean) {
+  if (uncounted) ctx.uncountedFailed(failure);
+  else pylon.attempts = { count: pylon.attempts.count + 1, last: failure };
 }
 
 /** One snapshot from a new observe stream, whose first event is always a snapshot. Null when the probe is unreachable. */

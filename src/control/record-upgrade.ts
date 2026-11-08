@@ -6,6 +6,7 @@
  */
 import { reviewPrefix } from "./agent-protocol.ts";
 import { noAttempts, type Attempts, type FailedAttempt } from "./reconcile.ts";
+import type { JobEnvelope } from "../protocol/jobs.ts";
 import { personOnly, type HoldCode } from "./holds.ts";
 import { reservedCases, reservedNames } from "../contract/reserved.ts";
 import { blocks, findingSchema, maxRounds, secondReads, type Change, type Review, type Verdict } from "./review-model.ts";
@@ -68,12 +69,21 @@ function codeOfText(text: string): HoldCode {
 }
 
 /**
- * A pylon record saved before `readFailure` kept a failed wake for reading in `last`, marked `reading: true`, and the
- * planner read it as no attempts unless desired was `reading`.
+ * A pylon record saved before a failed wake for reading went to the usage hold kept one apart in `readFailure`, or
+ * before that in `last`, marked `reading: true`. The upgrade drops it from the attempts and returns it as `readFailure`,
+ * for the hold that reads the pylon to give up on.
  */
-export function upgradeAttempts(attempts: Attempts): Attempts {
-  const last: (FailedAttempt & { reading?: true }) | null = attempts.last;
-  if (last?.reading !== true) return attempts;
-  const { reading: _, ...readFailure } = last;
-  return { ...noAttempts, readFailure };
+export function upgradeAttempts(attempts: Attempts): { attempts: Attempts; readFailure: FailedAttempt | null } {
+  const { readFailure, ...kept } = attempts as Attempts & { readFailure?: FailedAttempt };
+  const last = kept.last as (FailedAttempt & { reading?: true }) | null;
+  if (last?.reading !== true) return { attempts: kept, readFailure: readFailure ?? null };
+  const { reading: _, ...failure } = last;
+  return { attempts: noAttempts, readFailure: failure };
+}
+
+/** A job sent for reading before steps were marked `uncounted` was marked `reading: true`. */
+export function upgradeSubmitted(submitted: (JobEnvelope & { uncounted?: true; reading?: true }) | null): (JobEnvelope & { uncounted?: true }) | null {
+  if (submitted?.reading !== true) return submitted;
+  const { reading: _, ...env } = submitted;
+  return { ...env, uncounted: true };
 }
