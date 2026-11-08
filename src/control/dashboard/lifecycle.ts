@@ -9,7 +9,7 @@ import { checkThread, landingAt, landingSteps, roundsSpent, type LandingAt, type
 import { html, type Html, type Tone } from "./view.ts";
 import { checkBeside, duration, liveNote, needWording } from "../wording.ts";
 import type { Context } from "./context.ts";
-import type { ThreadNeed } from "../work.ts";
+import type { ThreadNeed } from "../wire.ts";
 import type { Role } from "../work-model.ts";
 
 export type Stage = Step | "held";

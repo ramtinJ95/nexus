@@ -17,7 +17,7 @@ import { trackStep, type Review } from "./review-model.ts";
 import { checkBeside, liveNote, phaseNote } from "./wording.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
-import { attentionLabels } from "./client-wording.ts";
+import { attentionLabels } from "./plain-wording.ts";
 import { personNeeds, prLocationOf, type PersonNeed } from "./work-model.ts";
 import { checkStart, startKey } from "./threads.ts";
 import type { StartRequest } from "./start-request.ts";

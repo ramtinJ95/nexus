@@ -1,5 +1,5 @@
 import { needsPerson } from "../attention.ts";
-import { attentionLabels } from "../client-wording.ts";
+import { attentionLabels } from "../plain-wording.ts";
 
 export const noticeText = (row) => attentionLabels[row.attention];
 /** A notice opens the inbox's card for what the thread waits on. A reply waits on no one, so it opens the thread. */

@@ -1,7 +1,7 @@
 // The dashboard's notices, a check's alerts and the Health page's seen mark, loaded as the page starts but outside its
 // first script. It reads the page's pieces when it runs, so a test reads what a change says without a page.
 import { doctorRoutes } from "../../contract/reports.ts";
-import { checkName } from "../client-wording.ts";
+import { checkName } from "../plain-wording.ts";
 
 const focused = () => document.visibilityState === "visible" && document.hasFocus();
 const refresh = async () => (await import("./page.js")).refreshNow();

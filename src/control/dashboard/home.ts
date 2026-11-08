@@ -1,14 +1,14 @@
 /** Renders the home page: what waits on the person beside the work in flight, and the preview of a thread picked from either. */
 import { desiredPhase } from "../reconcile.ts";
 import type { ThreadId } from "../../ids.ts";
-import type { ThreadDetail } from "../wire.ts";
+import type { ThreadDetail, ThreadNeed } from "../wire.ts";
 import type { Thread } from "../thread-store.ts";
 import type { Project } from "../project.ts";
 import { cannotLand, settled, type Review } from "../review-model.ts";
 import { needWording, reviewPr, roundOf, type NeedAction } from "../wording.ts";
 import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, threadState, dims, ago, workingFor, type Part } from "./view.ts";
 import type { Context } from "./context.ts";
-import type { HeldWork, InboxNeed, ThreadNeed } from "../work.ts";
+import type { HeldWork, InboxNeed } from "../work.ts";
 import { prose, inline } from "./markdown.ts";
 import { cleanupCard, judgmentCards, questionCard, landing, nudgeCard, resumeCard } from "./cards.ts";
 import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, type Shell } from "./shell.ts";

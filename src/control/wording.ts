@@ -3,10 +3,8 @@
  * so a state reads one way wherever it shows. A sentence that names a limit or a period reads it from the constant
  * that enforces it.
  */
-import type { ThreadDetail } from "./wire.ts";
+import type { ThreadDetail, ThreadNeed } from "./wire.ts";
 import type { Thread } from "./thread-store.ts";
-import type { ThreadNeed } from "./work.ts";
-import type { ServiceFact } from "../protocol/observations.ts";
 import { usageLimitText } from "./claude-transcript.ts";
 import { archivedDiskMs, keptPastDay } from "./reconcile.ts";
 import { maxNudges } from "./nudge.ts";
@@ -43,9 +41,6 @@ export const diskGoes = (absent: boolean) => absent ? "its disk went" : `its dis
 
 /** A paused session waits for its pylon to run again: the archive's unarchive, or else any wake. */
 export const sessionPaused = (t: Pick<Thread, "status">) => `paused, resumes on ${t.status === "archived" ? "unarchive" : "wake"}`;
-
-/** Why a running pylon's preview does not answer: its port has no route in, or its service failed. */
-export const previewFailed = (fact: ServiceFact) => fact.unrouted ?? (fact.state === "failed" ? `the service ${fact.name} failed. \`nexus service logs ${fact.name}\` in the pylon shows why` : null);
 
 export const freshVm = "Archive and unarchive the thread to give it a fresh VM. If the guest does not answer the pause either, the changes since its last saved disk are lost, so push or copy what you can first.";
 

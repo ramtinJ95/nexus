@@ -4,7 +4,7 @@ import type { ActualState, DesiredPhase } from "../reconcile.ts";
 import type { HerdrStatus } from "../../protocol/observations.ts";
 import type { ThreadRow } from "../wire.ts";
 import { needsPerson, type Attention } from "../attention.ts";
-import { attentionLabels } from "../client-wording.ts";
+import { attentionLabels } from "../plain-wording.ts";
 import type { Output, Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
 import { usageLimitText } from "../claude-transcript.ts";

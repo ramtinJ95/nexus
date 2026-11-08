@@ -1,6 +1,6 @@
 // The thread's composer, which sends a message and keeps its draft across a swap, and the forms that answer an ask.
 import { request } from "./request.js";
-import { answerFinal } from "../client-wording.ts";
+import { answerFinal } from "../plain-wording.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { questionRoutes } from "../../contract/reviews.ts";
 import { end, onSwap, refreshAfter, showError, whenRunning } from "./page.js";

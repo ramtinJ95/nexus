@@ -14,7 +14,7 @@ import type { AgentView } from "../conversation-view.ts";
 import { freshVm, liveNote, plannerGaveUp, prWatchText, reviewersNote, reviewLine, roundNote, sessionPaused } from "../wording.ts";
 import type { QueuedThread, Wait } from "../../contract/threads.ts";
 import { tokenCount, type UsageTotals } from "../usage.ts";
-import { attentionLabels } from "../client-wording.ts";
+import { attentionLabels } from "../plain-wording.ts";
 import { Html, html, attentionTone, actualBadge, desiredTone, sessionTone, outputLabel, dot, state, icon, menu, threadState, ago, workingFor, type Part, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
 import { prose } from "./markdown.ts";

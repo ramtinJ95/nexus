@@ -10,7 +10,7 @@
  * features with per-thread state of their own take part through a ThreadParticipant each, which the registry registers.
  */
 import { attentionOf, type Attention, type Need } from "./attention.ts";
-import { previewFailed } from "./wording.ts";
+import { previewFailed } from "./plain-wording.ts";
 import { eventCursor, sessionActivityTtlMs, maxActiveSessions, type EventFilter, type EventKind, type NexusEvent } from "./events.ts";
 import type { Sender } from "./agent-protocol.ts";
 import type { StartKey } from "./start-request.ts";

@@ -3,6 +3,7 @@
  */
 import type { Submission } from "@earendil-works/pi-durable";
 import type { Attention } from "./attention.ts";
+import type { PersonNeed } from "./work-model.ts";
 import type { ActualState, DesiredPhase } from "./reconcile.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
 import type { GuestNotAnswering } from "../protocol/observations.ts";
@@ -15,6 +16,8 @@ import type { JudgmentView } from "./judgment.ts";
 import type { NodePylons } from "./placement.ts";
 import type { Review } from "./review-model.ts";
 
+/** One card of the inbox for a thread. */
+export type ThreadNeed = PersonNeed & { d: ThreadDetail };
 export interface ThreadDetail {
   claudeWorker?: { model: string | null; state: string; message?: string };
   /** Nexus resuming the Claude worker after its turns died, or null. A control plane older than 0.64.0 sends none. */

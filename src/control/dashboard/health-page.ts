@@ -4,7 +4,7 @@ import { utc } from "../usage.ts";
 import { Html, html, dot, menu, state } from "./view.ts";
 import type { Context } from "./context.ts";
 import { layout, statusTone as tone } from "./shell.ts";
-import { checkName, problemsText } from "../client-wording.ts";
+import { checkName, problemsText } from "../plain-wording.ts";
 import { changesKept, doctorSchedule } from "../wording.ts";
 
 const at = (iso: string) => html`<time datetime="${iso}">${utc(Date.parse(iso))}</time>`;

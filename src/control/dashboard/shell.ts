@@ -14,7 +14,7 @@ import { span } from "./elapsed.ts";
 import { themeScript, Html, html, dot, icon, clonedIcons, menu, threadState, dims, workingFor, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
 import { assetUrl } from "./assets.ts";
-import { problemsText } from "../client-wording.ts";
+import { problemsText } from "../plain-wording.ts";
 import { tickMs } from "../loop.ts";
 
 /** How often the client refetches a page. The loop ticks no faster, so polling faster shows nothing new. */
