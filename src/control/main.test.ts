@@ -91,9 +91,13 @@ test("continuing after a usage limit is off unless the config turns it on", () =
   assert.throws(() => parseConfig(JSON.stringify({ ...config, resumeAfterUsageLimit: "yes" })), /invalid control plane config/);
 });
 
-test("the image build node is optional, and one given must be a configured node", () => {
+test("the image build node defaults to infra-testbench even when it is not a node, and one given must be a configured node", () => {
   const config = JSON.parse(example);
-  assert.equal(parseConfig(example).imageBuildNode, undefined);
+  assert.equal(parseConfig(example).imageBuildNode, "infra-testbench");
+  const elsewhere = config.nodes.filter((n: { name: string }) => n.name !== "infra-testbench");
+  const parsed = parseConfig(JSON.stringify({ ...config, nodes: elsewhere }));
+  assert.equal(parsed.imageBuildNode, "infra-testbench");
+  assert.deepEqual(parseConfig(JSON.stringify(parsed)), parsed, "a parsed config reads back as itself");
   const node = config.nodes[0].name;
   assert.equal(parseConfig(JSON.stringify({ ...config, imageBuildNode: node })).imageBuildNode, node);
   assert.throws(() => parseConfig(JSON.stringify({ ...config, imageBuildNode: "elsewhere" })), /imageBuildNode elsewhere is not one of the nodes/);

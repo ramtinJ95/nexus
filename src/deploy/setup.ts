@@ -269,7 +269,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
       listen: { host: self.ip, port: ports.control, hostnames: [self.name, self.host, self.ip] },
       self: { tailnetNodeId: self.id },
       nodes: [nodeEntry(self), ...addNodes.map((a) => nodeEntry(a.node))],
-      // Only a new config names this machine: an existing one without it builds on the default node, as it did.
+      // Only a new config names this machine: an existing one without it keeps building on the schema's default node.
       ...existing.control === undefined ? { imageBuildNode: self.name } : {},
       callers: admitted.map((d) => d.id),
       deployers: admitted.map((d) => d.id),

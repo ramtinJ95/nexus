@@ -17,7 +17,7 @@ import { ingest } from "./reconcile.ts";
 import { linuxTailscaledSocket, localApiWhois, localApiWhoisNode, localApiCertificate } from "../node-base/tailscaled.ts";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { chatgptToken, harnessModels, loginState, openCredentials, requireModel } from "./harness/credentials.ts";
-import { openHarnessHost, type ConversationId } from "./harness/host.ts";
+import { gateTurns, openHarnessHost, type ConversationId } from "./harness/host.ts";
 import { startApi } from "./api/server.ts";
 import { registryLocator } from "./locator.ts";
 import { jobDeadlineMs } from "../protocol/jobs.ts";
@@ -63,6 +63,9 @@ const port = z.int().min(1).max(65_535);
 /** Clear of every port in the node layout. */
 export const defaultPreviewPorts = { first: 10200, last: 10999 } as const;
 
+/** Where Docker access was first verified. It need not be one of the nodes: its builds then fail as offline. */
+export const defaultImageBuildNode = "infra-testbench" as NodeName;
+
 const configSchema = z.strictObject({
   db: z.string().min(1).transform(controlPath),
   https: z.strictObject({ hostname: z.string().regex(tsNet) }).optional(),
@@ -81,8 +84,8 @@ const configSchema = z.strictObject({
     tailnetHost: z.string().min(1),
     tailnetNodeId: tailnetNodeIdSchema,
   })).min(1),
-  /** Where `nexus image build` builds: infra-testbench when omitted, where Docker access was first verified. */
-  imageBuildNode: nodeNameSchema.optional(),
+  /** Where `nexus image build` builds. */
+  imageBuildNode: nodeNameSchema.default(defaultImageBuildNode),
   /** Other tailnet nodes, such as your laptop and phone, whose callers may use the API. */
   callers: z.array(tailnetNodeIdSchema),
   deployers: z.array(tailnetNodeIdSchema).optional(),
@@ -121,7 +124,7 @@ export function parseConfig(text: string): ControlPlaneConfig {
   const names = result.data.nodes.map((n) => n.name);
   if (new Set(names).size !== names.length) throw new Error(`invalid control plane config: node names repeat: ${names.join(", ")}`);
   const { imageBuildNode } = result.data;
-  if (imageBuildNode !== undefined && !names.includes(imageBuildNode)) throw new Error(`invalid control plane config: imageBuildNode ${imageBuildNode} is not one of the nodes`);
+  if (imageBuildNode !== defaultImageBuildNode && !names.includes(imageBuildNode)) throw new Error(`invalid control plane config: imageBuildNode ${imageBuildNode} is not one of the nodes`);
   if (result.data.https && !result.data.listen.hostnames.includes(result.data.https.hostname)) throw new Error("https.hostname must be in listen.hostnames");
   return result.data;
 }
@@ -199,16 +202,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   }));
 
   const gate = turnGate(() => isDraining(registry.drain()));
-  const harness: typeof rawHarness = {
-    ...rawHarness,
-    startThread: (...args) => gate.run(() => rawHarness.startThread(...args)),
-    send: (...args) => gate.run(() => rawHarness.send(...args)),
-    retry: (...args) => gate.run(() => rawHarness.retry(...args)),
-    startJudgment: (...args) => gate.run(() => rawHarness.startJudgment(...args)),
-    sendJudgment: (...args) => gate.run(() => rawHarness.sendJudgment(...args)),
-  };
+  const harness = gateTurns(rawHarness, gate);
   const images = services.start(startImageRollout({
-    registry, probes: probeMap, buildNode: (config.imageBuildNode ?? "infra-testbench") as NodeName, recipe: () => loadImageRecipe(), release: runningCommit,
+    registry, probes: probeMap, buildNode: config.imageBuildNode, recipe: () => loadImageRecipe(), release: runningCommit,
   }));
   const inbox = agentInbox({ registry, harness, probes: probeMap, wake: wakeThread });
   const agents = agentReader(registry, harness);

@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { openHarnessHost, type ConversationId } from "./host.ts";
+import { gateTurns, openHarnessHost, turnStarting, type ConversationId, type HarnessHost } from "./host.ts";
+import { DeployDraining, turnGate } from "../drain.ts";
 import { scriptedModel, scriptedModels, scriptedUsage, type ScriptedRequest } from "./test-fixture.ts";
 import type { PylonId } from "../../ids.ts";
 import { tempDir } from "../../test-support/kit.ts";
@@ -99,4 +100,22 @@ test("each deleted conversation aborted, by a delete or at open, is told to onAb
   const reopened = await open([first, second]);
   t.after(() => reopened.close());
   assert.deepEqual(aborted, [first, first, second]);
+});
+
+test("a draining gate refuses exactly the five methods that start a turn, and passes the rest through", async () => {
+  assert.deepEqual(turnStarting, ["startThread", "send", "retry", "startJudgment", "sendJudgment"]);
+  const called: string[] = [];
+  const methods = ["startThread", "send", "latestTurn", "abort", "retry", "watch", "deleteThread", "usage", "startJudgment", "sendJudgment", "judgmentReplies", "abortJudgment", "close"] as const;
+  const raw = Object.fromEntries(methods.map((m) => [m, async (...args: unknown[]) => { called.push(`${m}(${args.join(",")})`); return m; }])) as unknown as HarnessHost;
+  let draining = false;
+  const harness = gateTurns(raw, turnGate(() => draining));
+  assert.equal(await harness.send("t1", "hi", "r1", "followUp"), "send");
+  draining = true;
+  const refused: (typeof methods)[number][] = [];
+  for (const m of methods) {
+    const call = (harness[m] as (...args: unknown[]) => Promise<unknown>)("x");
+    if (await call.then(() => false, (err: unknown) => err instanceof DeployDraining)) refused.push(m);
+  }
+  assert.deepEqual(called, ["send(t1,hi,r1,followUp)", ...methods.filter((m) => !refused.includes(m)).map((m) => `${m}(x)`)]);
+  assert.deepEqual(refused, [...turnStarting]);
 });

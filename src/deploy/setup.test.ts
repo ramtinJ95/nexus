@@ -197,7 +197,7 @@ test("a rerun over a config without imageBuildNode leaves image builds on the de
   const first = onDisk(files(run(["--dotfiles", dotfiles])));
   const { imageBuildNode: _, ...control } = first.control as Record<string, Json>;
   const written = files(run([], { ...first, control }));
-  assert.equal(parseConfig(JSON.stringify(value(written, paths.control))).imageBuildNode, undefined);
+  assert.equal(parseConfig(JSON.stringify(value(written, paths.control))).imageBuildNode, "infra-testbench");
   assert.equal(written.get(paths.control)!.state, "unchanged");
 });
 

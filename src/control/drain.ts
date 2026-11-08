@@ -7,7 +7,7 @@ export class DeployDraining extends Error {
 export const isDraining = (drain: Drain | null) => drain?.locked === true || (drain?.expiresAt ?? 0) > Date.now();
 
 /**
- * One per control plane, shared by the API's turn-starting routes, the harness methods main wraps and the queue's
+ * One per control plane, shared by the API's turn-starting routes, the harness methods harness/host.ts lists and the queue's
  * starts, so a deploy's drain refuses them all and `busy` counts every turn still entering.
  */
 export type TurnGate = ReturnType<typeof turnGate>;
