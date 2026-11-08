@@ -9,7 +9,6 @@ import type { Sender } from "../agent-protocol.ts";
 import type { PromptSenders } from "../inbox.ts";
 import { partHash } from "../conversation-view.ts";
 import { queuedOf } from "../../contract/streams.ts";
-import type { AgentView } from "../../contract/threads.ts";
 import { askedIn, askQuestionId, type AskedQuestion, type Question } from "../questions.ts";
 import { clock } from "./elapsed.ts";
 import type { Tone } from "./view.ts";
@@ -97,7 +96,7 @@ const writtenImages = (name: string, args: Readonly<Record<string, unknown>>): s
  * The transcript's messages, then what pi-durable shows of the current run: tool output as it streams, the
  * partial answer and a model request waiting to be retried, then the messages queued behind the run.
  */
-function conversationItems(view: ConversationView, thread: ThreadId): Item[] {
+export function conversationItems(view: ConversationView, thread: ThreadId): Item[] {
   const live = view.docs["pi.live"] as LiveState | undefined;
   const inbox = view.docs["pi.inbox"] as InboxState | undefined;
   const items: Item[] = [];
@@ -151,15 +150,13 @@ function conversationItems(view: ConversationView, thread: ThreadId): Item[] {
   return items;
 }
 
-export const itemsOf = (view: AgentView, questions: () => readonly Question[], thread: ThreadId, senders: () => PromptSenders): Item[] => view.kind === "claude" ? claudeItems(view.view, questions(), thread, senders()) : conversationItems(view.view, thread);
-
 /**
  * A Claude worker's transcript as the rows a harness conversation shows. Each result goes on its call, and a
  * background task's finish on the call that started it. A call of the current turn without a result runs while
  * Claude works. An AskUserQuestion call is its own row, with the thread's question for it. A message Claude Code
  * queued and has not taken shows queued at the end. A pull request shows once.
  */
-function claudeItems({ entries, working }: ClaudeConversation, questions: readonly Question[], thread: ThreadId, senderOf: PromptSenders): Item[] {
+export function claudeItems({ entries, working }: ClaudeConversation, questions: readonly Question[], thread: ThreadId, senderOf: PromptSenders): Item[] {
   const from = (text: string | null | undefined): PromptFrom => (text == null ? null : senderOf(text)) ?? "person";
   const items: Item[] = [];
   const tools = new Map<string, ToolItem>();

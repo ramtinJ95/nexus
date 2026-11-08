@@ -35,13 +35,13 @@ import { usagePage } from "../dashboard/usage-page.ts";
 import { clusterPage } from "../dashboard/cluster-page.ts";
 import { itemView } from "../pipeline.ts";
 import { promptSenders } from "../inbox.ts";
-import { itemsOf, type Item } from "../dashboard/items.ts";
+import { claudeItems, conversationItems, type Item } from "../dashboard/items.ts";
 import { threadRole } from "../work-model.ts";
 import { landsOnItsOwn } from "../project.ts";
 import { healthPage } from "../dashboard/health-page.ts";
 import type { DoctorReport } from "../doctor-model.ts";
 import { threadPage, queuedPage } from "../dashboard/thread-page.ts";
-import { liveStreams } from "../dashboard/live-frames.ts";
+import { liveStreams, type ItemsOf } from "../dashboard/live-frames.ts";
 import type { ApiKit, RouteEntry } from "./kit.ts";
 import { anyAllowed, landing, refusal, refusalOf, type Role } from "./access.ts";
 import { readHealth } from "./node-routes.ts";
@@ -96,9 +96,10 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
   const offline = () => new Set(registry.nodes().filter((n) => n.state === "offline").map((n) => n.name));
   const homeView = (): HomeView => ({ projects: registry.projects(), offline: offline(), role: (t) => threadRole(registry, t) });
 
-  /** The conversation's items, which read the questions and the prompts' senders of a Claude worker's transcript. */
-  const itemsFor = (d: ThreadDetail, view: AgentView | Error | null): readonly Item[] =>
-    view === null || view instanceof Error ? [] : itemsOf(view, () => d.questions, d.thread.id, () => promptSenders(registry, d.thread.id));
+  /** A conversation's items. Only a Claude worker's transcript reads the thread's questions and who typed its prompts. */
+  const itemsOf = (thread: ThreadId): ItemsOf => (view) =>
+    view.kind === "claude" ? claudeItems(view.view, registry.questions(thread), thread, promptSenders(registry, thread)) : conversationItems(view.view, thread);
+  const itemsFor = (thread: ThreadId, view: AgentView | Error | null): readonly Item[] => view === null || view instanceof Error ? [] : itemsOf(thread)(view);
 
   /** The Cluster page with this node picked: what its probe reads of its host now, or why it could not. */
   const cluster = async (c: Context, roles: ReadonlySet<Role>, name: NodeName) => {
@@ -113,7 +114,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
     if (thread !== undefined) {
       const view = await transcript(thread);
       const d = detail(registry.thread(thread.id)!);
-      return { kind: "thread", d, row: rowOf(d), latest: latestOf(d, itemsFor(d, view)) };
+      return { kind: "thread", d, row: rowOf(d), latest: latestOf(d, itemsFor(thread.id, view)) };
     }
     const queued = registry.queuedThread(key as ThreadId);
     if (queued !== undefined && queued.status === "queued") return { kind: "queued", q: queuedView(registry, queued) };
@@ -170,7 +171,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
       const shown = t.status === "deleted" ? null : view;
       const page: ThreadView = {
         d, row: rowOf(d), node: registry.node(d.pylon.node)!, role: threadRole(registry, t), agent: registry.agent(t),
-        usage: registry.usageReport({ since: null, thread: t.id }).total, view: shown, items: itemsFor(d, shown), renderedReplyAt: repliedAt,
+        usage: registry.usageReport({ since: null, thread: t.id }).total, view: shown, items: itemsFor(t.id, shown), renderedReplyAt: repliedAt,
         nudged: registry.nudge(t.id)?.state === "person", lands: landsOnItsOwn(registry.project(t.project)?.autoReview),
       };
       return ok(threadPage(context(r), page, r.query.has("streaming")));
@@ -178,7 +179,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
     ["GET", /^\/threads\/([^/]+)\/stream$/, anyAllowed, ([, id]) => {
       const t = kit.thread(id!, { status: "kept" });
       const agent = kit.agentOf(t);
-      const reader = live(t, registry.claudeWorker(t.id)?.model ?? null, () => registry.questions(t.id), () => promptSenders(registry, t.id));
+      const reader = live(t, registry.claudeWorker(t.id)?.model ?? null, itemsOf(t.id));
       return { stream: (res) => kit.stream(res, t, () => agent.watch(t), reader.frames, reader.leave) };
     }],
     ["GET", /^\/nodes\/([^/]+)$/, anyAllowed, async (m, r) => {
