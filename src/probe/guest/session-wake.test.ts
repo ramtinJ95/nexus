@@ -4,7 +4,7 @@ import { seedClaudeState } from "./launchers.ts";
 import { fakeGuest, herdrArgs, herdrError, herdrOk, herdrPane, herdrSnapshot, sessionsFileReply, type ExecReply, type HerdrArgs } from "../../backends/fake-guest.ts";
 import type { PylonId } from "../../ids.ts";
 import type { PausedSession } from "../../protocol/observations.ts";
-import { finishRelaunch, onePerClaudeSession, pauseSessions, recordBeforePause, relaunchAfterWake, type RelaunchMark } from "./session-wake.ts";
+import { claudeSessionLock, finishRelaunch, pauseSessions, recordBeforePause, relaunchAfterWake, type RelaunchMark } from "./session-wake.ts";
 import { sendToClaude, sessionFacts, type SessionRecord } from "./sessions.ts";
 import { sessionsFile } from "../../guest-contract.ts";
 
@@ -222,7 +222,7 @@ async function wakeWithMessage(p: ReturnType<typeof pylon>, text: string) {
   p.pause();
   const [outcomes, sent] = await Promise.all([
     relaunchAfterWake(pylonId, p.guest, quiet),
-    onePerClaudeSession(pylonId, [worker], () => sendToClaude(p.guest, { session: worker, text })),
+    claudeSessionLock(pylonId)([worker], () => sendToClaude(p.guest, { session: worker, text })),
   ]);
   return { outcomes, sent };
 }

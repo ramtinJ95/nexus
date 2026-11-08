@@ -479,17 +479,20 @@ function relaunchedFrom(file: SessionsFile): RecordedSession[] {
  * does not start fails every session, for its reason.
  *
  * A session of a one-pane harness, such as Claude Code, comes back in one pane only: the first record of it whose pane
- * still runs it, or else its first record. Every other record of it is dropped and its pane closed. `exclusive` runs
+ * still runs it, or else its first record. Every other record of it is dropped and its pane closed. `lock` runs
  * the relaunch while no send or launch of those sessions does, so none of them starts a session the relaunch is
  * bringing back.
  */
-export async function relaunchSessions(guest: Guest, exclusive: <T>(claudeSessions: readonly string[], work: () => Promise<T>) => Promise<T> = (_, work) => work()): Promise<readonly RelaunchOutcome[]> {
+export async function relaunchSessions(guest: Guest, lock: ClaudeSessionLock): Promise<readonly RelaunchOutcome[]> {
   const file = await readSessionsFile(guest);
   if (file === null) return [];
   const records = [...file.sessions, ...file.failed.map((f) => f.record)];
   if (records.length === 0) return [];
-  return exclusive(records.flatMap((r) => launchers[r.harness]?.onePane && r.harnessSessionId !== null ? [r.harnessSessionId] : []), () => relaunch(guest, file, records));
+  return lock(records.flatMap((r) => launchers[r.harness]?.onePane && r.harnessSessionId !== null ? [r.harnessSessionId] : []), () => relaunch(guest, file, records));
 }
+
+/** Runs `work` while no other work holds any of `claudeSessions`, and holds them until it settles. */
+export type ClaudeSessionLock = <T>(claudeSessions: readonly string[], work: () => Promise<T>) => Promise<T>;
 
 async function relaunch(guest: Guest, file: SessionsFile, records: readonly SessionRecord[]): Promise<readonly RelaunchOutcome[]> {
   let unclaimed: LivePane[];

@@ -22,8 +22,11 @@ import type { Guest } from "../../backends/backend.ts";
 import { exit } from "../../exec.ts";
 import { unusedGuest } from "../../backends/fake-guest.ts";
 import type { SessionFact } from "../../protocol/observations.ts";
-import { closeSession, openSession, recordSessions, relaunchSessions, sessionFacts, type RecordedSession, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
+import { closeSession, openSession, recordSessions, relaunchSessions, sessionFacts, type RecordedSession, type ClaudeSessionLock, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
 import { claudeProjects as projects, herdrSession, home as cwd } from "../../guest-contract.ts";
+
+/** Nothing else runs here, so no call needs to wait for the relaunch. */
+const unlocked: ClaudeSessionLock = (_, work) => work();
 
 const shellCwd = `${cwd}/check-shell-cwd`;
 const guest: Guest = {
@@ -279,7 +282,7 @@ assert.ok(recorded !== null && recorded.length === 5, "the five sessions are rec
 expectNoSessionFiles("RESTORE", recorded);
 await stopServer("RESTORE", Object.values(opened));
 dropAppearedSessionFiles("RESTORE", recorded);
-const restored = await relaunchSessions(guest);
+const restored = await relaunchSessions(guest, unlocked);
 stepRelaunch("RESTORE_RELAUNCH_1", restored);
 assert.ok(others(restored).every((o) => o.result !== "failed"), "every recorded session comes back");
 // Herdr keeps the layout, so each session is back in its own pane, and only the relaunch started agents.
@@ -288,7 +291,7 @@ for (const o of restored) {
   if (o.result !== want || o.herdrPane !== o.record.herdrPane) findings.push(`RESTORE: ${o.record.title} is ${o.result} in ${"herdrPane" in o ? o.herdrPane : "no pane"}, not ${want} in its restored pane ${o.record.herdrPane}`);
 }
 const brokenByRestore = await expectRuns("RESTORE", restored);
-const restoredAgain = await relaunchSessions(guest);
+const restoredAgain = await relaunchSessions(guest, unlocked);
 stepRelaunch("RESTORE_RELAUNCH_2", restoredAgain);
 assert.ok(others(restoredAgain).every((o) => o.result === "present"), "a second relaunch opens nothing");
 const restoredPanes = restoredAgain.flatMap((o) => o.result === "present" || o.result === "relaunched" ? [o.herdrPane] : []);
@@ -324,7 +327,7 @@ const deleted = await herdr("session", "delete", herdrSession, "--json");
 step("FRESH_SESSION_DELETE", deleted);
 assert.equal(deleted.exitCode, 0, "Herdr deletes the stopped session's state");
 dropAppearedSessionFiles("FRESH", recordedAgain);
-const fresh = await relaunchSessions(guest);
+const fresh = await relaunchSessions(guest, unlocked);
 stepRelaunch("FRESH_RELAUNCH_1", fresh);
 assert.deepEqual(others(fresh).map((o) => o.result), ["relaunched", "relaunched", "relaunched"], "with no Herdr state, every session is recreated");
 const freshPanes = fresh.flatMap((o) => o.result === "relaunched" ? [o.herdrPane] : []);
@@ -338,7 +341,7 @@ step("FRESH_RECORDS", freshRecords);
 const freshShell = fresh.find((o) => o.record.harness === "shell");
 const shell = freshRecords?.find((r) => freshShell?.result === "relaunched" && r.herdrPane === freshShell.herdrPane);
 assert.deepEqual(shell && { harness: shell.harness, title: shell.title, cwd: shell.cwd }, { harness: "shell", title: "check-shell", cwd: shellCwd }, "the shell comes back with its title and cwd");
-const freshAgain = await relaunchSessions(guest);
+const freshAgain = await relaunchSessions(guest, unlocked);
 stepRelaunch("FRESH_RELAUNCH_2", freshAgain);
 assert.ok(others(freshAgain).every((o) => o.result === "present"), "a second relaunch after a fresh one opens nothing");
 
