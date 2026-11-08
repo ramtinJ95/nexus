@@ -32,4 +32,8 @@ function load(): Map<string, Asset> {
 }
 let assets: Map<string, Asset> | undefined;
 export const asset = (file: string) => (assets ??= load()).get(file);
-export const assetUrl = (file: string) => `/assets/${file}?v=${asset(file)!.version}`;
+export function assetUrl(file: string): string {
+  const version = asset(file)?.version;
+  if (version == null) throw new Error(`A page links only the files assets.ts versions, not ${file}.`);
+  return `/assets/${file}?v=${version}`;
+}
