@@ -5,7 +5,6 @@
 import { usageLimitText, type Placement, type QueuedThread, type Room, type ThreadDetail, type ThreadRow, type ThreadSetup, type Wait } from "../contract/threads.ts";
 import type { Question, Review } from "../contract/reviews.ts";
 import { reservedNames } from "../contract/reserved.ts";
-import { keptPastDay } from "../control/reconcile.ts";
 import { diskGoes, freshVm, keptPast, liveNote, prWatchText, reviewersNote, reviewLine, roundNote, sessionPaused } from "../control/wording.ts";
 import type { Changes, Listing } from "../contract/pylon.ts";
 import { ago, table, clip } from "./kit.ts";
@@ -80,10 +79,8 @@ function deathLines(t: ThreadDetail["thread"], resume: ThreadDetail["resume"]): 
   return [`turn died: ${t.turnDied.reason}, at ${new Date(t.turnDied.at).toISOString()}${then}`];
 }
 
-export function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, resume, attention, review, questions, judgments, planning }: ThreadDetail): string {
+export function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, resume, attention, review, keptPastDay: kept, questions, judgments, planning }: ThreadDetail): string {
   const observed = p.observedAt === null ? "" : `, observed ${ago(Date.parse(p.observedAt))}`;
-  // A pylon its node does not list has no disk left to keep.
-  const kept = p.actualState === "absent" ? null : keptPastDay(t, Date.now());
   return [
     `${t.id}  ${t.title}`,
     `project: ${t.project}`,
@@ -96,7 +93,7 @@ export function detailText({ thread: t, pylon: p, agent, sessions, previews, por
     `status: ${t.status}${t.working ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,
     ...p.notAnswering === undefined ? [] : [`guest: not answering since ${ago(Date.parse(p.notAnswering.since))}, as its last ${p.notAnswering.timeouts} guest commands got no answer, so messages, files and diffs fail. ${freshVm(t.id)}`],
-    ...kept === null ? [] : [`disk: ${keptPast}, as ${kept}`],
+    ...kept == null ? [] : [`disk: ${keptPast}, as ${kept}`],
     ...t.status !== "archived" || t.usageUnread === undefined ? [] : [`usage: unread, as ${t.usageUnread}, so ${diskGoes(p.actualState === "absent")} without it`],
     ...t.status === "archived" || t.status === "deleted" ? [] : [`attach: nexus attach ${t.id}`],
     `size: ${p.resources.cpus} CPUs, ${p.resources.memoryGiB} GiB memory, ${p.resources.diskGiB} GiB disk${p.resources.nestedVirtualization === true ? ", nested virtualization" : ""}`,
