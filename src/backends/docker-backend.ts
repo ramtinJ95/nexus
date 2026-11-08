@@ -223,7 +223,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
 
   function guest(pylonId: PylonId): Guest {
     return {
-      // As root, unlike a pylon: a container image need not have a `user`.
+      // As root, unlike a pylon's.
       async exec(argv, { cwd, timeoutMs }) {
         // docker exec reports a missing or stopped container as an ordinary exit code 1.
         const existing = await container(pylonId, AbortSignal.timeout(timeoutMs));

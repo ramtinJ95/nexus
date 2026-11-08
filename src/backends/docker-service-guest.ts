@@ -47,8 +47,9 @@ export function dockerServiceGuest(container: string): ServiceGuest & { close():
     return socket;
   }
 
-  /** The route and the path it sends, as Gondolin's ingress picks and strips them, or null for no route. */
-  function routed(target: string): { route: Route; path: string } | null {
+  /** The route and the path it sends, as Gondolin's ingress picks and strips them, null for no route, or "invalid" for a target that is no URL path. */
+  function routed(target: string): { route: Route; path: string } | null | "invalid" {
+    if (!URL.canParse(target, "http://ingress")) return "invalid";
     const url = new URL(target, "http://ingress");
     const matches = (prefix: string) => prefix === "/" || url.pathname === prefix || url.pathname.startsWith(`${prefix}/`);
     const route = routes.filter((r) => matches(r.prefix)).sort((a, b) => b.prefix.length - a.prefix.length)[0];
@@ -74,6 +75,7 @@ export function dockerServiceGuest(container: string): ServiceGuest & { close():
   async function listen(): Promise<{ server: http.Server; url: URL }> {
     const server = http.createServer((incoming, response) => {
       const found = routed(incoming.url ?? "/");
+      if (found === "invalid") return void response.writeHead(400).end("invalid request target\n");
       if (found === null) return void response.writeHead(404).end("no route\n");
       const upstream = http.request({ method: incoming.method, path: found.path, headers: headers(incoming, found.route, false), createConnection: () => pipe(found.route.port) }, (result) => {
         response.writeHead(result.statusCode ?? 502, result.headers);
@@ -88,6 +90,7 @@ export function dockerServiceGuest(container: string): ServiceGuest & { close():
     });
     server.on("upgrade", (incoming: http.IncomingMessage, socket: Duplex, head: Buffer) => {
       const found = routed(incoming.url ?? "/");
+      if (found === "invalid") return void socket.end("HTTP/1.1 400 Bad Request\r\n\r\n");
       if (found === null) return void socket.end("HTTP/1.1 404 Not Found\r\n\r\n");
       const backend = pipe(found.route.port);
       const lines = Object.entries(headers(incoming, found.route, true)).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(", ") : value}`);

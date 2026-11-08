@@ -4,6 +4,9 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, request } from "node:http";
+import { connect } from "node:net";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { createDockerBackend } from "./docker-backend.ts";
 import { dockerHostBridge } from "./docker-host-bridge.ts";
 import { dockerServiceGuest } from "./docker-service-guest.ts";
@@ -14,6 +17,7 @@ import { freePort } from "../test-support/kit.ts";
 import { checkoutDir, servicesFile } from "../../images/pylon/nexus-contract.ts";
 
 type Reply = { stdout?: string; stderr?: string; code?: number };
+const execFileAsync = promisify(execFile);
 
 /**
  * A `docker` first on PATH that logs each argv and answers from `replies`, keyed by the longest leading run of its
@@ -179,6 +183,80 @@ test("the ingress sends each request to its longest matching route's port, witho
   assert.equal((await fetch(new URL("/down/", base))).status, 502);
 });
 
+test("the ingress answers a request target that is no URL path with 400, also on an upgrade, and goes on serving", async (t) => {
+  await fakeDocker(t);
+  const guest = dockerServiceGuest(pylon);
+  t.after(() => guest.close());
+  const base = await guest.ingress();
+  const raw = (head: string) => new Promise<string>((accept, reject) => {
+    const socket = connect(Number(base.port), "127.0.0.1", () => socket.end(head));
+    let text = "";
+    socket.setEncoding("utf8").on("data", (chunk: string) => { text += chunk; }).on("end", () => accept(text)).on("error", reject);
+  });
+  assert.match(await raw("GET //%/ HTTP/1.1\r\nHost: x\r\n\r\n"), /^HTTP\/1\.1 400 /);
+  assert.match(await raw("GET //%/ HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"), /^HTTP\/1\.1 400 /);
+  assert.equal((await fetch(new URL("/elsewhere/", base))).status, 404, "the ingress still answers");
+});
+
+test("a boot clears the pid files, starts the relay and ensures the services; a later spawn only gives new URLs; a probe restart restarts them; a failed supervisor is retried; an ad hoc service starts", async (t) => {
+  const docker = await fakeDocker(t, { images: { stdout: "nexus-test\n" } });
+  // The relay and the service loops run on this host, under the container's directory.
+  t.after(() => execFileAsync("pkill", ["-f", join(docker.root, "pi-sandbox")]).catch(() => undefined));
+  t.after(() => rm(join(tmpdir(), "nexus-docker-services", pylon), { recursive: true, force: true }));
+  await mkdir(join(docker.root, "checkout", ".nexus"), { recursive: true });
+  const declare = (yaml: string) => writeFile(join(docker.root, "checkout", ".nexus", "services.yaml"), yaml);
+  await declare("services:\n  web:\n    command: sleep 1000\n    health: process\n");
+  const boot = {
+    pylonId: pylon, image: "img-test00000000" as const, source: { kind: "fresh" as const, preSetup: null }, resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
+    network: { allowedHosts: [], secrets: [] }, repo: { kind: "empty" as const, branch: "main" }, dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
+  };
+  const live = { previews: [], overlay: [] };
+  const execs = async () => (await docker.calls()).filter((argv) => argv[0] === "exec").map((argv) => argv.join(" "));
+  const pidFilesCleared = (lines: string[]) => lines.filter((line) => line.includes("rm -f /var/lib/pi-sandbox/services/*.pid")).length;
+  const relayStarts = (lines: string[]) => lines.filter((line) => line.includes("setsid env -u NEXUS_GUEST_COMMAND /bin/sh -c")).length;
+  const pid = () => readFile(join(docker.root, "pi-sandbox", "services", "web.pid"), "utf8");
+  const web = (state: string) => ({ name: "web", state, declared: true, wantsPreview: false });
+  const facts = async (backend: ReturnType<typeof createDockerBackend>) => (await backend.guest(pylon).services("list")).services.map(({ port: _port, ...fact }) => fact);
+
+  // Each backend's supervisor listens on an ingress until a delete closes it, which runs here while fakeDocker's docker is still on PATH.
+  const backends: ReturnType<typeof createDockerBackend>[] = [];
+  const probe = () => { const b = createDockerBackend({ images }); backends.push(b); return b; };
+  try {
+    const backend = probe();
+    await backend.ensureRunning(boot, live, AbortSignal.timeout(30_000));
+    let lines = await execs();
+    assert.equal(pidFilesCleared(lines), 1, "the boot cleared the pid files its disk carried");
+    assert.equal(relayStarts(lines), 1, "the boot started the relay");
+    assert.deepEqual(await facts(backend), [web("ready")], "the boot ensured web");
+    const booted = await pid();
+
+    await docker.answer({ ps: { stdout: "c1\n" }, "container inspect c1": running("c1", { "nexus.pylon": pylon }) });
+    await backend.ensureRunning(boot, live, AbortSignal.timeout(30_000));
+    lines = await execs();
+    assert.deepEqual([pidFilesCleared(lines), relayStarts(lines), await pid()], [1, 1, booted], "a later spawn rebuilt nothing and left web running");
+
+    const restarted = probe();
+    await restarted.ensureRunning(boot, live, AbortSignal.timeout(30_000));
+    lines = await execs();
+    assert.deepEqual([pidFilesCleared(lines), relayStarts(lines)], [1, 1], "a probe restart starts no relay and clears no pid file");
+    assert.notEqual(await pid(), booted, "a probe restart restarted web");
+    assert.deepEqual(await facts(restarted), [web("ready")]);
+
+    await declare("services:\n  web: {}\n");
+    const again = probe();
+    await assert.rejects(again.ensureRunning(boot, live, AbortSignal.timeout(30_000)), /invalid \.nexus\/services\.yaml/);
+    await assert.rejects(again.guest(pylon).services("list"), { message: "pylon-a is not running, or no spawn has reached it since the probe started" }, "the failed supervisor was dropped");
+    await declare("services:\n  web:\n    command: sleep 1000\n    health: process\n");
+    await again.ensureRunning(boot, live, AbortSignal.timeout(30_000));
+    assert.deepEqual(await facts(again), [web("ready")], "the next spawn made the supervisor again");
+
+    const adHoc = (await again.guest(pylon).startService("adhoc", { command: "sleep 1000", health: "process" })).map(({ port: _port, ...fact }) => fact);
+    assert.deepEqual(adHoc, [{ name: "adhoc", state: "ready", declared: false, wantsPreview: false }]);
+  } finally {
+    for (const b of backends) await b.ensureDeleted(pylon, AbortSignal.timeout(30_000));
+  }
+});
+
 test("a spawn for reading leaves a checkpoint's relaunch mark, and the pause after it keeps the sessions that checkpoint carried, recording none", async (t) => {
   const paused = Buffer.from(JSON.stringify([{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }])).toString("base64url");
   const labels = { "nexus.pylon": pylon, "nexus.image": "img-test00000000", "nexus.booted-from": "ckpt-a-1", "nexus.checkpoint": "ckpt-a-1", "nexus.sessions": paused };
@@ -186,6 +264,9 @@ test("a spawn for reading leaves a checkpoint's relaunch mark, and the pause aft
   const mark = join(docker.root, "var", "relaunch");
   await mkdir(join(mark, ".."), { recursive: true });
   await writeFile(mark, "");
+  // The container's relay, which outlived the probe, has applied every map, so the supervisor's routes confirm at once.
+  await mkdir(join(docker.root, "pi-sandbox"));
+  await writeFile(join(docker.root, "pi-sandbox", "relay-status.json"), JSON.stringify({ generation: 1_000_000, bound: {}, failed: {} }));
   const backend = createDockerBackend({ images });
   const boot = {
     pylonId: pylon, image: "img-test00000000" as const, source: { kind: "resume" as const, checkpoint: "ckpt-a-1" as const }, resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
