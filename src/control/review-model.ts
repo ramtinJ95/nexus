@@ -177,16 +177,23 @@ export interface Waiver { head: string; holds: string[]; codes: HoldCode[]; by: 
 
 /** A message saved before it is sent. `attempted` is when its first send began, saved before it. */
 interface Outbox { id: string; text: string; attempted: number | null }
+/**
+ * The loop's side of a conversation with an agent it awaits answers from. `expect` is the token the awaited answer must
+ * echo, and `asked` the text of the last message sent, which a turn that ended on a model failure gets again. `since`
+ * is when the agent was last sent something, and `nudges` how many reminders in a row it has had. `outbox` is the next
+ * message, and a send of it that went through before a crash still dates the wait from its `attempted`, and a reply
+ * that came meanwhile is read.
+ */
+export interface Talk<O extends Outbox = Outbox> { expect: string; asked: string; since: number; nudges: number; outbox: O | null }
 
 /**
  * The second reviewer the project's rule gave a review for `rule`'s reason: a Claude worker on another model than the
- * builder's and the first reviewer's, in `thread`, with its side of the conversation, as the review's own fields keep
- * the first's. `starting` until its thread starts, tried since `since` and last at `tried`, which failed for `why`.
- * `none` when no such model could run or its thread did not start in time, for `why`, which holds the landing for the
- * person.
+ * builder's and the first reviewer's, in `thread`, with its own conversation. `starting` until its thread starts,
+ * tried since `since` and last at `tried`, which failed for `why`. `none` when no such model could run or its thread
+ * did not start in time, for `why`, which holds the landing for the person.
  */
 export type SecondReviewer =
-  | { kind: "claude"; rule: string; thread: ThreadId; model: string; expect: string; asked: string; since: number; nudges: number; failing?: ModelFailure; outbox: Outbox | null }
+  | ({ kind: "claude"; rule: string; thread: ThreadId; model: string; failing?: ModelFailure } & Talk)
   | { kind: "starting"; rule: string; model: string; since: number; tried: number | null; why: string | null }
   | { kind: "none"; rule: string; why: string };
 /** Whether the review has a second reviewer whose verdict each round it reviews needs. */
@@ -204,11 +211,14 @@ export const verdictAt = (round: Round, seat: Seat): Verdict | null => round[sea
 export const verdictsFor = (seats: readonly Seat[], from?: Round): Pick<Round, "verdict" | "secondVerdict"> =>
   ({ verdict: from?.verdict ?? null, ...seats.includes("second") && { secondVerdict: from?.secondVerdict ?? null } });
 
-export interface Review {
+/**
+ * The review's own conversation is with the builder and the first reviewer, since only one of them owes an answer at
+ * a time, and its outbox names which one its message is for.
+ */
+export interface Review extends Talk<Outbox & { to: "builder" | "reviewer" }> {
   /** Part of every token and request ID, so a later review of the same thread never matches an earlier one's. */
   id: string;
-  /** The token the awaited answer must echo, and how many messages the review has sent, which numbers their request IDs. */
-  expect: string;
+  /** How many messages the review has sent, which numbers their request IDs. */
   sent: number;
   builder: ThreadId;
   reviewer: ThreadId;
@@ -238,16 +248,6 @@ export interface Review {
   merged: string | null;
   waiver: Waiver | null;
   phase: Phase;
-  /**
-   * The next message to the builder or the reviewer. A send that went through before a crash still dates the wait from
-   * its `attempted`, and a reply that came meanwhile is read.
-   */
-  outbox: (Outbox & { to: "builder" | "reviewer" }) | null;
-  /** The text of the last message sent, which a turn that ended on a model failure gets again. */
-  asked: string;
-  /** When the agent the loop waits on was last sent something, and how many reminders in a row it has had. */
-  since: number;
-  nudges: number;
   startedAt: number;
 }
 

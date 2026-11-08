@@ -18,6 +18,7 @@
  * ended because the agent's model failed gets the same request again, after a wait that grows with each failure in a row.
  */
 import { createHash, randomBytes } from "node:crypto";
+import type { z } from "zod";
 import { checkCaller, latest, mint, reviewerCaller, reviewPrefix, startedByNexus, verifyCaller } from "./agent-protocol.ts";
 import { releaseOutcome, type ReleaseView } from "../protocol/deploy.ts";
 import { scopedFlight } from "../single-flight.ts";
@@ -40,7 +41,7 @@ import { holdOptions, isOpen, type HeldQuestion, type Question, type ThreadQuest
 import {
   answered, answersSchema, approves, blocks, cancellable, cannotLand, changedPaths, changeOf, checkOutput, checkThread, descriptionDigest, ended, type EndedKind, findingsOf, gateFailure, heldForGate, humanLabel,
   inLanding, landable, landingVerb, liveOutput, maxRounds, personPhase, pushedHead, quoteSchema, reviewerApproved, reviewersFindings, roundsSpent, secondFindings, secondId, secondReads, seatsFor, seatsOf, verdictAt, verdictsFor, verdictSchema,
-  type Answer, type Finding, type HeldAt, type HoldCause, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type SecondReviewer, type Waiver,
+  type Answer, type Finding, type HeldAt, type HoldCause, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type Seat, type SecondReviewer, type Talk, type Waiver,
 } from "./review-model.ts";
 import { landsOnItsOwn, type Project } from "./project.ts";
 import { deliverDurable } from "./durable-message.ts";
@@ -90,7 +91,7 @@ const failedNodes = (view: ReleaseView, commit: string) => view.nodes.filter((n)
 const findingLine = (f: Finding) => `${f.id} (${f.priority})${f.where ? ` ${f.where}` : ""}: ${f.summary}${f.detail ? `\n${f.detail.split("\n").map((l) => `    ${l}`).join("\n")}` : ""}`;
 
 /** The first request to a reviewer on `model`, which is the same for either reviewer, so neither hears of the other. */
-function reviewerRequest(r: Review, detail: Pick<PrSnapshot["detail"], "head" | "base" | "body">, token: string, model: string): string {
+function reviewerRequest(r: Pick<Review, "pr" | "models" | "brief">, detail: Pick<PrSnapshot["detail"], "head" | "base" | "body">, token: string, model: string): string {
   return `${reviewPrefix}
 You are the independent reviewer of pull request #${r.pr.number}, "${r.pr.title}" (${r.pr.url}). An agent on ${r.models.builder} wrote it; you run on ${model}. Review only. Do not push, change the branch, or comment on GitHub. Your findings go to the builder, who answers each, and you review its new commits in later rounds.
 
@@ -174,17 +175,17 @@ You may take them up in a later pull request. Do not push to this pull request's
  * The answers to the findings of `seat`'s reviewer alone, under the IDs it gave them, so neither reviewer reads what
  * the other found. The first reviewer also reads the answers to a gate's findings, which no reviewer gave.
  */
-function answersFor(r: Review, previous: Round, seat: "first" | "second"): Answer[] | null {
+function answersFor(previous: Round, seat: Seat): Answer[] | null {
   if (previous.answers === null || previous.secondVerdict == null) return previous.answers;
   const seconds = new Map(secondFindings(previous).map((f) => [f.id, f.id.slice(secondId("").length)]));
   return seat === "second" ? previous.answers.flatMap((a) => seconds.has(a.id) ? [{ ...a, id: seconds.get(a.id)! }] : []) : previous.answers.filter((a) => !seconds.has(a.id));
 }
 
-function nextRound(r: Review, previous: Round, token: string, base: string, seat: "first" | "second" = "first"): string {
+function nextRound(r: Review, previous: Round, token: string, base: string, seat: Seat): string {
   const n = roundsSpent(r);
   const head = r.rounds.at(-1)!.head;
   const retargeted = previous.base !== undefined && previous.base !== base;
-  const yours = answersFor(r, previous, seat);
+  const yours = answersFor(previous, seat);
   // A reviewer none of whose findings the builder answered is told only that the round moved on.
   const answered = yours !== null && (yours.length > 0 || previous.secondVerdict == null) ? `The builder answered your findings:\n${yours.map((a) => `${a.id}: ${a.action}. ${a.reason}`).join("\n")}`
     : yours !== null ? `The builder pushed new commits after the round you reviewed at ${previous.head}.`
@@ -223,6 +224,45 @@ const fences = { reviewing: "nexus-review", fixing: "nexus-review-answers", quot
 function reminder(phase: keyof typeof fences, missing: string | null, token: string): string {
   return `${reviewPrefix}
 ${missing ?? `Your last reply had no ${fences[phase]} block with the token "${token}", so Nexus could not read it.`} End your reply with that block, with JSON in it, as ${phase === "quoting" ? "the request" : "the round's message"} showed.`;
+}
+
+/**
+ * Whom the loop awaits answers from, each in its conversation: the builder and the reviewer in the review's own, and
+ * the second reviewer, once its thread runs, in its own.
+ */
+type Party = "builder" | "reviewer" | "second";
+/** The party each reviewer seat's verdict comes from. */
+const partyAt = { first: "reviewer", second: "second" } as const satisfies Record<Seat, Party>;
+const talking = (r: Review, party: Party) => party !== "second" || r.second?.kind === "claude";
+type Awaiting = Extract<Phase, { kind: keyof typeof fences }>;
+const awaits = (phase: Phase): phase is Awaiting => phase.kind in fences;
+type Conversing = Talk & { failing: ModelFailure | undefined };
+interface Conversation { who: string; thread: ThreadId; talk: Conversing; with(talk: Conversing): Review }
+/**
+ * `party`'s conversation in `r`, and `r` with it changed. The builder's and the reviewer's model failures are kept on
+ * the phase that awaits their answer, and the review's one outbox is the message for whichever its `to` names.
+ */
+function conversation(r: Review, party: Party): Conversation {
+  if (party === "second") {
+    if (r.second?.kind !== "claude") throw new Error(`review ${r.id} has no second reviewer's conversation`);
+    const { failing: _, ...second } = r.second;
+    return {
+      who: "second reviewer", thread: second.thread, talk: { ...second, failing: r.second.failing },
+      with: ({ expect, asked, since, nudges, outbox, failing }) => ({ ...r, second: { ...second, expect, asked, since, nudges, outbox, ...failing && { failing } } }),
+    };
+  }
+  const { phase } = r;
+  const awaited = awaits(phase) && (phase.kind === "fixing" ? "builder" : "reviewer") === party ? phase : null;
+  return {
+    who: party, thread: r[party],
+    talk: { expect: r.expect, asked: r.asked, since: r.since, nudges: r.nudges, outbox: r.outbox?.to === party ? r.outbox : null, failing: awaited?.failing },
+    with({ expect, asked, since, nudges, outbox, failing }) {
+      const next: Review = { ...r, expect, asked, since, nudges, outbox: outbox !== null ? { to: party, id: outbox.id, text: outbox.text, attempted: outbox.attempted } : r.outbox?.to === party ? null : r.outbox };
+      if (awaited === null || awaited.failing === failing) return next;
+      const { failing: _, ...kept } = awaited;
+      return { ...next, phase: { ...kept, ...failing && { failing } } };
+    },
+  };
 }
 
 /** Every question about a review's holds has an ID that starts so, and a builder has at most one open. */
@@ -279,8 +319,6 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   let closed = false;
   const poll = passes.poll;
 
-  /** Whether the agent replied or ended a turn since the loop's last message to it, the only time its replies can hold an answer. */
-  const answeredSince = (state: AgentState) => state.ended !== null || state.replied;
   /** Each PR as GitHub said it in this pass, which a step reads rather than GitHub again. A landing reads it afresh. */
   let reads = new Map<string, Promise<PrSnapshot>>();
   const prKey = (r: Pick<Review, "pr">) => `${r.pr.repo}:${r.pr.number}`;
@@ -365,29 +403,37 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const again = r.rounds.slice(0, -1).some((earlier) => earlier.head === head && gateFailure(earlier)?.kind === gate.kind) ? [{ code: gate.code, text: `${gate.failed} again at ${head}, where it failed before.` }] : [];
     if (roundsSpent(r) >= r.maxRounds) return ranOut(next, { code: gate.code, text: `${gate.failed} at ${head} after the last round this review allows.` }, ...again, ...output);
     if (again.length) return toPerson(next, "gate", ...again, ...output);
-    return send(next, "builder", (token) => builderFindings(next, token), { kind: "fixing" });
+    return toBuilder(next);
   };
   /** The check's result at `head` from any round of `r`, which every round there keeps, since the check clones that commit alone. */
   const checkedAt = (r: Review, head: string) => r.rounds.findLast((round) => round.head === head && round.check !== null)?.check ?? null;
   /** The check could not run at the round's head, which a fresh pylon would not change, so the person gets its output. */
   const unrunnable = (r: Review, output: string): Review =>
     toPerson(r, "no-verdict", { code: "check-failed", text: `.nexus/check could not run at ${r.rounds.at(-1)!.head}.` }, checkOutput(output));
-  /** A reminder keeps the awaited token. Anything else is a new request, with a new token and no reminders yet. */
-  const send = (r: Review, to: "builder" | "reviewer", text: (token: string) => string, phase: Phase, nudges = 0): Review => {
-    const expect = nudges === 0 ? mint(r.id) : r.expect;
-    return resend({ ...r, phase, nudges, expect, asked: text(expect) }, to);
+  /** The last message to `party` again, under the review's next request ID, so it keeps its token. */
+  const resend = (r: Review, party: Party): Review => {
+    const c = conversation(r, party);
+    return { ...c.with({ ...c.talk, outbox: { id: `${r.id}:${r.sent + 1}`, text: c.talk.asked, attempted: null } }), sent: r.sent + 1 };
   };
-  /** The last message again, under a new request ID, so it keeps its token. */
-  const resend = (r: Review, to: "builder" | "reviewer"): Review => ({ ...r, sent: r.sent + 1, outbox: { to, id: `${r.id}:${r.sent + 1}`, text: r.asked, attempted: null } });
-  /** The second reviewer's side of `send` and `resend`, numbered among the review's messages. */
-  const sendSecond = (r: Review, text: (token: string) => string, nudges = 0): Review => {
-    if (r.second?.kind !== "claude") return r;
-    const { failing: _, ...second } = r.second;
-    const expect = nudges === 0 ? mint(r.id) : second.expect;
-    return resendSecond({ ...r, second: { ...second, nudges, expect, asked: text(expect) } });
+  const say = (r: Review, party: Party, expect: string, nudges: number, text: (token: string) => string): Review => {
+    const c = conversation(r, party);
+    return resend(c.with({ ...c.talk, expect, nudges, asked: text(expect), failing: undefined }), party);
   };
-  const resendSecond = (r: Review): Review => r.second?.kind !== "claude" ? r
-    : { ...r, sent: r.sent + 1, second: { ...r.second, outbox: { id: `${r.id}:${r.sent + 1}`, text: r.second.asked, attempted: null } } };
+  /** A new request to `party`, with a new token and no reminders yet. */
+  const send = (r: Review, party: Party, text: (token: string) => string): Review => say(r, party, mint(r.id), 0, text);
+  /** A reminder to `party`, which keeps the token its answer must echo. */
+  const remind = (r: Review, party: Party, text: (token: string) => string): Review => {
+    const { expect, nudges } = conversation(r, party).talk;
+    return say(r, party, expect, nudges + 1, text);
+  };
+  /** The round's findings go to the builder, who owes an answer to each. */
+  const toBuilder = (r: Review): Review => send({ ...r, phase: { kind: "fixing" } }, "builder", (token) => builderFindings(r, token));
+  /** What `party` did since the loop's last message to it, and the answer in a `fence` block with its token, or null. */
+  const hear = async <T extends { token: string }>(r: Review, party: Party, fence: string, schema: z.ZodType<T>) => {
+    const c = conversation(r, party);
+    const state = await agentState(registry.thread(c.thread)!, c.talk.since);
+    return { state, answer: state.mayAnswer ? latest(state.replies, fence, schema, c.talk.expect) : null };
+  };
   /**
    * The next round's request to each reviewer, which hears only of its own findings' answers. A second reviewer that
    * joins at this round, or starts again after the loop archived it at an approval, gets its first request instead.
@@ -395,8 +441,8 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   const toReviewers = async (r: Review, head: string, base: string): Promise<Review> => {
     const previous = r.rounds.at(-1)!;
     const slot = reviewRound(await joinSecond(r), head, base);
-    const next = send(slot, "reviewer", (token) => nextRound(slot, previous, token, base), { kind: "reviewing" });
-    return sendSecond(next, (token) => nextRound(slot, previous, token, base, "second"));
+    return seatsFor(slot).filter((seat) => talking(slot, partyAt[seat]))
+      .reduce((next, seat) => send(next, partyAt[seat], (token) => nextRound(slot, previous, token, base, seat)), { ...slot, phase: { kind: "reviewing" } } as Review);
   };
   /** A second reviewer the round's start may need: the project's rule's first at the round's head, or the review's again. */
   const joinSecond = async (r: Review): Promise<Review> => {
@@ -478,8 +524,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
    * approved change needs no round, and one that changes it runs out of rounds when the builder pushes it.
    */
   const rebase = (r: Review, base: string): Review => {
-    const next = withRound(r, { conflict: { base } });
-    return send(next, "builder", (token) => builderFindings(next, token), { kind: "fixing" });
+    return toBuilder(withRound(r, { conflict: { base } }));
   };
   /**
    * Why the caller a landing merges and deploys for may not, now. A landing the project's setting asked for lands for
@@ -601,68 +646,41 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   const asksAt = (r: Review, holds: HeldQuestion) => holds.review === r.id && holds.head === r.rounds.at(-1)!.head && holds.base === (r.rounds.at(-1)!.base ?? null);
 
   /**
-   * Waits on `t`. Once a turn of it ended after the loop's last message without the answer the loop needs, it gets a
-   * reminder saying what is `missing`, and after the last reminder, or hours of silence, the loop asks the person. A
-   * turn that ended because its model failed is no reminder: the same message goes again once the failure's wait is
-   * over, and after the last wait the loop asks the person.
+   * Waits on `party`. Once a turn of it ended after the loop's last message without the answer the loop needs, it gets
+   * a reminder saying what is `missing`, or that the block is, and after the last reminder, or hours of silence, the
+   * loop asks the person. A turn that ended because its model failed is no reminder: the same message goes again once
+   * the failure's wait is over, and after the last wait the loop asks the person.
    */
-  async function waitOn(r: Review, phase: Extract<Phase, { kind: "reviewing" | "fixing" | "quoting" }>, state: AgentState, missing: string | null = null): Promise<Review> {
-    const who = phase.kind === "fixing" ? "builder" : "reviewer";
-    const again = (failing?: ModelFailure): Phase => {
-      const { failing: _, ...kept } = phase;
-      return { ...kept, ...failing && { failing } };
-    };
-    return waitIn(r, {
-      who, since: r.since, nudges: r.nudges, failing: phase.failing, resend: () => resend(r, who),
-      remind: (text) => send(r, who, text, again(), r.nudges + 1), fail: (failing) => ({ ...r, phase: again(failing) }),
-    }, phase.kind, state, missing);
-  }
-
-  /** `waitOn` for the second reviewer, whose side of the conversation is its own. */
-  function waitOnSecond(r: Review, second: Extract<SecondReviewer, { kind: "claude" }>, state: AgentState): Promise<Review> {
-    return waitIn(r, {
-      who: "second reviewer", since: second.since, nudges: second.nudges, failing: second.failing, resend: () => resendSecond(r),
-      remind: (text) => sendSecond(r, text, second.nudges + 1), fail: (failing) => ({ ...r, second: { ...second, failing } }),
-    }, "reviewing", state, null);
-  }
-
-  /** Who the loop waits on, with its side of the conversation and how to move it. */
-  interface Waited { who: string; since: number; nudges: number; failing: ModelFailure | undefined; resend(): Review; remind(text: (token: string) => string): Review; fail(failing: ModelFailure): Review }
-  async function waitIn(r: Review, on: Waited, kind: keyof typeof fences, state: AgentState, missing: string | null): Promise<Review> {
-    const { who, since, failing } = on;
-    if (now() - since > answerMs) return toPerson(r, "agent", `The ${who} gave no answer Nexus could read within ${answerMs / 3_600_000} hours in round ${r.rounds.length}.`);
+  function wait(r: Review, phase: Awaiting, party: Party, state: AgentState, missing: string | null): Review {
+    const c = conversation(r, party);
+    const { since, nudges, failing } = c.talk;
+    if (now() - since > answerMs) return toPerson(r, "agent", `The ${c.who} gave no answer Nexus could read within ${answerMs / 3_600_000} hours in round ${r.rounds.length}.`);
     // Until the request goes again, `since` is before `retryAt`, and the turn that ended is the failure already counted,
     // whose end a Claude worker's transcript and its hook may each report at another time.
-    if (failing !== undefined && since < failing.retryAt) return now() < failing.retryAt ? r : on.resend();
-    const { ended, running, failure: failed } = state;
-    if (ended === null || running || now() - ended <= replyGraceMs) return r;
+    if (failing !== undefined && since < failing.retryAt) return now() < failing.retryAt ? r : resend(r, party);
+    const { over, failure: failed } = state;
+    if (over === null || now() - over <= replyGraceMs) return r;
     if (failed !== null) {
       const count = (failing?.count ?? 0) + 1;
-      if (count > retryMs.length) return toPerson(r, "agent", `The ${who}'s model failed ${count} times in a row (last: ${failed}), in round ${r.rounds.length}. Run nexus review again once the provider recovers.`);
-      return on.fail({ count, last: failed, retryAt: now() + retryMs[count - 1]! });
+      if (count > retryMs.length) return toPerson(r, "agent", `The ${c.who}'s model failed ${count} times in a row (last: ${failed}), in round ${r.rounds.length}. Run nexus review again once the provider recovers.`);
+      return c.with({ ...c.talk, failing: { count, last: failed, retryAt: now() + retryMs[count - 1]! } });
     }
-    if (on.nudges >= maxNudges) return toPerson(r, "agent", `The ${who} ended ${maxNudges + 1} turns in a row without an answer Nexus could read, in round ${r.rounds.length}.`);
-    return on.remind((token) => reminder(kind, missing, token));
+    if (nudges >= maxNudges) return toPerson(r, "agent", `The ${c.who} ended ${maxNudges + 1} turns in a row without an answer Nexus could read, in round ${r.rounds.length}.`);
+    return remind(r, party, (token) => reminder(phase.kind, missing, token));
   }
 
-
-  const steps: { [K in Exclude<PhaseKind, EndedKind>]: (r: Review, phase: Extract<Phase, { kind: K }>, builder: Thread, reviewer: Thread) => Promise<Review> } = {
-    async reviewing(r, phase, builder, reviewer) {
+  const steps: { [K in Exclude<PhaseKind, EndedKind>]: (r: Review, phase: Extract<Phase, { kind: K }>, builder: Thread) => Promise<Review> } = {
+    async reviewing(r, phase, builder) {
       const reading = r.rounds.at(-1)!;
       // Each reviewer's verdict is recorded as it comes, and the round goes on once both are in.
-      const state = reading.verdict === null ? await agentState(reviewer, r.since) : null;
-      const verdict = state !== null && answeredSince(state) ? latest(state.replies, "nexus-review", verdictSchema, r.expect) : null;
-      const second = r.second?.kind === "claude" && reading.secondVerdict === null && r.second.outbox === null ? r.second : null;
-      const secondState = second === null ? null : await agentState(registry.thread(second.thread)!, second.since);
-      const secondVerdict = second !== null && answeredSince(secondState!) ? latest(secondState!.replies, "nexus-review", verdictSchema, second.expect) : null;
+      const heard: { seat: Seat; state: AgentState }[] = [];
       let next = r;
-      if (verdict !== null) {
-        const { failing: _, ...read } = phase;
-        next = withRound({ ...next, phase: read, nudges: 0 }, { verdict });
-      }
-      if (secondVerdict !== null) {
-        const { failing: _, ...read } = second!;
-        next = withRound({ ...next, second: { ...read, nudges: 0 } }, { secondVerdict });
+      for (const seat of seatsOf(reading).filter((seat) => verdictAt(reading, seat) === null && talking(r, partyAt[seat]))) {
+        const { state, answer } = await hear(r, partyAt[seat], "nexus-review", verdictSchema);
+        heard.push({ seat, state });
+        if (answer === null) continue;
+        const c = conversation(next, partyAt[seat]);
+        next = withRound(c.with({ ...c.talk, nudges: 0, failing: undefined }), seat === "first" ? { verdict: answer } : { secondVerdict: answer });
       }
       const round = next.rounds.at(-1)!;
       if (seatsOf(round).some((seat) => verdictAt(round, seat) === null)) {
@@ -673,14 +691,17 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
           return r;
         });
         if (checked !== r) return checked;
-        const waited = state === null ? r : await waitOn(r, phase, state);
-        return waited !== r || second === null ? waited : await waitOnSecond(r, second, secondState!);
+        for (const { seat, state } of heard) {
+          const waited = wait(r, phase, partyAt[seat], state, null);
+          if (waited !== r) return waited;
+        }
+        return r;
       }
       const n = roundsSpent(next);
       if (reviewerApproved(round)) {
         if (phase.check?.unrunnable !== undefined) return unrunnable(next, phase.check.unrunnable);
         const after: Phase = phase.check === undefined || phase.check.refused !== undefined ? checking() : { kind: "checking", startedAt: phase.check.startedAt, thread: phase.check.thread };
-        return reviewersFindings(round).length ? send(next, "builder", () => builderNotes(next), after) : { ...next, phase: after, nudges: 0 };
+        return reviewersFindings(round).length ? send({ ...next, phase: after }, "builder", () => builderNotes(next)) : { ...next, phase: after, nudges: 0 };
       }
       const asks = seatsOf(round).filter((seat) => verdictAt(round, seat)!.verdict === "changes");
       const asking = asks.length === 2 ? "Both reviewers still request" : asks[0] === "second" ? "The second reviewer still requests" : "The reviewer still requests";
@@ -690,31 +711,28 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       const check = checkThread(phase);
       const run = check === null ? null : checks.poll(check, round.head, false);
       if (check !== null) checks.discard(check);
-      const stopped = run?.kind === "done" ? withRound(next, { check: { passed: run.passed, output: run.output } }) : next;
-      return send(stopped, "builder", (token) => builderFindings(stopped, token), { kind: "fixing" });
+      return toBuilder(run?.kind === "done" ? withRound(next, { check: { passed: run.passed, output: run.output } }) : next);
     },
-    async fixing(r, phase, builder) {
+    async fixing(r, phase) {
       const n = roundsSpent(r);
       const round = r.rounds.at(-1)!;
       const gate = gateFailure(round);
-      const state = await agentState(builder, r.since);
-      const found = answeredSince(state) ? latest(state.replies, "nexus-review-answers", answersSchema, r.expect) : null;
-      if (found === null) return waitOn(r, phase, state);
+      const { state, answer: found } = await hear(r, "builder", "nexus-review-answers", answersSchema);
+      if (found === null) return wait(r, phase, "builder", state, null);
       // A turn after the request went again that did not fail ends the model's failures in a row, though the loop may
       // still wait for the push its answer promises. An answer from before, or from the failed turn itself, does not.
       if (phase.failing !== undefined && r.since >= phase.failing.retryAt && state.ended !== null && state.failure === null) return { ...r, phase: { kind: "fixing" } };
       const unanswered = findingsOf(round).filter(blocks).filter((f) => !answered(f, found.answers));
-      if (unanswered.length) return waitOn(r, phase, state, `Your answers leave ${unanswered.map((f) => f.id).join(", ")} without a fix or a reason to reject.`);
+      if (unanswered.length) return wait(r, phase, "builder", state, `Your answers leave ${unanswered.map((f) => f.id).join(", ")} without a fix or a reason to reject.`);
       const withAnswers = withRound(r, { answers: found.answers });
       const fixed = found.answers.some((a) => a.action === "fixed");
       const snapshot = await read(r);
       if (snapshot.pr.state !== "open") return outside(withAnswers, snapshot.pr.state) ?? toPerson(withAnswers, "outside", `Pull request #${r.pr.number} was ${snapshot.pr.state} during the review.`);
       if (fixed && snapshot.detail.head === round.head) {
         // A push can land on GitHub a little after the turn that made it ends.
-        const { ended, running } = state;
-        if (ended === null || running) return waitOn(r, phase, state);
-        if (now() - ended < pushGraceMs) return r;
-        if (gate === null || gate.kind === "conflict") return waitOn(r, phase, state, `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
+        if (state.over === null) return wait(r, phase, "builder", state, null);
+        if (now() - state.over < pushGraceMs) return r;
+        if (gate === null || gate.kind === "conflict") return wait(r, phase, "builder", state, `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
       }
       // The reviewer cannot change a gate's result, so a failed gate at an unmoved head is the person's.
       if (gate !== null && snapshot.detail.head === round.head) {
@@ -731,14 +749,13 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (n >= r.maxRounds) return ranOut(withAnswers, `The builder pushed fixes after round ${n}, the last this review allows, so they are unreviewed.`);
       return await toReviewers(withAnswers, snapshot.detail.head, snapshot.detail.base);
     },
-    async quoting(r, phase, __, reviewer) {
+    async quoting(r, phase) {
       if (phase.asked === null) {
         const { detail } = await read(r);
-        return send(r, "reviewer", (token) => quoteRequest(r, detail, token), { kind: "quoting", asked: descriptionDigest(detail.body) });
+        return send({ ...r, phase: { kind: "quoting", asked: descriptionDigest(detail.body) } }, "reviewer", (token) => quoteRequest(r, detail, token));
       }
-      const state = await agentState(reviewer, r.since);
-      const quote = answeredSince(state) ? latest(state.replies, "nexus-quote", quoteSchema, r.expect) : null;
-      if (quote === null) return waitOn(r, phase, state);
+      const { state, answer: quote } = await hear(r, "reviewer", "nexus-quote", quoteSchema);
+      if (quote === null) return wait(r, phase, "reviewer", state, null);
       const { verdict } = r.rounds.at(-1)!;
       return { ...withRound(r, { verdict: { ...verdict!, notCheckedLive: quote.notCheckedLive }, quotedFrom: phase.asked }), phase: checking(), nudges: 0 };
     },
@@ -1008,31 +1025,20 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       return await startSecond(r, (await read(r)).detail);
     }
     // The builder's or the first reviewer's message goes before the second reviewer's.
-    const outbox = r.outbox !== null
-      ? {
-        ...r.outbox, thread: r.outbox.to === "builder" ? builder! : reviewer!,
-        attempt: (at: number): Review => ({ ...r, outbox: { ...r.outbox!, attempted: at } }),
-        sent: (since: number): Review => ({ ...r, outbox: null, since }),
-      }
-      : second?.outbox != null
-        ? {
-          ...second.outbox, thread: secondThread!,
-          attempt: (at: number): Review => ({ ...r, second: { ...second, outbox: { ...second.outbox!, attempted: at } } }),
-          sent: (since: number): Review => ({ ...r, second: { ...second, outbox: null, since } }),
-        }
-        : null;
-    if (outbox !== null) {
-      const { id, text, attempted, thread, attempt, sent } = outbox;
-      if (attempted === null) return attempt(now());
+    const to = (["builder", "reviewer", "second"] as const).find((party) => talking(r, party) && conversation(r, party).talk.outbox != null);
+    if (to !== undefined) {
+      const c = conversation(r, to);
+      const { id, text, attempted } = c.talk.outbox!;
+      if (attempted === null) return c.with({ ...c.talk, outbox: { id, text, attempted: now() } });
       const gone = live ? await endedOnGitHub(r) : null;
       if (gone !== null) return gone;
       // The save would refuse a step over a land or cancel made while GitHub answered, but the message would be gone.
       if (!registry.isCurrentReview(r)) return r;
-      return await deliverDurable({ id, text }, (m) => inbox(thread, { ...m, sender: "review" }), () => sent(attempted)) ?? r;
+      return await deliverDurable({ id, text }, (m) => inbox(registry.thread(c.thread)!, { ...m, sender: "review" }), () => c.with({ ...c.talk, outbox: null, since: attempted })) ?? r;
     }
     const phase = r.phase;
     if (ended(r)) return r;
-    const next = await (steps[phase.kind as keyof typeof steps] as (r: Review, p: Phase, b: Thread, v: Thread) => Promise<Review>)(r, phase, builder!, reviewer!);
+    const next = await (steps[phase.kind as keyof typeof steps] as (r: Review, p: Phase, b: Thread) => Promise<Review>)(r, phase, builder!);
     return live && ended(next) ? await endedOnGitHub(next) ?? next : next;
   }
 
@@ -1116,7 +1122,6 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     }
   }
 
-  /** Refuses a review of the builder's while one that has not ended runs. */
   function refuseIfRunning(builder: ThreadId): void {
     const existing = registry.review(builder);
     if (existing !== null && !ended(existing)) throw new Refusal("conflict", `review ${existing.id} of ${builder} is ${existing.phase.kind}${cancellable(existing) ? `. Cancel it with nexus review --cancel ${builder} to start another` : ""}`);
@@ -1139,22 +1144,23 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       return null;
     });
     const id = `rv-${randomBytes(4).toString("hex")}`;
+    const expect = mint(id);
     const second = rule === null ? {} : { second: secondFor(rule, models, project.secrets) };
-    const draft: Review = {
-      id, expect: mint(id), sent: 1, builder: builder.id, reviewer: "" as ThreadId, pr: { repo, number, url: snapshot.pr.url, title: snapshot.pr.title, branch: snapshot.detail.branch }, models, reviewerKind: kind.claude ? "claude" : "harness",
-      maxRounds: request.rounds ?? maxRounds, land: request.land, auto: request.auto, brief, ...second,
-      rounds: [{ head: snapshot.detail.head, base: snapshot.detail.base, ...verdictsFor(seatsFor(second)), check: null, answers: null }], merged: null, waiver: null, phase: { kind: "reviewing" }, outbox: null,
-      since: now(), nudges: 0, startedAt: now(), asked: "",
-    };
-    const prompt = reviewerRequest(draft, snapshot.detail, draft.expect, kind.model);
+    const pr = { repo, number, url: snapshot.pr.url, title: snapshot.pr.title, branch: snapshot.detail.branch };
+    const asked = reviewerRequest({ pr, models, brief }, snapshot.detail, expect, kind.model);
+    const at = now();
     beginning++;
     let review: Review;
     try {
-      const reviewer = await deps.startThread({
-        project: builder.project, title: `Review of #${number}: ${snapshot.pr.title}`.slice(0, 200), near: registry.pylon(builder.pylonId)!.node, branch: snapshot.detail.branch,
-        ...(kind.claude ? { claude: prompt, model: kind.model, raw: true } : {}),
-      }, reviewerCaller);
-      review = { ...draft, reviewer: reviewer.id, asked: prompt, ...(kind.claude ? {} : { outbox: { to: "reviewer", id: `${id}:1`, text: prompt, attempted: null } }) };
+      const reviewer = await startReviewer(builder, `Review of #${number}: ${snapshot.pr.title}`, pr.branch, kind.model, kind.claude, asked);
+      const started: Review = {
+        id, expect, sent: 0, builder: builder.id, reviewer: reviewer.id, pr, models, reviewerKind: kind.claude ? "claude" : "harness",
+        maxRounds: request.rounds ?? maxRounds, land: request.land, auto: request.auto, brief, ...second,
+        rounds: [{ head: snapshot.detail.head, base: snapshot.detail.base, ...verdictsFor(seatsFor(second)), check: null, answers: null }], merged: null, waiver: null, phase: { kind: "reviewing" }, outbox: null,
+        since: at, nudges: 0, startedAt: at, asked,
+      };
+      // A Claude reviewer's first request is its first prompt, which still takes the first message's number.
+      review = kind.claude ? { ...started, sent: 1 } : resend(started, "reviewer");
       if (secondReads(review)) review = await startSecond(review, snapshot.detail);
       registry.saveReview(review);
     } finally {
@@ -1164,6 +1170,13 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     return review;
   }
 
+  /**
+   * A reviewer's thread on `model`, started near the builder with its first request: a Claude worker's first prompt,
+   * or else the harness reviewer's first message, which its review sends.
+   */
+  const startReviewer = (builder: Thread, title: string, branch: string, model: string, claude: boolean, request: string) => deps.startThread({
+    project: builder.project, title: title.slice(0, 200), near: registry.pylon(builder.pylonId)!.node, branch, ...(claude ? { claude: request, model, raw: true } : {}),
+  }, reviewerCaller);
   /** A second reviewer for `rule` on a model neither the builder nor the first reviewer runs, to start, or why none can run. */
   const secondFor = (rule: string, models: Review["models"], secrets: Project["secrets"]): SecondReviewer => {
     const model = secondReviewerFor([models.builder, models.reviewer], secrets);
@@ -1182,10 +1195,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     const asked = reviewerRequest(r, { ...detail, head: round.head, base: round.base ?? detail.base }, expect, second.model);
     const builder = registry.thread(r.builder)!;
     try {
-      const thread = await deps.startThread({
-        project: builder.project, title: `Second review of #${r.pr.number}: ${r.pr.title}`.slice(0, 200), near: registry.pylon(builder.pylonId)!.node, branch: r.pr.branch,
-        claude: asked, model: second.model, raw: true,
-      }, reviewerCaller);
+      const thread = await startReviewer(builder, `Second review of #${r.pr.number}: ${r.pr.title}`, r.pr.branch, second.model, true, asked);
       return { ...r, second: { kind: "claude", rule: second.rule, thread: thread.id, model: second.model, expect, asked, since: now(), nudges: 0, outbox: null } };
     } catch (err) {
       if (!(err instanceof Refusal)) throw err;

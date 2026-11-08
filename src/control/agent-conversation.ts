@@ -73,16 +73,18 @@ export function personWrote(c: Conversation): boolean {
 }
 
 /**
- * When the newest turn of `t` that ended after `since` ended, or null when none has, whether a newer turn runs, and
- * whether a Claude worker replied since. A Claude turn that ends with a background shell or subagent running reports
- * heartbeats rather than its end, for up to hours, and stays `working`, so a Claude worker's turn also ends where its
- * transcript says, and a newer one runs once a prompt or a finished task follows that end there. `entries` is a
- * Claude worker's transcript, or null for a harness thread.
+ * The turn facts of `t` since `since`: `ended`, when its newest turn that ended after `since` ended, or null when none
+ * has; `over`, that end once no newer turn runs, or null; and `mayAnswer`, whether it ended a turn or a Claude worker
+ * replied since, the only time its replies can hold an answer. A Claude turn that ends with a background shell or
+ * subagent running reports heartbeats rather than its end, for up to hours, and stays `working`, so a Claude worker's
+ * turn also ends where its transcript says, and a newer one runs once a prompt or a finished task follows that end
+ * there. `entries` is a Claude worker's transcript, or null for a harness thread.
  */
 export function heard(t: Pick<Thread, "lastReplyAt" | "working">, entries: readonly ClaudeEntry[] | null, since: number) {
-  const ended = Math.max(t.lastReplyAt ?? -Infinity, ...(entries ?? []).flatMap((e) => e.kind === "turn" ? [e.at] : []));
-  const running = t.working && (entries === null || entries.some((e) => (e.kind === "prompt" || e.kind === "task") && e.at > ended));
-  return { ended: ended > since ? ended : null, running, replied: (entries ?? []).some((e) => e.kind === "reply" && e.at > since) };
+  const newest = Math.max(t.lastReplyAt ?? -Infinity, ...(entries ?? []).flatMap((e) => e.kind === "turn" ? [e.at] : []));
+  const running = t.working && (entries === null || entries.some((e) => (e.kind === "prompt" || e.kind === "task") && e.at > newest));
+  const ended = newest > since ? newest : null;
+  return { ended, over: running ? null : ended, mayAnswer: ended !== null || (entries ?? []).some((e) => e.kind === "reply" && e.at > since) };
 }
 
 /** What the review loop learns of an agent since `since` in one read: its replies and model failure, and `heard`'s turn facts. */
@@ -117,7 +119,6 @@ export function agentReader(registry: AgentConversationRegistry, harness: Pick<H
       if (first === undefined) return null;
       return typeof first.content === "string" ? first.content : first.content.flatMap((c) => c.type === "text" ? [c.text] : []).join("");
     },
-    /** An agent's replies, oldest first. */
     replies: async (t: Thread): Promise<string[]> => repliesOf(await read(t)),
     personWrote: async (t: Thread): Promise<boolean> => personWrote(await read(t)),
   };
