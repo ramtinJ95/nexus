@@ -1,0 +1,38 @@
+{
+  "Version": "1.90.0",
+  "BackendState": "Running",
+  "Self": {
+    "ID": "nFirebat1CNTRL",
+    "PublicKey": "nodekey:f1",
+    "HostName": "rj-firebat",
+    "DNSName": "rj-firebat.tail1234.ts.net.",
+    "OS": "linux",
+    "UserID": 1,
+    "TailscaleIPs": [
+      "fd7a:115c:a1e0::2"
+    ],
+    "Online": true,
+    "CapMap": {}
+  },
+  "CurrentTailnet": {
+    "Name": "person@example.com",
+    "MagicDNSSuffix": "tail1234.ts.net",
+    "MagicDNSEnabled": true
+  },
+  "CertDomains": [
+    "rj-firebat.tail1234.ts.net"
+  ],
+  "Peer": {
+    "nodekey:aaa": {
+      "ID": "nBench1CNTRL",
+      "HostName": "infra-testbench",
+      "DNSName": "infra-testbench.tail1234.ts.net.",
+      "OS": "linux",
+      "TailscaleIPs": [
+        "fd7a:115c:a1e0::3",
+        "100.64.0.3"
+      ],
+      "Online": true
+    }
+  }
+}

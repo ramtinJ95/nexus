@@ -7,7 +7,8 @@ import { test } from "node:test";
 import { parseConfig } from "../control/main.ts";
 import { parseProbeConfig } from "../probe/config.ts";
 import { parseControlPlane } from "./control-plane.ts";
-import { formatLeft, holdsImage, left, paths, parseFlags, parseTailnet, report, setup, type Existing, type Facts, type FileWrite, type Json, type Setup } from "./setup.ts";
+import { parseTailscaleStatus } from "../tailscale.ts";
+import { formatLeft, holdsImage, left, paths, parseFlags, report, tailnetDevices, setup, type Existing, type Facts, type FileWrite, type Json, type Setup } from "./setup.ts";
 
 const status = JSON.stringify({
   Version: "1.90.0",
@@ -27,7 +28,7 @@ const status = JSON.stringify({
     },
   },
 });
-const tailnet = parseTailnet(status);
+const tailnet = tailnetDevices(parseTailscaleStatus(status));
 const token = "c".repeat(64);
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 const dotfiles = "https://github.com/example/dotfiles.git";
@@ -78,7 +79,7 @@ test("a fresh control install writes configs the control plane and probe accept,
   assert.deepEqual(deployer, { token, drainTimeoutMs: 300000, healthTimeoutMs: 60000 });
 });
 
-const nodeTailnet = parseTailnet(status.replaceAll("rj-firebat", "x-self").replaceAll("infra-testbench", "rj-firebat"));
+const nodeTailnet = tailnetDevices(parseTailscaleStatus(status.replaceAll("rj-firebat", "x-self").replaceAll("infra-testbench", "rj-firebat")));
 
 test("a node rerun keeps a control plane URL the person set, since the remote port is not this machine's to know", () => {
   const first = onDisk(files(run(["--node", "rj-firebat"], fresh, nodeTailnet)));
@@ -147,7 +148,7 @@ test("a deployer.json that lacks a token gains one, and the report never prints 
 });
 
 test("a fresh node install points its probe and deployer at the control machine and writes no control.json", () => {
-  const written = files(run(["--node", "rj-firebat"], fresh, parseTailnet(status.replaceAll("rj-firebat", "x-self").replaceAll("infra-testbench", "rj-firebat"))));
+  const written = files(run(["--node", "rj-firebat"], fresh, tailnetDevices(parseTailscaleStatus(status.replaceAll("rj-firebat", "x-self").replaceAll("infra-testbench", "rj-firebat")))));
   assert.equal(written.has(paths.control), false);
   const probe = parseProbeConfig(JSON.stringify(value(written, paths.probe)));
   assert.equal(probe.node, "x-self");
@@ -277,10 +278,10 @@ test("--github-watch names the control plane's token file in the control.json on
 });
 
 test("a name two devices share is ambiguous, and the full MagicDNS name picks one", () => {
-  const shared = parseTailnet(JSON.stringify({
+  const shared = tailnetDevices(parseTailscaleStatus(JSON.stringify({
     ...JSON.parse(status),
     Peer: { ...JSON.parse(status).Peer, "nodekey:ccc": { ID: "nOther1CNTRL", DNSName: "infra-testbench.other.ts.net.", TailscaleIPs: ["100.64.0.9"] } },
-  }));
+  })));
   assert.match(errors(run(["--peer", "Infra-Testbench", "--dotfiles", dotfiles], fresh, shared)).join("\n"), /more than one device has that name: infra-testbench\.tail1234\.ts\.net, infra-testbench\.other\.ts\.net/);
   const written = files(run(["--peer", "infra-testbench.other.ts.net", "--dotfiles", dotfiles], fresh, shared));
   assert.deepEqual(value(written, paths.probe).auth.peers, ["nOther1CNTRL"]);

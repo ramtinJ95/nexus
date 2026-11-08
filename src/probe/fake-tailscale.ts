@@ -3,7 +3,8 @@
  * `tailscale serve status --json` printed in S6. No real tailscaled is contacted.
  */
 import { request } from "node:http";
-import type { HttpsGet, TailscaleCli } from "./serve.ts";
+import type { HttpsGet } from "./serve.ts";
+import type { TailscaleCli } from "../tailscale.ts";
 
 export const nodeHost = "infra-testbench.example.ts.net";
 
@@ -17,7 +18,7 @@ export function fakeTailscale(initial = "{}", localAdmin = false) {
   const changes: string[] = [];
   const failing = new Set<string>();
   const cli: TailscaleCli = async (args, signal) => {
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const line = args.join(" ");
     if (failing.delete(line)) throw new Error(`tailscale ${line}: error: injected failure`);
     if (line === "serve status --json") return JSON.stringify(config, null, 2);

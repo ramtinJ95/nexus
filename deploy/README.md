@@ -32,7 +32,7 @@ The installer checks every prerequisite first. It reports each one that is missi
 - QEMU, `qemu-system-<arch>` and `qemu-img`, because pylons are QEMU VMs;
 - `/dev/kvm`, owned by the `kvm` group;
 - tailscale, installed, running and logged in;
-- MagicDNS and HTTPS certificates turned on for the tailnet;
+- MagicDNS and HTTPS certificates turned on for the tailnet. `src/deploy/setup.ts check` reads these from `tailscale status --json`, so without Node 26 they are checked on the rerun;
 - on the control plane's machine, tailscaled started with `TS_PERMIT_CERT_UID=nexus-control`, so the control plane can fetch the dashboard's certificate (see [HTTPS dashboard](#https-dashboard)), and `--dotfiles` on the first install.
 
 Then `src/deploy/setup.ts` writes the configs from `tailscale status --json`:

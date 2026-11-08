@@ -14,10 +14,9 @@ import { join } from "node:path";
 import { createDockerBackend } from "../backends/docker-backend.ts";
 import { createPylonVmBackend } from "../backends/pylon-vm/pylon-vm-backend.ts";
 import { sweepScratch } from "../pylon-vm/client.ts";
-import { localApiWhois } from "../tailscale.ts";
+import { localApiWhois, selfDnsName, tailscaleCli, tailscaleStatus } from "../tailscale.ts";
 import { readControlPlane } from "../deploy/control-plane.ts";
-import { nodeSecrets, parseSelfDnsName, probeAuth, readProbeConfig, readSecretsFile, type ProbeConfig } from "./config.ts";
-import { tailscaleCli } from "./serve.ts";
+import { nodeSecrets, probeAuth, readProbeConfig, readSecretsFile, type ProbeConfig } from "./config.ts";
 import { startProbe } from "./server.ts";
 import { closeProbe } from "./shutdown.ts";
 import { configFiles, prefix, releasesDir, stateDirs } from "../node-layout.ts";
@@ -29,7 +28,7 @@ const secrets = nodeSecrets(await readSecretsFile(config.secretsFile));
 // `tailscale serve` as the probe's user needs `tailscale set --operator=nexus`, which deploy/install-probe.sh runs.
 const tailscale = tailscaleCli();
 // Read from tailscale rather than configured, so a preview URL always names the node the probe runs on.
-const previewHost = config.previews === undefined ? {} : { previewHost: parseSelfDnsName(await tailscale(["status", "--json"], AbortSignal.timeout(30_000))) };
+const previewHost = config.previews === undefined ? {} : { previewHost: selfDnsName(await tailscaleStatus(tailscale)) };
 function pylonVm({ gitSsh, ...backend }: Extract<ProbeConfig["backend"], { kind: "pylon-vm" }>) {
   return createPylonVmBackend({ ...backend, secrets, ...previewHost, ...(gitSsh === undefined ? {} : { gitSsh }) });
 }

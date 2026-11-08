@@ -1,0 +1,22 @@
+{
+  "Version": "1.90.0",
+  "BackendState": "Stopped",
+  "Self": {
+    "ID": "nFirebat1CNTRL",
+    "HostName": "rj-firebat",
+    "DNSName": "rj-firebat.tail1234.ts.net.",
+    "TailscaleIPs": [
+      "100.64.0.2",
+      "fd7a:115c:a1e0::2"
+    ]
+  },
+  "CurrentTailnet": {
+    "Name": "person@example.com",
+    "MagicDNSSuffix": "tail1234.ts.net",
+    "MagicDNSEnabled": true
+  },
+  "CertDomains": [
+    "rj-firebat.tail1234.ts.net"
+  ],
+  "Peer": null
+}

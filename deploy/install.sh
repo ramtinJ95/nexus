@@ -64,9 +64,9 @@ miss() {
 }
 
 # Records every prerequisite this machine misses for the role, control or node, and changes nothing. $3 is the command
-# line to rerun.
+# line to rerun. Tailscale's settings are read by src/deploy/setup.ts, so a machine without Node 26 has them checked on the rerun.
 check_prerequisites() {
-  local role=$1 dotfiles=$2 rerun=$3 major qemu packages status
+  local role=$1 dotfiles=$2 rerun=$3 major qemu packages status off
   [ "$(uid)" = 0 ] || miss "The installer changes the system, so it runs as root." "$rerun"
   if [ "$(kernel)" != Linux ] || ! systemd_booted; then
     miss "Nexus runs as systemd services, and this machine is not a Linux booted with systemd." "Install on a Linux that boots with systemd, such as Debian 12, Ubuntu 24.04 or Fedora 42."
@@ -101,13 +101,21 @@ check_prerequisites() {
 
   if ! in_service_path tailscale; then
     miss "Tailscale is not installed in $service_path. Nexus reaches its nodes and callers over the tailnet." "curl -fsSL https://tailscale.com/install.sh | sh" "sudo tailscale up"
-  elif ! status=$(tailscale_status) || ! grep -Eq '"BackendState": *"Running"' <<<"$status"; then
-    miss "Tailscale is not running and logged in." "sudo systemctl enable --now tailscaled && sudo tailscale up"
-  else
-    grep -Eq '"MagicDNSEnabled": *true' <<<"$status" \
-      || miss "MagicDNS is off. Nodes and preview URLs are named by MagicDNS." "Turn on MagicDNS at https://login.tailscale.com/admin/dns"
-    grep -Eq '"CertDomains": *\[ *("|$)' <<<"$status" \
-      || miss "HTTPS certificates are off. Previews and the dashboard are served over HTTPS." "Turn on HTTPS Certificates at https://login.tailscale.com/admin/dns"
+  elif [ "$major" != none ] && [ "$major" -ge 26 ]; then
+    if status=$(tailscale_status); then
+      off=$(PATH=$service_path node "$repo/src/deploy/setup.ts" check <<<"$status") \
+        || fail "src/deploy/setup.ts check could not read tailscale's status. See what it says: tailscale status --json | node $repo/src/deploy/setup.ts check"
+    else
+      off=not-running
+    fi
+    if [[ $off == *not-running* ]]; then
+      miss "Tailscale is not running and logged in." "sudo systemctl enable --now tailscaled && sudo tailscale up"
+    else
+      [[ $off != *magicdns-off* ]] \
+        || miss "MagicDNS is off. Nodes and preview URLs are named by MagicDNS." "Turn on MagicDNS at https://login.tailscale.com/admin/dns"
+      [[ $off != *certificates-off* ]] \
+        || miss "HTTPS certificates are off. Previews and the dashboard are served over HTTPS." "Turn on HTTPS Certificates at https://login.tailscale.com/admin/dns"
+    fi
   fi
 
   [ "$role" = control ] || return 0

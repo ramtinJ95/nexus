@@ -1,0 +1,88 @@
+{
+  "Version": "1.90.0",
+  "TUN": true,
+  "BackendState": "Running",
+  "HaveNodeKey": true,
+  "AuthURL": "",
+  "TailscaleIPs": [
+    "100.64.0.2",
+    "fd7a:115c:a1e0::2"
+  ],
+  "Self": {
+    "ID": "nFirebat1CNTRL",
+    "PublicKey": "nodekey:f1",
+    "HostName": "rj-firebat",
+    "DNSName": "rj-firebat.tail1234.ts.net.",
+    "OS": "linux",
+    "UserID": 1,
+    "TailscaleIPs": [
+      "100.64.0.2",
+      "fd7a:115c:a1e0::2"
+    ],
+    "Online": true,
+    "CapMap": {}
+  },
+  "Health": [],
+  "MagicDNSSuffix": "tail1234.ts.net",
+  "CurrentTailnet": {
+    "Name": "person@example.com",
+    "MagicDNSSuffix": "tail1234.ts.net",
+    "MagicDNSEnabled": true
+  },
+  "CertDomains": [
+    "rj-firebat.tail1234.ts.net"
+  ],
+  "Peer": {
+    "nodekey:aaa": {
+      "ID": "nBench1CNTRL",
+      "HostName": "infra-testbench",
+      "DNSName": "infra-testbench.tail1234.ts.net.",
+      "OS": "linux",
+      "TailscaleIPs": [
+        "fd7a:115c:a1e0::3",
+        "100.64.0.3"
+      ],
+      "Online": true
+    },
+    "nodekey:bbb": {
+      "ID": "nMac1CNTRL",
+      "HostName": "Ramtins-MacBook-Pro",
+      "DNSName": "ramtins-macbook-pro.tail1234.ts.net.",
+      "OS": "macOS",
+      "TailscaleIPs": [
+        "100.64.0.4",
+        "fd7a:115c:a1e0::4"
+      ],
+      "Online": false
+    },
+    "nodekey:ccc": {
+      "ID": "nPhone1CNTRL",
+      "HostName": "phone",
+      "DNSName": "",
+      "OS": "iOS",
+      "TailscaleIPs": [
+        "100.64.0.5"
+      ],
+      "Online": true
+    },
+    "nodekey:ddd": {
+      "ID": "nV6only1CNTRL",
+      "HostName": "v6only",
+      "DNSName": "v6only.tail1234.ts.net.",
+      "OS": "linux",
+      "TailscaleIPs": [
+        "fd7a:115c:a1e0::6"
+      ],
+      "Online": true
+    },
+    "nodekey:eee": {
+      "ID": "",
+      "HostName": "shared-in",
+      "DNSName": "shared-in.other.ts.net.",
+      "TailscaleIPs": [
+        "100.64.0.7"
+      ]
+    }
+  },
+  "User": {}
+}

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { JobFailure } from "../protocol/jobs.ts";
 import type { PylonId } from "../ids.ts";
-import { readRoutes, startPreviews, tailscaleCli } from "./serve.ts";
+import { readRoutes, startPreviews } from "./serve.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "./fake-tailscale.ts";
 
 const a = "pylon-a" as PylonId;
@@ -134,33 +134,6 @@ test("the routes file is readable by its owner only, whatever the umask", async 
   t.after(() => process.umask(umask));
   await serve.converge(a, [{ service: "web", httpsPort: 10000 }], signal);
   assert.equal((await stat(routesFile)).mode & 0o777, 0o600);
-});
-
-test("tailscaleCli resolves with stdout as printed, and a failure names the command and its stderr, or else Node's reason", async (t) => {
-  const bin = await mkdtemp(join(tmpdir(), "nexus-tailscale-bin-"));
-  t.after(() => rm(bin, { recursive: true }));
-  await writeFile(join(bin, "tailscale"), [
-    "#!/bin/sh",
-    'case "$1" in',
-    "  ok) printf '  {\"TCP\":{}}\\n\\n' ;;",
-    "  said) printf '\\n  no such serve config  \\n' >&2; exit 1 ;;",
-    "  quiet) exit 2 ;;",
-    "  slow) exec sleep 30 ;;",
-    "esac",
-  ].join("\n"), { mode: 0o755 });
-  const path = process.env.PATH;
-  process.env.PATH = `${bin}:${path}`;
-  t.after(() => { process.env.PATH = path; });
-  const cli = tailscaleCli();
-  const signal = AbortSignal.timeout(5000);
-
-  assert.equal(await cli(["ok", "--json"], signal), '  {"TCP":{}}\n\n');
-  await assert.rejects(cli(["said", "--https=443", "off"], signal), { message: "tailscale said --https=443 off: no such serve config" });
-  await assert.rejects(cli(["quiet", "status"], signal), (err: Error) => err.message.startsWith("tailscale quiet status: Command failed: tailscale quiet status"));
-  const abort = new AbortController();
-  const slow = cli(["slow"], abort.signal);
-  abort.abort();
-  await assert.rejects(slow, { message: /^tailscale slow: .*aborted/ });
 });
 
 test("withdraw stops routing a service's port at once, and the next converge of any pylon removes its entry", async (t) => {

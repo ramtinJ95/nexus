@@ -153,15 +153,3 @@ export async function readSecretsFile(path: string): Promise<SecretSource> {
     await file.close();
   }
 }
-
-const statusSchema = z.object({ Self: z.object({ DNSName: z.string() }) });
-
-/**
- * The node's MagicDNS name from `tailscale status --json`, such as infra-testbench.example.ts.net. Previews are
- * served under it, so a node without one cannot publish them.
- */
-export function parseSelfDnsName(statusJson: string): string {
-  const name = parseJson(statusSchema, statusJson, "tailscale status --json has no Self.DNSName: status").Self.DNSName.replace(/\.$/, "");
-  if (name === "") throw new Error("tailscale reports no MagicDNS name for this node, so previews have no host to be served under. Turn on MagicDNS for the tailnet");
-  return name;
-}

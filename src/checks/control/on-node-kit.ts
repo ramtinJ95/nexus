@@ -11,18 +11,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { z } from "zod";
 import { artifactDirectory, tarCodec } from "../../image/artifacts.ts";
-import { readControlPlane } from "../../deploy/control-plane.ts";
 import { exit, type Exit } from "../../exec.ts";
 import { shellQuote } from "../../shell.ts";
 import { isImageId, type TailnetNodeId } from "../../ids.ts";
-import { tailnetNodeIdSchema } from "../../protocol/fields.ts";
 import { probePort } from "../../protocol/routes.ts";
 import { scriptedModel, scriptedModels } from "../../control/harness/test-fixture.ts";
-import { parseSelfDnsName, readProbeConfig } from "../../probe/config.ts";
-import { parseServeStatus, tailscaleCli } from "../../probe/serve.ts";
 import { localApiWhois } from "../../tailscale.ts";
+import { nodePreviews, readNodeFacts } from "./node-facts.ts";
 import { callText } from "../../test-support/kit.ts";
 import type { ThreadDetail } from "../../control/wire.ts";
 import { defaultPreviewPorts, startControlPlane, type ControlPlaneConfig } from "../../control/main.ts";
@@ -35,7 +31,7 @@ import type { PortRange } from "../../control/thread-store.ts";
  * node as its control plane. With `resolvesToProbe`, this node's MagicDNS name must also resolve to the probe.
  */
 export async function openNodeCheck(options: { image: string | undefined; opens: string; resolvesToProbe: boolean }) {
-  const probeConfig = await readProbeConfig(process.argv[2] ?? "/etc/nexus/probe.json");
+  const { probeConfig, self, dnsName, trustedControlPlane: trusted } = await readNodeFacts(process.argv[2] ?? "/etc/nexus/probe.json");
   const { backend, previews } = probeConfig;
   if (backend.kind !== "pylon-vm") throw new Error(`the probe runs the ${backend.kind} backend. This check is for pylon-vm`);
   const store = artifactDirectory(backend.artifacts, tarCodec);
@@ -44,12 +40,6 @@ export async function openNodeCheck(options: { image: string | undefined; opens:
   if (!isImageId(image) || !images.includes(image)) throw new Error(`name one of the images in ${store.root}: ${images.join(", ")}`);
   if (probeConfig.listen.port !== probePort) throw new Error(`the probe listens on port ${probeConfig.listen.port}, and the control plane reaches probes on ${probePort} only`);
   if (previews === undefined) throw new Error(`set previews in the probe's config, then restart the probe. This check opens ${options.opens}`);
-  const tailscale = tailscaleCli();
-  const statusJson = await tailscale(["status", "--json"], AbortSignal.timeout(30_000));
-  const self = z.object({ Self: z.object({ ID: tailnetNodeIdSchema }) }).parse(JSON.parse(statusJson)).Self.ID;
-  // Preview URLs name the node by its MagicDNS name, because that is the name its tailscale serve certificate is for.
-  const dnsName = parseSelfDnsName(statusJson);
-  const trusted = (await readControlPlane()).tailnetNodeId;
   if (trusted !== self) throw new Error(`/etc/nexus/control-plane.json names ${trusted} as the control plane, not this node's ID ${self}. Point it at this node with sudo deploy/set-control-plane.sh ${self} <url>`);
   const tailscaledSocket = await personWhois(self);
   const manifest = await store.manifest(image);
@@ -82,14 +72,14 @@ export async function openNodeCheck(options: { image: string | undefined; opens:
     return await startControlPlane(config, scriptedModels());
   };
 
-  const serveJson = () => tailscale(["serve", "status", "--json"], AbortSignal.timeout(30_000));
+  const { serveJson, serveStatus, listeners, routes } = nodePreviews(previews);
 
   /**
    * Refuses to go on while tailscale serve serves a port in `ports`, which this check's previews would get. Taking over
    * an entry there would break whatever owns it. With `exceptGateway`, the probe's gateway may serve them.
    */
   const refuseServedPorts = async (ports: PortRange, { exceptGateway = false } = {}) => {
-    for (const [port, listener] of parseServeStatus(await serveJson(), `http://127.0.0.1:${previews.gatewayPort}`)) {
+    for (const [port, listener] of await listeners()) {
       if (port < ports.first || port > ports.last) continue;
       if (!exceptGateway) throw new Error(`tailscale serve already serves port ${port}, which this check's previews would get. Free it first`);
       if (listener.kind === "other") throw new Error(`tailscale serve serves port ${port} with something other than the probe's gateway. Free it first`);
@@ -104,7 +94,8 @@ export async function openNodeCheck(options: { image: string | undefined; opens:
     dnsName,
     host,
     serveJson,
-    serveStatus: async () => JSON.parse(await serveJson()) as { TCP?: Record<string, unknown> },
+    serveStatus,
+    routes,
     refuseServedPorts,
     planeConfig,
     startPlane,
