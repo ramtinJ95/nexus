@@ -81,7 +81,7 @@ test("once its controller stops, an instance is read from its directory and the 
 	c.finishStop();
 	assert.equal(((await stop) as Inspection).status.state, "stopped");
 	await assert.rejects(services, /Sandbox is stopped/);
-	const inspected = (await run(c.root, { action: "inspect", name: c.name })) as Inspection;
+	const inspected = await run(c.root, { action: "inspect", name: c.name });
 	assert.equal(inspected.connected, false, "an inspect after the stop reached the stopped controller");
 	assert.equal(inspected.status.state, "stopped");
 	assert.equal(c.afterStop(), 0, "requests reached the controller after its stop");
@@ -100,7 +100,7 @@ test("with no controller listening, an inspect reads the instance offline, a sto
 	await saveJson(join(c.dir, "status.json"), { name: c.name, state: "interrupted" });
 	c.server.close();
 	await c.closed;
-	const inspected = (await run(c.root, { action: "inspect", name: c.name })) as Inspection;
+	const inspected = await run(c.root, { action: "inspect", name: c.name });
 	assert.deepEqual([inspected.connected, inspected.status.state], [false, "interrupted"]);
 	await assert.rejects(run(c.root, { action: "services", name: c.name, op: "status" }), /^Error: pylon-t1 is not running\. Use start first$/);
 	assert.equal(((await run(c.root, { action: "stop", name: c.name })) as Inspection).status.state, "stopped");

@@ -13,7 +13,7 @@ import fs from "node:fs/promises";
 import { registerHooks, syncBuiltinESMExports } from "node:module";
 import type { Action, BootSpec, SandboxRecord } from "./contracts.ts";
 
-export { lifecycleQueue, NotRunning, readIntent, runsBesideQueue } from "./runtime.ts";
+export { lifecycleQueue, NotRunning, readIntent } from "./runtime.ts";
 
 export class SandboxRuntime {
 	retired = false;

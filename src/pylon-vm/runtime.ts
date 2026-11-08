@@ -83,12 +83,8 @@ export async function loadKvm(vm: VM, resources: BootSpec["resources"]): Promise
 /** One script that runs each command in a login shell, and stops at the first that fails with its exit code. */
 const chained = (commands: readonly string[]) => commands.map((cmd) => `/bin/sh -lc ${q(cmd)} || exit $?`).join("\n");
 
-/** Actions that wait on a process, only read, or touch only the host, which run beside the lifecycle queue so that they never wait behind it. */
-const besideQueue = new Set(["inspect", "exec", "exec-status", "exec-kill", "write-files", "logs", "update-secret"]);
-export const runsBesideQueue = (action: string) => besideQueue.has(action);
-
 /**
- * The controller's lifecycle queue. Every other action runs on it, one at a time and in order, so that none races
+ * The controller's lifecycle queue. Every action that `actions` in contracts.ts does not run beside it runs on it, one at a time and in order, so that none races
  * another's changes to the VM or its services. A failed action does not stop the next.
  */
 export const lifecycleQueue = serialQueue;

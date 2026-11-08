@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { SshExecRequest } from "@earendil-works/gondolin";
-import type { BootSpec } from "./contracts.ts";
+import { createHttpHooks, type SshExecRequest } from "@earendil-works/gondolin";
+import { type BootSpec, secretPlaceholderShapes } from "./contracts.ts";
 import { networkOptions } from "./network.ts";
 
 const spec: BootSpec = {
@@ -32,6 +32,13 @@ async function sentAuthorization(url: string): Promise<string | null> {
 	assert.ok(sent instanceof Request);
 	return sent.headers.get("authorization");
 }
+
+test("Gondolin's placeholders in both its modes have the shapes the probe redacts", () => {
+	const shared = networkOptions(spec, "pylon-t1").placeholders["STRIPE_KEY"]!;
+	assert.match(shared, new RegExp(`^${secretPlaceholderShapes.shared.source}\\.stripe_key$`));
+	const unique = createHttpHooks({ secrets: spec.secrets, secretPlaceholderMode: "unique" }).env["STRIPE_KEY"]!;
+	assert.match(unique, new RegExp(`^${secretPlaceholderShapes.unique.source}$`));
+});
 
 test("the guest sees a placeholder, never the secret value", () => {
 	const { placeholders } = networkOptions(spec, "pylon-t1");
