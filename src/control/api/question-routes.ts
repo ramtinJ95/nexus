@@ -1,7 +1,3 @@
-/**
- * Answering the questions about a thread, a Claude worker's AskUserQuestion and a review's holds included, and those
- * about a node.
- */
 import type { Pipeline } from "../pipeline.ts";
 import type { Planning } from "../planning.ts";
 import type { CleanupPass } from "../cleanup.ts";

@@ -1,6 +1,3 @@
-/**
- * The API's server-sent event streams: a thread's conversation, and the event log's followers.
- */
 import type { ServerResponse } from "node:http";
 import type { Frames, Watch } from "../conversation-view.ts";
 import type { Registry } from "../registry.ts";

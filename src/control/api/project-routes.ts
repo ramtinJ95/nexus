@@ -1,6 +1,3 @@
-/**
- * Adding, listing and editing projects.
- */
 import type { ProjectId } from "../../ids.ts";
 import type { Pipeline } from "../pipeline.ts";
 import { HttpError } from "../http-error.ts";

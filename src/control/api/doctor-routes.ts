@@ -1,7 +1,3 @@
-/**
- * `nexus doctor`'s checks, run now, and the health the control plane's passes keep: the latest pass, each problem
- * open, and the changes of the last 30 days.
- */
 import { HttpError } from "../http-error.ts";
 import { healthView, type DoctorReport } from "../doctor-model.ts";
 import { noContent, ok, on, parse, type RouteEntry, type ApiKit } from "./kit.ts";

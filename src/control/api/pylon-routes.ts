@@ -1,6 +1,3 @@
-/**
- * What a person does in a thread's pylon: previews, sessions, and reads of its checkout and conversation images.
- */
 import type { PortRange, Preview, Thread } from "../thread-store.ts";
 import { HttpError } from "../http-error.ts";
 import { checkoutReader, contentType, maxFileBytes, type CheckoutReader } from "../../checkout-files.ts";

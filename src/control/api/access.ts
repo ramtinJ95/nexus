@@ -71,7 +71,6 @@ export function admit(roles: ReadonlySet<Role>, policy: Policy | undefined) {
   throw unknown(role ?? "allowed");
 }
 
-/** The refusal of a caller holding `roles` that does not hold `policy`'s role, or null when it does. */
 export function refusal(roles: ReadonlySet<Role>, policy: Policy): Refusal | null {
   if (roles.has(policy.role)) return null;
   switch (policy.role) {
@@ -126,7 +125,6 @@ export function apiAccess(registry: Registry, wake: (node: NodeName) => void, op
     throw new HttpError(404, `no thread ${id}`);
   }
 
-  /** The thread `id` names, once it has what `need` asks of it. */
   function thread(id: string, need: Need = {}): Thread {
     const found = lookup(id);
     if ("thread" in found) return guard(found.thread, need);
@@ -134,7 +132,6 @@ export function apiAccess(registry: Registry, wake: (node: NodeName) => void, op
     throw new HttpError(409, status === "queued" ? `thread ${id} is queued, so it has no pylon or conversation yet` : `thread ${id} was ${status === "archived" ? "cancelled" : "deleted"} while queued, so it has no pylon or conversation`, "queued");
   }
 
-  /** Why the thread does not have what `need` asks of it, or null when it does. */
   function threadRefusal(t: Thread, need: Need): string | null {
     const status = need.status === undefined ? undefined : statusNeeds[need.status];
     if (status?.refuses.includes(t.status)) return `thread ${t.id} is ${t.status}${status.paused ? ", so its pylon stays paused" : ""}`;

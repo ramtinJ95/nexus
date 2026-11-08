@@ -1,6 +1,3 @@
-/**
- * The release a deployer asks for, and the deployer's reports and drain.
- */
 import { HttpError } from "../http-error.ts";
 import { releaseView, resolveMain } from "../releases.ts";
 import type { CleanupPass } from "../cleanup.ts";

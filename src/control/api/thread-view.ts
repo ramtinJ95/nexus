@@ -101,7 +101,6 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
     return { ...d, said: threadSaid(d) };
   }
 
-  /** What a thread page shows: a Claude worker's transcript as last read, the harness conversation's view, or none. */
   async function conversation(t: Thread): Promise<AgentView | null> {
     const view = await agents[registry.agent(t).kind].view(t);
     return view === null ? null : agentView(view);

@@ -60,7 +60,6 @@ function latestOf(d: ThreadDetail, items: readonly Item[]): Latest {
   };
 }
 
-/** The dashboard's pages, each a GET route, and the thread page's stream. */
 export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | null | undefined; health?: (() => DoctorReport | null) | undefined }, nodeHealth: (name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
   const { registry, detail } = kit;
   const deploys = (r: Review) => options.reviews?.deploys(r) ?? false;

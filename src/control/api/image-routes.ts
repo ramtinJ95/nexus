@@ -1,6 +1,3 @@
-/**
- * Recording, building, rolling out and rolling back the pylon image.
- */
 import { HttpError } from "../http-error.ts";
 import { imagesView, type ImageRollout } from "../image-rollout.ts";
 import type { ImageOperation } from "../image-store.ts";
