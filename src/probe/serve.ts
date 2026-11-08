@@ -22,7 +22,7 @@ import type { TailscaleCli } from "../tailscale.ts";
 import { serialQueue } from "../single-flight.ts";
 import { startGateway, warmHeader, type GatewayOptions, type PreviewGateway, type PreviewRoute } from "./gateway.ts";
 
-/** One GET that resolves to the HTTP status. The probe uses fetch. Tests route it to the gateway without TLS. */
+/** Tests route it to the gateway without TLS. */
 export type HttpsGet = (url: string, headers: Record<string, string>, signal: AbortSignal) => Promise<number>;
 
 export const fetchGet: HttpsGet = async (url, headers, signal) => {

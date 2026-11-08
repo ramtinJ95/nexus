@@ -64,7 +64,6 @@ export async function startGateway(options: GatewayOptions): Promise<PreviewGate
     options.onHit({ ...route, at: new Date(now).toISOString(), login: typeof login === "string" ? login : null });
   }
 
-  /** Either the gateway's own answer, or where to forward the request. */
   function resolve(req: IncomingMessage): Answer | { origin: URL; port: number } {
     const port = hostPort(req.headers.host);
     const route = port === null ? undefined : options.route(port);
@@ -195,7 +194,6 @@ function forwardedHeaders(req: IncomingMessage, port: number, upgrading: boolean
   return headers;
 }
 
-/** Drops hop-by-hop headers, including any the Connection header names. */
 function endToEnd(headers: IncomingHttpHeaders): OutgoingHttpHeaders {
   const named = new Set((headers.connection ?? "").split(",").map((h) => h.trim().toLowerCase()));
   const out: OutgoingHttpHeaders = {};

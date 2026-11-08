@@ -245,7 +245,6 @@ const herdrToml = existsSync(herdrConfig) ? readFileSync(herdrConfig, "utf8") : 
 step("HERDR_CONFIG", { path: herdrConfig, content: herdrToml });
 assert.match(herdrToml, /^\[session\][^[]*^\s*resume_agents_on_restore\s*=\s*false\s*$/m, `${herdrConfig} turns off Herdr's own agent resume`);
 
-// OPEN
 await mkdir(shellCwd, { recursive: true });
 const opened = {
   shell: await openSession(guest, { harness: "shell", title: "check-shell", cwd: shellCwd }),
@@ -346,7 +345,6 @@ const freshAgain = await relaunchSessions(guest, unlocked);
 stepRelaunch("FRESH_RELAUNCH_2", freshAgain);
 assert.ok(others(freshAgain).every((o) => o.result === "present"), "a second relaunch after a fresh one opens nothing");
 
-// CLOSE
 for (const o of freshAgain) if (o.result === "present" || o.result === "relaunched") await closeSession(guest, o.herdrPane);
 await closeSession(guest, "w999:p999");
 const closed = await sessionFacts(guest);

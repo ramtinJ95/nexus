@@ -91,7 +91,6 @@ export interface Probe {
 }
 
 const snapshotIntervalMs = 60_000;
-/** How long node health samples its pylons' CPU for. */
 const healthSampleMs = 1_000;
 const maxSecretBytes = 16_384;
 /** RFC 6750's b64token, the alphabet bearer tokens are written in. */
@@ -234,13 +233,12 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     };
   }
 
+  let publishedAt: string | null = null;
+  let published = 0;
   /**
    * A full snapshot rather than a pylon event, because a pylon event cannot say that a pylon is gone. Calls while one
    * is read share one more read after it, which runs in the read queue, so it sees each link or unlink queued before it.
    */
-  /** The latest published snapshot's time, and how many have been published. */
-  let publishedAt: string | null = null;
-  let published = 0;
   const publisher = singleFlight(async () => {
     if (observers.size === 0) return;
     // Observers that cannot get the new state lose their link, so they reconnect for a fresh snapshot.

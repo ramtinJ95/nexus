@@ -17,7 +17,6 @@ export interface Launcher {
   kind: string;
   /** The launch arguments that resume a harness session ID, and whether the session already took a prompt, which a prompted launch must not repeat. */
   resume(guest: Guest, id: string): Promise<{ args: readonly string[]; hasHistory: boolean }>;
-  /** The launch arguments of a fresh start. */
   fresh(): readonly string[];
   /** Arguments every launch passes, after those and any model. */
   flags: readonly string[];

@@ -151,7 +151,6 @@ export const jobHooks: { readonly [K in JobKind]: JobHooks<K> } = {
 
 type CommandKind = PylonCommand["kind"];
 
-/** How the probe runs one kind of command. */
 export interface CommandPolicy<K extends CommandKind> {
   /**
    * What it waits for. A function names the Claude session it waits on, if any, so the sends, launches and interrupts
