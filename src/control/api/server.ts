@@ -70,6 +70,7 @@ import type { DoctorReport } from "../doctor-model.ts";
 import { BodyTooLarge, readBody } from "../../node-base/request-body.ts";
 import type { StartKey, StartRequest } from "../start-request.ts";
 import type { Features } from "../features.ts";
+import type { Log } from "../log-once.ts";
 import { attachScript } from "../../guest-contract.ts";
 
 export interface ApiOptions {
@@ -99,6 +100,7 @@ export interface ApiOptions {
   previewPorts: PortRange;
   /** The health passes' latest, null before the first. */
   health(): DoctorReport | null;
+  log: Log;
   /** How long a stream's client may leave what was sent unread before it is dropped. 30 s by default. */
   streamStallMs?: number;
   /** How attached terminals ping and wait. Tests shorten it. */
@@ -139,7 +141,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const pylon = pylonAccess({ registry, probes, wake, guard, current });
   const { inPylon, whileRunning } = pylon;
   const wakeThread = access.wakeThread;
-  const claude = claudeConversations({ registry, probes });
+  const claude = claudeConversations({ registry, probes, log: options.log });
   const agents: ThreadAgents = threadAgents({ registry, harness, claude, inPylon, whileRunning, wake: wakeThread, planning: options.features.planning });
 
   const views = threadViews(registry, agents, options);

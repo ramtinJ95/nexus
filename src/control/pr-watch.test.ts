@@ -42,7 +42,7 @@ function fixture(path = ":memory:") {
   const harness: Pick<HarnessHost, "send"> = { async send(...args) { messages.push(args); if (reject) throw new Error("delivery interrupted"); return { id: 1 } as never; } };
   const github = { async find(repo: string, branch: string, state = "open") { calls.push(`find:${repo}:${branch}${state === "all" ? ":all" : ""}`); return state === "all" || snapshot.pr.state === "open" ? [1] : []; }, async poll() { calls.push("poll"); return structuredClone(snapshot); } };
   let wakes = 0;
-  const inbox = (r = registry, h = harness) => agentInbox({ registry: r, harness: h, probes: new Map(), wake() { wakes++; } });
+  const inbox = (r = registry, h = harness) => agentInbox({ log: assert.fail, registry: r, harness: h, probes: new Map(), wake() { wakes++; } });
   const options = { registry, github, inbox: inbox() };
   /** Reports the node online with the thread's pylon running, or with no pylons. */
   function observe(thread: ThreadId, running: boolean) {
@@ -554,7 +554,7 @@ test("feedback reaches a Claude worker thread typed into its session once its py
   let outcome: "sent" | "blocked" = "blocked";
   const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command); return { kind: "send-claude", outcome, herdrPane: "w1:p1", resumed: false }; } };
   const woken: ThreadId[] = [];
-  const watcher = prWatcher({ ...f.options, inbox: agentInbox({ registry: f.registry, harness: f.harness, probes: new Map([[f.node, probe]]), wake(t) { woken.push(t.id); } }) });
+  const watcher = prWatcher({ ...f.options, inbox: agentInbox({ log: assert.fail, registry: f.registry, harness: f.harness, probes: new Map([[f.node, probe]]), wake(t) { woken.push(t.id); } }) });
   await watcher.poll();
   f.snapshot.comments.push({ id: "review:1", text: "review by owner (CHANGES_REQUESTED): https://example.com\r\n\tUse the cache\r\n" });
   await watcher.poll();

@@ -27,6 +27,7 @@ import { defaultClaudeModel, modelFamily, secondReviewerModels } from "../protoc
 import type { ChangedFile, GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { Refusal } from "./refusal.ts";
 import type { Inbox } from "./inbox.ts";
+import { logOnce, type Log } from "./log-once.ts";
 import { caseOf, remedyOf, waivable, waivedName, type Hold } from "./holds.ts";
 import { carryWaiver, headHolds, holdsAt, landPress, secondReviewRule, staleQuote, unwaived } from "./policy.ts";
 import type { CheckRuns } from "./gate.ts";
@@ -83,7 +84,7 @@ export interface ReviewDeps {
   mayLand(caller: string): boolean;
   /** Tells the planner a thread's status changed, so an archived thread's pylon pauses at once. */
   wake(t: Thread): void;
-  log(message: string): void;
+  log: Log;
   now?: () => number;
 }
 
@@ -171,6 +172,8 @@ export function secondReviewerFor(taken: readonly string[], secrets: readonly Se
 export function reviewLoop(deps: ReviewDeps) {
   const { registry, github, inbox, agentState, release, log } = deps;
   const now = deps.now ?? Date.now;
+  // The failures each pass retries. Never log transport errors' text: a fetch implementation may put authorization headers in them.
+  const retried = logOnce(log);
   const passes = scopedFlight(pass);
   let closed = false;
   // A check's stream can end after close, and its wake then finds the registry closed.
@@ -550,8 +553,11 @@ export function reviewLoop(deps: ReviewDeps) {
       if (seatsOf(round).some((seat) => verdictAt(round, seat) === null)) {
         if (next !== r) return next;
         // A check that cannot start yet must not keep the reviewer's reminders, retries and deadline from running.
-        const checked = await checkWhileReading(r, phase, builder).catch((err: unknown) => {
-          log(`review ${r.id} of ${r.builder}: the check beside the reviewer did not start and will be tried again (${(err as Error).name})`);
+        const checked = await checkWhileReading(r, phase, builder).then((checked) => {
+          retried.ok(`${r.id} check`);
+          return checked;
+        }, (err: unknown) => {
+          retried.failed(`${r.id} check`, `review ${r.id} of ${r.builder}: the check beside the reviewer did not start and will be tried again (${(err as Error).name})`);
           return r;
         });
         if (checked !== r) return checked;
@@ -751,8 +757,11 @@ export function reviewLoop(deps: ReviewDeps) {
 
   async function step(r: Review): Promise<Review> {
     // The person is asked once the holds are known, whatever the phase waits on, and a failed read only delays it.
-    const ready = await askHolds(r).catch((err: unknown) => {
-      log(`review ${r.id} of ${r.builder}: its holds were not asked about and will be tried again (${(err as Error).name})`);
+    const ready = await askHolds(r).then((ready) => {
+      retried.ok(`${r.id} holds`);
+      return ready;
+    }, (err: unknown) => {
+      retried.failed(`${r.id} holds`, `review ${r.id} of ${r.builder}: its holds were not asked about and will be tried again (${(err as Error).name})`);
       return r;
     });
     if (ready !== r) return ready;
@@ -887,8 +896,9 @@ export function reviewLoop(deps: ReviewDeps) {
         registry.replaceQuestions(builder, holdsPrefix, null);
         asked.set(builder, null);
       }
+      retried.ok("drop questions");
     } catch (err) {
-      log(`the questions of reviews no pass steps were not dropped and will be tried again (${(err as Error).name})`);
+      retried.failed("drop questions", `the questions of reviews no pass steps were not dropped and will be tried again (${(err as Error).name})`);
     }
   }
 
@@ -912,9 +922,9 @@ export function reviewLoop(deps: ReviewDeps) {
           r = next;
         }
         yolo(r);
+        retried.ok(`${r.id} step`);
       } catch (err) {
-        // Never log transport errors' text: a fetch implementation may put authorization headers in them.
-        log(`review ${r.id} of ${r.builder}: a step failed and will be retried (${(err as Error).name})`);
+        retried.failed(`${r.id} step`, `review ${r.id} of ${r.builder}: a step failed and will be retried (${(err as Error).name})`);
       }
     }
   }

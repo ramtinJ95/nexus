@@ -34,11 +34,11 @@ function fixture(t: import("node:test").TestContext, limit: { resetsAt: number |
   const typed: Extract<PylonCommand, { kind: "send-claude" }>[] = [];
   let outcome: "sent" | "blocked" = "sent";
   const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command as Extract<PylonCommand, { kind: "send-claude" }>); return { kind: "send-claude", outcome, herdrPane: "w1:p1", resumed: false }; } };
-  const inbox = agentInbox({ registry, harness: { async send() { throw new Error("a Claude worker's message never reaches the harness"); } }, probes: new Map([[node, probe]]), wake() {} });
+  const inbox = agentInbox({ log: assert.fail, registry, harness: { async send() { throw new Error("a Claude worker's message never reaches the harness"); } }, probes: new Map([[node, probe]]), wake() {} });
   let now = resetsAt + graceMs;
   let gate: Promise<void> | null = null;
   const gated: typeof inbox = async (th, message) => { await gate; return inbox(th, message); };
-  const resumer = usageLimitResumer({ registry, inbox: gated, clock: () => now, graceMs });
+  const resumer = usageLimitResumer({ log: assert.fail, registry, inbox: gated, clock: () => now, graceMs });
   const continued = () => registry.events("0", { kinds: ["usage-limit.continued"] });
   return { registry, id: thread.id, typed, resumer, continued, setNow(at: number) { now = at; }, setOutcome(o: typeof outcome) { outcome = o; }, hold(until: Promise<void> | null) { gate = until; } };
 }
@@ -148,13 +148,27 @@ test("a pass that throws rejects every poll that joined it, and the next poll ru
   await f.resumer.close();
 });
 
+test("a send that fails the same way every pass is logged once, and again after a pass that sent", async (t) => {
+  const f = fixture(t);
+  const logged: string[] = [];
+  let failure: Error | null = new Error("the probe is unreachable");
+  const resumer = usageLimitResumer({ log: (message) => { logged.push(message); }, registry: f.registry, inbox: async () => { if (failure !== null) throw failure; return "later"; }, clock: () => resetsAt + graceMs, graceMs });
+  for (let i = 0; i < 3; i++) await resumer.poll();
+  assert.deepEqual(logged, [`${f.id}: continuing after the usage limit failed: the probe is unreachable`]);
+  failure = null;
+  await resumer.poll();
+  failure = new Error("the probe is unreachable");
+  await resumer.poll();
+  assert.equal(logged.length, 2, "the pass between them sent without failing");
+});
+
 test("a pass reads no archived or deleted thread", async (t) => {
   const f = fixture(t, { resetsAt }, ["th-1", "th-archived", "th-deleted"]);
   f.registry.setThreadStatus("th-archived" as ThreadId, "archived");
   f.registry.setThreadStatus("th-deleted" as ThreadId, "deleted");
   const read: ThreadId[] = [];
   const registry = { ...f.registry, thread: (id: ThreadId) => { read.push(id); return f.registry.thread(id); } };
-  const resumer = usageLimitResumer({ registry, inbox: async () => "delivered", clock: () => resetsAt + graceMs, graceMs });
+  const resumer = usageLimitResumer({ log: assert.fail, registry, inbox: async () => "delivered", clock: () => resetsAt + graceMs, graceMs });
   await resumer.poll();
   assert.deepEqual(read, ["th-1"]);
   assert.equal(registry.events("0", { kinds: ["usage-limit.continued"] }).length, 1);

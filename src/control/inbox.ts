@@ -7,6 +7,7 @@
 import { createHash } from "node:crypto";
 import { type Sender, senders } from "./agent-protocol.ts";
 import type { HarnessHost } from "./harness/host.ts";
+import type { Log } from "./log-once.ts";
 import type { NodeName, ThreadId } from "../ids.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { ProbeError } from "../protocol/http.ts";
@@ -123,8 +124,8 @@ export function typeable(text: string): string {
   return text.toWellFormed().replace(/\r\n?/g, "\n").replace(/\t/g, "  ").replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, "").trim();
 }
 
-export function agentInbox(options: { registry: InboxRegistry; harness: Pick<HarnessHost, "send">; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "command">>; wake(t: Thread): void }): Inbox {
-  const { registry, harness, probes, wake } = options;
+export function agentInbox(options: { registry: InboxRegistry; harness: Pick<HarnessHost, "send">; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "command">>; wake(t: Thread): void; log: Log }): Inbox {
+  const { registry, harness, probes, wake, log } = options;
   return async (t, message) => {
     const agent = registry.agent(t);
     if (agent.kind === "none") throw new Error(`thread ${t.id} has no agent to take a message`);
@@ -143,7 +144,7 @@ export function agentInbox(options: { registry: InboxRegistry; harness: Pick<Har
       throw err;
     }
     if (typed.kind === "nothing") return "later";
-    if (typed.kind === "uncertain") console.error(`${t.id}: an earlier send of ${message.id} failed partway, so it is not typed again`);
+    if (typed.kind === "uncertain") log(`${t.id}: an earlier send of ${message.id} failed partway, so it is not typed again`);
     return "delivered";
   };
 }

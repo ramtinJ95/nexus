@@ -170,7 +170,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   for (const node of [...config.nodes, ...registry.joinedNodes()]) if (!probeMap.has(node.name)) connect(node);
   const services = startServices();
   const handoff = services.start(chatgptToken === undefined ? null : { everyMs: 60_000, ...chatgptTokenHandoff({ probes: () => [...probeMap.values()], token: chatgptToken }) });
-  const peers = services.start(peerHandoff({ registry, probes: probeMap }));
+  const peers = services.start(peerHandoff({ registry, probes: probeMap, log }));
   const loop = services.start(startLoop({
     registry, probes: [...probeMap.values()], previewPorts: config.previewPorts, gitIdentity: config.gitIdentity, ingest,
     onSnapshot(node, observation) {
@@ -207,11 +207,11 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const images = services.start(startImageRollout({
     registry, probes: probeMap, buildNode: config.imageBuildNode, recipe: () => loadImageRecipe(), release: runningCommit,
   }));
-  const inbox = agentInbox({ registry, harness, probes: probeMap, wake: wakeThread });
+  const inbox = agentInbox({ registry, harness, probes: probeMap, wake: wakeThread, log });
   const agents = agentReader(registry, harness);
   const usage = services.start(usageCounter({ registry, probes: probeMap, harness }));
   const github = token === null ? null : githubClient(token);
-  services.start(config.resumeAfterUsageLimit ? { everyMs: 30_000, ...usageLimitResumer({ registry, inbox }) } : null);
+  services.start(config.resumeAfterUsageLimit ? { everyMs: 30_000, ...usageLimitResumer({ registry, inbox, log }) } : null);
   const mirror = projectMirror({ githubToken: token });
   const backfill = services.start(usageBackfill({ registry, counter: usage, wake }));
   const threads = services.start(threadServices({
@@ -288,6 +288,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     probes: probeMap,
     previewPorts: config.previewPorts,
     health: health.latest,
+    log,
   }));
   console.error(`nexus control plane: API on ${config.listen.host}:${api.port}, following ${[...probeMap.keys()].join(", ")}`);
 
