@@ -814,6 +814,12 @@ test("a command and a stream ask the backend for their own pylon's state and lis
   assert.deepEqual(asked, [`state ${pylonId}`, `state ${pylonId}`, "state pylon-gone"]);
 });
 
+test("the outcome of a Claude send is answered from the probe's record, without reaching the pylon's guest", async (t) => {
+  const { client } = await setup(t);
+  await running(client);
+  assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:never" }), { kind: "send-claude-outcome", send: "unknown" });
+});
+
 test("a command or job body over a mebibyte is refused and reaches no guest", async (t) => {
   const guest = fakeGuest(() => { throw new Error("no exec expected"); });
   const { client, base } = await setup(t, {}, guest);
