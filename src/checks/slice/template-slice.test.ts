@@ -27,6 +27,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import { artifactArchive } from "../../image/artifacts.ts";
 import { createDockerBackend } from "../../backends/docker-backend.ts";
+import { docker, labelFilters } from "../../backends/docker-cli.ts";
 import { createPylonVmBackend } from "../../backends/pylon-vm/pylon-vm-backend.ts";
 import { run as pylonVm } from "../../pylon-vm/client.ts";
 import { nodeSecrets } from "../../probe/config.ts";
@@ -82,14 +83,14 @@ interface TemplateFixture {
 }
 
 async function dockerFixture(): Promise<TemplateFixture> {
-  const docker = async (...args: string[]) => (await execFileAsync("docker", args)).stdout.trim();
   const baseImage = "debian:bookworm-slim";
   const image: ImageId = "img-tslicetest000";
+  const labels = { "nexus.test": `tslice-${run}` };
   const testLabel = `nexus.test=tslice-${run}`;
   const tag = `nexus-tslice-test:${run}`;
   const scratch = await mkdtemp(join(tmpdir(), "nexus-tslice-"));
   const stores = { a: join(scratch, "a"), b: join(scratch, "b") };
-  const backend = (side: Side) => createDockerBackend({ images: { [image]: tag }, labels: { "nexus.test": `tslice-${run}`, "nexus.side": side }, artifacts: stores[side] });
+  const backend = (side: Side) => createDockerBackend({ images: { [image]: tag }, labels: { ...labels, "nexus.side": side }, artifacts: stores[side] });
   const home = "/home/user";
   // Docker execs run as root, and git refuses a repository root does not own, so the checks run as user.
   const sh = (guest: Guest, script: string, cwd = checkoutDir) => guest.exec(["sh", "-c", asUserIn(script, cwd)], { cwd: "/", timeoutMs: 30_000 });
@@ -138,19 +139,19 @@ async function dockerFixture(): Promise<TemplateFixture> {
           `RUN useradd --create-home --shell /bin/bash user && install -d -o user -g user ${home}/workspace`,
           sliceRepoStep,
         ].join("\n") + "\n");
-        if (await docker("images", "-q", "--filter", `reference=${baseImage}`) === "") await docker("pull", baseImage);
-        await docker("build", "--quiet", "--label", testLabel, "--tag", tag, dir);
+        if (await docker(["images", "-q", "--filter", `reference=${baseImage}`]) === "") await docker(["pull", baseImage]);
+        await docker(["build", "--quiet", "--label", testLabel, "--tag", tag, dir]);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
     },
     async cleanUp() {
-      const ids = (await docker("ps", "-a", "-q", "--filter", `label=${testLabel}`)).split("\n").filter(Boolean);
-      if (ids.length > 0) await docker("rm", "--force", ...ids);
+      const ids = (await docker(["ps", "-a", "-q", ...labelFilters(labels)])).split("\n").filter(Boolean);
+      if (ids.length > 0) await docker(["rm", "--force", ...ids]);
       for (;;) {
-        const images = (await docker("images", "-q", "--filter", `label=${testLabel}`)).split("\n").filter(Boolean);
+        const images = (await docker(["images", "-q", ...labelFilters(labels)])).split("\n").filter(Boolean);
         if (images.length === 0) break;
-        await docker("rmi", "--force", images[0]!);
+        await docker(["rmi", "--force", images[0]!]);
       }
       await rm(scratch, { recursive: true, force: true });
     },
