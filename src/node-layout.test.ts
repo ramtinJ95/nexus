@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import * as layout from "./node-layout.ts";
-import { backupStatusFile, configFiles, controlPath, deployerFiles, deployerLink, deployerWakeFile, etc, ports, prefix, releasesDir, roleLinks, servicePath, stateDirs, unitNames, users } from "./node-layout.ts";
+import { backupStatusFile, configFiles, controlPath, deployerFiles, deployerLink, deployerWakeFile, etc, ports, prefix, releasesDir, roleLinks, servicePath, stateDirs, unitDir, unitNames, users } from "./node-layout.ts";
 import { defaultPreviewPorts, parseConfig } from "./control/main.ts";
 import { probePort } from "./protocol/routes.ts";
 import { stores } from "./deploy/credentials.ts";
+import { parseFlags, setup } from "./deploy/setup.ts";
 import { backupBudgetMs, drainYieldMs } from "./deploy/worker.ts";
 import { shutdownPauseMs } from "./probe/shutdown.ts";
 
@@ -136,4 +137,53 @@ test("control.json's db is opened from the control plane's working directory", (
   assert.equal(parseConfig(JSON.stringify({ ...example, db: "registry.db" })).db, `${stateDirs.control}/registry.db`);
   assert.equal(parseConfig(JSON.stringify(example)).db, "/var/lib/nexus-control/registry.db");
   assert.equal(parseConfig(JSON.stringify({ ...example, db: "/srv/nexus/registry.db" })).db, "/srv/nexus/registry.db");
+});
+
+test("the backup and the deployer units run as root, and the deployer's worker finds Node where the units do", () => {
+  const backup = read(`deploy/${unitNames.backup}`);
+  for (const line of ["User=root", "Group=root", `Environment=PATH=${servicePath}`]) assert.match(backup, new RegExp(`^${RegExp.escape(line)}$`, "m"), line);
+  const deployer = read(`deploy/${unitNames.deployer}`);
+  const [, supervisor] = /^ExecStart=(\S+)$/m.exec(deployer) ?? assert.fail("the deployer unit runs one script");
+  assert.ok(read("deploy/install-deployer.sh").includes(`install -o root -g root -m 0700 "$repo/deploy/supervise-deployer.sh" "${supervisor!.replace(prefix, "$prefix")}"`), `install-deployer.sh installs the supervisor at ${supervisor}`);
+  const [, unitPath] = /^Environment=PATH=(\S+)$/m.exec(deployer) ?? assert.fail("the deployer unit sets PATH");
+  const [, workerPath] = /\/usr\/bin\/env -i PATH=(\S+) node "\$1"/.exec(read("deploy/supervise-deployer.sh")) ?? assert.fail("the supervisor sets the worker's PATH");
+  assert.equal(workerPath, unitPath);
+  assert.ok(workerPath!.startsWith(`${servicePath}:`), "the worker searches the units' PATH first, so it runs the same Node");
+});
+
+test("the units' groups, the probe's kvm and tailscale operator rights, and tailscaled's cert permit name the layout's users", () => {
+  for (const [role, user] of Object.entries(users)) {
+    const unit = read(`deploy/${unitNames[role as keyof typeof users]}`);
+    assert.match(unit, new RegExp(`^Group=${user}$`, "m"), `${role} runs in its own group`);
+  }
+  assert.match(read(`deploy/${unitNames.probe}`), /^SupplementaryGroups=kvm$/m);
+  const release = read("deploy/release.sh");
+  for (const line of [`usermod --append --groups kvm ${users.probe}`, `tailscale set --operator=${users.probe}`]) assert.ok(release.includes(line), line);
+  assert.ok(read("deploy/install.sh").includes(`grep -qx 'TS_PERMIT_CERT_UID=${users.control}'`), "the control plane's user fetches the dashboard's certificate");
+});
+
+test("the installers install each unit file under its own name in the layout's unit directory", () => {
+  const release = read("deploy/release.sh");
+  for (const line of [`local source=$1 unit=${unitDir}/$2`, `sha256sum < "${unitDir}/$unit"`, `"${releasesDir}/$release"`]) assert.ok(release.includes(line), line);
+  const installed = ["deploy/release.sh", "deploy/install-deployer.sh"].flatMap((file) => [...read(file).matchAll(/^\s*install_unit "\$\w+\/deploy\/([\w.-]+)" ([\w.-]+)$/gm)]);
+  for (const [line, source, unit] of installed) assert.equal(source, unit, line);
+  assert.deepEqual(installed.map(([, , unit]) => unit).sort(), [...Object.values(unitNames)].sort());
+  const started = ["deploy/install-probe.sh", "deploy/install-control.sh"].flatMap((file) => [...read(file).matchAll(/^\s*start_unit ([\w.-]+) /gm)].map(([, unit]) => unit));
+  assert.deepEqual(started, [unitNames.probe, unitNames.control]);
+});
+
+test("the example configs name the state and secrets paths setup.ts writes on a fresh node", () => {
+  const tailnet = { self: { id: "nSelf1CNTRL", name: "rj-firebat", host: "rj-firebat.example.ts.net", ip: "100.64.0.2" }, peers: [] };
+  const result = setup(tailnet, parseFlags(["write", "--dotfiles", "https://github.com/example/dotfiles.git"]).flags, { gitKey: false }, "c".repeat(64));
+  assert.ok(result.ok, result.ok ? "" : result.errors.join("; "));
+  const written = (path: string) => result.files.find((file) => file.path === path)?.value as Record<string, Record<string, unknown>>;
+  const control = written(configFiles.control);
+  const probe = written(configFiles.probe);
+  const controlExample = JSON.parse(read("deploy/control.example.json")) as typeof control;
+  const probeExample = JSON.parse(read("deploy/probe.example.json")) as typeof probe;
+  assert.equal(controlExample["db"], control["db"]);
+  assert.deepEqual([controlExample["harness"]!["storage"], controlExample["harness"]!["credentials"]], [control["harness"]!["storage"], control["harness"]!["credentials"]]);
+  assert.deepEqual([probeExample["backend"]!["stateRoot"], probeExample["backend"]!["artifacts"]], [probe["backend"]!["stateRoot"], probe["backend"]!["artifacts"]]);
+  assert.equal(probeExample["secretsFile"], probe["secretsFile"]);
+  assert.deepEqual([probe["backend"]!["stateRoot"], probe["backend"]!["artifacts"]], [`${stateDirs.probe}/pylons`, `${stateDirs.probe}/artifacts`], "release.sh makes these as the probe's user");
 });
