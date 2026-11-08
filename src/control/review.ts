@@ -21,6 +21,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { z } from "zod";
 import { checkCaller, latest, mint, reviewerCaller, reviewPrefix, verifyCaller } from "./agent-protocol.ts";
 import { releaseOutcome, type ReleaseView } from "../protocol/deploy.ts";
+import { deployWaitMs } from "../contract/release.ts";
 import { scopedFlight } from "../single-flight.ts";
 import type { SecretGrant } from "../protocol/secret-grants.ts";
 import { agentKinds } from "../protocol/agent-kinds.ts";
@@ -63,8 +64,6 @@ const checkMs = 60 * 60_000;
 /** How long a second reviewer's start is tried, once a minute, before the review goes on without it. */
 const secondStartMs = 30 * 60_000;
 const secondRetryMs = 60_000;
-/** As long as `nexus deploy --wait` waits. */
-const deployMs = 30 * 60_000;
 
 export interface ReviewDeps {
   registry: ReviewRegistry;
@@ -350,7 +349,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   /** `r` while its release is pending before the deadline, which moves on while a node waits for idle to deploy, or null. */
   const pending = (r: Review, phase: Extract<Phase, { kind: "deploying" | "rolling-back" }>, view: ReleaseView, outcome: ReturnType<typeof releaseOutcome>): Review | null => {
     if (outcome !== "pending") return null;
-    if (view.nodes.some((n) => n.target === view.desired?.commit && n.state === "waiting-for-idle")) return { ...r, phase: { ...phase, deadline: now() + deployMs } };
+    if (view.nodes.some((n) => n.target === view.desired?.commit && n.state === "waiting-for-idle")) return { ...r, phase: { ...phase, deadline: now() + deployWaitMs } };
     return now() < phase.deadline ? r : null;
   };
   /** A review that lands still decides whether a merge made outside it deploys. */
@@ -870,7 +869,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
         commit = merged.commit;
       }
       if (!deploys(r)) return { ...landing, merged: commit, phase: { kind: "landed", commit } };
-      return { ...landing, merged: commit, phase: { kind: "deploying", commit, previous: registry.desiredRelease()?.commit ?? null, requested: false, deadline: now() + deployMs } };
+      return { ...landing, merged: commit, phase: { kind: "deploying", commit, previous: registry.desiredRelease()?.commit ?? null, requested: false, deadline: now() + deployWaitMs } };
     },
     async deploying(r, phase) {
       if (!phase.requested) return requestRelease(r, phase, phase.commit, `nexus review ${r.id}`);
@@ -882,9 +881,9 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (waiting !== null) return waiting;
       const why = outcome === "failed"
         ? `The deploy of ${phase.commit} failed: ${failedNodes(view, phase.commit)}.`
-        : `Not every service reported healthy at ${phase.commit} within ${deployMs / 60_000} minutes.`;
+        : `Not every service reported healthy at ${phase.commit} within ${deployWaitMs / 60_000} minutes.`;
       if (phase.previous === null) return toPerson(r, "deploy", why, "There is no previous release to roll back to.");
-      return { ...r, phase: { kind: "rolling-back", commit: phase.commit, previous: phase.previous, why, requested: false, deadline: now() + deployMs } };
+      return { ...r, phase: { kind: "rolling-back", commit: phase.commit, previous: phase.previous, why, requested: false, deadline: now() + deployWaitMs } };
     },
     async "rolling-back"(r, phase) {
       if (!phase.requested) return requestRelease(r, phase, phase.previous, `nexus review ${r.id} rollback`);
@@ -899,7 +898,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (waiting !== null) return waiting;
       const failed = outcome === "failed"
         ? failedNodes(view, phase.previous)
-        : `not every service reported healthy within ${deployMs / 60_000} minutes`;
+        : `not every service reported healthy within ${deployWaitMs / 60_000} minutes`;
       return toPerson(r, "deploy", phase.why, `The rollback to ${phase.previous} failed too: ${failed}. The fleet needs the person now.`, revert);
     },
   };
