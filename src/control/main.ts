@@ -245,7 +245,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     if (!events.some((e) => wakesDeployers(registry, e))) return;
     for (const probe of probeMap.values()) probe.wakeDeployer().catch((err: unknown) => log(`${probe.node}: waking its deployer failed: ${(err as Error).message}`));
   }, (err) => log(`following events for wake-ups failed, going on from the newest: ${err.message}`)) });
-  for (const poll of threads.polls) services.start({ everyMs: passMs, poll });
+  for (const polled of threads.polls) services.start(polled && { everyMs: passMs, poll: () => polled.poll() });
   services.start(github === null ? null : { everyMs: passMs, ...builderNudger({ registry, github, inbox, personWroteTo: agents.personWrote, watch }) });
   services.start({ everyMs: passMs, ...deadTurnResumer({ registry, inbox, personWroteTo: agents.personWrote }) });
   // Judgments need no GitHub, so they run without a token too.
