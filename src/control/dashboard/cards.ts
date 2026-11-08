@@ -110,8 +110,8 @@ function askCard(c: Context, q: Question, asked: readonly AskedQuestion[]): Html
   const refusal = c.answerRefusal(q);
   // Each field has an ID, so a swap of the region keeps the focus in it.
   const field = (i: number, name: string) => `${q.id}-${i}-${name}`;
-  return html`<section class="landing question ask" data-question="${q.id}" aria-label="Claude asks">
-<div class="land-top"><h2>Claude asks</h2></div>
+  return html`<section class="landing question ask" data-question="${q.id}" aria-label="${needLabels.ask}">
+<div class="land-top"><h2>${needLabels.ask}</h2></div>
 <form class="ask" data-thread="${q.thread}" data-question="${q.id}">
 <fieldset class="ask-all"${refusal !== null && " disabled"}>
 ${asked.map((aq, i) => html`<fieldset class="ask-q" data-multi="${String(aq.multiSelect)}" data-header="${aq.header}">
