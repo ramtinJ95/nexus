@@ -21,7 +21,7 @@ import { reviewerFor, reviewLoop, secondReviewerFor, type ReviewDeps } from "./r
 import { upgradeReview } from "./record-upgrade.ts";
 import { reviewText } from "../cli/thread-text.ts";
 import { defaultSecondReview } from "../contract/projects.ts";
-import { agentConversation, agentReader, harnessView, heard } from "./agent-conversation.ts";
+import { agentReader, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
 import { fakeHarness } from "../test-support/fake-harness.ts";
 import { parseRecord, transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
@@ -2977,7 +2977,7 @@ test("a model failure is a harness turn's last message that stopped on an error,
   const fake = fakeHarness();
   const harness = f.registry.thread(f.builder)!;
   await fake.harness.startThread({ threadId: harness.id, pylonId: harness.pylonId });
-  const read = agentConversation(f.registry, harnessView(fake.harness));
+  const read = agentReader(f.registry, fake.harness).conversation;
   const failure = async (th: Thread) => (await read(th)).failure;
   fake.transcript(harness.id).messages.push({ role: "user", content: "review it", timestamp: 1 });
   for (let i = 0; i < 4; i++) fake.transcript(harness.id).messages.push({ role: "assistant", content: [], stopReason: "error", errorMessage: "Request timed out.", timestamp: 2 + i } as never);

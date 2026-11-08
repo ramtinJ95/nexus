@@ -1,8 +1,8 @@
 /**
- * What the control plane does with a thread's agent, whichever kind it is. The registry says which agent a thread
- * has (`Registry.agent`), and the API takes that kind's implementation here: the harness for a harness thread, and
- * claude-conversation.ts and the registry for a Claude worker. A bare thread has neither, and its agent refuses
- * everything a conversation would answer.
+ * What the control plane does with a thread's agent, one implementation per kind. The registry says which agent a
+ * thread has (`Registry.agent`), and the API takes that kind's implementation here: the harness for a harness thread,
+ * and claude-conversation.ts and the registry for a Claude worker. A bare thread has neither, and its agent refuses
+ * everything a conversation would answer. Each kind also answers what the loops read of it (agent-conversation.ts).
  *
  * The wire keeps each kind's own shapes: a harness conversation's view and its `/events` stream, and a Claude worker's
  * transcript and its `/claude/events` stream. Only the transcript carries a kind, which `agentView` reads.
@@ -16,7 +16,7 @@ import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import type { HarnessHost } from "./harness/host.ts";
 import { claudeTextProblem } from "../protocol/agent-kinds.ts";
-import { harnessView } from "./agent-conversation.ts";
+import { agentReads, harnessView, type AgentRead } from "./agent-conversation.ts";
 import type { ClaudeConversations } from "./claude-conversation.ts";
 import { viewFrames, type Frames, type Watch } from "./conversation-view.ts";
 import { claudeFrames } from "../contract/streams.ts";
@@ -28,7 +28,7 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { Sent, ThreadDetail } from "./wire.ts";
 
-type ThreadAgentRegistry = Pick<Registry, "agent" | "claudeMessage" | "claudeMessageSenders" | "claudeWorker" | "latestClaudeTurn" | "node" | "pylon" | "recordActivity" | "sealedBoot" | "setClaudeMessage" | "standingRulesCarried" | "standingRulesOf">;
+type ThreadAgentRegistry = Pick<Registry, "agent" | "claudeEntries" | "claudeMessage" | "claudeMessageSenders" | "claudeWorker" | "latestClaudeTurn" | "node" | "pylon" | "recordActivity" | "sealedBoot" | "setClaudeMessage" | "standingRulesCarried" | "standingRulesOf">;
 
 /** A message for the thread's agent, as `POST /v1/threads/:id/messages` takes it. */
 export interface AgentMessage { text: string; requestId: string; mode: "followUp" | "steer" }
@@ -36,7 +36,7 @@ export interface AgentMessage { text: string; requestId: string; mode: "followUp
 /** Runs `act` in the thread's pylon, as the API's `inPylon` does, mapping the probe's failures to its refusals. */
 export type PylonRun = <T>(t: Thread, act: (probe: Pick<ProbeClient, "command" | "stream">, pylonId: PylonId) => Promise<T>) => Promise<T>;
 
-export interface Agent<V> {
+export interface Agent<V> extends AgentRead {
   /** The conversation now. A Claude worker's is its transcript as last read, so it never reaches the pylon. */
   view(t: Thread): Promise<V>;
   /** What `GET /v1/threads/:id/conversation` answers. A Claude worker's transcript is read first, for at most 5 s. */
@@ -54,12 +54,9 @@ export interface Agent<V> {
   delete(t: Thread): Promise<void>;
 }
 
-/** The drain reads every harness thread's view from its stored row, so a harness view needs only the thread's ID. */
-interface HarnessAgent extends Agent<ConversationView> { view(t: Pick<Thread, "id">): Promise<ConversationView> }
-
 export type ThreadHarness = Pick<HarnessHost, "startThread" | "send" | "abort" | "retry" | "watch" | "deleteThread" | "activity" | "latestTurn">;
 
-export interface ThreadAgents { harness: HarnessAgent; claude: Agent<ClaudeConversation>; none: Agent<null> }
+export interface ThreadAgents { harness: Agent<ConversationView>; claude: Agent<ClaudeConversation>; none: Agent<null> }
 
 export const noConversation = (t: Pick<Thread, "id">) => `thread ${t.id} has no conversation`;
 
@@ -79,9 +76,11 @@ export function threadAgents(options: {
   const worker = (t: Thread) => registry.claudeWorker(t.id)!;
 
   const view = harnessView(harness);
+  const reads = agentReads(registry, harness);
 
   return {
     harness: {
+      ...reads.harness,
       view,
       read: view,
       watch: (t) => harness.watch(t.id),
@@ -103,6 +102,7 @@ export function threadAgents(options: {
       delete: (t) => harness.deleteThread({ threadId: t.id, pylonId: t.pylonId }),
     },
     claude: {
+      ...reads.claude,
       view: async (t) => claude.view(t),
       async read(t) {
         await Promise.race([claude.refresh(t), sleep(claudeReadMs, undefined, { ref: false })]);
@@ -174,6 +174,7 @@ export function threadAgents(options: {
       delete: async (t) => { void claude.refresh(t); },
     },
     none: {
+      ...reads.none,
       view: async () => null,
       read: async (t) => refuse(t),
       watch: async (t) => refuse(t),
