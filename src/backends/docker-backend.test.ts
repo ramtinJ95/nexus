@@ -228,3 +228,17 @@ test("the host bridge names the pylon from the one running container carrying th
   assert.equal((await fetch(`http://127.0.0.1:${port}/not-a-token/v1/request`, { method: "POST" })).status, 404);
   assert.equal((await docker.calls()).length, 1, "a path without a token asks Docker nothing");
 });
+
+test("a checkpoint's sessions label is parsed, and one that does not parse is refused", async (t) => {
+  const label = (sessions: unknown) => Buffer.from(JSON.stringify(sessions)).toString("base64url");
+  const checkpoint = (sessions: string) => ({
+    stdout: JSON.stringify([{ Id: "i1", Created: "2026-10-27T00:00:00Z", Config: { Labels: { "nexus.pylon": pylon, "nexus.image": "img-test00000000", "nexus.checkpoint": "ckpt-a-1", "nexus.sessions": sessions } } }]),
+  });
+  const session = { id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" };
+  const docker = await fakeDocker(t, { images: { stdout: "i1\n" }, "image inspect i1": checkpoint(label([session])) });
+  const backend = createDockerBackend({ images });
+  assert.deepEqual(await backend.list(), [{ pylonId: pylon, vm: "stopped", checkpoint: "ckpt-a-1", image: "img-test00000000", sessions: [session] }]);
+
+  await docker.answer({ images: { stdout: "i1\n" }, "image inspect i1": checkpoint(label([{ ...session, harness: "nobody" }])) });
+  await assert.rejects(backend.list(), { message: /^label nexus\.sessions\[0\]\.harness: / });
+});

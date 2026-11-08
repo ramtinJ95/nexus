@@ -5,7 +5,7 @@
  * domain types below. The control plane reads through `parseProbeEvent`, and the probe writes through `encodeProbeEvent`.
  */
 import { z } from "zod";
-import { agentKinds, type SessionHarness } from "./agent-kinds.ts";
+import { agentKinds, sessionHarnessSchema, type SessionHarness } from "./agent-kinds.ts";
 import { asSent, parse, parseJson, unchecked } from "../parse.ts";
 import type { ArtifactId, CheckpointId, ImageId, LiveHash, NodeName, PylonId } from "../ids.ts";
 import { pylonIdField, pylonIdSchema } from "./fields.ts";
@@ -153,8 +153,13 @@ export type SessionFact =
   | { id: string; state: "failed"; herdrPane: string | null; harness: SessionHarness; harnessSessionId: string | null; status: HerdrStatus; title: string; message: string };
 /** What tells sessions apart. `title` is null where it is not known, as from a probe before titles were reported. */
 export interface SessionIdentity { harness: SessionHarness; harnessSessionId: string | null; title: string | null }
+const pausedSessionSchema = z.strictObject({
+  id: z.string(), herdrPane: z.string().nullable(), harness: sessionHarnessSchema, harnessSessionId: z.string().nullable(), title: z.string(),
+});
 /** A session a stopped pylon's wake brings back, under the `id` it had while the pylon ran. */
-export interface PausedSession { id: string; herdrPane: string | null; harness: SessionHarness; harnessSessionId: string | null; title: string }
+export type PausedSession = z.infer<typeof pausedSessionSchema>;
+/** What a backend keeps beside a checkpoint: the pylon VM's sidecar file, a Docker checkpoint's sessions label. */
+export const pausedSessionsSchema = z.array(pausedSessionSchema).readonly();
 export interface GitFacts { head: string; branch: string | null; dirty: boolean; branches: readonly { name: string; head: string; pushedAs: string | null }[] }
 /** How long the probe reuses a pylon's git read, so a snapshot holds the branches pushed that long before it was taken. */
 export const gitPollMs = 60_000;
