@@ -706,9 +706,9 @@ type LandRequest =
  * `base` is the branch the round's head was reviewed against, absent from a round saved before Nexus recorded it, and
  * an approval carries only on the same base, since a new base adds its own commits to the change. `carried` marks a
  * round whose verdict is the reviewer's approval of head `from`, carried to `head` because the change at both is the
- * same, so no reviewer round ran for it and it counts against no limit. With `held`, in a review whose rounds ran out,
- * it carries whatever verdict it was held with, and its hold. Its checks run as any round's do, since the base under
- * the change moved. `quotedFrom` is the digest of the description the reviewer last quoted from when a landing asked it
+ * same, so no reviewer round ran for it and it counts against no limit. Its checks run as any round's do, since the
+ * base under the change moved. With `held`, in a review whose rounds ran out, it carries whatever verdict it was held
+ * with, and its hold, and runs nothing at the new head. `quotedFrom` is the digest of the description the reviewer last quoted from when a landing asked it
  * again, so a landing asks again only once the description changed since.
  * `heldAt` holds those `head` alone decides (policy.ts's `headHolds`) against the PR's `base`, whose files they read,
  * recorded once its checks pass, so the person's Land and the landing read the same ones. A landing reads them again
@@ -876,7 +876,7 @@ A round's `base` is the branch its head was reviewed against. A round with `carr
 ```ts
 // src/control/review-model.ts
 /**
- * A pull request's change at a head against branch `base`, as `git patch-id --stable` identifies it: one identity per
+ * A pull request's change at a head against branch `base`, identified as `git patch-id --stable` would: one SHA-256 per
  * changed file, of its path, its path before a rename, its modes before and after, and its patch without the hunk
  * headers, so a rebase that only moves hunks keeps it, and any changed line, context lines included, or mode does not.
  * `unknown` when GitHub does not show the whole change, such as a binary file's, so nothing can say it is the same.

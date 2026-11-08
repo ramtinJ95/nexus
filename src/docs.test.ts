@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { cliDoc, generated } from "../scripts/docs-gen.ts";
+import { cliDoc, declaration, generated, marker } from "../scripts/docs-gen.ts";
 import { minControlVersion } from "./cli/config.ts";
 import { version } from "./version.ts";
 
@@ -55,6 +55,21 @@ test("docs/cli.md's type blocks are the source declarations they name, which nod
 });
 
 test("every TypeScript block in docs/cli.md names the declarations it shows, so none is a hand copy", () => {
-  const unmarked = [...read(cliDoc).matchAll(/^(.*)\n```ts$/gm)].map((match) => match[1]!).filter((line) => !line.startsWith("<!-- types: "));
-  assert.deepEqual(unmarked, []);
+  assert.equal([...read(cliDoc).matchAll(marker)].length, [...read(cliDoc).matchAll(/^```ts$/gm)].length);
+});
+
+test("docs-gen copies a declaration whole, with its TSDoc and its last line's comment", () => {
+  const source = [
+    "/** Not this. */",
+    "export const x = 1;",
+    "/** A quote. */",
+    'export type Quoted = "say\\";more" | `a;${"b"}`; // trailing',
+    "export interface Generic<T = () => void> extends Base<{ a: 1 }> {",
+    "  /** } and ; in a comment. */",
+    "  value: T; // ;",
+    "}",
+    "export type After = 1;",
+  ].join("\n");
+  assert.equal(declaration(source, "Quoted"), '/** A quote. */\ntype Quoted = "say\\";more" | `a;${"b"}`; // trailing');
+  assert.equal(declaration(source, "Generic"), source.split("\n").slice(4, 8).join("\n").replace("export ", ""));
 });

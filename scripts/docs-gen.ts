@@ -9,7 +9,7 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 export const cliDoc = resolve(root, "docs/cli.md");
-const marker = /^<!-- types: (.+) -->\n```ts\n[\s\S]*?\n```$/gm;
+export const marker = /^<!-- types: (.+) -->\n```ts\n[\s\S]*?\n```$/gm;
 
 /** The declaration of `name` in `source`, with the TSDoc above it and without `export`. */
 export function declaration(source: string, name: string): string {
@@ -24,8 +24,8 @@ export function declaration(source: string, name: string): string {
     const c = source[i]!;
     if (c === "/" && source[i + 1] === "/") i = source.indexOf("\n", i) - 1;
     else if (c === "/" && source[i + 1] === "*") i = source.indexOf("*/", i) + 1;
-    else if (c === '"' || c === "'" || c === "`") i = source.indexOf(c, i + 1);
-    else if (isInterface && depth === 0 && (c === "<" || c === ">")) angle += c === "<" ? 1 : -1;
+    else if (c === '"' || c === "'" || c === "`") while (source[++i] !== c) i += source[i] === "\\" ? 1 : 0;
+    else if (isInterface && depth === 0 && (c === "<" || c === ">" && source[i - 1] !== "=")) angle += c === "<" ? 1 : -1;
     else if ("{([".includes(c)) depth++;
     else if ("})]".includes(c)) {
       depth--;
