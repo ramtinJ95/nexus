@@ -13,6 +13,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { configSchema, type BootSpec, type SandboxRecord } from "./contracts.ts";
 import { fileNotFound, watched } from "./fake-vm.ts";
 import { lifecycleQueue, SandboxRuntime } from "./runtime.ts";
+import { vmGuest } from "./guest.ts";
 import { answersScript, GuestServices } from "./services.ts";
 
 /**
@@ -111,7 +112,7 @@ test("every route points at a relay port of Nexus's own, which the relay map car
 	const dir = await mkdtemp(join(tmpdir(), "nexus-services-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	const fake = fakeVm();
-	const services = new GuestServices(fake.vm, dir, "/workspace/repo/.nexus/services.yaml", "/workspace/repo", "agent", {});
+	const services = new GuestServices(vmGuest(fake.vm), dir, "/workspace/repo/.nexus/services.yaml", "/workspace/repo", "agent", {});
 	t.after(() => services.close());
 	await services.attach(3000);
 	await services.attach(3001);
@@ -133,7 +134,7 @@ test("a route is set only once the relay confirms its relay port carries to its 
 	const dir = await mkdtemp(join(tmpdir(), "nexus-services-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	const fake = fakeVm();
-	const services = new GuestServices(fake.vm, dir, configPath, "/workspace/repo", "agent", {});
+	const services = new GuestServices(vmGuest(fake.vm), dir, configPath, "/workspace/repo", "agent", {});
 	t.after(() => services.close());
 	fake.relay.held = true;
 	const attaching = services.attach(3000);
@@ -156,7 +157,7 @@ test("a status asked while the relay has not confirmed a preview waits for it, a
 	const dir = await mkdtemp(join(tmpdir(), "nexus-services-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	const fake = fakeVm();
-	const services = new GuestServices(fake.vm, dir, configPath, "/workspace/repo", "agent", {});
+	const services = new GuestServices(vmGuest(fake.vm), dir, configPath, "/workspace/repo", "agent", {});
 	t.after(() => services.close());
 	const fact = { name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true };
 	fake.relay.held = true;
@@ -178,7 +179,7 @@ test("a relay port the relay cannot listen on is never routed, and its preview s
 	const dir = await mkdtemp(join(tmpdir(), "nexus-services-"));
 	t.after(() => rm(dir, { recursive: true, force: true }));
 	const fake = fakeVm();
-	const services = new GuestServices(fake.vm, dir, configPath, "/workspace/repo", "agent", {});
+	const services = new GuestServices(vmGuest(fake.vm), dir, configPath, "/workspace/repo", "agent", {});
 	t.after(() => services.close());
 	fake.relay.unbindable.set(700, "[Errno 98] Address already in use");
 	await services.attach(3000);
@@ -198,7 +199,7 @@ test("a declaration that fixes one of Nexus's ports is refused, and a service wi
 	t.after(() => rm(root, { recursive: true, force: true }));
 	const fake = fakeVm();
 	fake.guest.file = declared("  web:\n    command: serve\n    port: 700\n    preview: true\n");
-	const services = new GuestServices(fake.vm, root, configPath, "/workspace/repo", "agent", {});
+	const services = new GuestServices(vmGuest(fake.vm), root, configPath, "/workspace/repo", "agent", {});
 	t.after(() => services.close());
 	await services.initialize();
 	await assert.rejects(services.operate("ensure"), /is Nexus's own: sshd's 22, or the preview relay's 700 to 799/);
@@ -217,7 +218,7 @@ test("a wake drops restored ports that are Nexus's own and routes the rest, rath
 	await writeFile(join(root, "adhoc.json"), JSON.stringify({ api: { command: "serve", port: 22 }, jobs: { command: "work" } }));
 	await writeFile(join(root, "services.json"), JSON.stringify({ old: { port: 750 } }));
 	const fake = fakeVm();
-	const services = new GuestServices(fake.vm, root, configPath, "/workspace/repo", "agent", {});
+	const services = new GuestServices(vmGuest(fake.vm), root, configPath, "/workspace/repo", "agent", {});
 	t.after(() => services.close());
 	await services.initialize();
 	assert.deepEqual(fake.targets.at(-1), { "/port-3000/": 700 });
@@ -234,7 +235,7 @@ test("a first boot, with no saved services, ad hoc services or linked ports, wak
 		t.after(() => rm(root, { recursive: true, force: true }));
 		for (const [file, text] of Object.entries(saved)) await writeFile(join(root, file), text);
 		const fake = fakeVm();
-		const services = new GuestServices(fake.vm, root, configPath, "/workspace/repo", "agent", {});
+		const services = new GuestServices(vmGuest(fake.vm), root, configPath, "/workspace/repo", "agent", {});
 		t.after(() => services.close());
 		await services.initialize();
 		return { routes: fake.targets.at(-1), status: await services.operate("status") };
@@ -252,7 +253,7 @@ test("a port past the relay's 100 is refused before anything is saved, and a wak
 	t.after(() => rm(root, { recursive: true, force: true }));
 	const logged = t.mock.method(console, "log", () => {});
 	const fake = fakeVm();
-	const services = new GuestServices(fake.vm, root, configPath, "/workspace/repo", "agent", {});
+	const services = new GuestServices(vmGuest(fake.vm), root, configPath, "/workspace/repo", "agent", {});
 	t.after(() => services.close());
 	for (let port = 3000; port < 3100; port++) await services.attach(port);
 	const full = /because every relay port from 700 to 799 serves another preview\. Unpublish one first/;
@@ -266,7 +267,7 @@ test("a port past the relay's 100 is refused before anything is saved, and a wak
 
 	await writeFile(join(root, "linked.json"), JSON.stringify(Array.from({ length: 101 }, (_, i) => 3000 + i)));
 	const woken = fakeVm();
-	const again = new GuestServices(woken.vm, root, configPath, "/workspace/repo", "agent", {});
+	const again = new GuestServices(vmGuest(woken.vm), root, configPath, "/workspace/repo", "agent", {});
 	t.after(() => again.close());
 	await again.initialize();
 	assert.equal(Object.keys(woken.targets.at(-1)!).length, 100);
@@ -286,7 +287,7 @@ test("a reserved port is refused, and a linked port is saved before it is acknow
 	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
 	t.after(() => rm(root, { recursive: true, force: true }));
 	const dir = join(root, "instance");
-	const services = (vm: VM) => new GuestServices(vm, dir, "/workspace/repo/.nexus/services.yaml", "/workspace/repo", "agent", {});
+	const services = (vm: VM) => new GuestServices(vmGuest(vm), dir, "/workspace/repo/.nexus/services.yaml", "/workspace/repo", "agent", {});
 	const first = services(fakeVm().vm);
 	await assert.rejects(first.attach(22), /Port 22 is Nexus's own/, "the in-pylon preview refuses it too");
 	await assert.rejects(first.attach(3000), { code: "ENOENT" }, "the state directory is missing, so the save fails");
@@ -307,7 +308,7 @@ test("an unlinked port is saved before it stops counting as linked, unlinking ag
 	t.after(() => rm(root, { recursive: true, force: true }));
 	const dir = join(root, "instance");
 	await mkdir(dir);
-	const services = (vm: VM) => new GuestServices(vm, dir, "/workspace/repo/.nexus/services.yaml", "/workspace/repo", "agent", {});
+	const services = (vm: VM) => new GuestServices(vmGuest(vm), dir, "/workspace/repo/.nexus/services.yaml", "/workspace/repo", "agent", {});
 	const first = fakeVm();
 	const running = services(first.vm);
 	await running.attach(3000);
@@ -339,7 +340,7 @@ test("a port a service's preview owns is refused, naming the service, and stays 
 	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
 	t.after(() => rm(root, { recursive: true, force: true }));
 	const { vm, routes } = fakeVm();
-	const services = new GuestServices(vm, root, "/workspace/repo/.nexus/services.yaml", "/workspace/repo", "agent", {});
+	const services = new GuestServices(vmGuest(vm), root, "/workspace/repo/.nexus/services.yaml", "/workspace/repo", "agent", {});
 	t.after(() => services.close());
 	const { web, worker } = configSchema.parse({
 		services: { web: { command: "serve", port: 3000, preview: true }, worker: { command: "work", port: 3001 } },
@@ -356,7 +357,7 @@ test("a port whose linked name a service holds is refused, so its caller leaves 
 	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
 	t.after(() => rm(root, { recursive: true, force: true }));
 	const { vm, routes } = fakeVm();
-	const services = new GuestServices(vm, root, "/workspace/repo/.nexus/services.yaml", "/workspace/repo", "agent", {});
+	const services = new GuestServices(vmGuest(vm), root, "/workspace/repo/.nexus/services.yaml", "/workspace/repo", "agent", {});
 	t.after(() => services.close());
 	const { "port-6006": named } = configSchema.parse({ services: { "port-6006": { command: "serve", port: 3000, preview: true } } }).services;
 	await services.adHoc("port-6006", named!);
@@ -381,7 +382,7 @@ test("a service declared with a preview while the pylon runs is reported with it
 	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
 	t.after(() => rm(root, { recursive: true, force: true }));
 	const guest = fakeVm();
-	const services = new GuestServices(guest.vm, root, configPath, "/workspace/repo", "agent", {});
+	const services = new GuestServices(vmGuest(guest.vm), root, configPath, "/workspace/repo", "agent", {});
 	t.after(() => services.close());
 	await services.initialize();
 	guest.guest.file = declared("  web:\n    command: serve\n    preview: true\n  finder:\n    command: open .\n    preview: true\n    platforms: [darwin]\n");
@@ -409,7 +410,7 @@ test("a service declared without a preview while the pylon runs starts when a st
 	const root = await mkdtemp(join(tmpdir(), "nexus-services-"));
 	t.after(() => rm(root, { recursive: true, force: true }));
 	const guest = fakeVm();
-	const services = new GuestServices(guest.vm, root, configPath, "/workspace/repo", "agent", {});
+	const services = new GuestServices(vmGuest(guest.vm), root, configPath, "/workspace/repo", "agent", {});
 	t.after(() => services.close());
 	await services.initialize();
 	await services.operate("ensure");
@@ -430,7 +431,7 @@ test("a start does not wait for health: ensure and new URLs return at once, the 
 	const guest = fakeVm();
 	guest.guest.listening = false;
 	guest.guest.file = declared("  web:\n    command: sleep infinity\n    port: 3000\n    preview: true\n    timeoutMs: 1000\n");
-	const services = new GuestServices(guest.vm, root, configPath, "/workspace/repo", "agent", {});
+	const services = new GuestServices(vmGuest(guest.vm), root, configPath, "/workspace/repo", "agent", {});
 	t.after(() => services.close());
 	await services.initialize();
 	// The clock moves only on a tick, so a call that waited for the service's timeout would never return.
@@ -458,7 +459,7 @@ test("a start whose process exits at once is starting until its timeout fails it
 	guest.guest.listening = false;
 	guest.guest.exits = true;
 	guest.guest.file = declared("  web:\n    command: serve\n    cwd: missing\n    port: 3000\n    timeoutMs: 500\n");
-	const services = new GuestServices(guest.vm, root, configPath, "/workspace/repo", "agent", {});
+	const services = new GuestServices(vmGuest(guest.vm), root, configPath, "/workspace/repo", "agent", {});
 	t.after(() => services.close());
 	await services.initialize();
 	assert.deepEqual((await services.operate("ensure")).map((f) => f.state), ["starting"]);
@@ -474,7 +475,7 @@ test("an unpreview sent to the controller during an ensure of a service that nev
 	const guest = fakeVm();
 	guest.guest.listening = false;
 	guest.guest.file = declared("  web:\n    command: sleep infinity\n    port: 3000\n    preview: true\n");
-	const services = new GuestServices(guest.vm, root, configPath, "/workspace/repo", "agent", {});
+	const services = new GuestServices(vmGuest(guest.vm), root, configPath, "/workspace/repo", "agent", {});
 	t.after(() => services.close());
 	await services.initialize();
 	const record = { name: "pylon-q", createdAt: "2027-01-01T00:00:00.000Z", labels: {}, config: { diskGiB: 8, workspace: "/workspace" } } as unknown as SandboxRecord;
@@ -494,7 +495,7 @@ test("a status of a service whose health is its process checks the process once"
 	t.after(() => rm(root, { recursive: true, force: true }));
 	const guest = fakeVm();
 	guest.guest.file = declared("  worker:\n    command: work\n    health: process\n");
-	const services = new GuestServices(guest.vm, root, configPath, "/workspace/repo", "agent", {});
+	const services = new GuestServices(vmGuest(guest.vm), root, configPath, "/workspace/repo", "agent", {});
 	t.after(() => services.close());
 	await services.initialize();
 	await services.operate("ensure");
@@ -509,7 +510,7 @@ test("statuses read the services file again only once its stamp changed", async 
 	t.after(() => rm(root, { recursive: true, force: true }));
 	const guest = fakeVm();
 	guest.guest.file = declared("  web:\n    command: serve\n    port: 3000\n    preview: true\n");
-	const services = new GuestServices(guest.vm, root, configPath, "/workspace/repo", "agent", {});
+	const services = new GuestServices(vmGuest(guest.vm), root, configPath, "/workspace/repo", "agent", {});
 	t.after(() => services.close());
 	await services.initialize();
 	assert.deepEqual((await services.operate("status")).map((f) => f.name), ["web"]);
@@ -529,7 +530,7 @@ test("a services status that changes nothing leaves status.json as it was, and o
 	t.mock.method(console, "log", () => {});
 	const guest = fakeVm();
 	guest.guest.file = declared("  web:\n    command: serve\n    port: 3000\n    preview: true\n");
-	const services = new GuestServices(guest.vm, root, configPath, "/workspace/repo", "agent", {});
+	const services = new GuestServices(vmGuest(guest.vm), root, configPath, "/workspace/repo", "agent", {});
 	t.after(() => services.close());
 	await services.initialize();
 	const record = { name: "pylon-q", createdAt: "2027-01-01T00:00:00.000Z", labels: {}, config: { diskGiB: 8, workspace: "/workspace" } } as unknown as SandboxRecord;

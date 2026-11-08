@@ -1,7 +1,5 @@
 /**
- * The preview rules both services supervisors share, the pylon VM's (src/pylon-vm/services.ts) and the Docker
- * double's (src/backends/docker-services.ts), so the double refuses what a pylon refuses, in the same words. Each keeps
- * its own I/O. The pylon controller loads this file with type stripping, so it imports no values but services-file.ts's and protocol/ports.ts's.
+ * The preview rules of the services supervisor (src/pylon-vm/services.ts), which both backends run. The pylon controller loads this file with type stripping, so it imports no values but services-file.ts's and protocol/ports.ts's.
  */
 import { linkedName } from "./services-file.ts";
 import { reservedPorts } from "./protocol/ports.ts";

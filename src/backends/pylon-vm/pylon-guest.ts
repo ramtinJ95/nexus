@@ -5,7 +5,6 @@
  */
 import { readFileSync, statSync } from "node:fs";
 import { appendFile } from "node:fs/promises";
-import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import type { Guest, PreviewOrigin } from "../backend.ts";
 import { processStream } from "../../process-stream.ts";
@@ -13,6 +12,7 @@ import type { PylonId } from "../../ids.ts";
 import { logTailBounds } from "../../protocol/observations.ts";
 import type { PylonLog } from "../../probe/guest/session-wake.ts";
 import { type ActionInput, type Reply, statusSchema } from "../../pylon-vm/contracts.ts";
+import { settled } from "../../pylon-vm/services.ts";
 import { stamped } from "../../pylon-vm/controller-log.ts";
 import { shellQuote as q } from "../../shell.ts";
 import { existsError, readLogTail } from "../../pylon-vm/storage.ts";
@@ -54,13 +54,6 @@ export function guestSsh({ access }: Reply<"shell">): string[] {
 	];
 }
 const loopback = /^http:\/\/127\.0\.0\.1:\d+$/;
-/**
- * How long ensure, restart and service-start wait for the services they started: the longest `timeoutMs` a
- * service may declare (contracts.ts), and a margin for its last health check. The controller fails each start
- * that outlasts its own timeout, so a service still starting after this went unhealthy after it was ready.
- */
-const readyWaitMs = 130_000;
-const readyPollMs = 250;
 
 /**
  * Each instance's status.json as previewOrigin last parsed it, under its inode, size and mtime. The controller replaces
@@ -77,21 +70,7 @@ export type ShellFlights = Map<PylonId, Promise<Reply<"shell">>>;
 /** `dir` is the instance directory. */
 export function pylonGuest(pylonId: PylonId, dir: string, run: Sandbox, statuses: StatusCache, shells: ShellFlights = new Map()): Guest {
 	const name = pylonId;
-	/**
-	 * The controller only launches a service and watches its readiness itself, so that no health wait holds its
-	 * lifecycle queue. A caller of ensure, restart or service-start still gets each service it was answered about,
-	 * the dependencies an ensure of one service started included, ready or failed, from status reads that queue
-	 * between other actions.
-	 */
-	async function ready(facts: Reply<"services">) {
-		const started = new Set(facts.map((fact) => fact.name));
-		const deadline = Date.now() + readyWaitMs;
-		while (facts.some((fact) => fact.state === "starting") && Date.now() < deadline) {
-			await delay(readyPollMs);
-			facts = (await run({ action: "services", name, op: "status" })).filter((fact) => started.has(fact.name));
-		}
-		return facts;
-	}
+	const ready = (facts: Reply<"services">) => settled(facts, () => run({ action: "services", name, op: "status" }));
 	return {
 		async exec(argv, { cwd, timeoutMs }) {
 			const deadline = Date.now() + timeoutMs;

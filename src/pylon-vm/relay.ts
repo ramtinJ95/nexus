@@ -14,8 +14,7 @@
  * relayLog.
  */
 import { z } from "zod";
-import type { VM } from "@earendil-works/gondolin";
-import { checked } from "./guest.ts";
+import { checkedIn, type ServiceGuest } from "./guest.ts";
 import { shellQuote as q } from "../shell.ts";
 
 export const relayMap = "/var/lib/pi-sandbox/relays.json";
@@ -87,21 +86,21 @@ export const relayScript = [
  * dies. A boot starts it once, before any service. A crash's traceback goes to the log too, which the relay rotates, so
  * a relay that keeps crashing cannot fill the disk.
  */
-export async function startRelay(vm: VM): Promise<void> {
+export async function startRelay(guest: ServiceGuest): Promise<void> {
 	const loop = 'while :; do python3 -c "$0" "$1" "$2" "$3" 2>>"$3"; echo "relay exited $?, restarting in 1s" >>"$3"; sleep 1; done';
-	await checked(vm, `rm -f ${q(relayLog)} ${q(relayStatus)}`);
-	await writeRelayMap(vm, 0, new Map());
-	await checked(vm, `setsid env -u NEXUS_GUEST_COMMAND /bin/sh -c ${q(loop)} ${q(relayScript)} ${q(relayMap)} ${q(relayStatus)} ${q(relayLog)} </dev/null >/dev/null 2>&1 &`);
+	await checkedIn(guest, `rm -f ${q(relayLog)} ${q(relayStatus)}`);
+	await writeRelayMap(guest, 0, new Map());
+	await checkedIn(guest, `setsid env -u NEXUS_GUEST_COMMAND /bin/sh -c ${q(loop)} ${q(relayScript)} ${q(relayMap)} ${q(relayStatus)} ${q(relayLog)} </dev/null >/dev/null 2>&1 &`);
 }
 
 /** Replaces the map, from app port to relay port, in one rename, so the relay never reads half of it. */
-export async function writeRelayMap(vm: VM, generation: number, relays: ReadonlyMap<number, number>): Promise<void> {
+export async function writeRelayMap(guest: ServiceGuest, generation: number, relays: ReadonlyMap<number, number>): Promise<void> {
 	const json = JSON.stringify({ generation, relays: Object.fromEntries([...relays].map(([port, relay]) => [relay, port])) });
-	await checked(vm, `mkdir -p ${q("/var/lib/pi-sandbox")} && printf '%s' ${q(json)} > ${q(`${relayMap}.new`)} && mv ${q(`${relayMap}.new`)} ${q(relayMap)}`);
+	await checkedIn(guest, `mkdir -p ${q("/var/lib/pi-sandbox")} && printf '%s' ${q(json)} > ${q(`${relayMap}.new`)} && mv ${q(`${relayMap}.new`)} ${q(relayMap)}`);
 }
 
 /** The relay's last status, or none before its first. */
-export async function readRelayStatus(vm: VM): Promise<RelayStatus> {
-	const text = (await checked(vm, `cat ${q(relayStatus)} 2>/dev/null || true`)).trim();
+export async function readRelayStatus(guest: ServiceGuest): Promise<RelayStatus> {
+	const text = (await checkedIn(guest, `cat ${q(relayStatus)} 2>/dev/null || true`)).trim();
 	return text === "" ? noRelayStatus : relayStatusSchema.parse(JSON.parse(text));
 }

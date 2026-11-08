@@ -6,12 +6,12 @@ import { z } from "zod";
 import type { Action, BootSpec, SandboxRecord } from "./contracts.ts";
 import {
 	checked,
-	execute,
 	freeReservedSlots,
 	notAnswering,
 	readGuestFile,
 	serviceRoot,
 	stagingRoot,
+	vmGuest,
 	writeFiles,
 } from "./guest.ts";
 import { networkOptions } from "./network.ts";
@@ -221,7 +221,8 @@ export class SandboxRuntime {
 			`rm -f ${serviceRoot}/*.pid; rm -rf ${commandsRoot} ${stagingRoot}; mkdir -p -m 700 ${commandsRoot}`,
 		);
 		// Before the services, whose routes all point at the relay.
-		await startRelay(vm);
+		const guest = vmGuest(vm);
+		await startRelay(guest);
 		// Placeholders are new on every boot, and login shells, which every guest command runs through, read profile.d.
 		await writeFiles(vm, [
 			{
@@ -272,7 +273,7 @@ export class SandboxRuntime {
 				this.resumePid = pid;
 		}
 		this.managed = new GuestServices(
-			vm,
+			guest,
 			this.dir,
 			servicesFile(config.workspace),
 			repoRoot(config.workspace),
@@ -506,16 +507,9 @@ export class SandboxRuntime {
 				);
 			case "unpreview":
 				return this.persisting(this.managed!.detach(action.port).then((refused) => ({ refused })));
-			case "logs": {
-				if (!action.service || !this.managed?.names().includes(action.service))
-					throw new Error("Choose a started service for guest logs");
-				return execute(
-					vm,
-					`tail -n ${action.lines} ${q(`${serviceRoot}/${action.service}.log`)}`,
-					"/",
-					10000,
-				);
-			}
+			case "logs":
+				if (!this.managed || !action.service) throw new Error("Choose a started service for guest logs");
+				return this.managed.logs(action.service, action.lines);
 			default:
 				throw new Error("Action unavailable on a running instance");
 		}

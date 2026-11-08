@@ -7,6 +7,7 @@ import type { Writable } from "node:stream";
 import type { VM } from "@earendil-works/gondolin";
 import { z } from "zod";
 import { actionSchema } from "./pylon-vm/contracts.ts";
+import { vmGuest } from "./pylon-vm/guest.ts";
 import { GuestServices } from "./pylon-vm/services.ts";
 import { parseServicesFile, serviceDecl, type ParsesTo } from "./services-file.ts";
 
@@ -140,7 +141,7 @@ function guestWith(yaml: string): VM {
 /** The pylon's own path for the file: the `ensure` its supervisor runs on every boot. */
 async function backendAccepts(yaml: string): Promise<boolean> {
   const dir = mkdtempSync(join(tmpdir(), "nexus-services-"));
-  const services = new GuestServices(guestWith(yaml), dir, "/workspace/repo/.nexus/services.yaml", "/workspace/repo", "user", { a: "https://a.example/" });
+  const services = new GuestServices(vmGuest(guestWith(yaml)), dir, "/workspace/repo/.nexus/services.yaml", "/workspace/repo", "user", { a: "https://a.example/" });
   try {
     await services.operate("ensure");
     return true;

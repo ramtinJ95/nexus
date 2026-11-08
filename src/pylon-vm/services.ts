@@ -1,11 +1,10 @@
 import { posix } from "node:path";
-import type { VM } from "@earendil-works/gondolin";
 import { z } from "zod";
 import { linkedName, parseServicesFile, serviceReference, wantsPreview, withPublicUrls } from "../services-file.ts";
-import { relayPorts, reservedPortMessage, reservedPorts } from "../protocol/ports.ts";
+import { relayPortList, relayPorts, reservedPortMessage, reservedPorts } from "../protocol/ports.ts";
 import { shellQuote as q } from "../shell.ts";
 import { configSchema, type Service } from "./contracts.ts";
-import { checked, direct, readGuestFile, serviceRunning, startService, stopService } from "./guest.ts";
+import { checkedIn, serviceRoot, serviceRunning, startService, stopService, type ServiceGuest } from "./guest.ts";
 import { openPortal } from "./portals.ts";
 import { linkTarget, serviceState, unlinkRefusal, type PreviewService } from "../preview-links.ts";
 import { noRelayStatus, readRelayStatus, relayLog, writeRelayMap } from "./relay.ts";
@@ -13,9 +12,9 @@ import { readJson, saveJson } from "../node-base/json-file.ts";
 import { instanceFiles } from "./instance-layout.ts";
 import { parse } from "../parse.ts";
 import { serialQueue } from "../single-flight.ts";
+import { setTimeout as delay } from "node:timers/promises";
 import type { ServiceFact } from "../protocol/observations.ts";
 
-const relayPortList = Array.from({ length: relayPorts.last - relayPorts.first + 1 }, (_, i) => relayPorts.first + i);
 type Entry = {
 	service: Service;
 	declared: boolean;
@@ -40,7 +39,6 @@ const linkedSchema = z.array(z.number().int().min(1).max(65535));
 export class GuestServices {
 	private entries = new Map<string, Entry>();
 	private assignments: z.infer<typeof assignmentsSchema> = {};
-	private base: string | undefined;
 	private reservedPorts: number[] = [];
 	private attached = new Map<number, Awaited<ReturnType<typeof openPortal>>>();
 	private adHocConfig: Record<string, Service> = {};
@@ -69,21 +67,21 @@ export class GuestServices {
 	private unrouted = new Map<number, string>();
 	/** Map writes and status reads, one at a time, so a map lands, and is confirmed, in the order its routes changed. */
 	private relayQueue = serialQueue();
-	private vm: VM;
+	private guest: ServiceGuest;
 	private dir: string;
 	readonly configPath: string;
 	private root: string;
 	private user: string;
 	private publicUrls: Record<string, string>;
 	constructor(
-		vm: VM,
+		guest: ServiceGuest,
 		dir: string,
 		configPath: string,
 		root: string,
 		user: string,
 		publicUrls: Record<string, string>,
 	) {
-		this.vm = vm;
+		this.guest = guest;
 		this.dir = dir;
 		this.configPath = configPath;
 		this.root = root;
@@ -117,16 +115,12 @@ export class GuestServices {
 	}
 	/** A repo without the file declares no services. The file is parsed again only once its size, inode or mtime changed. */
 	private async declaredFile(): Promise<Record<string, Service>> {
-		const stat = await direct(this.vm, ["stat", "-L", "-c", "%s %i %y", this.configPath]);
-		if (stat.exitCode !== 0) {
-			if (stat.stderr.includes("No such file or directory")) return {};
-			throw new Error(`${this.configPath} could not be read: ${stat.stderr.trim()}`);
-		}
-		const stamp = stat.stdout.trim();
+		const stamp = await this.guest.stamp(this.configPath);
+		if (stamp === null) return {};
 		if (this.declared?.stamp === stamp) return this.declared.services;
 		if (Number(stamp.split(" ")[0]) > 1048576)
 			throw new Error("Service YAML exceeds 1 MiB");
-		const text = await readGuestFile(this.vm, this.configPath);
+		const text = await this.guest.readFile(this.configPath);
 		if (text === null) return {};
 		const services = configSchema.parse(parseServicesFile(text.toString("utf8"))).services;
 		this.declared = { stamp, services };
@@ -192,12 +186,8 @@ export class GuestServices {
 		for (const name of names) visit(name);
 		return ordered;
 	}
-	private async ingress(): Promise<URL> {
-		if (!this.base)
-			this.base = (
-				await this.vm.enableIngress({ listenHost: "127.0.0.1", listenPort: 0 })
-			).url;
-		return new URL(this.base);
+	private ingress(): Promise<URL> {
+		return this.guest.ingress();
 	}
 	private async configure(
 		name: string,
@@ -221,8 +211,8 @@ export class GuestServices {
 			];
 			port = Number(
 				(
-					await checked(
-						this.vm,
+					await checkedIn(
+						this.guest,
 						`python3 -c ${q("import json,socket,sys; reserved=json.loads(sys.argv[1]); s=socket.socket(); s.bind(('127.0.0.1',0)); port=s.getsockname()[1];\nwhile port in reserved:\n s.close(); s=socket.socket(); s.bind(('127.0.0.1',0)); port=s.getsockname()[1]\nprint(port)")} ${q(JSON.stringify(reserved))}`,
 					)
 				).trim(),
@@ -288,7 +278,7 @@ export class GuestServices {
 		await this.relayStep(async () => {
 			const json = JSON.stringify([...relays]);
 			if (json !== this.relaysWritten) {
-				await writeRelayMap(this.vm, ++this.generation, relays);
+				await writeRelayMap(this.guest, ++this.generation, relays);
 				this.relaysWritten = json;
 			}
 			await this.confirm();
@@ -307,7 +297,7 @@ export class GuestServices {
 	private async confirm(): Promise<void> {
 		const deadline = Date.now() + 5000;
 		for (;;) {
-			this.relayStatus = await readRelayStatus(this.vm);
+			this.relayStatus = await readRelayStatus(this.guest);
 			if (this.relayStatus.generation >= this.generation || Date.now() >= deadline) return;
 			await new Promise((accept) => setTimeout(accept, 100));
 		}
@@ -339,7 +329,7 @@ export class GuestServices {
 				);
 		}
 		if (JSON.stringify(routes) === JSON.stringify(this.published)) return;
-		this.vm.setIngressRoutes(routes);
+		this.guest.setIngressRoutes(routes);
 		this.published = routes;
 	}
 	private readonly full = `every relay port from ${relayPorts.first} to ${relayPorts.last} serves another preview`;
@@ -392,11 +382,11 @@ export class GuestServices {
 	/** `running` is whether its process runs, when the caller has just asked. */
 	private async healthy(name: string, entry: Entry, running?: boolean): Promise<boolean> {
 		if (entry.service.health === "process")
-			return running ?? serviceRunning(this.vm, name);
+			return running ?? serviceRunning(this.guest, name);
 		return this.answers(entry.port, entry.service.health);
 	}
 	private async answers(port: number, path?: string): Promise<boolean> {
-		return (await checked(this.vm, `python3 -c ${q(answersScript)} ${port}${path === undefined ? "" : ` ${q(path)}`}`)).trim() === "True";
+		return (await checkedIn(this.guest, `python3 -c ${q(answersScript)} ${port}${path === undefined ? "" : ` ${q(path)}`}`)).trim() === "True";
 	}
 	/** The env and PUBLIC_URL a start gives the service. Throws while a URL it needs is unassigned. */
 	private environment(name: string, entry: Entry): { env: Record<string, string>; url: string | undefined } {
@@ -428,7 +418,7 @@ export class GuestServices {
 		try {
 			const { env, url } = this.environment(name, entry);
 			await startService(
-				this.vm,
+				this.guest,
 				name,
 				{
 					...entry.service,
@@ -471,7 +461,7 @@ export class GuestServices {
 	}
 	private async stop(name: string): Promise<void> {
 		this.watches.delete(name);
-		await stopService(this.vm, name);
+		await stopService(this.guest, name);
 		this.wanted.delete(name);
 		this.failures.delete(name);
 	}
@@ -488,7 +478,7 @@ export class GuestServices {
 				if (!entry.declared || this.held.has(name)) continue;
 			} else {
 				if (before === this.envKey(name, entry)) continue;
-				await stopService(this.vm, name);
+				await stopService(this.guest, name);
 			}
 			await this.start(name, entry, entry.service.timeoutMs);
 		}
@@ -542,7 +532,7 @@ export class GuestServices {
 					op === "restart",
 				);
 				if (op === "restart" && (!selected || selected === name))
-					await stopService(this.vm, name);
+					await stopService(this.guest, name);
 				await this.start(name, entry, entry.service.timeoutMs);
 			}
 		} else if (op === "stop")
@@ -561,7 +551,7 @@ export class GuestServices {
 			}
 		// The relay may have confirmed a relay port since the routes last changed, or lost one.
 		await this.relayStep(async () => {
-			this.relayStatus = await readRelayStatus(this.vm);
+			this.relayStatus = await readRelayStatus(this.guest);
 		});
 		const facts = await Promise.all(
 			names.flatMap((name) => {
@@ -573,7 +563,7 @@ export class GuestServices {
 		return [...facts, ...(await Promise.all([...this.attached.keys()].map((port) => this.linkedFact(port))))];
 	}
 	private async fact(name: string, entry: Entry): Promise<ServiceFact> {
-		const running = await serviceRunning(this.vm, name);
+		const running = await serviceRunning(this.guest, name);
 		const state = serviceState({
 			running,
 			healthy: running && (await this.healthy(name, entry, running)),
@@ -635,6 +625,10 @@ export class GuestServices {
 	names(): string[] {
 		return [...this.entries.keys()];
 	}
+	async logs(name: string, lines: number): Promise<{ exitCode: number; output: string }> {
+		if (!this.entries.has(name)) throw new Error("Choose a started service for guest logs");
+		return this.guest.execute(`tail -n ${lines} ${q(`${serviceRoot}/${name}.log`)}`, 10000);
+	}
 	async close(): Promise<void> {
 		this.watches.clear();
 		for (const entry of this.entries.values()) {
@@ -645,8 +639,32 @@ export class GuestServices {
 		this.attached.clear();
 	}
 	async stopAll(): Promise<void> {
-		for (const name of this.entries.keys()) await stopService(this.vm, name);
+		for (const name of this.entries.keys()) await stopService(this.guest, name);
 	}
+}
+
+/**
+ * How long ensure, restart and service-start wait for the services they started: the longest `timeoutMs` a
+ * service may declare (contracts.ts), and a margin for its last health check. The supervisor fails each start
+ * that outlasts its own timeout, so a service still starting after this went unhealthy after it was ready.
+ */
+const readyWaitMs = 130_000;
+const readyPollMs = 250;
+
+/**
+ * The supervisor only launches a service and watches its readiness itself, so that no health wait holds the pylon
+ * VM controller's lifecycle queue. A caller of ensure, restart or service-start still gets each service it was
+ * answered about, the dependencies an ensure of one service started included, ready or failed, from `status` reads.
+ */
+export async function settled(facts: readonly ServiceFact[], status: () => Promise<readonly ServiceFact[]>): Promise<ServiceFact[]> {
+	const started = new Set(facts.map((fact) => fact.name));
+	let current = [...facts];
+	const deadline = Date.now() + readyWaitMs;
+	while (current.some((fact) => fact.state === "starting") && Date.now() < deadline) {
+		await delay(readyPollMs);
+		current = (await status()).filter((fact) => started.has(fact.name));
+	}
+	return current;
 }
 
 /**

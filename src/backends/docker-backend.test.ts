@@ -3,19 +3,26 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createServer, request } from "node:http";
+import { connect } from "node:net";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { createDockerBackend } from "./docker-backend.ts";
 import { dockerHostBridge } from "./docker-host-bridge.ts";
-import { dockerServices } from "./docker-services.ts";
+import { dockerServiceGuest } from "./docker-service-guest.ts";
+import { GuestServices } from "../pylon-vm/services.ts";
+import { checkedIn } from "../pylon-vm/guest.ts";
 import type { PylonId } from "../ids.ts";
 import { freePort } from "../test-support/kit.ts";
-import { checkoutDir } from "../../images/pylon/nexus-contract.ts";
+import { checkoutDir, servicesFile } from "../../images/pylon/nexus-contract.ts";
 
 type Reply = { stdout?: string; stderr?: string; code?: number };
+const execFileAsync = promisify(execFile);
 
 /**
  * A `docker` first on PATH that logs each argv and answers from `replies`, keyed by the longest leading run of its
  * arguments joined by spaces. Its `exec` runs the command on this host instead, with the container's checkout and
- * services directory under `root`, so a container's files are the test's.
+ * other directories under `root`, so a container's files are the test's.
  */
 async function fakeDocker(t: TestContext, replies: Record<string, Reply> = {}) {
   const bin = await realpath(await mkdtemp(join(tmpdir(), "nexus-fake-docker-")));
@@ -32,7 +39,7 @@ appendFileSync(${JSON.stringify(join(bin, "calls"))}, JSON.stringify(argv) + "\\
 if (argv[0] === "exec") {
   let i = 1, cwd = ${JSON.stringify(bin)};
   for (; argv[i].startsWith("--"); i++) if (argv[i] === "--workdir") cwd = argv[++i]; else if (argv[i] === "--env") i++;
-  const remap = (arg) => arg.replaceAll(${JSON.stringify(checkoutDir)}, ${JSON.stringify(join(root, "checkout"))}).replaceAll("/run/nexus-services", ${JSON.stringify(join(root, "run"))})
+  const remap = (arg) => arg.replaceAll(${JSON.stringify(checkoutDir)}, ${JSON.stringify(join(root, "checkout"))}).replaceAll("/run/nexus-services", ${JSON.stringify(join(root, "run"))}).replaceAll("/var/lib/pi-sandbox", ${JSON.stringify(join(root, "pi-sandbox"))})
     .replaceAll("/var/lib/nexus", ${JSON.stringify(join(root, "var"))}).replaceAll("/home/user/.nexus", ${JSON.stringify(join(root, "nexus"))})
     .replaceAll("/proc/1/fd/1", ${JSON.stringify(join(root, "container.log"))});
   const [program, ...args] = argv.slice(i + 1).map(remap);
@@ -124,67 +131,142 @@ test("a guest exec answers its exit code with stdout then stderr, a nonzero exit
   assert.ok(hasPair(lookup, "--filter", `label=nexus.pylon=${pylon}`) && hasPair(lookup, "--filter", "label=nexus.test=pin"), lookup.join(" "));
 });
 
-test("a container without a services file runs no services, and one with a file runs what it declares", async (t) => {
-  const docker = await fakeDocker(t, { "port pylon-a": { stdout: "8000/tcp -> 127.0.0.1:49000\n" } });
-  const services = dockerServices();
-  await services.apply(pylon, {}, false);
-  assert.deepEqual(await services.operate(pylon, "list"), []);
-
-  await mkdir(join(docker.root, "checkout", ".nexus"), { recursive: true });
-  await writeFile(join(docker.root, "checkout", ".nexus", "services.yaml"), "services:\n  web:\n    command: serve\n    port: 8000\n");
-  // Stopped on purpose, so the apply starts nothing.
-  await mkdir(join(docker.root, "run"));
-  await writeFile(join(docker.root, "run", "web.stopped"), "");
-  await services.apply(pylon, {}, false);
-  assert.deepEqual(await services.operate(pylon, "list"), [{ name: "web", state: "stopped", port: 8000, declared: true, wantsPreview: false }]);
+test("before a spawn reaches a container, its services, links and preview origins are unavailable, naming why", async (t) => {
+  await fakeDocker(t);
+  const guest = createDockerBackend({ images }).guest(pylon);
+  const why = "pylon-a is not running, or no spawn has reached it since the probe started";
+  assert.deepEqual(guest.previewOrigin("web"), { unavailable: why });
+  await assert.rejects(guest.services("list"), { message: why });
+  await assert.rejects(guest.linkPort(8000), { message: why });
 });
 
-test("a preview origin is unavailable before a spawn reaches the container and for a service with no preview, and a preview port Docker did not publish is a fault", async (t) => {
-  const docker = await fakeDocker(t, { "port pylon-a": { stdout: "8000/tcp -> 127.0.0.1:49000\n" } });
-  const services = dockerServices();
-  assert.deepEqual(services.origin(pylon, "web"), { unavailable: "pylon-a is not running, or no spawn has reached it since the probe started" });
-  await mkdir(join(docker.root, "checkout", ".nexus"), { recursive: true });
-  await writeFile(join(docker.root, "checkout", ".nexus", "services.yaml"), "services:\n  web:\n    command: serve\n    port: 8000\n    preview: true\n  docs:\n    command: serve\n    port: 8001\n    preview: true\n  worker:\n    command: work\n    port: 8002\n");
-  await mkdir(join(docker.root, "run"));
-  for (const name of ["web", "docs", "worker"]) await writeFile(join(docker.root, "run", `${name}.stopped`), "");
-  await services.apply(pylon, {}, false);
-  assert.equal(services.origin(pylon, "web"), "http://127.0.0.1:49000");
-  assert.deepEqual(services.origin(pylon, "worker"), { unavailable: "pylon-a has no preview of worker" });
-  assert.throws(() => services.origin(pylon, "docs"), /Docker published no loopback port for docs's port 8001 in pylon-a/);
-});
+test("a container's services file is read by its stamp, a missing one declares no services, and one the container cannot read or a failed step fails with the exit code and the output", async (t) => {
+  const docker = await fakeDocker(t);
+  const dir = await mkdtemp(join(tmpdir(), "nexus-docker-services-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const guest = dockerServiceGuest(pylon);
+  t.after(() => guest.close());
+  const services = new GuestServices(guest, dir, servicesFile, checkoutDir, "user", {});
+  assert.equal(await guest.stamp(servicesFile), null);
+  assert.equal(await guest.readFile(servicesFile), null);
+  assert.deepEqual(await services.operate("status"), []);
+  await assert.rejects(services.attach(22), { message: "Port 22 is Nexus's own, so it cannot be previewed" });
 
-test("a link of a reserved port, or of a port whose linked name a declared service holds, is refused as a pylon refuses it", async (t) => {
-  const docker = await fakeDocker(t, { "port pylon-a": { stdout: "8000/tcp -> 127.0.0.1:49000\n8001/tcp -> 127.0.0.1:49001\n" } });
-  const services = dockerServices();
-  await mkdir(join(docker.root, "checkout", ".nexus"), { recursive: true });
-  await writeFile(join(docker.root, "checkout", ".nexus", "services.yaml"), "services:\n  port-8001:\n    command: serve\n    port: 8000\n    preview: true\n");
-  await mkdir(join(docker.root, "run"));
-  await writeFile(join(docker.root, "run", "port-8001.stopped"), "");
-  await services.apply(pylon, {}, false);
-  await assert.rejects(services.link(pylon, 8001), { message: "Service port-8001 runs on another port, so port 8001 cannot be previewed under that name. Rename the service" });
-  await assert.rejects(services.link(pylon, 22), { message: "Port 22 is Nexus's own, so it cannot be previewed" });
-});
-
-test("a services file the container cannot read, and a failed step in the container, fail with the exit code and the output", async (t) => {
-  const docker = await fakeDocker(t, { "port pylon-a": { stdout: "8001/tcp -> 127.0.0.1:49001\n" } });
   await mkdir(join(docker.root, "checkout", ".nexus", "services.yaml"), { recursive: true });
-  const services = dockerServices();
-  await assert.rejects(services.apply(pylon, {}, false), { message: new RegExp(`^reading ${checkoutDir}/\\.nexus/services\\.yaml in pylon-a exited 1: cat: .*Is a directory`) });
-
-  await rm(join(docker.root, "checkout"), { recursive: true });
-  // A file where the services directory goes, so making it fails.
+  await assert.rejects(guest.readFile(servicesFile), { message: new RegExp(`^reading ${checkoutDir}/\\.nexus/services\\.yaml in pylon-a exited 1: cat: .*Is a directory$`) });
   await writeFile(join(docker.root, "run"), "");
-  await services.apply(pylon, {}, false);
-  await assert.rejects(services.link(pylon, 8001), { message: /^in pylon-a, mkdir -p \/run\/nexus-services .* exited 1: mkdir: .*File exists$/ });
+  await assert.rejects(checkedIn(guest, "mkdir -p /run/nexus-services/x"), { message: /^Guest command exited 1: mkdir: .*/ });
+  assert.deepEqual(await guest.execute("echo out; echo err >&2; exit 3", 10_000), { exitCode: 3, output: "out\nerr\n" });
+  await guest.writeFile(`${checkoutDir}/written`, "content");
+  assert.equal((await guest.readFile(`${checkoutDir}/written`))?.toString(), "content");
+});
+
+test("the ingress sends each request to its longest matching route's port, without the prefix and with Gondolin's forwarded headers, and answers 404 without a route and 502 without a listener", async (t) => {
+  await fakeDocker(t);
+  const app = createServer((req, res) => res.end(JSON.stringify({ url: req.url, host: req.headers.host, forwarded: [req.headers["x-forwarded-host"], req.headers["x-forwarded-proto"], req.headers["x-forwarded-prefix"]] })));
+  await new Promise<void>((accept) => app.listen(0, "127.0.0.1", accept));
+  t.after(() => app.close());
+  const port = (app.address() as { port: number }).port;
+  const guest = dockerServiceGuest(pylon);
+  t.after(() => guest.close());
+  const base = await guest.ingress();
+  guest.setIngressRoutes([{ prefix: "/web/", port: 1, stripPrefix: true }, { prefix: "/web/api/", port, stripPrefix: true }, { prefix: "/down/", port: await freePort(), stripPrefix: true }]);
+  const body = await new Promise<string>((accept, reject) => {
+    request(new URL("/web/api/x?y=1", base), { headers: { host: "pylon.example:8443" } }, (res) => {
+      let text = "";
+      res.setEncoding("utf8").on("data", (chunk: string) => { text += chunk; }).on("end", () => accept(text));
+    }).on("error", reject).end();
+  });
+  assert.deepEqual(JSON.parse(body), { url: "/x?y=1", host: "pylon.example:8443", forwarded: ["pylon.example:8443", "http", "/web/api"] });
+  assert.equal((await fetch(new URL("/web/api", base))).status, 200, "the prefix alone is routed, as /");
+  assert.equal((await fetch(new URL("/elsewhere/", base))).status, 404);
+  assert.equal((await fetch(new URL("/down/", base))).status, 502);
+});
+
+test("the ingress answers a request target that is no URL path with 400, also on an upgrade, and goes on serving", async (t) => {
+  await fakeDocker(t);
+  const guest = dockerServiceGuest(pylon);
+  t.after(() => guest.close());
+  const base = await guest.ingress();
+  const raw = (head: string) => new Promise<string>((accept, reject) => {
+    const socket = connect(Number(base.port), "127.0.0.1", () => socket.end(head));
+    let text = "";
+    socket.setEncoding("utf8").on("data", (chunk: string) => { text += chunk; }).on("end", () => accept(text)).on("error", reject);
+  });
+  assert.match(await raw("GET //%/ HTTP/1.1\r\nHost: x\r\n\r\n"), /^HTTP\/1\.1 400 /);
+  assert.match(await raw("GET //%/ HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"), /^HTTP\/1\.1 400 /);
+  assert.equal((await fetch(new URL("/elsewhere/", base))).status, 404, "the ingress still answers");
+});
+
+test("a boot clears the pid files, starts the relay and ensures the services; a later spawn only gives new URLs; a probe restart restarts them; a failed supervisor is retried; an ad hoc service starts", async (t) => {
+  const docker = await fakeDocker(t, { images: { stdout: "nexus-test\n" } });
+  // The relay and the service loops run on this host, under the container's directory.
+  t.after(() => execFileAsync("pkill", ["-f", join(docker.root, "pi-sandbox")]).catch(() => undefined));
+  t.after(() => rm(join(tmpdir(), "nexus-docker-services", pylon), { recursive: true, force: true }));
+  await mkdir(join(docker.root, "checkout", ".nexus"), { recursive: true });
+  const declare = (yaml: string) => writeFile(join(docker.root, "checkout", ".nexus", "services.yaml"), yaml);
+  await declare("services:\n  web:\n    command: sleep 1000\n    health: process\n");
+  const boot = {
+    pylonId: pylon, image: "img-test00000000" as const, source: { kind: "fresh" as const, preSetup: null }, resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
+    network: { allowedHosts: [], secrets: [] }, repo: { kind: "empty" as const, branch: "main" }, dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
+  };
+  const live = { previews: [], overlay: [] };
+  const execs = async () => (await docker.calls()).filter((argv) => argv[0] === "exec").map((argv) => argv.join(" "));
+  const pidFilesCleared = (lines: string[]) => lines.filter((line) => line.includes("rm -f /var/lib/pi-sandbox/services/*.pid")).length;
+  const relayStarts = (lines: string[]) => lines.filter((line) => line.includes("setsid env -u NEXUS_GUEST_COMMAND /bin/sh -c")).length;
+  const pid = () => readFile(join(docker.root, "pi-sandbox", "services", "web.pid"), "utf8");
+  const web = (state: string) => ({ name: "web", state, declared: true, wantsPreview: false });
+  const facts = async (backend: ReturnType<typeof createDockerBackend>) => (await backend.guest(pylon).services("list")).services.map(({ port: _port, ...fact }) => fact);
+
+  // Each backend's supervisor listens on an ingress until a delete closes it, which runs here while fakeDocker's docker is still on PATH.
+  const backends: ReturnType<typeof createDockerBackend>[] = [];
+  const probe = () => { const b = createDockerBackend({ images }); backends.push(b); return b; };
+  try {
+    const backend = probe();
+    await backend.ensureRunning(boot, live, AbortSignal.timeout(30_000));
+    let lines = await execs();
+    assert.equal(pidFilesCleared(lines), 1, "the boot cleared the pid files its disk carried");
+    assert.equal(relayStarts(lines), 1, "the boot started the relay");
+    assert.deepEqual(await facts(backend), [web("ready")], "the boot ensured web");
+    const booted = await pid();
+
+    await docker.answer({ ps: { stdout: "c1\n" }, "container inspect c1": running("c1", { "nexus.pylon": pylon }) });
+    await backend.ensureRunning(boot, live, AbortSignal.timeout(30_000));
+    lines = await execs();
+    assert.deepEqual([pidFilesCleared(lines), relayStarts(lines), await pid()], [1, 1, booted], "a later spawn rebuilt nothing and left web running");
+
+    const restarted = probe();
+    await restarted.ensureRunning(boot, live, AbortSignal.timeout(30_000));
+    lines = await execs();
+    assert.deepEqual([pidFilesCleared(lines), relayStarts(lines)], [1, 1], "a probe restart starts no relay and clears no pid file");
+    assert.notEqual(await pid(), booted, "a probe restart restarted web");
+    assert.deepEqual(await facts(restarted), [web("ready")]);
+
+    await declare("services:\n  web: {}\n");
+    const again = probe();
+    await assert.rejects(again.ensureRunning(boot, live, AbortSignal.timeout(30_000)), /invalid \.nexus\/services\.yaml/);
+    await assert.rejects(again.guest(pylon).services("list"), { message: "pylon-a is not running, or no spawn has reached it since the probe started" }, "the failed supervisor was dropped");
+    await declare("services:\n  web:\n    command: sleep 1000\n    health: process\n");
+    await again.ensureRunning(boot, live, AbortSignal.timeout(30_000));
+    assert.deepEqual(await facts(again), [web("ready")], "the next spawn made the supervisor again");
+
+    const adHoc = (await again.guest(pylon).startService("adhoc", { command: "sleep 1000", health: "process" })).map(({ port: _port, ...fact }) => fact);
+    assert.deepEqual(adHoc, [{ name: "adhoc", state: "ready", declared: false, wantsPreview: false }]);
+  } finally {
+    for (const b of backends) await b.ensureDeleted(pylon, AbortSignal.timeout(30_000));
+  }
 });
 
 test("a spawn for reading leaves a checkpoint's relaunch mark, and the pause after it keeps the sessions that checkpoint carried, recording none", async (t) => {
   const paused = Buffer.from(JSON.stringify([{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }])).toString("base64url");
   const labels = { "nexus.pylon": pylon, "nexus.image": "img-test00000000", "nexus.booted-from": "ckpt-a-1", "nexus.checkpoint": "ckpt-a-1", "nexus.sessions": paused };
-  const docker = await fakeDocker(t, { ps: { stdout: "c1\n" }, "container inspect c1": running("c1", labels), "port c1": { stdout: "" }, [`port ${pylon}`]: { stdout: "" } });
+  const docker = await fakeDocker(t, { ps: { stdout: "c1\n" }, "container inspect c1": running("c1", labels) });
   const mark = join(docker.root, "var", "relaunch");
   await mkdir(join(mark, ".."), { recursive: true });
   await writeFile(mark, "");
+  // The container's relay, which outlived the probe, has applied every map, so the supervisor's routes confirm at once.
+  await mkdir(join(docker.root, "pi-sandbox"));
+  await writeFile(join(docker.root, "pi-sandbox", "relay-status.json"), JSON.stringify({ generation: 1_000_000, bound: {}, failed: {} }));
   const backend = createDockerBackend({ images });
   const boot = {
     pylonId: pylon, image: "img-test00000000" as const, source: { kind: "resume" as const, checkpoint: "ckpt-a-1" as const }, resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
