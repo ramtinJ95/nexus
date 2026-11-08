@@ -6,6 +6,7 @@ import type { ThreadDetail } from "../wire.ts";
 import type { Thread } from "../thread-store.ts";
 import type { TailnetNodeId, ThreadId } from "../../ids.ts";
 import { blocks as blocking, cancellable, cannotLand, findingsOf, pushedHead, reviewersNote, roundNote, roundsSpent, type Review } from "../review-model.ts";
+import { reviewedPr } from "../pr-watch-model.ts";
 import { holdRule, reservedNames } from "../holds.ts";
 import { landsOnItsOwn } from "../project.ts";
 import { heldBy, landPress } from "../policy.ts";
@@ -127,8 +128,7 @@ ${aq.options.map((o, j) => html`<div class="ask-opt"><label><input type="${aq.mu
 </section>`;
 }
 
-/** The review's PR as the PR watch last read it. */
-export const prOf = (d: ThreadDetail) => d.pullRequests.find((p) => p.repo === d.review?.pr.repo && p.number === d.review.pr.number);
+export const prOf = (d: ThreadDetail) => d.review === null ? undefined : reviewedPr(d.review, d.pullRequests, d.prWatch.stopped);
 
 /**
  * Above the composer, for a builder whose review the person can land or is landing: why it waits for them, with the
@@ -167,8 +167,8 @@ ${phase.kind === "quoting" ? html`<p class="land-note">The reviewer quotes, from
   const pr = prOf(d);
   if (cannotLand(r, d.thread, pr) !== null) return r.phase.kind === "needs-person" ? heldReview(c, d, r, pr, id, card) : null;
   const round = r.rounds.at(-1)!;
-  // The PR watch can read a push before the loop's next pass starts a round on it. A stopped watch reads nothing new.
-  const moved = d.prWatch.stopped ? null : pushedHead(r, pr);
+  // The PR watch can read a push before the loop's next pass starts a round on it.
+  const moved = pushedHead(r, pr);
   const held = r.phase.kind === "needs-person";
   const reasons = heldBy(r);
   const rules = reasons.map((h) => ({ reason: h.text, ...holdRule(h.code) }));

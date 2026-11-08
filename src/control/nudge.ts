@@ -12,7 +12,7 @@ import { gitPollMs } from "../protocol/observations.ts";
 import { singleFlight } from "../single-flight.ts";
 import { githubRepo, type GitHub } from "./github.ts";
 import type { Inbox } from "./inbox.ts";
-import { pushedBranches } from "./pr-watch-model.ts";
+import { prLocation, pushedBranches, watchedPrs } from "./pr-watch-model.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import { requestIds, type ThreadId } from "../ids.ts";
@@ -69,7 +69,7 @@ export function builderNudger(options: {
     return false;
   }
 
-  const hasPullRequest = (t: Thread) => (registry.prWatch(t.id)?.links.length ?? 0) > 0 || registry.review(t.id) !== null;
+  const hasPullRequest = (t: Thread) => prLocation(registry.review(t.id), watchedPrs(registry.prWatch(t.id))).kind !== "none";
   /** The thread as the registry has it now, if a nudge may still go to it: an await may have let a turn, a PR link, or an archive in. */
   const idleBuilder = (id: Thread["id"]) => {
     const fresh = registry.thread(id);

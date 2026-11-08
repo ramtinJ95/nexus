@@ -32,7 +32,7 @@ import { askedHolds, carryWaiver, headHolds, heldBy, landingHolds, landPress, se
 import type { CheckRuns } from "./gate.ts";
 import { releaseView } from "./releases.ts";
 import type { AgentState } from "./agent-conversation.ts";
-import { prWatchMs, watchStopped } from "./pr-watch-model.ts";
+import { prWatchMs, reviewedPr, watchedPrs, watchStopped } from "./pr-watch-model.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { NodeName, ProjectId, TailnetNodeId, ThreadId } from "../ids.ts";
@@ -289,8 +289,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
   };
   /** When the loop last read each capped held review's PR itself, in place of the PR watch. A restart reads it again. */
   const cappedReads = new Map<string, number>();
-  /** When the loop last read the holds of each approved review's head that had none recorded, at most once per PR watch interval. */
+  /** When the loop last read the holds of each approved review's head that had none recorded. */
   const holdReads = new Map<string, number>();
+  /** Whether a PR watch interval passed since the loop last read GitHub for `r` in `reads`. */
+  const due = (reads: Map<string, number>, r: Review) => now() - (reads.get(r.id) ?? -Infinity) >= prWatchMs;
   /** The check thread or verify pylon `phase` holds, and the runs it is one of. */
   const gateThread = (phase: Phase): { thread: ThreadId; runs: CheckRuns } | null => {
     const check = checkThread(phase);
@@ -895,8 +897,10 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     },
   };
 
-  /** The review's PR as the PR watch last read it. */
-  const watchedPr = (r: Review) => registry.prWatch(r.builder)?.links.find((l) => l.pr.repo === r.pr.repo && l.pr.number === r.pr.number)?.pr;
+  const watchedPr = (r: Review) => {
+    const watch = registry.prWatch(r.builder);
+    return reviewedPr(r, watchedPrs(watch), watchStopped(watch));
+  };
 
   /** Why `r` may not merge yet, read fresh: a pass saves after every step, so it sees what earlier reviews did in it. */
   function landingAhead(r: Review): string | null {
@@ -948,19 +952,19 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       // open, as often as the watch would, and about a held review's head. One that stopped at approval leaves its head
       // to the landing, which reads GitHub before it merges.
       const capped = watchStopped(registry.prWatch(r.builder));
-      const due = capped && now() - (cappedReads.get(r.id) ?? -Infinity) >= prWatchMs;
-      const fresh = due ? await read(r) : null;
-      if (due) cappedReads.set(r.id, now());
-      const state = fresh?.pr.state ?? (capped ? undefined : watchedPr(r)?.state);
+      const fresh = capped && due(cappedReads, r) ? await read(r) : null;
+      if (fresh !== null) cappedReads.set(r.id, now());
+      const watched = watchedPr(r);
+      const state = fresh?.pr.state ?? (capped ? undefined : watched?.state);
       const gone = r.phase.kind === "approved" ? outside(r, state) : state === "closed" ? end(r, { kind: "closed" }) : null;
       if (gone !== null) return gone;
-      const pr = fresh !== null && held ? { ...fresh.pr, head: fresh.detail.head } : capped ? undefined : watchedPr(r);
+      const pr = fresh !== null && held ? { ...fresh.pr, head: fresh.detail.head } : watched;
       // The PR watch reads GitHub only every two minutes, so the loop acts on what GitHub says now.
       const moved = pushedHead(r, pr) === null ? null : await pushedAfter(r, fresh ?? await read(r));
       if (moved !== null) return moved;
       // A review approved before Nexus recorded what holds its head reads them, as its checks passing would. A head
       // GitHub shows moved meanwhile is a push after the approval, whatever the PR watch read.
-      if (r.phase.kind === "approved" && r.rounds.at(-1)!.heldAt === undefined && now() - (holdReads.get(r.id) ?? -Infinity) >= prWatchMs) {
+      if (r.phase.kind === "approved" && r.rounds.at(-1)!.heldAt === undefined && due(holdReads, r)) {
         holdReads.set(r.id, now());
         const recorded = await recordHolds(r);
         if (recorded !== null) return recorded.review;

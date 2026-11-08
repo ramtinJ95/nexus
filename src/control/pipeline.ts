@@ -14,6 +14,7 @@ import { newItemId, requestIds, type ItemId, type ProjectId, type ThreadId } fro
 import { Refusal } from "./refusal.ts";
 import { queuedView, waitOf, type ThreadQueue } from "./queue.ts";
 import { checkBeside, liveNote, phaseNote } from "./review-model.ts";
+import { prLocation, watchedPrs } from "./pr-watch-model.ts";
 import type { Registry } from "./registry.ts";
 import { checkStart, startKey } from "./threads.ts";
 import type { StartRequest } from "./start-request.ts";
@@ -93,8 +94,8 @@ export function threadPhase(registry: PipelineRegistry, id: ThreadId): ItemPhase
   const attention = registry.attention(id);
   if (attention === "failed" || attention === "decision") return phase("held", attention === "failed" ? "its thread failed" : "its thread needs the person's decision");
   if (wait.state === "blocked") return phase("held", wait.why);
-  const open = registry.prWatch(id)?.links.find((l) => l.pr.state === "open");
-  if (open !== undefined) return phase("reviewing", `PR #${open.pr.number} is open, before its review`);
+  const where = prLocation(review, watchedPrs(registry.prWatch(id)));
+  if (where.kind === "open") return phase("reviewing", `PR #${where.number} is open, before its review`);
   return phase("building", t.working ? "its agent is working, with no pull request yet" : "no pull request yet");
 }
 

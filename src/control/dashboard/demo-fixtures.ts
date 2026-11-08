@@ -33,6 +33,7 @@ import type { PylonObservation } from "../../protocol/observations.ts";
 import type { CommandResult } from "../../protocol/commands.ts";
 import type { DoctorReport, Check } from "../doctor-model.ts";
 import type { PullRequest } from "../github.ts";
+import type { WatchedPr } from "../pr-watch-store.ts";
 import { claudeTalk, diffSnippet, failingTests, harnessTalk, longConversation, testOutput, typescriptSnippet } from "./demo-talk.ts";
 
 type Demo = Awaited<ReturnType<typeof testApi>>;
@@ -92,7 +93,7 @@ interface ThreadSpec {
 /** What the seeding passes share: each thread by key, and what the live clock keeps moving. */
 interface World { threads: Map<string, Thread>; live: { working: Thread[]; talker: Thread | null } }
 
-const pr = (project: string, number: number, title: string, over: Partial<PullRequest> = {}): PullRequest =>
+const pr = (project: string, number: number, title: string, over: Partial<WatchedPr> = {}): WatchedPr =>
   ({ repo: repos[project]!, number, title, url: `https://github.com/${repos[project]}/pull/${number}`, state: "open", checks: "passing", review: "none", conflict: false, ...over });
 
 const head = (seed: string) => seed.repeat(40).slice(0, 40);
@@ -111,7 +112,7 @@ const round = (h: string, over: Partial<Round> = {}): Round => ({ head: head(h),
 const changes = (...findings: ReturnType<typeof finding>[]) => ({ token: "t", verdict: "changes" as const, findings, reserved: [], notCheckedLive: null });
 const approve = (...findings: ReturnType<typeof finding>[]) => ({ token: "t", verdict: "approve" as const, findings, reserved: [], notCheckedLive: null });
 
-function linkPr(d: Demo, t: Thread, p: PullRequest) {
+function linkPr(d: Demo, t: Thread, p: WatchedPr) {
   d.registry.savePrWatch(t.id, { links: [{ pr: p, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
 }
 
