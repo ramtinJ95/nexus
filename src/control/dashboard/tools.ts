@@ -1,6 +1,6 @@
 /** Renders an agent's tool calls: each tool's look and diff, a run of steps, and screenshots. */
 import { clock } from "./elapsed.ts";
-import { Html, html, icon, grows, type Part } from "./view.ts";
+import { Html, html, icon, grows, growing, type Part } from "./view.ts";
 import { prose } from "./markdown.ts";
 import type { ToolItem, Shot } from "./items.ts";
 import { checkoutDir } from "../../../images/pylon/nexus-contract.ts";
@@ -141,13 +141,13 @@ function toolView(tool: ToolItem): Html {
   const exit = bad && (exitCode(output) === undefined ? "failed" : `exit ${exitCode(output)}`);
   const { mark, said } = toolMarks[state];
   return html`<details class="tool${bad && " failed"}${running && " running"}" id="tool-${call.id}"${open && " open"}>
-<summary><span class="t-mark ${state}" role="img" aria-label="${said}" title="${said}">${mark}</span><span class="t-name"${look.label.toLowerCase() !== call.name.toLowerCase() && html` title="${call.name}"`}>${look.label}</span><span class="t-subj">${subject !== undefined && shortSubject(subject.value)}</span><span class="t-meta"><span class="t-size"${running && " data-grow"}>${grow(size)}</span>${exit && html`<span class="t-exit">${exit}</span>`}</span>${ms !== null && html`<span class="t-time">${took(ms)}</span>`}<span class="chev" aria-hidden="true">›</span></summary>
+<summary><span class="t-mark ${state}" role="img" aria-label="${said}" title="${said}">${mark}</span><span class="t-name"${look.label.toLowerCase() !== call.name.toLowerCase() && html` title="${call.name}"`}>${look.label}</span><span class="t-subj">${subject !== undefined && shortSubject(subject.value)}</span><span class="t-meta"><span class="t-size"${running && growing}>${grow(size)}</span>${exit && html`<span class="t-exit">${exit}</span>`}</span>${ms !== null && html`<span class="t-time">${took(ms)}</span>`}<span class="chev" aria-hidden="true">›</span></summary>
 ${subject !== undefined && html`<pre class="t-full">${subject.value}</pre>`}
 ${text !== undefined && html`<div class="t-text">${prose(text.value)}</div>`}
 ${Object.keys(rest).length > 0 && html`<pre class="t-args">${JSON.stringify(rest, null, 2)}</pre>`}
 ${diff !== null && clipped(`more-${call.id}-diff`, diff.lines, (lines, part) => html`<pre class="t-out diff${part}">${lines.map(([sign, line]) => html`<span class="d d-${sign === "+" ? "add" : "del"}">${sign === "+" ? "+" : "−"} ${line}</span>`)}</pre>`)}
 ${(diff === null || bad) && (output === "" ? (tool.images?.length ?? 0) === 0 && html`<p class="t-empty">${running ? "No output yet." : "No output."}</p>`
-    : running ? html`<pre class="t-out" data-grow>${grows(output)}</pre>`
+    : running ? html`<pre class="t-out"${growing}>${grows(output)}</pre>`
     : clipped(`more-${call.id}`, outLines, (lines, part) => html`<pre class="t-out${part}">${lines.join("\n")}</pre>`))}
 ${shotsView(tool.images)}
 ${task !== undefined && html`<p class="t-task">Background task ${task.status}: ${task.summary}</p>${task.result !== null && html`<div class="t-text">${prose(task.result)}</div>`}`}

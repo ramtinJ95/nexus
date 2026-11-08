@@ -8,6 +8,7 @@ import { agentView, type AgentView } from "../../contract/threads.ts";
 import { Html, html, ago } from "./view.ts";
 import { modelOf, type Item } from "./items.ts";
 import { blocks, blockView } from "./conversation.ts";
+import { growParts } from "./contract.ts";
 
 /**
  * The inside of the conversation region, which the page's stream sends again whenever it changed. `model` is the
@@ -49,8 +50,6 @@ export function shownKey(read: AgentView, model: string | null): string {
   return digest(JSON.stringify([view.session, view.dropped, entriesDigest(view.entries), view.readAt === null, view.working, view.usageLimit, model]));
 }
 
-const grown = /<!--grow-->([\s\S]*?)<!--\/grow-->/g;
-
 /** A render of a thread page's conversation region, with its growing parts apart, and the view it shows. */
 interface LiveRender { region: string; shape: string; parts: readonly string[]; shows: string }
 
@@ -68,7 +67,7 @@ function liveRender(t: Thread, claudeModel: string | null, items: ItemsOf): (ser
     const view = agentView(served);
     const model = view.kind === "claude" ? claudeModel : modelOf(view.view);
     const region = convo(t, view, items(view), model, Date.now()).text;
-    const render = { region, shape: region.replace(grown, "<!--grow-->"), parts: [...region.matchAll(grown)].map((m) => m[1]!), shows: shownKey(view, model) };
+    const render = { region, ...growParts(region), shows: shownKey(view, model) };
     last = { served, render };
     return render;
   };

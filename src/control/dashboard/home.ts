@@ -6,7 +6,7 @@ import type { Thread } from "../thread-store.ts";
 import { landsOnItsOwn, type Project } from "../project.ts";
 import { cannotLand, settled, type Review } from "../review-model.ts";
 import { needWording, reviewPr, roundOf, type NeedAction } from "../wording.ts";
-import { Html, html, actualBadge, desiredTone, dot, state, icon, menu, threadState, dims, ago, workingFor, type Part } from "./view.ts";
+import { Html, html, act, actualBadge, desiredTone, dot, state, icon, menu, threadState, dims, ago, workingFor, type Part } from "./view.ts";
 import type { Context, FoldView, HomeView, Latest, Peek } from "./context.ts";
 import type { HeldWork, InboxNeed } from "../work.ts";
 import { prose, inline } from "./markdown.ts";
@@ -15,6 +15,7 @@ import { layout, threadsOf, queuedLook, closedLabel, quietLabel, newProjectButto
 import { lifeOfThread, roleLine, type Life } from "./lifecycle.ts";
 import { flightLines, flightRows, flightStack, heldLine, inFlight, itemActions, itemBrief, peekHref, peekKey, peekView } from "./flight.ts";
 import { lifeTrack } from "./timeline.ts";
+import type { NoticeAttention } from "./contract.ts";
 
 /**
  * Two columns: on the left what waits on the person, each a line that opens to its card, and on the right the work in
@@ -33,6 +34,7 @@ export function home(c: Context, h: HomeView, dialogs: Pick<Shell, "start" | "ad
   return layout(c, {
     title: dialogs.start !== undefined ? "Start a thread" : dialogs.addProject === true ? "New project" : "Threads",
     ...dialogs,
+    page: "home",
     main: html`<header class="bar">${menu}<div class="crumb"><h1>Threads</h1></div><div class="bar-end"><a class="btn btn-ghost" href="/projects/new" data-new-project>New project</a><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
 <div class="seg-bar home-seg" role="radiogroup" aria-label="Show"><label class="seg-tab"><input type="radio" name="home-side" value="needs" id="side-needs" checked>Needs you<span class="seg-n" id="seg-needs-n" data-live>${waiting || ""}</span></label><label class="seg-tab"><input type="radio" name="home-side" value="flight" id="side-flight">In flight<span class="seg-n" id="seg-flight-n" data-live>${flying || ""}</span></label></div>
 <div class="split${peek !== null && !carded && " peeking"}" id="split">
@@ -56,7 +58,7 @@ function autoReviewSwitch(c: Context, p: Project): Html {
   const by = p.autoReview == null ? "" : `, set by ${p.autoReview.enabledBy}`;
   return html`<span class="auto-review" role="group" aria-label="Auto review for ${p.id}${by}"><span class="dim">Auto review</span>${autoModes.map(([mode, label]) => {
   const refused = mode !== current && (mode === "land" || mode === "yolo") && c.landRefusal === "not a deployer";
-  return html`<button type="button" class="btn btn-xs${mode === current ? " btn-primary" : ""}" data-action="auto-review" data-project="${p.id}" data-mode="${mode}" aria-pressed="${mode === current ? "true" : "false"}"${(mode === current || refused) && html` disabled`}${refused && html` title="Landing deploys, so only a deployer may turn it on"`}${mode === "yolo" && html` data-confirm="Turn on yolo for project ${p.id}? Nexus then answers each review's holds question with Land for you, waiving every hold the policy lets you waive, reserved paths and data-deleting migrations included, until you switch it off."`}>${label}</button>`;
+  return html`<button type="button" class="btn btn-xs${mode === current ? " btn-primary" : ""}"${act("auto-review")} data-project="${p.id}" data-mode="${mode}" aria-pressed="${mode === current ? "true" : "false"}"${(mode === current || refused) && html` disabled`}${refused && html` title="Landing deploys, so only a deployer may turn it on"`}${mode === "yolo" && html` data-confirm="Turn on yolo for project ${p.id}? Nexus then answers each review's holds question with Land for you, waiving every hold the policy lets you waive, reserved paths and data-deleting migrations included, until you switch it off."`}>${label}</button>`;
 })}</span>`;
 }
 
@@ -180,7 +182,7 @@ ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</s
   const [what, body] = needCard(c, h, n);
   const life = lifeOfThread(c, t.id);
   const why = needWording(n, c.now).why || life.why;
-  return html`<article class="need need-${n.kind}${mark(n)}" id="${needId(n)}" data-thread="${t.id}" data-attention="${n.kind === "thread" ? n.attention : "decision"}" tabindex="-1" aria-label="${what}: ${t.title}">
+  return html`<article class="need need-${n.kind}${mark(n)}" id="${needId(n)}" data-thread="${t.id}" data-attention="${(n.kind === "thread" ? n.attention : "decision") satisfies NoticeAttention}" tabindex="-1" aria-label="${what}: ${t.title}">
 ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="/threads/${t.id}" data-peek="${t.id}"><span class="dim">${t.project} /</span> ${t.title}</a><span class="need-at">${ago(n.since, c.now)}</span></div>`, html`${leads.has(n) ? whereNow(c, h, n.d, life, replyOf(t.id)) : n.kind === "review" && html`<p class="need-facts">${prFact(n.d.review!.pr, n.d.review)}</p>`}${body}`, why, mark(n))}
 </article>`;
 })}</div>`}`;
@@ -237,5 +239,5 @@ ${card}`];
 
 function needAction(t: Thread, a: NeedAction): Html {
   if (a.kind === "terminal") return html`<a class="btn btn-xs" href="/threads/${t.id}#terminal">${icon("terminal")}Open terminal</a>`;
-  return html`<button type="button" class="btn btn-xs${a.danger && " danger"}" data-action="${a.action}" data-thread="${t.id}"${a.confirm !== undefined && html` data-confirm="${a.confirm}"`}>${a.label}</button>`;
+  return html`<button type="button" class="btn btn-xs${a.danger && " danger"}"${act(a.action)} data-thread="${t.id}"${a.confirm !== undefined && html` data-confirm="${a.confirm}"`}>${a.label}</button>`;
 }

@@ -12,7 +12,7 @@ import { askingHolds, type AnswerRefusal, type ClaudeQuestion, type CleanupQuest
 import { bytesText, itemKey, itemText, type cleanupOptions } from "../cleanup-model.ts";
 import type { judgmentOptions } from "../judgment.ts";
 import type { proposalOptions } from "../planning.ts";
-import { Html, html, ago, short } from "./view.ts";
+import { Html, html, act, ago, short } from "./view.ts";
 import type { LandRefusal, Context } from "./context.ts";
 import { prose } from "./markdown.ts";
 import { landingTrack } from "./lifecycle.ts";
@@ -92,7 +92,7 @@ export function questionCard(c: Context, q: ThreadQuestion): Html {
   const buttons = q.options.map((option) => {
     const { label, confirm } = offerOf(q, option);
     return refusal === null
-      ? html`<button type="button" class="btn" data-action="answer" data-thread="${q.thread}" data-question="${q.id}" data-option="${option}"${confirm !== null && html` data-confirm="${confirm(q)}"`}>${label}</button>`
+      ? html`<button type="button" class="btn"${act("answer")} data-thread="${q.thread}" data-question="${q.id}" data-option="${option}"${confirm !== null && html` data-confirm="${confirm(q)}"`}>${label}</button>`
       : html`<button type="button" class="btn" data-question="${q.id}" data-option="${option}" disabled>${label}</button>`;
   });
   return html`<section class="landing question" data-question="${q.id}" aria-label="${needLabels.question}">
@@ -116,7 +116,7 @@ export function cleanupCard(c: Context, q: CleanupQuestion): Html {
   const buttons = q.options.map((option) => {
     const { label, confirm } = offerOf(q, option);
     return refusal === null
-      ? html`<button type="button" class="btn" data-action="answer" data-question="${q.id}" data-option="${option}"${confirm !== null && html` data-confirm="${confirm(q)}"`}>${label}</button>`
+      ? html`<button type="button" class="btn"${act("answer")} data-question="${q.id}" data-option="${option}"${confirm !== null && html` data-confirm="${confirm(q)}"`}>${label}</button>`
       : html`<button type="button" class="btn" disabled>${label}</button>`;
   });
   return html`<section class="landing question cleanup" data-question="${q.id}" aria-label="Cleanup to confirm on ${q.node}">
@@ -234,7 +234,7 @@ ${found}
 ${moved !== null ? html`<p class="land-note">The PR watch last read the pull request at ${short(moved)}, not ${short(round.head)}, so ${short(round.head)} is not offered for landing. Nexus confirms the head with GitHub, and a new head gets a new round, or holds for you when no round is left.</p>`
   : stuck ? html`<p class="land-note">Landing checks the merge policy again, and what is marked "holds again" holds every landing of this commit. Only you can get past it, by merging the pull request on GitHub${c.deploys(r) && " and deploying it with nexus deploy"}.</p>`
   : asking ? html`<p class="land-note">Answer the question about its holds${!card && " above"} to waive them and land it.</p>`
-  : c.landRefusal === null ? html`<div class="land-act"><button type="button" class="btn btn-primary" id="${id("land")}" data-action="land" data-thread="${d.thread.id}" data-head="${round.head}"${waived.length > 0 && html` data-holds="${JSON.stringify(waived)}"`} data-confirm="${confirm}">Land #${r.pr.number}</button>${waived.length > 0 && html`<p class="land-note">Pressing Land waives what is marked "you may waive", for commit ${short(round.head)} and any rebase of it that leaves the change as it is. Landing checks everything else again.</p>`}</div>`
+  : c.landRefusal === null ? html`<div class="land-act"><button type="button" class="btn btn-primary" id="${id("land")}"${act("land")} data-thread="${d.thread.id}" data-head="${round.head}"${waived.length > 0 && html` data-holds="${JSON.stringify(waived)}"`} data-confirm="${confirm}">Land #${r.pr.number}</button>${waived.length > 0 && html`<p class="land-note">Pressing Land waives what is marked "you may waive", for commit ${short(round.head)} and any rebase of it that leaves the change as it is. Landing checks everything else again.</p>`}</div>`
   : html`<div class="land-act"><button type="button" class="btn" id="${id("land")}" disabled>Land #${r.pr.number}</button><p class="error">${landRefusals[c.landRefusal](c.caller)}</p></div>`}
 </section>`;
 }
@@ -262,7 +262,7 @@ ${outside === "merged" ? html`<p class="land-note">Pull request #${r.pr.number} 
   : outside === "closed" ? html`<p class="land-note">Pull request #${r.pr.number} closed on GitHub, so nothing is left to review or land. Cancel the review once nothing more is needed.</p>`
   : !again && html`<p class="land-note">The thread is ${d.thread.status}, so it cannot be reviewed again.</p>`}
 <div class="land-act need-act">${again && (refusal === null
-  ? html`<button type="button" class="btn btn-primary" data-action="review-again" data-thread="${d.thread.id}" data-pr="${r.pr.number}"${land && html` data-land="true"`} data-confirm="${confirm}">Review again</button>`
+  ? html`<button type="button" class="btn btn-primary"${act("review-again")} data-thread="${d.thread.id}" data-pr="${r.pr.number}"${land && html` data-land="true"`} data-confirm="${confirm}">Review again</button>`
   : html`<button type="button" class="btn" disabled>Review again</button>`)}${cancelReview(d.thread.id, r, "btn-ghost")}</div>
 ${again && refusal !== null && html`<p class="error">${landRefusals[refusal](c.caller)}</p>`}
 </section>`;
@@ -270,7 +270,7 @@ ${again && refusal !== null && html`<p class="error">${landRefusals[refusal](c.c
 
 /** As `nexus review --cancel`, wherever the review can be cancelled. */
 export const cancelReview = (thread: ThreadId, r: Review, look: string) => cancellable(r)
-  && html`<button type="button" class="btn ${look}" data-action="cancel-review" data-thread="${thread}" data-confirm="Cancel review ${r.id} of pull request #${r.pr.number}?${r.phase.kind === "needs-person" && " It stops waiting on you."} Its reviewer thread is archived, and this thread stays as it is.">Cancel review</button>`;
+  && html`<button type="button" class="btn ${look}"${act("cancel-review")} data-thread="${thread}" data-confirm="Cancel review ${r.id} of pull request #${r.pr.number}?${r.phase.kind === "needs-person" && " It stops waiting on you."} Its reviewer thread is archived, and this thread stays as it is.">Cancel review</button>`;
 
 /** For a Claude worker whose turns kept dying after Nexus resumed them, which waits on the person, with why Nexus stopped resuming it. */
 export function resumeCard(t: Thread, why: string, place: Place = "page"): Html {

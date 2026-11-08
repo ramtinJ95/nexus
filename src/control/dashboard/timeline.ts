@@ -8,11 +8,10 @@ import { isOpen } from "../questions.ts";
 import { isOpenStatus, keptPastDay } from "../reconcile.ts";
 import { blocks, findingsOf, reviewerApproved, type Review, type Round, type Verdict } from "../review-model.ts";
 import { diskGoes, keptPast, limitText, needKind, needLabels, plannerGaveUp, reviewersNote, reviewLine } from "../wording.ts";
-import { Html, html, ago, short, dot, icon, type Part, type Tone } from "./view.ts";
+import { Html, html, ago, short, since, dot, icon, type Part, type Tone } from "./view.ts";
 import type { Context, ThreadView } from "./context.ts";
 import { prose } from "./markdown.ts";
 import { promptLabel, type Item } from "./items.ts";
-import { clock } from "./elapsed.ts";
 import { landingTrack, stageLabel, stepStates, type Life, type StepState } from "./lifecycle.ts";
 import { steps, type Step } from "../pipeline.ts";
 
@@ -112,7 +111,7 @@ export function timeline(c: Context, page: ThreadView, life: Life): Html {
 ${heldAt("planned")}`,
     queued: html`<p class="tl-meta">${queuedAfter === null ? "Started at once, with nothing ahead of it in the queue." : html`Queued after ${queuedAfter.length === 0 ? "nothing" : queuedAfter.map((id, i) => html`${i > 0 && ", "}<a class="link" href="/threads/${id}">${c.thread(id)?.title ?? id}</a>`)}.`} Its pylon runs on <a class="link" href="/nodes/${encodeURIComponent(d.pylon.node)}">${d.pylon.node}</a> with ${cpus} CPUs, ${memoryGiB} GiB of memory and ${diskGiB} GiB of disk.</p>${heldAt("queued")}`,
     building: html`${turnsList(turns, c.now)}
-${t.working && html`<p class="tl-event tl-work">${dot("work")}<span>Its agent is working${t.workingSince !== undefined && html` for <time data-since="${t.workingSince}">${clock(c.now - t.workingSince)}</time>`}.</span></p>`}
+${t.working && html`<p class="tl-event tl-work">${dot("work")}<span>Its agent is working${t.workingSince !== undefined && html` for ${since(t.workingSince, c.now)}`}.</span></p>`}
 ${t.usageLimit !== undefined && html`<p class="tl-event tl-bad">${dot("bad")}<span>It ${limitText(t, c.now)}, ${ago(t.usageLimit.stoppedAt, c.now)}.</span></p>`}
 ${d.pylon.failed !== null && html`<p class="tl-event tl-bad">${dot("bad")}<span>${plannerGaveUp(d.pylon.failed)}</span></p>`}
 ${d.judgments.map((j) => html`<p class="tl-event">${dot(j.verdict === null ? "work" : "bad")}<span>Judged a failure on ${j.node} ${ago(j.startedAt, c.now)}: ${j.verdict === null ? "no answer yet" : html`<b>${j.verdict.answer}</b>, ${j.verdict.why}`}</span></p>`)}

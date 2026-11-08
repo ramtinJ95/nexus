@@ -5,6 +5,7 @@
  */
 import type { ThreadDetail, ThreadNeed, ThreadSaid } from "./wire.ts";
 import type { Thread } from "./thread-store.ts";
+import type { Action } from "./dashboard/contract.ts";
 import { usageLimitText } from "../contract/threads.ts";
 import { archivedDiskMs, keptPastDay } from "./reconcile.ts";
 import { maxNudges } from "./nudge.ts";
@@ -148,7 +149,7 @@ type NeedOf<K extends NeedKind> = K extends "held-review" | "approved-review" ? 
   : Extract<ThreadNeed, { kind: "thread" }>;
 
 /** What gets a stopped thread past the stop: a button its card presses, or its terminal, where a dialog waits. */
-export type NeedAction = { kind: "button"; action: string; label: string; confirm?: string; danger?: true } | { kind: "terminal" };
+export type NeedAction = { kind: "button"; action: Action; label: string; confirm?: string; danger?: true } | { kind: "terminal" };
 /** A card that says in full what stopped its thread, with the one action that gets past it. */
 export interface NeedFix { body: string; action: NeedAction }
 
@@ -160,7 +161,7 @@ interface NeedRow<K extends NeedKind> {
 }
 
 const asked = ({ question: q }: NeedOf<"question">) => firstLine(q.kind === "ask" ? q.ask.questions[0]!.question : q.kind === "proposal" ? q.proposal.title : q.text);
-const button = (action: string, label: string, confirm?: string): NeedAction => ({ kind: "button", action, label, ...confirm === undefined ? {} : { confirm } });
+const button = (action: Action, label: string, confirm?: string): NeedAction => ({ kind: "button", action, label, ...confirm === undefined ? {} : { confirm } });
 
 const needRows: { [K in NeedKind]: NeedRow<K> } = {
   "held-review": { label: "Review needs you", why: () => "" },
