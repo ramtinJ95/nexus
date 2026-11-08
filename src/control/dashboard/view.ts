@@ -7,7 +7,7 @@ import { needsPerson, type Attention } from "../attention.ts";
 import { attentionLabels } from "../plain-wording.ts";
 import type { Output, Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
-import { usageLimitText } from "../claude-transcript.ts";
+import { limitText } from "../wording.ts";
 import { agoText, clock } from "./elapsed.ts";
 
 interface Page { status: number; headers: Record<string, string>; body: string }
@@ -90,7 +90,6 @@ export const menu = html`<button type="button" class="icon-btn menu" data-open="
 /** Text a screen reader says that the page shows another way, such as with an icon or a bubble's side. */
 export const unseen = (text: string) => html`<span class="vh">${text}</span>`;
 
-export const limitText = (t: Pick<Thread, "usageLimit">, now: number) => usageLimitText(t.usageLimit ?? { resetsAt: null }, now);
 
 export const attentionTone: Record<NonNullable<Attention>, Tone> = { failed: "bad", decision: "bad", parked: "bad", limited: "bad", reply: "reply", working: "work", waiting: "idle" };
 

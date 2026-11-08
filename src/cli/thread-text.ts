@@ -10,7 +10,7 @@ import type { Question } from "../control/questions.ts";
 import { reservedNames } from "../control/holds.ts";
 import { usageLimitText } from "../control/claude-transcript.ts";
 import { keptPastDay } from "../control/reconcile.ts";
-import { diskGoes, keptPast, liveNote, prWatchText, reviewersNote, reviewLine, roundNote, sessionPaused } from "../control/wording.ts";
+import { diskGoes, freshVm, keptPast, liveNote, prWatchText, reviewersNote, reviewLine, roundNote, sessionPaused } from "../control/wording.ts";
 import type { Changes, Listing } from "../contract/pylon.ts";
 import type { ThreadSetup } from "../control/templates.ts";
 import { ago, table, clip } from "./kit.ts";
@@ -100,7 +100,7 @@ export function detailText({ thread: t, pylon: p, agent, sessions, previews, por
     ...t.usageLimit === undefined ? [] : [`usage limit: ${usageLimitText(t.usageLimit, Date.now())}. \`nexus send ${t.id} continue\` resumes it once the limit resets`],
     `status: ${t.status}${t.working ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,
-    ...p.notAnswering === undefined ? [] : [`guest: not answering since ${ago(Date.parse(p.notAnswering.since))}, as its last ${p.notAnswering.timeouts} guest commands got no answer, so messages, files and diffs fail. \`nexus archive ${t.id}\` and \`nexus unarchive ${t.id}\` give it a fresh VM. If the guest does not answer the pause either, the pylon breaks and \`nexus retry-pylon ${t.id}\` resumes its last saved disk, losing the changes since, so push or copy what you can first`],
+    ...p.notAnswering === undefined ? [] : [`guest: not answering since ${ago(Date.parse(p.notAnswering.since))}, as its last ${p.notAnswering.timeouts} guest commands got no answer, so messages, files and diffs fail. ${freshVm(t.id)}`],
     ...kept === null ? [] : [`disk: ${keptPast}, as ${kept}`],
     ...t.status !== "archived" || t.usageUnread === undefined ? [] : [`usage: unread, as ${t.usageUnread}, so ${diskGoes(p.actualState === "absent")} without it`],
     ...t.status === "archived" || t.status === "deleted" ? [] : [`attach: nexus attach ${t.id}`],

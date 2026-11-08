@@ -6,8 +6,8 @@ import type { ClaudeConversation } from "../claude-transcript.ts";
 import type { AgentView } from "../conversation-view.ts";
 import { isOpen } from "../questions.ts";
 import { clock } from "./elapsed.ts";
-import { dialogWaits, freshVm, parkedText } from "../wording.ts";
-import { Html, html, dot, icon, unseen, limitText, ago, grows, type Tone } from "./view.ts";
+import { dialogWaits, freshVm, limitText, parkedText } from "../wording.ts";
+import { Html, html, dot, icon, unseen, ago, grows, type Tone } from "./view.ts";
 import { prose } from "./markdown.ts";
 import { promptLabel, type Item, type ToolItem, type AskItem, type UserItem } from "./items.ts";
 import { shotsView, stepsView } from "./tools.ts";
@@ -111,7 +111,7 @@ export function composer(d: ThreadDetail, agent: ThreadAgent["kind"], run: Run, 
   const hint = claude !== null && primary === "steer" ? "Claude takes it at its next step." : look.hint;
   return html`<form id="prompt" class="composer composer-${primary}" data-thread="${t.id}"${claude !== null && " data-claude"}>
 ${asOf !== null && html`<p class="comp-note">${asOf} Sending a message wakes it and resumes Claude.</p>`}
-${d.pylon.notAnswering !== undefined && html`<p class="comp-note" role="alert">The pylon's guest has not answered its commands since ${ago(Date.parse(d.pylon.notAnswering.since), now)}, so a message may fail. ${freshVm}</p>`}
+${d.pylon.notAnswering !== undefined && html`<p class="comp-note" role="alert">The pylon's guest has not answered its commands since ${ago(Date.parse(d.pylon.notAnswering.since), now)}, so a message may fail. ${freshVm()}</p>`}
 <div class="comp-box">
 <textarea id="prompt-text" name="text" rows="2" required aria-label="${claude === null ? "Message the agent" : "Message Claude"}" placeholder="${placeholder}"></textarea>
 <div class="comp-foot">${model !== null && html`<span class="chip chip-model">${model}</span>`}${hint !== null && html`<span class="dim small comp-hint">${hint}</span>`}<span class="comp-sends">${queue && html`<button type="submit" class="btn btn-ghost send-alt" id="queue" name="mode" value="followUp" title="Queue after this run (⌥↵)">Queue <kbd>⌥↵</kbd></button>`}<button type="submit" class="send send-${primary}" id="send" name="mode" value="${look.mode}" title="${look.label} (⌘↵)">${icon("up")}<span class="send-label">${look.label}</span> <kbd>⌘↵</kbd></button></span></div>

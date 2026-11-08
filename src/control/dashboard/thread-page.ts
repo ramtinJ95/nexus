@@ -274,7 +274,7 @@ ${unpublished === null ? html`<p class="empty">The pylon's ports could not be re
 </dl>
 <code class="id">${pylon.id}</code>
 ${pylon.failed !== null && html`<p class="error">${plannerGaveUp(pylon.failed)}</p>`}
-${pylon.notAnswering !== undefined && html`<p class="error">The guest has not answered its last ${pylon.notAnswering.timeouts} commands, since ${ago(Date.parse(pylon.notAnswering.since), now)}. ${freshVm}</p>`}
+${pylon.notAnswering !== undefined && html`<p class="error">The guest has not answered its last ${pylon.notAnswering.timeouts} commands, since ${ago(Date.parse(pylon.notAnswering.since), now)}. ${freshVm()}</p>`}
 </section>
 <section aria-labelledby="outputs-h"><h2 id="outputs-h">Outputs ${count(outputs.length + d.pullRequests.length)}</h2>
 ${!d.prWatch.enabled ? html`<p class="empty">${prWatchText(d.prWatch)}.</p>` : html`<p>${prWatchText(d.prWatch)}${d.prWatch.error && html` — ${d.prWatch.error}`}</p>`}

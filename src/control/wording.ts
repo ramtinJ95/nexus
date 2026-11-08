@@ -25,7 +25,7 @@ export function duration(ms: number): string {
 
 const firstLine = (text: string) => text.trim().split("\n").find((l) => l.trim() !== "")?.trim() ?? "";
 
-const limitText = (t: Pick<Thread, "usageLimit">, now: number) => usageLimitText(t.usageLimit ?? { resetsAt: null }, now);
+export const limitText = (t: Pick<Thread, "usageLimit">, now: number) => usageLimitText(t.usageLimit ?? { resetsAt: null }, now);
 
 export const stoppedShort = `Its turn ended without a pull request after ${spelled(maxNudges)} nudges`;
 export const parkedText = (tasks: number) => `${counted(tasks, "task")} hit the restart limit and hold the run`;
@@ -42,7 +42,11 @@ export const diskGoes = (absent: boolean) => absent ? "its disk went" : `its dis
 /** A paused session waits for its pylon to run again: the archive's unarchive, or else any wake. */
 export const sessionPaused = (t: Pick<Thread, "status">) => `paused, resumes on ${t.status === "archived" ? "unarchive" : "wake"}`;
 
-export const freshVm = "Archive and unarchive the thread to give it a fresh VM. If the guest does not answer the pause either, the changes since its last saved disk are lost, so push or copy what you can first.";
+const pauseFails = (lost: string) => `If the guest does not answer the pause either, ${lost}, so push or copy what you can first`;
+/** What gets a pylon whose guest stopped answering a fresh VM, and what is lost if the pause fails too: the dashboard's buttons, or `nexus`'s commands for `thread`. */
+export const freshVm = (thread?: string) => thread === undefined
+  ? `Archive and unarchive the thread to give it a fresh VM. ${pauseFails("the changes since its last saved disk are lost")}.`
+  : `\`nexus archive ${thread}\` and \`nexus unarchive ${thread}\` give it a fresh VM. ${pauseFails(`the pylon breaks and \`nexus retry-pylon ${thread}\` resumes its last saved disk, losing the changes since`)}`;
 
 export const prWatchText = (w: Pick<ThreadDetail["prWatch"], "enabled" | "stopped">) => !w.enabled ? "PR watch: off (no control-plane GitHub token configured)"
   : w.stopped ? `PR watch: stopped (${commentCap} comment-only wakes)` : "PR watch: on";
