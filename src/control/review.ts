@@ -374,7 +374,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     reads.delete(prKey(r));
     const { detail } = await read(r);
     if (detail.head !== round.head || detail.base !== base) return null;
-    const heldAt = { base, holds: headHolds({ review: r, files, nexus: deploys(r) }) };
+    const heldAt = { base, holds: headHolds({ review: r, files, deploys: deploys(r) }) };
     return { review: withRound(r, { heldAt }), heldAt };
   };
   /** Past every check, a review records what holds its head, then stops at approval, or lands when asked to. */
@@ -586,7 +586,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       if (early.get(r.id)?.at !== at) early.set(r.id, { at, files: await github.change(r.pr.repo, round.base, round.head) });
       files = early.get(r.id)!.files;
     }
-    const holds = askedHolds(r, files === null ? null : headHolds({ review: r, files, nexus: deploys(r) }));
+    const holds = askedHolds(r, files === null ? null : headHolds({ review: r, files, deploys: deploys(r) }));
     const base = async () => round.base ?? (await read(r)).detail.base;
     // As the landing does, the change a waiver is for is read once the person gave it, so a rebase can be compared with it.
     if (r.waiver !== null && r.waiver.change === null && r.waiver.head === round.head) return { ...r, waiver: { ...r.waiver, change: await changeAt(r, await base(), round.head) } };

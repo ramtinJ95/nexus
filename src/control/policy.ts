@@ -27,8 +27,8 @@ interface LandingFacts {
 interface HeadFacts {
   review: Review;
   files: readonly ChangedFile[];
-  /** Whether the PR is Nexus's own, whose paths this module knows. */
-  nexus: boolean;
+  /** Whether the PR is of the repository releases come from, Nexus's own, whose paths this module knows. */
+  deploys: boolean;
 }
 
 /** Whether `path` names `pattern`. Nothing under docs/ deploys, so its names reserve nothing. */
@@ -84,14 +84,14 @@ const recordedHolds = (review: Review): Hold[] => [
 ];
 
 /** The holds of the paths a change touches that need the person, which a second reviewer's rule reads. */
-const reservedPathHolds = (files: readonly ChangedFile[], nexus: boolean): Hold[] => [...changedChecks(files), ...nexus ? pathHolds(files) : []];
+const reservedPathHolds = (files: readonly ChangedFile[], deploys: boolean): Hold[] => [...changedChecks(files), ...deploys ? pathHolds(files) : []];
 
 /**
  * Why `rule`, a project's setting, gives the pull request whose change is `files` a second reviewer, or null when it
  * does not. Every added and deleted line counts, tests and docs too, and a file GitHub shows no patch for may change
  * any number of them.
  */
-export function secondReviewRule(rule: SecondReview, files: readonly ChangedFile[], nexus: boolean): string | null {
+export function secondReviewRule(rule: SecondReview, files: readonly ChangedFile[], deploys: boolean): string | null {
   if (rule.always) return "the project gives every pull request one";
   if (rule.lines !== null) {
     const unshown = files.find((f) => f.patch === "");
@@ -99,7 +99,7 @@ export function secondReviewRule(rule: SecondReview, files: readonly ChangedFile
     const lines = files.reduce((n, f) => n + f.patch.split("\n").filter((line) => /^[+-]/.test(line)).length, 0);
     if (lines >= rule.lines) return `the change has ${lines} changed lines, at least the ${rule.lines} the project sets`;
   }
-  const held = rule.reserved ? reservedPathHolds(files, nexus) : [];
+  const held = rule.reserved ? reservedPathHolds(files, deploys) : [];
   return held.length ? `the change has holds for the person on its paths: ${held.map((h) => h.code).join(", ")}` : null;
 }
 
@@ -107,11 +107,11 @@ export function secondReviewRule(rule: SecondReview, files: readonly ChangedFile
  * The holds the head alone decides, which meet every landing of it whatever GitHub says: the record's, and the
  * changed files'. The loop records them on the round once its checks pass, as `heldAt`.
  */
-export function headHolds({ review, files, nexus }: HeadFacts): Hold[] {
+export function headHolds({ review, files, deploys }: HeadFacts): Hold[] {
   return [
     ...sameModel(review),
     ...recordedHolds(review),
-    ...reservedPathHolds(files, nexus),
+    ...reservedPathHolds(files, deploys),
   ];
 }
 

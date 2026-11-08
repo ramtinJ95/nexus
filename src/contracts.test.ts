@@ -184,7 +184,7 @@ test("health.ts runs as no commit, and says why only when release-commit is ther
 
 test("the reserved cases each tracked file holds a landing for, on every change or only on one that names their guard, are the snapshot's", () => {
   const review = testReview();
-  const holds = (path: string, patch: string) => new Set(headHolds({ review, nexus: true, files: [{ path, previous: null, patch }] }).map((hold) => hold.code));
+  const holds = (path: string, patch: string) => new Set(headHolds({ review, deploys: true, files: [{ path, previous: null, patch }] }).map((hold) => hold.code));
   // GitHub's empty patch may change anything, so it meets every rule. A patch that names no guarded word meets only
   // the rules that hold every change to the file.
   const neutral = "@@ -1 +1 @@\n-x\n+y";

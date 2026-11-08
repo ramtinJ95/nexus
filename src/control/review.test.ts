@@ -1178,7 +1178,7 @@ test("paths under docs/ hold for no reserved case by their names, while deploy/ 
     maxRounds: 3, phase: { kind: "merging", authorized: null }, rounds: [round],
   });
   const pr: PrSnapshot = { pr: testPr({ repo: "ramtinJ95/nexus", number: 199, title: "", url: "" }), detail: { head: head1, branch: "f", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
-  const holds = (...paths: string[]) => headHolds({ review, nexus: true, files: paths.map((path) => ({ path, previous: null, patch: "@@ -0,0 +1 @@\n+x" })) }).map((h) => h.text);
+  const holds = (...paths: string[]) => headHolds({ review, deploys: true, files: paths.map((path) => ({ path, previous: null, patch: "@@ -0,0 +1 @@\n+x" })) }).map((h) => h.text);
   const pr199 = ["README.md", "docs/explorations/install.md", "docs/roadmap.md", ...["README.md", "loopback.py", "run.ts", "standin/apt-get", "standin/github-host-keys", "standin/journalctl", "standin/qemu",
     "standin/ssh-keyscan", "standin/systemctl", "standin/tailscale", "tailnet.ts", "transcript.txt", "tsconfig.json"].map((p) => `docs/verification/fresh-install/${p}`)];
   assert.deepEqual(holds(...pr199), []);
@@ -1191,19 +1191,19 @@ test("paths under docs/ hold for no reserved case by their names, while deploy/ 
   assert.deepEqual(holds("src/protocol/routes.ts"), ["Always needs the person: changes to login or auth, as it changes src/protocol/routes.ts."]);
   assert.deepEqual(holds("src/control/api/kit.ts"), ["Always needs the person: changes to login or auth, as it changes src/control/api/kit.ts."]);
   const migration = { path: "src/control/schema.ts", previous: null, patch: "@@ -250,3 +250,4 @@ export const migrations: readonly string[] = [\n+  `ALTER TABLE threads ADD COLUMN x TEXT;`," };
-  assert.deepEqual(headHolds({ review, nexus: true, files: [migration] }).map((h) => h.text), ["Always needs the person: anything irreversible, as it changes src/control/schema.ts."]);
+  assert.deepEqual(headHolds({ review, deploys: true, files: [migration] }).map((h) => h.text), ["Always needs the person: anything irreversible, as it changes src/control/schema.ts."]);
   assert.deepEqual(holds("src/control/schema.ts", "src/control/db.ts"), []);
   const dropped = { path: "src/control/schema.ts", previous: null, patch: "@@ -250,3 +250,2 @@ export const migrations: readonly string[] = [\n-  `UPDATE threads SET x = NULL;`," };
-  assert.deepEqual(headHolds({ review, nexus: true, files: [dropped] }).map((h) => h.code), ["reserved-path:irreversible"], "a hunk in the migrations holds even when it names no DDL");
+  assert.deepEqual(headHolds({ review, deploys: true, files: [dropped] }).map((h) => h.code), ["reserved-path:irreversible"], "a hunk in the migrations holds even when it names no DDL");
   const registry = { path: "src/control/registry.ts", previous: null, patch: "" };
-  assert.deepEqual(headHolds({ review, nexus: true, files: [registry] }), [], "the registry holds no migrations, so even GitHub's empty patch for it holds nothing");
+  assert.deepEqual(headHolds({ review, deploys: true, files: [registry] }), [], "the registry holds no migrations, so even GitHub's empty patch for it holds nothing");
 });
 
 test("a path that holds for what its patch changes holds for a change to what its case guards, not for every edit to it", () => {
   const review = testReview({ builder: "th-b" as ThreadId, reviewer: "th-r" as ThreadId, pr: { repo: "ramtinJ95/nexus", number: 199, url: "", title: "", branch: "f" }, models: { builder: "a", reviewer: "b" }, maxRounds: 3, phase: { kind: "approved" },
     rounds: [{ head: head1, verdict: { token: "x", verdict: "approve", findings: [], reserved: [], notCheckedLive: null }, check: { passed: true, output: "" }, live: { kind: "absent" }, answers: null }] });
-  const holds = (path: string, ...lines: string[]) => headHolds({ review, nexus: true, files: [{ path, previous: null, patch: ["@@ -1,3 +1,3 @@ export function f(", ...lines].join("\n") }] }).map((h) => h.code);
-  const patched = (path: string, patch: string, previous: string | null = null) => headHolds({ review, nexus: true, files: [{ path, previous, patch }] }).map((h) => h.code);
+  const holds = (path: string, ...lines: string[]) => headHolds({ review, deploys: true, files: [{ path, previous: null, patch: ["@@ -1,3 +1,3 @@ export function f(", ...lines].join("\n") }] }).map((h) => h.code);
+  const patched = (path: string, patch: string, previous: string | null = null) => headHolds({ review, deploys: true, files: [{ path, previous, patch }] }).map((h) => h.code);
   // Each line is from a merged pull request the paths held for nothing reserved: #435, #441, #430, #412, #408, #440, #432.
   assert.deepEqual(holds("deploy/README.md", "+### Debug a pylon's guest commands"), []);
   assert.deepEqual(holds("src/pylon-vm/client.ts", `-for (const key of ["PATH", "HOME"])`, `+for (const key of ["PATH", "HOME", "GONDOLIN_DEBUG"])`), []);
@@ -1222,8 +1222,8 @@ test("a path that holds for what its patch changes holds for a change to what it
   assert.deepEqual(patched("src/pylon-vm/client.ts", "@@ -1,3 +1,3 @@\n \t\t// a pylon's disk would take host memory\n-\t\tconst a = 1;\n+\t\tconst a = 2;\n \t/* the allowlist's hosts */"), [], "a line that is only a comment changes nothing");
   assert.deepEqual(holds("src/pylon-vm/daemon.ts", "+\t/* temporary */ await chmod(socket, 0o777);"), ["reserved-path:auth"], "code after a comment on its line");
   assert.deepEqual(holds("src/control/api/thread-routes.ts", "+  * authorized() {"), ["reserved-path:auth"], "a generator's line, which starts with a star");
-  assert.deepEqual(headHolds({ review, nexus: true, files: [{ path: "src/control/live.ts", previous: null, patch: "@@ -15,3 +15,3 @@ export function pylonLive(pylon: StoredPylon) {\n-  return a;\n+  return b;" }] }).map((h) => h.code), [], "the hunk's header names no host");
-  assert.deepEqual(headHolds({ review, nexus: true, files: [{ path: "src/control/live.ts", previous: null, patch: "@@ -15,3 +15,3 @@ export function liveHosts(pylon: StoredPylon) {\n-  return a;\n+  return b;" }] }).map((h) => h.code), ["reserved-path:egress"], "the hunk's header says the change is in the hosts");
+  assert.deepEqual(headHolds({ review, deploys: true, files: [{ path: "src/control/live.ts", previous: null, patch: "@@ -15,3 +15,3 @@ export function pylonLive(pylon: StoredPylon) {\n-  return a;\n+  return b;" }] }).map((h) => h.code), [], "the hunk's header names no host");
+  assert.deepEqual(headHolds({ review, deploys: true, files: [{ path: "src/control/live.ts", previous: null, patch: "@@ -15,3 +15,3 @@ export function liveHosts(pylon: StoredPylon) {\n-  return a;\n+  return b;" }] }).map((h) => h.code), ["reserved-path:egress"], "the hunk's header says the change is in the hosts");
   assert.deepEqual(holds("src/pylon-vm/network.ts", "+export const x = 1;"), ["reserved-path:egress"]);
   assert.deepEqual(holds("src/pylon-vm/host-bridge.ts", "+export const x = 1;"), ["reserved-path:egress"]);
   assert.deepEqual(holds("src/pylon-vm/daemon.ts", "+\tawait chmod(socket, 0o600);"), ["reserved-path:auth"], "who on the node may call the controller");
@@ -1244,7 +1244,7 @@ test("a path that holds for what its patch changes holds for a change to what it
   assert.deepEqual(patched("src/pylon-vm/relay.ts", "@@ -1 +1 @@\n-const a = 1;\n+const a = 2;", "src/pylon-vm/relay.test.ts"), ["reserved-path:egress", "reserved-path:auth"], "a test renamed into code that ships brings a body its patch does not show, so it holds as a file with no patch does");
   assert.deepEqual(patched("src/pylon-vm/relay.ts", "@@ -1 +1 @@\n-const a = 1;\n+const a = 2;", "docs/verification/relay.ts"), ["reserved-path:egress", "reserved-path:auth"], "so does code moved in from where nothing held it");
   assert.deepEqual(patched("src/pylon-vm/relay.test.ts", "@@ -1 +1 @@\n-const a = 1;\n+const a = 2;", "src/pylon-vm/old.test.ts"), [], "a test renamed to a test is still a test");
-  assert.deepEqual(headHolds({ review, nexus: true, files: [{ path: "src/pylon-vm/client.ts", previous: null, patch: "" }, { path: "src/control/api/sse.ts", previous: null, patch: "" }] }).map((h) => h.code),
+  assert.deepEqual(headHolds({ review, deploys: true, files: [{ path: "src/pylon-vm/client.ts", previous: null, patch: "" }, { path: "src/control/api/sse.ts", previous: null, patch: "" }] }).map((h) => h.code),
     ["reserved-path:egress", "reserved-path:auth"], "a file GitHub shows no patch for may change anything");
 });
 
@@ -1256,7 +1256,7 @@ test("the policy's review conditions: another model, an approval with no P0 to P
     rounds: [{ ...round, verdict: { ...round.verdict, verdict: "changes", findings: [{ id: "F1", priority: "P2", summary: "s" }, { id: "F2", priority: "P2", summary: "s" }, { id: "N1", priority: "P3", summary: "s" }] }, answers: [{ id: "F1", action: "rejected", reason: " " }] }, round],
   });
   const pr: PrSnapshot = { pr: testPr({ repo: "acme/shop", number: 7, title: "", url: "", checks: "pending", conflict: true }), detail: { head: head2, branch: "f", base: "main", body: "Not checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] };
-  assert.deepEqual(landingHolds({ review, pr, heldAt: { base: "main", holds: headHolds({ review, files: [], nexus: false }) } }).map((h) => h.text), [
+  assert.deepEqual(landingHolds({ review, pr, heldAt: { base: "main", holds: headHolds({ review, files: [], deploys: false }) } }).map((h) => h.text), [
     "The builder neither fixed nor rejected with a reason finding F1 of round 1.",
     "The builder neither fixed nor rejected with a reason finding F2 of round 1.",
     `The pull request's head is ${head2}, not the approved ${head1}.`,
@@ -4048,7 +4048,7 @@ test("an approval by a reviewer on the builder's own model offers no Land press,
   const f = fixture(t);
   const loop = await approved(f, null);
   const review = { ...f.review(), models: { builder: "gpt-6-astra", reviewer: "gpt-6-astra" } };
-  f.registry.saveReview({ ...review, rounds: [{ ...review.rounds[0]!, heldAt: { base: "main", holds: headHolds({ review, files: [], nexus: true }) } }] });
+  f.registry.saveReview({ ...review, rounds: [{ ...review.rounds[0]!, heldAt: { base: "main", holds: headHolds({ review, files: [], deploys: true }) } }] });
   assert.equal(landPress(f.review()).kind, "stuck");
   assert.throws(() => loop.land(f.builder, "nLAPTOP", head1), { kind: "conflict", message: /builder's own model/ });
   assert.deepEqual(f.review().phase, { kind: "approved" });
@@ -4838,7 +4838,7 @@ test("the policy holds a landing the second reviewer has not approved, and reads
   assert.deepEqual(held(testReview({ second, rounds: [lost] })), ["The second reviewer has not approved the latest commits."], "a round that lost the verdict has no approval");
   assert.deepEqual(held(testReview({ second, rounds: [round(approval)] })), []);
   const reserved = { ...approval, reserved: [{ case: "auth" as const, why: "it loosens the probe's guard" }] };
-  assert.deepEqual(headHolds({ review: testReview({ second, rounds: [round(reserved)] }), files: [], nexus: true }).map((h) => [h.code, h.text]),
+  assert.deepEqual(headHolds({ review: testReview({ second, rounds: [round(reserved)] }), files: [], deploys: true }).map((h) => [h.code, h.text]),
     [["reserved:auth", `${personOnly}${reservedNames.auth}, by the second reviewer's reading (it loosens the probe's guard).`]]);
 });
 
