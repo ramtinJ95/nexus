@@ -3,9 +3,7 @@ import { el } from "./page.js";
 import { checkoutText } from "./checkout-text.js";
 import { factsOf, kept, storageKeys } from "./contract.ts";
 
-// A thread page's checkout: the changes in the inspector, and the diff tabs beside the conversation. Each read
-// reaches into the pylon and wakes it if it sleeps, so the changes are read when the pylon runs and a turn of its
-// agent ends, when the reader asks, and never on a paused pylon unless the reader says to wake it.
+// A thread page's checkout, which the changes in the inspector and the diff tabs beside the conversation share.
 export const changesPane = document.getElementById("pane-changes");
 export const thread = changesPane?.dataset.thread;
 export const checkout = {

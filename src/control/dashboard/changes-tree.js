@@ -20,6 +20,8 @@ export function changesUnreadable(facts) {
   showChanges(...unreadable(facts, "its changes", () => { void readChanges(true); }));
 }
 
+// Each read reaches into the pylon and wakes it if it sleeps, so the changes are read when the pylon runs and a turn
+// of its agent ends, when the reader asks, and never on a paused pylon unless the reader says to wake it.
 let reading = null;
 /**
  * Reads the changes into the inspector. A paused pylon is read only when the reader asked to wake it, and then
