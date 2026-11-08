@@ -5,7 +5,7 @@
  */
 import type { Preview } from "../control/thread-store.ts";
 import type { SessionHarness } from "../protocol/agent-kinds.ts";
-import { queryOf, route, type FileBytes, type QueryCodec } from "./route.ts";
+import { pylonWaitMs, queryOf, route, type FileBytes, type QueryCodec } from "./route.ts";
 
 /**
  * What the Changes view and the diff are read against: `start` is what the pylon booted at, which its first boot
@@ -79,12 +79,13 @@ export interface OpenedSession { herdrPane: string; harness: SessionHarness; tit
 export const pylonRoutes = {
   preview: route<Preview, { port: number }>()("POST", "/v1/threads/{thread}/previews"),
   unpreview: route<null>()("DELETE", "/v1/threads/{thread}/previews/{port}"),
-  openSession: route<OpenedSession, SessionRequest>()("POST", "/v1/threads/{thread}/sessions"),
+  openSession: route<OpenedSession, SessionRequest>()("POST", "/v1/threads/{thread}/sessions", undefined, pylonWaitMs),
   closeSession: route<null>()("DELETE", "/v1/threads/{thread}/sessions/{session}"),
   focusSession: route<null>()("POST", "/v1/threads/{thread}/sessions/{session}/focus"),
-  files: route<Listing>()("GET", "/v1/threads/{thread}/files", pathQuery),
+  files: route<Listing>()("GET", "/v1/threads/{thread}/files", pathQuery, pylonWaitMs),
   file: route<FileBytes>()("GET", "/v1/threads/{thread}/files/content", pathQuery),
   image: route<FileBytes>()("GET", "/v1/threads/{thread}/image", imageQuery),
-  changes: route<Changes>()("GET", "/v1/threads/{thread}/changes", changesQuery),
-  diff: route<Diff>()("GET", "/v1/threads/{thread}/diff", diffQuery),
+  /** A diff of a large tree can take the pylon a while. */
+  changes: route<Changes>()("GET", "/v1/threads/{thread}/changes", changesQuery, pylonWaitMs),
+  diff: route<Diff>()("GET", "/v1/threads/{thread}/diff", diffQuery, pylonWaitMs),
 } as const;

@@ -17,6 +17,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import type { WebSocket } from "ws";
 import { encodeMessage, type AttachErrorKind, type AttachRequest, type ServerMessage } from "../contract/attach.ts";
 import { parseClientMessage } from "../contract/attach-parse.ts";
+import { apiPingMs } from "../contract/route.ts";
 import type { Terminal, TerminalSize } from "../guest-terminal.ts";
 import type { StreamEnd } from "../protocol/streams.ts";
 import type { ProbeError } from "../protocol/http.ts";
@@ -39,7 +40,7 @@ export interface PylonDoor {
 export type Ending = "deleted" | "stopping";
 
 export interface AttachTiming {
-  /** A ping this often, and a socket that did not answer the last one is dropped. Under the CLI's 30 s idle timeout. */
+  /** A ping this often, and a socket that did not answer the last one is dropped. */
   pingMs: number;
   /** How long the pylon has to run. */
   waitMs: number;
@@ -47,7 +48,7 @@ export interface AttachTiming {
   /** How long a hung-up terminal has to end before its stream is dropped. */
   hangUpMs: number;
 }
-export const attachTiming: AttachTiming = { pingMs: 15_000, waitMs: 120_000, pollMs: 1_000, hangUpMs: 10_000 };
+export const attachTiming: AttachTiming = { pingMs: apiPingMs, waitMs: 120_000, pollMs: 1_000, hangUpMs: 10_000 };
 
 export const maxQueuedKeys = 1 << 20;
 export const maxQueuedWrites = 1024;

@@ -11,7 +11,7 @@ import type { ClaudeConversation } from "../control/claude-transcript.ts";
 import type { Thread } from "../control/thread-store.ts";
 import type { Sent, ThreadDetail, ThreadRow } from "../control/wire.ts";
 import type { activitySchema, messageSchema, seenSchema, startSchema } from "./threads-parse.ts";
-import { queryOf, route, type QueryCodec } from "./route.ts";
+import { pylonWaitMs, queryOf, route, type QueryCodec } from "./route.ts";
 
 /** What one predecessor means for the queued thread. */
 export interface Wait { thread: ThreadId; state: "waiting" | "landed" | "blocked"; why: string }
@@ -69,7 +69,8 @@ export const threadRoutes = {
   archive: route<Thread | QueuedThread>()("POST", "/v1/threads/{thread}/archive"),
   unarchive: route<Thread | QueuedThread>()("POST", "/v1/threads/{thread}/unarchive"),
   activity: route<null, z.input<typeof activitySchema>>()("POST", "/v1/threads/{thread}/activity"),
-  message: route<Sent, z.input<typeof messageSchema>>()("POST", "/v1/threads/{thread}/messages"),
+  /** A Claude worker's message waits for the pylon to type it in. */
+  message: route<Sent, z.input<typeof messageSchema>>()("POST", "/v1/threads/{thread}/messages", undefined, pylonWaitMs),
   abort: route<null>()("POST", "/v1/threads/{thread}/abort"),
   retry: route<null>()("POST", "/v1/threads/{thread}/retry"),
   retryPylon: route<null>()("POST", "/v1/threads/{thread}/pylon/retry"),

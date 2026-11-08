@@ -10,7 +10,7 @@ import { connect, isIP, type Socket } from "node:net";
 import { connect as tlsConnect } from "node:tls";
 import { WebSocket } from "ws";
 import type { RefusalCode } from "../control/refusal.ts";
-import { apiKeepAliveMs } from "../contract/route.ts";
+import { apiIdleMs, apiKeepAliveMs } from "../contract/route.ts";
 
 /** Every way a command fails. Each has its own exit code, so a caller can tell them apart without parsing text. */
 export type ErrorKind = "failed" | "unreachable" | "refused" | "not-found" | "conflict" | "invalid";
@@ -43,9 +43,6 @@ export interface Endpoint {
   /** Null connects directly. */
   socks: HostPort | null;
 }
-
-/** No byte in either direction for this long fails the request: a proxy or node that hangs rather than refusing. */
-const idleTimeoutMs = 30_000;
 
 const statusKinds: Readonly<Record<number, ErrorKind>> = { 400: "invalid", 413: "invalid", 403: "refused", 415: "refused", 404: "not-found", 409: "conflict" };
 
@@ -82,7 +79,7 @@ function handshake(raw: Socket, host: string): Promise<Socket> {
  * Sends JSON as the API requires and returns its JSON reply, or null for an empty one. A request the API answers
  * only once its work is done, such as a session open that waits for its agent, passes a longer `idleMs`.
  */
-export async function call(endpoint: Endpoint, method: string, path: string, body?: unknown, idleMs = idleTimeoutMs): Promise<unknown> {
+export async function call(endpoint: Endpoint, method: string, path: string, body?: unknown, idleMs = apiIdleMs): Promise<unknown> {
   // Only a GET shares a connection. An error on a reused one may hide a request that ran, and only a GET may run twice.
   const via = method === "GET" ? pool(endpoint) : await open(endpoint);
   const { status, text } = await exchange(via, endpoint.url.host, method, path, body, idleMs);
@@ -158,7 +155,7 @@ export async function follow(endpoint: Endpoint, path: string, onEvent: (data: u
               data = [];
               // Waiting for the consumer is not an idle network. Async iteration bounds the unread response.
               socket.setTimeout(0);
-              try { await onEvent(event); } finally { if (!signal.aborted && !socket.destroyed) socket.setTimeout(idleTimeoutMs); }
+              try { await onEvent(event); } finally { if (!signal.aborted && !socket.destroyed) socket.setTimeout(apiIdleMs); }
             }
             if (cursor !== undefined) onCursor?.(cursor);
             cursor = undefined;
@@ -212,7 +209,7 @@ export async function upgrade(endpoint: Endpoint, path: string): Promise<WebSock
       // Until the caller listens, so a message that came with the 101 waits for it. The caller resumes it.
       ws.pause();
       // ws turns the socket's timeout off once the handshake is done.
-      socket.setTimeout(idleTimeoutMs);
+      socket.setTimeout(apiIdleMs);
       socket.on("error", (err) => ws.emit("error", lost(host, err)));
       resolve(ws);
     });
@@ -255,7 +252,7 @@ const lost = (host: string, err: Error) => err instanceof CliError ? err : new C
 /** A name with both an IPv6 and an IPv4 address fails with one error per address and no message of its own. */
 const reason = (err: Error) => err instanceof AggregateError ? err.errors.map((e: Error) => e.message).join(", ") : err.message;
 
-function withIdleTimeout(socket: Socket, what: string, ms = idleTimeoutMs): Socket {
+function withIdleTimeout(socket: Socket, what: string, ms = apiIdleMs): Socket {
   socket.setTimeout(ms, () => socket.destroy(new CliError("unreachable", `${what} sent nothing for ${socket.timeout! / 1000}s`)));
   return socket;
 }
