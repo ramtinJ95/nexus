@@ -10,6 +10,7 @@ import { PassThrough, type Duplex } from "node:stream";
 import { z } from "zod";
 import { parseJson } from "../parse.ts";
 import type { PylonId } from "../ids.ts";
+import { probeRoutes, routePath } from "./routes.ts";
 
 /**
  * A stream is a raw pipe to a process in the guest, such as the pi-env daemon. It carries the process's stdout
@@ -39,13 +40,13 @@ export interface ByteStream extends AsyncIterable<Uint8Array> {
  * frame is a lost stream. The probe answers 409 instead of upgrading when the pylon is not running, and 504 when its
  * guest does not start the process in time.
  */
-export const streamProtocol = "nexus-stream";
+export const streamProtocol = probeRoutes.stream.upgrade;
 // 2 was a resize, which nothing sends since streams lost their pty, so the other numbers stay as older peers know them.
 const frameType = { data: 0, eof: 1, exit: 3 } as const;
 const maxFrameBytes = 16 << 20;
 
 export function streamPath(pylonId: PylonId, argv: readonly string[]): string {
-  return `/v1/pylons/${encodeURIComponent(pylonId)}/stream?request=${encodeURIComponent(JSON.stringify({ argv }))}`;
+  return `${routePath(probeRoutes.stream, { pylonId })}?request=${encodeURIComponent(JSON.stringify({ argv }))}`;
 }
 
 const streamRequestSchema = z.object({

@@ -1,5 +1,5 @@
 /**
- * Probe contract, the probe's port, and who may call each of its routes. The control plane decides, and the probe
+ * Probe contract, the probe's port, and its route table. The control plane decides, and the probe
  * executes and observes.
  *
  * The probe never dials the control plane. The control plane opens every connection, except probe-to-probe artifact
@@ -17,18 +17,61 @@ export const probePort = 7480;
  * is not the one its config names for the route.
  */
 export type CallerRole = "control-plane" | "peer-probe";
-export const routeAuth = {
-  "/v1/jobs": "control-plane",
-  "/v1/observe": "control-plane",
-  "/v1/pylons": "control-plane",
-  "/v1/manifests": "control-plane",
-  "/v1/secrets": "control-plane",
-  "/v1/peers": "control-plane",
-  "/v1/node-health": "control-plane",
-  "/v1/cleanup": "control-plane",
-  "/v1/deployer": "control-plane",
-  "/v1/artifacts": "peer-probe", // checkpoints hold the pylon's logins, so only the other probe may read them
-} as const satisfies Record<string, CallerRole>;
+
+/**
+ * A route of the probe's HTTP surface. `path` names each parameter in braces. `retry` is "until-expired" for a call
+ * the client repeats on a transport error until its envelope's notAfter. `upgrade` is the protocol a route upgrades to.
+ */
+export interface ProbeRoute {
+  method: "GET" | "PUT" | "POST";
+  path: string;
+  role: CallerRole;
+  retry?: "until-expired";
+  upgrade?: string;
+}
+
+export const probeRoutes = {
+  submit: { method: "PUT", path: "/v1/jobs/{jobId}", role: "control-plane", retry: "until-expired" },
+  job: { method: "GET", path: "/v1/jobs/{jobId}", role: "control-plane" },
+  observe: { method: "GET", path: "/v1/observe", role: "control-plane" },
+  command: { method: "POST", path: "/v1/pylons/{pylonId}/commands", role: "control-plane" },
+  readGit: { method: "POST", path: "/v1/pylons/{pylonId}/git", role: "control-plane" },
+  stream: { method: "GET", path: "/v1/pylons/{pylonId}/stream", role: "control-plane", upgrade: "nexus-stream" },
+  manifest: { method: "GET", path: "/v1/manifests/{artifact}", role: "control-plane" },
+  putSecret: { method: "PUT", path: "/v1/secrets/{name}", role: "control-plane" },
+  putPeers: { method: "PUT", path: "/v1/peers", role: "control-plane" },
+  health: { method: "GET", path: "/v1/node-health", role: "control-plane" },
+  artifactUsage: { method: "GET", path: "/v1/cleanup", role: "control-plane" },
+  dropArtifacts: { method: "POST", path: "/v1/cleanup", role: "control-plane" },
+  wakeDeployer: { method: "POST", path: "/v1/deployer/wake", role: "control-plane" },
+  // Checkpoints hold the pylon's logins, so only the other probe may read them.
+  fetchArtifact: { method: "GET", path: "/v1/artifacts/{artifact}", role: "peer-probe" },
+} as const satisfies Record<string, ProbeRoute>;
+
+type ParamsOf<P extends string> = P extends `${string}{${infer K}}${infer Rest}` ? Record<K, string> & ParamsOf<Rest> : unknown;
+type IsUnion<T, U = T> = T extends unknown ? ([U] extends [T] ? false : true) : never;
+/** One route's literal path only, since a union of routes or a widened `ProbeRoute` cannot say which parameters it needs. */
+type PathArgs<P extends string> = string extends P ? never : true extends IsUnion<P> ? never : P extends `${string}{${string}` ? [ParamsOf<P>] : [];
+
+/** The route's path with each parameter URI-encoded. */
+export function routePath<P extends string>(route: { path: P }, ...params: PathArgs<P>): string {
+  const given: Partial<Record<string, string>> = params[0] ?? {};
+  return route.path.replace(/\{(\w+)\}/g, (_, key: string) => {
+    const value = given[key];
+    if (value === undefined) throw new Error(`${route.path} needs ${key}`);
+    return encodeURIComponent(value);
+  });
+}
+
+/**
+ * The probe authorizes by a path's first segment under /v1, before it looks for a handler, so a wrong caller gets 403
+ * even for a method or path no route serves.
+ */
+export function routeRole(path: string): CallerRole | undefined {
+  return roleByPrefix.get(authPrefix(path));
+}
+const authPrefix = (path: string) => path.split("/").slice(0, 3).join("/");
+const roleByPrefix = new Map<string, CallerRole>(Object.values(probeRoutes).map((route) => [authPrefix(route.path), route.role]));
 
 /** `controlPlane` is read from /etc/nexus/control-plane.json on each node, and `peers` from /etc/nexus/probe.json until the control plane puts the list of every other node. */
 export interface ProbeAuthConfig {
