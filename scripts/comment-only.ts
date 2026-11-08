@@ -97,7 +97,7 @@ const isShell = (path: string, source: string) => path.endsWith(".sh") || /^#!.*
 const shell = (source: string) =>
   source
     .split("\n")
-    .filter((line, at, lines) => at === 0 || !/^\s*#/.test(line) || lines[at - 1]!.endsWith("\\"))
+    .filter((line, at, lines) => at === 0 || !/^[ \t]*#/.test(line) || lines[at - 1]!.endsWith("\\"))
     .join("\n");
 
 const firstDifference = (a: string, b: string) => {
