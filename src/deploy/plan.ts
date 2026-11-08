@@ -28,13 +28,18 @@ export function quarantined(desired: DesiredRelease | null, attempts: readonly A
   return attempts.find((a) => a.commit === desired.commit && (a.state === "rolled-back" || a.state === "failed") && !busyDrainReason(a.reason)) ?? null;
 }
 
+/** Control runs `commit` and is healthy there, which a probe waits for before it installs `commit`. */
+export function controlReady(commit: string, control: ReleaseHealth): boolean {
+  return control.commit === commit && control.healthy;
+}
+
 export function planDeploy(input: DeployInput): DeployStep {
   const { desired, current } = input;
   if (desired === null) return { kind: "idle" };
   const held = quarantined(desired, input.attempts);
   if (held !== null) return { kind: "stop", reason: held.reason ?? held.state };
   if (current.commit === desired.commit && current.healthy) return { kind: "healthy" };
-  if (input.role === "probe" && (input.control.commit !== desired.commit || !input.control.healthy)) {
+  if (input.role === "probe" && !controlReady(desired.commit, input.control)) {
     return { kind: "wait", reason: "control-first" };
   }
   if (input.role === "control" && input.turnRunning) {

@@ -2,8 +2,8 @@ import { copyFile, readFile, readlink, stat, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
-import { command, checkoutMerged, type Command, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
-import { planDeploy, quarantined, schemaStep, type Attempt, type ReleaseHealth, type SchemaVersions } from "./plan.ts";
+import { command, checkoutMerged, type Command, type InstallBoundary, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
+import { controlReady, planDeploy, quarantined, schemaStep, type Attempt, type DeployStep, type ReleaseHealth, type SchemaVersions } from "./plan.ts";
 import { digestPattern, type DrainBody, type DrainReply, type ReleaseReport, type ReleaseView, type ReportBody, type Role } from "../protocol/deploy.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
 import { deleteReleases, readReleases } from "./release-cleanup.ts";
@@ -102,9 +102,11 @@ export function nodeRegistry(paths: RegistryPaths, run: Command = command, budge
       try { return (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version; } finally { db.close(); }
     },
     async known(dir) {
+      const file = join(resolve(paths.prefix, dir), "src/control/schema.ts");
+      try { await stat(file); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
       // schema.ts imports nothing, so a release's own list loads without its node_modules.
-      try { return ((await import(join(resolve(paths.prefix, dir), "src/control/schema.ts"))) as { migrations: readonly string[] }).migrations.length; }
-      catch (error) { if ((error as NodeJS.ErrnoException).code === "ERR_MODULE_NOT_FOUND") return null; throw error; }
+      return ((await import(file)) as { migrations: readonly string[] }).migrations.length;
     },
     async backUp() {
       const started = Date.now();
@@ -131,98 +133,88 @@ function controlHealth(view: ReleaseView): ReleaseHealth {
   return { commit: control?.commit ?? null, healthy: control?.state === "healthy" };
 }
 
-/** One poll. Its roles share one read of the release view, read again once control's report would change what it shows. */
-export async function reconcileRoles(roles: readonly Role[], config: WorkerConfig, api: Api, boundary: NodeBoundary = nodeBoundary): Promise<void> {
-  let view: Promise<ReleaseView> | undefined;
-  const reporting: Api = async (path, body) => {
-    const answer = await api(path, body);
-    const report = body as ReportBody;
-    if (path === "report" && report.role === "control" && view !== undefined) {
-      const shown = controlHealth(await view);
-      if (shown.commit !== report.commit || shown.healthy !== (report.state === "healthy")) view = undefined;
-    }
-    return answer;
+/** The files a role's deploy uses. deploy/'s units, installers and configs keep these names. */
+function roleFiles({ prefix, etc, units }: NodeBoundary, role: Role) {
+  const service = unitNames[role];
+  return {
+    service,
+    unit: join(units, service),
+    savedUnit: join(prefix, `${role}-deploy.unit`),
+    report: join(prefix, `${role}-deploy-report.json`),
+    config: join(etc, `${role}.json`),
+    /** Relative to the deployer's checkout. */
+    installer: join("deploy", `install-${role}.sh`),
+    link: releaseLink(prefix, role),
   };
-  for (const role of roles) await reconcileRole(role, config, reporting, boundary, () => view ??= api("release"));
 }
 
-export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, boundary: NodeBoundary = nodeBoundary,
-  readView: () => Promise<ReleaseView> = () => api("release")): Promise<void> {
-  const { prefix, etc, units, run, checkout } = boundary;
-  // Only control's code opens the registry.
-  const registry = role === "control" ? boundary.registry : undefined;
-  const schemaAt = async (dir: string): Promise<SchemaVersions> => ({ registry: await registry!.version(), release: await registry!.known(dir) });
-  const link = releaseLink(prefix, role);
-  const service = unitNames[role];
-  const unit = join(units, service);
-  const savedUnit = join(prefix, `${role}-deploy.unit`);
-  const reportPath = join(prefix, `${role}-deploy-report.json`);
-  const repo = join(prefix, deployerFiles.repo);
-  const localConfig = join(etc, `${role}.json`);
-  const listen = listenAddress(await readJson(localConfig, null), localConfig);
-  const healthUrl = new URL(`http://${urlHost(listen.host)}:${listen.port}/v1/health`);
-  const healthy = async () => {
-    const expected = await readReleaseCommit(link);
-    const until = Date.now() + config.healthTimeoutMs;
-    do {
-      try {
-        await run("systemctl", ["is-active", "--quiet", service], prefix, Math.max(1, Math.min(5000, until - Date.now())));
-        if ((await jsonRequest(healthUrl, "GET", undefined, null, undefined, Math.max(1, Math.min(10_000, until - Date.now())))).commit === expected) return true;
-      } catch { /* Retry while the service binds and the harness opens. */ }
-      await sleep(500);
-    } while (Date.now() < until);
-    return false;
-  };
-  const report = async (state: ReleaseReport["state"], target: string | null, reason: string | null = null) => {
-    const wire: ReportBody = { role, commit: await readReleaseCommit(link), target, state, reason };
-    const saved = await readJson(reportPath, null).catch(() => null) as ReleaseReport | null;
-    if (saved === null || (Object.keys(wire) as (keyof typeof wire)[]).some((key) => saved[key] !== wire[key])) {
-      await saveJson(reportPath, { ...wire, observedAt: Date.now() });
+type Report = (state: ReleaseReport["state"], target: string | null, reason?: string | null) => Promise<void>;
+
+/** What a role's steps share with the poll that runs them. */
+interface RolePoll {
+  api: Api;
+  run: Command;
+  prefix: string;
+  service: string;
+  config: WorkerConfig;
+  registry: RegistrySchema | undefined;
+  desired(): string | null;
+  report: Report;
+}
+
+/** What one role does apart from the install every role shares. */
+interface RoleSteps extends Required<Pick<InstallBoundary, "beforeSwitch" | "readyData" | "rollbackRefused">> {
+  /** Runs once the link names the target, before the role's installer. */
+  activate(): Promise<void>;
+  /** Runs before a restart that keeps the target. */
+  beforeRestart(): Promise<void>;
+  /** Resolves true once the role may install, or false to yield this poll and keep what it holds for the next. */
+  admit(next: (turnRunning: boolean) => DeployStep, requestedAt: number): Promise<boolean>;
+  /** Gives back what the role held for this poll. */
+  release(): Promise<void>;
+}
+
+const probeSteps = ({ api, desired }: RolePoll): RoleSteps => ({
+  async beforeSwitch() {
+    let view: ReleaseView;
+    try { view = await api("release") as ReleaseView; }
+    catch (error) {
+      console.error(`probe: could not read the release view before activation: ${String(error)}`);
+      throw new WaitingForControl("control readiness could not be read; retrying next poll");
     }
-    await api("report", wire).catch(() => { console.error(`could not report ${role} release; retained locally for the next poll`); });
-  };
-  const settled = (result: Transaction) => report(result.state === "installing" ? "failed" : result.state, result.commit, result.reason);
-  let desired: string | null = null;
+    const commit = desired();
+    if (view.desired?.commit !== commit) throw new WaitingForControl("release superseded before activation; retrying next poll");
+    if (commit === null || !controlReady(commit, controlHealth(view))) throw new WaitingForControl("control plane is not healthy on the desired release; retrying next poll");
+  },
+  readyData: async () => null,
+  rollbackRefused: async () => null,
+  activate: async () => {},
+  beforeRestart: async () => {},
+  admit: async () => true,
+  release: async () => {},
+});
+
+/** Control holds the drain from idle through its restart, and only its code opens the registry. */
+function controlSteps({ api, run, prefix, service, config, registry, desired, report }: RolePoll): RoleSteps {
   let renewal: NodeJS.Timeout | undefined;
   let drainLost = false;
   let keepDrain = false;
   const drain = async () => {
-    if (desired === null) throw new Error("no desired release to drain");
-    return api("drain", { commit: desired } satisfies DrainBody) as Promise<DrainReply>;
+    const commit = desired();
+    if (commit === null) throw new Error("no desired release to drain");
+    return api("drain", { commit } satisfies DrainBody) as Promise<DrainReply>;
   };
-  const installer = new ReleaseInstaller(prefix, role, {
-    async prepare(commit) {
-      await checkout(repo, commit);
-      await copyFile(unit, savedUnit);
-      await run("env", [`NEXUS_COMMIT=${commit}`, "bash", "-c", '. "$1/deploy/release.sh"; install_release "$1"', "build", repo], repo);
-      return `${releasesDir}/${commit}`;
-    },
+  const schemaAt = async (dir: string): Promise<SchemaVersions> => ({ registry: await registry!.version(), release: await registry!.known(dir) });
+  return {
     async beforeSwitch() {
-      if (role === "probe") {
-        let view: ReleaseView;
-        try { view = await api("release") as ReleaseView; }
-        catch { throw new WaitingForControl("control readiness could not be read; retrying next poll"); }
-        if (view.desired?.commit !== desired) throw new WaitingForControl("release superseded before activation; retrying next poll");
-        if (!view.nodes.some((r) => r.role === "control" && r.commit === desired && r.state === "healthy")) {
-          throw new WaitingForControl("control plane is not healthy on the desired release; retrying next poll");
-        }
-      }
-      if (role === "control" && !(await api("drain", { commit: desired!, hold: true } satisfies DrainBody)).idle) throw new Error("agent turn entered after the drain lease expired; refusing restart");
-    },
-    async activate() {
-      if (role === "control") {
-        const view = await api("release") as ReleaseView;
-        if (view.desired?.commit !== desired) throw new Error("release superseded before activation");
-        if (drainLost || !(await drain()).idle) throw new Error("drain barrier lost before restart");
-      }
-      await run("env", [`NEXUS_COMMIT=${desired}`, "NEXUS_PREPARE=1", "bash", join(repo, "deploy", `install-${role}.sh`)], repo);
+      if (!(await api("drain", { commit: desired()!, hold: true } satisfies DrainBody)).idle) throw new Error("agent turn entered after the drain lease expired; refusing restart");
     },
     async readyData(target) {
       if (registry === undefined) return null;
       const versions = await schemaAt(target);
       const step = schemaStep(versions);
       if (step === "refuses") {
-        throw new Error(`release ${desired} ${applies(versions)}, but the registry is at schema version ${versions.registry}, so its control plane would refuse to start. Deploy a newer commit, or restore a backup from before the migration as ${restoreSteps} says`);
+        throw new Error(`release ${desired()} ${applies(versions)}, but the registry is at schema version ${versions.registry}, so its control plane would refuse to start. Deploy a newer commit, or restore a backup from before the migration as ${restoreSteps} says`);
       }
       return step === "migrates" ? registry.backUp() : null;
     },
@@ -245,13 +237,119 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
       const backup = transaction.backup === undefined ? "a backup from before it" : `backup ${transaction.backup}, taken just before it,`;
       return `the registry is at schema version ${versions.registry}, and the previous release, ${transaction.previous}, ${applies(versions)}, so its control plane would refuse to start. Control stays on ${transaction.target}. Deploy a fixed commit to keep what control recorded since the migration, or restore ${backup} and point control back at ${transaction.previous}, which discards that, as ${restoreSteps} says${failed}`;
     },
+    async activate() {
+      const view = await api("release") as ReleaseView;
+      if (view.desired?.commit !== desired()) throw new Error("release superseded before activation");
+      if (drainLost || !(await drain()).idle) throw new Error("drain barrier lost before restart");
+    },
+    async beforeRestart() {
+      if (drainLost || !(await drain()).idle) throw new Error("drain barrier lost at restart");
+    },
+    async admit(next, requestedAt) {
+      const start = Date.now();
+      while (true) {
+        const status = await drain();
+        const step = next(!status.idle);
+        if (step.kind === "install") break;
+        if (step.kind === "stop") throw new Error(step.reason);
+        await report("waiting-for-idle", desired(), `Waiting for idle ${Math.floor((Date.now() - requestedAt) / 1000)}s since release request; threads: ${status.threads?.join(", ") || "unknown"}${status.entering ? "; submissions entering" : ""}`);
+        // Retains the lease for the next 15-second poll.
+        if (Date.now() - start >= Math.min(config.drainTimeoutMs, drainYieldMs)) { keepDrain = true; return false; }
+        await sleep(1000);
+      }
+      renewal = setInterval(() => {
+        void drain().catch((error: unknown) => { console.error(`control: drain renewal failed, so the restart will refuse: ${String(error)}`); drainLost = true; });
+      }, 20_000);
+      return true;
+    },
+    async release() {
+      clearInterval(renewal);
+      const commit = desired();
+      if (keepDrain || commit === null) return;
+      await api("drain", { commit, release: true } satisfies DrainBody).catch((error: unknown) => {
+        console.error(`control: could not release the drain at ${commit}; its lease expires on its own: ${String(error)}`);
+      });
+    },
+  };
+}
+
+const roleSteps: Record<Role, (poll: RolePoll) => RoleSteps> = { probe: probeSteps, control: controlSteps };
+
+/** One poll. Its roles share one read of the release view, read again once control's report would change what it shows. */
+export async function reconcileRoles(roles: readonly Role[], config: WorkerConfig, api: Api, boundary: NodeBoundary = nodeBoundary): Promise<void> {
+  let view: Promise<ReleaseView> | undefined;
+  const reporting: Api = async (path, body) => {
+    const answer = await api(path, body);
+    const report = body as ReportBody;
+    if (path === "report" && report.role === "control" && view !== undefined) {
+      const shown = controlHealth(await view);
+      if (shown.commit !== report.commit || shown.healthy !== (report.state === "healthy")) view = undefined;
+    }
+    return answer;
+  };
+  for (const role of roles) await reconcileRole(role, config, reporting, boundary, () => view ??= api("release"));
+}
+
+export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, boundary: NodeBoundary = nodeBoundary,
+  readView: () => Promise<ReleaseView> = () => api("release")): Promise<void> {
+  const { prefix, run, checkout } = boundary;
+  const files = roleFiles(boundary, role);
+  const { link, service } = files;
+  const repo = join(prefix, deployerFiles.repo);
+  const listen = listenAddress(await readJson(files.config, null), files.config);
+  const healthUrl = new URL(`http://${urlHost(listen.host)}:${listen.port}/v1/health`);
+  const healthy = async () => {
+    const expected = await readReleaseCommit(link);
+    const until = Date.now() + config.healthTimeoutMs;
+    let last: unknown = null;
+    do {
+      try {
+        await run("systemctl", ["is-active", "--quiet", service], prefix, Math.max(1, Math.min(5000, until - Date.now())));
+        const answered = (await jsonRequest(healthUrl, "GET", undefined, null, undefined, Math.max(1, Math.min(10_000, until - Date.now())))).commit;
+        if (answered === expected) return true;
+        last = `it answered commit ${answered}`;
+      } catch (error) { last = error; } // Retry while the service binds and the harness opens.
+      await sleep(500);
+    } while (Date.now() < until);
+    console.error(`${role}: ${service} is not healthy at ${expected}: ${String(last)}`);
+    return false;
+  };
+  const report: Report = async (state, target, reason = null) => {
+    const wire: ReportBody = { role, commit: await readReleaseCommit(link), target, state, reason };
+    const saved = await readJson(files.report, null).catch((error: unknown) => {
+      console.error(`${role}: rewriting ${files.report}, which could not be read: ${String(error)}`);
+      return null;
+    }) as ReleaseReport | null;
+    if (saved === null || (Object.keys(wire) as (keyof typeof wire)[]).some((key) => saved[key] !== wire[key])) {
+      await saveJson(files.report, { ...wire, observedAt: Date.now() });
+    }
+    await api("report", wire).catch((error: unknown) => { console.error(`could not report ${role} release; retained locally for the next poll: ${String(error)}`); });
+  };
+  const settled = (result: Transaction) => report(result.state === "installing" ? "failed" : result.state, result.commit, result.reason);
+  let desired: string | null = null;
+  const steps = roleSteps[role]({ api, run, prefix, service, config, registry: boundary.registry, desired: () => desired, report });
+  const installer = new ReleaseInstaller(prefix, role, {
+    async prepare(commit) {
+      await checkout(repo, commit);
+      await copyFile(files.unit, files.savedUnit);
+      await run("env", [`NEXUS_COMMIT=${commit}`, "bash", "-c", '. "$1/deploy/release.sh"; install_release "$1"', "build", repo], repo);
+      return `${releasesDir}/${commit}`;
+    },
+    beforeSwitch: steps.beforeSwitch,
+    async activate() {
+      await steps.activate();
+      await run("env", [`NEXUS_COMMIT=${desired}`, "NEXUS_PREPARE=1", "bash", join(repo, files.installer)], repo);
+    },
+    readyData: steps.readyData,
+    rollbackRefused: steps.rollbackRefused,
     async restart() {
       const transaction = await installer.observed();
-      if (transaction !== null && await readlink(link) === transaction.previous) {
-        await copyFile(savedUnit, unit);
-        await run("systemctl", ["daemon-reload"], prefix);
+      if (transaction !== null) {
+        if (await readlink(link) === transaction.previous) {
+          await copyFile(files.savedUnit, files.unit);
+          await run("systemctl", ["daemon-reload"], prefix);
+        } else await steps.beforeRestart();
       }
-      if (role === "control" && transaction !== null && await readlink(link) !== transaction.previous && (drainLost || !(await drain()).idle)) throw new Error("drain barrier lost at restart");
       await run("systemctl", ["restart", service], prefix, 60_000);
     },
     healthy,
@@ -262,40 +360,27 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   if (recovered !== null) await settled(recovered);
   const view = await readView();
   desired = view.desired?.commit ?? null;
-  const prior = await readJson(reportPath, null) as ReleaseReport | null;
+  const prior = await readJson(files.report, null) as ReleaseReport | null;
   const journal = await installer.observed();
   // The report also holds failures that never reached the journal, such as a failed build or a drain refusal.
   const attempts: Attempt[] = [...prior === null ? [] : [{ commit: prior.target, state: prior.state, reason: prior.reason }], ...journal === null ? [] : [journal]];
   const held = quarantined(view.desired, attempts);
   if (held !== null) {
     await report(held.state, desired, held.reason);
-    if (role === "control") await api("drain", { commit: desired!, release: true } satisfies DrainBody).catch(() => {});
+    await steps.release();
     return;
   }
   const current = { commit: await readReleaseCommit(link), healthy: await healthy() };
-  const observedControl = controlHealth(view);
-  const step = planDeploy({ desired: view.desired, role, current, control: observedControl, attempts, turnRunning: false });
+  const plan = (turnRunning: boolean) => planDeploy({ desired: view.desired, role, current, control: controlHealth(view), attempts, turnRunning });
+  const step = plan(false);
   if (step.kind === "idle" || step.kind === "healthy") {
     await report(current.healthy ? "healthy" : "failed", desired, current.healthy ? null : "running release is not healthy");
-    if (role === "control" && desired !== null) await api("drain", { commit: desired, release: true } satisfies DrainBody).catch(() => {});
+    await steps.release();
     return;
   }
   if (step.kind !== "install") { await report("waiting-for-control", desired); return; }
   try {
-    if (role === "control") {
-      const start = Date.now();
-      while (true) {
-        const status = await drain();
-        const next = planDeploy({ desired: view.desired, role, current, control: observedControl, attempts, turnRunning: !status.idle });
-        if (next.kind === "install") break;
-        if (next.kind === "stop") throw new Error(next.reason);
-        await report("waiting-for-idle", desired, `Waiting for idle ${Math.floor((Date.now() - view.desired!.requestedAt) / 1000)}s since release request; threads: ${status.threads?.join(", ") || "unknown"}${status.entering ? "; submissions entering" : ""}`);
-        // Retains the lease for the next 15-second poll.
-        if (Date.now() - start >= Math.min(config.drainTimeoutMs, drainYieldMs)) { keepDrain = true; return; }
-        await sleep(1000);
-      }
-      renewal = setInterval(() => { void drain().catch(() => { drainLost = true; }); }, 20_000);
-    }
+    if (!await steps.admit(plan, view.desired!.requestedAt)) return;
     await report("installing", desired);
     const result = await installer.install(step.commit);
     await settled(result);
@@ -303,8 +388,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   } catch (error) {
     await report(error instanceof WaitingForControl ? "waiting-for-control" : "failed", desired, String(error).slice(-20_000));
   } finally {
-    clearInterval(renewal);
-    if (role === "control" && !keepDrain) await api("drain", { commit: desired!, release: true } satisfies DrainBody).catch(() => {});
+    await steps.release();
   }
 }
 
@@ -313,7 +397,11 @@ async function promoteWorker(commit: string, repo: string, prefix: string, run: 
   const rejected = join(prefix, deployerFiles.rejected);
   if ((await readFile(rejected, "utf8").catch(() => "")).trim() === target) return;
   try { await run(process.execPath, [join(prefix, target, "src/deploy/worker.ts"), "--check"], repo); }
-  catch { await writeFile(rejected, target); return; }
+  catch (error) {
+    console.error(`the worker in ${target} failed its check, so the deployer keeps its own: ${String(error)}`);
+    await writeFile(rejected, target);
+    return;
+  }
   await pointLink(join(prefix, deployerLink), target);
 }
 
