@@ -293,6 +293,8 @@ test("show says why an archived thread's disk is kept past its 24 hours, and not
   const dayOld: ThreadDetail = await s.json(["show", id]);
   assert.deepEqual(disk(dayOld), ["disk: kept past its 24 hours, as its token usage is not read to its end yet, and reading it failed once, the last because its pylon did not boot within 10 minutes"]);
   assert.deepEqual(disk({ ...dayOld, keptPastDay: null }), [], "the API's keptPastDay is null for an absent pylon");
+  const { keptPastDay: _kept, ...older } = dayOld;
+  assert.deepEqual(disk(older), [], "a control plane older than 0.71.0 serves no keptPastDay, and show prints no disk line");
   const { settleFailure: _, ...unfailed } = dayOld.thread;
   assert.equal(keptPastDay({ ...unfailed, usageSettledAt: 1, backedUpAt: 2 }, Date.now()), null);
 });
@@ -1758,6 +1760,15 @@ test("land --waive shows the head and every hold it waives, and sends them only 
   const unheld = (async () => ({ review: unheldReview, reviewView: reviewView(unheldReview, []), questions: [] })) as Api;
   assert.deepEqual(await pressOf(unheld, "th-builder", nothing.terminal), { head: approvedRound.head }, "nothing to waive asks nothing");
   assert.equal(nothing.shown(), "");
+  const asked: string[] = [];
+  const olderApi = (async (method: string, path: string) => {
+    asked.push(`${method} ${path}`);
+    return { review, questions: [] };
+  }) as Api;
+  const older = confirmingTerminal("yes");
+  await assert.rejects(pressOf(olderApi, "th-builder", older.terminal), (err: CliError) => err.kind === "failed" && /^land --waive needs a control plane of 0\.71\.0 or later/.test(err.message));
+  assert.equal(older.shown(), "", "a control plane that serves no reviewView gets no prompt");
+  assert.deepEqual(asked, ["GET /v1/threads/th-builder"], "and nothing past the thread's read");
 });
 
 test("land --waive answers the review's question about its holds, once the person confirmed the holds it names, while the review still runs too", async () => {
