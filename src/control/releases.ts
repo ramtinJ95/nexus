@@ -1,33 +1,10 @@
-import { z } from "zod";
 import type { NexusEvent } from "./events.ts";
 import type { Registry } from "./registry.ts";
-import { busyDrainReason, fullCommit, reportStates, type ReleaseView, type ReportBody, type Role } from "../protocol/deploy.ts";
+import { busyDrainReason, type ReleaseView } from "../protocol/deploy.ts";
 import { command, repository } from "../deploy/install.ts";
-import type { ReleaseInventory } from "../deploy/release-cleanup.ts";
-import { releaseName } from "../node-layout.ts";
-import { deleteOutcomeSchema } from "../protocol/cleanup.ts";
+import { commitSchema } from "../contract/release-parse.ts";
 
 type ReleasesRegistry = Pick<Registry, "desiredRelease" | "nodes" | "releaseReports">;
-
-export const commitSchema = z.string().regex(fullCommit);
-export const reportSchema = z.strictObject({
-  role: z.enum(["control", "probe"] satisfies Role[]), commit: commitSchema.nullable(), target: commitSchema.nullable(),
-  state: z.enum(reportStates),
-  reason: z.string().max(20_000).nullable(),
-}) satisfies z.ZodType<ReportBody>;
-
-const name = z.string().regex(releaseName);
-const pid = z.int().positive();
-/** A deployer's report of the releases its node holds, and what its last deletes did, by release. */
-export const releasesSchema = z.strictObject({
-  inventory: z.strictObject({
-    releases: z.array(z.strictObject({ name, commit: commitSchema.nullable(), bytes: z.int().nonnegative().max(Number.MAX_SAFE_INTEGER), installedAt: z.number().nonnegative() })).max(10_000),
-    links: z.strictObject({ current: name.nullable(), "control-current": name.nullable(), "deployer-current": name.nullable() }),
-    replaced: z.strictObject({ probe: name.nullable(), control: name.nullable() }),
-    running: z.record(name, pid),
-  }) satisfies z.ZodType<ReleaseInventory>,
-  outcomes: z.record(name, deleteOutcomeSchema).optional(),
-});
 
 export function releaseView(registry: ReleasesRegistry, self: string | undefined, now = Date.now()): ReleaseView {
   const desired = registry.desiredRelease();

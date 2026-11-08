@@ -14,8 +14,6 @@ import type { Question } from "./questions.ts";
 import type { JudgmentView } from "./judgment.ts";
 import type { NodePylons } from "./placement.ts";
 import type { Review } from "./review-model.ts";
-import type { ImageEntry } from "./image-rollout.ts";
-import type { BackfillPlanRow, UsageBackfill } from "./usage.ts";
 
 export interface ThreadDetail {
   claudeWorker?: { model: string | null; state: string; message?: string };
@@ -81,9 +79,3 @@ export type NodeSummary = Omit<NodeRecord, "observation"> & { observedAt: string
 
 /** What a send answers: the harness's submission, or what typing into the Claude worker's session did. */
 export type Sent = { submission: Submission["id"] } | { claude: ClaudeSent };
-
-/** `GET /v1/images/current`: the current and previous images, each null when none is. */
-export interface ImagesCurrent { current: ImageEntry | null; previous: ImageEntry | null }
-
-/** `GET /v1/usage/backfill`: the backfill's state, and the archived threads a start would read. */
-export interface BackfillView { backfill: UsageBackfill; plan: BackfillPlanRow[] }

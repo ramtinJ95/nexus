@@ -1,5 +1,7 @@
 // The thread's composer, which sends a message and keeps its draft across a swap, and the forms that answer an ask.
-import { api } from "./request.js";
+import { request } from "./request.js";
+import { threadRoutes } from "../../contract/threads.ts";
+import { questionRoutes } from "../../contract/reviews.ts";
 import { end, onSwap, refreshAfter, showError, whenRunning } from "./page.js";
 import { review, reviewSent } from "./checkout.js";
 
@@ -31,7 +33,7 @@ document.addEventListener("submit", async (event) => {
   outgoing.inFlight = true;
   for (const send of form.querySelectorAll("button[type=submit]")) send.disabled = true;
   const { requestId } = outgoing;
-  const post = () => api("POST", `/v1/threads/${thread}/messages`, { text, requestId, mode });
+  const post = () => request(threadRoutes.message, { thread, body: { text, requestId, mode } });
   try {
     const terminalOnly = form.dataset.claude === undefined || !text.trimStart().startsWith("/") ? null : (await import("./slash.js")).terminalOnlyReason(text, thread);
     if (terminalOnly !== null) {
@@ -113,7 +115,7 @@ document.addEventListener("submit", async (event) => {
   const submit = form.querySelector("button[type=submit]");
   submit.disabled = true;
   try {
-    await api("POST", `/v1/questions/${encodeURIComponent(form.dataset.question)}/answer`, { choices });
+    await request(questionRoutes.answer, { question: form.dataset.question, body: { choices } });
     showError("action-error", null);
     await refreshAfter();
   } catch (err) {

@@ -1,5 +1,5 @@
 /** Release, deployer and drain routes, and the usage backfill's. */
-import { reportSchema } from "./releases.ts";
+import { reportSchema } from "../contract/release-parse.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { turnGate } from "./drain.ts";

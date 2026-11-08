@@ -1,10 +1,13 @@
 // The thread list's rows, read for every tab of the browser by the one that follows the events, and the seen mark
 // a thread page owes. The page passes its own pieces and a test its fakes, with the browser globals last.
 import { owedSeen } from "./notifications.js";
+import { requestOver } from "./request.js";
 import { callOf } from "../../contract/route.ts";
 import { streamRoutes } from "../../contract/streams.ts";
+import { threadRoutes } from "../../contract/threads.ts";
 
 export function startRows({ api, notifications, health = () => {}, caughtUp = () => {}, currentThread, focused, activeTab }, { window, navigator, document, BroadcastChannel, EventSource, Date, AbortSignal, setTimeout, clearTimeout, setInterval } = globalThis) {
+  const request = requestOver(api);
   // The events that change a row's attention, its reply or whether it works, and a check's change, which every tab
   // hears from the one that follows the events, as it hears the rows.
   const rowEvents = ["attention.changed", "thread.turn-ended", "session.turn-started", "session.turn-ended", "session.waiting", "session.ended", "health.changed"];
@@ -35,7 +38,7 @@ export function startRows({ api, notifications, health = () => {}, caughtUp = ()
     try {
       do {
         stale = false;
-        const rows = await api("GET", "/v1/threads?deleted=false", undefined, AbortSignal.timeout(10_000));
+        const rows = await request(threadRoutes.list, { query: { deleted: false } }, AbortSignal.timeout(10_000));
         const now = Date.now();
         if (following) rowsChannel?.postMessage({ rows, now });
         showRows(rows, now);
@@ -108,7 +111,7 @@ export function startRows({ api, notifications, health = () => {}, caughtUp = ()
     if (body === null) return;
     marking = true;
     try {
-      await api("POST", `/v1/threads/${id}/seen`, body, AbortSignal.timeout(10_000));
+      await request(threadRoutes.seen, { thread: id, body }, AbortSignal.timeout(10_000));
       marked = body.lastReplyAt;
     } catch { /* The page's refresh reports connection failures. */ }
     finally { marking = false; }

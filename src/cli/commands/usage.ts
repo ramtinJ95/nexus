@@ -1,8 +1,8 @@
 /** `nexus usage` and `usage backfill`: the tokens the agents spent, and the read of archived threads' transcripts. */
-import type { BackfillView } from "../../control/wire.ts";
 import { breakdownLook, breakdowns, tokenColumns, tokenCount, utc, type BackfillPlanRow, type UsageBackfill, type UsageReport, type UsageTotals } from "../../control/usage.ts";
 import { CliError } from "../transport.ts";
-import { type Command, str, table } from "../kit.ts";
+import { type Command, str, request, table } from "../kit.ts";
+import { usageRoutes } from "../../contract/reports.ts";
 
 function backfillText(b: UsageBackfill): string {
   if (b.state === "never") return "Backfill: not run. A deployer runs `nexus usage backfill` to read archived threads' pylons.";
@@ -40,9 +40,7 @@ export const usageCommands: Readonly<Record<string, Command>> = {
     args: [0, 0],
     options: { since: { type: "string" }, project: { type: "string" }, by: { type: "string" } },
     async run(api, _, v) {
-      const query = new URLSearchParams({ since: str(v, "since") ?? "7d" });
-      for (const key of ["project", "by"]) if (str(v, key) !== undefined) query.set(key, str(v, key)!);
-      const report = await api("GET", `/v1/usage?${query}`) as UsageReport;
+      const report = await request(api, usageRoutes.report, { query: { since: str(v, "since") ?? "7d", project: str(v, "project"), by: str(v, "by") } });
       return { json: report, text: usageText(report) };
     },
   },
@@ -52,10 +50,10 @@ export const usageCommands: Readonly<Record<string, Command>> = {
     async run(api, _, v) {
       if (v["dry-run"] === true && v.stop === true) throw new CliError("invalid", "--dry-run and --stop do not go together");
       if (v["dry-run"] === true) {
-        const view = await api("GET", "/v1/usage/backfill") as BackfillView;
+        const view = await request(api, usageRoutes.backfill, {});
         return { json: view, text: backfillPlanText(view.plan) };
       }
-      const state = await api(v.stop === true ? "DELETE" : "POST", "/v1/usage/backfill") as UsageBackfill;
+      const state = await request(api, v.stop === true ? usageRoutes.stopBackfill : usageRoutes.startBackfill, {});
       return { json: state, text: backfillText(state) };
     },
   },

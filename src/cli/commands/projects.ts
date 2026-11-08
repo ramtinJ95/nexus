@@ -1,15 +1,16 @@
 /** `nexus projects`, `project show`, `project edit` and `project add`. */
 import { readFileSync } from "node:fs";
-import { defaultProjectResources, defaultSecondReview, upgradeProject, type Project, type SecondReview } from "../../control/project.ts";
-import { secretHostPattern, secretNamePattern, type SecretGrant } from "../../protocol/secret-grants.ts";
+import { defaultProjectResources, defaultSecondReview, upgradeProject, type LoginKind, type Project, type SecondReview } from "../../control/project.ts";
+import { secretHostPattern, secretNamePattern } from "../../protocol/secret-grants.ts";
 import { CliError } from "../transport.ts";
-import { type Command, str, strs, int, resourcesOf, placementOptions, table } from "../kit.ts";
+import { type Command, str, strs, int, request, resourcesOf, placementOptions, table } from "../kit.ts";
+import { projectRoutes } from "../../contract/projects.ts";
 
 /**
  * `NAME:HOST[,HOST...]`, such as GH_TOKEN:api.github.com,github.com. A value pasted by mistake, as in NAME=value,
  * fails the name or host check, so it never reaches the API, and the error does not repeat it.
  */
-function secretGrantOf(flag: string): SecretGrant {
+function secretGrantOf(flag: string) {
   const colon = flag.indexOf(":");
   const name = flag.slice(0, colon);
   const hosts = flag.slice(colon + 1).split(",");
@@ -85,7 +86,7 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
   projects: {
     args: [0, 0],
     async run(api) {
-      const projects = await api("GET", "/v1/projects") as Project[];
+      const projects = await request(api, projectRoutes.list, {});
       return { json: projects, text: projects.length === 0 ? "No projects." : table(projects.map((p) => [p.id, `node ${p.defaultNode}`, `branch ${p.defaultBranch}`, autoReviewText(p), pipelineText(p), p.repoUrl ?? "scratch"])) };
     },
   },
@@ -93,7 +94,7 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
     args: [1, 1],
     async run(api, [id]) {
       // From the list, so the command needs no route newer than `projects`.
-      const p = (await api("GET", "/v1/projects") as Project[]).find((project) => project.id === id);
+      const p = (await request(api, projectRoutes.list, {})).find((project) => project.id === id);
       if (p === undefined) throw new CliError("not-found", `no project ${id}`);
       return { json: p, text: projectText(p) };
     },
@@ -136,7 +137,7 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
       if (v["clear-rules"] && rulesFile !== undefined) throw new CliError("invalid", "--clear-rules conflicts with --rules-file");
       if (v["clear-rules"]) patch.standingRules = null;
       else if (rulesFile !== undefined) patch.standingRules = rulesFileOf(rulesFile);
-      const p = await api("PATCH", `/v1/projects/${encodeURIComponent(id!)}`, patch) as Project;
+      const p = await request(api, projectRoutes.edit, { project: id!, body: patch });
       const rules = patch.standingRules === undefined ? "" : p.standingRules?.text == null ? " It has no standing rules." : ` Builder threads started from now get its standing rules, revision ${p.standingRules.revision}.`;
       return { json: p, text: `Updated project ${p.id}, ${autoReviewText(p)}, ${pipelineText(p)}${second === undefined ? "" : `, ${secondReviewText(p)}`}. Existing threads keep their boot settings and grants; start a new thread to apply them.${rules}` };
     },
@@ -156,16 +157,17 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
       const secrets = strs(v, "secret").map(secretGrantOf);
       const rulesFile = str(v, "rules-file");
       const auto = autoReviewOf(v);
-      const added = await api("POST", "/v1/projects", {
-        id, repoUrl, defaultBranch: str(v, "branch") ?? "main", defaultNode: str(v, "node") ?? "auto", resources,
-        allowedHosts: strs(v, "allow-host"), secrets, logins: strs(v, "login"), preSetup: null,
+      const added = await request(api, projectRoutes.add, { body: {
+        id: id!, repoUrl, defaultBranch: str(v, "branch") ?? "main", defaultNode: str(v, "node") ?? "auto", resources,
+        // The API refuses a login it does not know.
+        allowedHosts: strs(v, "allow-host"), secrets, logins: strs(v, "login") as LoginKind[], preSetup: null,
         ...rulesFile === undefined ? {} : { standingRules: rulesFileOf(rulesFile) },
-      }) as Project;
+      } });
       // Only an edit records who turned auto review on, so a new project's add cannot name someone else.
       let p = added;
       if (auto != null) {
         try {
-          p = await api("PATCH", `/v1/projects/${encodeURIComponent(added.id)}`, { autoReview: auto }) as Project;
+          p = await request(api, projectRoutes.edit, { project: added.id, body: { autoReview: auto } });
         } catch (err) {
           if (!(err instanceof CliError)) throw err;
           throw new CliError(err.kind, `Added project ${added.id}, but its auto review was not set: ${err.message}. Set it with nexus project edit ${added.id} --auto-review`, err.status, err.code, err.retryable);

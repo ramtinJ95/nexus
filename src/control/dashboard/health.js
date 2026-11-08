@@ -1,5 +1,7 @@
 // The dashboard's notices, a check's alerts and the Health page's seen mark, loaded as the page starts but outside its
 // first script. It reads the page's pieces when it runs, so a test reads what a change says without a page.
+import { doctorRoutes } from "../../contract/reports.ts";
+
 const focused = () => document.visibilityState === "visible" && document.hasFocus();
 const refresh = async () => (await import("./page.js")).refreshNow();
 
@@ -41,7 +43,7 @@ export function newChanges(baseline) {
  */
 export async function caughtUp(hand, wait = 1000) {
   try {
-    for (const change of (await (await import("./request.js")).api("GET", "/v1/checks/changes", undefined, AbortSignal.timeout(10_000))).reverse()) hand(change);
+    for (const change of (await (await import("./request.js")).request(doctorRoutes.changes, {}, AbortSignal.timeout(10_000))).reverse()) hand(change);
   } catch {
     setTimeout(() => void caughtUp(hand, Math.min(wait * 2, 30_000)), wait);
   }
@@ -92,7 +94,7 @@ export function markHealthSeen() {
     if (owed === null || marking) return;
     marking = true;
     try {
-      await (await import("./request.js")).api("POST", "/v1/checks/seen", owed, AbortSignal.timeout(10_000));
+      await (await import("./request.js")).request(doctorRoutes.seen, { body: owed }, AbortSignal.timeout(10_000));
       marked = owed.through;
       void refresh();
     } catch { /* The page's refresh reports connection failures. */ }

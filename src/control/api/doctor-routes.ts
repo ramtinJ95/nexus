@@ -2,27 +2,26 @@
  * `nexus doctor`'s checks, run now, and the health the control plane's passes keep: the latest pass, each problem
  * open, and the changes of the last 30 days.
  */
-import { z } from "zod";
 import { HttpError } from "../http-error.ts";
 import { healthView, type DoctorReport } from "../doctor-model.ts";
-import { noContent, ok, parse, type RouteEntry, type ApiKit } from "./kit.ts";
+import { noContent, ok, on, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 import { anyAllowed } from "./access.ts";
-
-const seenSchema = z.strictObject({ through: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) });
+import { doctorRoutes as routes } from "../../contract/reports.ts";
+import { checksSeenSchema } from "../../contract/reports-parse.ts";
 
 export function doctorRoutes(kit: ApiKit, options: { doctor?: (() => Promise<DoctorReport>) | undefined; health?: (() => DoctorReport | null) | undefined }): readonly RouteEntry[] {
   const { registry } = kit;
   return [
-    ["GET", /^\/v1\/doctor$/, anyAllowed, async () => {
+    on(routes.doctor, anyAllowed, async () => {
       if (options.doctor === undefined) throw new HttpError(409, "this control plane runs no doctor");
       return ok(await options.doctor());
-    }],
-    ["GET", /^\/v1\/checks$/, anyAllowed, () => ok(healthView(options.health?.() ?? null, registry.healthStates()))],
-    ["GET", /^\/v1\/checks\/changes$/, anyAllowed, () => ok(registry.healthChanges())],
-    ["POST", /^\/v1\/checks\/seen$/, { role: "allowed", why: "what the person has seen changes no check" }, async (_, r) => {
-      const { through } = parse(seenSchema, await r.body({}));
+    }),
+    on(routes.checks, anyAllowed, () => ok(healthView(options.health?.() ?? null, registry.healthStates()))),
+    on(routes.changes, anyAllowed, () => ok(registry.healthChanges())),
+    on(routes.seen, { role: "allowed", why: "what the person has seen changes no check" }, async (_, r) => {
+      const { through } = parse(checksSeenSchema, await r.body({}));
       registry.markHealthSeen(through, Date.now());
       return noContent;
-    }],
+    }),
   ];
 }

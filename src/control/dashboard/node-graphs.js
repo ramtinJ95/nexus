@@ -4,7 +4,8 @@
 import uPlot from "uplot";
 import css from "uplot/dist/uPlot.min.css";
 import { afterSwap, el } from "./page.js";
-import { api } from "./request.js";
+import { request } from "./request.js";
+import { nodeRoutes } from "../../contract/reports.ts";
 import { onThemeChange, themeValue } from "./theme.js";
 import { appended, bucketed, charts, columns, gapMs, historyOf, missed, rangeMs, rangeOf, reading, regroupMs, regroups, slotter, yRange } from "./graph-data.ts";
 
@@ -247,7 +248,7 @@ async function load() {
   section.classList.add("graphs-loading");
   const to = Date.now();
   try {
-    const metrics = await api("GET", `/v1/nodes/${encodeURIComponent(node)}/metrics?from=${to - rangeMs(range)}&to=${to}`);
+    const metrics = await request(nodeRoutes.metrics, { node, query: { from: to - rangeMs(range), to } });
     if (ask !== asked) return;
     renode(node);
     history = historyOf(metrics, rangeMs(range));

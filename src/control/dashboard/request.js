@@ -17,8 +17,11 @@ export function apiOver({ fetch } = globalThis) {
 }
 export const api = apiOver();
 
-/** Calls one of the contract's routes with its path's parameters, its query and its body. */
-export function request(route, args, signal) {
-  const { path, body } = callOf(route, args);
-  return api(route.method, path, body, signal);
+/** Calls one of the contract's routes over `api`, with its path's parameters, its query and its body. */
+export function requestOver(api) {
+  return function request(route, args, signal) {
+    const { path, body } = callOf(route, args);
+    return api(route.method, path, body, signal);
+  };
 }
+export const request = requestOver(api);

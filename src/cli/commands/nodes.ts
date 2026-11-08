@@ -1,10 +1,10 @@
 /** `nexus nodes` and `nexus node`: the nodes' capacity and pylons, and one node's health. */
-import type { NodeSummary } from "../../control/wire.ts";
 import { gib, type NodePylons } from "../../control/placement.ts";
 import type { NodeCapacity } from "../../protocol/observations.ts";
 import type { NodeHealth } from "../../protocol/client.ts";
 import { diskText, lowDisk } from "../../disk-space.ts";
-import { type Command, ago, table } from "../kit.ts";
+import { type Command, ago, request, table } from "../kit.ts";
+import { nodeRoutes } from "../../contract/reports.ts";
 
 /** A probe from before pylons were counted reports no CPUs or committed disk, and always 0 GiB of memory committed. */
 function capacityText(c: Partial<NodeCapacity>, overcommitted: boolean): string {
@@ -47,14 +47,14 @@ export const nodesCommands: Readonly<Record<string, Command>> = {
   node: {
     args: [1, 1],
     async run(api, [name]) {
-      const health = await api("GET", `/v1/nodes/${encodeURIComponent(name!)}/health`) as NodeHealth;
+      const health = await request(api, nodeRoutes.health, { node: name! });
       return { json: health, text: healthText(health) };
     },
   },
   nodes: {
     args: [0, 0],
     async run(api) {
-      const nodes = await api("GET", "/v1/nodes") as NodeSummary[];
+      const nodes = await request(api, nodeRoutes.list, {});
       return {
         json: nodes,
         text: nodes.length === 0 ? "No nodes." : table(nodes.map((n) => [

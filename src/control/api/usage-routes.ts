@@ -4,8 +4,9 @@
 import type { UsageBackfillJob } from "../usage-backfill.ts";
 import { HttpError } from "../http-error.ts";
 import { usageFilter } from "../usage.ts";
-import { ok, type RouteEntry, type ApiKit } from "./kit.ts";
+import { ok, on, type RouteEntry, type ApiKit } from "./kit.ts";
 import { anyAllowed, type Policy } from "./access.ts";
+import { usageRoutes as routes } from "../../contract/reports.ts";
 
 /** The backfill wakes archived threads' pylons, so starting or stopping it takes the same right as `nexus deploy`. */
 const steer = { role: "deployer", action: "start or stop the usage backfill" } satisfies Policy;
@@ -19,9 +20,9 @@ export function usageRoutes(kit: ApiKit, options: { usageBackfill?: UsageBackfil
   }
 
   return [
-    ["GET", /^\/v1\/usage$/, anyAllowed, (_, r) => ok(registry.usageReport(usageFilter(r.query, Date.now())))],
-    ["GET", /^\/v1\/usage\/backfill$/, anyAllowed, () => ok({ backfill: usageBackfill().status(), plan: usageBackfill().plan() })],
-    ["POST", /^\/v1\/usage\/backfill$/, steer, () => ok(usageBackfill().start())],
-    ["DELETE", /^\/v1\/usage\/backfill$/, steer, () => ok(usageBackfill().stop())],
+    on(routes.report, anyAllowed, (_, r) => ok(registry.usageReport(usageFilter(r.query, Date.now())))),
+    on(routes.backfill, anyAllowed, () => ok({ backfill: usageBackfill().status(), plan: usageBackfill().plan() })),
+    on(routes.startBackfill, steer, () => ok(usageBackfill().start())),
+    on(routes.stopBackfill, steer, () => ok(usageBackfill().stop())),
   ];
 }

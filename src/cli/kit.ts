@@ -35,7 +35,6 @@ export interface Command {
 export const str = (v: Values, key: string) => v[key] as string | undefined;
 /** A flag given any number of times. */
 export const strs = (v: Values, key: string) => (v[key] as string[] | undefined) ?? [];
-export const thread = (id: string) => `/v1/threads/${encodeURIComponent(id)}`;
 
 export function int(value: string | undefined, flag: string, fallback: number): number {
   if (value === undefined) return fallback;
