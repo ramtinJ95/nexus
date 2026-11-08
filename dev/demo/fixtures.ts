@@ -37,7 +37,7 @@ import type { DoctorReport, Check } from "../../src/control/doctor-model.ts";
 import type { PullRequest } from "../../src/control/github.ts";
 import type { WatchedPr } from "../../src/control/pr-watch-store.ts";
 import type { Features } from "../../src/control/features.ts";
-import { claudeTalk, diffSnippet, failingTests, harnessTalk, longConversation, testOutput, typescriptSnippet } from "./talk.ts";
+import { claudeTalk, failingTests, harnessTalk, longConversation, testOutput, typescriptSnippet } from "./talk.ts";
 
 type Demo = Awaited<ReturnType<typeof testApi>>;
 
