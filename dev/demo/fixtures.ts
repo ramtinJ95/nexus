@@ -16,6 +16,7 @@ import { processStream } from "../../src/process-stream.ts";
 import type { ByteStream } from "../../src/protocol/streams.ts";
 import { observeNode, image, laptop, type testApi } from "../../src/test-support/api-kit.ts";
 import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../../src/test-support/kit.ts";
+import { testPr, testReview } from "../../src/test-support/registry-kit.ts";
 import { sampleOf } from "../../src/control/node-metrics.ts";
 import { personPhase, type Review, type Round } from "../../src/control/review-model.ts";
 import { personOnly } from "../../src/control/holds.ts";
@@ -95,17 +96,15 @@ interface ThreadSpec {
 interface World { threads: Map<string, Thread>; live: { working: Thread[]; talker: Thread | null } }
 
 const pr = (project: string, number: number, title: string, over: Partial<WatchedPr> = {}): WatchedPr =>
-  ({ repo: repos[project]!, number, title, url: `https://github.com/${repos[project]}/pull/${number}`, state: "open", checks: "passing", review: "none", conflict: false, ...over });
+  testPr({ repo: repos[project]!, number, title, checks: "passing", ...over });
 
 const head = (seed: string) => seed.repeat(40).slice(0, 40);
 
 function review(t: Thread, p: PullRequest, over: Partial<Review>): Review {
-  return {
+  return testReview({
     id: `rv-${p.number}`, builder: t.id, reviewer: `${t.id}-review` as ThreadId, pr: { repo: p.repo, number: p.number, url: p.url, title: p.title, branch: `nexus/${p.number}` },
-    reviewerKind: "harness", models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: true, merged: null, waiver: null,
-    expect: `rv-${p.number}:t`, sent: 3, outbox: null, asked: "", since: now() - 20 * minute, nudges: 0, startedAt: now() - 3 * hour,
-    rounds: [], phase: { kind: "reviewing" }, ...over,
-  };
+    auto: true, expect: `rv-${p.number}:t`, sent: 3, since: now() - 20 * minute, startedAt: now() - 3 * hour, rounds: [], ...over,
+  });
 }
 
 const finding = (id: string, priority: "P0" | "P1" | "P2" | "P3", where: string, summary: string, detail?: string) => ({ id, priority, where, summary, detail: detail ?? null });
