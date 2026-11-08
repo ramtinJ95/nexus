@@ -11,7 +11,8 @@ import type { HeldWork, InboxNeed, ThreadNeed } from "../work.ts";
 import { prose, inline } from "./markdown.ts";
 import { cleanupCard, judgmentCards, questionCard, prOf, landing, nudgeCard, resumeCard } from "./cards.ts";
 import { layout, threadsOf, queuedLook, threadTitle, closedLabel, quietLabel, newProjectButton, type Shell } from "./shell.ts";
-import { lifeOfThread, needWhy, roleLine, threadRole, type Life } from "./lifecycle.ts";
+import { lifeOfThread, needWhy, roleLine, type Life } from "./lifecycle.ts";
+import { threadRole } from "../work-model.ts";
 import { flightLines, flightRows, flightStack, heldLine, inFlight, itemActions, itemBrief, peekHref, peekKey, peekView, type Peek } from "./flight.ts";
 import { lifeTrack } from "./timeline.ts";
 import type { Item } from "./items.ts";
@@ -165,8 +166,8 @@ function whereNow(c: Context, d: ThreadDetail, life: Life, items: readonly Item[
   const r = d.review !== null && !settled(d.review) ? d.review : null;
   const pr = r?.pr ?? d.pullRequests.find((x) => x.state === "open") ?? d.pullRequests.at(-1);
   const reply = items?.findLast((i) => i.kind === "agent" && i.text.trim() !== "");
-  const role = threadRole(c, d.thread.id);
-  return html`<div class="need-ctx">${role.kind === "builder" ? lifeTrack(life, false) : roleLine(c, d.thread.id, role)}
+  const role = threadRole(c.registry, d.thread);
+  return html`<div class="need-ctx">${role === "builder" ? lifeTrack(life, false) : roleLine(c, d.thread.id, role)}
 <p class="need-facts">${pr !== undefined && prFact(pr, r)}<span>${state(...actualBadge[d.pylon.actualState])} <span class="dim">on</span> ${d.pylon.node}</span><a class="link" href="/threads/${d.thread.id}">Open thread</a></p>
 ${reply?.kind === "agent" && html`<p class="need-reply"><span class="dim">Latest reply${d.thread.lastReplyAt !== null && html` ${ago(d.thread.lastReplyAt, c.now)}`}</span> ${inline(reply.text.replace(/```[\s\S]*?```/g, " ").replace(/\s+/g, " ").trim())}</p>`}
 </div>`;

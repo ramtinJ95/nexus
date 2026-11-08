@@ -27,21 +27,13 @@ export const planningPrefix = "[Nexus planning: automated, not a message from th
 export const judgmentPrefix = "[Nexus judgment — automated, not a message from the person]";
 export const senderPrefixes: Readonly<Record<Sender, string>> = { "pr-watch": prWatchPrefix, review: reviewPrefix, nudge: nudgePrefix, "usage-limit": usageLimitPrefix, resume: resumePrefix };
 
-type ThreadRole = "builder" | "reviewer" | "check" | "verify" | "other";
+type CallerRole = "builder" | "reviewer" | "check" | "verify" | "other";
+
+const nexusCallers: ReadonlyMap<string, CallerRole> = new Map([[reviewerCaller, "reviewer"], [checkCaller, "check"], [verifyCaller, "verify"]]);
 
 /** A reviewer, check or verify thread is one the review loop started, and a builder one a person started from a tailnet node. */
-export function roleOf(startedBy: string): ThreadRole {
-  if (startedBy === reviewerCaller) return "reviewer";
-  if (startedBy === checkCaller) return "check";
-  if (startedBy === verifyCaller) return "verify";
-  return tailnetNodeIdSchema.safeParse(startedBy).success ? "builder" : "other";
-}
-
-/** Whether the review loop started `t`, including a reviewer a later review of the same builder replaced. */
-export const startedByNexus = <Id extends string>(registry: { isReviewer(id: Id): boolean }, t: { id: Id; startedBy: string }): boolean => {
-  const role = roleOf(t.startedBy);
-  return role === "reviewer" || role === "check" || role === "verify" || registry.isReviewer(t.id);
-};
+export const roleOf = (startedBy: string): CallerRole =>
+  nexusCallers.get(startedBy) ?? (tailnetNodeIdSchema.safeParse(startedBy).success ? "builder" : "other");
 
 /** A token of `id` and random hex, which only the recipient of the request it is in is told. */
 export const mint = (id: string) => `${id}:${randomBytes(6).toString("hex")}`;

@@ -15,7 +15,8 @@ import type { HeldWork } from "../work.ts";
 import { clock, span } from "./elapsed.ts";
 import { prose } from "./markdown.ts";
 import type { Item } from "./items.ts";
-import { lifeOfItem, ofPhase, pipelineItems, lifeOfThread, needLabel, roleLine, stages, threadRole, type Life, type Stage } from "./lifecycle.ts";
+import { lifeOfItem, phaseTone, pipelineItems, lifeOfThread, needLabel, roleLine, stages, type Life, type Stage } from "./lifecycle.ts";
+import { threadRole } from "../work-model.ts";
 import { lifeTrack } from "./timeline.ts";
 import { lastActive, queuedLook, threadTitle } from "./shell.ts";
 
@@ -39,7 +40,7 @@ const threadLine = (c: Context, t: Thread): Line => {
   };
 };
 const queuedLine = (c: Context, q: QueuedThread): Line => ({ key: q.id, title: q.title, project: q.project, life: lifeOfThread(c, q.id), state: queuedLook(q), when: "queued", dim: false, order: 0 });
-const itemLine = (c: Context, i: PipelineItem): Line => ({ key: i.id, title: i.title, project: i.project, life: lifeOfItem(c, i), state: [i.phase.kind, ofPhase[i.phase.kind].tone], when: "item", dim: false, order: i.addedAt });
+const itemLine = (c: Context, i: PipelineItem): Line => ({ key: i.id, title: i.title, project: i.project, life: lifeOfItem(c, i), state: [i.phase.kind, phaseTone[i.phase.kind]], when: "item", dim: false, order: i.addedAt });
 
 /** How long a landed thread stays under Deployed once it is archived, as the review loop archives each builder that lands. */
 const deployedForMs = 24 * 60 * 60 * 1000;
@@ -54,7 +55,7 @@ export function flightLines(c: Context): Map<Stage, Line[]> {
   const lines = [
     ...pipelineItems(c).filter((i) => i.thread === null).map((i) => itemLine(c, i)),
     ...c.registry.projects().flatMap((p) => c.queuedIn(p.id)).map((q) => queuedLine(c, q)),
-    ...c.threads().filter((t) => recent(t) && threadRole(c, t.id).kind === "builder").map((t) => [t, threadLine(c, t)] as const).filter(([t, l]) => t.status !== "archived" || l.life.stage === "deployed").map(([, l]) => l),
+    ...c.threads().filter((t) => recent(t) && threadRole(c.registry, t) === "builder").map((t) => [t, threadLine(c, t)] as const).filter(([t, l]) => t.status !== "archived" || l.life.stage === "deployed").map(([, l]) => l),
   ];
   const placed = Map.groupBy(lines.filter((l) => l.life.stage !== null), (l) => l.life.stage!);
   for (const stage of placed.values()) stage.sort((a, b) => a.order - b.order);
@@ -146,7 +147,7 @@ export function peekView(c: Context, p: Peek | null): Html | false {
     const project = c.registry.project(i.project);
     const life = lifeOfItem(c, i);
     return html`<section class="peek" aria-labelledby="peek-h" data-peek-key="${i.id}">
-<header class="peek-head"><span class="peek-proj">${i.project}<span class="dim"> item </span><code>${i.id}</code></span><h2 id="peek-h">${dot(ofPhase[i.phase.kind].tone, i.phase.kind)}<span>${i.title}</span></h2>${i.thread !== null && html`<a class="btn btn-xs" href="/threads/${i.thread}">Open thread</a>`}${close}</header>
+<header class="peek-head"><span class="peek-proj">${i.project}<span class="dim"> item </span><code>${i.id}</code></span><h2 id="peek-h">${dot(phaseTone[i.phase.kind], i.phase.kind)}<span>${i.title}</span></h2>${i.thread !== null && html`<a class="btn btn-xs" href="/threads/${i.thread}">Open thread</a>`}${close}</header>
 ${lifeTrack(life, false)}
 ${next(life)}
 ${itemBrief(c, i)}
@@ -167,14 +168,14 @@ ${next(life, q.waits.every((w) => w.state === "landed") ? undefined : html`<ul c
   }
   const { d, items } = p;
   const t = d.thread;
-  const role = threadRole(c, t.id);
-  const life = role.kind === "builder" ? lifeOfThread(c, t.id) : null;
+  const role = threadRole(c.registry, t);
+  const life = role === "builder" ? lifeOfThread(c, t.id) : null;
   const [label, tone] = threadState({ ...t, attention: d.attention, desired: d.desired, pylon: d.pylon }, c.now);
   const r = d.review;
   const pr = d.pullRequests.find((x) => x.state === "open") ?? d.pullRequests.at(-1);
   return html`<section class="peek" aria-labelledby="peek-h" data-peek-key="${t.id}">
 <header class="peek-head"><span class="peek-proj">${t.project}</span><h2 id="peek-h">${dot(tone, label)}<span>${t.title}</span></h2><a class="btn btn-xs btn-primary" href="/threads/${t.id}">Open thread</a>${close}</header>
-${role.kind === "builder" ? html`${lifeTrack(life!, false)}
+${role === "builder" ? html`${lifeTrack(life!, false)}
 ${next(life!)}` : roleLine(c, t.id, role)}
 <dl class="peek-facts">
 <dt>State</dt><dd>${label}</dd>

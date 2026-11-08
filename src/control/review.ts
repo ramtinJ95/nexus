@@ -19,7 +19,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import type { z } from "zod";
-import { checkCaller, latest, mint, reviewerCaller, reviewPrefix, startedByNexus, verifyCaller } from "./agent-protocol.ts";
+import { checkCaller, latest, mint, reviewerCaller, reviewPrefix, verifyCaller } from "./agent-protocol.ts";
 import { releaseOutcome, type ReleaseView } from "../protocol/deploy.ts";
 import { scopedFlight } from "../single-flight.ts";
 import type { SecretGrant } from "../protocol/secret-grants.ts";
@@ -47,8 +47,9 @@ import {
 import { landsOnItsOwn, type Project } from "./project.ts";
 import { deliverDurable } from "./durable-message.ts";
 import type { StartRequest } from "./start-request.ts";
+import { servesReview, threadRole } from "./work-model.ts";
 
-type ReviewRegistry = Pick<Registry, "agent" | "answerQuestion" | "desiredRelease" | "drain" | "isCurrentReview" | "isReviewer" | "nodeByTailnetId" | "nodes" | "prReviewed" | "prWatch" | "project" | "pylon" | "question" | "questions" | "releaseReports" | "replaceQuestions" | "review" | "reviews" | "reviewsToStep" | "saveReview" | "setDesiredRelease" | "setThreadStatus" | "storedThreads" | "thread" | "threadsAsking">;
+type ReviewRegistry = Pick<Registry, "agent" | "answerQuestion" | "desiredRelease" | "drain" | "isCurrentReview" | "isReviewer" | "nodeByTailnetId" | "nodes" | "planning" | "prReviewed" | "prWatch" | "project" | "pylon" | "question" | "questions" | "releaseReports" | "replaceQuestions" | "review" | "reviews" | "reviewsToStep" | "saveReview" | "setDesiredRelease" | "setThreadStatus" | "storedThreads" | "thread" | "threadsAsking">;
 
 /** How long a turn's end may run ahead of its transcript before a reply without the block counts as missing it. */
 const replyGraceMs = 60_000;
@@ -1232,7 +1233,7 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
      */
     async auto(t: Thread, pr: Pick<PullRequest, "repo" | "number">): Promise<void> {
       const setting = registry.project(t.project)?.autoReview;
-      if (setting == null || startedByNexus(registry, t)) return;
+      if (setting == null || servesReview(threadRole(registry, t))) return;
       // Another thread on the same branch links the same PR, which has had its review, even one its builder's next replaced.
       if (registry.prReviewed(pr.repo, pr.number)) return;
       try {

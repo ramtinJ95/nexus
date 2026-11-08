@@ -9,8 +9,9 @@ import { scopedFlight } from "../single-flight.ts";
 import { prWatchPrefix } from "./agent-protocol.ts";
 import { commentCap, pushedBranches, watchStopped } from "./pr-watch-model.ts";
 import { deliverDurable } from "./durable-message.ts";
+import { threadRole } from "./work-model.ts";
 
-type PrWatchRegistry = Pick<Registry, "isReviewer" | "outputs" | "prWatch" | "project" | "queuedThreads" | "savePrWatch" | "storedThreads" | "thread">;
+type PrWatchRegistry = Pick<Registry, "isReviewer" | "outputs" | "planning" | "prWatch" | "project" | "queuedThreads" | "savePrWatch" | "storedThreads" | "thread">;
 
 /** A description's first paragraph past its headings, images and comments, on one line and at most 400 characters. */
 export function summaryOf(body: string): string {
@@ -101,7 +102,7 @@ export function prWatcher(options: {
     for (const t of [...watched, ...waitedOn]) {
       if (only !== null && !only.has(t.id)) continue;
       // A reviewer checks out the builder's branch, so its outputs would link it to the PR it reviews.
-      if (registry.isReviewer(t.id)) continue;
+      if (threadRole(registry, t) === "reviewer") continue;
       // Before the state is read, so the watch's own save keeps what it records.
       const settled = !awaited.has(t.id) || await settle(t).then(() => true, () => false);
       // Never include transport errors: a fetch implementation may put authorization headers in them.
@@ -176,7 +177,7 @@ export function prWatcher(options: {
   /** Reads thread `id`'s pull requests now rather than at the next poll, as after its turn ended. */
   function turnEnded(id: ThreadId): Promise<void> {
     const t = registry.thread(id);
-    if (closed || github === null || !active(t) || registry.isReviewer(id)) return Promise.resolve();
+    if (closed || github === null || !active(t) || threadRole(registry, t!) === "reviewer") return Promise.resolve();
     // The poll still reads branches a failed read missed.
     const run = (options.fresh?.(t!) ?? Promise.resolve()).catch(() => undefined).then(() => closed ? undefined : ticks.wake(id));
     ending.add(run);

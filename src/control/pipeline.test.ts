@@ -52,7 +52,7 @@ function fixture(t: import("node:test").TestContext, setting: PipelineSetting | 
   };
 }
 
-const phase = (registry: Registry, id: ItemId) => { const { kind, why } = itemPhase(registry, registry.item(id)!); return `${kind}: ${why}`; };
+const phase = (registry: Registry, id: ItemId) => { const { kind, why } = itemPhase(registry, registry.item(id)!, Date.now()); return `${kind}: ${why}`; };
 const thread = (registry: Registry, id: ItemId) => itemThread(registry, id)!;
 
 test("an item moves through every phase its records put it in, from planned to landed", async (t) => {
@@ -92,8 +92,14 @@ test("an item moves through every phase its records put it in, from planned to l
   assert.equal(phase(r, a), "reviewing: PR #9, round 1: live check waiting for a node to take its verify pylon: no node can run this pylon: rj-firebat is offline");
   f.review(ta, { kind: "fixing" });
   assert.equal(phase(r, a), "reviewing: PR #9, round 1: fixing");
+  f.review(ta, { kind: "checking", startedAt: 0, thread: null });
+  assert.equal(phase(r, a), "reviewing: PR #9, round 1: checking");
+  f.review(ta, { kind: "quoting", asked: null }, laptop);
+  assert.equal(phase(r, a), "landing: PR #9, round 1: quoting", "quoting what could not be checked live is a step of the landing, as the dashboard's track says");
+  f.review(ta, { kind: "checking", startedAt: 0, thread: null }, laptop);
+  assert.equal(phase(r, a), "landing: PR #9, round 1: checking", "a review asked to land runs its checks as the first steps of its landing");
   f.review(ta, { kind: "approved" }, laptop);
-  assert.equal(phase(r, a), "landing: PR #9 is approved");
+  assert.equal(phase(r, a), "held: its thread needs the person's decision", "an approved review waits on the person, as its card says, even once asked to land");
   f.review(ta, { kind: "merging", authorized: "h" }, laptop);
   assert.equal(phase(r, a), "landing: PR #9 is merging");
   f.review(ta, { kind: "merging", authorized: null, waiting: "rv-other deploys" }, laptop);
@@ -123,6 +129,15 @@ test("an item is held for the person by its review, its thread's attention, a bl
   assert.equal(phase(r, c), "held: its thread needs the person's decision");
   f.links(td!, f.pr(4, "closed"));
   assert.equal(phase(r, d), "held: PR #4 closed without merging");
+  const e = f.add("E");
+  await f.passes();
+  const te = thread(r, e);
+  r.recordParked(te, true);
+  assert.equal(phase(r, e), "held: its thread is parked", "a thread stuck where only the person moves it holds its item, as its card says");
+  r.recordParked(te, false);
+  f.review(te, { kind: "landed", commit: "c".repeat(40) });
+  r.askQuestion({ id: "q2", thread: te, text: "Clean up the branch?", options: ["yes", "no"], reserved: null, answerer: "person", askedAt: 1 });
+  assert.equal(phase(r, e), "held: its thread needs the person's decision", "a question holds an item whatever its review says");
 
   const after = f.add("After D", [d]);
   await f.items.poll();
@@ -182,7 +197,7 @@ test("an item is queued once across passes and restarts, under its request ID", 
   assert.equal(second.registry.queuedThreads().length, 2, "a restart queues nothing again");
   assert.equal(thread(second.registry, a), ta);
   assert.equal(second.registry.thread(ta)?.title, "A");
-  assert.deepEqual(itemView(second.registry, second.registry.item(b)!), {
+  assert.deepEqual(itemView(second.registry, second.registry.item(b)!, Date.now()), {
     id: b, project: "acme", title: "B", addedBy: laptop, addedAt: second.registry.item(b)!.addedAt, after: [a], worker: "claude", model: "claude-opus-5-5",
     brief: "Build B", thread: tb, phase: { kind: "queued", why: "waits for A: has no pull request yet" }, approved: null,
   });
@@ -206,7 +221,7 @@ test("an item is checked as a start is, and its pass records why a queue refused
   assert.equal(f.registry.item(gone)!.lastError, "no node nowhere");
 });
 
-test("an item whose review asks about its holds holds only itself: it stays in review, and the items beside it start and build", async (t) => {
+test("an item whose review asks about its holds holds only itself: it is held, and the items beside it start and build", async (t) => {
   const f = fixture(t);
   const r = f.registry;
   const a = f.add("A"), b = f.add("B");
@@ -218,7 +233,7 @@ test("an item whose review asks about its holds holds only itself: it stays in r
     holds: { review: `r-${ta}`, head: "h", base: "main", holds: [{ code: "reserved-path:auth", text: "Always needs the person: changes to login or auth, as it changes src/control/api.ts." }] },
   });
   assert.equal(r.attention(ta), "decision");
-  assert.equal(phase(r, a), "reviewing: PR #9, round 1: reviewing");
+  assert.equal(phase(r, a), "held: its thread needs the person's decision", "the holds question is the person's, as its card in Needs you says");
   assert.equal(phase(r, b), "building: no pull request yet");
   const c = f.add("C");
   await f.passes();

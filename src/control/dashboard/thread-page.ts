@@ -23,7 +23,8 @@ import { runOf, stateBar, composer, type Run } from "./conversation.ts";
 import { convo, shownKey } from "./live-frames.ts";
 import { judgmentCards, questionCards, landing, cancelReview, nudgeCard, resumeCard } from "./cards.ts";
 import { layout, queuedLook, threadTitle } from "./shell.ts";
-import { lifeOfThread, roleLine, threadRole } from "./lifecycle.ts";
+import { lifeOfThread, roleLine } from "./lifecycle.ts";
+import { threadRole } from "../work-model.ts";
 import { lifeTrack, timeline } from "./timeline.ts";
 import { usageColumns, exact } from "./usage-page.ts";
 
@@ -64,8 +65,8 @@ export function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: 
   const model = d.claudeWorker !== undefined ? d.claudeWorker.model : read === null || read.kind === "claude" ? null : modelOf(read.view);
   const shows = streaming && read !== null ? shownKey(read, model) : null;
   const open = t.status === "active" || t.status === "idle";
-  const role = threadRole(c, t.id);
-  const life = role.kind === "builder" ? lifeOfThread(c, t.id) : null;
+  const role = threadRole(c.registry, t);
+  const life = role === "builder" ? lifeOfThread(c, t.id) : null;
   const bar = threadBar(t, headState(d, run, c.now), [
     t.status !== "deleted" && archiveButton(t.id, t.status === "archived"),
     t.status !== "deleted" && html`<button type="button" class="btn btn-ghost danger" id="delete" data-action="delete" data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its pylon and disk are removed.">Delete</button>`,
@@ -75,7 +76,7 @@ export function threadPage(c: Context, d: ThreadDetail, node: NodeRecord, view: 
     active: t.id,
     ...(open ? { activity: t.id } : {}),
     main: html`${bar}
-${role.kind === "builder" ? html`<nav class="life-bar" id="life" data-live aria-label="Stages">${lifeTrack(life!)}</nav>` : html`<div class="life-bar" id="life" data-live>${roleLine(c, t.id, role)}</div>`}
+${role === "builder" ? html`<nav class="life-bar" id="life" data-live aria-label="Stages">${lifeTrack(life!)}</nav>` : html`<div class="life-bar" id="life" data-live>${roleLine(c, t.id, role)}</div>`}
 <div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button>${life !== null && html`<button type="button" class="tab tab-tl" role="tab" aria-selected="false" aria-controls="timeline-view" data-tab="timeline">${icon("timeline")}<span class="tab-name">Timeline</span></button>`}${t.status !== "deleted" && html`<button type="button" class="tab tab-term"${!open && " hidden"} role="tab" aria-selected="false" aria-controls="term-view" data-tab="term" title="A terminal in the pylon, as nexus attach ${t.id} gives">${icon("terminal")}<span class="tab-name">Terminal</span></button>`}</div>
 <div class="strip" id="strip" data-live>${strip(d)}</div>
 <div id="facts" data-live hidden>${facts(d)}</div>

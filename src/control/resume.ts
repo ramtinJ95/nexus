@@ -13,13 +13,14 @@
  * where no session ends. Only a death in the last hour is resumed, so a control plane that starts, or starts this,
  * leaves the turns that died long before to the person.
  */
-import { resumePrefix, startedByNexus } from "./agent-protocol.ts";
+import { resumePrefix } from "./agent-protocol.ts";
 import { singleFlight } from "../single-flight.ts";
 import type { Inbox } from "./inbox.ts";
 import type { Registry } from "./registry.ts";
 import type { ClaudeResume, Thread } from "./thread-store.ts";
 import { requestIds, type ThreadId } from "../ids.ts";
 import type { PhaseKind } from "./review-model.ts";
+import { threadRole } from "./work-model.ts";
 
 type ResumeRegistry = Pick<Registry, "agent" | "appendEvent" | "claudeResume" | "claudeTranscript" | "isReviewer" | "planning" | "resumedThreads" | "review" | "saveClaudeResume" | "storedThreads" | "thread">;
 
@@ -48,7 +49,7 @@ export function deadTurnResumer(options: {
 
   function covered(t: Thread): boolean {
     if (t.status !== "active" && t.status !== "idle") return false;
-    if (registry.agent(t).kind !== "claude" || startedByNexus(registry, t) || registry.planning(t.id) !== null) return false;
+    if (registry.agent(t).kind !== "claude" || threadRole(registry, t) !== "builder") return false;
     const phase = registry.review(t.id)?.phase.kind;
     if (phase === "needs-person") return false;
     return !(t.turnDied?.cause === "model-error" && phase !== undefined && !finished.has(phase));

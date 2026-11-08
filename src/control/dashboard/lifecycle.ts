@@ -4,18 +4,14 @@
  * and what waits on the person.
  */
 import type { ThreadId } from "../../ids.ts";
-import { roleOf } from "../agent-protocol.ts";
 import { keptPastDay } from "../reconcile.ts";
-import { prLocation, watchedPrs } from "../pr-watch-model.ts";
-import { itemView, threadPhase, type ItemPhase, type PipelineItem } from "../pipeline.ts";
-import { checkBeside, checkThread, landingAt, landingSteps, liveNote, roundsSpent, trackStep, type LandingAt, type LandingStep, type PhaseKind, type Review } from "../review-model.ts";
+import { itemView, phaseStep, steps, threadStage, type ItemPhase, type PipelineItem, type Step } from "../pipeline.ts";
+import { checkBeside, checkThread, landingAt, landingSteps, liveNote, roundsSpent, type LandingAt, type LandingStep, type PhaseKind, type Review } from "../review-model.ts";
 import { html, limitText, type Html, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
 import type { ThreadNeed } from "../work.ts";
+import type { Role } from "../work-model.ts";
 
-/** The steps every piece of work takes, in order. Held is not a step: work is held for the person at one of them. */
-export const steps = ["planned", "queued", "building", "review", "landing", "deployed"] as const;
-export type Step = typeof steps[number];
 export type Stage = Step | "held";
 
 /** Each phase of the work in flight, in the order work moves through them, with the tone of its marker. */
@@ -36,11 +32,10 @@ export const stageLabel = Object.fromEntries(stages.map((s) => [s.stage, s.label
  */
 export interface Life { stage: Stage | null; at: Step; why: string; needs: readonly ThreadNeed[] }
 
-/** Each pipeline phase's stage, or null once the work was archived or cancelled short of landing, and the tone of its dot. */
-export const ofPhase: Record<ItemPhase["kind"], { stage: Stage | null; tone: Tone }> = {
-  planned: { stage: "planned", tone: "idle" }, queued: { stage: "queued", tone: "idle" }, building: { stage: "building", tone: "work" },
-  reviewing: { stage: "review", tone: "work" }, held: { stage: "held", tone: "bad" }, landing: { stage: "landing", tone: "busy" },
-  landed: { stage: "deployed", tone: "ok" }, archived: { stage: null, tone: "muted" }, cancelled: { stage: null, tone: "muted" },
+/** Each pipeline phase's stage, or null once the work was archived or cancelled short of landing. */
+export const stageOf = (kind: ItemPhase["kind"]): Stage | null => kind === "held" ? "held" : phaseStep[kind];
+export const phaseTone: Record<ItemPhase["kind"], Tone> = {
+  planned: "idle", queued: "idle", building: "work", reviewing: "work", held: "bad", landing: "busy", landed: "ok", archived: "muted", cancelled: "muted",
 };
 
 /** What a review does next, in the words of the step it is on. */
@@ -96,23 +91,6 @@ export function needWhy(n: ThreadNeed, now: number): string {
   }
 }
 
-/**
- * What a thread is to the work. A builder's work becomes a pull request, so only a builder has a life on the track. The
- * rest serve one: a review's reviewer, a check or verify thread a review started, and a planning thread. `review` is
- * the review it serves, null once its builder's next review replaced it or its check is over.
- */
-export type Role = { kind: "builder" } | { kind: "planning" } | { kind: "reviewer" | "check" | "verify"; review: Review | null };
-
-/** A queued thread has not started, and only a builder is ever queued. */
-export function threadRole(c: Pick<Context, "registry" | "reviews">, id: ThreadId): Role {
-  const t = c.registry.thread(id);
-  if (t === undefined) return { kind: "builder" };
-  const role = roleOf(t.startedBy);
-  const reviews = c.reviews().find((r) => r.reviewer === id || (r.second?.kind === "claude" && r.second.thread === id));
-  if (role === "reviewer" || reviews !== undefined) return { kind: "reviewer", review: reviews ?? null };
-  if (role === "check" || role === "verify") return { kind: role, review: c.reviews().find((r) => ranIn(r, id)) ?? null };
-  return c.registry.planning(id) === null ? { kind: "builder" } : { kind: "planning" };
-}
 const ranIn = (r: Review, id: ThreadId) => checkThread(r.phase) === id || (r.phase.kind === "verifying" && r.phase.thread === id)
   || r.rounds.some((round) => round.live?.kind === "ran" && round.live.thread === id);
 
@@ -131,41 +109,36 @@ function runAt(r: Review, id: ThreadId): string {
   return live?.kind === "ran" ? live.passed ? "passed" : "failed" : reviewAt[r.phase.kind](r);
 }
 
-/** A thread that is not a builder says in one line what it is, in place of the track. */
-export function roleLine(c: Pick<Context, "registry">, id: ThreadId, role: Exclude<Role, { kind: "builder" }>): Html {
-  if (role.kind === "planning") return html`<p class="role-line">Planning thread. Each item it proposes waits for you to accept it.</p>`;
-  const r = role.review;
-  const what = { reviewer: "Reviewer", check: "Check", verify: "Live check" }[role.kind];
-  if (r === null) return html`<p class="role-line">${what} for a review that has moved on.</p>`;
+/**
+ * A thread that is not a builder says in one line what it is, in place of the track, with the review it serves, until
+ * its builder's next review replaced it or its check is over.
+ */
+export function roleLine(c: Pick<Context, "registry" | "reviews">, id: ThreadId, role: Exclude<Role, "builder">): Html {
+  if (role === "planning") return html`<p class="role-line">Planning thread. Each item it proposes waits for you to accept it.</p>`;
+  const r = c.reviews().find((r) => role === "reviewer" ? r.reviewer === id || (r.second?.kind === "claude" && r.second.thread === id) : ranIn(r, id));
+  const what = { reviewer: "Reviewer", check: "Check", verify: "Live check" }[role];
+  if (r === undefined) return html`<p class="role-line">${what} for a review that has moved on.</p>`;
   const builder = html`<a class="link" href="/threads/${r.builder}">${c.registry.thread(r.builder)?.title ?? r.builder}</a>`;
-  const at = role.kind === "reviewer" ? reviewAt[r.phase.kind](r) : runAt(r, id);
+  const at = role === "reviewer" ? reviewAt[r.phase.kind](r) : runAt(r, id);
   return html`<p class="role-line">${what} of <a class="link" href="${r.pr.url}" target="_blank" rel="noreferrer">PR #${r.pr.number}</a> for ${builder}<span class="role-at">${at}</span></p>`;
 }
 
 /** A started or queued thread's life, from its pipeline phase and what of it waits on the person. */
 export function lifeOfThread(c: Pick<Context, "registry" | "needs" | "now">, id: ThreadId): Life {
-  const phase = threadPhase(c.registry, id);
+  const { phase, at } = threadStage(c.registry, id, c.now);
   const needs = c.needs().filter((n): n is ThreadNeed => n.kind !== "cleanup" && n.kind !== "held" && n.d.thread.id === id);
   const review = c.registry.review(id);
-  const started = c.registry.thread(id) !== undefined;
-  const track = review === null ? null : trackStep(review);
-  const mapped = phase.kind === "reviewing" && track === "landing" ? "landing" : ofPhase[phase.kind].stage;
-  const at: Step = track ?? (mapped !== null && mapped !== "held" ? mapped
-    : review !== null ? "review"
-    : !started ? "queued"
-    : prLocation(null, watchedPrs(c.registry.prWatch(id))).kind === "open" ? "review" : "building");
-  const stage = needs.length > 0 ? "held" : mapped;
   const said = (needs.length === 0 ? null : needWhy(needs[0]!, c.now) || null) ?? (review === null ? null : reviewNext(review));
-  return { stage, at, why: said ?? phase.why, needs };
+  return { stage: stageOf(phase.kind), at, why: said ?? phase.why, needs };
 }
 
 /** An item's life: its thread's once it has one, and before then its own phase on the first step. */
 export function lifeOfItem(c: Pick<Context, "registry" | "needs" | "now">, item: PipelineItem): Life {
   if (item.thread !== null) return lifeOfThread(c, item.thread);
-  return { stage: ofPhase[item.phase.kind].stage, at: "planned", why: item.phase.why, needs: [] };
+  return { stage: stageOf(item.phase.kind), at: "planned", why: item.phase.why, needs: [] };
 }
 
-export const pipelineItems = (c: Pick<Context, "registry">) => c.registry.items().map((i) => itemView(c.registry, i));
+export const pipelineItems = (c: Pick<Context, "registry" | "now">) => c.registry.items().map((i) => itemView(c.registry, i, c.now));
 
 /**
  * The track of steps a card or a page draws: each step done, the one it is at, held there or not, and those ahead.
