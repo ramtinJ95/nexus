@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-// The in-pylon nexus CLI. Each command is one POST of a PylonApiRequest (src/probe/pylon-api.ts) to $NEXUS_API/v1/request,
-// which the host bridge answers from the probe on this node, so the call never leaves the machine and carries no
-// token. --json prints the probe's reply as it is. Plain JavaScript with no dependencies, run by the image's Node.
+// The in-pylon nexus CLI. Each command is one POST of a PylonApiRequest (src/probe/pylon-api.ts) to NEXUS_API's request
+// path, which the host bridge answers from the probe on this node, so the call never leaves the machine and carries no
+// token. --json prints the probe's reply as it is. Plain JavaScript that imports only Node and the contract beside it,
+// run by the image's Node.
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { bridgeRequestPath, maxEventMessageLength, maxSessionLength, nexusApi, sessionKinds } from "./nexus-contract.ts";
 
 const version = "0.3.0";
-const api = process.env.NEXUS_API || "http://nexus.pylon";
+const api = process.env.NEXUS_API || nexusApi;
 
 const usage = `nexus ${version}, the Nexus pylon CLI
 
@@ -60,9 +62,9 @@ const commands = {
     request([kind], { session, message, at }) {
       const time = at === undefined ? Date.now() : Number(at);
       if (!Number.isSafeInteger(time) || time < 0) throw new UsageError("--at must be a nonnegative Unix millisecond timestamp");
-      if (!["session.turn-started", "session.heartbeat", "session.turn-ended", "session.waiting", "session.ended"].includes(kind)) throw new UsageError("not a pylon event kind");
-      if (session !== undefined && (session.length === 0 || session.length > 200)) throw new UsageError("session must be 1 to 200 characters");
-      if (message !== undefined && message.length > 2048) throw new UsageError("message exceeds 2048 characters");
+      if (!sessionKinds.includes(kind)) throw new UsageError("not a pylon event kind");
+      if (session !== undefined && (session.length === 0 || session.length > maxSessionLength)) throw new UsageError(`session must be 1 to ${maxSessionLength} characters`);
+      if (message !== undefined && message.length > maxEventMessageLength) throw new UsageError(`message exceeds ${maxEventMessageLength} characters`);
       return { op: "event", kind, at: time, ...(session === undefined ? {} : { session }), ...(message === undefined ? {} : { message }) };
     },
     print: () => "Event accepted.",
@@ -189,7 +191,7 @@ async function main(argv) {
   }
   let res;
   try {
-    res = await fetch(`${api}/v1/request`, { method: "POST", signal: AbortSignal.timeout(call.request.op === "event" ? 1500 : 120_000), headers: { "content-type": "application/json" }, body: JSON.stringify(call.request) });
+    res = await fetch(`${api}${bridgeRequestPath}`, { method: "POST", signal: AbortSignal.timeout(call.request.op === "event" ? 1500 : 120_000), headers: { "content-type": "application/json" }, body: JSON.stringify(call.request) });
   } catch (err) {
     console.error(`nexus: cannot reach ${api}: ${err.cause?.message ?? err.message}`);
     return 1;

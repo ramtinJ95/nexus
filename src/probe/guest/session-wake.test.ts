@@ -6,7 +6,7 @@ import type { PylonId } from "../../ids.ts";
 import type { PausedSession } from "../../protocol/observations.ts";
 import { claudeSessionLock, finishRelaunch, pauseSessions, recordBeforePause, relaunchAfterWake, type RelaunchMark } from "./session-wake.ts";
 import { sendToClaude, sessionFacts, type SessionRecord } from "./sessions.ts";
-import { sessionsFile } from "../../guest-contract.ts";
+import { sessionsFile } from "../../../images/pylon/nexus-contract.ts";
 
 const pylonId = "pyl-session-wake" as PylonId;
 

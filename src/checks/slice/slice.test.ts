@@ -46,7 +46,7 @@ import type { ProjectId } from "../../ids.ts";
 import { sessionFacts } from "../../probe/guest/sessions.ts";
 import type { SessionHarness } from "../../protocol/agent-kinds.ts";
 import { freePort } from "../../test-support/kit.ts";
-import { checkoutDir, pylonInfoFile, sessionsFile } from "../../guest-contract.ts";
+import { checkoutDir, pylonInfoFile, sessionsFile } from "../../../images/pylon/nexus-contract.ts";
 
 const execFileAsync = promisify(execFile);
 

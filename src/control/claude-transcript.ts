@@ -13,7 +13,8 @@
 import { createHash } from "node:crypto";
 import { pipeOutput, type OpenPipe } from "../pipe.ts";
 import { claudeSessionId } from "../protocol/agent-kinds.ts";
-import { claudeProjects, onClaudeTranscript } from "../guest-contract.ts";
+import { onClaudeTranscript } from "../guest-contract.ts";
+import { claudeProjects } from "../../images/pylon/nexus-contract.ts";
 
 /**
  * Who a prompt came from: the person, a slash command, or something else, such as a plugin. A finished background

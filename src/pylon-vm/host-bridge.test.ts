@@ -9,7 +9,7 @@ import type { HostBridgeAnswer } from "../host-bridge.ts";
 import { pylonVmHostBridge } from "../backends/pylon-vm/pylon-vm-backend.ts";
 import type { BootSpec } from "./contracts.ts";
 import { hostBridgeHook, hostBridgeSocket } from "./host-bridge.ts";
-import { bridgeHost, nexusApi } from "../guest-contract.ts";
+import { bridgeHost, nexusApi } from "../../images/pylon/nexus-contract.ts";
 import { networkOptions } from "./network.ts";
 
 /** A probe-side bridge on a fresh state root that records every call and answers each with its body echoed. */

@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { parseJson } from "../parse.ts";
 import { openPython, pipeOutput, type OpenPipe } from "../pipe.ts";
-import { claudeProjects, piSessions } from "../guest-contract.ts";
+import { claudeProjects, piSessions } from "../../images/pylon/nexus-contract.ts";
 
 export type AgentKind = "claude" | "pi";
 export interface Tokens { input: number; output: number; cacheWrite: number; cacheRead: number }

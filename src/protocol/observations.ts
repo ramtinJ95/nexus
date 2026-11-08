@@ -10,7 +10,7 @@ import { asSent, parse, parseJson, unchecked } from "../parse.ts";
 import type { ArtifactId, CheckpointId, ImageId, LiveHash, NodeName, PylonId } from "../ids.ts";
 import { pylonIdField, pylonIdSchema } from "./fields.ts";
 import { jobStatusSchema, type JobStatus } from "./jobs.ts";
-import { eventIdPattern, maxEventMessageLength, maxSessionLength, sessionKinds } from "../guest-contract.ts";
+import { eventIdPattern, maxEventMessageLength, maxSessionLength, sessionKinds } from "../../images/pylon/nexus-contract.ts";
 
 export const pylonEventSchema = z.strictObject({
   kind: z.enum(sessionKinds),

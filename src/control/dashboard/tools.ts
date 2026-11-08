@@ -3,7 +3,7 @@ import { clock } from "./elapsed.ts";
 import { Html, html, icon, grows, type Part } from "./view.ts";
 import { prose } from "./markdown.ts";
 import type { ToolItem, Shot } from "./items.ts";
-import { checkoutDir } from "../../guest-contract.ts";
+import { checkoutDir } from "../../../images/pylon/nexus-contract.ts";
 
 /** Each image links to its full size in a new tab. A broken one becomes a note, which client.js writes. */
 export const shotsView = (images: readonly Shot[] = []) => images.length > 0 && html`<div class="shots">${images.map((shot) =>

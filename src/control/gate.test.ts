@@ -14,7 +14,7 @@ import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } 
 import type { ByteStream } from "../protocol/streams.ts";
 import type { StartRequest } from "./start-request.ts";
 import { runningPylon, tempDir, testCapacity, testObservation, until } from "../test-support/kit.ts";
-import { checkoutDir } from "../guest-contract.ts";
+import { checkoutDir } from "../../images/pylon/nexus-contract.ts";
 
 const node = "node" as NodeName;
 

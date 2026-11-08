@@ -1,4 +1,4 @@
-import { sessionKinds } from "../guest-contract.ts";
+import { sessionKinds } from "../../images/pylon/nexus-contract.ts";
 
 export const sessionActivityTtlMs = 30 * 60_000;
 export const maxActiveSessions = 16;

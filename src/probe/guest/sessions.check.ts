@@ -23,7 +23,8 @@ import { exit } from "../../exec.ts";
 import { unusedGuest } from "../../backends/fake-guest.ts";
 import type { SessionFact } from "../../protocol/observations.ts";
 import { closeSession, openSession, recordSessions, relaunchSessions, sessionFacts, type RecordedSession, type ClaudeSessionLock, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
-import { claudeProjects as projects, herdrSession, home as cwd } from "../../guest-contract.ts";
+import { herdrSession } from "../../guest-contract.ts";
+import { claudeProjects as projects, home as cwd } from "../../../images/pylon/nexus-contract.ts";
 
 /** Nothing else runs here, so no call needs to wait for the relaunch. */
 const unlocked: ClaudeSessionLock = (_, work) => work();

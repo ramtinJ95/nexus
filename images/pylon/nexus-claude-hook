@@ -6,7 +6,7 @@ import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 import { alive, askDecision, awaitAnswer, deliverAnswer, forgetAsk, forgetSession, hookInput, parseAskAnswer, recordCall, waitingAsks } from "./nexus-ask.ts";
 import { backgroundGroups, backgroundWatch, claimHold, claudeEnviron, heartbeatDue, holdSuperseded, holdTurnEnd, releaseHold, reportedKind, reportsIntoThread } from "./nexus-heartbeat.ts";
-import { answerDelivered, answerExits, claudeTurn } from "./nexus-contract.ts";
+import { answerDelivered, answerExits, checkoutDir, claudeTurn, maxSessionLength, pylonInfoFile } from "./nexus-contract.ts";
 import { enqueue, startSender } from "./nexus-outbox.ts";
 import { snapshotTurn } from "./nexus-turn.ts";
 import { spawn } from "node:child_process";
@@ -18,7 +18,7 @@ const asks = join(userInfo().homedir, ".nexus", "asks");
 async function report() {
   const payload = await hookInput(process.stdin);
   const { session_id: session } = payload ?? {};
-  if (typeof session !== "string" || session.length > 200) return null;
+  if (typeof session !== "string" || session.length > maxSessionLength) return null;
   const answered = payload.hook_event_name === "PostToolUse" && payload.tool_name === "AskUserQuestion";
   if (answered) await forgetAsk(asks, session, payload.tool_input).catch(() => {});
   const { kind, shells } = reportedKind(process.argv[2], payload);
@@ -85,14 +85,14 @@ if (process.argv[2] === "asks") {
   process.exit(0);
 }
 const home = userInfo().homedir;
-if (!reportsIntoThread(process.env, await claudeEnviron(process.env.CLAUDE_PID), home, existsSync(join(home, ".nexus", "pylon.json")))) process.exit(0);
+if (!reportsIntoThread(process.env, await claudeEnviron(process.env.CLAUDE_PID), home, existsSync(pylonInfoFile))) process.exit(0);
 // AskUserQuestion's PreToolUse records the call's ID, which its PermissionRequest input lacks. The PermissionRequest
 // runs while Claude's terminal dialog shows, and prints nothing unless the dashboard answers first. A dialog the
 // terminal answers stays the terminal's.
 if (process.argv[2] === "ask") {
   const payload = await hookInput(process.stdin).catch(() => null);
   const session = payload?.session_id;
-  if (typeof session !== "string" || session.length > 200) process.exit(0);
+  if (typeof session !== "string" || session.length > maxSessionLength) process.exit(0);
   if (payload.hook_event_name === "PreToolUse") {
     if (typeof payload.tool_use_id === "string") await recordCall(asks, session, payload.tool_input, payload.tool_use_id).catch(() => {});
     process.exit(0);
@@ -111,4 +111,4 @@ if (process.argv[2] === "ask") {
 const session = await report().catch(() => null);
 // A turn whose session is unknown reports no start, so its snapshot is named for none, and the previous turn's
 // snapshot cannot pass for its own.
-if (process.argv[2] === "session.turn-started") await snapshotTurn("/home/user/workspace/repo", claudeTurn(session ?? "unknown", at));
+if (process.argv[2] === "session.turn-started") await snapshotTurn(checkoutDir, claudeTurn(session ?? "unknown", at));

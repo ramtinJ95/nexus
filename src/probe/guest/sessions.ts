@@ -23,7 +23,8 @@ import type { CommandResult, InterruptClaudeOutcome } from "../../protocol/comma
 import { nonEmpty, parse, parseJson } from "../../parse.ts";
 import { claudeCode, launchers, type Launcher } from "./launchers.ts";
 import { agentKinds, claudeSessionId, sessionHarnessSchema, type SessionHarness } from "../../protocol/agent-kinds.ts";
-import { callTimeoutMs, checkoutDir, claudeLaunchesDir, herdrClient, herdrServerStartMs, herdrSession, home, sessionsFile, startHerdrServer } from "../../guest-contract.ts";
+import { callTimeoutMs, herdrClient, herdrServerStartMs, herdrSession, startHerdrServer } from "../../guest-contract.ts";
+import { checkoutDir, claudeLaunchesDir, home, sessionsFile } from "../../../images/pylon/nexus-contract.ts";
 
 const agentStartTimeoutMs = 30_000;
 /** pi-shepherdr's launch.ts: a new pane's shell can still be starting when the first agent start lands. */

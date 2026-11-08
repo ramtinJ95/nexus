@@ -26,7 +26,8 @@ import { imageIdOf, pinsSchema, type ImageManifest, type ImageRecipe } from "../
 import { loadImageRecipe } from "./recipe.ts";
 import { shellQuote } from "../shell.ts";
 import type { ImageId, NodeName } from "../ids.ts";
-import { agentSetupInstaller, asUser, bakedDotfilesDir, home, nexusKvm, nexusTurn, piEnv, pylonGuideFile } from "../guest-contract.ts";
+import { asUser } from "../guest-contract.ts";
+import { agentSetupInstaller, bakedDotfilesDir, home, nexusKvm, nexusTurn, piEnv, pylonGuideFile } from "../../images/pylon/nexus-contract.ts";
 
 const gondolinBuild = fileURLToPath(new URL("./gondolin-build.ts", import.meta.url));
 

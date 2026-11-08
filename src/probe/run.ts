@@ -8,7 +8,7 @@ import type { ServiceName } from "../services-file.ts";
 import { closeSession, dropFailedSession, interruptClaude, LaunchStalled, openSession, sendToClaude } from "./guest/sessions.ts";
 import { type SecretSource, type VmBackend } from "../backends/backend.ts";
 import { refuseShortDisk } from "../disk-space.ts";
-import { checkoutDir } from "../guest-contract.ts";
+import { checkoutDir } from "../../images/pylon/nexus-contract.ts";
 import type { PylonStates } from "./pylon-facts.ts";
 
 /** Linking or unlinking a pylon's port together with its preview route, so no snapshot read overlaps either. */

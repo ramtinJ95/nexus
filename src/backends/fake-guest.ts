@@ -8,7 +8,7 @@ import type { OpenPipe } from "../pipe.ts";
 import { processStream } from "../process-stream.ts";
 import type { OverlayFile } from "../protocol/spawn.ts";
 import type { SessionRecord } from "../probe/guest/sessions.ts";
-import { checkoutDir } from "../guest-contract.ts";
+import { checkoutDir } from "../../images/pylon/nexus-contract.ts";
 
 export type ExecReply = { exitCode: number | null; output: string; truncated?: boolean };
 

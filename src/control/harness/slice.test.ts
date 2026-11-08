@@ -29,7 +29,7 @@ import type { ImageId, NodeName, PylonId, TailnetNodeId } from "../../ids.ts";
 import { openHarnessHost, type HarnessHost } from "./host.ts";
 import { pylonEnvs, type PylonLocator } from "./pylon-env.ts";
 import { scriptedModel, scriptedModels, type ChildArgs } from "./test-fixture.ts";
-import { checkoutDir } from "../../guest-contract.ts";
+import { checkoutDir } from "../../../images/pylon/nexus-contract.ts";
 
 const execFileAsync = promisify(execFile);
 const docker = async (...args: string[]) => (await execFileAsync("docker", args, { maxBuffer: 64 << 20 })).stdout.trim();

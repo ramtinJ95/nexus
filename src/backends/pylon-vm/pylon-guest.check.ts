@@ -43,7 +43,8 @@ import { launchers } from "../../probe/guest/launchers.ts";
 import { loginHosts } from "../../control/project.ts";
 import { type BootInputs, type LiveSpec, type OverlayFile } from "../../protocol/spawn.ts";
 import { freePort } from "../../test-support/kit.ts";
-import { checkoutDir, herdrSession, sessionsFile } from "../../guest-contract.ts";
+import { herdrSession } from "../../guest-contract.ts";
+import { checkoutDir, sessionsFile } from "../../../images/pylon/nexus-contract.ts";
 
 const [assets, stateRoot] = process.argv.slice(2);
 if (assets === undefined || stateRoot === undefined) throw new Error("usage: node src/backends/pylon-vm/pylon-guest.check.ts <image dir in an artifact store> <state root>");

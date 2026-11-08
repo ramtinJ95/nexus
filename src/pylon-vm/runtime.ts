@@ -23,7 +23,7 @@ import { shellQuote as q } from "../shell.ts";
 import { saveJson } from "../json-file.ts";
 import { serialQueue } from "../single-flight.ts";
 import { existsError } from "./storage.ts";
-import { nexusKvm } from "../guest-contract.ts";
+import { nexusKvm } from "../../images/pylon/nexus-contract.ts";
 
 /**
  * Logs a resume's output and then one `resume:` line with its outcome, however long it runs. A failed resume

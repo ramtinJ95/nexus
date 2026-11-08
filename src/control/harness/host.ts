@@ -24,7 +24,7 @@ import { latestTurn, turnSnapshots } from "./turn-snapshot.ts";
 import { writeThread } from "./thread-doc.ts";
 import type { AgentCall } from "../agent-usage.ts";
 import { senderNames, type Sender } from "../agent-protocol.ts";
-import { checkoutDir } from "../../guest-contract.ts";
+import { checkoutDir } from "../../../images/pylon/nexus-contract.ts";
 
 export type { ConversationId };
 

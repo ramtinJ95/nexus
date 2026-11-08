@@ -21,7 +21,7 @@ import { personPhase, type Review, type Round } from "../review-model.ts";
 import { personOnly, reservedNames } from "../holds.ts";
 import { proposalQuestion } from "../planning.ts";
 import { startKey } from "../threads.ts";
-import { claudeHook } from "../../../images/pylon/nexus-contract.ts";
+import { checkoutDir, claudeHook } from "../../../images/pylon/nexus-contract.ts";
 import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
 import { checkCaller, reviewPrefix, reviewerCaller, usageLimitPrefix, verifyCaller } from "../agent-protocol.ts";
 import type { AgentCall } from "../agent-usage.ts";
@@ -34,7 +34,6 @@ import type { CommandResult } from "../../protocol/commands.ts";
 import type { DoctorReport, Check } from "../doctor-model.ts";
 import type { PullRequest } from "../github.ts";
 import { claudeTalk, diffSnippet, failingTests, harnessTalk, longConversation, testOutput, typescriptSnippet } from "./demo-talk.ts";
-import { checkoutDir } from "../../guest-contract.ts";
 
 type Demo = Awaited<ReturnType<typeof testApi>>;
 

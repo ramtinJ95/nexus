@@ -11,7 +11,7 @@ import { partHash, queuedOf, type AgentView } from "../conversation-view.ts";
 import { askedIn, askQuestionId, type AskedQuestion, type Question } from "../questions.ts";
 import { clock } from "./elapsed.ts";
 import type { Tone } from "./view.ts";
-import { checkoutDir } from "../../guest-contract.ts";
+import { checkoutDir } from "../../../images/pylon/nexus-contract.ts";
 
 /**
  * One row of the conversation. A tool call carries its result, which the transcript holds in a later entry, and the

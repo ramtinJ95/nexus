@@ -1,61 +1,12 @@
 /**
- * The pylon guest as every side of Nexus sees it: where the image installs its tools, where the user's files live, and
- * how a command reaches Herdr. It imports nothing, so the probe, the backends, the image build and the control plane
- * all read this one copy. The image's Dockerfile and hook cannot import it, and guest-contract.test.ts holds them to it.
+ * How the probe and the control plane drive the pylon guest: the `services` actions and log limit, the user every
+ * command runs as, the call timeout, and how a command reaches Herdr. It imports nothing, so every side reads this one
+ * copy. The guest's layout and the in-pylon API, which the image defines, are in images/pylon/nexus-contract.ts.
  */
-
-export const home = "/home/user";
-export const workspaceDir = `${home}/workspace`;
-/** Where the repository is checked out in every pylon. */
-export const checkoutDir = `${workspaceDir}/repo`;
-export const servicesFile = `${checkoutDir}/.nexus/services.yaml`;
-
-export const pylonInfoFile = `${home}/.nexus/pylon.json`;
-/** Written on every spawn. The image points Claude Code's CLAUDE.md and pi's AGENTS.md at it. */
-export const pylonGuideFile = `${home}/.nexus/PYLON.md`;
-export const sessionsFile = `${home}/.nexus/sessions.json`;
-export const claudeLaunchesDir = `${home}/.nexus/claude-launches`;
-export const outputsDir = `${home}/.nexus/outputs`;
-/** The dotfiles layer every boot pulls into, cloned first from bakedDotfilesDir. */
-export const dotfilesDir = `${home}/.nexus/dotfiles`;
-export const claudeProjects = `${home}/.claude/projects`;
-export const piSessions = `${home}/.pi/agent/sessions`;
-
-export const bakedDotfilesDir = "/opt/nexus/dotfiles";
-export const agentSetupInstaller = "/opt/nexus/agent-setup/install.ts";
-export const piEnv = "/usr/local/libexec/nexus/pi-env";
-/** Run as root at boot by a pylon that asks for nested virtualization. */
-export const nexusKvm = "/usr/local/libexec/nexus/nexus-kvm";
-export const nexusTurn = "/usr/local/bin/nexus-turn.ts";
-
-/** The host the guest's NEXUS_API names. Each backend's host bridge answers it on the node, so it needs no allowlist entry or DNS name. */
-export const bridgeHost = "nexus.pylon";
-export const nexusApi = `http://${bridgeHost}`;
-/** The one path under NEXUS_API. Each call POSTs a PylonApiRequest (src/probe/pylon-api.ts). */
-export const bridgeRequestPath = "/v1/request";
 
 export const servicesActions = ["ensure", "list", "restart", "stop"] as const;
 /** The fork returns at most this many lines of a service's log. */
 export const maxServiceLogLines = 500;
-
-export const sessionKinds = ["session.turn-started", "session.heartbeat", "session.turn-ended", "session.waiting", "session.ended"] as const;
-export const maxSessionLength = 200;
-export const maxEventMessageLength = 2048;
-/** Set by the pylon's outbox on each event, and kept when it sends the event again. */
-export const eventIdPattern = /^[0-9a-z-]{1,64}$/;
-
-/** What the control plane writes to pylonInfoFile, and `nexus info` prints. */
-export interface PylonInfo {
-  pylonId: string;
-  threadId: string;
-  project: string;
-  node: string;
-  api: string;
-  allowedHosts: readonly string[];
-  previews: readonly { service: string; url: string }[];
-  logins: readonly ("claude" | "chatgpt")[];
-  dotfiles: { repo: string; ref: string };
-}
 
 /** How long one ordinary guest exec may take. */
 export const callTimeoutMs = 10_000;

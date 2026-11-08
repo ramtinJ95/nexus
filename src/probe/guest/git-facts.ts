@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Guest } from "../../backends/backend.ts";
 import { parseJson } from "../../parse.ts";
 import type { GitFacts } from "../../protocol/observations.ts";
-import { checkoutDir } from "../../guest-contract.ts";
+import { checkoutDir } from "../../../images/pylon/nexus-contract.ts";
 
 let helper: string | undefined;
 const hash = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);

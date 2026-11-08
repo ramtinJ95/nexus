@@ -52,7 +52,7 @@ import { threadsCommands } from "./commands/threads.ts";
 import { answeredText, pressOf } from "./commands/release.ts";
 import { commandGroups, commands } from "./commands/index.ts";
 import { version } from "../version.ts";
-import { checkoutDir, claudeProjects } from "../guest-contract.ts";
+import { checkoutDir, claudeProjects } from "../../images/pylon/nexus-contract.ts";
 
 const cli = fileURLToPath(new URL("./nexus.ts", import.meta.url));
 const node = "rj-firebat" as NodeName;

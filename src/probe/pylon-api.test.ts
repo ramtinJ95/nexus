@@ -9,7 +9,7 @@ import type { NodeName, PylonId } from "../ids.ts";
 import type { ServiceFact } from "../protocol/observations.ts";
 import { createPylonApi, type PylonApiDeps } from "./pylon-api.ts";
 import { until } from "../test-support/kit.ts";
-import { pylonInfoFile } from "../guest-contract.ts";
+import { pylonInfoFile } from "../../images/pylon/nexus-contract.ts";
 
 const pylonId = "pylon-t1" as PylonId;
 const overlay: PylonOverlay = {

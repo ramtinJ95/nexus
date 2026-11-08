@@ -12,7 +12,8 @@ import { z } from "zod";
 import type { Guest } from "../../backends/backend.ts";
 import { parseJson } from "../../parse.ts";
 import type { DeclaredOutput } from "../../protocol/observations.ts";
-import { callTimeoutMs, checkoutDir, outputsDir } from "../../guest-contract.ts";
+import { callTimeoutMs } from "../../guest-contract.ts";
+import { checkoutDir, outputsDir } from "../../../images/pylon/nexus-contract.ts";
 
 type OutputDeclaration = { kind: "file"; path: string; title?: string } | { kind: "diff"; title?: string };
 
