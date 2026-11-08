@@ -1,6 +1,4 @@
-/**
- * The queue store: each queued thread's record. A save with a start's key stores the key, in its transaction.
- */
+/** A save with a start's key stores the key, in its transaction. */
 import { json, type Db, type Holding } from "./db.ts";
 import type { ProjectId, ThreadId } from "../ids.ts";
 import type { BootInputs } from "../protocol/spawn.ts";

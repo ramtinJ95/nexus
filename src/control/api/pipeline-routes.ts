@@ -1,6 +1,3 @@
-/**
- * The pipeline's items, which a person adds, approves and cancels.
- */
 import { HttpError } from "../http-error.ts";
 import { itemView, type Pipeline } from "../pipeline.ts";
 import type { ItemId } from "../../ids.ts";

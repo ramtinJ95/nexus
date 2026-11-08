@@ -1,5 +1,3 @@
-// A thread page's checkout: the changes pane, the tabs beside the conversation with each file's diff and the
-// terminal, and the review notes on a diff.
 import { afterSend, emptyReview, formatReview, kinds, linesLabel, noteOn, place, rangeOf, readReview, rowsOf } from "./review.js";
 import { request } from "./request.js";
 import { changesBases, pylonRoutes, statusLetters } from "../../contract/pylon.ts";

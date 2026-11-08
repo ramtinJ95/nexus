@@ -1,6 +1,3 @@
-/**
- * The event log and each thread's conversation, as server-sent event streams.
- */
 import { HttpError } from "../http-error.ts";
 import { eventCursor, eventKinds, type EventFilter } from "../events.ts";
 import { ok, on, type RouteEntry, type ApiKit } from "./kit.ts";

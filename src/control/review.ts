@@ -467,7 +467,6 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     if (press.kind === "stuck") throw new Refusal("conflict", `review ${r.id} of ${r.builder} is held by what meets every landing of ${r.rounds.at(-1)!.head} again, so no Land press lands it: ${press.holds.map((h) => h.text).join(" ")}`);
     return press;
   };
-  /** The waiver of the holds the person named by `texts` at the review's latest head. */
   const waiverOf = (r: Review, by: string, texts: readonly string[], codes: Waiver["codes"]): Waiver => ({ head: r.rounds.at(-1)!.head, holds: [...texts], codes, by, at: now(), change: null });
   /** A Land press on `r`, which `landableAt` took, past the holds the person `waive`s, each one the review has now and the policy lets them waive. */
   const pressed = (r: Review, requestedBy: string, waive: readonly string[] | undefined): Review => {
@@ -481,7 +480,6 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
     };
     return pressWith(r, requestedBy, waive === undefined ? null : waiverOf(r, requestedBy, waive, waive.map(waived)));
   };
-  /** A Land press on `r`, which `landableAt` took, with `waiver`. */
   const pressWith = (r: Review, requestedBy: string, waiver: Waiver | null): Review => {
     const press = pressOn(r);
     return { ...r, land: { requestedBy }, waiver, phase: press.quotes ? { kind: "quoting", asked: null } : checking(), outbox: null, nudges: 0 };
@@ -1010,7 +1008,6 @@ export function reviewLoop(deps: ReviewDeps & { startThread(request: StartReques
       await passes.settled();
     },
 
-    /** Starts a review of the builder's open PR: the reviewer thread, its first request, and the record. */
     async start(builderId: ThreadId, request: { pr?: number | undefined; rounds?: number | undefined; land: string | null }): Promise<Review> {
       const builder = registry.thread(builderId);
       if (builder === undefined) throw new Refusal("missing", `no thread ${builderId}`);

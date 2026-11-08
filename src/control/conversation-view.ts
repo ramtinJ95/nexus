@@ -1,6 +1,6 @@
 /**
  * The server's side of a thread's conversation streams: the frames each client of a harness conversation is sent,
- * and the hash of an image part. src/contract/streams.ts holds the frames' shapes. Nothing here holds state beyond
+ * and the hash of an image part. Nothing here holds state beyond
  * one client's frames.
  */
 import { createHash } from "node:crypto";

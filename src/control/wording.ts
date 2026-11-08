@@ -116,7 +116,6 @@ export const reviewSaid = (r: Review): string[] => {
   return [`${lead}${r.reviewer}${tail}`, ...[reviewersNote(r), roundNote(r), liveNote(r)].filter((line) => line !== null)];
 };
 
-/** What `nexus show` says of a thread's state. */
 export function threadSaid(d: Omit<ThreadDetail, "said">): ThreadSaid {
   const { thread: t, pylon: p } = d;
   return {

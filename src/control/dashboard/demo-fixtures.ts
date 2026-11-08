@@ -129,7 +129,6 @@ function claudeTranscript(d: Demo, t: Thread, entries: readonly ClaudeEntry[], s
 }
 
 const threads: ThreadSpec[] = [
-  // nexus
   {
     key: "graphs", item: "it-graphs", project: "nexus", title: "Graph node health with 31 days of history", ago: 26 * hour, worker: "harness", pylon: "running", working: true,
     extra(d, t) {
@@ -322,7 +321,6 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
       d.registry.setWaitingAsks(t.id, [{ ask: { session: `${t.id}-s1`, toolUseId: id, questions }, at: now() - 12 * minute }]);
     },
   },
-  // storefront
   {
     key: "applepay", item: "it-applepay", project: "storefront", title: "Checkout: add the Apple Pay button", ago: 6 * hour, worker: "harness", pylon: "running", working: true,
     extra(d, t, w) {
@@ -412,7 +410,6 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
     key: "search", item: "it-search", project: "storefront", title: "Typo tolerance in product search", ago: 4 * day, worker: "harness", pylon: "paused", archived: true,
     extra(d, t) { talk(d, t, harnessTalk(t.createdAt).person("Make search forgive one typo.").say("Merged as #84.").messages); },
   },
-  // field-notes
   {
     key: "tagger", project: "field-notes", title: "Train the tagger on the October export", ago: 90 * minute, worker: "claude", pylon: "running", working: true,
     extra(d, t, w) {

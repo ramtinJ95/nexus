@@ -65,7 +65,6 @@ export function pylonAccess({ registry, probes, wake, guard, current }: {
   /** Whether the node, online, reports the pylon running, as a Claude transcript's reads ask. */
   const running = (pylon: StoredPylon): boolean => runningNode(registry, pylon.pylonId, "work") !== null;
 
-  /** Runs `argv` in the thread's pylon as a command whose answer the API waits for, at most 15 s. */
   async function execInPylon(t: Thread, argv: readonly string[]): Promise<{ exitCode: number | null; output: string }> {
     const { exitCode, output } = await pylonCommand(t, { kind: "exec", argv: [...argv], cwd: "/", timeoutMs: 15_000 });
     return { exitCode, output };

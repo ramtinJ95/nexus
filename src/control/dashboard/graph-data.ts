@@ -1,7 +1,8 @@
 /**
- * The node page's graphs as data, apart from the DOM: the ranges its picker offers, the charts and the lines each
- * draws from a node's series, the history the page holds of a range with each poll's sample appended, and the
- * columns uPlot draws. Pure, so node-page.ts renders the charts' figures from it and a test reads it without a browser.
+ * The Cluster page's node graphs as data, apart from the DOM: the ranges its picker offers, the charts and the lines
+ * each draws from a node's series, the history the page holds of a range with each poll's sample appended, and the
+ * columns uPlot draws. Pure, so cluster-page.ts renders the charts' figures from it and a test reads it without a
+ * browser.
  */
 import { backgroundReadMs, maxPylons, pylonOf, seriesOf, type NodeMetrics, type Series } from "../node-metrics.ts";
 
@@ -15,7 +16,7 @@ const defaultRange: RangeName = "1h";
 export const rangeOf = (name: string | null): RangeName => ranges.find(([n]) => n === name)?.[0] ?? defaultRange;
 export const rangeMs = (name: RangeName): number => ranges.find(([n]) => n === name)![1];
 
-/** What the node page carries in `data-sample`: its health read as a sample, and a label for each pylon series. */
+/** What the Cluster page carries in `data-sample`: its health read as a sample, and a label for each pylon series. */
 interface PageSample { at: number; values: Record<string, number>; labels: Record<string, string> }
 
 /** A series' points in time order: each point's time, the min, average and max of its samples, and how many. */

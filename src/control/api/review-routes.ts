@@ -1,6 +1,3 @@
-/**
- * Starting and cancelling a thread's review, and landing its pull request.
- */
 import type { ReviewLoop } from "../review.ts";
 import { HttpError } from "../http-error.ts";
 import { ok, created, on, parse, type RouteEntry, type ApiKit } from "./kit.ts";

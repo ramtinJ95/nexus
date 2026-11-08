@@ -1,6 +1,6 @@
-// The node page's graphs, which client.js loads when the page has them: a uPlot chart in each figure node-page.ts
-// renders, drawn from the metrics API for the picked range and moved along by each poll's sample, with one crosshair
-// across them all and a legend that reads the values under it.
+// The Cluster page's node graphs, which client.js loads when the page has them: a uPlot chart in each figure
+// cluster-page.ts renders, drawn from the metrics API for the picked range and moved along by each poll's sample, with
+// one crosshair across them all and a legend that reads the values under it.
 import uPlot from "uplot";
 import css from "uplot/dist/uPlot.min.css";
 import { afterSwap, el } from "./page.js";

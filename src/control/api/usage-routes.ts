@@ -1,6 +1,3 @@
-/**
- * The usage report, and the backfill a deployer starts and stops.
- */
 import type { UsageBackfillJob } from "../usage-backfill.ts";
 import { HttpError } from "../http-error.ts";
 import { usageFilter } from "../usage.ts";

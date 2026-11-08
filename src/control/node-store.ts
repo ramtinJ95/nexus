@@ -1,6 +1,3 @@
-/**
- * The node store: each node, the join tokens, and the nodes that joined with one.
- */
 import { jsonOrNull, type Db, type Holding, type Row } from "./db.ts";
 import type { NodeName, TailnetNodeId } from "../ids.ts";
 import type { NodeCapacity, NodeObservation } from "../protocol/observations.ts";

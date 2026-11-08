@@ -102,7 +102,6 @@ function meter(label: string, used: number | null, total: number | null, words: 
   return html`<div class="meter"><dt>${label}</dt><dd>${known ? html`<meter min="0" max="${total}" low="${total * 0.75}" high="${total * 0.9}" optimum="0" value="${Math.min(used, total)}"></meter>` : html`<span class="meter-none" aria-hidden="true"></span>`}<span class="meter-words">${words}</span></dd></div>`;
 }
 
-/** What a node's card shows of its host. */
 interface Reading { cpus: number; load: number | null; memory: { totalGiB: number; availableGiB: number } | null; disk: { totalGiB: number; freeGiB: number } }
 
 function liveReading(h: NodeHealth): Reading {

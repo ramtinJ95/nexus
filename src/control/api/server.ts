@@ -1,6 +1,3 @@
-import { DeployDraining, isDraining, turnGate, type TurnGate } from "../drain.ts";
-import { answerLocalHealth, runningCommit } from "../../deploy/health.ts";
-import { version } from "../../version.ts";
 /**
  * The control plane's HTTP API for the dashboard and the CLI. JSON in and out.
  *
@@ -21,6 +18,9 @@ import { version } from "../../version.ts";
  * on the allowlist. The API writes only what a human asks for. Every change that can move a pylon
  * wakes the loop for its node, so a start or a dashboard visit acts within one pass rather than 5 seconds.
  */
+import { DeployDraining, isDraining, turnGate, type TurnGate } from "../drain.ts";
+import { answerLocalHealth, runningCommit } from "../../deploy/health.ts";
+import { version } from "../../version.ts";
 import { once } from "node:events";
 import { createServer as createHttpsServer } from "node:https";
 import { TLSSocket } from "node:tls";
@@ -134,7 +134,7 @@ export interface Api {
   close(): Promise<void>;
 }
 
-/** Every route but those of the server's own state and the callers it knows. Each feature's module holds its routes. */
+/** Every route but those of the server's own state and the callers it knows. */
 export function featureRoutes(kit: ApiKit, options: ApiOptions, nodeHealth: (name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
   return [
     ...dashboardRoutes(kit, options, nodeHealth),

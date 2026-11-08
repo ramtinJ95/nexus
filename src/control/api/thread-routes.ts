@@ -1,6 +1,3 @@
-/**
- * Starting, listing, messaging, archiving and deleting threads, and the turns and pylons a person retries.
- */
 import type { z } from "zod";
 import type { Planning } from "../planning.ts";
 import { isPipelineRequestId, requestIds, type ProjectId, type ThreadId } from "../../ids.ts";

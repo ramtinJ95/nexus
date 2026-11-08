@@ -1,6 +1,4 @@
-/**
- * The nudge store: each builder's nudge record. A save recomputes the thread's attention, in its transaction.
- */
+/** A save recomputes the thread's attention, in its transaction. */
 import type { Db, Holding } from "./db.ts";
 import type { ThreadId } from "../ids.ts";
 import type { Need } from "./attention.ts";

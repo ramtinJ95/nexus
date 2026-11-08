@@ -1,6 +1,3 @@
-/**
- * The nodes and their pylons, and a node's health and its history, which only a deployer reads.
- */
 import type { NodeHealth } from "../../protocol/client.ts";
 import type { NodeName } from "../../ids.ts";
 import { HttpError } from "../http-error.ts";

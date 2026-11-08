@@ -30,7 +30,6 @@ export const itemKey = (item: Candidate): string => item.kind === "release" ? `r
 export interface NodeFacts {
   /** The images and templates its last observation lists, or null while it is offline. */
   held: readonly ArtifactId[] | null;
-  /** Each template build on the node. */
   templates: readonly TemplateRecord[];
   current: ImageId | null;
   previous: ImageId | null;

@@ -1655,7 +1655,6 @@ interface JudgmentView {
   failure: number;
   /** Where the pylon failed. */
   node: NodeName;
-  /** The failure's reason. */
   failed: string;
   /** Unix milliseconds. */
   startedAt: number;

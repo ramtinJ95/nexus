@@ -48,9 +48,9 @@ export interface HarnessHostOptions {
   deleted: readonly ConversationId[];
   /** A deleted thread's conversation is aborted, at open or by deleteThread, so no later open needs to abort it again. */
   onAborted?: (conversationId: ConversationId) => void;
-  /** A thread's agent facts changed, or differ at open from what `threads` says the registry holds. */
   onReply?: (threadId: string, at: number) => void;
   onParked?: (threadId: string, parked: boolean) => void;
+  /** A thread's agent facts changed, or differ at open from what `threads` says the registry holds. */
   onActivity(threadId: string, facts: AgentFacts): void;
   log(message: string): void;
 }

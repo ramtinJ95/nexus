@@ -1,4 +1,3 @@
-/** A project's standing rules: which starts carry them, how they join a brief, and how an edit counts revisions. */
 import { roleOf } from "./agent-protocol.ts";
 import type { ThreadId } from "../ids.ts";
 import type { Project, StandingRules } from "./project.ts";
@@ -13,7 +12,6 @@ export const standingRulesLimit = 8_192;
  */
 export interface StandingRulesStamp { revision: number; text: string; carriedBy: string | null }
 
-/** The brief as written, then the rules under a heading of their own. */
 export const withStandingRules = (brief: string, rules: Pick<StandingRulesStamp, "text"> | null): string =>
   rules === null ? brief : `${brief}\n\n## Standing rules for this project\n\n${rules.text}`;
 

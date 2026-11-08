@@ -1,5 +1,3 @@
-// What the changes pane and the diff say of the checkout: the bases they are read against, and why they cannot be
-// read now.
 /** What the changes are read against: its label, its commit when that is the empty tree, an empty list and a diff's. */
 export const bases = {
   start: { label: "Since the pylon booted", emptyTree: "an empty repository", unchanged: "Nothing has changed since the pylon booted.", vs: "vs boot" },
