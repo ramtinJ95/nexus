@@ -9,6 +9,7 @@ import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
 import { deleteReleases, readReleases } from "./release-cleanup.ts";
 import { checkControlPlaneFile, readControlPlane, type ControlPlane } from "./control-plane.ts";
 import { readJson, saveJson } from "../node-base/json-file.ts";
+import { controlFields, listenAddress } from "../node-base/node-config.ts";
 import { localApiWhois } from "../node-base/tailscaled.ts";
 import { backupStatusFile, configFiles, deployerFiles, deployerLink, etc, prefix, readReleaseCommit, releasesDir, stateDirs, unitDir, unitNames } from "../node-base/node-layout.ts";
 
@@ -92,8 +93,9 @@ export const drainYieldMs = 60_000;
 export function nodeRegistry(paths: RegistryPaths, run: Command = command, budgetMs = backupBudgetMs): RegistrySchema {
   return {
     async version() {
-      const config = await readJson(paths.config, null) as { db: string };
-      const path = resolve(paths.home, config.db);
+      const file = controlFields(await readJson(paths.config, null), paths.config).db;
+      if (file === undefined) throw new Error(`${paths.config} has no db`);
+      const path = resolve(paths.home, file);
       try { await stat(path); }
       catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
       const db = new DatabaseSync(path, { readOnly: true });
@@ -156,8 +158,9 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   const savedUnit = join(prefix, `${role}-deploy.unit`);
   const reportPath = join(prefix, `${role}-deploy-report.json`);
   const repo = join(prefix, deployerFiles.repo);
-  const local = await readJson(join(etc, `${role}.json`), null) as { listen: { host: string; port: number } };
-  const healthUrl = new URL(`http://${urlHost(local.listen.host)}:${local.listen.port}/v1/health`);
+  const localConfig = join(etc, `${role}.json`);
+  const listen = listenAddress(await readJson(localConfig, null), localConfig);
+  const healthUrl = new URL(`http://${urlHost(listen.host)}:${listen.port}/v1/health`);
   const healthy = async () => {
     const expected = await readReleaseCommit(link);
     const until = Date.now() + config.healthTimeoutMs;

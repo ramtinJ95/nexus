@@ -13,6 +13,7 @@ import { promisify } from "node:util";
 import { appendSecret, parseSecretsFile } from "../node-base/secrets-env.ts";
 import { chatgptTokenGrant } from "../protocol/secret-grants.ts";
 import { configFiles, prefix, roleLinks, servicePath, stateDirs, users } from "../node-base/node-layout.ts";
+import { controlFields, probeFields } from "../node-base/node-config.ts";
 
 const exec = promisify(execFile);
 
@@ -238,13 +239,13 @@ export interface Locations { harness: string; secrets: string; gitKey: string; g
 
 /** Where this machine's credentials are: what control.json and probe.json name, or else the stores' files. */
 export async function locations(host: Pick<Host, "read">): Promise<Locations> {
-  const control = JSON.parse(await host.read(configFiles.control) ?? "{}") as { harness?: { credentials?: string }; github?: { tokenFile?: string } };
-  const probe = JSON.parse(await host.read(configFiles.probe) ?? "{}") as { node?: string; secretsFile?: string; backend?: { gitSsh?: { privateKeyFile?: string } } };
+  const control = controlFields(JSON.parse(await host.read(configFiles.control) ?? "{}"), configFiles.control);
+  const probe = probeFields(JSON.parse(await host.read(configFiles.probe) ?? "{}"), configFiles.probe);
   return {
-    harness: control.harness?.credentials ?? stores.harness.file,
+    harness: control.harnessCredentials ?? stores.harness.file,
     secrets: probe.secretsFile ?? stores.claude.file,
-    gitKey: probe.backend?.gitSsh?.privateKeyFile ?? stores.gitKey.file,
-    githubWatch: control.github?.tokenFile,
+    gitKey: probe.gitKeyFile ?? stores.gitKey.file,
+    githubWatch: control.githubTokenFile,
     node: probe.node,
   };
 }

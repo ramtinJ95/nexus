@@ -19,6 +19,7 @@ import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
 import { digestPattern, tokenDigest, tsNet } from "../protocol/deploy.ts";
 import { parseWorkerConfig, type WorkerConfig } from "./worker.ts";
 import { readJson, saveJson } from "../node-base/json-file.ts";
+import { controlFields } from "../node-base/node-config.ts";
 import { isImageId } from "../ids.ts";
 import { parseTailscaleStatus, tailscaleCli, tailscaleStatus, type TailnetDevice, type TailscaleStatus } from "../tailscale.ts";
 import { localApiWhois } from "../node-base/tailscaled.ts";
@@ -471,7 +472,8 @@ async function gather(flags: Flags): Promise<Facts> {
     if (control === undefined) throw new Error(errors.join("; "));
     return { ...common, role: "node", control, joined: flags.join !== undefined };
   }
-  const { callers } = await readJson(paths.control) as { callers: string[] };
+  const { callers } = controlFields(await readJson(paths.control), paths.control);
+  if (callers === undefined) throw new Error(`${paths.control} has no callers`);
   const credentials = await system.read(at.harness).catch(() => undefined);
   const groups = await exec("id", ["-nG", users.probe]).then(({ stdout }) => stdout.trim().split(/\s+/), (): string[] => []);
   const succeeds = (args: string[]) => exec("docker", args, { env: { PATH: servicePath } }).then(() => true, () => false);
@@ -509,12 +511,13 @@ function refusal(err: unknown): string | undefined {
 
 /** Whether the harness the control.json at `path` names is signed in. A missing credentials file is not. */
 async function signedIn(path: string): Promise<boolean> {
-  const { harness } = await readJson(path) as { harness: { credentials: string } };
-  const text = await system.read(harness.credentials);
+  const { harnessCredentials } = controlFields(await readJson(path), path);
+  if (harnessCredentials === undefined) throw new Error(`${path} has no harness.credentials`);
+  const text = await system.read(harnessCredentials);
   try {
     return text !== undefined && harnessSignedIn(text);
   } catch (err) {
-    throw new Error(`${harness.credentials} is not valid JSON: ${(err as Error).message}`);
+    throw new Error(`${harnessCredentials} is not valid JSON: ${(err as Error).message}`);
   }
 }
 
