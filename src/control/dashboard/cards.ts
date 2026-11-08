@@ -177,7 +177,7 @@ ${phase.kind === "quoting" ? html`<p class="land-note">The reviewer quotes, from
   const press = landPress(r);
   const waived = press.kind === "lands" ? press.waives.map((h) => h.text) : [];
   // The review's question about these holds is how the person waives them, so the card does not offer a second way.
-  const asking = askingHolds(d.questions, r.id)?.holds.head === round.head;
+  const asking = askingHolds(d.questions, r.id, round) !== undefined;
   // A hold that meets every landing again, and that the person cannot waive, leaves only merging on GitHub.
   const stuck = press.kind === "stuck";
   const checks = press.kind === "lands" && press.quotes ? "Nexus first asks the reviewer to quote, from the description as it is now, what could not be checked live, then checks" : "Nexus checks";

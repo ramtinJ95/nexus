@@ -15,7 +15,6 @@ import type { Hold } from "./holds.ts";
 import type { ReservedCase } from "../contract/reserved.ts";
 import type { Cleanup } from "./cleanup-model.ts";
 
-/** What every question has, whatever its kind. */
 interface Asked<K extends string> {
   kind: K;
   /** Chosen by the asker, so asking again with one ID asks nothing new. */
@@ -63,9 +62,14 @@ export const isOpen = (q: Pick<Question, "answer" | "withdrawn">) => q.answer ==
 
 /** The review a holds question is about, the head and base it was asked at, and the holds it names, each of which the person may waive. */
 export interface HeldQuestion { review: string; head: string; base: string | null; holds: readonly Hold[] }
-/** The open question about the review's holds. The review loop asks at most one per thread at a time. */
-export const askingHolds = (questions: readonly Question[], review: string): HoldsQuestion | undefined =>
-  questions.find((q): q is HoldsQuestion => q.kind === "holds" && isOpen(q) && q.holds.review === review);
+/**
+ * The open question about the review's holds, asked at the round `at` when given. Land on it is taken only at the
+ * review's latest round's head and base, since a change against another base is another change. The review loop asks
+ * at most one per thread at a time.
+ */
+export const askingHolds = (questions: readonly Question[], review: string, at?: { head: string; base?: string | undefined }): HoldsQuestion | undefined =>
+  questions.find((q): q is HoldsQuestion => q.kind === "holds" && isOpen(q) && q.holds.review === review
+    && (at === undefined || (q.holds.head === at.head && q.holds.base === (at.base ?? null))));
 
 /**
  * One item of a planning thread's block, as Question.proposal holds it. `block` is 12 hex characters, a hash of the

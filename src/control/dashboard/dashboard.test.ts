@@ -3031,7 +3031,7 @@ test("a review that asks about its holds has one card in Needs you, the question
   s.registry.saveReview(review);
   s.registry.replaceQuestions(fix.id, "holds-", {
     kind: "holds", id: "holds-rv-1-a", thread: fix.id, text: `Land pull request #7, "Cache", at ${head.slice(0, 12)}, waiving changes to login or auth?\n- ${reserved}`, options: ["Land", "Leave it"],
-    reserved: "auth", answerer: "deployer", askedAt: Date.now(), holds: { review: review.id, head, base: "main", holds: [{ code: "reserved-path:auth", text: reserved }] },
+    reserved: "auth", answerer: "deployer", askedAt: Date.now(), holds: { review: review.id, head, base: null, holds: [{ code: "reserved-path:auth", text: reserved }] },
   });
   const page = (await s.call("GET", "/")).text;
   const mine = needsOf(page).cards.filter((c) => c.thread === fix.id);
