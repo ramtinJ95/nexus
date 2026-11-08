@@ -84,23 +84,26 @@ type LiveCheck = { kind: "absent" } | { kind: "ran"; thread: ThreadId; passed: b
  */
 export interface ModelFailure { count: number; last: string; retryAt: number }
 
+/** A run of a gate at a round's head, in `thread` once it started, the check thread or verify pylon. */
+export interface GateRun { startedAt: number; thread: ThreadId | null }
+
 export type Phase =
   /**
    * The reviewer has the round's request and owes its verdict. `check` is the repository's checks at the round's head,
-   * run beside it in `thread` unless the round has their result already, as `checking`'s are. `unrunnable` is the output
-   * of a check the pylon could not run, which goes to the person once the reviewer approves. `refused` is why no node had
-   * room for the check, which then runs in `checking` once the reviewer approves.
+   * run beside it unless the round has their result already, as `checking`'s are. `unrunnable` is the output of a check
+   * the pylon could not run, which goes to the person once the reviewer approves. `refused` is why no node had room for
+   * the check, which then runs in `checking` once the reviewer approves.
    */
-  | { kind: "reviewing"; failing?: ModelFailure; check?: { startedAt: number; thread: ThreadId | null; unrunnable?: string; refused?: string } }
+  | { kind: "reviewing"; failing?: ModelFailure; check?: GateRun & { unrunnable?: string; refused?: string } }
   /** The builder has the round's findings and owes an answer to each, and a push for what it fixed. */
   | { kind: "fixing"; failing?: ModelFailure }
-  /** The repository's checks run at the approved head, in `thread`, a check thread thrown away afterwards. */
-  | { kind: "checking"; startedAt: number; thread: ThreadId | null }
+  /** The repository's checks run at the approved head, in a check thread thrown away afterwards. */
+  | { kind: "checking" } & GateRun
   /**
-   * The live check runs at the approved head in `thread`, a verify pylon archived afterwards. `refused` is why no node
-   * could take the verify pylon yet, which the loop tries again.
+   * The live check runs at the approved head, in a verify pylon archived afterwards. `refused` is why no node could take
+   * the verify pylon yet, which the loop tries again.
    */
-  | { kind: "verifying"; startedAt: number; thread: ThreadId | null; refused?: string }
+  | { kind: "verifying"; refused?: string } & GateRun
   /**
    * A landing at an approved head with no live check needs the reviewer's quote, from the description as it is now,
    * of what could not be checked live, as after the person's Land press. `asked` is the digest of the description the
@@ -455,8 +458,10 @@ export function reviewersNote(r: Review): string | null {
   if (r.second.kind === "starting") return `${first}, and the second reviewer on ${r.second.model} is starting${r.second.why === null ? "" : `, after a start that failed: ${r.second.why}`}. It reviews since ${r.second.rule}`;
   return `${first}, and the second reviewer ${r.second.thread} on ${r.second.model} ${verdictWord(round.secondVerdict)}. It reviews since ${r.second.rule}`;
 }
+/** The gate run `phase` steps: a reviewing round's check beside the reviewer, the check, or the live check. */
+export const gateRun = (phase: Phase): GateRun | null => phase.kind === "checking" || phase.kind === "verifying" ? phase : phase.kind === "reviewing" ? phase.check ?? null : null;
 /** The check thread `phase` holds: a checking round's, or a reviewing round's, which runs beside the reviewer. */
-export const checkThread = (phase: Phase): ThreadId | null => phase.kind === "checking" ? phase.thread : phase.kind === "reviewing" ? phase.check?.thread ?? null : null;
+export const checkThread = (phase: Phase): ThreadId | null => phase.kind === "verifying" ? null : gateRun(phase)?.thread ?? null;
 /** What a reviewing round's check does beside the reviewer, which a review's line adds to its phase note, so it says whether the round waits on one or both. */
 export function checkBeside(r: Review): string {
   if (r.phase.kind !== "reviewing") return "";
