@@ -1,4 +1,3 @@
-/** Renders the usage page: the tokens every agent spent in a period, in all and by each breakdown. */
 import type { ProjectId, ThreadId } from "../../ids.ts";
 import { periods, periodStart, type Period } from "../usage.ts";
 import { breakdownLook, breakdowns, tokenColumns, tokenCount, utc, type UsageBackfill, type UsageTotals } from "../../contract/usage.ts";

@@ -50,7 +50,6 @@ export async function caughtUp(hand, wait = 1000) {
   }
 }
 
-/** Shows a notice on the channel picked, and returns what closes it. */
 export async function notice(channel, title, body, url) {
   if (channel === "system") {
     const shown = new Notification(title, { body });

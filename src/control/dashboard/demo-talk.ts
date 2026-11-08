@@ -20,7 +20,6 @@ export function harnessTalk(start: number, model = "gpt-6-astra") {
     person(text: string, gap = 2 * minute) { messages.push({ role: "user", content: text, timestamp: step(gap) }); return t; },
     say(text: string) { messages.push(assistant([{ type: "text", text }])); return t; },
     think(thinking: string, text: string) { messages.push(assistant([{ type: "thinking", thinking }, { type: "text", text }])); return t; },
-    /** One tool call and its result. */
     tool(name: string, args: ToolCall["arguments"], output: string, isError = false) {
       const id = `call_${++calls}`;
       messages.push(assistant([{ type: "toolCall", id, name, arguments: args }], "toolUse"));

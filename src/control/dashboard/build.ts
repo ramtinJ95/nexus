@@ -9,7 +9,6 @@ import { build, type Metafile } from "esbuild";
 
 export const outdir = fileURLToPath(new URL("../../../dist/dashboard/", import.meta.url));
 
-/** Builds the client into `out`, replacing whatever was there, and returns esbuild's account of the output. */
 export async function buildDashboard(out = outdir): Promise<Metafile> {
   await rm(out, { recursive: true, force: true });
   const { metafile } = await build({

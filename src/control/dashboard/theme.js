@@ -1,4 +1,4 @@
-// The page's theme, a block of style.css named on <html> as data-theme. dashboard.ts's head script names the stored
+// The page's theme, a block of style.css named on <html> as data-theme. view.ts's themeScript names the stored
 // one before the first paint, and this follows the sidebar's picker and toggle, the device and the reader's other tabs.
 
 const key = "nexus.theme";

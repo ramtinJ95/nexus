@@ -1,4 +1,3 @@
-/** The dashboard's static assets: the stylesheet and icon from src, and the client as build.ts bundled it. */
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 

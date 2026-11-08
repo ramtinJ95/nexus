@@ -15,7 +15,6 @@ document.adoptedStyleSheets = [...document.adoptedStyleSheets, base];
 const { adoptStyles } = styleAdopter();
 
 const ansi = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"];
-/** The shown theme's terminal colours in xterm.js's terms. */
 function terminalTheme() {
   const colors = themeValue("--term-ansi").split(/\s+/);
   return {

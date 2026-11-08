@@ -96,7 +96,6 @@ function readerFrames(render: (served: ConversationView | ClaudeConversation) =>
   };
 }
 
-/** The frames of a reader that renders for itself. */
 export const liveFrames = (t: Thread, claudeModel: string | null = null, questions: () => readonly Question[] = () => [], senders: () => PromptSenders = () => () => null) =>
   readerFrames(liveRender(t, claudeModel, questions, senders));
 

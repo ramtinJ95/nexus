@@ -17,7 +17,6 @@ import { clock } from "./elapsed.ts";
 import { landingTrack, pipelineItems, stageLabel, stepStates, type Life, type StepState } from "./lifecycle.ts";
 import { steps, type Step } from "../pipeline.ts";
 
-/** One turn of the conversation: what started it and from whom, the tools it ran, and the answer it ended on. */
 interface Turn { from: string; text: string; at: number; queued: boolean; tools: number; failed: number; reply: string | null; took: string | null; running: boolean }
 
 const firstLine = (text: string) => (text.trim().split("\n").find((l) => l.trim() !== "")?.trim() ?? "").replaceAll("`", "");

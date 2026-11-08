@@ -1,7 +1,3 @@
-/**
- * Renders a thread's cards, on its page and in the inbox: its landing and review, the judgments of a failed pylon,
- * its questions and its nudge. And a node's cleanup question, on the node's page and in the inbox.
- */
 import type { ThreadDetail } from "../wire.ts";
 import type { Thread } from "../thread-store.ts";
 import type { TailnetNodeId, ThreadId } from "../../ids.ts";
@@ -52,7 +48,6 @@ const offers = {
     Keep: { label: "Keep", confirm: null },
   } satisfies Offers<CleanupQuestion, typeof cleanupOptions>,
 };
-/** The button of `option`, one of `q`'s options. */
 const offerOf = <Q extends Exclude<Question, ClaudeQuestion>>(q: Q, option: string): Offer<Q> =>
   (offers[q.kind] as Readonly<Record<string, Offer<Q>>>)[option] ?? answering(option);
 
@@ -161,8 +156,7 @@ ${aq.options.map((o, j) => html`<div class="ask-opt"><label><input type="${aq.mu
 }
 
 /**
- * Above the composer, for a builder whose review the person can land or is landing: why it waits for them, with the
- * Land button, and then the landing's steps until it lands or ends for them again. The land route decides who may
+ * Above the composer, for a builder whose review the person can land or is landing. The land route decides who may
  * land, and the page says so up front rather than offer a button that fails. In the inbox it leaves out the title and
  * the pull request, which its head and strip say, and folds what the person need not read to decide. `lands` is whether
  * the thread's project lands its reviews on its own.
