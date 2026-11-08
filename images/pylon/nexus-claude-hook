@@ -6,7 +6,7 @@ import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 import { alive, askDecision, awaitAnswer, deliverAnswer, forgetAsk, forgetSession, hookInput, parseAskAnswer, recordCall, waitingAsks } from "./nexus-ask.ts";
 import { backgroundGroups, backgroundWatch, claimHold, claudeEnviron, heartbeatDue, holdSuperseded, holdTurnEnd, releaseHold, reportedKind, reportsIntoThread } from "./nexus-heartbeat.ts";
-import { answerDelivered, answerExits, checkoutDir, claudeTurn, maxSessionLength, pylonInfoFile } from "./nexus-contract.ts";
+import { answerDelivered, answerExits, checkoutDir, claudeTurn, maxSessionLength } from "./nexus-contract.ts";
 import { enqueue, startSender } from "./nexus-outbox.ts";
 import { snapshotTurn } from "./nexus-turn.ts";
 import { spawn } from "node:child_process";
@@ -85,7 +85,7 @@ if (process.argv[2] === "asks") {
   process.exit(0);
 }
 const home = userInfo().homedir;
-if (!reportsIntoThread(process.env, await claudeEnviron(process.env.CLAUDE_PID), home, existsSync(pylonInfoFile))) process.exit(0);
+if (!reportsIntoThread(process.env, await claudeEnviron(process.env.CLAUDE_PID), home, existsSync(join(home, ".nexus", "pylon.json")))) process.exit(0);
 // AskUserQuestion's PreToolUse records the call's ID, which its PermissionRequest input lacks. The PermissionRequest
 // runs while Claude's terminal dialog shows, and prints nothing unless the dashboard answers first. A dialog the
 // terminal answers stays the terminal's.
