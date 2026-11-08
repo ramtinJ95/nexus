@@ -5,7 +5,7 @@ import { chatgptTokenGrant, secretHostPattern, secretNamePattern } from "../prot
 import { gitIdentitySchema } from "../protocol/spawn.ts";
 import { gitUrl } from "../control/project.ts";
 import { standingRulesLimit } from "../control/standing-rules.ts";
-import { resourcesSchema, startSchema } from "./threads-parse.ts";
+import { briefSchema, itemRules, resourcesSchema, startFields } from "./threads-parse.ts";
 
 const name = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
 const host = z.string().min(1);
@@ -38,4 +38,4 @@ export const projectEditSchema = projectSchema.omit({ id: true, repoUrl: true, p
   }).partial();
 
 /** A pipeline item: what its queued thread starts with, after the items whose threads must merge first. */
-export const itemSchema = startSchema.omit({ after: true, requestId: true, planning: true }).extend({ after: z.array(z.string().min(1)).max(32).optional() });
+export const itemSchema = briefSchema(startFields.omit({ after: true, requestId: true, planning: true }).extend({ after: z.array(z.string().min(1)).max(32).optional() }), itemRules);

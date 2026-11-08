@@ -9,7 +9,8 @@ import { threadRoutes as routes } from "../../contract/threads.ts";
 import { pylonRoutes, type ChangesBase } from "../../contract/pylon.ts";
 import { attachTerminal, processTty } from "../attach.ts";
 import { CliError } from "../transport.ts";
-import { type Values, type Api, type Command, str, request, int, workerOptions, briefOf, table, waitMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
+import { startRules } from "../../contract/threads-parse.ts";
+import { type Values, type Api, type Command, str, request, int, briefOptions, briefOf, table, waitMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
 import { detailText, portsText, listingText, changesText, queuedRow, queuedText, threadRow } from "../thread-text.ts";
 
 function portArg(given: string): number {
@@ -192,16 +193,12 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
       "    --request-id makes a repeat of the start answer the thread the first made",
     ],
     args: [0, 0],
-    options: { ...workerOptions, "request-id": { type: "string" }, plan: { type: "boolean" } },
+    options: { ...briefOptions, "request-id": { type: "string" }, plan: { type: "boolean" } },
     async run(api, _, v) {
-      if (v.plan === true && (v.claude !== undefined || v.after !== undefined)) throw new CliError("invalid", "--plan starts a Nexus agent thread now, so it takes neither --claude nor --after");
-      const { project, title, optional, resources, after } = briefOf(v, "start");
-      if (title === undefined) throw new CliError("invalid", "start needs --title, --message or --claude");
-      const requestId = str(v, "request-id");
       // One request: the control plane sends the first message once the thread starts, as the person's.
-      const body = { project, title, ...optional, ...resources === undefined ? {} : { resources }, ...requestId === undefined ? {} : { requestId }, ...v.plan === true ? { planning: true as const } : {} };
-      if (after !== undefined) {
-        const q = await request(api, routes.start, { body: { ...body, after } });
+      const body = briefOf(v, "start", startRules);
+      if (body.after !== undefined) {
+        const q = await request(api, routes.start, { body });
         // A repeat of the request ID after the queued thread started answers the thread.
         if (!("after" in q)) return { json: q, text: `Started ${q.id} on ${q.project}: ${q.title}` };
         return { json: q, text: `Queued ${q.id} on ${q.project}: ${q.title}. It starts once ${listed(q.after)} ${q.after.length === 1 ? "has merged its pull request" : "have merged their pull requests"}.` };

@@ -21,6 +21,7 @@ import type { QueuedThread, Wait } from "../contract/threads.ts";
 import { sendWithStandingRules } from "./standing-rules.ts";
 import { deliverDurable } from "./durable-message.ts";
 import { prLocationOf, servesReview, threadRole } from "./work-model.ts";
+import { brokenRule, startRules } from "../contract/threads-parse.ts";
 
 type QueueRegistry = Pick<Registry, "createThread" | "currentImage" | "isReviewer" | "latestHealthSample" | "node" | "nodes" | "planning" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveQueued" | "saveTemplate" | "templates" | "thread">;
 
@@ -157,7 +158,8 @@ export function threadQueue(options: {
   const passes = singleFlight(pass);
   return {
     add(request, message, after, caller, key) {
-      if (message !== null && request.claude !== undefined) throw new Refusal("invalid", "message is for a Nexus agent thread. A Claude worker's first prompt is its claude");
+      const broken = brokenRule(startRules, { ...request, message });
+      if (broken !== undefined) throw new Refusal("invalid", broken);
       const project = checkStart(registry, request, caller);
       const ids = [...new Set(after)] as ThreadId[];
       for (const id of ids) {

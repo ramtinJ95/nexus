@@ -99,11 +99,8 @@ export function threadRoutes(kit: ApiKit, options: { queue?: ThreadQueue | null 
   }
 
   async function startOnce({ after, message, planning, ...request }: Omit<z.infer<typeof startSchema>, "requestId">, caller: string, key?: StartKey, made?: ThreadId): Promise<Thread | QueuedThread> {
-    if (request.model !== undefined && request.claude === undefined) throw new HttpError(400, "model requires claude");
-    if (planning && (request.claude !== undefined || after !== undefined)) throw new HttpError(400, "a planning thread is a Nexus agent thread that starts now, so it takes neither claude nor after");
     if (planning && !options.planning) throw new HttpError(409, "this control plane has no planning pass");
     if (after === undefined) {
-      if (message !== undefined && request.claude !== undefined) throw new HttpError(400, "message is for a Nexus agent thread. A Claude worker's first prompt is its claude");
       const t = made === undefined ? await startThread({ ...request, planning }, caller, undefined, key) : registry.thread(made)!;
       if (planning) options.planning!.begin(t);
       if (message !== undefined && t.status !== "archived" && t.status !== "deleted") {

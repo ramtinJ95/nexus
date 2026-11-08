@@ -1,7 +1,7 @@
 /** The pipeline items: `items` and the `item` commands. */
 import type { PipelineItem } from "../../control/pipeline.ts";
-import { CliError } from "../transport.ts";
-import { type Command, str, request, workerOptions, briefOf, ago, table, clip } from "../kit.ts";
+import { type Command, str, request, briefOptions, briefOf, ago, table, clip } from "../kit.ts";
+import { itemRules } from "../../contract/threads-parse.ts";
 import { itemRoutes } from "../../contract/projects.ts";
 
 const itemRow = (i: PipelineItem) => [i.id, i.phase.kind, i.phase.why, i.thread ?? "no thread yet", i.project, ago(i.addedAt), i.title];
@@ -38,11 +38,9 @@ export const itemsCommands: Readonly<Record<string, Command>> = {
       "    an item becomes a queued thread once the items it is after are, and starts once their pull requests merge",
     ],
     args: [0, 0],
-    options: workerOptions,
+    options: briefOptions,
     async run(api, _, v) {
-      const { project, title, optional, resources, after } = briefOf(v, "item add");
-      if (v.message === undefined && v.claude === undefined) throw new CliError("invalid", "item add needs a brief: --message, or --claude for a Claude worker");
-      const i = await request(api, itemRoutes.add, { body: { project, title: title!, ...optional, ...resources === undefined ? {} : { resources }, ...after === undefined ? {} : { after } } });
+      const i = await request(api, itemRoutes.add, { body: briefOf(v, "item add", itemRules) });
       return { json: i, text: `Added ${i.id} to ${i.project}: ${i.title}. It is ${i.phase.kind}: ${i.phase.why}.` };
     },
   },

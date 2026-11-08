@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { defaultProjectResources, defaultSecondReview, upgradeProject, type LoginKind, type Project, type SecondReview } from "../../control/project.ts";
 import { secretHostPattern, secretNamePattern } from "../../protocol/secret-grants.ts";
 import { CliError } from "../transport.ts";
-import { type Command, str, strs, int, request, resourcesOf, placementOptions, table } from "../kit.ts";
+import { type Command, str, strs, int, request, resourcesOf, resourceOptions, table } from "../kit.ts";
 import { projectRoutes } from "../../contract/projects.ts";
 
 /**
@@ -115,7 +115,7 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
     ],
     args: [1, 1],
     options: {
-      ...placementOptions,
+      node: { type: "string" }, branch: { type: "string" }, ...resourceOptions,
       "allow-host": { type: "string", multiple: true }, login: { type: "string", multiple: true }, secret: { type: "string", multiple: true },
       "clear-hosts": { type: "boolean" }, "clear-logins": { type: "boolean" }, "clear-secrets": { type: "boolean" },
       "git-name": { type: "string" }, "git-email": { type: "string" }, "clear-git-identity": { type: "boolean" },
@@ -163,7 +163,7 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
     ],
     args: [1, 2],
     options: {
-      ...placementOptions,
+      node: { type: "string" }, branch: { type: "string" }, ...resourceOptions,
       "allow-host": { type: "string", multiple: true }, login: { type: "string", multiple: true }, secret: { type: "string", multiple: true },
       scratch: { type: "boolean" }, "rules-file": { type: "string" }, "auto-review": { type: "string" },
     },

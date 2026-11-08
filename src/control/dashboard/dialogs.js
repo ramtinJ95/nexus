@@ -1,6 +1,5 @@
 // The start and new-project dialogs, which start a thread and add a project, and the page's keyboard shortcuts.
 import { startHint } from "./start-hint.ts";
-import { titleOf } from "../../thread-title.ts";
 import { request } from "./request.js";
 import { threadRoutes } from "../../contract/threads.ts";
 import { projectRoutes } from "../../contract/projects.ts";
@@ -94,7 +93,6 @@ document.addEventListener("submit", async (event) => {
   const { cpus, memoryGiB, diskGiB, ...body } = Object.fromEntries([...new FormData(form)].filter(([key, value]) => value !== "" && key !== "worker"));
   const resources = Object.fromEntries(Object.entries({ cpus, memoryGiB, diskGiB }).flatMap(([key, value]) => value === undefined ? [] : [[key, Number(value)]]));
   if (Object.keys(resources).length > 0) body.resources = resources;
-  if (body.claude !== undefined && body.title === undefined) body.title = titleOf(body.claude);
   if (body.planning !== undefined) body.planning = true;
   form.querySelector("button[type=submit]").disabled = true;
   try {
