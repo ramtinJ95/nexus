@@ -8,7 +8,6 @@
  * so it starts once whatever crashes, restarts or concurrent passes come between. What blocks it is derived on every
  * pass and read rather than stored, so a reopened or later-merged pull request unblocks it.
  */
-import { startedByNexus } from "./agent-protocol.ts";
 import { defaultClaudeModel } from "../protocol/models.ts";
 import { newThreadId, requestIds, type ProjectId, type ThreadId } from "../ids.ts";
 import { singleFlight } from "../single-flight.ts";
@@ -20,10 +19,10 @@ import type { StartKey, StartRequest } from "./start-request.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 import type { QueuedThread, Wait } from "../contract/threads.ts";
 import { sendWithStandingRules } from "./standing-rules.ts";
-import { prLocation, watchedPrs } from "./pr-watch-model.ts";
 import { deliverDurable } from "./durable-message.ts";
+import { prLocationOf, servesReview, threadRole } from "./work-model.ts";
 
-type QueueRegistry = Pick<Registry, "createThread" | "currentImage" | "isReviewer" | "latestHealthSample" | "node" | "nodes" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveQueued" | "saveTemplate" | "templates" | "thread">;
+type QueueRegistry = Pick<Registry, "createThread" | "currentImage" | "isReviewer" | "latestHealthSample" | "node" | "nodes" | "planning" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveQueued" | "saveTemplate" | "templates" | "thread">;
 
 export interface ThreadQueue {
   /** Validates and records, with `key` if given; throws a Refusal. Does not start it; the caller calls poll() after. */
@@ -55,7 +54,7 @@ export function waitOf(registry: QueueRegistry, id: ThreadId): Wait {
     }
   }
   const review = registry.review(id);
-  const where = prLocation(review, watchedPrs(registry.prWatch(id)));
+  const where = prLocationOf(registry, id);
   if (where.kind === "merged") return landed(id, `PR #${where.number} merged`);
   if (t.status === "archived" || t.status === "deleted") return blocked(id, `is ${t.status} and its pull request did not merge`);
   if (review?.phase.kind === "needs-person") return blocked(id, `its review ended for the person: ${review.phase.reasons[0] ?? "no reason given"}`);
@@ -164,7 +163,7 @@ export function threadQueue(options: {
       for (const id of ids) {
         const t = registry.thread(id);
         if (t === undefined && registry.queuedThread(id) === undefined) throw new Refusal("missing", `no thread ${id}`);
-        if (t !== undefined && startedByNexus(registry, t)) throw new Refusal("invalid", `thread ${id} is a review loop's reviewer, check or verify thread, which merges no pull request of its own`);
+        if (t !== undefined && servesReview(threadRole(registry, t))) throw new Refusal("invalid", `thread ${id} is a review loop's reviewer, check or verify thread, which merges no pull request of its own`);
       }
       const record: QueuedRecord = {
         id: newThreadId(), title: request.title, project: project.id, startedBy: caller, createdAt: Date.now(), after: ids,

@@ -100,7 +100,7 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
     const queued = registry.queuedThread(key as ThreadId);
     if (queued !== undefined && queued.status === "queued") return { kind: "queued", q: queuedView(registry, queued) };
     const item = registry.items().find((i) => i.id === key);
-    return item === undefined ? null : { kind: "item", item: itemView(registry, item) };
+    return item === undefined ? null : { kind: "item", item: itemView(registry, item, c.now) };
   }
 
   return [

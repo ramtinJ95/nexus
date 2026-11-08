@@ -20,12 +20,12 @@ export function pipelineRoutes(kit: ApiKit, options: { pipeline?: Pipeline | nul
   function item(id: string) {
     const record = registry.item(id as ItemId);
     if (record === undefined) throw new HttpError(404, `no item ${id}`);
-    return itemView(registry, record);
+    return itemView(registry, record, Date.now());
   }
 
   return [
     on(routes.list, anyAllowed, (_, { query: { project, cancelled } }) => {
-      const items = registry.items().filter((i) => project === undefined || i.project === project).map((i) => itemView(registry, i));
+      const items = registry.items().filter((i) => project === undefined || i.project === project).map((i) => itemView(registry, i, Date.now()));
       return ok(cancelled === false ? items.filter((i) => i.phase.kind !== "cancelled") : items);
     }),
     on(routes.add, { role: "person", action: "add an item" }, async (_, r) => {
@@ -33,15 +33,15 @@ export function pipelineRoutes(kit: ApiKit, options: { pipeline?: Pipeline | nul
       const pipeline = pipelineOrRefuse();
       const added = pipeline.add(request, message ?? null, after ?? [], r.caller);
       await pipeline.poll();
-      return created(itemView(registry, added));
+      return created(itemView(registry, added, Date.now()));
     }),
     on(routes.show, anyAllowed, ({ item: id }) => ok(item(id))),
-    on(routes.cancel, { role: "person", action: "cancel an item" }, ({ item: id }, r) => ok(itemView(registry, pipelineOrRefuse().cancel(id, r.caller)))),
+    on(routes.cancel, { role: "person", action: "cancel an item" }, ({ item: id }, r) => ok(itemView(registry, pipelineOrRefuse().cancel(id, r.caller), Date.now()))),
     on(routes.approve, { role: "person", action: "approve an item" }, async ({ item: id }, r) => {
       const pipeline = pipelineOrRefuse();
       const approved = pipeline.approve(id, r.caller);
       await pipeline.poll();
-      return ok(itemView(registry, approved));
+      return ok(itemView(registry, approved, Date.now()));
     }),
   ];
 }

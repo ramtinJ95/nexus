@@ -7,17 +7,18 @@
  * thread to the person through its `decision` attention. A pull request ends it, and the person writing to the thread
  * leaves the thread alone for good.
  */
-import { nudgePrefix, startedByNexus } from "./agent-protocol.ts";
+import { nudgePrefix } from "./agent-protocol.ts";
 import { gitPollMs } from "../protocol/observations.ts";
 import { singleFlight } from "../single-flight.ts";
 import { githubRepo, type GitHub } from "./github.ts";
 import type { Inbox } from "./inbox.ts";
-import { prLocation, pushedBranches, watchedPrs } from "./pr-watch-model.ts";
+import { pushedBranches } from "./pr-watch-model.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import { requestIds, type ThreadId } from "../ids.ts";
 import type { Nudge } from "./nudge-store.ts";
 import { deliverDurable } from "./durable-message.ts";
+import { prLocationOf, threadRole } from "./work-model.ts";
 
 type NudgeRegistry = Pick<Registry, "isReviewer" | "node" | "nudge" | "nudgedThreads" | "outputs" | "planning" | "prWatch" | "project" | "pylon" | "review" | "saveNudge" | "storedThreads" | "thread">;
 
@@ -39,7 +40,7 @@ export function builderNudger(options: {
   /** The repository of a builder whose project reviews its pull requests on its own, or null for any other thread. */
   function builderRepo(t: Thread): string | null {
     if (t.status !== "active" && t.status !== "idle") return null;
-    if (startedByNexus(registry, t) || registry.planning(t.id) !== null) return null;
+    if (threadRole(registry, t) !== "builder") return null;
     const project = registry.project(t.project);
     return project?.autoReview == null ? null : githubRepo(project.repoUrl);
   }
@@ -70,7 +71,7 @@ export function builderNudger(options: {
     return false;
   }
 
-  const hasPullRequest = (t: Thread) => prLocation(registry.review(t.id), watchedPrs(registry.prWatch(t.id))).kind !== "none";
+  const hasPullRequest = (t: Thread) => prLocationOf(registry, t.id).kind !== "none";
   /** The thread as the registry has it now, if a nudge may still go to it: an await may have let a turn, a PR link, or an archive in. */
   const idleBuilder = (id: Thread["id"]) => {
     const fresh = registry.thread(id);
