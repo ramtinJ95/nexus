@@ -298,8 +298,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   const repo = join(prefix, deployerFiles.repo);
   const listen = listenAddress(await readJson(files.config, null), files.config);
   const healthUrl = new URL(`http://${urlHost(listen.host)}:${listen.port}/v1/health`);
-  /** Logs why when it gives up, unless `quiet`, as for the check at the start of each poll, where an unhealthy release is a state to report. */
-  const healthy = async (quiet = false) => {
+  const healthy = async () => {
     const expected = await readReleaseCommit(link);
     const until = Date.now() + config.healthTimeoutMs;
     let last: unknown = null;
@@ -312,7 +311,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
       } catch (error) { last = error; } // Retry while the service binds and the harness opens.
       await sleep(500);
     } while (Date.now() < until);
-    if (!quiet) console.error(`${role}: ${service} is not healthy at ${expected}: ${String(last)}`);
+    console.error(`${role}: ${service} is not healthy at ${expected}: ${String(last)}`);
     return false;
   };
   const report: Report = async (state, target, reason = null) => {
@@ -371,7 +370,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     await steps.release();
     return;
   }
-  const current = { commit: await readReleaseCommit(link), healthy: await healthy(true) };
+  const current = { commit: await readReleaseCommit(link), healthy: await healthy() };
   const plan = (turnRunning: boolean) => planDeploy({ desired: view.desired, role, current, control: controlHealth(view), attempts, turnRunning });
   const step = plan(false);
   if (step.kind === "idle" || step.kind === "healthy") {
