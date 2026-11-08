@@ -60,8 +60,6 @@ deployer GET /v1/threads?deleted=false -> 200
 deployer POST /v1/threads -> 400 ✖ Unrecognized key: "bogus"
 ✖ Invalid input: expected string, received undefined
   → at project
-✖ Invalid input: expected string, received undefined
-  → at title
 deployer GET /v1/queued -> 200
 deployer GET /v1/queued/th-000000000000 -> 404 no queued thread th-000000000000
 deployer POST /v1/threads/th-000000000000/start -> 409 queued threads need the control plane's GitHub token (github.tokenFile), which is not configured
@@ -86,26 +84,10 @@ deployer POST /v1/projects -> 400 ✖ Unrecognized key: "bogus"
   → at id
 ✖ Invalid input: expected string, received undefined
   → at repoUrl
-✖ Invalid input: expected string, received undefined
-  → at defaultBranch
-✖ Invalid input: expected string, received undefined
-  → at defaultNode
-✖ Invalid input: expected object, received undefined
-  → at resources
-✖ Invalid input: expected array, received undefined
-  → at allowedHosts
-✖ Invalid input: expected array, received undefined
-  → at secrets
-✖ Invalid input: expected array, received undefined
-  → at logins
-✖ Invalid input: expected string, received undefined
-  → at preSetup
 deployer GET /v1/items -> 200
 deployer POST /v1/items -> 400 ✖ Unrecognized key: "bogus"
 ✖ Invalid input: expected string, received undefined
   → at project
-✖ Invalid input: expected string, received undefined
-  → at title
 deployer GET /v1/items/it-nosuch -> 404 no item it-nosuch
 deployer POST /v1/items/it-nosuch/cancel -> 409 pipeline items need the control plane's GitHub token (github.tokenFile), which is not configured
 deployer POST /v1/items/it-nosuch/approve -> 409 pipeline items need the control plane's GitHub token (github.tokenFile), which is not configured
@@ -217,8 +199,6 @@ person GET /v1/threads?deleted=false -> 200
 person POST /v1/threads -> 400 ✖ Unrecognized key: "bogus"
 ✖ Invalid input: expected string, received undefined
   → at project
-✖ Invalid input: expected string, received undefined
-  → at title
 person GET /v1/queued -> 200
 person GET /v1/queued/th-000000000000 -> 404 no queued thread th-000000000000
 person POST /v1/threads/th-000000000000/start -> 409 queued threads need the control plane's GitHub token (github.tokenFile), which is not configured
@@ -243,26 +223,10 @@ person POST /v1/projects -> 400 ✖ Unrecognized key: "bogus"
   → at id
 ✖ Invalid input: expected string, received undefined
   → at repoUrl
-✖ Invalid input: expected string, received undefined
-  → at defaultBranch
-✖ Invalid input: expected string, received undefined
-  → at defaultNode
-✖ Invalid input: expected object, received undefined
-  → at resources
-✖ Invalid input: expected array, received undefined
-  → at allowedHosts
-✖ Invalid input: expected array, received undefined
-  → at secrets
-✖ Invalid input: expected array, received undefined
-  → at logins
-✖ Invalid input: expected string, received undefined
-  → at preSetup
 person GET /v1/items -> 200
 person POST /v1/items -> 400 ✖ Unrecognized key: "bogus"
 ✖ Invalid input: expected string, received undefined
   → at project
-✖ Invalid input: expected string, received undefined
-  → at title
 person GET /v1/items/it-nosuch -> 404 no item it-nosuch
 person POST /v1/items/it-nosuch/cancel -> 409 pipeline items need the control plane's GitHub token (github.tokenFile), which is not configured
 person POST /v1/items/it-nosuch/approve -> 409 pipeline items need the control plane's GitHub token (github.tokenFile), which is not configured
@@ -410,20 +374,6 @@ control-node POST /v1/projects -> 400 ✖ Unrecognized key: "bogus"
   → at id
 ✖ Invalid input: expected string, received undefined
   → at repoUrl
-✖ Invalid input: expected string, received undefined
-  → at defaultBranch
-✖ Invalid input: expected string, received undefined
-  → at defaultNode
-✖ Invalid input: expected object, received undefined
-  → at resources
-✖ Invalid input: expected array, received undefined
-  → at allowedHosts
-✖ Invalid input: expected array, received undefined
-  → at secrets
-✖ Invalid input: expected array, received undefined
-  → at logins
-✖ Invalid input: expected string, received undefined
-  → at preSetup
 control-node GET /v1/items -> 200
 control-node POST /v1/items -> 403 caller may not add an item: only a person may, never the control plane, infrastructure nodes or pylons
 control-node GET /v1/items/it-nosuch -> 404 no item it-nosuch
@@ -559,20 +509,6 @@ control-node-without-key POST /v1/projects -> 400 ✖ Unrecognized key: "bogus"
   → at id
 ✖ Invalid input: expected string, received undefined
   → at repoUrl
-✖ Invalid input: expected string, received undefined
-  → at defaultBranch
-✖ Invalid input: expected string, received undefined
-  → at defaultNode
-✖ Invalid input: expected object, received undefined
-  → at resources
-✖ Invalid input: expected array, received undefined
-  → at allowedHosts
-✖ Invalid input: expected array, received undefined
-  → at secrets
-✖ Invalid input: expected array, received undefined
-  → at logins
-✖ Invalid input: expected string, received undefined
-  → at preSetup
 control-node-without-key GET /v1/items -> 200
 control-node-without-key POST /v1/items -> 403 caller may not add an item: only a person may, never the control plane, infrastructure nodes or pylons
 control-node-without-key GET /v1/items/it-nosuch -> 404 no item it-nosuch
