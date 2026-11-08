@@ -7,27 +7,11 @@ import { controlReady, planDeploy, quarantined, schemaStep, type Attempt, type D
 import { digestPattern, type DrainBody, type DrainReply, type ReleaseReport, type ReleaseView, type ReportBody, type Role } from "../protocol/deploy.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
 import { deleteReleases, readReleases } from "./release-cleanup.ts";
-import { checkControlPlaneFile, readControlPlane, type ControlPlane } from "./control-plane.ts";
+import { checkControlPlaneFile, parseWorkerConfig, readControlPlane, type ControlPlane, type WorkerConfig } from "./control-plane.ts";
 import { readJson, saveJson } from "../node-base/json-file.ts";
 import { controlFields, listenAddress } from "../node-base/node-config.ts";
 import { localApiWhois } from "../node-base/tailscaled.ts";
 import { backupStatusFile, configFiles, deployerFiles, deployerLink, etc, prefix, readReleaseCommit, releasesDir, stateDirs, unitDir, unitNames } from "../node-base/node-layout.ts";
-
-export interface WorkerConfig {
-  controlUrl: string;
-  controlNodeId: string;
-  token: string;
-  drainTimeoutMs: number;
-  healthTimeoutMs: number;
-}
-/** The control plane comes from control-plane.json. The controlUrl and controlNodeId an older deployer.json holds are left for older code. */
-export function parseWorkerConfig(deployer: unknown, control: ControlPlane): WorkerConfig {
-  const v = deployer as WorkerConfig;
-  if (typeof v !== "object" || v === null || typeof v.token !== "string" || !digestPattern.test(v.token) ||
-      !Number.isInteger(v.drainTimeoutMs) || v.drainTimeoutMs < 0 || v.drainTimeoutMs > 600_000 ||
-      !Number.isInteger(v.healthTimeoutMs) || v.healthTimeoutMs < 1000 || v.healthTimeoutMs > 60_000) throw new Error("invalid deployer.json");
-  return { controlUrl: control.url, controlNodeId: control.tailnetNodeId, token: v.token, drainTimeoutMs: v.drainTimeoutMs, healthTimeoutMs: v.healthTimeoutMs };
-}
 
 export async function runWorker(check = false): Promise<void> {
   if (process.getuid?.() !== 0) throw new Error("deployer must run as root");

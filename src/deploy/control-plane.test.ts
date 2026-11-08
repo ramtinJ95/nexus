@@ -6,8 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { promisify } from "node:util";
-import { adoptControlPlane, parseControlPlane, readControlPlane, setControlPlane } from "./control-plane.ts";
-import { parseWorkerConfig } from "./worker.ts";
+import { adoptControlPlane, parseControlPlane, parseWorkerConfig, readControlPlane, setControlPlane } from "./control-plane.ts";
 
 const exec = promisify(execFile);
 const firebat = "nFirebat1CNTRL";
