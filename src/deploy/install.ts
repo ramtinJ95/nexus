@@ -58,9 +58,11 @@ export interface Transaction {
   /** The backup taken before the switch, which a restore needs once the target has changed stored data. */
   backup?: string;
 }
+const journalPath = (prefix: string, role: Role) => join(prefix, deployJournal(role));
+
 /** The role's last install, from its journal, or null before its first. */
 export async function readJournal(prefix: string, role: Role): Promise<Transaction | null> {
-  return await readJson(join(prefix, deployJournal(role)), null) as Transaction | null;
+  return await readJson(journalPath(prefix, role), null) as Transaction | null;
 }
 
 export interface InstallBoundary {
@@ -102,7 +104,7 @@ export class ReleaseInstaller {
   }
 
   private async record(value: Transaction): Promise<Transaction> {
-    await saveJson(join(this.prefix, deployJournal(this.role)), value);
+    await saveJson(journalPath(this.prefix, this.role), value);
     return value;
   }
 

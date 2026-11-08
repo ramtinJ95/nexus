@@ -298,7 +298,8 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   const repo = join(prefix, deployerFiles.repo);
   const listen = listenAddress(await readJson(files.config, null), files.config);
   const healthUrl = new URL(`http://${urlHost(listen.host)}:${listen.port}/v1/health`);
-  const healthy = async () => {
+  /** Logs why when it gives up, unless `quiet`, as for the check at the start of each poll, where an unhealthy release is a state to report. */
+  const healthy = async (quiet = false) => {
     const expected = await readReleaseCommit(link);
     const until = Date.now() + config.healthTimeoutMs;
     let last: unknown = null;
@@ -307,11 +308,11 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
         await run("systemctl", ["is-active", "--quiet", service], prefix, Math.max(1, Math.min(5000, until - Date.now())));
         const answered = (await jsonRequest(healthUrl, "GET", undefined, null, undefined, Math.max(1, Math.min(10_000, until - Date.now())))).commit;
         if (answered === expected) return true;
-        last = `it answered commit ${answered}`;
+        last = `it answered commit ${answered ?? "none"}`;
       } catch (error) { last = error; } // Retry while the service binds and the harness opens.
       await sleep(500);
     } while (Date.now() < until);
-    console.error(`${role}: ${service} is not healthy at ${expected}: ${String(last)}`);
+    if (!quiet) console.error(`${role}: ${service} is not healthy at ${expected}: ${String(last)}`);
     return false;
   };
   const report: Report = async (state, target, reason = null) => {
@@ -370,7 +371,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     await steps.release();
     return;
   }
-  const current = { commit: await readReleaseCommit(link), healthy: await healthy() };
+  const current = { commit: await readReleaseCommit(link), healthy: await healthy(true) };
   const plan = (turnRunning: boolean) => planDeploy({ desired: view.desired, role, current, control: controlHealth(view), attempts, turnRunning });
   const step = plan(false);
   if (step.kind === "idle" || step.kind === "healthy") {
@@ -395,7 +396,11 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
 async function promoteWorker(commit: string, repo: string, prefix: string, run: typeof command): Promise<void> {
   const target = `${releasesDir}/${commit}`;
   const rejected = join(prefix, deployerFiles.rejected);
-  if ((await readFile(rejected, "utf8").catch(() => "")).trim() === target) return;
+  const marked = await readFile(rejected, "utf8").catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") console.error(`could not read ${rejected}, so the worker in ${target} is checked again: ${String(error)}`);
+    return "";
+  });
+  if (marked.trim() === target) return;
   try { await run(process.execPath, [join(prefix, target, "src/deploy/worker.ts"), "--check"], repo); }
   catch (error) {
     console.error(`the worker in ${target} failed its check, so the deployer keeps its own: ${String(error)}`);
