@@ -460,7 +460,7 @@ Each message goes under the request ID `resume:<thread>:<death>`, where the deat
 
 ## Queued threads
 
-`nexus start --after A,B` records a thread now and starts it once A's and B's pull requests have merged, landed by the review loop or merged outside it. Builders branch from the default branch as it is when they start, so the start waits for the merge and not for a deploy. [The CLI's contract](cli.md#queued-threads) has the rules and the types, and `src/control/queue.ts` holds them.
+`nexus start --after A,B` records a thread now and starts it once A's and B's pull requests have merged, landed by the review loop or merged outside it. Builders branch from the default branch as it is when they start, so the start waits for the merge and not for a deploy. [The CLI's contract](cli.md#queued-threads) has the rules and the types. `src/control/queue.ts` holds the rules, and `src/contract/threads.ts` the types.
 
 A queued thread is not a `threads` row. It is a record in the registry's `queued_threads` table, keyed by the ID the thread will have, holding the start request as it was asked for, with its size filled in from the project's, the predecessors and a Nexus agent thread's first message. So nothing that reads threads sees it: the planner boots no pylon for it, placement counts no room for it, and the PR watch and the review loop pass it by. Only the API's views, the CLI and the dashboard show it.
 
