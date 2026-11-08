@@ -10,7 +10,7 @@ import { gitIdentitySchema } from "../../protocol/spawn.ts";
 import { gitUrl, type AutoReviewMode, type Project } from "../project.ts";
 import { editedRules, standingRulesLimit } from "../standing-rules.ts";
 import { ok, created, parse, type RouteEntry, type ApiKit } from "./kit.ts";
-import { anyAllowed, mayLand } from "./access.ts";
+import { anyAllowed, demand, landing } from "./access.ts";
 
 const name = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
 const host = z.string().min(1);
@@ -64,7 +64,7 @@ export function projectRoutes(kit: ApiKit, options: { pipeline?: Pipeline | null
       const { autoReview, pipeline, standingRules, secondReview, ...patch } = parse(projectEditSchema, await r.body());
       // A CLI older than modes sends `land`.
       const mode: AutoReviewMode | null | undefined = autoReview == null ? autoReview : "mode" in autoReview ? autoReview.mode : autoReview.land ? "land" : "review";
-      if (mode === "land" || mode === "yolo") mayLand(r.roles);
+      if (mode === "land" || mode === "yolo") demand(r.roles, landing);
       const project = registry.editProject(id as ProjectId, ({ autoReview: kept, pipeline: running, standingRules: standing, secondReview: second, ...previous }) => {
         const updated: Project = parse(projectSchema, { ...previous, ...patch, resources: { ...previous.resources, ...patch.resources } });
         refuseUnknownNode(updated);

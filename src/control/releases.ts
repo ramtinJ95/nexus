@@ -1,6 +1,5 @@
 import { z } from "zod";
 import type { NexusEvent } from "./events.ts";
-import type { TailnetNodeId } from "../ids.ts";
 import type { Registry } from "./registry.ts";
 import { busyDrainReason, fullCommit, reportStates, type ReleaseView, type ReportBody, type Role } from "../protocol/deploy.ts";
 import { command, repository } from "../deploy/install.ts";
@@ -10,13 +9,6 @@ import { deleteOutcomeSchema } from "../protocol/cleanup.ts";
 
 type ReleasesRegistry = Pick<Registry, "desiredRelease" | "nodes" | "releaseReports">;
 
-export interface DeploymentOptions {
-  self: TailnetNodeId;
-  deployers: ReadonlySet<TailnetNodeId>;
-  /** control.json's deploy keys. A node that joined keeps its key in the registry. */
-  keys: Readonly<Record<string, string>>;
-  resolveMain?: () => Promise<string>;
-}
 export const commitSchema = z.string().regex(fullCommit);
 export const reportSchema = z.strictObject({
   role: z.enum(["control", "probe"] satisfies Role[]), commit: commitSchema.nullable(), target: commitSchema.nullable(),

@@ -41,7 +41,7 @@ import type { DoctorReport } from "../doctor-model.ts";
 import { threadPage, queuedPage } from "../dashboard/thread-page.ts";
 import { liveStreams } from "../dashboard/live-frames.ts";
 import type { ApiKit, RouteEntry } from "./kit.ts";
-import { anyAllowed, refusal, refusalOf, type Role } from "./access.ts";
+import { anyAllowed, landing, refusal, refusalOf, type Role } from "./access.ts";
 import { readHealth } from "./node-routes.ts";
 
 type Caller = { caller: TailnetNodeId; roles: ReadonlySet<Role> };
@@ -69,7 +69,7 @@ export function dashboardRoutes(kit: ApiKit, options: { reviews?: ReviewLoop | n
     let byProject: Map<string, Thread[]> | undefined;
     let queued: Map<string, QueuedThread[]> | undefined;
     const c: Context = {
-      registry, row, deploys, now: Date.now(), caller, landRefusal: !options.reviews ? "no review loop" : roles.has("deployer") ? null : "not a deployer",
+      registry, row, deploys, now: Date.now(), caller, landRefusal: !options.reviews ? "no review loop" : refusal(roles, landing) === null ? null : "not a deployer",
       answerRefusal: (question) => refusalOf(roles, question),
       threads: () => threads ??= registry.threads(),
       threadsIn: (project) => (byProject ??= Map.groupBy(c.threads(), (t) => t.project)).get(project) ?? [],

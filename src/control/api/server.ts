@@ -1,7 +1,6 @@
 import { DeployDraining, isDraining, turnGate, type TurnGate } from "../drain.ts";
 import { answerLocalHealth, runningCommit } from "../../deploy/health.ts";
 import { version } from "../../version.ts";
-import type { DeploymentOptions } from "../releases.ts";
 /**
  * The control plane's HTTP API for the dashboard and the CLI. JSON in and out.
  *
@@ -50,11 +49,11 @@ import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDo
 import { refusalStatus } from "../http-error.ts";
 import { Refusal, type RefusalCode, type RefusalKind } from "../refusal.ts";
 import { ok, parse, type ApiKit, type RouteEntry } from "./kit.ts";
-import { admit, anyAllowed, apiAccess, refusal, type Policy, type Role } from "./access.ts";
+import { admit, anyAllowed, apiAccess, demand, type Policy, type Role } from "./access.ts";
 import { pylonAccess } from "./pylon-access.ts";
 import { eventStreams, maxStreams } from "./sse.ts";
 import { threadViews } from "./thread-view.ts";
-import { releaseRoutes } from "./release-routes.ts";
+import { releaseRoutes, type DeploymentOptions } from "./release-routes.ts";
 import { streamRoutes } from "./stream-routes.ts";
 import { projectRoutes } from "./project-routes.ts";
 import { usageRoutes } from "./usage-routes.ts";
@@ -255,8 +254,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (atPath.length === 0) throw new Refusal("missing", `no route ${path}`, "no-route");
     if (match === undefined) throw new Refusal("method", `${req.method} is not allowed on ${path}`);
     const { entry: [, , policy, route], m } = match;
-    const refused = refusal(roles, policy);
-    if (refused !== null) throw refused;
+    demand(roles, policy);
     const url = new URL(req.url ?? "/", "http://nexus");
     const run = () => route(m, { query: url.searchParams, caller, roles, host, body: (empty) => readJson(req, empty) });
     const reply = policy.startsTurn ? await gate.run(async () => run()) : await run();
@@ -311,8 +309,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    * as it maps any route's. A terminal takes a place among the streams, so a delete ends it too.
    */
   async function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
-    const refused = refusal((await admitted(req, attach)).roles, attach);
-    if (refused !== null) throw refused;
+    demand((await admitted(req, attach)).roles, attach);
     if (stopping) throw new Refusal("unavailable", "the control plane is stopping");
     // CORS does not guard a WebSocket handshake, and previews are served under the API's hostname on other ports, so
     // a preview's page could open a terminal from the browser of anyone allowed. A browser always sends Origin.

@@ -1,5 +1,5 @@
 /** The API wired as the control plane wires it, over a fake harness and probe, for the API, dashboard and CLI suites. */
-import type { DeploymentOptions } from "../control/releases.ts";
+import type { DeploymentOptions } from "../control/api/release-routes.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { once } from "node:events";
