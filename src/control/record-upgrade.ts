@@ -70,11 +70,15 @@ function codeOfText(text: string): HoldCode {
 
 /**
  * A pylon record saved before a failed wake for reading went to the usage hold kept one apart in `readFailure`, or
- * before that in `last`, marked `reading: true`. Either is dropped, so a hold that still reads the pylon wakes it again.
+ * before that in `last`, marked `reading: true`. The upgrade drops it from the attempts and returns it as `readFailure`,
+ * for the hold that reads the pylon to give up on.
  */
-export function upgradeAttempts(attempts: Attempts): Attempts {
-  const { readFailure: _, ...kept } = attempts as Attempts & { readFailure?: FailedAttempt };
-  return (kept.last as (FailedAttempt & { reading?: true }) | null)?.reading === true ? noAttempts : kept;
+export function upgradeAttempts(attempts: Attempts): { attempts: Attempts; readFailure: FailedAttempt | null } {
+  const { readFailure, ...kept } = attempts as Attempts & { readFailure?: FailedAttempt };
+  const last = kept.last as (FailedAttempt & { reading?: true }) | null;
+  if (last?.reading !== true) return { attempts: kept, readFailure: readFailure ?? null };
+  const { reading: _, ...failure } = last;
+  return { attempts: noAttempts, readFailure: failure };
 }
 
 /** A job sent for reading before steps were marked `uncounted` was marked `reading: true`. */

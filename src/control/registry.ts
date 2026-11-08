@@ -39,7 +39,7 @@ export function openRegistry(path: string, clock = Date.now, log = (message: str
   const { participant: queueing, ...queue } = queueStore(kernel, saveStartKey);
   const { participant: usageHolding, ...usage } = usageStore(kernel, { threadRecord, archivedAt, recordSettle });
   participants.push(reviewing, asking, nudging, watching, queueing, usageHolding);
-  start();
+  for (const [thread, failure] of start()) usage.failUsageRead(thread, failure);
 
   return {
     close() { kernel.db.close(); },

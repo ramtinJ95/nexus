@@ -176,10 +176,12 @@ const attemptFixtures: [string, Attempts][] = [
 
 test("the upgrade gives every stored-attempts fixture what tick's upgradeAttempts gave it, less a failed wake for reading, which an older tick and the upgrade leave as it is", () => {
   for (const [name, attempts] of attemptFixtures) {
-    const upgraded = upgradeAttempts(structuredClone(attempts));
+    const { attempts: upgraded, readFailure: taken } = upgradeAttempts(structuredClone(attempts));
     assert.deepEqual(upgraded, droppingReadFailure(structuredClone(attempts)), name);
+    const kept = (tickUpgradeAttempts(structuredClone(attempts)) as Attempts & { readFailure?: FailedAttempt }).readFailure;
+    assert.deepEqual(taken, kept ?? null, `${name}: the failed wake for reading it drops is the one it hands the hold`);
     assert.deepEqual(tickUpgradeAttempts(structuredClone(upgraded)), upgraded, `${name}: an older control plane reads it unchanged`);
-    assert.deepEqual(upgradeAttempts(structuredClone(upgraded)), upgraded, `${name}: it upgrades no further`);
+    assert.deepEqual(upgradeAttempts(structuredClone(upgraded)), { attempts: upgraded, readFailure: null }, `${name}: it upgrades no further`);
   }
 });
 
@@ -204,6 +206,23 @@ test("a registry opened over a pylon's older attempts rewrites them upgraded onc
   const stored = (id: string) => JSON.parse((db.prepare("SELECT attempts FROM pylons WHERE id = ?").get(id) as { attempts: string }).attempts);
   assert.deepEqual(stored(older.pylonId), droppingReadFailure(structuredClone(legacy)), "the upgraded attempts are what the registry holds");
   assert.deepEqual(stored(current.pylonId), kept);
+});
+
+test("a registry opened over a failed wake for reading an older control plane kept on the pylon gives up the run's hold on it with the reason it gave", async (t) => {
+  const path = join(await tempDir("record-upgrade", t), "registry.db");
+  const first = seedRegistry(openRegistry(path));
+  const held = addThread(first);
+  first.setThreadStatus(held.id, "archived");
+  first.startUsageBackfill([held.id], 1);
+  first.holdUsageBackfill(held.id, 1);
+  first.savePylon({ ...first.pylon(held.pylonId)!, attempts: { count: 0, last: null, readFailure: { at: 2, code: "setup-failed", message: "the disk is full" } } as Attempts });
+  first.close();
+
+  const registry = testRegistry(t, path);
+  assert.deepEqual(registry.pylon(held.pylonId)!.attempts, noAttempts);
+  assert.deepEqual(registry.usageHold(), { by: "run", thread: held.id, phase: "pausing", since: 2 }, "the hold waits for the pause, so the planner wakes the pylon no more");
+  const row = registry.usageBackfillThreads().find((r) => r.thread === held.id)!;
+  assert.deepEqual([row.state, row.reason], ["skipped", "the pylon did not boot: setup-failed: the disk is full"]);
 });
 
 test("a job sent for reading that an older control plane marked `reading` is marked uncounted, and every other is left as it is", () => {
