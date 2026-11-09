@@ -1571,7 +1571,8 @@ test("show prints each question with its options, its reserved case, and who mus
   assert.deepEqual((await s.json(["show", thread.id])).questions.map((q: { id: string }) => q.id), ["qn-image", "qn-brief"]);
   s.registry.askQuestion({ kind: "judgment", id: "qn-failed", thread: thread.id, text: "The pylon failed.", options: ["Retry"], reserved: null, answerer: "person", askedAt: 3, failure: 1 });
   await s.json(["archive", thread.id]);
-  assert.match((await s.nexus(["show", thread.id])).stdout, /^question qn-failed: The pylon failed\.\n {2}options: "Retry"\n {2}withdrawn when the thread was archived at \d{4}-\d\d-\d\dT[\d:.]+Z$/m, "archiving withdraws an open failure question");
+  const { at } = (await s.json(["show", thread.id])).questions.find((q: Question) => q.id === "qn-failed").withdrawn;
+  assert.ok((await s.nexus(["show", thread.id])).stdout.includes(`question qn-failed: The pylon failed.\n  options: "Retry"\n  withdrawn when the thread was archived at ${new Date(at).toISOString()}\n`), "archiving withdraws an open failure question, at the time the API records");
 });
 
 test("show prints a Claude worker's ask with a line per question it asks, and the choices that answered it in one line", async (t) => {
