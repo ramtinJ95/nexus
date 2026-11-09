@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import type { NodeName, ProjectId, PylonId } from "../ids.ts";
 import { githubTokenGrant } from "../protocol/secret-grants.ts";
 import { renderOverlay, type PylonOverlay } from "./overlay.ts";
+import { latest } from "./agent-protocol.ts";
+import { noChangeAnswer } from "./prompts.ts";
 
 const overlay: PylonOverlay = {
   pylonId: "pylon-th-1" as PylonId,
@@ -15,6 +17,7 @@ const overlay: PylonOverlay = {
   dotfiles: { repo: "https://github.com/example/dotfiles.git", ref: "main" },
   repo: { kind: "empty", branch: "main" },
   secrets: [],
+  reviewsBuilders: false,
 };
 const guide = renderOverlay(overlay).find((f) => f.path === "/home/user/.nexus/PYLON.md")!.content;
 const section = (heading: string) => guide.split(`\n## ${heading}\n`)[1]!.split("\n## ")[0]!;
@@ -24,6 +27,13 @@ test("the guide's reviewer spawn names every field shepherdr requires for it", (
   assert.match(review, /`agent_type: "reviewer"`/);
   assert.match(review, /`label`/);
   assert.match(review, /`base`/);
+});
+
+test("in a project that reviews its builders, the guide shows the no-change block under the thread's own token, which the nudger reads", () => {
+  const reviewed = renderOverlay({ ...overlay, reviewsBuilders: true }).find((f) => f.path === "/home/user/.nexus/PYLON.md")!.content;
+  const noChange = reviewed.split("\n## When the task needs no change\n")[1]!.split("\n## ")[0]!;
+  assert.deepEqual(latest([noChange], noChangeAnswer.fence, noChangeAnswer.schema, overlay.threadId), { token: "th-1", reason: "why no change is needed, and how you checked" });
+  assert.ok(!guide.includes("nexus-no-change"), "a project that does not review its builders has no use for the block");
 });
 
 test("the guide's Shell section warns that pkill -f matches its own command and says when a bracket pattern avoids it", () => {

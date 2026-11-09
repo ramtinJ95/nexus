@@ -15,6 +15,7 @@ import type { BootInputs } from "../../protocol/spawn.ts";
 import type { Project } from "../project.ts";
 import { observedPylon } from "../observed.ts";
 import { watchStopped } from "../pr-watch-model.ts";
+import { noChangeOf } from "../work-model.ts";
 import { herdrClient } from "../../guest-contract.ts";
 import { threadSaid } from "../wording.ts";
 
@@ -80,6 +81,7 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
       thread: t,
       ...claudeWorker === undefined ? {} : { claudeWorker, resume: registry.threads.claudeResume(t.id) },
       attention: registry.threads.attention(t.id), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
+      noChange: noChangeOf(registry, t.id),
       desired: desiredPhase(t, now),
       // An absent pylon has no disk to keep.
       keptPastDay: state.actualState === "absent" ? null : keptPastDay(t, now),

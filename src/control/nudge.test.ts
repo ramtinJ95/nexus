@@ -9,6 +9,7 @@ import { testPr, testPylon, testRegistry, testThread, claudeWorkerAt } from "../
 import { agentInbox, type Inbox } from "./inbox.ts";
 import { fakeHarness } from "../test-support/fake-harness.ts";
 import { builderNudger } from "./nudge.ts";
+import { threadQueue, waitOf } from "./queue.ts";
 import { agentReader } from "./agent-conversation.ts";
 import { prWatcher } from "./pr-watch.ts";
 import { pushedBranches } from "./pr-watch-model.ts";
@@ -26,6 +27,9 @@ import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation } fr
 const node = "node" as NodeName;
 const session = "c0ffee00-0000-4000-8000-000000000000";
 const repo = "acme/repo";
+
+/** What a nudger reads of the threads' agents, and a planner it tells of nothing. */
+const reads = (agents: ReturnType<typeof agentReader>) => ({ personWroteTo: agents.personWrote, replies: agents.replies, wake() {} });
 
 const assistant = (text: string) => ({
   role: "assistant", content: [{ type: "text", text }], stopReason: "stop", api: "x", provider: "x", model: "gpt-test", timestamp: 0,
@@ -76,7 +80,7 @@ function fixture(t: import("node:test").TestContext) {
     },
   };
   const watch = prWatcher({ registry, github, inbox });
-  const nudger = builderNudger({ registry, inbox, personWroteTo: agentReader(registry, fake.harness).personWrote, watch, log: (message) => logs.push(message), github });
+  const nudger = builderNudger({ registry, inbox, ...reads(agentReader(registry, fake.harness)), watch, log: (message) => logs.push(message), github });
   const claudes = new Set<ThreadId>();
   const claudeSeq = new Map<ThreadId, number>();
   const pushes = new Map<PylonId, { at: number; ref: string }[]>();
@@ -182,6 +186,66 @@ test("a builder whose turn ended without a pull request gets one nudge once its 
   assert.notEqual(f.registry.threads.attention(id), "decision");
 });
 
+test("a builder that declares its task needs no change is archived instead of nudged, and the thread queued after it starts", async (t) => {
+  // U56 found that U55 (#545) had already done its work and correctly opened no pull request, but was nudged twice and
+  // handed to the person, while U114, queued after it, waited on "has no pull request yet" until a person started it.
+  const f = fixture(t);
+  const builder = await f.add("th-u56", { claude: true });
+  const quoting = await f.add("th-quoting");
+  const corrected = await f.add("th-corrected");
+  const starts: ThreadId[] = [];
+  const queue = threadQueue({ registry: f.registry, gate: { run: (action) => action() }, send: async () => {}, async startThread({ queued }) { starts.push(queued!); throw new Error("not started in this test"); } });
+  f.registry.queue.saveQueued({
+    id: "th-u114" as ThreadId, title: "U114", project: "reviewed" as ProjectId, startedBy: "nLAPTOP", createdAt: 1, after: [builder],
+    request: { project: "reviewed", title: "U114", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
+  });
+  const reason = "U55 (#545) already made every change this task asks for, and main has them";
+  const declaration = (token: string) => `\`\`\`nexus-no-change\n${JSON.stringify({ token, reason })}\n\`\`\``;
+  f.turn(builder, `Checked main: nothing is left to do.\n\n${declaration(builder)}`);
+  f.turn(quoting, `The other thread said:\n\n${declaration(builder)}`);
+  f.turn(corrected, declaration(corrected));
+  f.tick(1);
+  f.turn(corrected, "Correction: the task does need changes, and I am blocked on the schema.");
+  const trailing = await f.add("th-trailing");
+  f.turn(trailing, `${declaration(trailing)}\n\nCorrection: changes are still required.`);
+  const turnEnd = f.registry.threads.thread(builder)!.lastReplyAt!;
+  f.tick(gitPollMs);
+  await f.pass();
+  await queue.poll();
+  assert.deepEqual(f.nudges().map((n) => n.thread).sort(), [corrected, quoting, trailing], "only a final answer that ends with the builder's own token goes without a nudge");
+  assert.equal(f.registry.threads.thread(builder)!.status, "archived");
+  assert.deepEqual(f.registry.nudges.nudge(builder), { state: "no-change", turn: turnEnd, reason, archived: true });
+  assert.deepEqual(waitOf(f.registry, builder), { thread: builder, state: "landed", why: `needs no change: ${reason}` });
+  assert.deepEqual(starts, ["th-u114"], "the queued thread starts as if the builder's pull request had merged");
+  f.tick(gitPollMs);
+  await f.pass();
+  assert.deepEqual(f.registry.nudges.nudge(builder)?.state, "no-change", "the archive keeps the declaration");
+  assert.equal(f.typed.length, 0, "the builder is never nudged");
+  f.link(builder, 546);
+  assert.deepEqual(waitOf(f.registry, builder), { thread: builder, state: "blocked", why: "is archived and its pull request did not merge" }, "a pull request linked since decides instead");
+});
+
+test("a declared builder is archived after a visit to it, a pass after a crash before its archive archives it, and one the person unarchives stays open", async (t) => {
+  const f = fixture(t);
+  const visited = await f.add("th-visited");
+  const crashed = await f.add("th-crashed");
+  const reason = "main already has it";
+  f.turn(visited, `\`\`\`nexus-no-change\n${JSON.stringify({ token: visited, reason })}\n\`\`\``);
+  f.tick(1);
+  f.registry.threads.recordActivity(visited, { human: f.now });
+  f.registry.nudges.saveNudge(crashed, { state: "no-change", turn: 1, reason, archived: false });
+  f.tick(gitPollMs);
+  await f.pass();
+  assert.equal(f.registry.threads.thread(visited)!.status, "archived", "opening its page or terminal is no message, so it does not keep the thread open");
+  assert.equal(f.registry.threads.thread(crashed)!.status, "archived");
+  assert.deepEqual(f.registry.nudges.nudge(crashed), { state: "no-change", turn: 1, reason, archived: true });
+  f.registry.threads.setThreadStatus(visited, "active");
+  f.tick(gitPollMs);
+  await f.pass();
+  assert.equal(f.registry.threads.thread(visited)!.status, "active", "an unarchive is the person's, and the pass leaves it");
+  assert.deepEqual(f.nudges(), []);
+});
+
 test("a pull request opened before the turn ended, whose branch the probe reports after a minute, gets no nudge", async (t) => {
   // Thread th-ee9a0b3c31e6 on 2026-10-28, in seconds after its push at 07:34:15: PR #174 opened at 27, the turn ended at
   // 57.4, and the PR watch linked #174 at 232.7. The probe read git half a second before the push and reused that
@@ -215,7 +279,7 @@ test("a PR watch pass already running once the turn's pushes are known does not 
   const f = fixture(t);
   const id = await f.add("th-1");
   const passes = { started: 1, finished: 0 };
-  const nudger = builderNudger({ registry: f.registry, inbox: async () => "delivered", personWroteTo: agentReader(f.registry, f.fake.harness).personWrote, watch: { passes: () => passes }, log: () => {}, github: f.github });
+  const nudger = builderNudger({ registry: f.registry, inbox: async () => "delivered", ...reads(agentReader(f.registry, f.fake.harness)), watch: { passes: () => passes }, log: () => {}, github: f.github });
   f.turn(id);
   f.tick(gitPollMs);
   f.observe();
@@ -534,7 +598,7 @@ test("a harness builder's nudge refused by a deploy's drain is kept and goes out
   let draining = true;
   const gate = turnGate(() => draining);
   const gated = builderNudger({
-    registry: f.registry, personWroteTo: agentReader(f.registry, f.fake.harness).personWrote, watch: f.watch, log: () => {}, github: f.github,
+    registry: f.registry, ...reads(agentReader(f.registry, f.fake.harness)), watch: f.watch, log: () => {}, github: f.github,
     inbox: agentInbox({ log: assert.fail, registry: f.registry, harness: { send: (...args) => gate.run(() => f.fake.harness.send(...args)) }, probes: new Map(), wake() {} }),
   });
   f.turn(id);
@@ -553,7 +617,7 @@ test("a nudge delivered just before a crash still counts after the builder ended
   const id = await f.add("th-1");
   const inbox = agentInbox({ log: assert.fail, registry: f.registry, harness: f.fake.harness, probes: new Map(), wake() {} });
   const nudger = (crash: boolean) => builderNudger({
-    registry: f.registry, personWroteTo: agentReader(f.registry, f.fake.harness).personWrote, watch: f.watch, log: () => {}, github: f.github,
+    registry: f.registry, ...reads(agentReader(f.registry, f.fake.harness)), watch: f.watch, log: () => {}, github: f.github,
     inbox: async (th, message) => { const result = await inbox(th, message); if (crash) throw new Error("the control plane stopped"); return result; },
   });
   const sent = () => new Set(f.nudges().map((n) => n.requestId)).size;
@@ -584,7 +648,7 @@ test("a nudge the drain held goes to neither a running turn nor a thread the per
   let draining = true;
   const gate = turnGate(() => draining);
   const gated = builderNudger({
-    registry: f.registry, personWroteTo: agentReader(f.registry, f.fake.harness).personWrote, watch: f.watch, log: () => {}, github: f.github,
+    registry: f.registry, ...reads(agentReader(f.registry, f.fake.harness)), watch: f.watch, log: () => {}, github: f.github,
     inbox: agentInbox({ log: assert.fail, registry: f.registry, harness: { send: (...args) => gate.run(() => f.fake.harness.send(...args)) }, probes: new Map(), wake() {} }),
   });
   const running = await f.add("th-running");
@@ -620,7 +684,7 @@ test("a pass reads no archived or deleted thread, except to clear a nudge it lef
   f.registry.threads.setThreadStatus(deleted, "deleted");
   const read: ThreadId[] = [];
   const registry = { ...f.registry, threads: { ...f.registry.threads, thread: (id: ThreadId) => { read.push(id); return f.registry.threads.thread(id); } } };
-  const nudger = builderNudger({ registry, inbox: async () => "delivered", personWroteTo: agentReader(registry, f.fake.harness).personWrote, watch: f.watch, log: () => {}, github: f.github });
+  const nudger = builderNudger({ registry, inbox: async () => "delivered", ...reads(agentReader(registry, f.fake.harness)), watch: f.watch, log: () => {}, github: f.github });
   await nudger.poll();
   assert.deepEqual(read, [active, nudged]);
   assert.equal(f.registry.nudges.nudge(nudged), null, "an archived thread's nudge is cleared, so its count starts over if it comes back");

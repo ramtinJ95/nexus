@@ -243,7 +243,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   }) });
   services.start({ everyMs: passMs, poll: () => registry.threads.retainEvents() });
   for (const polled of threads.polls) services.start(polled && { everyMs: passMs, poll: () => polled.poll() });
-  services.start(github === null ? null : { everyMs: passMs, ...builderNudger({ registry, github, inbox, personWroteTo: agents.personWrote, watch }) });
+  services.start(github === null ? null : { everyMs: passMs, ...builderNudger({ registry, github, inbox, personWroteTo: agents.personWrote, replies: agents.replies, wake: wakeThread, watch }) });
   services.start({ everyMs: passMs, ...deadTurnResumer({ registry, inbox, personWroteTo: agents.personWrote }) });
   // Judgments need no GitHub, so they run without a token too.
   services.start({ everyMs: passMs, ...judgmentPass({ registry, harness, probes: probeMap, wake }) });

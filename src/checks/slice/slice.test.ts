@@ -631,7 +631,7 @@ test("the sessions open before the pause come back after the wake", async () => 
 test("the in-pylon CLI reaches the probe through the host bridge, and a declared output reaches the observation", async () => {
   const pylonJson = renderOverlay({
     pylonId, threadId: thread, project: "slice" as ProjectId, node, allowedHosts: [], previews: [], logins: [],
-    dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, repo: { kind: "empty", branch: "main" }, secrets: [],
+    dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, repo: { kind: "empty", branch: "main" }, secrets: [], reviewsBuilders: false,
   }).find((f) => f.path === pylonInfoFile)!.content;
   await fixture.installCli(pylonJson);
   const nexus = async (...args: string[]) => {

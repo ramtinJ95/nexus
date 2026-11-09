@@ -2,9 +2,13 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
-## 0.75.0
+## 0.76.0
 
 `POST /v1/threads/<thread>/review` answers once the review is recorded, and the loop starts its reviewer threads after, so `Review` gains `reviewerStarted`, false until then, and `reviewer` names a thread that appears once it starts. A refused reviewer start holds the review for the person instead of refusing the request. `Review` gains `earlierRounds`, the rounds the PR's earlier reviews spent: a later review of a PR gets what they left of the 5, `review` fails with exit code 5 once none are left unless `--rounds N` grants more, and `ReviewView.round` and `maxRounds` count the PR's reviews, so `maxRounds` may be above 5. A review of a PR that another builder's unsettled review holds fails with exit code 5. `POST /v1/threads` answers 409 to a request ID whose thread is archived or deleted, or whose queued start was cancelled. The CLI says a change whose answer timed out after it went out may have gone through.
+
+## 0.75.0
+
+Adds `ThreadDetail.noChange`: why the builder found that its task needs no change, as it declared in a `nexus-no-change` block instead of opening a pull request, or null. `show` prints it as an `outcome:` line, and prints none for an older control plane, which omits the field. A queued thread's `Wait` on such a builder reads `landed`, with `why` set to `needs no change: <the reason>`.
 
 ## 0.74.0
 

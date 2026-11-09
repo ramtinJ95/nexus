@@ -1,7 +1,8 @@
 /**
  * Queued threads: a thread recorded now, with everything its start needs, that starts once each thread it is queued
- * after has merged its pull request, whether the review loop landed it or someone merged it outside the loop. One
- * queued after no thread, as a pipeline item with no item ahead of it is, starts on the next pass.
+ * after has merged its pull request, whether the review loop landed it or someone merged it outside the loop, or has
+ * declared that its task needs no change. One queued after no thread, as a pipeline item with no item ahead of it is,
+ * starts on the next pass.
  *
  * A queued thread has no `threads` row, so the planner, PR watch, the review loop and placement never see it. Its
  * record keeps the ID the thread gets, and the transaction that inserts the thread's row marks the record started,
@@ -19,11 +20,11 @@ import type { Start, StartKey, StartRequest } from "./start-request.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 import type { QueuedThread, Wait } from "../contract/threads.ts";
 import { deliverDurable } from "./durable-message.ts";
-import { prLocationOf, servesReview, threadRole } from "./work-model.ts";
+import { noChangeOf, prLocationOf, servesReview, threadRole } from "./work-model.ts";
 import { brokenRule, startRules } from "../contract/threads-parse.ts";
 import { isOpenStatus } from "./reconcile.ts";
 
-type QueueRegistry = Pick<Registry, "threads" | "images" | "reviews" | "nodeMetrics" | "nodes" | "now" | "planning" | "prWatches" | "projects" | "queue" | "placement">;
+type QueueRegistry = Pick<Registry, "threads" | "images" | "reviews" | "nodeMetrics" | "nodes" | "now" | "nudges" | "planning" | "prWatches" | "projects" | "queue" | "placement">;
 
 export interface ThreadQueue {
   /** Validates and records, with `key` if given; throws a Refusal. Does not start it; the caller calls poll() after. */
@@ -43,7 +44,10 @@ const waiting = (thread: ThreadId, why: string): Wait => ({ thread, state: "wait
 const landed = (thread: ThreadId, why: string): Wait => ({ thread, state: "landed", why });
 const blocked = (thread: ThreadId, why: string): Wait => ({ thread, state: "blocked", why });
 
-/** A merge wins over an archive, so a predecessor archived after its pull request merged still landed. */
+/**
+ * A merge wins over an archive, so a predecessor archived after its pull request merged still landed. So does a
+ * builder's declaration that its task needs no change (nudge.ts), which archives it, while it has no pull request.
+ */
 export function waitOf(registry: QueueRegistry, id: ThreadId): Wait {
   const t = registry.threads.thread(id);
   if (t === undefined) {
@@ -57,6 +61,8 @@ export function waitOf(registry: QueueRegistry, id: ThreadId): Wait {
   const review = registry.reviews.review(id);
   const where = prLocationOf(registry, id);
   if (where.kind === "merged") return landed(id, `PR #${where.number} merged`);
+  const noChange = noChangeOf(registry, id);
+  if (noChange !== null) return landed(id, `needs no change: ${noChange}`);
   if (!isOpenStatus(t.status)) return blocked(id, `is ${t.status} and its pull request did not merge`);
   if (review?.phase.kind === "needs-person") return blocked(id, `its review ended for the person: ${review.phase.holds[0]?.text ?? "no reason given"}`);
   if (where.kind === "closed") return blocked(id, `PR #${where.number} closed without merging`);

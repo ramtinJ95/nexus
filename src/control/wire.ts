@@ -26,6 +26,8 @@ export interface ThreadDetail {
   claudeWorker?: { model: string | null; state: ClaudeWorkerState; message?: string };
   /** Nexus resuming the Claude worker after its turns died, or null. */
   resume?: ClaudeResume | null;
+  /** Why the builder found that its task needs no change, as it declared instead of opening a pull request, or null. */
+  noChange: string | null;
   attention: Attention;
   seenAt: number | null;
   lastReplyAt: number | null;
