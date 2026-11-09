@@ -15,7 +15,7 @@ import { threadRoutes as routes, type QueuedThread } from "../../contract/thread
 import { activitySchema, messageSchema, seenSchema, startSchema } from "../../contract/threads-parse.ts";
 
 export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEntry[] {
-  const { lookup, thread, guard, wakeThread, row, shown, open, registry, harness, startThread, agents, agentOf } = kit;
+  const { lookup, thread, guard, wakeThread, rows, shown, open, registry, harness, startThread, agents, agentOf } = kit;
 
   const queueOrRefuse = () => feature(features, "queue");
 
@@ -133,7 +133,7 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
   return [
     on(routes.list, anyAllowed, (_, r) => {
       const threads = registry.threads.threads(r.query.project as ProjectId | undefined);
-      return ok((r.query.deleted === false ? threads.filter((t) => t.status !== "deleted") : threads).map(row));
+      return ok(rows(r.query.deleted === false ? threads.filter((t) => t.status !== "deleted") : threads));
     }),
     on(routes.start, { role: "person", action: "start a thread", startsTurn: true }, async (_, r) => {
       return created(await start(await r.body(), r.caller));

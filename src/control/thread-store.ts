@@ -63,6 +63,8 @@ export type ThreadAgent = { kind: "harness"; conversationId: string } | { kind: 
 
 /** What the registry keeps of a pylon. The desired phase is derived from its thread on every tick. */
 export type StoredPylon = Omit<PylonRecord, "desired" | "thread"> & { thread: ThreadId };
+/** A pylon's node, its failure, its job in flight or last finished, and its thread's attention. */
+export interface ListedPylon { node: NodeName; failed: string | null; job: JobStatus | null; attention: Attention }
 
 /**
  * A session of a pylon. `id` names it, and is what closes it: its Herdr pane, or `failed-` and a hash for a failed
@@ -774,6 +776,15 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     job(subject: Subject): JobStatus | undefined {
       const row = sql("SELECT status FROM jobs WHERE subject = ?").get(subject) as Row | undefined;
       return row && json<JobStatus>(row.status);
+    },
+
+    /** What a list row shows of each pylon and its thread, in one query that leaves the boot and live specs unread. */
+    listedPylons(pylons: readonly PylonId[]): Map<PylonId, ListedPylon> {
+      return new Map(sql(`SELECT p.id, p.node, p.failed, j.status AS job, a.attention FROM pylons p
+        LEFT JOIN jobs j ON j.subject = p.id LEFT JOIN thread_attention a ON a.thread = p.thread WHERE p.id IN (SELECT value FROM json_each(?))`)
+        .all(JSON.stringify(pylons)).map((r) => [r.id as PylonId, {
+          node: r.node as NodeName, failed: r.failed as string | null, job: jsonOrNull<JobStatus>(r.job), attention: (r.attention ?? null) as Attention,
+        }]));
     },
 
     /**

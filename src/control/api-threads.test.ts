@@ -11,7 +11,8 @@ import type { Judgment } from "./judgment-store.ts";
 import type { Thread } from "./thread-store.ts";
 import { liveHashOf } from "../protocol/spawn.ts";
 import { processStream } from "../process-stream.ts";
-import { runningPylon, testCapacity, testObservation } from "../test-support/kit.ts";
+import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../test-support/kit.ts";
+import { addThread, observeNode, seedRegistry } from "../test-support/registry-kit.ts";
 import type { JobId, NodeName, TailnetNodeId } from "../ids.ts";
 import { node, laptop, project, image, dotfiles, withThread, withImage, withQueue, localCheckout } from "../test-support/api-kit.ts";
 
@@ -118,6 +119,34 @@ test("the thread list leaves deleted threads out when asked, as the dashboard as
   assert.deepEqual(await ids("/v1/threads"), [s.thread.id, gone.id]);
   assert.deepEqual(await ids("/v1/threads?deleted=false"), [s.thread.id]);
   assert.deepEqual(await ids("/v1/threads?project=acme&deleted=false"), [s.thread.id]);
+});
+
+test("each row of the list says what its thread's detail says, over threads on two nodes", async (t) => {
+  const s = await withImage(t);
+  const bench = "infra-testbench" as NodeName;
+  seedRegistry(s.registry, { nodes: [bench] });
+  const add = (on: NodeName, createdAt: number) => addThread(s.registry, { node: on, thread: { createdAt } });
+  const [running, pausing, archived, failed, deleted] = [add(node, 1), add(node, 2), add(bench, 3), add(bench, 4), add(node, 5)];
+  for (const f of [failed, deleted]) s.registry.threads.savePylon({ ...s.registry.threads.pylon(f.pylonId)!, failed: "setup exited 1" });
+  s.registry.threads.setThreadStatus(archived.id, "archived");
+  s.registry.threads.setThreadStatus(deleted.id, "deleted");
+  s.registry.threads.recordReply(running.id, Date.now());
+  s.registry.threads.apply({ record: "job", status: { jobId: "job-1" as JobId, subject: pausing.pylonId, kind: "pause", state: "running", startedAt: "2027-01-01T00:00:00Z" } });
+  observeNode(s.registry, { node, pylons: [runningPylon(running.pylonId), runningPylon(pausing.pylonId)] });
+  observeNode(s.registry, { node: bench, pylons: [stoppedPylon(archived.pylonId)] });
+
+  const listed = async () => {
+    const rows = (await s.call("GET", "/v1/threads")).body as ThreadRow[];
+    const details = await Promise.all(rows.map(async (r) => (await s.call("GET", `/v1/threads/${r.id}`)).body as ThreadDetail));
+    assert.deepEqual(rows, details.map((d) => ({ ...d.thread, attention: d.attention, desired: d.desired, pylon: { node: d.pylon.node, actualState: d.pylon.actualState, failed: d.pylon.failed } })));
+    return rows.map((r) => [r.id, r.pylon.node, r.pylon.actualState, r.attention]);
+  };
+  assert.deepEqual(await listed(), [
+    [running.id, node, "running", "reply"], [pausing.id, node, "pausing", null], [archived.id, bench, "paused", null],
+    [failed.id, bench, "failed", "failed"], [deleted.id, node, "absent", "failed"],
+  ]);
+  s.registry.nodes.markOffline(bench);
+  assert.deepEqual((await listed()).map(([, , state]) => state), ["running", "pausing", "unknown", "unknown", "absent"], "an offline node's pylons are unknown");
 });
 
 test("retrying a failed pylon clears the planner's verdict and its attempts, marks the retry, counts as human activity and wakes its node", async (t) => {
