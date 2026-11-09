@@ -1056,7 +1056,7 @@ export function reviewLoop(deps: ReviewDeps) {
   const starting = (rule: string, model: string): SecondReviewer => ({ kind: "starting", rule, model, since: now(), tried: null, why: null });
   /**
    * The starting second reviewer's thread, with the first request at the round's head. A start refused, as when no
-   * node has room, is tried again a minute later, and one that has not started within `secondStartMs` gives up, so
+   * node has room, or that failed otherwise, is tried again a minute later, and one that has not started within `secondStartMs` gives up, so
    * the round goes on with the first reviewer alone and the landing holds for the person.
    */
   async function startSecond(r: Review, detail: Pick<PrSnapshot["detail"], "head" | "base" | "body">): Promise<Review> {
@@ -1069,10 +1069,11 @@ export function reviewLoop(deps: ReviewDeps) {
       const thread = await startReviewer(builder, `Second review of #${r.pr.number}: ${r.pr.title}`, r.pr.branch, second.model, true, asked);
       return { ...r, second: { kind: "claude", rule: second.rule, thread: thread.id, model: second.model, expect, asked, since: now(), nudges: 0, outbox: null } };
     } catch (err) {
-      if (!(err instanceof Refusal)) throw err;
-      if (now() - second.since < secondStartMs) return { ...r, second: { ...second, tried: now(), why: err.message } };
+      // A start fails before it records the thread, so trying again later starts none twice.
+      const why = (err as Error).message;
+      if (now() - second.since < secondStartMs) return { ...r, second: { ...second, tried: now(), why } };
       const { secondVerdict: _, ...alone } = round;
-      return { ...r, second: { kind: "none", rule: second.rule, why: `its thread did not start within ${secondStartMs / 60_000} minutes: ${err.message}` }, rounds: [...r.rounds.slice(0, -1), alone] };
+      return { ...r, second: { kind: "none", rule: second.rule, why: `its thread did not start within ${secondStartMs / 60_000} minutes: ${why}` }, rounds: [...r.rounds.slice(0, -1), alone] };
     }
   }
 
