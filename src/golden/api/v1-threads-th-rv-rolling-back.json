@@ -132,8 +132,19 @@
   },
   "reviewView": {
     "id": "rv-416",
+    "pr": 416,
     "head": "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
     "ended": false,
+    "phase": {
+      "kind": "rolling-back"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-rv-rolling-back-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": true,
     "holds": [],
     "press": {
       "kind": "lands",

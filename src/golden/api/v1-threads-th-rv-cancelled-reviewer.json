@@ -115,8 +115,19 @@
   },
   "reviewView": {
     "id": "rv-100",
+    "pr": 100,
     "head": "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4",
     "ended": true,
+    "phase": {
+      "kind": "cancelled"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-seeded-1",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": false,
     "holds": [],
     "press": {
       "kind": "lands",

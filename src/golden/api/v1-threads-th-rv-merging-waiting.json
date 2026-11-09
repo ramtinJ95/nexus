@@ -129,8 +129,19 @@
   },
   "reviewView": {
     "id": "rv-414",
+    "pr": 414,
     "head": "aeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeae",
     "ended": false,
+    "phase": {
+      "kind": "merging"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-rv-merging-waiting-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": true,
     "holds": [],
     "press": {
       "kind": "lands",

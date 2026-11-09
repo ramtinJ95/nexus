@@ -166,8 +166,19 @@ exit 0
   },
   "reviewView": {
     "id": "rv-92",
+    "pr": 92,
     "head": "4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e",
     "ended": false,
+    "phase": {
+      "kind": "fixing"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-rv-fixing-failing-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": false,
     "holds": [],
     "press": {
       "kind": "lands",

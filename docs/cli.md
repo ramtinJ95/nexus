@@ -811,9 +811,19 @@ Since 0.71.0 `ThreadDetail.reviewView` says what the merge policy makes of `revi
 // src/control/review-view.ts
 interface ReviewView {
   id: string;
+  /** The number of the pull request it reviews. */
+  pr: number;
   /** The latest round's head, which a Land press names. */
   head: string;
   ended: boolean;
+  /** The review's phase, and while it waits on the person, why. */
+  phase: { kind: Exclude<PhaseKind, "needs-person"> } | { kind: "needs-person"; reasons: readonly string[] };
+  /** The rounds that count against `maxRounds`, as `nexus show` counts them, so a carried or repeated approval is not one. */
+  round: number;
+  maxRounds: number;
+  reviewer: { thread: ThreadId; model: string };
+  /** Whether it lands under the merge policy once approved, as `review --land` and `--auto-review land` ask. */
+  landsWhenApproved: boolean;
   /** The holds on the review now, each with whether it meets every landing of the head again and whether the person may waive it. */
   holds: readonly (Hold & HoldRule)[];
   press: LandPress;

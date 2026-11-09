@@ -37,7 +37,7 @@
       "id": "toolu_0002",
       "name": "Edit",
       "input": {
-        "file_path": "<repo>/src/control/usage-backfill.ts",
+        "file_path": "/home/user/workspace/repo/src/control/usage-backfill.ts",
         "old_string": "from: 0",
         "new_string": "from: cursor?.position ?? 0"
       }

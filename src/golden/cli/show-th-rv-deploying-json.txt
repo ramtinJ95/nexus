@@ -132,8 +132,19 @@ exit 0
   },
   "reviewView": {
     "id": "rv-415",
+    "pr": 415,
     "head": "bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf",
     "ended": false,
+    "phase": {
+      "kind": "deploying"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-rv-deploying-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": true,
     "holds": [],
     "press": {
       "kind": "lands",

@@ -178,8 +178,19 @@ exit 0
   },
   "reviewView": {
     "id": "rv-400",
+    "pr": 400,
     "head": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2",
     "ended": false,
+    "phase": {
+      "kind": "deploying"
+    },
+    "round": 2,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-drain-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": true,
     "holds": [],
     "press": {
       "kind": "lands",

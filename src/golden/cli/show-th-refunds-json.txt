@@ -141,8 +141,19 @@ exit 0
   },
   "reviewView": {
     "id": "rv-90",
+    "pr": 90,
     "head": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1",
     "ended": false,
+    "phase": {
+      "kind": "checking"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-refunds-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": false,
     "holds": [],
     "press": {
       "kind": "lands",

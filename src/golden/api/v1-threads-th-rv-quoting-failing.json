@@ -133,8 +133,19 @@
   },
   "reviewView": {
     "id": "rv-95",
+    "pr": 95,
     "head": "7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b",
     "ended": false,
+    "phase": {
+      "kind": "quoting"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-rv-quoting-failing-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": true,
     "holds": [],
     "press": {
       "kind": "lands",

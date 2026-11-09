@@ -191,8 +191,23 @@ exit 0
   },
   "reviewView": {
     "id": "rv-408",
+    "pr": 408,
     "head": "282d29de282d29de282d29de282d29de282d29de",
     "ended": true,
+    "phase": {
+      "kind": "needs-person",
+      "reasons": [
+        "Always needs the person: changes to secrets, as it changes src/control/secrets.ts.",
+        "The change at 282d29de282d differs from the one you waived at d1d1d1d1d1d1."
+      ]
+    },
+    "round": 2,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-tokens-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": false,
     "holds": [
       {
         "code": "reserved-path:secrets",

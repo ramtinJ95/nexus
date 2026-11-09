@@ -127,8 +127,19 @@
   },
   "reviewView": {
     "id": "rv-410",
+    "pr": 410,
     "head": "1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
     "ended": false,
+    "phase": {
+      "kind": "reviewing"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-rv-reviewing-starting-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": false,
     "holds": [],
     "press": {
       "kind": "lands",

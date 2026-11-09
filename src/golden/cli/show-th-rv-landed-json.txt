@@ -129,8 +129,19 @@ exit 0
   },
   "reviewView": {
     "id": "rv-417",
+    "pr": 417,
     "head": "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0",
     "ended": true,
+    "phase": {
+      "kind": "landed"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-rv-landed-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": true,
     "holds": [],
     "press": {
       "kind": "lands",

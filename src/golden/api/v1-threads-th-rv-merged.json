@@ -127,8 +127,19 @@
   },
   "reviewView": {
     "id": "rv-98",
+    "pr": 98,
     "head": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
     "ended": true,
+    "phase": {
+      "kind": "merged"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-rv-merged-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": false,
     "holds": [],
     "press": {
       "kind": "lands",

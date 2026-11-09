@@ -125,8 +125,19 @@
   },
   "reviewView": {
     "id": "rv-94",
+    "pr": 94,
     "head": "6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a",
     "ended": false,
+    "phase": {
+      "kind": "verifying"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-rv-verifying-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": false,
     "holds": [],
     "press": {
       "kind": "lands",

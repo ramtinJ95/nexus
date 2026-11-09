@@ -229,8 +229,24 @@ exit 0
   },
   "reviewView": {
     "id": "rv-398",
+    "pr": 398,
     "head": "a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3",
     "ended": true,
+    "phase": {
+      "kind": "needs-person",
+      "reasons": [
+        "Finding F3 (P2) is still open after the last round.",
+        "The builder has not answered F3 in round 3.",
+        "The pull request's GitHub checks are pending."
+      ]
+    },
+    "round": 3,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-flaky-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": false,
     "holds": [
       {
         "code": "open-findings",

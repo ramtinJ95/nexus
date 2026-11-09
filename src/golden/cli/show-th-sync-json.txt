@@ -136,8 +136,19 @@ exit 0
   },
   "reviewView": {
     "id": "rv-57",
+    "pr": 57,
     "head": "g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1",
     "ended": false,
+    "phase": {
+      "kind": "verifying"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-sync-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": false,
     "holds": [],
     "press": {
       "kind": "lands",

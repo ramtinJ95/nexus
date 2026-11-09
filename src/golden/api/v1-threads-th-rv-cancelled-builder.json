@@ -122,8 +122,19 @@
   },
   "reviewView": {
     "id": "rv-419",
+    "pr": 419,
     "head": "f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3",
     "ended": true,
+    "phase": {
+      "kind": "cancelled"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-rv-cancelled-builder-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": false,
     "holds": [],
     "press": {
       "kind": "lands",

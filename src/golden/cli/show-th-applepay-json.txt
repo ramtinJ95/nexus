@@ -175,8 +175,19 @@ exit 0
   },
   "reviewView": {
     "id": "rv-88",
+    "pr": 88,
     "head": "d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2",
     "ended": false,
+    "phase": {
+      "kind": "reviewing"
+    },
+    "round": 2,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-applepay-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": false,
     "holds": [],
     "press": {
       "kind": "lands",

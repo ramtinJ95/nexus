@@ -126,8 +126,19 @@ exit 0
   },
   "reviewView": {
     "id": "rv-96",
+    "pr": 96,
     "head": "8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c",
     "ended": true,
+    "phase": {
+      "kind": "approved"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-rv-approved-review",
+      "model": "claude-sonnet-5-5"
+    },
+    "landsWhenApproved": false,
     "holds": [
       {
         "code": "claude-approved",

@@ -151,8 +151,19 @@
   },
   "reviewView": {
     "id": "rv-91",
+    "pr": 91,
     "head": "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
     "ended": false,
+    "phase": {
+      "kind": "fixing"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-rounding-review",
+      "model": "claude-sonnet-5-5"
+    },
+    "landsWhenApproved": false,
     "holds": [
       {
         "code": "claude-approved",
