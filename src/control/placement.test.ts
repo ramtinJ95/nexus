@@ -96,6 +96,8 @@ test("a start refused for room alone is a NoRoom, which room that frees can end,
   assert.throws(() => placeAuto(fakeRegistry([{ name: "a", total: 32, committed: 0 }]), kvm), (err: unknown) => err instanceof Refusal && !(err instanceof NoRoom)
     && /a cannot give a pylon KVM of its own/.test(err.message));
   assert.throws(() => placeAuto(fakeRegistry([{ name: "a", total: 32, committed: 0 }]), { ...need(), image: "img-elsewhere" }), (err: unknown) => err instanceof Refusal && !(err instanceof NoRoom));
+  assert.throws(() => placeAuto(fakeRegistry([{ name: "small", total: 8, committed: 0 }]), need(8)), (err: unknown) => err instanceof Refusal && !(err instanceof NoRoom)
+    && err.message === "no node can run this pylon: small has 8 GiB of memory, and the pylon needs 8 GiB with 1 GiB to spare", "a pylon no node could hold even empty never waits for room");
 });
 
 test("auto ranks nodes by the smaller of the memory their commitments and their host leave", () => {

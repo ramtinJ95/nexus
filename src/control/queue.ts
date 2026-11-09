@@ -153,13 +153,14 @@ export function threadQueue(options: {
 
   async function pass() {
     // A gate pylon that waits for room gets it before a builder that would take it, since a review held waiting for
-    // one keeps its pull request, and the threads queued after it, from landing.
-    const gateWaits = registry.reviews.reviewsToStep().some((r) => waitsForRoom(r.phase));
+    // one keeps its pull request, and the threads queued after it, from landing. Read before each start, since the
+    // review loop can save a wait while an earlier start is in flight.
+    const gateWaits = () => registry.reviews.reviewsToStep().some((r) => waitsForRoom(r.phase));
     for (const record of registry.queue.queuedThreads()) {
       if (record.status === "started") {
         await deliver(record.id).catch((err: unknown) => log(`queued thread ${record.id} started, but its first message was not sent yet: ${(err as Error).message}`));
       } else if (record.status === "queued" && (record.refused === undefined || Date.now() - record.refused.at >= refusedRetryMs)
-        && (record.startNow !== null || (!gateWaits && record.after.every((id) => waitOf(registry, id).state === "landed")))) {
+        && (record.startNow !== null || (record.after.every((id) => waitOf(registry, id).state === "landed") && !gateWaits()))) {
         // attempt records and logs why, and the next pass tries again.
         await start(record.id).catch(() => {});
       }

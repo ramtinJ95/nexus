@@ -1,6 +1,6 @@
 import type { BootInputs } from "../protocol/spawn.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
-import { diskRefusal } from "../disk-space.ts";
+import { diskRefusal, keptFreeGiB } from "../disk-space.ts";
 import { heldSecrets, type NodeCapacity, type NodeObservation, type PylonObservation } from "../protocol/observations.ts";
 import { desiredPhase, isOpenStatus, wantsToRun } from "./reconcile.ts";
 import { NoRoom, Refusal } from "./refusal.ts";
@@ -74,6 +74,10 @@ function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighe
   if (missing.length > 0) return refused(`has no secret ${missing.map(from).join(", ")}`);
   const ssh = [...need.repo.kind === "clone" ? [need.repo.url] : [], need.dotfiles.repo].filter((url) => !url.startsWith("https://"));
   if (ssh.length > 0 && !o.grants.gitSsh) return refused(`has no git SSH key to reach ${ssh.join(" and ")}`);
+  // Room that frees never gives a pylon more than the node has.
+  const disks = c.disks?.find((d) => d.pylons === true);
+  if (need.resources.memoryGiB + memoryHeadroomGiB > c.memoryGiB) return refused(`has ${gib(c.memoryGiB)} GiB of memory, and the pylon needs ${need.resources.memoryGiB} GiB with ${memoryHeadroomGiB} GiB to spare`);
+  if (disks !== undefined && need.resources.diskGiB + keptFreeGiB(disks.totalGiB) > disks.totalGiB) return refused(`has ${gib(disks.totalGiB)} GiB on the filesystem of its pylons' disks, too little for a ${need.resources.diskGiB} GiB pylon disk and the ${gib(keptFreeGiB(disks.totalGiB))} GiB it keeps free`);
   const { left, pending } = roomLeft(registry, node.name, o, c, need.resources);
   const held = heldRoom(registry, node.name, registry.now());
   pending.memoryGiB -= held;

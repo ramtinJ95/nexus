@@ -325,6 +325,18 @@ test("a queued builder does not start while a review's gate pylon waits for room
   f.review(gated, { kind: "verifying", startedAt: 2, thread: "th-verify-1" as ThreadId });
   await q.poll();
   assert.deepEqual(f.starts, [now.id, record.id]);
+
+  const first = q.add(f.request({ title: "First" }), null, [a], laptop);
+  const second = q.add(f.request({ title: "Second" }), null, [a], laptop);
+  const release = f.holdStarts();
+  const pass = q.poll();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(f.starts.slice(2), [first.id]);
+  f.review(gated, { kind: "verifying", startedAt: 3, thread: null, refused: "no node can run this pylon: rj-firebat is overcommitted", room: true });
+  release();
+  await pass;
+  assert.deepEqual(f.starts.slice(2), [first.id], "a wait saved while a start was in flight holds the next start");
+  assert.equal(f.registry.queue.queuedThread(second.id)!.status, "queued");
 });
 
 test("a Nexus agent thread's first message is sent once under its queued request ID, and again under it after a crash", async (t) => {
