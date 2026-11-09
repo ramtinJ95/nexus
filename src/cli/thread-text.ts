@@ -61,7 +61,8 @@ export function detailText({ thread: t, pylon: p, agent, sessions, previews, por
     ...(claudeWorker === undefined ? [] : [`Claude worker: ${claudeWorker.state}, model ${claudeWorker.model ?? "unknown"}`, ...(claudeWorker.message === undefined ? [] : [`failed: ${claudeWorker.message}`])]),
     `attention: ${attention ?? "none"}`,
     ...deathLines(t, resume),
-    ...noChange === null ? [] : [`outcome: needs no change, so it opened no pull request: ${noChange}`],
+    // A control plane older than 0.75.0 sends no noChange.
+    ...noChange == null ? [] : [`outcome: needs no change, so it opened no pull request: ${noChange}`],
     ...t.usageLimit === undefined ? [] : [`usage limit: ${usageLimitText(t.usageLimit, Date.now())}. \`nexus send ${t.id} continue\` resumes it once the limit resets`],
     `status: ${t.status}${t.working ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,

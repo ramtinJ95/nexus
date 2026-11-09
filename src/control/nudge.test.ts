@@ -206,11 +206,13 @@ test("a builder that declares its task needs no change is archived instead of nu
   f.turn(corrected, declaration(corrected));
   f.tick(1);
   f.turn(corrected, "Correction: the task does need changes, and I am blocked on the schema.");
+  const trailing = await f.add("th-trailing");
+  f.turn(trailing, `${declaration(trailing)}\n\nCorrection: changes are still required.`);
   const turnEnd = f.registry.threads.thread(builder)!.lastReplyAt!;
   f.tick(gitPollMs);
   await f.pass();
   await queue.poll();
-  assert.deepEqual(f.nudges().map((n) => n.thread).sort(), [corrected, quoting], "only a final answer that ends with the builder's own token goes without a nudge");
+  assert.deepEqual(f.nudges().map((n) => n.thread).sort(), [corrected, quoting, trailing], "only a final answer that ends with the builder's own token goes without a nudge");
   assert.equal(f.registry.threads.thread(builder)!.status, "archived");
   assert.deepEqual(f.registry.nudges.nudge(builder), { state: "no-change", turn: turnEnd, reason });
   assert.deepEqual(waitOf(f.registry, builder), { thread: builder, state: "landed", why: `needs no change: ${reason}` });

@@ -4,7 +4,7 @@ What each version of the API contract and the Mac `nexus` CLI changed, newest fi
 
 ## 0.75.0
 
-Adds `ThreadDetail.noChange`: why the builder found that its task needs no change, as it declared in a `nexus-no-change` block instead of opening a pull request, or null. `show` prints it as an `outcome:` line. A queued thread's `Wait` on such a builder reads `landed`, with `why` set to `needs no change: <the reason>`.
+Adds `ThreadDetail.noChange`: why the builder found that its task needs no change, as it declared in a `nexus-no-change` block instead of opening a pull request, or null. `show` prints it as an `outcome:` line, and prints none for an older control plane, which omits the field. A queued thread's `Wait` on such a builder reads `landed`, with `why` set to `needs no change: <the reason>`.
 
 ## 0.74.0
 

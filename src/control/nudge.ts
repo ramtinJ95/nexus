@@ -8,7 +8,7 @@
  * leaves the thread alone for good. A stalled turn whose replies end with the builder's no-change block gets no nudge:
  * the thread is archived with the block's reason, and a thread queued after it starts (queue.ts).
  */
-import { latest, senders } from "./agent-protocol.ts";
+import { endingBlock, senders } from "./agent-protocol.ts";
 import { gitPollMs } from "../protocol/observations.ts";
 import { singleFlight } from "../single-flight.ts";
 import { githubRepo, type GitHub } from "./github.ts";
@@ -131,8 +131,8 @@ export function builderNudger(options: {
       log(`${t.id}: nudge could not search GitHub for its pull request and will retry (${(err as Error).name})`);
       return;
     }
-    // Only the final answer counts, so a reply after a declaration, such as a correction, takes it back.
-    const declared = latest((await replies(t)).slice(-1), noChangeAnswer.fence, noChangeAnswer.schema, t.id);
+    // Only a block that ends the final answer counts, so a reply after it, such as a correction, takes it back.
+    const declared = endingBlock((await replies(t)).at(-1) ?? "", noChangeAnswer.fence, noChangeAnswer.schema, t.id);
     const fresh = idleBuilder(t.id);
     if (fresh === undefined || fresh.lastReplyAt !== turn) return;
     if (declared !== null) {

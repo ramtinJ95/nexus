@@ -57,6 +57,15 @@ export const tokenBlocks = <T extends { token: string }>(replies: readonly strin
     return parsed.success && parsed.data.token === token ? [parsed.data] : [];
   });
 
+/**
+ * The fenced `fence` block that ends `reply`, with nothing but whitespace after it, if its JSON matches `schema` and
+ * echoes `token`, or null. Text after the block, such as a correction, takes it back.
+ */
+export function endingBlock<T extends { token: string }>(reply: string, fence: string, schema: z.ZodType<T>, token: string): T | null {
+  const last = reply.slice(reply.lastIndexOf("```" + fence));
+  return new RegExp("^```" + fence + "[ \\t]*\\r?\\n[\\s\\S]*?\\r?\\n[ \\t]*```\\s*$").test(last) ? latest([last], fence, schema, token) : null;
+}
+
 /** The newest fenced `fence` block in the replies whose JSON matches `schema` and echoes `token`, or null when none does. */
 export const latest = <T extends { token: string }>(replies: readonly string[], fence: string, schema: z.ZodType<T>, token: string): T | null =>
   tokenBlocks(replies, fence, schema, token).at(-1) ?? null;
