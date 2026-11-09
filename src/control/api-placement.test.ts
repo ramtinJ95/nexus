@@ -157,7 +157,7 @@ test("the first start of a setup builds its template on the node, the next waits
   s.remoteReads(async () => ({ commit: first, setupBlob: "b".repeat(40) }));
 
   const building = (await s.call("POST", "/v1/threads", { project: "acme", title: "First", branch: "feature" })).body as Thread;
-  const [template] = s.registry.templates(project.id as ProjectId);
+  const [template] = s.registry.images.templates(project.id as ProjectId);
   assert.ok(template?.state === "building");
   assert.deepEqual(building.setup, { how: "fresh", reason: `no template of this setup is on ${node} yet`, building: template.id });
   assert.deepEqual([template.on, template.inputs.repo, template.submitted], [node, { url: project.repoUrl, branch: "feature", commit: first }, null], "the build checks out the commit the setup was read at");
@@ -166,10 +166,10 @@ test("the first start of a setup builds its template on the node, the next waits
 
   const waiting = (await s.call("POST", "/v1/threads", { project: "acme", title: "Second", branch: "feature" })).body as Thread;
   assert.deepEqual(waiting.setup, { how: "fresh", reason: `template ${template.id} of this setup is still building on ${node}`, building: template.id });
-  assert.equal(s.registry.templates(project.id as ProjectId).length, 1, "a running build is not started twice");
+  assert.equal(s.registry.images.templates(project.id as ProjectId).length, 1, "a running build is not started twice");
 
   const builtAt = Date.now() - 60_000;
-  s.registry.saveTemplate({ id: template.id, key: template.key, state: "ready", builtOn: node, builtAt, commit: first });
+  s.registry.images.saveTemplate({ id: template.id, key: template.key, state: "ready", builtOn: node, builtAt, commit: first });
   observeNode(s, node, { total: 64, committed: 0 }, { artifacts: [image.id, template.id] as NodeObservation["artifacts"] });
   s.remoteReads(async () => ({ commit: moved, setupBlob: "b".repeat(40) }));
   const reused = (await s.call("POST", "/v1/threads", { project: "acme", title: "Third", branch: "feature" })).body as Thread;
@@ -185,7 +185,7 @@ test("a start whose setup cannot be read boots fresh and says why, and only a fu
   const s = await withImage(t);
   const unread = (await s.call("POST", "/v1/threads", { project: "acme", title: "Unread" })).body as Thread;
   assert.deepEqual(unread.setup, { how: "fresh", reason: "the control plane could not read .nexus/setup at main: this test has no remote" });
-  assert.deepEqual(s.registry.templates(project.id as ProjectId), []);
+  assert.deepEqual(s.registry.images.templates(project.id as ProjectId), []);
   assert.deepEqual(s.registry.threads.pylon(unread.pylonId)!.firstBoot, { kind: "fresh", preSetup: null });
 
   const short = (await s.call("POST", "/v1/threads", { project: "acme", title: "Short", commit: "abc123" })).body as Thread;
@@ -196,7 +196,7 @@ test("a start whose setup cannot be read boots fresh and says why, and only a fu
   s.remoteReads(async () => ({ commit: full, setupBlob: null }));
   const pinned = (await s.call("POST", "/v1/threads", { project: "acme", title: "Pinned", commit: full })).body as Thread;
   assert.deepEqual(s.reads, [{ branch: "main" }, { commit: full }]);
-  assert.deepEqual(s.registry.templates(project.id as ProjectId).map((r: TemplateRecord) => r.state === "building" && r.inputs.repo), [{ url: project.repoUrl, branch: "main", commit: full }]);
+  assert.deepEqual(s.registry.images.templates(project.id as ProjectId).map((r: TemplateRecord) => r.state === "building" && r.inputs.repo), [{ url: project.repoUrl, branch: "main", commit: full }]);
   assert.equal(pinned.setup?.how, "fresh");
 });
 
@@ -208,7 +208,7 @@ test("a start that names a branch the remote does not have is refused before it 
   s.remoteReads(async () => null);
   const refused = await s.call("POST", "/v1/threads", { project: "acme", title: "Gone", branch: "feat/gone" });
   assert.deepEqual(refused, { status: 400, body: { error: gone, code: "no-branch", retryable: false } });
-  assert.deepEqual([s.registry.threads.threads().length, s.fake.calls.filter(([kind]) => kind === "start").length, s.woken, s.registry.reserved(node)], [0, 0, [], []], "no thread, conversation, wake or room is left of it");
+  assert.deepEqual([s.registry.threads.threads().length, s.fake.calls.filter(([kind]) => kind === "start").length, s.woken, s.registry.placement.reserved(node)], [0, 0, [], []], "no thread, conversation, wake or room is left of it");
 
   const unnamed = (await s.call("POST", "/v1/threads", { project: "acme", title: "Default" })).body as Thread;
   assert.deepEqual(unnamed.setup, { how: "fresh", reason: "the remote has no branch main" });
@@ -222,7 +222,7 @@ test("a pipeline item whose branch the remote does not have is held for the pers
   const s = await testApi(t, { pipeline: true });
   assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
-  s.registry.setCurrentImage(image.id as ImageId);
+  s.registry.images.setCurrentImage(image.id as ImageId);
   assert.equal((await s.call("PATCH", "/v1/projects/acme", { pipeline: { autoStart: true } })).status, 200);
   s.remoteReads(async (_, ref) => "branch" in ref && ref.branch === "feat/gone" ? null : { commit: "1".repeat(40), setupBlob: null });
   const item = (await s.call("POST", "/v1/items", { project: "acme", title: "Gone", message: "Build it.", branch: "feat/gone" })).body as { id: string };
@@ -300,7 +300,7 @@ test("a start whose disk differs from its project's boots fresh without a templa
   s.remoteReads(async () => ({ commit: "1".repeat(40), setupBlob: "b".repeat(40) }));
   const disk = (await s.call("POST", "/v1/threads", { project: "acme", title: "Disk", resources: { diskGiB: 40 } })).body as Thread;
   assert.deepEqual(disk.setup, { how: "fresh", reason: "the start asked for a 40 GiB disk, and this project's templates have 10 GiB" });
-  assert.deepEqual([s.reads, s.registry.templates(project.id as ProjectId)], [[], []], "nothing is read, and no template of the project's size is built for it");
+  assert.deepEqual([s.reads, s.registry.images.templates(project.id as ProjectId)], [[], []], "nothing is read, and no template of the project's size is built for it");
   const memory = (await s.call("POST", "/v1/threads", { project: "acme", title: "Memory", resources: { memoryGiB: 12 } })).body as Thread;
   assert.equal(memory.setup?.how, "fresh");
   assert.ok(memory.setup?.how === "fresh" && memory.setup.building !== undefined, "it asks for the project's template, whose disk it can boot");
@@ -312,9 +312,9 @@ test("a template built before the project's disk size changed is not reused by a
   observeNode(s, node, { total: 64, committed: 0 });
   s.remoteReads(async () => ({ commit: "1".repeat(40), setupBlob: "b".repeat(40) }));
   await s.call("POST", "/v1/threads", { project: "acme", title: "Builds" });
-  const [old] = s.registry.templates(project.id as ProjectId);
+  const [old] = s.registry.images.templates(project.id as ProjectId);
   assert.ok(old?.state === "building");
-  s.registry.saveTemplate({ id: old.id, key: old.key, state: "ready", builtOn: node, builtAt: Date.now() - 60_000, commit: "1".repeat(40) });
+  s.registry.images.saveTemplate({ id: old.id, key: old.key, state: "ready", builtOn: node, builtAt: Date.now() - 60_000, commit: "1".repeat(40) });
   observeNode(s, node, { total: 64, committed: 0 }, { artifacts: [image.id, old.id] as NodeObservation["artifacts"] });
   assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Reuses" })).body.setup.how, "template", "the 10 GiB template serves a 10 GiB start");
 

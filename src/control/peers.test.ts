@@ -14,8 +14,7 @@ test("each put reads the nodes' tailnet IDs once, without their records, and a s
   let recordReads = 0;
   const counted: Registry = {
     ...registry,
-    nodeIds: () => { idReads++; return registry.nodeIds(); },
-    node: (name) => { recordReads++; return registry.node(name); },
+    nodes: { ...registry.nodes, nodeIds: () => { idReads++; return registry.nodes.nodeIds(); }, node: (name) => { recordReads++; return registry.nodes.node(name); } },
   };
   const puts: [NodeName, readonly TailnetNodeId[]][] = [];
   const probes = new Map(names.map((name) => [name, { putPeers: async (peers: readonly TailnetNodeId[]) => { puts.push([name, peers]); } }]));

@@ -65,7 +65,7 @@ test("only a project edit turns on reviews of its own, landing needs a deployer,
 
 test("a project saved before auto-review modes reads its land setting as a mode", async (t) => {
   const s = await testApi(t, { deployment });
-  for (const [id, land] of [["lands", true], ["reviews", false]] as const) s.registry.createProject({ ...project, id: id as ProjectId, autoReview: { land, enabledBy: laptop } } as never);
+  for (const [id, land] of [["lands", true], ["reviews", false]] as const) s.registry.projects.createProject({ ...project, id: id as ProjectId, autoReview: { land, enabledBy: laptop } } as never);
   const read = (await s.call("GET", "/v1/projects")).body as { id: string; autoReview: unknown }[];
   assert.deepEqual(read.map((p) => [p.id, p.autoReview]), [["lands", { mode: "land", enabledBy: laptop }], ["reviews", { mode: "review", enabledBy: laptop }]]);
 });

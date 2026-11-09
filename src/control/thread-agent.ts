@@ -27,7 +27,7 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { Sent, ThreadDetail } from "./wire.ts";
 
-type ThreadAgentRegistry = Pick<Registry, "threads" | "node">;
+type ThreadAgentRegistry = Pick<Registry, "threads" | "nodes">;
 
 /** A message for the thread's agent, as `POST /v1/threads/:id/messages` takes it. */
 export interface AgentMessage { text: string; requestId: string; mode: "followUp" | "steer" }

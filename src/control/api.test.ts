@@ -71,16 +71,16 @@ test("a machine joins once with a token, as whois names it, whatever its request
   const forged = { token, deployKey: joinerKey, name: "rj-firebat", node: "rj-firebat", tailnetNodeId: laptop, tailnetHost: "evil.example" };
   assert.deepEqual(await s.call("POST", "/v1/join", forged), { status: 200, body: { node: "infra-2", tailnetNodeId: joiner } });
   const recorded = { name: "infra-2", tailnetHost: "infra-2.tail.ts.net", tailnetNodeId: joiner, deployKey: joinerKey };
-  assert.deepEqual(s.registry.joinedNodes().map(({ joinedAt: _, ...n }) => n), [recorded]);
+  assert.deepEqual(s.registry.nodes.joinedNodes().map(({ joinedAt: _, ...n }) => n), [recorded]);
   assert.deepEqual(s.joined.map(({ joinedAt: _, ...n }) => n), [recorded], "the control plane is told, so it follows the new probe");
-  assert.deepEqual(s.registry.nodes().map((n) => [n.name, n.tailnetNodeId]), [["infra-2", joiner], ["rj-firebat", "nFIREBAT"]], "rj-firebat is as it was");
+  assert.deepEqual(s.registry.nodes.nodes().map((n) => [n.name, n.tailnetNodeId]), [["infra-2", joiner], ["rj-firebat", "nFIREBAT"]], "rj-firebat is as it was");
 
   s.callAs("nSECOND" as TailnetNodeId);
   s.hosts.set("nSECOND" as TailnetNodeId, "infra-3.tail.ts.net");
   const used = await s.call("POST", "/v1/join", { token, deployKey: joinerKey });
   assert.equal(used.status, 403);
   assert.match(used.body.error, /^this join token was used at .*, and each joins one node\. Mint another with sudo deploy\/install\.sh --join-token/);
-  assert.deepEqual(s.registry.joinedNodes().map((n) => n.name), ["infra-2"], "a used token records nothing");
+  assert.deepEqual(s.registry.nodes.joinedNodes().map((n) => n.name), ["infra-2"], "a used token records nothing");
 });
 
 test("an unknown or expired token is refused with nothing recorded", async (t) => {
@@ -94,13 +94,13 @@ test("an unknown or expired token is refused with nothing recorded", async (t) =
   assert.equal(late.status, 403);
   assert.match(late.body.error, /^this join token expired at \d{4}-/);
   assert.equal((await s.call("POST", "/v1/join", { token: expired })).status, 400, "a join names its deploy key");
-  assert.deepEqual([s.registry.joinedNodes(), s.joined, s.registry.nodes().map((n) => n.name)], [[], [], ["rj-firebat"]]);
+  assert.deepEqual([s.registry.nodes.joinedNodes(), s.joined, s.registry.nodes.nodes().map((n) => n.name)], [[], [], ["rj-firebat"]]);
 });
 
 test("a caller, the control plane's machine and a node of control.json never join, and a token they send stays unused", async (t) => {
   const s = await testApi(t);
-  s.registry.upsertNode({ name: "infra-testbench" as NodeName, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nBENCH" as TailnetNodeId });
-  s.registry.upsertNode({ name: "retired" as NodeName, tailnetHost: "retired.tail.ts.net", tailnetNodeId: "nRETIRED" as TailnetNodeId });
+  s.registry.nodes.upsertNode({ name: "infra-testbench" as NodeName, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nBENCH" as TailnetNodeId });
+  s.registry.nodes.upsertNode({ name: "retired" as NodeName, tailnetHost: "retired.tail.ts.net", tailnetNodeId: "nRETIRED" as TailnetNodeId });
   const { token } = mintJoinToken(s.registry);
   const attempts: [TailnetNodeId, string][] = [
     [laptop, "laptop.tail.ts.net"],
@@ -127,7 +127,7 @@ test("a caller, the control plane's machine and a node of control.json never joi
     "409 this machine is already the node retired, and tailscale now names it renamed",
     "409 tailscale names this machine Upper.tail.ts.net, whose first label is not a node name: must be a lowercase tailnet machine name of at most 63 characters",
   ]);
-  assert.equal(s.registry.joinToken(tokenDigest(token))?.usedAt, null);
+  assert.equal(s.registry.nodes.joinToken(tokenDigest(token))?.usedAt, null);
   s.callAs(joiner);
   s.hosts.set(joiner, "infra-2.tail.ts.net");
   assert.equal((await s.call("POST", "/v1/join", { token, deployKey: joinerKey })).status, 200, "the token still joins a new machine");
@@ -192,7 +192,7 @@ test("a web page on an allowed machine cannot change state", async (t) => {
   // A DNS rebinding page reaches the API under the page's own name.
   assert.equal((await s.call("GET", "/v1/projects", undefined, { host: "evil.example:80" })).status, 403);
   assert.equal((await s.call("POST", "/v1/projects", project, { host: "evil.example" })).status, 403);
-  assert.deepEqual(s.registry.projects(), []);
+  assert.deepEqual(s.registry.projects.projects(), []);
 });
 
 test("unknown threads, routes and methods get 404 and 405", async (t) => {
@@ -221,7 +221,7 @@ test("a body over a mebibyte is refused with 413 and reaches no route", async (t
   const refused = await s.call("POST", "/v1/projects", "x".repeat((1 << 20) + 1));
   assert.equal(refused.status, 413);
   assert.deepEqual(refused.body, { error: "request body over 1048576 bytes", code: null, retryable: false });
-  assert.deepEqual(s.registry.projects(), []);
+  assert.deepEqual(s.registry.projects.projects(), []);
 });
 
 
@@ -342,7 +342,7 @@ test("the health, release, deployer and event routes answer each caller and meth
   const off = await testApi(t);
   const otherToken = "other-node-token";
   const on = await testApi(t, { deployment: { ...deployment, keys: { ...deployment.keys, nOTHER: tokenDigest(otherToken) } } });
-  on.registry.upsertNode({ name: "rj-other" as NodeName, tailnetHost: "rj-other.tail.ts.net", tailnetNodeId: "nOTHER" as TailnetNodeId });
+  on.registry.nodes.upsertNode({ name: "rj-other" as NodeName, tailnetHost: "rj-other.tail.ts.net", tailnetNodeId: "nOTHER" as TailnetNodeId });
   const notDeployer = await testApi(t, { deployment: { ...deployment, deployers: new Set(["nFIREBAT" as TailnetNodeId]) } });
   const callers: [string, Awaited<ReturnType<typeof testApi>>, string, Record<string, string>][] = [
     ["a deployer", on, laptop, {}],
@@ -520,10 +520,10 @@ test("the health, release, deployer and event routes answer each caller and meth
 test("only a person starts a thread, starts a queued one now or messages one, never the control node, an infrastructure node or a pylon", async (t) => {
   const s = await withQueue(t);
   const testbench = "nTESTBENCH" as TailnetNodeId;
-  s.registry.upsertNode({ name: "infra-testbench" as NodeName, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: testbench });
+  s.registry.nodes.upsertNode({ name: "infra-testbench" as NodeName, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: testbench });
   const queued = (await s.call("POST", "/v1/threads", { project: "acme", title: "Then", after: [s.first.id] })).body as QueuedThread;
   // A pylon's request leaves through its node, so whois names that node.
-  const pylonNode = s.registry.nodes().find((n) => n.name === s.registry.threads.pylon(s.first.pylonId)!.node)!.tailnetNodeId;
+  const pylonNode = s.registry.nodes.nodes().find((n) => n.name === s.registry.threads.pylon(s.first.pylonId)!.node)!.tailnetNodeId;
   const routes = [
     ["start a thread", "/v1/threads", { project: "acme", title: "Another" }, 201],
     ["start a queued thread", `/v1/threads/${queued.id}/start`, undefined, 201],
@@ -555,8 +555,8 @@ test("only a person acts on a thread, its pylon or a project, never the control 
   } as never as ReviewLoop;
   const s = await withThread(t, { reviews });
   const testbench = "nTESTBENCH" as TailnetNodeId;
-  s.registry.upsertNode({ name: "infra-testbench" as NodeName, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: testbench });
-  const pylonNode = s.registry.nodes().find((n) => n.name === s.registry.threads.pylon(s.thread.pylonId)!.node)!.tailnetNodeId;
+  s.registry.nodes.upsertNode({ name: "infra-testbench" as NodeName, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: testbench });
+  const pylonNode = s.registry.nodes.nodes().find((n) => n.name === s.registry.threads.pylon(s.thread.pylonId)!.node)!.tailnetNodeId;
   const id = s.thread.id;
   const routes = [
     ["abort a thread's turn", "POST", `/v1/threads/${id}/abort`, undefined, 204],
@@ -587,7 +587,7 @@ test("only a person acts on a thread, its pylon or a project, never the control 
   }
   assert.deepEqual([s.calls.length, s.commands, s.streams, reviewed], [harnessCalls, [], [], []], "no refused request reached the harness, the probe or the review loop");
   assert.equal(s.registry.threads.thread(id)!.status, "active");
-  assert.equal(s.registry.project("acme" as ProjectId)!.defaultBranch, project.defaultBranch);
+  assert.equal(s.registry.projects.project("acme" as ProjectId)!.defaultBranch, project.defaultBranch);
 
   s.callAs(phone);
   s.registry.threads.savePylon({ ...s.registry.threads.pylon(s.thread.pylonId)!, failed: "last job failed with setup-failed" });

@@ -38,7 +38,7 @@ async function seeded(t: TestContext) {
   };
   assert.equal((await call("POST", "/v1/projects", project)).status, 201);
   assert.equal((await call("POST", "/v1/images", image)).status, 201);
-  registry.setCurrentImage(image.id as ImageId);
+  registry.images.setCurrentImage(image.id as ImageId);
   async function start(title: string): Promise<Thread> {
     const res = await call("POST", "/v1/threads", { project: "acme", title });
     assert.equal(res.status, 201, res.text);

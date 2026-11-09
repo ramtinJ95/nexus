@@ -33,7 +33,7 @@ import type { Registry } from "./registry.ts";
 import type { PortRange, StoredPylon, Thread } from "./thread-store.ts";
 import { tickTemplateBuild } from "./template-builds.ts";
 
-type LoopRegistry = Pick<Registry, "threads" | "buildingTemplates" | "deleteTemplate" | "image" | "latestHealthSample" | "markOffline" | "node" | "nodes" | "project" | "releaseHold" | "reserved" | "usage" | "saveTemplate" | "now">;
+type LoopRegistry = Pick<Registry, "threads" | "images" | "nodeMetrics" | "nodes" | "projects" | "placement" | "usage" | "now">;
 
 /**
  * reconcile.ts's ingest. `known` maps each registry pylon on the node that the pass would tick, given what the event and
@@ -111,7 +111,7 @@ export function startLoop(options: LoopOptions): Loop {
   const links = new Map<NodeName, Link>();
   const followers: Promise<void>[] = [];
   function followProbe(probe: ProbeClient) {
-    const stored = registry.node(probe.node);
+    const stored = registry.nodes.node(probe.node);
     if (stored === undefined) throw new Error(`probe for ${probe.node}, which the registry does not know`);
     if (links.has(probe.node) || shutdown.signal.aborted) return;
     const link: Link = { probe, up: false, last: stored.observation, passes: singleFlight(() => pass(probe.node, link), () => shutdown.signal.aborted), offline: null, waiters: new Set() };
@@ -129,7 +129,7 @@ export function startLoop(options: LoopOptions): Loop {
     [...links.keys()].filter((node) => node !== from && observation(node)?.artifacts.includes(artifact));
 
   function artifactSha256(artifact: ArtifactId): string {
-    const image = isImageId(artifact) ? registry.image(artifact) : undefined;
+    const image = isImageId(artifact) ? registry.images.image(artifact) : undefined;
     if (image === undefined) throw new Error(`the registry has no recorded sha256 for ${artifact}`);
     return image.sha256;
   }
@@ -163,14 +163,14 @@ export function startLoop(options: LoopOptions): Loop {
     const nodeObservation = observation(stored.node);
     const observed = nodeObservation?.pylons.find((p) => p.pylonId === stored.pylonId);
     if (nodeObservation !== null && (observed === undefined || observed.phase === "stopped") && stored.submitted === null) {
-      const gitIdentity = gitIdentityOf(registry.project(thread.project)!, options.gitIdentity);
+      const gitIdentity = gitIdentityOf(registry.projects.project(thread.project)!, options.gitIdentity);
       if (JSON.stringify(gitIdentity) !== JSON.stringify(stored.boot.gitIdentity)) {
         stored = { ...stored, boot: { ...stored.boot, gitIdentity } };
         registry.threads.savePylon(stored);
       }
     }
     // Not observation(node), which is null while the link is down: a preview's state stays as the node last reported it.
-    const live = pylonLive(stored, registry.project(thread.project)!, registry.threads.previews(stored.pylonId, link.last));
+    const live = pylonLive(stored, registry.projects.project(thread.project)!, registry.threads.previews(stored.pylonId, link.last));
     const liveHash = liveHashOf(live);
     if (liveHash === stored.liveHash) return stored;
     const updated = { ...stored, live, liveHash };
@@ -180,7 +180,7 @@ export function startLoop(options: LoopOptions): Loop {
 
   async function pass(node: NodeName, link: Link) {
     registry.threads.pruneSessions();
-    for (const template of registry.buildingTemplates(node)) {
+    for (const template of registry.images.buildingTemplates(node)) {
       try {
         await tickTemplateBuild(template, { probe: link.probe, observation: observation(node), registry, log });
       } catch (err) {
@@ -278,7 +278,7 @@ export function startLoop(options: LoopOptions): Loop {
 
   function linkDown(node: NodeName, link: Link) {
     link.up = false;
-    link.offline ??= setTimeout(() => { link.offline = null; registry.markOffline(node); }, offlineAfterMs);
+    link.offline ??= setTimeout(() => { link.offline = null; registry.nodes.markOffline(node); }, offlineAfterMs);
   }
 
   function linkUp(link: Link) {

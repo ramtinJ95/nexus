@@ -28,7 +28,7 @@ export type Role = "tailnet" | "joiner" | "allowed" | "person" | "deployer" | "r
 export type Policy = ({ role: "person" | "deployer" | "control-node"; action: string } | { role: "tailnet" | "joiner" | "allowed" | "reporter"; why?: string }) & { startsTurn?: true };
 export const anyAllowed = { role: "allowed" } satisfies Policy;
 
-type AccessRegistry = Pick<Registry, "nodeByTailnetId">;
+type AccessRegistry = Pick<Registry, "nodes">;
 
 /** Whom the control plane trusts beyond its allowlist: the control node, the deployers, and control.json's deploy keys. */
 export interface Deployment {
@@ -40,7 +40,7 @@ export interface Deployment {
 
 /** Whether the caller is a person's device: neither the control node nor a node, whose pylons call as their node. */
 function isPerson(registry: AccessRegistry, deployment: Deployment, caller: TailnetNodeId): boolean {
-  return caller !== deployment.self && registry.nodeByTailnetId(caller) === undefined;
+  return caller !== deployment.self && registry.nodes.nodeByTailnetId(caller) === undefined;
 }
 /** A person among the deployers, whatever the allowlist says, so a landing the review loop runs later can ask it. */
 export function isDeployer(registry: AccessRegistry, deployment: Deployment, caller: TailnetNodeId): boolean {
@@ -48,7 +48,7 @@ export function isDeployer(registry: AccessRegistry, deployment: Deployment, cal
 }
 function isReporter(registry: AccessRegistry, deployment: Deployment, caller: TailnetNodeId, authorization: string | undefined): boolean {
   if (!authorization?.startsWith("Bearer ") || authorization.length > 256) return false;
-  const node = registry.nodeByTailnetId(caller);
+  const node = registry.nodes.nodeByTailnetId(caller);
   if (node === undefined) return false;
   const key = deployment.keys[caller] ?? node.deployKey;
   return tokenDigest(authorization.slice(7)) === key;

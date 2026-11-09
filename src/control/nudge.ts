@@ -21,7 +21,7 @@ import { deliverDurable } from "./durable-message.ts";
 import { prLocationOf, threadRole } from "./work-model.ts";
 import { isOpenStatus, openStatuses } from "./reconcile.ts";
 
-type NudgeRegistry = Pick<Registry, "reviews" | "node" | "nudges" | "threads" | "planning" | "prWatches" | "project">;
+type NudgeRegistry = Pick<Registry, "reviews" | "nodes" | "nudges" | "threads" | "planning" | "prWatches" | "projects">;
 
 const text = `${senders.nudge.prefix}
 Your turn ended, and Nexus finds no pull request from this thread. This project reviews its builders' pull requests on its own, so the work moves on only once one is open. If the task is not done, go on with it. When it is, commit, push the branch and open a pull request. If you are blocked or the task needs no pull request, say why in one line: after two nudges without a pull request, Nexus hands this thread to the person.`;
@@ -42,7 +42,7 @@ export function builderNudger(options: {
   function builderRepo(t: Thread): string | null {
     if (!isOpenStatus(t.status)) return null;
     if (threadRole(registry, t) !== "builder") return null;
-    const project = registry.project(t.project);
+    const project = registry.projects.project(t.project);
     return project?.autoReview == null ? null : githubRepo(project.repoUrl);
   }
 
@@ -53,7 +53,7 @@ export function builderNudger(options: {
    */
   function pushedKnown(t: Thread, turn: number): boolean {
     const pylon = registry.threads.pylon(t.pylonId);
-    const observation = pylon === undefined ? null : registry.node(pylon.node)?.observation ?? null;
+    const observation = pylon === undefined ? null : registry.nodes.node(pylon.node)?.observation ?? null;
     const facts = observation?.pylons.find((p) => p.pylonId === t.pylonId);
     return facts?.phase === "running" && facts.git !== null && Date.parse(observation!.observedAt) - gitPollMs >= turn;
   }

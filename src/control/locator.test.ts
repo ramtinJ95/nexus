@@ -45,7 +45,7 @@ test("a pylon is located at its node's probe once the node reports it running", 
 test("a running pylon on an offline node is not reachable, and the wait ends at the deadline", async (t) => {
   const registry = seeded(t);
   observeNode(registry, { node, capacity, pylons: [running] });
-  registry.markOffline(node);
+  registry.nodes.markOffline(node);
   await assert.rejects(locator(registry, 300).locator.awaitRunning(pylonId), /was not running by/);
 });
 

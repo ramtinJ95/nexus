@@ -13,7 +13,7 @@ export function projectRoutes(kit: ApiKit, features: Features): readonly RouteEn
   const { registry } = kit;
 
   function refuseUnknownNode(project: Project) {
-    if (project.defaultNode !== "auto" && registry.node(project.defaultNode) === undefined) throw new HttpError(400, `no node ${project.defaultNode}`);
+    if (project.defaultNode !== "auto" && registry.nodes.node(project.defaultNode) === undefined) throw new HttpError(400, `no node ${project.defaultNode}`);
   }
 
   function createProject(body: unknown): Project {
@@ -21,8 +21,8 @@ export function projectRoutes(kit: ApiKit, features: Features): readonly RouteEn
     const rules = standingRules === undefined ? undefined : editedRules(undefined, standingRules);
     const project: Project = { ...fields, ...rules === undefined ? {} : { standingRules: rules } };
     refuseUnknownNode(project);
-    if (registry.project(project.id) !== undefined) throw new HttpError(409, `project ${project.id} exists`);
-    registry.createProject(project);
+    if (registry.projects.project(project.id) !== undefined) throw new HttpError(409, `project ${project.id} exists`);
+    registry.projects.createProject(project);
     return project;
   }
 
@@ -32,7 +32,7 @@ export function projectRoutes(kit: ApiKit, features: Features): readonly RouteEn
       // A CLI older than modes sends `land`.
       const mode: AutoReviewMode | null | undefined = autoReview == null ? autoReview : "mode" in autoReview ? autoReview.mode : autoReview.land ? "land" : "review";
       if (mode === "land" || mode === "yolo") demand(r.roles, landing);
-      const project = registry.editProject(id as ProjectId, ({ autoReview: kept, pipeline: running, standingRules: standing, secondReview: second, ...previous }) => {
+      const project = registry.projects.editProject(id as ProjectId, ({ autoReview: kept, pipeline: running, standingRules: standing, secondReview: second, ...previous }) => {
         const updated: Project = parse(projectSchema, { ...previous, ...patch, resources: { ...previous.resources, ...patch.resources } });
         refuseUnknownNode(updated);
         const review = mode === undefined ? kept : mode === null ? null : { mode, enabledBy: r.caller };
@@ -46,7 +46,7 @@ export function projectRoutes(kit: ApiKit, features: Features): readonly RouteEn
       if (project === undefined) throw new HttpError(404, `no project ${id}`);
       return ok(project);
     }),
-    on(routes.list, anyAllowed, () => ok(registry.projects())),
+    on(routes.list, anyAllowed, () => ok(registry.projects.projects())),
     on(routes.add, { role: "allowed", why: "adding a project changes no thread, pylon or project there is" }, async (_, r) => created(createProject(await r.body()))),
   ];
 }

@@ -28,7 +28,7 @@ import { isItemId, itemIdFrom, type ItemId, type ThreadId } from "../ids.ts";
 import { notConfigured } from "./not-configured.ts";
 import { isOpenStatus } from "./reconcile.ts";
 
-type PlanningRegistry = Pick<Registry, "threads" | "questions" | "planning" | "planningThreads" | "savePlanning">;
+type PlanningRegistry = Pick<Registry, "threads" | "questions" | "planning">;
 
 const planFence = "nexus-plan";
 /** A proposal question's options, which its answer names. The dashboard's cards.ts gives each its label. */
@@ -104,17 +104,17 @@ export function planning(options: { registry: PlanningRegistry; pipeline: Pick<P
   const now = options.now ?? Date.now;
 
   async function pass() {
-    for (const { thread } of registry.planningThreads()) {
+    for (const { thread } of registry.planning.planningThreads()) {
       const t = registry.threads.thread(thread);
-      const read = registry.planning(thread)!.read;
+      const read = registry.planning.planning(thread)!.read;
       if (!isOpenStatus(t?.status) || t.working || t.lastReplyAt === null || t.lastReplyAt <= read) continue;
       const through = t.lastReplyAt;
       try {
-        for (const block of planBlocks(await replies(t), registry.planning(thread)!.token)) {
+        for (const block of planBlocks(await replies(t), registry.planning.planning(thread)!.token)) {
           const at = now();
           for (const p of block) registry.questions.askQuestion(proposalQuestion(t, p, block, at));
         }
-        registry.savePlanning({ ...registry.planning(thread)!, read: through });
+        registry.planning.savePlanning({ ...registry.planning.planning(thread)!, read: through });
       } catch (err) {
         log(`planning thread ${thread}: its replies were not read: ${(err as Error).message}`);
       }
@@ -138,30 +138,30 @@ export function planning(options: { registry: PlanningRegistry; pipeline: Pick<P
     /** Marks a thread as planning, once. A repeat keeps its token. */
     begin(t: Thread): void {
       if (registry.threads.agent(t).kind !== "harness") throw new Refusal("invalid", "a planning thread is a Nexus agent thread, not a Claude worker");
-      if (registry.planning(t.id) === null) registry.savePlanning({ thread: t.id, token: mint(t.id), read: 0, sent: [] });
+      if (registry.planning.planning(t.id) === null) registry.planning.savePlanning({ thread: t.id, token: mint(t.id), read: 0, sent: [] });
     },
     /**
      * The text to send to `t` under `requestId`: the guide before a planning thread's first message the harness took,
      * and the answers no taken message told of. A resend of the ID gets the same text.
      */
     compose(t: Thread, requestId: string, text: string): string {
-      const record = registry.planning(t.id);
+      const record = registry.planning.planning(t.id);
       if (record === null) return text;
       let entry = record.sent.find((s) => s.requestId === requestId);
       if (entry === undefined) {
         const delivered = record.sent.filter((s) => s.delivered);
         const told = new Set(delivered.flatMap((s) => s.told));
         entry = { requestId, guide: delivered.length === 0, told: registry.questions.questions(t.id).filter((q) => q.kind === "proposal" && q.answer !== null && !told.has(q.id)).map((q) => q.id), delivered: false };
-        registry.savePlanning({ ...record, sent: [...record.sent, entry] });
+        registry.planning.savePlanning({ ...record, sent: [...record.sent, entry] });
       }
       const tells = entry.told.map((id) => registry.questions.question(id) as ProposalQuestion);
       return [...entry.guide ? [guide(record.token)] : [], ...tells.length === 0 ? [] : [answers(tells)], text].join("\n\n");
     },
     /** The harness took the message composed under `requestId`. */
     sent(t: Thread, requestId: string): void {
-      const record = registry.planning(t.id);
+      const record = registry.planning.planning(t.id);
       if (record === null) return;
-      registry.savePlanning({ ...record, sent: record.sent.map((s) => s.requestId === requestId ? { ...s, delivered: true } : s) });
+      registry.planning.savePlanning({ ...record, sent: record.sent.map((s) => s.requestId === requestId ? { ...s, delivered: true } : s) });
     },
     /**
      * Runs in the transaction that records an answer, so an accepted proposal and its item are stored together or not

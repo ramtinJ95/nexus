@@ -25,21 +25,21 @@ export function nodeRoutes(kit: ApiKit, nodeHealth: (name: NodeName) => Promise<
 
   /** Read from the registry alone. */
   function nodeMetrics(name: NodeName, query: URLSearchParams): NodeMetrics {
-    if (registry.node(name) === undefined) throw new HttpError(404, `no node ${name}`);
+    if (registry.nodes.node(name) === undefined) throw new HttpError(404, `no node ${name}`);
     const now = Date.now();
     const from = whole(query, "from");
     if (from === null) throw new HttpError(400, "from must be a whole number of milliseconds since the epoch");
     const to = whole(query, "to") ?? now;
     if (from >= to) throw new HttpError(400, "from must be before to");
     if (to - from > maxSpanMs) throw new HttpError(400, "the range must span at most 31 days, as long as the registry keeps a node's metrics");
-    const stored = registry.nodeMetrics(name, from, to, now);
+    const stored = registry.nodeMetrics.nodeMetrics(name, from, to, now);
     const { series, otherPylons } = foldPylons(stored.series, stored.bucketMs);
     const label = (s: Series) => s.kind === "otherPylonsCpu" || s.kind === "otherPylonsResident" ? `${otherPylons.length} other pylons, summed` : seriesLabel(s, (t) => registry.threads.thread(t)?.title);
     return { node: name, from, to, tier: stored.tier, bucketMs: stored.bucketMs, sampledAt: stored.sampledAt, series: series.map((s): MetricSeries => ({ ...s, label: label(s.series) })), otherPylons };
   }
 
   return [
-    on(routes.list, anyAllowed, () => ok(registry.nodes().map((record) => nodeSummary(registry, record)))),
+    on(routes.list, anyAllowed, () => ok(registry.nodes.nodes().map((record) => nodeSummary(registry, record)))),
     on(routes.health, readHealth, async ({ node }) => ok(await nodeHealth(node as NodeName))),
     // History holds what a node's health held, so it takes the same right.
     on(routes.metrics, { role: "deployer", action: "read a node's metrics" }, ({ node }, r) => ok(nodeMetrics(node as NodeName, r.query))),

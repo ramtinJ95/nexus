@@ -12,7 +12,7 @@ import { deliverDurable } from "./durable-message.ts";
 import { threadRole } from "./work-model.ts";
 import { isOpenStatus, openStatuses } from "./reconcile.ts";
 
-type PrWatchRegistry = Pick<Registry, "reviews" | "threads" | "planning" | "prWatches" | "project" | "queue">;
+type PrWatchRegistry = Pick<Registry, "reviews" | "threads" | "planning" | "prWatches" | "projects" | "queue">;
 
 /** A description's first paragraph past its headings, images and comments, on one line and at most 400 characters. */
 export function summaryOf(body: string): string {
@@ -68,7 +68,7 @@ export function prWatcher(options: {
      * between two reads, which a search of open PRs never finds.
      */
     async function settle(t: StoredThread) {
-      const repo = githubRepo(registry.project(t.project)?.repoUrl ?? null);
+      const repo = githubRepo(registry.projects.project(t.project)?.repoUrl ?? null);
       if (repo === null) return;
       const known = (registry.prWatches.prWatch(t.id)?.links ?? []).filter((l) => l.pr.repo === repo);
       const numbers = new Set(known.filter((l) => l.pr.state !== "merged").map((l) => l.pr.number));
@@ -112,7 +112,7 @@ export function prWatcher(options: {
       try {
         if (state.pending) { await deliver(t.id, state); continue; }
         if (watchStopped(state)) continue;
-        const repo = githubRepo(registry.project(t.project)?.repoUrl ?? null);
+        const repo = githubRepo(registry.projects.project(t.project)?.repoUrl ?? null);
         if (repo === null) continue;
         const found = await Promise.all(pushedBranches(registry, t.id).map((branch) => find(repo, branch, "open")));
         for (const number of found.flat()) {

@@ -155,7 +155,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const whois = localApiWhois(tailscaled);
   const registry = openRegistry(config.db);
   for (const node of config.nodes) {
-    registry.upsertNode({ name: node.name, tailnetHost: node.tailnetHost, tailnetNodeId: node.tailnetNodeId });
+    registry.nodes.upsertNode({ name: node.name, tailnetHost: node.tailnetHost, tailnetNodeId: node.tailnetNodeId });
   }
   // It grows when a node joins, and everything handed it reads it when it acts.
   const probeMap = new Map<NodeName, ProbeClient>();
@@ -163,11 +163,11 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   /** Every health read, the node page's, the API's and a judgment's, goes through the client, so each is recorded here. */
   const connect = (node: NodeAddress) => {
     const client = recordingHealth(probe?.(node) ?? connectProbe(node.name, node.tailnetHost, node.tailnetNodeId, { whois }),
-      (h) => registry.recordHealthSample(node.name, sampleOf(h, Date.now(), (p) => registry.threads.pylon(p)?.thread ?? null)), log);
+      (h) => registry.nodeMetrics.recordHealthSample(node.name, sampleOf(h, Date.now(), (p) => registry.threads.pylon(p)?.thread ?? null)), log);
     probeMap.set(node.name, client);
     return client;
   };
-  for (const node of [...config.nodes, ...registry.joinedNodes()]) if (!probeMap.has(node.name)) connect(node);
+  for (const node of [...config.nodes, ...registry.nodes.joinedNodes()]) if (!probeMap.has(node.name)) connect(node);
   const services = startServices();
   const handoff = services.start(chatgptToken === undefined ? null : { everyMs: 60_000, ...chatgptTokenHandoff({ probes: () => [...probeMap.values()], token: chatgptToken }) });
   const peers = services.start(peerHandoff({ registry, probes: probeMap, log }));
@@ -202,7 +202,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     log,
   }));
 
-  const gate = turnGate(() => isDraining(registry.drain(), registry.now()));
+  const gate = turnGate(() => isDraining(registry.releases.drain(), registry.now()));
   const harness = gateTurns(rawHarness, gate);
   const images = services.start(startImageRollout({
     registry, probes: probeMap, buildNode: config.imageBuildNode, recipe: () => loadImageRecipe(), release: runningCommit,
@@ -263,7 +263,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   }).catch((err: unknown) => log(`recording the newest backup failed: ${(err as Error).message}`)) });
   const health = services.start({ everyMs: checkEveryMs, ...healthPasses({ registry, run: doctor, startedAt }) });
   services.start({ everyMs: backgroundReadMs, ...healthSampling({ registry, probes: probeMap, log }) });
-  services.start({ everyMs: 60_000, poll: () => drainNodeMetrics(registry.pruneNodeMetrics, Date.now()).catch((err: unknown) => log(`pruning node metrics failed: ${(err as Error).message}`)) });
+  services.start({ everyMs: 60_000, poll: () => drainNodeMetrics(registry.nodeMetrics.pruneNodeMetrics, Date.now()).catch((err: unknown) => log(`pruning node metrics failed: ${(err as Error).message}`)) });
   const api = services.start(await startApi({
     ...(config.https ? { https: { port: ports.dashboard, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
     prWatchEnabled: token !== null,

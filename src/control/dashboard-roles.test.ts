@@ -19,7 +19,7 @@ async function setup(t: TestContext) {
     resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
   })).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
-  s.registry.setCurrentImage(image.id as ImageId);
+  s.registry.images.setCurrentImage(image.id as ImageId);
   const start = async (body: Record<string, unknown>) => {
     const res = await s.call("POST", "/v1/threads", { project: "acme", ...body });
     assert.equal(res.status, 201, JSON.stringify(res.body));

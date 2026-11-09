@@ -33,20 +33,20 @@ test("a person sets, changes and clears a project's standing rules, and each cha
   assert.deepEqual((await s.call("PATCH", "/v1/projects/acme", { defaultBranch: "trunk" })).body.standingRules, { text: rules, revision: 4 }, "another edit keeps them");
   assert.deepEqual((await s.call("GET", "/v1/projects")).body, [{ ...project, defaultBranch: "trunk", standingRules: { text: rules, revision: 4 } }]);
 
-  const stored = s.registry.project("acme" as ProjectId);
+  const stored = s.registry.projects.project("acme" as ProjectId);
   for (const standingRules of ["", "  \n ", "x".repeat(8_193), "a\0b", 7, { text: "x", revision: 9 }]) {
     assert.equal((await s.call("PATCH", "/v1/projects/acme", { standingRules })).status, 400, JSON.stringify(standingRules).slice(0, 40));
   }
-  assert.deepEqual(s.registry.project("acme" as ProjectId), stored, "no refused edit changed the project");
+  assert.deepEqual(s.registry.projects.project("acme" as ProjectId), stored, "no refused edit changed the project");
   assert.deepEqual(await setRules(s, "x".repeat(8_192)), { text: "x".repeat(8_192), revision: 5 }, "8192 characters fit");
 
   const added = await s.call("POST", "/v1/projects", { ...project, id: "ruled", standingRules: rules });
   assert.deepEqual(added, { status: 201, body: { ...project, id: "ruled", standingRules: { text: rules, revision: 1 } } });
-  assert.deepEqual(s.registry.project("ruled" as ProjectId)?.standingRules, { text: rules, revision: 1 });
+  assert.deepEqual(s.registry.projects.project("ruled" as ProjectId)?.standingRules, { text: rules, revision: 1 });
   for (const standingRules of ["", "x".repeat(8_193), { text: rules, revision: 7 }]) {
     assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "refused", standingRules })).status, 400);
   }
-  assert.equal(s.registry.project("refused" as ProjectId), undefined);
+  assert.equal(s.registry.projects.project("refused" as ProjectId), undefined);
 
   assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "plain" })).status, 201);
   assert.deepEqual((await s.call("PATCH", "/v1/projects/plain", { standingRules: null })).body, { ...project, id: "plain" }, "clearing rules never set leaves none");
@@ -213,7 +213,7 @@ test("a pipeline item's thread gets the rules with its brief, and a planning thr
   const s = await testApi(t, { pipeline: true });
   assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
-  s.registry.setCurrentImage(image.id as ImageId);
+  s.registry.images.setCurrentImage(image.id as ImageId);
   assert.equal((await s.call("PATCH", "/v1/projects/acme", { pipeline: { autoStart: true } })).status, 200);
   await setRules(s, rules);
 
@@ -257,7 +257,7 @@ test("which starts carry standing rules: a person's builder and queued starts do
   const s = await testApi(t, { queue: true, planning: true });
   assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
-  s.registry.setCurrentImage(image.id as ImageId);
+  s.registry.images.setCurrentImage(image.id as ImageId);
   await setRules(s, rules);
   const builder = (await s.call("POST", "/v1/threads", { project: "acme", title: "Builder" })).body as Thread;
   observeNode(s, node, { total: 64, committed: 0 }, { nestedVirtualization: true });

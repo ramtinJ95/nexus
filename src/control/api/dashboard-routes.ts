@@ -87,8 +87,8 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
     return {
       now, caller, deploys, landRefusal: options.features.reviews === null ? "no review loop" : refusal(roles, landing) === null ? null : "not a deployer",
       answerRefusal: (question) => refusalOf(roles, question),
-      projects: registry.projects(), nodes: registry.nodes(), image: registry.currentImage(),
-      health: { states: registry.healthStates(), changes: registry.healthChanges() },
+      projects: registry.projects.projects(), nodes: registry.nodes.nodes(), image: registry.images.currentImage(),
+      health: { states: registry.health.healthStates(), changes: registry.health.healthChanges() },
       threads, threadsIn: (project) => byProject.get(project) ?? [], queuedIn,
       needs: needsOf({ registry, now, threads: () => threads, queuedIn }, detail),
       reviews: () => reviews ??= registry.reviews.reviews(),
@@ -100,8 +100,8 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
     };
   };
 
-  const offline = () => new Set(registry.nodes().filter((n) => n.state === "offline").map((n) => n.name));
-  const itemsAt = (now: number) => registry.items().map((i) => itemView(registry, i, now));
+  const offline = () => new Set(registry.nodes.nodes().filter((n) => n.state === "offline").map((n) => n.name));
+  const itemsAt = (now: number) => registry.pipeline.items().map((i) => itemView(registry, i, now));
   const homePage = (c: Context, dialogs: Parameters<typeof home>[2], peek: Peek | null = null, card: string | null = null) =>
     ok(home(c, { offline: offline(), role: (t) => threadRole(registry, t), items: itemsAt(c.now) }, dialogs, peek, card));
 
@@ -119,11 +119,11 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
     const now = Date.now();
     const health = refused ?? await nodeHealth(name).catch((err: unknown) => err as Error);
     const c = context(r, now);
-    const control = registry.releaseReports().find((x) => x.role === "control")?.node;
+    const control = registry.releases.releaseReports().find((x) => x.role === "control")?.node;
     const reading = (node: NodeName): NodeReading => node === name ? health instanceof Error ? { kind: "failed", error: health.message } : liveReading(health)
-      : refused !== null ? { kind: "refused" } : recordedReading(registry.nodeMetrics(node, c.now - recentMs, c.now, c.now), c.now);
+      : refused !== null ? { kind: "refused" } : recordedReading(registry.nodeMetrics.nodeMetrics(node, c.now - recentMs, c.now, c.now), c.now);
     const view: ClusterView = {
-      name, health, sample: registry.latestHealthSample(name),
+      name, health, sample: registry.nodeMetrics.latestHealthSample(name),
       release: releaseView(registry, c.nodes.find((n) => n.name === control)?.tailnetNodeId, c.now),
       nodes: c.nodes.map((node) => ({ node, reading: reading(node.name), pylons: nodePylons(registry, node), cleanups: registry.questions.nodeQuestions(node.name) })),
       pylonThreads: new Map(registry.threads.pylonsOn(name).map((p) => {
@@ -145,7 +145,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
     }
     const queued = registry.queue.queuedThread(key as ThreadId);
     if (queued !== undefined && queued.status === "queued") return { kind: "queued", q: queuedView(registry, queued) };
-    const item = registry.item(key as ItemId);
+    const item = registry.pipeline.item(key as ItemId);
     return item === undefined ? null : { kind: "item", item: itemView(registry, item, now) };
   }
 
@@ -167,7 +167,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
     // The pipeline's items show on the home page's work in flight now, and on their threads.
     ["GET", /^\/pipeline$/, anyAllowed, () => ({ status: 303, headers: { location: "/#in-flight" }, body: "" })],
     ["GET", /^\/cluster$/, anyAllowed, async (_, r) => {
-      const first = registry.nodes()[0];
+      const first = registry.nodes.nodes()[0];
       if (first === undefined) return { ...ok(notFound(context(r), "No nodes yet.")), status: 404 };
       return ok(await cluster(r, first.name));
     }],
@@ -175,11 +175,11 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
     ...(["closed", "quiet"] as const).map((kind): RouteEntry => ["GET", new RegExp(`^\\/threads\\/${kind}$`), anyAllowed, (_, r) => {
       const c = context(r);
       const id = r.query.get("project");
-      const project = id === null ? null : registry.project(id as ProjectId);
+      const project = id === null ? null : registry.projects.project(id as ProjectId);
       if (project === undefined) return { ...ok(notFound(c, `No project ${id!}.`)), status: 404 };
       const page = Number(r.query.get("page"));
       const cancelled = kind === "quiet" ? [] : registry.queue.queuedThreads().filter((q) => q.status === "archived" || q.status === "deleted").toSorted((a, b) => b.createdAt - a.createdAt).map((q) => queuedView(registry, q));
-      const fold: FoldView = { projects: project === null ? registry.projects() : [project], offline: offline(), cancelled };
+      const fold: FoldView = { projects: project === null ? registry.projects.projects() : [project], offline: offline(), cancelled };
       return ok(foldPage(c, kind, fold, Number.isInteger(page) && page > 0 ? page : 1));
     }]),
     ["GET", /^\/threads\/([^/]+)$/, anyAllowed, async (m, r) => {
@@ -200,9 +200,9 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
       const shown = t.status === "deleted" ? null : view;
       const c = context(r);
       const page: ThreadView = {
-        d, row: rowOf(d), node: registry.node(d.pylon.node)!, role: threadRole(registry, t), agent: registry.threads.agent(t),
+        d, row: rowOf(d), node: registry.nodes.node(d.pylon.node)!, role: threadRole(registry, t), agent: registry.threads.agent(t),
         usage: registry.usage.usageReport({ since: null, thread: t.id }).total, view: shown, items: itemsFor(t.id, shown), renderedReplyAt: repliedAt,
-        nudged: registry.nudges.nudge(t.id)?.state === "person", lands: landsOnItsOwn(registry.project(t.project)?.autoReview),
+        nudged: registry.nudges.nudge(t.id)?.state === "person", lands: landsOnItsOwn(registry.projects.project(t.project)?.autoReview),
         queuedAfter: registry.queue.queuedThread(t.id)?.after ?? null, item: itemsAt(c.now).find((i) => i.thread === t.id),
       };
       return ok(threadPage(c, page, r.query.has("streaming")));
@@ -215,7 +215,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
     }],
     ["GET", /^\/nodes\/([^/]+)$/, anyAllowed, async (m, r) => {
       const name = m[1]! as NodeName;
-      if (registry.node(name) === undefined) return { ...ok(notFound(context(r), `No node ${name}.`)), status: 404 };
+      if (registry.nodes.node(name) === undefined) return { ...ok(notFound(context(r), `No node ${name}.`)), status: 404 };
       return ok(await cluster(r, name));
     }],
     ["GET", /^\/assets\/([\w.-]+)$/, anyAllowed, (m, r) => {

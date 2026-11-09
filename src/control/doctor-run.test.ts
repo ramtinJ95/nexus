@@ -33,7 +33,7 @@ function passes(t: import("node:test").TestContext, registry = testRegistry(t), 
       now = Math.max(now + checkEveryMs, startedAt + 5 * minute);
       await health.poll();
     },
-    view: () => healthView(health.latest(), registry.healthStates()),
+    view: () => healthView(health.latest(), registry.health.healthStates()),
     at: () => now,
     advance(ms: number) { now += ms; },
   };
@@ -82,7 +82,7 @@ test("a check that flips at its threshold on every pass alerts once, and stays o
   await p.pass(backup("ok"), disk("fail"));
   assert.deepEqual(p.alerts().map((a) => [a.from, a.status]), [["ok", "warn"]], "two bad passes, the better of them");
   const [problem] = p.view().problems;
-  p.registry.markHealthSeen(problem!.id, p.at());
+  p.registry.health.markHealthSeen(problem!.id, p.at());
   for (const status of ["ok", "warn", "ok", "warn", "ok", "fail", "warn"] as const) await p.pass(backup("ok"), disk(status));
   assert.equal(p.alerts().length, 1, "no recovery and no new alert while it flips");
   assert.deepEqual([p.view().problems.map((c) => c.id), p.view().unseen], [[problem!.id], 0]);
@@ -128,7 +128,7 @@ test("a problem whose check is no longer run, as a removed node's, recovers", as
   await p.pass(backup("ok"), disk("fail"));
   await p.pass();
   await p.pass(backup("ok"));
-  assert.deepEqual(p.registry.healthStates().map((c) => [c.name, c.status, c.text]), [["disk", "ok", "no longer checked"]]);
+  assert.deepEqual(p.registry.health.healthStates().map((c) => [c.name, c.status, c.text]), [["disk", "ok", "no longer checked"]]);
   assert.deepEqual(p.view().problems, []);
 });
 
@@ -142,7 +142,7 @@ test("a pass whose checks or registry throw logs it and records nothing, so a fi
   fails = false;
   await health.poll();
   assert.equal(health.latest()?.checks[0]?.status, "fail");
-  const throwing = healthPasses({ registry: { healthStates: () => { throw new SyntaxError("Unexpected token"); }, recordHealthChanges: () => [] }, startedAt: start - checkEveryMs, clock: () => start, log: (m) => logged.push(m), run: async () => ({ at: new Date(start).toISOString(), status: "ok", checks: [] }) });
+  const throwing = healthPasses({ registry: { health: { healthStates: () => { throw new SyntaxError("Unexpected token"); }, recordHealthChanges: () => [] } }, startedAt: start - checkEveryMs, clock: () => start, log: (m) => logged.push(m), run: async () => ({ at: new Date(start).toISOString(), status: "ok", checks: [] }) });
   await assert.doesNotReject(throwing.poll());
   assert.equal(logged.at(-1), "a health pass failed: Unexpected token");
 });
@@ -154,10 +154,10 @@ test("changes are kept 30 days, but the one that set a problem still open", asyn
   await p.pass(backup("ok"), disk("ok"));
   await p.pass(backup("ok"), disk("fail"));
   await p.pass();
-  assert.equal(p.registry.healthChanges().length, 3);
+  assert.equal(p.registry.health.healthChanges().length, 3);
   p.advance(changesKeptMs);
   await p.pass();
-  assert.deepEqual(p.registry.healthChanges().map((c) => [c.name, c.status]), [["disk", "fail"]], "the backup's changes went, and the disk's open problem stays");
+  assert.deepEqual(p.registry.health.healthChanges().map((c) => [c.name, c.status]), [["disk", "fail"]], "the backup's changes went, and the disk's open problem stays");
   assert.deepEqual(p.alerts().length, 3, "and it raises no alert again");
 });
 
@@ -165,11 +165,11 @@ test("changes are kept 30 days, but the one that set a problem still open", asyn
 test("the doctor reads each node, the release and the control node from the registry, and the rest from what it is handed", async (t) => {
   const registry = testRegistry(t);
   const node = "rj-firebat" as NodeName;
-  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.example.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  registry.nodes.upsertNode({ name: node, tailnetHost: "rj-firebat.example.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   const now = Date.now();
   registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity({ disks: [{ paths: ["/var/lib/nexus/pylons"], totalGiB: 500, freeGiB: 5, pylons: true }] }) });
   registry.threads.ingested(testObservation(node, { observedAt: new Date(now - 10_000).toISOString() }), []);
-  registry.setDesiredRelease({ commit: "c".repeat(40), requestedBy: "nLAPTOP", requestedAt: now - day });
+  registry.releases.setDesiredRelease({ commit: "c".repeat(40), requestedBy: "nLAPTOP", requestedAt: now - day });
   const r = await runDoctor({
     registry, self: "nFIREBAT" as TailnetNodeId, clock: () => now, startedAt: now - 3 * day,
     backupStatus: async () => "missing",
@@ -284,7 +284,7 @@ test("a certificate that throws while it is read becomes an unreachable fact, no
 
 test("a source that throws fails only its own check, with the error's code and not its message, and the rest still report", async (t) => {
   const registry = testRegistry(t);
-  registry.upsertNode({ name: "rj-firebat" as NodeName, tailnetHost: "rj-firebat.example.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  registry.nodes.upsertNode({ name: "rj-firebat" as NodeName, tailnetHost: "rj-firebat.example.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   const failing = (code: string) => async () => { throw Object.assign(new Error("the file holds sk-secret"), { code }); };
   const r = await runDoctor({
     registry, self: "nFIREBAT" as TailnetNodeId, clock: () => start, startedAt: start,

@@ -635,7 +635,7 @@ test("an archive whose settle waits says why: its node is offline, or has no roo
   const offline = addThread(registry, n1, "offline", "archived", false);
   const full = addThread(registry, n2, "full", "archived", false);
   observe(registry, n2, [[full.pylonId, "stopped"]], {}, { total: 64, committed: 60 });
-  registry.markOffline(n1);
+  registry.nodes.markOffline(n1);
   backfill(t, registry);
   await until("both record why they wait", () => [offline, full].map((x) => registry.threads.thread(x.id)!.settleWaiting), (w) => w.every((r) => r !== undefined));
   assert.equal(registry.threads.thread(offline.id)!.settleWaiting, "rj-firebat is offline");

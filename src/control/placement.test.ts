@@ -44,8 +44,8 @@ function fakeRegistry(nodes: FakeNode[]) {
   const byName = new Map(nodes.map((n) => [n.name, n]));
   return {
     now: () => now,
-    nodes: () => nodes.map(record),
-    latestHealthSample: (name: string) => { const n = byName.get(name); return n === undefined ? null : sample(n); },
+    nodes: { nodes: () => nodes.map(record) },
+    nodeMetrics: { latestHealthSample: (name: string) => { const n = byName.get(name); return n === undefined ? null : sample(n); } },
     threads: {
       pylonsWithStatusOn: (name: NodeName) => (byName.get(name)?.pylons ?? []).map((p) => ({
         pylon: { pylonId: `pylon-${p.id}` as PylonId, boot: { resources: { cpus: 2, memoryGiB: p.memoryGiB, diskGiB: 10 } } } as StoredPylon, status: "active" as const,
@@ -58,8 +58,10 @@ function fakeRegistry(nodes: FakeNode[]) {
           : { lastAgentActivityAt: now, lastHumanActivityAt: now } } as unknown as Thread,
       })),
     },
-    releaseHold: (thread: ThreadId) => { released.add(thread); },
-    reserved: (name: NodeName): Room[] => { const r = byName.get(name)?.reserved; return r === undefined ? [] : [{ cpus: 0, memoryGiB: r, diskGiB: 0 }]; },
+    placement: {
+      releaseHold: (thread: ThreadId) => { released.add(thread); },
+      reserved: (name: NodeName): Room[] => { const r = byName.get(name)?.reserved; return r === undefined ? [] : [{ cpus: 0, memoryGiB: r, diskGiB: 0 }]; },
+    },
   };
 }
 
@@ -160,7 +162,7 @@ test("a move weighs the other nodes by their free memory too", () => {
 test("a start with --node auto fails with the free memory as the reason, and one that names the node starts there all the same", async (t) => {
   const s = await withImage(t);
   observeNode(s, "infra-testbench", { total: 31.2, committed: 8 });
-  s.registry.recordHealthSample("infra-testbench", { at: Date.now(), values: { memAvailable: 2.2 } });
+  s.registry.nodeMetrics.recordHealthSample("infra-testbench", { at: Date.now(), values: { memAvailable: 2.2 } });
   const refused = await s.call("POST", "/v1/threads", { project: "acme", title: "Nowhere", node: "auto" });
   assert.equal(refused.status, 409);
   assert.equal(refused.body.error, "no node can run this pylon: infra-testbench has 2.2 GiB of memory free, and the pylon needs 4 GiB with 1 GiB to spare; rj-firebat is offline");
@@ -174,7 +176,7 @@ test("a pylon that boots after the node's health read holds all its memory until
   const capacity = (committed: number) => testCapacity({ committedCpus: 4, memoryGiB: 32, committedMemoryGiB: committed, diskFreeGiB: 200, committedDiskGiB: 60,
     disks: [{ paths: ["/var/lib/nexus/pylons"], totalGiB: 500, freeGiB: 200, pylons: true }] });
   observeNode(s, "infra-testbench", { total: 32, committed: 0 }, { capacity: capacity(0) });
-  s.registry.recordHealthSample("infra-testbench", { at: Date.now(), values: { memAvailable: 6 } });
+  s.registry.nodeMetrics.recordHealthSample("infra-testbench", { at: Date.now(), values: { memAvailable: 6 } });
   const first = await s.call("POST", "/v1/threads", { project: "acme", title: "First", node: "auto" });
   assert.equal(first.status, 201, JSON.stringify(first.body));
   const refusal = "no node can run this pylon: infra-testbench has 6 GiB of memory free, less 4 GiB %s, and the pylon needs 4 GiB with 1 GiB to spare; rj-firebat is offline";
@@ -182,7 +184,7 @@ test("a pylon that boots after the node's health read holds all its memory until
   assert.equal((await second()).body.error, refusal.replace("%s", "for pylons about to boot there"), "before the node reports it, the first pylon is about to boot");
   observeNode(s, "infra-testbench", { total: 32, committed: 4 }, { capacity: capacity(4), pylons: [{ pylonId: (first.body as Thread).pylonId, phase: "booting" }] });
   assert.equal((await second()).body.error, refusal.replace("%s", "its pylons have yet to touch"), "once it reports it, the read from before its boot still lacks it");
-  s.registry.recordHealthSample("infra-testbench", { at: Date.now() + 5_000, values: { memAvailable: 9.5, [`pylonResident:${(first.body as Thread).pylonId}:${(first.body as Thread).id}`]: 0.5 } });
+  s.registry.nodeMetrics.recordHealthSample("infra-testbench", { at: Date.now() + 5_000, values: { memAvailable: 9.5, [`pylonResident:${(first.body as Thread).pylonId}:${(first.body as Thread).id}`]: 0.5 } });
   const named = await second();
   assert.equal(named.status, 201, `a read that names it counts only the 3.5 GiB it has yet to touch: ${JSON.stringify(named.body)}`);
 });

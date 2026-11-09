@@ -16,7 +16,7 @@ import type { CleanupQuestion } from "./questions.ts";
 import { artifactKept, bytesText, cleanupCandidates, cleanupDue, cleanupQuestion, grew, itemKey, undeleted, type CleanupItem, type NodeFacts } from "./cleanup-model.ts";
 import { isOpenStatus } from "./reconcile.ts";
 
-type CleanupRegistry = Pick<Registry, "questions" | "currentImage" | "imageOperation" | "node" | "nodes" | "previousImage" | "projects" | "threads" | "releaseInventory" | "saveReleaseInventory" | "templates">;
+type CleanupRegistry = Pick<Registry, "questions" | "images" | "nodes" | "projects" | "threads" | "releases">;
 
 export const cleanupEveryMs = 60_000;
 
@@ -24,20 +24,20 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
   registry: CleanupRegistry; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "artifactUsage" | "dropArtifacts">>; log: (message: string) => void; now?: () => number;
 }) {
   function factsOf(node: NodeName): NodeFacts {
-    const record = registry.node(node);
+    const record = registry.nodes.node(node);
     return {
       held: record?.state === "online" ? record.observation?.artifacts ?? null : null,
-      templates: registry.projects().flatMap((p) => registry.templates(p.id)).filter((t) => (t.state === "ready" ? t.builtOn : t.on) === node),
-      current: registry.currentImage(),
-      previous: registry.previousImage(),
-      operated: registry.imageOperation()?.image ?? null,
+      templates: registry.projects.projects().flatMap((p) => registry.images.templates(p.id)).filter((t) => (t.state === "ready" ? t.builtOn : t.on) === node),
+      current: registry.images.currentImage(),
+      previous: registry.images.previousImage(),
+      operated: registry.images.imageOperation()?.image ?? null,
       boots: registry.threads.pylonsWithThreadsOn(node).flatMap(({ pylon, thread }) => {
         const listed = record?.observation?.pylons.some((p) => p.pylonId === pylon.pylonId) ?? false;
         const starting = !listed && isOpenStatus(thread.status);
         if (!listed && !starting) return [];
         return [{ pylon: pylon.pylonId, image: pylon.boot.image, template: starting && pylon.firstBoot.kind === "template" ? pylon.firstBoot.template : null }];
       }),
-      releases: registry.releaseInventory(node),
+      releases: registry.releases.releaseInventory(node),
     };
   }
 
@@ -51,7 +51,7 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
     // An offline node's images and templates are unknown, and a question without them would be asked again with them.
     if (facts.held === null) return;
     const asked = registry.questions.nodeQuestions(node);
-    const low = registry.node(node)?.capacity?.disks?.some(lowDisk) ?? false;
+    const low = registry.nodes.node(node)?.capacity?.disks?.some(lowDisk) ?? false;
     if (!cleanupDue(asked, low, now())) return;
     const deleting = new Set(asked.flatMap((q) => undeleted(q).map(itemKey)));
     const candidates = cleanupCandidates(node, facts, now()).filter((c) => !deleting.has(itemKey(c)));
@@ -95,7 +95,7 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
   }
 
   async function pass() {
-    for (const { name } of registry.nodes()) {
+    for (const { name } of registry.nodes.nodes()) {
       try {
         for (const q of registry.questions.nodeQuestions(name)) await deleteArtifacts(name, q);
         await ask(name);
@@ -115,7 +115,7 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
      * the node since is gone, and one a link or a process now keeps is skipped, with why.
      */
     releases(node: NodeName, inventory: ReleaseInventory, outcomes: Readonly<Record<string, DeleteOutcome>> = {}): string[] {
-      registry.saveReleaseInventory(node, inventory);
+      registry.releases.saveReleaseInventory(node, inventory);
       const keeps = releaseKeeps(inventory);
       const wanted = new Set<string>();
       for (const q of registry.questions.nodeQuestions(node)) {

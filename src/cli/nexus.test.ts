@@ -136,7 +136,7 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean; https?: bo
     planning: true,
     dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
     images: (registry) => startImageRollout({
-      registry, probes: new Map([[node, { submit: noJobs, job: noJobs, manifest: async (id) => registry.image(id as ImageId) ?? null }]]), buildNode: node,
+      registry, probes: new Map([[node, { submit: noJobs, job: noJobs, manifest: async (id) => registry.images.image(id as ImageId) ?? null }]]), buildNode: node,
       recipe: noJobs, release: null, log: () => {},
     }),
     usageBackfill: (registry) => usageBackfill({ registry, counter: { readWhole: () => Promise.reject(new Error("the CLI tests read no pylon")) }, wake: () => {}, intervalMs: 3_600_000, log: () => {} }),
@@ -152,9 +152,9 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean; https?: bo
     }]]),
   });
   const { registry, fake, startThread } = control;
-  registry.createProject(project);
-  registry.saveImage(image, null);
-  registry.setCurrentImage(image.id);
+  registry.projects.createProject(project);
+  registry.images.saveImage(image, null);
+  registry.images.setCurrentImage(image.id);
   t.after(() => rm(dir, { recursive: true }));
   const proxy = await socksProxy(t);
   const home = join(dir, "home");
@@ -410,7 +410,7 @@ test("project add sizes a project at 2 CPUs, 4 GiB of memory and 10 GiB of disk,
   assert.deepEqual((await s.json(["project", "add", "plain", repo, "--node", node])).resources, { cpus: 2, memoryGiB: 4, diskGiB: 10 });
   assert.deepEqual((await s.json(["project", "add", "big", repo, "--node", node, "--memory", "6"])).resources, { cpus: 2, memoryGiB: 6, diskGiB: 10 });
   assert.deepEqual((await s.json(["project", "add", "wide", repo, "--node", node, "--cpus", "4"])).resources, { cpus: 4, memoryGiB: 4, diskGiB: 10 });
-  assert.deepEqual(s.registry.project("big" as ProjectId)?.resources, { cpus: 2, memoryGiB: 6, diskGiB: 10 });
+  assert.deepEqual(s.registry.projects.project("big" as ProjectId)?.resources, { cpus: 2, memoryGiB: 6, diskGiB: 10 });
 });
 
 test("project add creates a project with the contract's defaults or its flags, and maps the API's refusals", async (t) => {
@@ -418,11 +418,11 @@ test("project add creates a project with the contract's defaults or its flags, a
   const repo = "https://github.com/octocat/Hello-World.git";
   const added = await s.nexus(["project", "add", "hello", repo, "--node", node]);
   assert.deepEqual([added.code, added.stdout, added.stderr], [0, `Added project hello (${repo}) on ${node}\n`, ""]);
-  assert.deepEqual(s.registry.project("hello" as ProjectId), {
+  assert.deepEqual(s.registry.projects.project("hello" as ProjectId), {
     id: "hello", repoUrl: repo, defaultBranch: "main", defaultNode: node,
     resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
   }, "an unflagged project gets main, 2 CPUs, 4 GiB of memory and 10 GiB of disk");
-  assert.deepEqual(s.registry.project("hello" as ProjectId)?.resources, defaultProjectResources, "the resources the dashboard's new-project dialog gives");
+  assert.deepEqual(s.registry.projects.project("hello" as ProjectId)?.resources, defaultProjectResources, "the resources the dashboard's new-project dialog gives");
 
   const custom = await s.json([
     "project", "add", "custom", "git@github.com:octocat/Spoon-Knife.git", "--node", node, "--branch", "dev", "--cpus", "4", "--memory", "8", "--disk", "20",
@@ -432,7 +432,7 @@ test("project add creates a project with the contract's defaults or its flags, a
     id: "custom", repoUrl: "git@github.com:octocat/Spoon-Knife.git", defaultBranch: "dev", defaultNode: node,
     resources: { cpus: 4, memoryGiB: 8, diskGiB: 20 }, allowedHosts: ["registry.npmjs.org", "api.stripe.com"], secrets: [], logins: ["claude", "chatgpt"], preSetup: null,
   }, "--json prints the created project, with each repeated flag's values in order");
-  assert.deepEqual(s.registry.project("custom" as ProjectId), custom);
+  assert.deepEqual(s.registry.projects.project("custom" as ProjectId), custom);
   assert.deepEqual((await s.json(["projects"])).map((p: Project) => p.id).toSorted(), ["acme", "custom", "hello"]);
 
   const fails = async (args: readonly string[], code: number, error: Record<string, unknown>, overrides?: Record<string, string>) => {
@@ -450,18 +450,18 @@ test("project add creates a project with the contract's defaults or its flags, a
   await fails(["project", "add", "other", repo, "--node", node, "--cpus", "two"], 64, { kind: "invalid", status: null, error: "--cpus takes a whole number, got two" });
   await fails(["project", "add"], 64, { kind: "invalid", status: null, error: "project add takes 1 to 2 arguments, got 0" });
   await fails(["project", "other"], 64, { kind: "invalid", status: null, error: "unknown command project" });
-  assert.deepEqual(s.registry.projects().map((p) => p.id).toSorted(), ["acme", "custom", "hello"], "no refused project was created");
+  assert.deepEqual(s.registry.projects.projects().map((p) => p.id).toSorted(), ["acme", "custom", "hello"], "no refused project was created");
 
   const spread = await s.nexus(["project", "add", "spread", repo]);
   assert.deepEqual([spread.code, spread.stdout, spread.stderr], [0, `Added project spread (${repo}) on auto\n`, ""]);
-  assert.equal(s.registry.project("spread" as ProjectId)!.defaultNode, "auto", "without --node its threads boot where they fit best");
+  assert.equal(s.registry.projects.project("spread" as ProjectId)!.defaultNode, "auto", "without --node its threads boot where they fit best");
 });
 
 test("project add --scratch makes a project with no repository, --secret grants each NAME:HOST in order, and start cannot pin its commit", async (t) => {
   const s = await setup(t);
   const added = await s.nexus(["project", "add", "sketch", "--scratch", "--node", node, "--secret", "GH_TOKEN:api.github.com,github.com", "--secret", "EXA_API_KEY:api.exa.ai"]);
   assert.deepEqual([added.code, added.stdout, added.stderr], [0, `Added scratch project sketch on ${node}\n`, ""]);
-  assert.deepEqual(s.registry.project("sketch" as ProjectId), {
+  assert.deepEqual(s.registry.projects.project("sketch" as ProjectId), {
     id: "sketch", repoUrl: null, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [],
     secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] }, { name: "EXA_API_KEY", hosts: ["api.exa.ai"] }], logins: [], preSetup: null,
   });
@@ -487,7 +487,7 @@ test("project add --scratch makes a project with no repository, --secret grants 
   for (const malformed of ["gh_token:github.com", "GH_TOKEN:", "GH_TOKEN:github.com,", "GH_TOKEN:ghp_pastedbymistake", "GH_TOKEN:GitHub.com"]) {
     await refused(["--scratch", "--secret", malformed], grant);
   }
-  assert.deepEqual(s.registry.projects().map((p) => p.id).toSorted(), ["acme", "sketch"], "no refused project was created");
+  assert.deepEqual(s.registry.projects.projects().map((p) => p.id).toSorted(), ["acme", "sketch"], "no refused project was created");
 });
 
 /** The JSON lines a watch prints, one at a time. */
@@ -1429,7 +1429,7 @@ test("seen encodes a thread ID so it cannot become an unarchive request", async 
 
 test("start --node auto picks the node with room, show says why, and nodes prints what pylons hold", async (t) => {
   const s = await setup(t);
-  s.registry.upsertNode({ name: "spare" as NodeName, tailnetHost: "spare.tail.ts.net", tailnetNodeId: "nSPARE" as TailnetNodeId });
+  s.registry.nodes.upsertNode({ name: "spare" as NodeName, tailnetHost: "spare.tail.ts.net", tailnetNodeId: "nSPARE" as TailnetNodeId });
   const capacity = testCapacity({ committedCpus: 6, memoryGiB: 62.75, committedMemoryGiB: 16, diskFreeGiB: 180.25, committedDiskGiB: 120 });
   s.registry.threads.apply({ record: "node", node, state: "online", capacity });
   s.registry.threads.ingested(testObservation(node, { capacity, artifacts: [image.id] }), []);
@@ -1453,16 +1453,16 @@ test("show says how the pylon got its setup: fresh and why, with the build it as
 
   s.remoteReads(async () => ({ commit: "2".repeat(40), setupBlob: "b".repeat(40) }));
   const built = await shown("built");
-  const [building] = s.registry.templates(project.id) as Extract<TemplateRecord, { state: "building" }>[];
+  const [building] = s.registry.images.templates(project.id) as Extract<TemplateRecord, { state: "building" }>[];
   assert.equal(built.line, `setup: fresh boot runs .nexus/setup, because no template of this setup is on rj-firebat yet; ${building!.id} builds for the next thread`);
 
   const log = `the setup of template ${building!.id} failed: Setup exited 1\nnpm ERR! 404`;
-  s.registry.saveTemplate({ id: building!.id, key: building!.key, state: "failed", on: node, failedAt: Date.now(), logTail: log });
+  s.registry.images.saveTemplate({ id: building!.id, key: building!.key, state: "failed", on: node, failedAt: Date.now(), logTail: log });
   const failed = await shown("failed");
   assert.equal(failed.line, `setup: fresh boot runs .nexus/setup, because the build of template ${building!.id} failed on rj-firebat: the setup of template ${building!.id} failed: Setup exited 1`, "the log stays out of the text");
   assert.equal((await s.json(["show", failed.thread.id])).thread.setup.reason, `the build of template ${building!.id} failed on rj-firebat: ${log}`);
 
-  s.registry.saveTemplate({ id: building!.id, key: building!.key, state: "ready", builtOn: node, builtAt: Date.now() - 3 * 60_000, commit: "2".repeat(40) });
+  s.registry.images.saveTemplate({ id: building!.id, key: building!.key, state: "ready", builtOn: node, builtAt: Date.now() - 3 * 60_000, commit: "2".repeat(40) });
   s.registry.threads.ingested(testObservation(node, { artifacts: [image.id, building!.id] }), []);
   assert.equal((await shown("reused")).line, `setup: from template ${building!.id}, built 3m ago, then checked out 222222222222`);
 });
@@ -1587,9 +1587,9 @@ test("show prints each judgment of a failed pylon: its verdict and who gave it, 
     failure, thread: thread.id, node, failed: "pylon is broken: the controller exited\nqemu: terminating", startedAt: Date.UTC(2026, 9, 28, 9), request: { brief: "Is it the node?", token: "t" },
     conversation: 3, reply: null, phase,
   });
-  s.registry.saveJudgment(judgment(812, { kind: "done", verdict: { answer: "retry", why: "The controller died while the node was swapping.", by: "judgment" }, outcome: { kind: "retried", node, on: "verdict" } }), null);
-  s.registry.saveJudgment(judgment(813, { kind: "asked", verdict: { answer: "person", why: "the judgment did not answer within 15 minutes", by: "control plane" } }), null);
-  s.registry.saveJudgment(judgment(814, { kind: "judging", deadline: null }), null);
+  s.registry.judgments.saveJudgment(judgment(812, { kind: "done", verdict: { answer: "retry", why: "The controller died while the node was swapping.", by: "judgment" }, outcome: { kind: "retried", node, on: "verdict" } }), null);
+  s.registry.judgments.saveJudgment(judgment(813, { kind: "asked", verdict: { answer: "person", why: "the judgment did not answer within 15 minutes", by: "control plane" } }), null);
+  s.registry.judgments.saveJudgment(judgment(814, { kind: "judging", deadline: null }), null);
   const shown = await s.nexus(["show", thread.id]);
   assert.equal(shown.code, 0, shown.stderr);
   assert.match(shown.stdout, new RegExp(`^judgment of failure 812 on ${node}: retry, by the judgment: The controller died while the node was swapping\\.\n {2}retried the pylon on ${node}
@@ -1607,10 +1607,10 @@ test("deploy and release use the shared release view and wait for both roles", a
   const requested = await s.json(["deploy", "main"]);
   assert.equal(requested.desired.commit, "a".repeat(40));
   assert.equal(requested.desired.requestedBy, laptop);
-  for (const role of ["control", "probe"] as const) s.registry.reportRelease({ node, role, commit: requested.desired.commit, target: requested.desired.commit, state: "healthy", reason: null, observedAt: Date.now() });
+  for (const role of ["control", "probe"] as const) s.registry.releases.reportRelease({ node, role, commit: requested.desired.commit, target: requested.desired.commit, state: "healthy", reason: null, observedAt: Date.now() });
   assert.equal((await s.json(["deploy", "main", "--wait"])).nodes.every((r: { state: string }) => r.state === "healthy"), true);
   assert.equal((await s.json(["release"])).desired.commit, requested.desired.commit);
-  s.registry.reportRelease({ node, role: "control", commit: "b".repeat(40), target: requested.desired.commit, state: "rolled-back", reason: "failed to bind", observedAt: Date.now() });
+  s.registry.releases.reportRelease({ node, role: "control", commit: "b".repeat(40), target: requested.desired.commit, state: "rolled-back", reason: "failed to bind", observedAt: Date.now() });
   const failed = await s.nexus(["deploy", "main", "--wait", "--json"]);
   assert.equal(failed.code, 1);
   assert.match(failed.stderr, /failed to bind/);
@@ -1619,7 +1619,7 @@ test("deploy and release use the shared release view and wait for both roles", a
 test("image list and current print each image's role, build, release and nodes, and rollout --wait follows the rollout until it is done", async (t) => {
   const s = await setup(t);
   const older: ImageManifest = { ...image, id: "img-00000000000a" as ImageId, builtAt: "2026-12-01T00:00:00Z" };
-  s.registry.saveImage(older, "f".repeat(40));
+  s.registry.images.saveImage(older, "f".repeat(40));
   s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
   s.registry.threads.ingested(testObservation(node, { artifacts: [image.id, older.id] }), []);
   const entry = { ...image, release: null, nodes: [node] };
@@ -1871,7 +1871,7 @@ test("project add and edit set standing rules from a file or stdin, edit clears 
   await writeFile(file, "- Run npm test before you push.\n");
   const added = await s.nexus(["project", "add", "ruled", "--scratch", "--node", node, "--rules-file", file]);
   assert.deepEqual([added.code, added.stdout, added.stderr], [0, `Added scratch project ruled on ${node}, with standing rules\n`, ""]);
-  const ruled = () => s.registry.project("ruled" as ProjectId)!;
+  const ruled = () => s.registry.projects.project("ruled" as ProjectId)!;
   assert.deepEqual(ruled().standingRules, { text: "- Run npm test before you push.", revision: 1 });
 
   const show = await s.nexus(["project", "show", "ruled"]);
@@ -1936,7 +1936,7 @@ test("concurrent project edits preserve independently changed resources", async 
 
 test("project add and edit exit 64 for duplicate secret names and explain how to combine hosts", async (t) => {
   const s = await setup(t);
-  const before = s.registry.project(project.id);
+  const before = s.registry.projects.project(project.id);
   for (const args of [
     ["project", "add", "duplicate", "--scratch", "--node", node],
     ["project", "edit", project.id],
@@ -1947,8 +1947,8 @@ test("project add and edit exit 64 for duplicate secret names and explain how to
     assert.equal(error.status, 400);
     assert.match(error.error, /duplicate secret names: list all of a secret's hosts in one grant/);
   }
-  assert.equal(s.registry.project("duplicate" as ProjectId), undefined);
-  assert.deepEqual(s.registry.project(project.id), before);
+  assert.equal(s.registry.projects.project("duplicate" as ProjectId), undefined);
+  assert.deepEqual(s.registry.projects.project(project.id), before);
   const added = await s.json(["project", "add", "combined", "--scratch", "--node", node, "--secret", "TOKEN:a.example,b.example"]);
   assert.deepEqual(added.secrets, [{ name: "TOKEN", hosts: ["a.example", "b.example"] }]);
   const edited = await s.json(["project", "edit", project.id, "--secret", "TOKEN:a.example,b.example"]);
@@ -2285,7 +2285,7 @@ test("item add lines up items behind each other, project edit --pipeline decides
 
   const added = await s.nexus(["item", "add", "--project", "acme", "--message", "Build A\nwith tests"]);
   assert.equal(added.code, 0, added.stderr);
-  const [a] = s.registry.items();
+  const [a] = s.registry.pipeline.items();
   assert.equal(added.stdout, `Added ${a!.id} to acme: Build A. It is held: project acme waits for the person to approve each item: nexus item approve ${a!.id}.\n`);
   const b: PipelineItem = await s.json(["item", "add", "--project", "acme", "--title", "B", "--claude", "Build B", "--model", "claude-sonnet-5-5", "--after", a!.id]);
   assert.deepEqual([b.worker, b.model, b.brief, b.after, b.phase.kind], ["claude", "claude-sonnet-5-5", "Build B", [a!.id], "planned"]);
@@ -2586,7 +2586,7 @@ test("deploy --wait polls over one connection through the proxy, and its PUT ope
   const asked = s.requests();
   const waiting = s.nexus(["deploy", "main", "--wait", "--json"]);
   await until("the wait polled a few times", () => s.requests() >= asked + 4);
-  for (const role of ["control", "probe"] as const) s.registry.reportRelease({ node, role, commit: "a".repeat(40), target: "a".repeat(40), state: "healthy", reason: null, observedAt: Date.now() });
+  for (const role of ["control", "probe"] as const) s.registry.releases.reportRelease({ node, role, commit: "a".repeat(40), target: "a".repeat(40), state: "healthy", reason: null, observedAt: Date.now() });
   const done = await waiting;
   assert.equal(done.code, 0, done.stderr);
   assert.ok(s.requests() >= asked + 5);

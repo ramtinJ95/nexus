@@ -41,7 +41,7 @@ function addThread(registry: Registry, options: { startedBy?: string; conversati
 }
 
 function observe(registry: Registry, pylonId: PylonId, phase: "running" | "paused") {
-  const pylons = [...(registry.node(node)?.observation?.pylons ?? []).filter((p) => p.pylonId !== pylonId), ...phase === "paused" ? [] : [
+  const pylons = [...(registry.nodes.node(node)?.observation?.pylons ?? []).filter((p) => p.pylonId !== pylonId), ...phase === "paused" ? [] : [
     runningPylon(pylonId, { liveHash: "hash-1" as LiveHash, bootedAt: new Date().toISOString(), bootedFrom: { image, checkpoint: null } }),
   ]];
   observeNode(registry, { node, probeBootId: "boot-1", artifacts: [image], pylons });

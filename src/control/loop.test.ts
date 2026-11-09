@@ -305,7 +305,7 @@ test("a thread's pylon follows its thread: spawn, pause on archive, resume on ac
   run(t, registry, fake.probe);
 
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
-  assert.equal(registry.node(node)?.state, "online");
+  assert.equal(registry.nodes.node(node)?.state, "online");
 
   registry.threads.setThreadStatus(thread.id, "archived");
   await until("the pylon is paused", () => fake.pylons.get(thread.pylonId)?.phase === "stopped");
@@ -779,7 +779,7 @@ test("each pass sends the template builds recorded for its node, before its pylo
   const thread = seed(registry);
   const key = { project: "acme" as ProjectId, image, setupHash: "s" };
   const inputs = { key, repo: { url: "git@example.com:acme.git", branch: "main", commit: "c".repeat(40) }, preSetup: null, allowedHosts: [], resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } };
-  registry.saveTemplate({ id: "tpl-aaaaaaaaaaaa", key, state: "building", on: node, inputs, submitted: null });
+  registry.images.saveTemplate({ id: "tpl-aaaaaaaaaaaa", key, state: "building", on: node, inputs, submitted: null });
   const fake = fakeNode({ autoFinish: false });
   run(t, registry, fake.probe);
   await until("the pylon's spawn is sent", () => fake.submitted.some((job) => job.kind === "spawn"));
@@ -915,8 +915,8 @@ test("a fetch of its image for a wake for reading that fails after the backfill 
   const thread = seed(registry);
   const testbench = "infra-testbench" as NodeName;
   const other: ImageId = "img-111111111111";
-  registry.upsertNode({ name: testbench, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
-  registry.saveImage({ id: other, gondolinBuildId: "b2", builtOn: testbench, builtAt: "2026-10-27T00:00:00Z", sha256: "b".repeat(64), pins: {} } as never, null);
+  registry.nodes.upsertNode({ name: testbench, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
+  registry.images.saveImage({ id: other, gondolinBuildId: "b2", builtOn: testbench, builtAt: "2026-10-27T00:00:00Z", sha256: "b".repeat(64), pins: {} } as never, null);
   const fake = fakeNode({ autoFinish: false });
   const peer = fakeNode({ autoFinish: false, node: testbench, artifacts: [image, other] });
   const logged: string[] = [];
@@ -986,7 +986,7 @@ test("a retry and a wake boot the size the thread started with, though its proje
   fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 1));
   await until("the planner gives up", () => registry.threads.pylon(thread.pylonId)?.failed !== null);
 
-  registry.editProject(thread.project, (p) => ({ ...p, resources: { cpus: 8, memoryGiB: 16, diskGiB: 80 } }));
+  registry.projects.editProject(thread.project, (p) => ({ ...p, resources: { cpus: 8, memoryGiB: 16, diskGiB: 80 } }));
   assert.equal(registry.threads.retryPylon(thread.pylonId), true);
   void loop.wake(node);
   await until("the retry's spawn runs", () => fake.running().length === 1 && fake.submitted.length === 2);
@@ -1169,7 +1169,7 @@ test("a pylon moved to another node while a pass waits on the probe for another 
   const [first, second] = [seed(registry), seed(registry)].sort((a, b) => a.pylonId.localeCompare(b.pylonId));
   registry.threads.savePylon({ ...registry.threads.pylon(second!.pylonId)!, failed: "gave up after 5 failed attempts", attempts: { count: 5, last: { at: 1, code: "backend", message: "boot failed" } } });
   const other = "infra-testbench" as NodeName;
-  registry.upsertNode({ name: other, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
+  registry.nodes.upsertNode({ name: other, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
   const fake = fakeNode({ autoFinish: false });
   const release = fake.holdSubmits();
   const loop = run(t, registry, fake.probe, { log: () => {} });
@@ -1187,7 +1187,7 @@ test("a pass over several running pylons reads its node's record at most once", 
   const registry = openRegistry(tempDb());
   const threads = [seed(registry), addThread(registry, { node, boot: { image } }), addThread(registry, { node, boot: { image } })];
   let reads = 0;
-  const counted: Registry = { ...registry, node: (name) => { if (name === node) reads++; return registry.node(name); } };
+  const counted: Registry = { ...registry, nodes: { ...registry.nodes, node: (name) => { if (name === node) reads++; return registry.nodes.node(name); } } };
   const fake = fakeNode({ autoFinish: true });
   const loop = run(t, counted, fake.probe, { intervalMs: 60_000 });
   await until("every pylon runs", () => threads.every((th) => fake.pylons.get(th.pylonId)?.phase === "running"));
@@ -1287,12 +1287,12 @@ test("an unreachable node gets no jobs, is recorded offline after the grace peri
   run(t, registry, fake.probe, { offlineAfterMs: 30 });
 
   registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity({ memoryGiB: 1, diskFreeGiB: 1 }) });
-  await until("the node is recorded offline", () => registry.node(node)?.state === "offline");
+  await until("the node is recorded offline", () => registry.nodes.node(node)?.state === "offline");
   assert.equal(fake.submitted.length, 0);
 
   fake.reconnect();
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
-  assert.equal(registry.node(node)?.state, "online");
+  assert.equal(registry.nodes.node(node)?.state, "online");
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn"]);
 });
 
@@ -1306,7 +1306,7 @@ test("an unreachable node gets no delete for a pylon archived 24 hours ago, and 
   run(t, registry, fake.probe, { offlineAfterMs: 30 });
 
   registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity({ memoryGiB: 1, diskFreeGiB: 1 }) });
-  await until("the node is recorded offline", () => registry.node(node)?.state === "offline");
+  await until("the node is recorded offline", () => registry.nodes.node(node)?.state === "offline");
   assert.equal(fake.submitted.length, 0);
 
   fake.reconnect();
@@ -1341,7 +1341,7 @@ test("with the real ingest, a pylon's sessions reach the registry and a working 
 
   fake.setSessions(thread.pylonId, []);
   await until("the closed session is removed", () => registry.threads.sessions(thread.pylonId).length === 0);
-  assert.deepEqual(nodePylons(registry, registry.node(fake.probe.node)!)?.orphaned, []);
+  assert.deepEqual(nodePylons(registry, registry.nodes.node(fake.probe.node)!)?.orphaned, []);
 });
 
 test("with the real ingest, a paused pylon lists its sessions as paused, and once it runs again they run, with the status each read gives", async (t) => {
@@ -1360,9 +1360,9 @@ test("with the real ingest, a paused pylon lists its sessions as paused, and onc
 
   registry.threads.setThreadStatus(thread.id, "active");
   registry.threads.recordActivity(thread.id, { human: Date.now() });
-  await until("the pylon runs again", () => registry.node(node)!.observation?.pylons.find((p) => p.pylonId === thread.pylonId)?.phase === "running");
+  await until("the pylon runs again", () => registry.nodes.node(node)!.observation?.pylons.find((p) => p.pylonId === thread.pylonId)?.phase === "running");
   // Its sessions are not read yet, so the stored observation knows none, and the session runs in its pane, its status unknown.
-  const stored = registry.node(node)!.observation!.pylons.find((p) => p.pylonId === thread.pylonId);
+  const stored = registry.nodes.node(node)!.observation!.pylons.find((p) => p.pylonId === thread.pylonId);
   assert.ok(stored?.phase === "running" && stored.sessions === null);
   assert.deepEqual(registry.threads.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...review, status: "unknown", message: null }]);
 
@@ -1389,7 +1389,7 @@ test("a restarted control plane writes each pylon's session list on its first ob
   await until("the pause is folded in", () => before.threads.pylon(thread.pylonId)?.pauses === 1 && before.threads.sessions(thread.pylonId)[0]?.state === "paused");
   await first.close();
   // As a control plane from before paused sessions left it: the observation with the paused list, and no rows.
-  before.threads.ingested(before.node(node)!.observation!, [{ record: "sessions", pylonId: thread.pylonId, sessions: [] }]);
+  before.threads.ingested(before.nodes.node(node)!.observation!, [{ record: "sessions", pylonId: thread.pylonId, sessions: [] }]);
   before.close();
 
   const after = openRegistry(path);
@@ -1453,7 +1453,7 @@ test("listening ports the probe could not read are stored as unknown, not as the
   run(t, registry, fake.probe);
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   const stored = () => {
-    const pylon = registry.node(node)!.observation?.pylons.find((p) => p.pylonId === thread.pylonId);
+    const pylon = registry.nodes.node(node)!.observation?.pylons.find((p) => p.pylonId === thread.pylonId);
     return pylon?.phase === "running" ? pylon.listening : undefined;
   };
   fake.setListening(thread.pylonId, [{ port: 3000 }]);
@@ -1476,8 +1476,8 @@ test("a node that goes quiet, as a sleeping one does, is treated as unreachable"
     }
   } };
   run(t, registry, asleep, { silenceMs: 30, offlineAfterMs: 30 });
-  await until("the node is online", () => registry.node(node)?.state === "online");
-  await until("the node is recorded offline", () => registry.node(node)?.state === "offline");
+  await until("the node is online", () => registry.nodes.node(node)?.state === "online");
+  await until("the node is recorded offline", () => registry.nodes.node(node)?.state === "offline");
 });
 
 test("each snapshot is ingested against the last observation ingested for each known pylon", async (t) => {
@@ -1539,7 +1539,7 @@ test("session, job and preview-hit events apply their writes and leave the store
   const loop = run(t, registry, fake.probe, { ingest: realIngest });
   await until("the spawn's job event is ingested", () => registry.threads.job(thread.pylonId)?.state === "running");
   await settled(fake, loop);
-  const stored = registry.node(node)!.observation;
+  const stored = registry.nodes.node(node)!.observation;
   assert.deepEqual(stored?.jobs, [], "the job event came after the snapshot");
 
   const hit = Date.now() + 1000;
@@ -1548,7 +1548,7 @@ test("session, job and preview-hit events apply their writes and leave the store
   await settled(fake, loop);
   assert.equal(registry.threads.thread(thread.id)!.lastHumanActivityAt, hit);
   assert.equal(registry.threads.thread(thread.id)!.working, true);
-  assert.deepEqual(registry.node(node)!.observation, stored);
+  assert.deepEqual(registry.nodes.node(node)!.observation, stored);
 });
 
 test("a job in flight survives a control-plane restart: the new process asks the probe and sends nothing twice", async (t) => {
@@ -1585,7 +1585,7 @@ test("an envelope saved by a control plane that died mid-submit holds the pylon 
   registry.threads.savePylon({ ...pylon, submitted: inTransit });
   const fake = fakeNode({ autoFinish: true });
   const loop = run(t, registry, fake.probe);
-  await until("the node is online", () => registry.node(node)?.state === "online");
+  await until("the node is online", () => registry.nodes.node(node)?.state === "online");
   await loop.wake(node);
   await loop.wake(node);
   assert.equal(fake.submitted.length, 0);
@@ -1609,7 +1609,7 @@ async function heldLoop(t: import("node:test").TestContext) {
   const thread = seed(registry);
   registry.threads.savePylon({ ...registry.threads.pylon(thread.pylonId)!, submitted: envelope({ kind: "delete", pylonId: thread.pylonId }, node, Date.now()) });
   const testbench = "infra-testbench" as NodeName;
-  registry.upsertNode({ name: testbench, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
+  registry.nodes.upsertNode({ name: testbench, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
   const fake = fakeNode({ autoFinish: false });
   const other = fakeNode({ autoFinish: false, node: testbench });
   const lookups: { began: PromiseWithResolvers<void>; released: PromiseWithResolvers<void> }[] = [];
@@ -1628,7 +1628,7 @@ async function heldLoop(t: import("node:test").TestContext) {
   const loop = run(t, registry, [probe, other.probe], { intervalMs: 600_000 });
   await other.delivered();
   await settled(fake, loop);
-  assert.equal(registry.node(node)?.state, "online");
+  assert.equal(registry.nodes.node(node)?.state, "online");
   count = 0;
   lookups.length = 0;
   return {
@@ -1972,7 +1972,7 @@ test("a node the loop starts following while it runs comes online and runs its t
   loop.follow(fake.probe);
   loop.follow(fake.probe);
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
-  assert.equal(registry.node(node)?.state, "online");
+  assert.equal(registry.nodes.node(node)?.state, "online");
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn"], "following it twice follows it once");
 });
 
@@ -1980,7 +1980,7 @@ test("a node reporting a pylon the registry places on another node gets no ports
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
   const peer = "infra-testbench" as NodeName;
-  registry.upsertNode({ name: peer, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
+  registry.nodes.upsertNode({ name: peer, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
   const home = fakeNode({ autoFinish: true });
   const elsewhere = fakeNode({ autoFinish: true, node: peer });
   const loop = polled(startLoop({ registry, probes: [home.probe, elsewhere.probe], ingest: realIngest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail }));
@@ -1992,7 +1992,7 @@ test("a node reporting a pylon the registry places on another node gets no ports
 
   elsewhere.pylons.set(thread.pylonId, { ...home.pylons.get(thread.pylonId)!, services: [] } as PylonObservation);
   elsewhere.setServices(thread.pylonId, [web]);
-  await until("the copy is listed as an orphan", () => nodePylons(registry, registry.node(peer)!)?.orphaned.includes(thread.pylonId) === true);
+  await until("the copy is listed as an orphan", () => nodePylons(registry, registry.nodes.node(peer)!)?.orphaned.includes(thread.pylonId) === true);
   await loop.wake(firebat);
   assert.deepEqual(registry.threads.previews(thread.pylonId), []);
   assert.deepEqual(home.submitted.map((job) => job.kind), ["spawn"]);
@@ -2005,7 +2005,7 @@ test("a boot asking for a held secret waits for a probe older than it, and boots
   registry.threads.savePylon({ ...stored, boot: { ...stored.boot, network: { allowedHosts: [], secrets: [chatgptTokenGrant] } } });
   const fake = fakeNode({ autoFinish: true });
   const loop = run(t, registry, fake.probe);
-  await until("the node is online", () => registry.node(node)?.state === "online");
+  await until("the node is online", () => registry.nodes.node(node)?.state === "online");
   await settled(fake, loop);
   assert.deepEqual(fake.submitted, [], "no spawn reaches a probe that does not take the held secret");
   assert.equal(registry.threads.pylon(thread.pylonId)!.failed, null);
@@ -2022,7 +2022,7 @@ test("a boot asking for a held secret waits for a probe older than it, and boots
 
 test("a boot asking for the ChatGPT token right after a probe restart boots once the handoff the restart set off arrives", async (t) => {
   const registry = openRegistry(tempDb());
-  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  registry.nodes.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   const fake = fakeNode({ autoFinish: true, heldSecrets: [chatgptTokenGrant.name] });
   let token: string | undefined;
   const handoff = chatgptTokenHandoff({ probes: () => [fake.probe], token: async () => token, log: assert.fail });
@@ -2037,7 +2037,7 @@ test("a boot asking for the ChatGPT token right after a probe restart boots once
       return ingest(event, ...rest);
     },
   });
-  await until("the node is online", () => registry.node(node)?.state === "online");
+  await until("the node is online", () => registry.nodes.node(node)?.state === "online");
   token = "token";
 
   fake.restartProbe();
@@ -2046,7 +2046,7 @@ test("a boot asking for the ChatGPT token right after a probe restart boots once
   registry.threads.savePylon({ ...stored, boot: { ...stored.boot, network: { allowedHosts: [], secrets: [chatgptTokenGrant] } } });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh"]);
-  assert.deepEqual(registry.node(node)?.observation?.grants?.secrets, [chatgptTokenGrant.name]);
+  assert.deepEqual(registry.nodes.node(node)?.observation?.grants?.secrets, [chatgptTokenGrant.name]);
   assert.ok(heard.length >= 4, "the loop heard more than one snapshot");
   assert.deepEqual(heard, heard.map((_, i) => i % 2 === 0 ? `heard ${node}` : "ingested"), "each snapshot is heard just before it is ingested");
   await handoff.close();
@@ -2063,7 +2063,7 @@ test("every new boot takes the configured git identity, but a checkpoint keeps i
   assert.ok(fresh.kind === "spawn");
   assert.deepEqual(fresh.boot.gitIdentity, gitIdentity);
   const override = { name: "Work Person", email: "work@example.com" };
-  registry.editProject(thread.project, (p) => ({ ...p, gitIdentity: override, secrets: [{ name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }], logins: ["claude"] }));
+  registry.projects.editProject(thread.project, (p) => ({ ...p, gitIdentity: override, secrets: [{ name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }], logins: ["claude"] }));
   assert.deepEqual(registry.threads.pylon(thread.pylonId)!.boot.gitIdentity, gitIdentity, "a running pylon keeps its boot identity");
   registry.threads.setThreadStatus(thread.id, "archived");
   await until("the pause is folded in", () => registry.threads.pylon(thread.pylonId)?.pauses === 1);
@@ -2298,7 +2298,7 @@ for (const phase of ["booting", "stopping"] as const) test(`retry recovers a con
   registry.threads.savePylon({ ...registry.threads.pylon(thread.pylonId)!, failed: "Guest command got no answer within 40000 ms" });
   fake.pylons.set(thread.pylonId, { pylonId: thread.pylonId, phase });
   fake.forgetJobs();
-  await until("the controller's transitional state is observed", () => registry.node(node)?.observation?.pylons.find((p) => p.pylonId === thread.pylonId)?.phase === phase);
+  await until("the controller's transitional state is observed", () => registry.nodes.node(node)?.observation?.pylons.find((p) => p.pylonId === thread.pylonId)?.phase === phase);
   assert.equal(registry.threads.retryPylon(thread.pylonId), true);
   void loop.wake(node);
   await until("retry boots again", () => fake.submitted.length === 3 && fake.pylons.get(thread.pylonId)?.phase === "running");
@@ -2329,14 +2329,14 @@ test("a git read again settles once the registry holds the snapshot that read it
   const loop = startLoop({ registry, probes: [probe], ingest: realIngest, previewPorts, intervalMs: 60_000, log: assert.fail });
   t.after(() => loop.close());
   send({ type: "snapshot", observation: testObservation(node, { observedAt: "2026-11-04T10:00:00.000Z" }) });
-  await until("the first snapshot is ingested", () => registry.node(node)?.observation?.observedAt === "2026-11-04T10:00:00.000Z");
+  await until("the first snapshot is ingested", () => registry.nodes.node(node)?.observation?.observedAt === "2026-11-04T10:00:00.000Z");
   const read = watch(loop.readGit(node, "pylon-th-1" as PylonId));
   send({ type: "snapshot", observation: testObservation(node, { observedAt: "2026-11-04T10:00:00.500Z" }) });
-  await until("the older snapshot is ingested", () => registry.node(node)?.observation?.observedAt === "2026-11-04T10:00:00.500Z");
+  await until("the older snapshot is ingested", () => registry.nodes.node(node)?.observation?.observedAt === "2026-11-04T10:00:00.500Z");
   assert.equal(await read(), false, "an older snapshot holds the old git read");
   send({ type: "snapshot", observation: testObservation(node, { observedAt: "2026-11-04T10:00:01.000Z" }) });
   await until("the read settles", read);
-  assert.equal(registry.node(node)?.observation?.observedAt, "2026-11-04T10:00:01.000Z");
+  assert.equal(registry.nodes.node(node)?.observation?.observedAt, "2026-11-04T10:00:01.000Z");
   assert.deepEqual(asked, ["pylon-th-1"]);
 });
 
@@ -2358,11 +2358,11 @@ test("woken settles once the loop ingests the node's next event, so a wait for a
   const loop = startLoop({ registry, probes: [probe], ingest: realIngest, previewPorts, intervalMs: 60_000, log: assert.fail });
   t.after(() => loop.close());
   send({ type: "snapshot", observation: testObservation(node, { observedAt: "2026-11-04T10:00:00.000Z" }) });
-  await until("the first snapshot is ingested", () => registry.node(node)?.observation?.observedAt === "2026-11-04T10:00:00.000Z");
+  await until("the first snapshot is ingested", () => registry.nodes.node(node)?.observation?.observedAt === "2026-11-04T10:00:00.000Z");
   const woken = watch(loop.woken());
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(await woken(), false, "nothing woke the loop yet");
   send({ type: "snapshot", observation: testObservation(node, { observedAt: "2026-11-04T10:00:01.000Z" }) });
   await until("the loop wakes", woken);
-  assert.equal(registry.node(node)?.observation?.observedAt, "2026-11-04T10:00:01.000Z", "the registry holds the event by then");
+  assert.equal(registry.nodes.node(node)?.observation?.observedAt, "2026-11-04T10:00:01.000Z", "the registry holds the event by then");
 });

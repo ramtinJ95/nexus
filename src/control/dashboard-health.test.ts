@@ -34,7 +34,7 @@ test("the sidebar counts the problems the person has not seen, which opening the
   assert.match(empty, /No pass since the control plane started/);
   assert.match(empty, /No check has changed/);
 
-  const [backup] = s.registry.recordHealthChanges([{ at: "2026-11-02T00:25:00.000Z", node: null, name: "backup", from: "ok", status: "fail", text: "the newest backup is 27 h old" }], 0);
+  const [backup] = s.registry.health.recordHealthChanges([{ at: "2026-11-02T00:25:00.000Z", node: null, name: "backup", from: "ok", status: "fail", text: "the newest backup is 27 h old" }], 0);
   assert.equal(await count(), "1");
   assert.match((await page("/")).text, new RegExp(`id="health-link"[^>]*data-change="${backup!.id}"`), "the newest change the page shows, which no notice repeats");
   pass = latest;
@@ -48,11 +48,11 @@ test("the sidebar counts the problems the person has not seen, which opening the
   assert.equal((await s.call("POST", "/v1/checks/seen", { through: Number(await through()) })).status, 204, "as the page does once the person looks at it");
   assert.equal(await count(), "", "seen, so the count clears while the problem stays open");
   assert.doesNotMatch((await page("/health")).text, /<em>new<\/em>/);
-  s.registry.recordHealthChanges([{ at: "2026-11-02T00:35:00.000Z", node: null, name: "backup", from: "fail", status: "warn", text: "the run failed" }], 0);
+  s.registry.health.recordHealthChanges([{ at: "2026-11-02T00:35:00.000Z", node: null, name: "backup", from: "fail", status: "warn", text: "the run failed" }], 0);
   assert.equal(await count(), "", "a problem that got better is not new");
-  s.registry.recordHealthChanges([{ at: "2026-11-02T00:40:00.000Z", node: "rj-firebat" as never, name: "disk", from: "ok", status: "warn", text: "low" }], 0);
+  s.registry.health.recordHealthChanges([{ at: "2026-11-02T00:40:00.000Z", node: "rj-firebat" as never, name: "disk", from: "ok", status: "warn", text: "low" }], 0);
   assert.equal(await count(), "1", "a new problem brings the count back");
-  s.registry.recordHealthChanges([{ at: "2026-11-02T00:45:00.000Z", node: "rj-firebat" as never, name: "disk", from: "warn", status: "ok", text: "fine" }], 0);
+  s.registry.health.recordHealthChanges([{ at: "2026-11-02T00:45:00.000Z", node: "rj-firebat" as never, name: "disk", from: "warn", status: "ok", text: "fine" }], 0);
   assert.equal(await count(), "", "and its recovery takes it away");
   for (const path of ["/reports", "/reports/1"]) assert.equal((await page(path)).status, 404, path);
 });

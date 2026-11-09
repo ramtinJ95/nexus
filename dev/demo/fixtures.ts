@@ -267,7 +267,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
       d.registry.threads.savePylon({ ...d.registry.threads.pylon(t.pylonId)!, failed: reason });
       d.registry.threads.appendEvent("thread.failed", t.id, { message: reason, cause: "pylon" });
       const failure = d.registry.threads.failure(t.id)!.event;
-      d.registry.saveJudgment({
+      d.registry.judgments.saveJudgment({
         failure, thread: t.id, node: firebat, failed: `${reason}\nqemu: terminating on signal 15`, startedAt: now() - 40 * minute,
         request: { brief: "The pylon of thread 'Fix doctor's certificate check' failed on rj-firebat. Was it the node, the thread's work, or neither?", token: "t" }, conversation: 9,
         reply: "The node was swapping at the time: 7.8 of 8 GiB swap used. Retrying elsewhere is safest, but infra-testbench is near its memory limit too.",
@@ -573,8 +573,8 @@ function seedHealthHistory(d: Demo) {
     const threadOf = (p: PylonId) => d.registry.threads.pylon(p)?.thread ?? null;
     const end = now();
     // Five-minute samples over 31 days, then every minute for the last six hours, as the sampler takes them.
-    for (let at = end - 31 * day; at < end - 6 * hour; at += 5 * minute) d.registry.recordHealthSample(node, sampleOf(health(node, at, pylons), at, threadOf));
-    for (let at = end - 6 * hour; at <= end; at += minute) d.registry.recordHealthSample(node, sampleOf(health(node, at, pylons), at, threadOf));
+    for (let at = end - 31 * day; at < end - 6 * hour; at += 5 * minute) d.registry.nodeMetrics.recordHealthSample(node, sampleOf(health(node, at, pylons), at, threadOf));
+    for (let at = end - 6 * hour; at <= end; at += minute) d.registry.nodeMetrics.recordHealthSample(node, sampleOf(health(node, at, pylons), at, threadOf));
   }
 }
 
@@ -610,8 +610,8 @@ function seedHealthChanges(d: Demo) {
     [2 * hour, { node: testbench, name: "pylons", status: "warn", text: "1 pylon is broken: Fix the crash on an empty notebook." }, "ok"],
     [40 * minute, { node: firebat, name: "pylons", status: "fail", text: "1 pylon is broken: Fix doctor's certificate check." }, "ok"],
   ];
-  for (const [ago, check, from] of history) d.registry.recordHealthChanges([{ ...check, from, at: iso(ago) }], now() - 30 * day);
-  d.registry.markHealthSeen(d.registry.healthChanges().find((c) => c.node === null && c.name === "backup")!.id, now() - 20 * hour);
+  for (const [ago, check, from] of history) d.registry.health.recordHealthChanges([{ ...check, from, at: iso(ago) }], now() - 30 * day);
+  d.registry.health.markHealthSeen(d.registry.health.healthChanges().find((c) => c.node === null && c.name === "backup")!.id, now() - 20 * hour);
   return report;
 }
 
@@ -640,7 +640,7 @@ async function seedPipeline(d: Demo, world: World) {
     id: id as ItemId, project: project as ProjectId, title, request: { project, title }, message: `Brief: ${title}.`, after: [], addedBy: laptop, addedAt: now() - ago,
     approved: null, cancelled: null, lastError: null, ...over,
   });
-  for (const spec of threads.filter((s) => s.item !== undefined)) d.registry.saveItem(item(spec.item!, spec.project, spec.title, spec.ago + 10 * minute));
+  for (const spec of threads.filter((s) => s.item !== undefined)) d.registry.pipeline.saveItem(item(spec.item!, spec.project, spec.title, spec.ago + 10 * minute));
   const graphs = world.threads.get("graphs")!;
   const prune = { project: "nexus", title: "Prune events older than 90 days" };
   const pruneBrief = "Add a pruning pass for events older than 90 days.";
@@ -652,16 +652,16 @@ async function seedPipeline(d: Demo, world: World) {
     item("it-cleanup", "nexus", "Move cleanup onto the new model", 20 * hour, { after: ["it-split" as ItemId] }),
     item("it-giftcards", "storefront", "Gift cards at checkout", 9 * hour),
     item("it-svelte", "storefront", "Rewrite the cart in Svelte", 2 * day, { cancelled: { by: laptop, at: now() - day } }),
-  ]) d.registry.saveItem(i);
+  ]) d.registry.pipeline.saveItem(i);
 }
 
 /** The releases each node reports, and infra-testbench's cleanup question, which waits on the person. */
 function seedNodeExtras(d: Demo) {
   const current = "fac9ff725fd13db015758c7f31094f8df76077d0";
-  d.registry.setDesiredRelease({ commit: current, requestedBy: laptop, requestedAt: now() - 2 * hour });
-  d.registry.reportRelease({ node: firebat, role: "control", commit: current, target: current, state: "healthy", reason: null, observedAt: now() - minute });
-  d.registry.reportRelease({ node: firebat, role: "probe", commit: current, target: current, state: "healthy", reason: null, observedAt: now() - minute });
-  d.registry.reportRelease({ node: testbench, role: "probe", commit: "4209370e1c2b5d1a9f0e3b7c6d8a2e4f1b3c5d7e", target: current, state: "waiting-for-idle", reason: "2 pylons have running turns", observedAt: now() - 2 * minute });
+  d.registry.releases.setDesiredRelease({ commit: current, requestedBy: laptop, requestedAt: now() - 2 * hour });
+  d.registry.releases.reportRelease({ node: firebat, role: "control", commit: current, target: current, state: "healthy", reason: null, observedAt: now() - minute });
+  d.registry.releases.reportRelease({ node: firebat, role: "probe", commit: current, target: current, state: "healthy", reason: null, observedAt: now() - minute });
+  d.registry.releases.reportRelease({ node: testbench, role: "probe", commit: "4209370e1c2b5d1a9f0e3b7c6d8a2e4f1b3c5d7e", target: current, state: "waiting-for-idle", reason: "2 pylons have running turns", observedAt: now() - 2 * minute });
   const gib = 1024 ** 3;
   d.registry.questions.askQuestion({
     kind: "cleanup", id: "cleanup:infra-testbench:1", node: testbench, reserved: null, answerer: "deployer", askedAt: now() - 3 * hour, options: ["Delete", "Keep"],
@@ -692,7 +692,7 @@ function liveClock(d: Demo, world: World) {
   let n = 0;
   const tick = setInterval(() => {
     for (const t of world.live.working) d.registry.threads.recordActivity(t.id, { agent: now(), agentTurnRunning: true });
-    for (const node of [firebat, testbench]) d.registry.recordHealthSample(node, sampleOf(health(node, now(), runningOn(d.registry, node)), now(), (p) => d.registry.threads.pylon(p)?.thread ?? null));
+    for (const node of [firebat, testbench]) d.registry.nodeMetrics.recordHealthSample(node, sampleOf(health(node, now(), runningOn(d.registry, node)), now(), (p) => d.registry.threads.pylon(p)?.thread ?? null));
     const talker = world.live.talker;
     if (talker !== null && ++n % 3 === 0) {
       const text = liveReplies[(n / 3 - 1) % liveReplies.length]!;
@@ -752,10 +752,10 @@ export async function seedDemo(d: Demo) {
       resources: { cpus: 2, memoryGiB: 4, diskGiB: 20 }, allowedHosts: p.hosts, secrets: p.secrets, logins: ["claude", "chatgpt"], preSetup: null,
     });
     if (res.status !== 201) throw new Error(`adding project ${p.id}: ${JSON.stringify(res.body)}`);
-    if (p.pipeline !== null) d.registry.editProject(p.id as ProjectId, (stored) => ({ ...stored, pipeline: p.pipeline }));
+    if (p.pipeline !== null) d.registry.projects.editProject(p.id as ProjectId, (stored) => ({ ...stored, pipeline: p.pipeline }));
   }
   if ((await d.call("POST", "/v1/images", image)).status !== 201) throw new Error("adding the image");
-  d.registry.setCurrentImage(image.id as ImageId);
+  d.registry.images.setCurrentImage(image.id as ImageId);
 
   for (const spec of threads.toSorted((a, b) => b.ago - a.ago)) {
     const t = await back(spec.ago, async () => {

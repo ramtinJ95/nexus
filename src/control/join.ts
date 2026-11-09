@@ -12,7 +12,7 @@ import { Refusal } from "./refusal.ts";
 import type { Registry } from "./registry.ts";
 import type { JoinedNode } from "./node-store.ts";
 
-type JoinRegistry = Pick<Registry, "addJoinToken" | "joinNode" | "joinToken" | "node" | "nodeByTailnetId">;
+type JoinRegistry = Pick<Registry, "nodes">;
 
 export const joinTokenTtlMs = 60 * 60_000;
 /** Not strict, so a name or node ID in the body is dropped rather than read. */
@@ -24,7 +24,7 @@ const mint = "Mint another with sudo deploy/install.sh --join-token on the contr
 export function mintJoinToken(registry: JoinRegistry, now = Date.now()): { token: string; expiresAt: number } {
   const token = randomBytes(32).toString("base64url");
   const expiresAt = now + joinTokenTtlMs;
-  registry.addJoinToken(hashOf(token), expiresAt);
+  registry.nodes.addJoinToken(hashOf(token), expiresAt);
   return { token, expiresAt };
 }
 
@@ -36,7 +36,7 @@ export function mintJoinToken(registry: JoinRegistry, now = Date.now()): { token
  */
 export function joinNode(registry: JoinRegistry, admitted: ReadonlySet<TailnetNodeId>, configured: ReadonlySet<TailnetNodeId>, caller: { id: TailnetNodeId; host: string }, request: z.infer<typeof joinRequestSchema>, now = Date.now()): JoinedNode {
   const hash = hashOf(request.token);
-  const token = registry.joinToken(hash);
+  const token = registry.nodes.joinToken(hash);
   if (token === undefined) throw new Refusal("forbidden", `this join token is not one this control plane minted. ${mint}`);
   if (token.usedAt !== null) throw new Refusal("forbidden", `this join token was used at ${new Date(token.usedAt).toISOString()}, and each joins one node. ${mint}`);
   if (token.expiresAt <= now) throw new Refusal("forbidden", `this join token expired at ${new Date(token.expiresAt).toISOString()}. ${mint}`);
@@ -45,12 +45,12 @@ export function joinNode(registry: JoinRegistry, admitted: ReadonlySet<TailnetNo
   if (configured.has(caller.id)) throw new Refusal("conflict", `${caller.host} is a node in control.json, which sets its deploy key`);
   const name = nodeNameSchema.safeParse(caller.host.split(".")[0]);
   if (!name.success) throw new Refusal("conflict", `tailscale names this machine ${caller.host}, whose first label is not a node name: ${name.error.issues[0]!.message}`);
-  const named = registry.node(name.data);
+  const named = registry.nodes.node(name.data);
   if (named !== undefined && named.tailnetNodeId !== caller.id) throw new Refusal("conflict", `a node named ${name.data} is already tailnet node ${named.tailnetNodeId}. Rename this machine in tailscale`);
-  const same = registry.nodeByTailnetId(caller.id);
+  const same = registry.nodes.nodeByTailnetId(caller.id);
   if (same !== undefined && same.name !== name.data) throw new Refusal("conflict", `this machine is already the node ${same.name}, and tailscale now names it ${name.data}`);
 
   const node = { name: name.data, tailnetHost: caller.host, tailnetNodeId: caller.id, deployKey: request.deployKey };
-  if (!registry.joinNode(hash, node, now)) throw new Refusal("forbidden", `this join token was used or expired meanwhile. ${mint}`);
+  if (!registry.nodes.joinNode(hash, node, now)) throw new Refusal("forbidden", `this join token was used or expired meanwhile. ${mint}`);
   return { ...node, joinedAt: now };
 }

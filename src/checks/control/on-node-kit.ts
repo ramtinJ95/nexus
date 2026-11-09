@@ -67,8 +67,8 @@ export async function openNodeCheck(options: { image: string | undefined; opens:
   const startPlane = async (config: ControlPlaneConfig) => {
     // A rollout needs a deployer, which the control plane's own node never is, so the check makes the image current in the registry.
     const seed = openRegistry(config.db);
-    seed.saveImage(manifest!, null);
-    seed.setCurrentImage(image);
+    seed.images.saveImage(manifest!, null);
+    seed.images.setCurrentImage(image);
     seed.close();
     return await startControlPlane(config, scriptedModels());
   };

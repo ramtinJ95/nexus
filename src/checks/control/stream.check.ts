@@ -59,19 +59,19 @@ const threads: ThreadHarness = {
 harness.resume();
 
 const registry = openRegistry(join(dir, "registry.db"));
-registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
-registry.createProject({
+registry.nodes.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+registry.projects.createProject({
   id: "acme" as ProjectId, repoUrl: "https://github.com/octocat/Spoon-Knife.git", defaultBranch: "main", defaultNode: node,
   resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
 });
 const image = "img-0123456789ab" as ImageId;
-registry.saveImage(testImage({ id: image }), null);
+registry.images.saveImage(testImage({ id: image }), null);
 
-registry.setCurrentImage(image);
+registry.images.setCurrentImage(image);
 const api = await startApi({
   registry, host: "127.0.0.1", port: 0, whois: async () => laptop, allowed: new Set([laptop]), hostnames: new Set(["127.0.0.1"]),
   deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} },
-  harness: threads, wake: () => {}, log: (message) => console.error(message), features: noFeatures, gate: turnGate(() => isDraining(registry.drain(), registry.now())), health: () => null,
+  harness: threads, wake: () => {}, log: (message) => console.error(message), features: noFeatures, gate: turnGate(() => isDraining(registry.releases.drain(), registry.now())), health: () => null,
   startThread: threadStarter({
     registry, harness: threads, wake: () => {}, dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
     mirror: { setupInputs: () => Promise.reject(new Error("the stream check reads no remote")) },

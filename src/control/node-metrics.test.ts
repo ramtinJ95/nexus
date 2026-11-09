@@ -32,8 +32,8 @@ function pointsOf(metrics: { series: { key: string; t: number[]; min: number[]; 
 
 test("a health read becomes one value per series it holds, a repeated sensor name numbered and a pylon without a thread keyed by the pylon alone", (t) => {
   const registry = testRegistry(t);
-  assert.equal(registry.recordHealthSample("rj-firebat", sampleOf(health, now, threadOf)), true);
-  const metrics = registry.nodeMetrics("rj-firebat", now - 15 * minute, now, now);
+  assert.equal(registry.nodeMetrics.recordHealthSample("rj-firebat", sampleOf(health, now, threadOf)), true);
+  const metrics = registry.nodeMetrics.nodeMetrics("rj-firebat", now - 15 * minute, now, now);
   assert.equal(metrics.tier, "raw");
   assert.deepEqual(Object.fromEntries(metrics.series.map((s) => [s.key, s.avg])), {
     cpus: [16], diskFree: [180.3], diskTotal: [457], load1: [2.5], load15: [1], load5: [1.75], memAvailable: [40.2], memTotal: [62.8],
@@ -47,37 +47,37 @@ test("a health read becomes one value per series it holds, a repeated sensor nam
 
 test("a node whose host reads no load, memory, temperatures or pylons records only CPUs and disk", (t) => {
   const registry = testRegistry(t);
-  registry.recordHealthSample("rj-firebat", sampleOf({ ...health, load: null, memory: null, temperatures: null, pylons: null }, now, threadOf));
-  assert.deepEqual(pointsOf(registry.nodeMetrics("rj-firebat", now - hour, now, now)), { cpus: [[now, 16, 16, 16, 1]], diskFree: [[now, 180.3, 180.3, 180.3, 1]], diskTotal: [[now, 457, 457, 457, 1]] });
-  assert.deepEqual(registry.nodeMetrics("other", now - hour, now, now).series, [], "another node's history is its own");
+  registry.nodeMetrics.recordHealthSample("rj-firebat", sampleOf({ ...health, load: null, memory: null, temperatures: null, pylons: null }, now, threadOf));
+  assert.deepEqual(pointsOf(registry.nodeMetrics.nodeMetrics("rj-firebat", now - hour, now, now)), { cpus: [[now, 16, 16, 16, 1]], diskFree: [[now, 180.3, 180.3, 180.3, 1]], diskTotal: [[now, 457, 457, 457, 1]] });
+  assert.deepEqual(registry.nodeMetrics.nodeMetrics("other", now - hour, now, now).series, [], "another node's history is its own");
 });
 
 test("a read within 4 s of the node's last recorded one is not recorded, across a reopen of the registry too", async (t) => {
   const path = `${await tempDir("nexus-node-metrics-", t)}/registry.db`;
   const one = (at: number, load: number) => ({ at, values: { load1: load } });
   const first = openRegistry(path);
-  assert.equal(first.recordHealthSample("a", one(now, 1)), true);
-  assert.equal(first.recordHealthSample("a", one(now + 3_999, 2)), false);
-  assert.equal(first.recordHealthSample("b", one(now + 1_000, 3)), true, "each node has its own gap");
+  assert.equal(first.nodeMetrics.recordHealthSample("a", one(now, 1)), true);
+  assert.equal(first.nodeMetrics.recordHealthSample("a", one(now + 3_999, 2)), false);
+  assert.equal(first.nodeMetrics.recordHealthSample("b", one(now + 1_000, 3)), true, "each node has its own gap");
   first.close();
   const reopened = testRegistry(t, path);
-  assert.equal(reopened.recordHealthSample("a", one(now + 3_000, 4)), false, "the gap holds from the registry's newest sample");
-  assert.equal(reopened.recordHealthSample("a", one(now + 4_000, 5)), true);
-  assert.deepEqual(pointsOf(reopened.nodeMetrics("a", now - minute, now + 5_000, now + 5_000)).load1, [[now, 1, 1, 1, 1], [now + 4_000, 5, 5, 5, 1]]);
+  assert.equal(reopened.nodeMetrics.recordHealthSample("a", one(now + 3_000, 4)), false, "the gap holds from the registry's newest sample");
+  assert.equal(reopened.nodeMetrics.recordHealthSample("a", one(now + 4_000, 5)), true);
+  assert.deepEqual(pointsOf(reopened.nodeMetrics.nodeMetrics("a", now - minute, now + 5_000, now + 5_000)).load1, [[now, 1, 1, 1, 1], [now + 4_000, 5, 5, 5, 1]]);
 });
 
 test("a bucket holds its samples' min, average and max, and a wider bucket weighs each smaller one by its samples", (t) => {
   const registry = testRegistry(t);
-  for (const [at, load] of [[now, 1], [now + 5_000, 2], [now + 10_000, 6], [now + minute, 12]] as const) registry.recordHealthSample("a", { at, values: { load1: load } });
+  for (const [at, load] of [[now, 1], [now + 5_000, 2], [now + 10_000, 6], [now + minute, 12]] as const) registry.nodeMetrics.recordHealthSample("a", { at, values: { load1: load } });
   const at = now + 2 * minute;
-  const sixHours = registry.nodeMetrics("a", at - 6 * hour, at, at);
+  const sixHours = registry.nodeMetrics.nodeMetrics("a", at - 6 * hour, at, at);
   assert.deepEqual([sixHours.tier, sixHours.bucketMs], ["1m", minute]);
   assert.deepEqual(pointsOf(sixHours).load1, [[now, 1, 3, 6, 3], [now + minute, 12, 12, 12, 1]]);
-  const day1 = registry.nodeMetrics("a", at - 24 * hour, at, at);
+  const day1 = registry.nodeMetrics.nodeMetrics("a", at - 24 * hour, at, at);
   assert.deepEqual([day1.tier, day1.bucketMs], ["2m", 2 * minute]);
   assert.deepEqual(pointsOf(day1).load1, [[now, 1, 21 / 4, 12, 4]], "(1 + 2 + 6 + 12) / 4, not the average of 3 and 12");
-  assert.deepEqual(pointsOf(registry.nodeMetrics("a", at - 30 * day, at, at)).load1, [[now, 1, 21 / 4, 12, 4]], "the hour tier holds the same");
-  const twoHours = registry.nodeMetrics("a", at - 2 * hour, at, at);
+  assert.deepEqual(pointsOf(registry.nodeMetrics.nodeMetrics("a", at - 30 * day, at, at)).load1, [[now, 1, 21 / 4, 12, 4]], "the hour tier holds the same");
+  const twoHours = registry.nodeMetrics.nodeMetrics("a", at - 2 * hour, at, at);
   assert.deepEqual([twoHours.tier, twoHours.bucketMs], ["raw", 8_000], "raw samples regrouped in 8-s buckets");
   assert.deepEqual(pointsOf(twoHours).load1, [[now, 1, 1.5, 2, 2], [now + 10_000, 6, 6, 6, 1], [now + minute, 12, 12, 12, 1]]);
 });
@@ -108,12 +108,12 @@ test("each range of the page's picker is one range of the node's rows, read in k
 
 test("no range gives a series more than 1,000 points, even with a sample every 4 s", (t) => {
   const registry = testRegistry(t);
-  for (let at = now - 31 * day; at < now - 25 * hour; at += minute) registry.recordHealthSample("a", { at, values: { load1: 1 } });
-  for (let at = now - 25 * hour; at <= now; at += 4_000) registry.recordHealthSample("a", { at, values: { load1: 1 } });
+  for (let at = now - 31 * day; at < now - 25 * hour; at += minute) registry.nodeMetrics.recordHealthSample("a", { at, values: { load1: 1 } });
+  for (let at = now - 25 * hour; at <= now; at += 4_000) registry.nodeMetrics.recordHealthSample("a", { at, values: { load1: 1 } });
   const counts: Record<string, number> = {};
   for (const span of [15 * minute, hour, 2 * hour, 6 * hour, 24 * hour, 25 * hour, 7 * day, 8 * day, 30 * day, 31 * day]) {
     for (const end of [now, now - 7_777]) {
-      const m = registry.nodeMetrics("a", end - span, end, now);
+      const m = registry.nodeMetrics.nodeMetrics("a", end - span, end, now);
       const points = m.series[0]!.t.length;
       assert.ok(points <= maxPoints, `${span / minute} min to ${end}: ${points} points from ${m.tier} in ${m.bucketMs} ms buckets`);
       counts[`${span / minute}`] ??= points;
@@ -124,20 +124,20 @@ test("no range gives a series more than 1,000 points, even with a sample every 4
 
 test("pruning drops what each tier keeps no longer, at most a batch per tier a call", (t) => {
   const registry = testRegistry(t);
-  registry.recordHealthSample("a", { at: now, values: { load1: 1 } });
+  registry.nodeMetrics.recordHealthSample("a", { at: now, values: { load1: 1 } });
   const kept = [["raw", 2 * hour], ["1m", 7 * hour], ["2m", 25 * hour], ["15m", 8 * day], ["1h", 31 * day]] as const;
   for (const [tier, keep] of kept) {
-    assert.equal(registry.pruneNodeMetrics(now + keep, 500), 0, `${tier} keeps a sample exactly its keep old`);
-    assert.equal(registry.pruneNodeMetrics(now + keep + 1, 500), 1, `${tier} drops it after`);
+    assert.equal(registry.nodeMetrics.pruneNodeMetrics(now + keep, 500), 0, `${tier} keeps a sample exactly its keep old`);
+    assert.equal(registry.nodeMetrics.pruneNodeMetrics(now + keep + 1, 500), 1, `${tier} drops it after`);
   }
-  assert.deepEqual(registry.nodeMetrics("a", now - 1, now + 1, now + 32 * day).series, [], "past 31 days nothing is left");
+  assert.deepEqual(registry.nodeMetrics.nodeMetrics("a", now - 1, now + 1, now + 32 * day).series, [], "past 31 days nothing is left");
 
   const old = now - 2 * hour - 1_200 * 4_000;
-  for (let i = 0; i < 1_200; i++) registry.recordHealthSample("b", { at: old + i * 4_000, values: { load1: 1 } });
-  for (let at = now - hour; at <= now; at += 4 * minute) registry.recordHealthSample("b", { at, values: { load1: 2 } });
-  assert.deepEqual([500, 500, 200, 0].map(() => registry.pruneNodeMetrics(now, 500)), [500, 500, 200, 0]);
-  assert.deepEqual(pointsOf(registry.nodeMetrics("b", now - 2 * hour, now, now)).load1!.map(([, , avg]) => avg), Array(16).fill(2), "the last hour's raw samples stay");
-  assert.equal(registry.nodeMetrics("b", now - 6 * hour, now, now).series[0]!.n.reduce((a, b) => a + b), 1_216, "the minutes still hold the pruned samples");
+  for (let i = 0; i < 1_200; i++) registry.nodeMetrics.recordHealthSample("b", { at: old + i * 4_000, values: { load1: 1 } });
+  for (let at = now - hour; at <= now; at += 4 * minute) registry.nodeMetrics.recordHealthSample("b", { at, values: { load1: 2 } });
+  assert.deepEqual([500, 500, 200, 0].map(() => registry.nodeMetrics.pruneNodeMetrics(now, 500)), [500, 500, 200, 0]);
+  assert.deepEqual(pointsOf(registry.nodeMetrics.nodeMetrics("b", now - 2 * hour, now, now)).load1!.map(([, , avg]) => avg), Array(16).fill(2), "the last hour's raw samples stay");
+  assert.equal(registry.nodeMetrics.nodeMetrics("b", now - 6 * hour, now, now).series[0]!.n.reduce((a, b) => a + b), 1_216, "the minutes still hold the pruned samples");
 });
 
 test("the drain prunes until a call deletes nothing, yielding between calls", async () => {

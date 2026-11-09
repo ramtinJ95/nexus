@@ -18,8 +18,8 @@ const graceMs = 180_000;
 function fixture(t: import("node:test").TestContext, limit: { resetsAt: number | null } = { resetsAt }, ids: readonly string[] = ["th-1"]) {
   const registry = testRegistry(t);
   const project = { id: "project" as ProjectId, repoUrl: "https://github.com/acme/repo.git", defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null };
-  registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
-  registry.createProject(project);
+  registry.nodes.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
+  registry.projects.createProject(project);
   const threads = ids.map((id) => testThread({ id: id as ThreadId, title: "test", project: project.id, startedBy: "test", createdAt: 1, lastHumanActivityAt: 1 }));
   for (const thread of threads) {
     const pylon = testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } } });

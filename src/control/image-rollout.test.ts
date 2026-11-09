@@ -34,7 +34,7 @@ function fakeNodes(registry: Registry, names: readonly NodeName[]) {
   const stores = new Map(names.map((name) => [name, new Map<ImageId, ImageManifest>()]));
   const jobs = new Map<JobId, { env: JobEnvelope; status: JobStatus }>();
   const submitted: JobEnvelope[] = [];
-  for (const name of names) registry.upsertNode({ name, tailnetHost: `${name}.tail.ts.net`, tailnetNodeId: `n${name.toUpperCase()}` as TailnetNodeId });
+  for (const name of names) registry.nodes.upsertNode({ name, tailnetHost: `${name}.tail.ts.net`, tailnetNodeId: `n${name.toUpperCase()}` as TailnetNodeId });
 
   function observe(node: NodeName) {
     const capacity = testCapacity({ diskFreeGiB: 200 });
@@ -106,9 +106,9 @@ function setup(t: TestContext, names: readonly NodeName[]) {
 /** A registry where `old` is current on every node, and `next` is recorded and held only by the node that built it. */
 function withTwoImages(t: TestContext, names: readonly NodeName[]) {
   const s = setup(t, names);
-  s.registry.saveImage(manifestOf(old, testbench), null);
-  s.registry.saveImage(manifestOf(next, testbench), release);
-  s.registry.setCurrentImage(old);
+  s.registry.images.saveImage(manifestOf(old, testbench), null);
+  s.registry.images.saveImage(manifestOf(next, testbench), release);
+  s.registry.images.setCurrentImage(old);
   for (const node of names) s.nodes.hold(node, old, testbench);
   s.nodes.hold(testbench, next, testbench);
   return s;
@@ -126,14 +126,14 @@ test("a build sends build-image with the recipe to the build node and records th
   assert.deepEqual([started.kind, started.image, started.state, started.requestedBy], ["build", image, "running", laptop]);
   await worker.wake();
   assert.deepEqual(s.nodes.submitted.map((env) => [env.node, env.job]), [[testbench, { kind: "build-image", image, recipe }]]);
-  assert.deepEqual(stepsOf(s.registry.imageOperation()), [[testbench, "running", null]]);
-  assert.equal(s.registry.image(image), undefined, "nothing is recorded while the build runs");
+  assert.deepEqual(stepsOf(s.registry.images.imageOperation()), [[testbench, "running", null]]);
+  assert.equal(s.registry.images.image(image), undefined, "nothing is recorded while the build runs");
 
   s.nodes.finish(testbench);
   await worker.wake();
-  assert.equal(s.registry.imageOperation()?.state, "done");
-  assert.deepEqual(s.registry.image(image), { ...manifestOf(image, testbench), release });
-  assert.equal(s.registry.currentImage(), null, "a build makes nothing current");
+  assert.equal(s.registry.images.imageOperation()?.state, "done");
+  assert.deepEqual(s.registry.images.image(image), { ...manifestOf(image, testbench), release });
+  assert.equal(s.registry.images.currentImage(), null, "a build makes nothing current");
 
   const again = await worker.build(laptop);
   assert.deepEqual([again.state, stepsOf(again)], ["done", [[testbench, "done", "recorded already"]]]);
@@ -153,8 +153,8 @@ test("a build that a control plane of another release finishes records the relea
   const after = s.start(deployed);
   s.nodes.finish(testbench);
   await after.wake();
-  assert.equal(s.registry.imageOperation()?.state, "done");
-  assert.equal(s.registry.image(imageIdOf(recipe))?.release, release, `not ${deployed}, the release that only finished it`);
+  assert.equal(s.registry.images.imageOperation()?.state, "done");
+  assert.equal(s.registry.images.image(imageIdOf(recipe))?.release, release, `not ${deployed}, the release that only finished it`);
   assert.equal(s.nodes.submitted.length, 1);
 });
 
@@ -164,18 +164,18 @@ test("a rollout sends fetch-artifact with the recorded sha256 from a holder to e
   assert.equal(worker.rollout(next, laptop).state, "running");
   await worker.wake();
   assert.deepEqual(s.nodes.submitted.map((env) => [env.node, env.job]), [[firebat, fetchOf(next)], [nuc, fetchOf(next)]]);
-  assert.deepEqual(stepsOf(s.registry.imageOperation()), [[testbench, "done", null], [firebat, "running", null], [nuc, "running", null]]);
+  assert.deepEqual(stepsOf(s.registry.images.imageOperation()), [[testbench, "done", null], [firebat, "running", null], [nuc, "running", null]]);
 
   s.nodes.finish(firebat);
   await worker.wake();
-  assert.equal(s.registry.currentImage(), old, "one node still lacks the image");
-  assert.equal(s.registry.imageOperation()?.state, "running");
+  assert.equal(s.registry.images.currentImage(), old, "one node still lacks the image");
+  assert.equal(s.registry.images.imageOperation()?.state, "running");
 
   s.nodes.finish(nuc);
   await worker.wake();
-  assert.deepEqual([s.registry.currentImage(), s.registry.previousImage()], [next, old]);
-  assert.equal(s.registry.imageOperation()?.state, "done");
-  assert.deepEqual(stepsOf(s.registry.imageOperation()), [[testbench, "done", null], [firebat, "done", null], [nuc, "done", null]]);
+  assert.deepEqual([s.registry.images.currentImage(), s.registry.images.previousImage()], [next, old]);
+  assert.equal(s.registry.images.imageOperation()?.state, "done");
+  assert.deepEqual(stepsOf(s.registry.images.imageOperation()), [[testbench, "done", null], [firebat, "done", null], [nuc, "done", null]]);
   assert.equal(s.nodes.submitted.length, 2);
 });
 
@@ -187,11 +187,11 @@ test("a failed fetch on one node fails the rollout with that node and the probe'
   s.nodes.finish(firebat, { code: "backend", message: "the copy hashes to 0000, so it was thrown away", logTail: "tar: short read" });
   s.nodes.finish(nuc);
   await worker.wake();
-  const failed = s.registry.imageOperation();
+  const failed = s.registry.images.imageOperation();
   assert.ok(failed?.state === "failed");
   assert.equal(failed.reason, `rj-firebat could not fetch ${next}: backend: the copy hashes to 0000, so it was thrown away\ntar: short read`);
   assert.deepEqual(stepsOf(failed)?.[1], [firebat, "failed", "backend: the copy hashes to 0000, so it was thrown away\ntar: short read"]);
-  assert.deepEqual([s.registry.currentImage(), s.registry.previousImage()], [old, null]);
+  assert.deepEqual([s.registry.images.currentImage(), s.registry.images.previousImage()], [old, null]);
   assert.match(s.logged.join("\n"), /image rollout of img-000000000002 failed: rj-firebat could not fetch/);
 });
 
@@ -201,11 +201,11 @@ test("a node that already holds the image under another sha256 fails the rollout
   const worker = s.start();
   worker.rollout(next, laptop);
   await worker.wake();
-  const failed = s.registry.imageOperation();
+  const failed = s.registry.images.imageOperation();
   assert.ok(failed?.state === "failed");
   assert.equal(failed.reason, `rj-firebat could not fetch ${next}: it holds ${next} with sha256 ${manifestOf(next, firebat).sha256}, not the recorded ${manifestOf(next, testbench).sha256}`);
   assert.equal(s.nodes.submitted.length, 0);
-  assert.equal(s.registry.currentImage(), old);
+  assert.equal(s.registry.images.currentImage(), old);
 });
 
 test("rollback makes the previous image current again, and a second rollback goes forward", async (t) => {
@@ -213,22 +213,22 @@ test("rollback makes the previous image current again, and a second rollback goe
   const worker = s.start();
   assert.throws(() => worker.rollback(laptop), { kind: "conflict", message: /no image was current before this one/ });
   s.nodes.hold(firebat, next, testbench);
-  s.registry.setCurrentImage(next);
+  s.registry.images.setCurrentImage(next);
 
   assert.equal(worker.rollback(laptop).image, old);
   await worker.wake();
-  assert.deepEqual([s.registry.currentImage(), s.registry.previousImage()], [old, next]);
-  assert.equal(s.registry.imageOperation()?.state, "done");
+  assert.deepEqual([s.registry.images.currentImage(), s.registry.images.previousImage()], [old, next]);
+  assert.equal(s.registry.images.imageOperation()?.state, "done");
 
   worker.rollback(laptop);
   await worker.wake();
-  assert.deepEqual([s.registry.currentImage(), s.registry.previousImage()], [next, old]);
+  assert.deepEqual([s.registry.images.currentImage(), s.registry.images.previousImage()], [next, old]);
   assert.equal(s.nodes.submitted.length, 0, "every node held both images");
 });
 
 test("an offline node is skipped, and a worker that starts mid-rollout resumes from the saved job without sending a second", async (t) => {
   const s = withTwoImages(t, [firebat, testbench]);
-  s.registry.upsertNode({ name: nuc, tailnetHost: "rj-nuc.tail.ts.net", tailnetNodeId: "nRJ-NUC" as TailnetNodeId });
+  s.registry.nodes.upsertNode({ name: nuc, tailnetHost: "rj-nuc.tail.ts.net", tailnetNodeId: "nRJ-NUC" as TailnetNodeId });
   const first = s.start();
   const started = first.rollout(next, laptop);
   assert.deepEqual(stepsOf(started), [[testbench, "pending", null], [firebat, "pending", null], [nuc, "skipped", "offline when the rollout began; it fetches the image on first use"]]);
@@ -241,13 +241,13 @@ test("an offline node is skipped, and a worker that starts mid-rollout resumes f
   assert.equal(s.nodes.submitted.length, 1, "the restarted worker asked the probe about the saved job");
   s.nodes.finish(firebat);
   await second.wake();
-  assert.equal(s.registry.currentImage(), next, "a skipped node does not hold the rollout up");
-  assert.deepEqual(stepsOf(s.registry.imageOperation()), [[testbench, "done", null], [firebat, "done", null], [nuc, "skipped", "offline when the rollout began; it fetches the image on first use"]]);
+  assert.equal(s.registry.images.currentImage(), next, "a skipped node does not hold the rollout up");
+  assert.deepEqual(stepsOf(s.registry.images.imageOperation()), [[testbench, "done", null], [firebat, "done", null], [nuc, "skipped", "offline when the rollout began; it fetches the image on first use"]]);
 });
 
 test("a job the probe does not know is sent again only once its envelope has expired, and a node that goes offline fails the rollout", async (t) => {
   const s = withTwoImages(t, [firebat, testbench]);
-  const sent = (job: { id: JobId; notAfter: string }) => s.registry.saveImageOperation({
+  const sent = (job: { id: JobId; notAfter: string }) => s.registry.images.saveImageOperation({
     kind: "rollout", image: next, requestedBy: laptop, requestedAt: Date.now(), state: "running",
     steps: [{ node: testbench, state: "done", job: null, reason: null }, { node: firebat, state: "pending", job, reason: null }],
   });
@@ -262,20 +262,20 @@ test("a job the probe does not know is sent again only once its envelope has exp
   await worker.wake();
   await worker.wake();
   assert.deepEqual(s.nodes.submitted.map((env) => [env.node, env.job]), [[firebat, fetchOf(next)]]);
-  assert.notEqual(s.registry.imageOperation()?.steps[1]?.job?.id, lost.id);
+  assert.notEqual(s.registry.images.imageOperation()?.steps[1]?.job?.id, lost.id);
 
-  s.registry.markOffline(firebat);
+  s.registry.nodes.markOffline(firebat);
   await worker.wake();
-  const failed = s.registry.imageOperation();
+  const failed = s.registry.images.imageOperation();
   assert.ok(failed?.state === "failed");
   assert.equal(failed.reason, `rj-firebat went offline before it held ${next}`);
-  assert.equal(s.registry.currentImage(), old);
+  assert.equal(s.registry.images.currentImage(), old);
 });
 
 test("one operation runs at a time, and one that no node could carry out is refused", async (t) => {
   const s = withTwoImages(t, [firebat, testbench]);
   const worker = s.start();
-  s.registry.markOffline(testbench);
+  s.registry.nodes.markOffline(testbench);
   assert.throws(() => worker.rollout(next, laptop), { kind: "conflict", message: `no online node holds ${next}, so no node could fetch it` });
   await assert.rejects(worker.build(laptop), { kind: "conflict", message: "the image build node infra-testbench is offline" });
   assert.throws(() => worker.rollout("img-ffffffffffff", laptop), { kind: "missing", message: "no image img-ffffffffffff is recorded" });
@@ -309,7 +309,7 @@ async function heldRollout(t: TestContext) {
   const worker = s.start(release, probes);
   worker.rollout(next, laptop);
   await worker.wake();
-  assert.deepEqual(stepsOf(s.registry.imageOperation()), [[testbench, "done", null], [firebat, "running", null]]);
+  assert.deepEqual(stepsOf(s.registry.images.imageOperation()), [[testbench, "done", null], [firebat, "running", null]]);
   count = 0;
   lookups.length = 0;
   return {
@@ -364,15 +364,15 @@ test("close waits for the pass in flight, and a wake asked for during that pass 
 test("a pass that throws rejects its wakes, and the next wake runs a new pass", async (t) => {
   const s = setup(t, [testbench]);
   const worker = s.start();
-  const imageOperation = s.registry.imageOperation;
+  const imageOperation = s.registry.images.imageOperation;
   let reads = 0;
-  s.registry.imageOperation = () => { reads++; throw new Error("database is locked"); };
+  s.registry.images.imageOperation = () => { reads++; throw new Error("database is locked"); };
   await Promise.all([
     assert.rejects(worker.wake(), /database is locked/),
     assert.rejects(worker.wake(), /database is locked/),
   ]);
   assert.equal(reads, 1, "the wake during the pass that threw ran no other");
-  s.registry.imageOperation = () => { reads++; return imageOperation.call(s.registry); };
+  s.registry.images.imageOperation = () => { reads++; return imageOperation.call(s.registry); };
   await worker.wake();
   assert.equal(reads, 2);
 });

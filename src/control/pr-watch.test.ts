@@ -24,8 +24,8 @@ function fixture(path = ":memory:") {
   const registry = openRegistry(path);
   const node = "node" as NodeName;
   const project = { id: "project" as ProjectId, repoUrl: "https://github.com/acme/repo.git", defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null };
-  registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
-  registry.createProject(project);
+  registry.nodes.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
+  registry.projects.createProject(project);
   function add(id = "th-1", claude = false, output: string | null = "origin/feature") {
     const thread = testThread({ id: id as ThreadId, title: "test", project: project.id, conversationId: claude ? null : "1", startedBy: "test", createdAt: 1, lastHumanActivityAt: 1 });
     const pylon = testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } } });

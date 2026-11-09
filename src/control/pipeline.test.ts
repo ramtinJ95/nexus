@@ -22,11 +22,11 @@ const dir = await tempDir("nexus-pipeline-");
 function fixture(t: import("node:test").TestContext, setting: PipelineSetting | null = { autoStart: true }, path = ":memory:") {
   const registry = openRegistry(path);
   t.after(() => { try { registry.close(); } catch { /* closed by a restart */ } });
-  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
-  if (registry.project("acme" as ProjectId) === undefined) {
-    registry.createProject({ id: "acme" as ProjectId, repoUrl: null, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null, pipeline: setting });
-    registry.saveImage(image, null);
-    registry.setCurrentImage(image.id);
+  registry.nodes.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  if (registry.projects.project("acme" as ProjectId) === undefined) {
+    registry.projects.createProject({ id: "acme" as ProjectId, repoUrl: null, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null, pipeline: setting });
+    registry.images.saveImage(image, null);
+    registry.images.setCurrentImage(image.id);
   }
   const fake = fakeHarness();
   const services = threadServices({ registry, harness: fake.harness, mirror: { setupInputs: () => Promise.reject(new Error("a scratch project has no remote")) }, dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, wake: () => {}, gate: turnGate(() => false), queue: true, planning: null });
@@ -48,11 +48,11 @@ function fixture(t: import("node:test").TestContext, setting: PipelineSetting | 
         rounds: [{ head: "h", verdict: null, check: null, answers: null }], merged: phase.kind === "landed" ? phase.commit : null, phase,
       }));
     },
-    setPipeline(next: PipelineSetting | null) { registry.editProject("acme" as ProjectId, (p) => ({ ...p, pipeline: next })); },
+    setPipeline(next: PipelineSetting | null) { registry.projects.editProject("acme" as ProjectId, (p) => ({ ...p, pipeline: next })); },
   };
 }
 
-const phase = (registry: Registry, id: ItemId) => { const { kind, why } = itemPhase(registry, registry.item(id)!, Date.now()); return `${kind}: ${why}`; };
+const phase = (registry: Registry, id: ItemId) => { const { kind, why } = itemPhase(registry, registry.pipeline.item(id)!, Date.now()); return `${kind}: ${why}`; };
 const thread = (registry: Registry, id: ItemId) => itemThread(registry, id)!;
 
 test("an item moves through every phase its records put it in, from planned to landed", async (t) => {
@@ -197,8 +197,8 @@ test("an item is queued once across passes and restarts, under its request ID", 
   assert.equal(second.registry.queue.queuedThreads().length, 2, "a restart queues nothing again");
   assert.equal(thread(second.registry, a), ta);
   assert.equal(second.registry.threads.thread(ta)?.title, "A");
-  assert.deepEqual(itemView(second.registry, second.registry.item(b)!, Date.now()), {
-    id: b, project: "acme", title: "B", addedBy: laptop, addedAt: second.registry.item(b)!.addedAt, after: [a], worker: "claude", model: "claude-opus-5-5",
+  assert.deepEqual(itemView(second.registry, second.registry.pipeline.item(b)!, Date.now()), {
+    id: b, project: "acme", title: "B", addedBy: laptop, addedAt: second.registry.pipeline.item(b)!.addedAt, after: [a], worker: "claude", model: "claude-opus-5-5",
     brief: "Build B", thread: tb, phase: { kind: "queued", why: "waits for A: has no pull request yet" }, approved: null,
   });
 });
@@ -212,13 +212,13 @@ test("an item is checked as a start is, and its pass records why a queue refused
   refused(() => f.items.add(f.request("X"), null, [], laptop), "invalid", /an item needs a brief/);
   refused(() => f.items.add(f.request("X", { model: "m" }), "Go.", [], laptop), "invalid", /model requires claude/);
   refused(() => f.items.approve(f.add("A"), laptop), "conflict", /starts its items on their own/);
-  assert.equal(f.registry.items().length, 1, "a refused item records nothing");
+  assert.equal(f.registry.pipeline.items().length, 1, "a refused item records nothing");
 
   const gone = f.add("On a node that goes", [], { node });
-  f.registry.saveItem({ ...f.registry.item(gone)!, request: { ...f.registry.item(gone)!.request, node: "nowhere" } });
+  f.registry.pipeline.saveItem({ ...f.registry.pipeline.item(gone)!, request: { ...f.registry.pipeline.item(gone)!.request, node: "nowhere" } });
   await f.items.poll();
   assert.equal(phase(f.registry, gone), "planned: was not queued: no node nowhere");
-  assert.equal(f.registry.item(gone)!.lastError, "no node nowhere");
+  assert.equal(f.registry.pipeline.item(gone)!.lastError, "no node nowhere");
 });
 
 test("an item whose review asks about its holds holds only itself: it is held, and the items beside it start and build", async (t) => {

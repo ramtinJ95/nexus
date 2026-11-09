@@ -94,7 +94,7 @@ async function seeded(t: TestContext, options: TestApiOptions = {}) {
   const s = await setup(t, options);
   for (const id of ["acme", "beta"]) assert.equal((await s.call("POST", "/v1/projects", project(id))).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
-  s.registry.setCurrentImage(image.id as ImageId);
+  s.registry.images.setCurrentImage(image.id as ImageId);
   return s;
 }
 
@@ -547,8 +547,8 @@ test("each judgment of a failed pylon is a card above the questions: what failed
     failure, thread: fix.id, node, failed: "pylon is broken: the controller exited\nqemu: terminating <on signal 15>", startedAt: Date.now(),
     request: { brief: "Is it the node?", token: "t" }, conversation: 3, reply, phase,
   });
-  s.registry.saveJudgment(judgment(812, { kind: "done", verdict: { answer: "retry", why: "The node was swapping.", by: "judgment" }, outcome: { kind: "retried", node, on: "verdict" } }, "It was the node.\n```nexus-judgment\n{}\n```"), null);
-  s.registry.saveJudgment(judgment(813, { kind: "asked", verdict: { answer: "person", why: "the judgment did not answer within 15 minutes", by: "control plane" } }, null), null);
+  s.registry.judgments.saveJudgment(judgment(812, { kind: "done", verdict: { answer: "retry", why: "The node was swapping.", by: "judgment" }, outcome: { kind: "retried", node, on: "verdict" } }, "It was the node.\n```nexus-judgment\n{}\n```"), null);
+  s.registry.judgments.saveJudgment(judgment(813, { kind: "asked", verdict: { answer: "person", why: "the judgment did not answer within 15 minutes", by: "control plane" } }, null), null);
 
   const region = judgmentsOf((await s.call("GET", `/threads/${fix.id}`)).text);
   assert.deepEqual([...region.matchAll(/<section class="landing judgment" data-judgment="(\d+)"/g)].map((m) => m[1]), ["812", "813"]);
@@ -1083,7 +1083,7 @@ test("an offline node shows its pylons as unknown, and the last observation as s
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   s.observe(fix);
-  s.registry.markOffline(node);
+  s.registry.nodes.markOffline(node);
 
   const list = (await s.call("GET", "/")).text;
   assert.equal(overviewRow(list, fix), "Fix checkout running unknown rj-firebat offline just now never");
@@ -1833,7 +1833,7 @@ test("/projects/new opens the new-project dialog with the fields of nexus projec
   const s = await setup(t);
   // Nodes are listed by name, so the online one comes after the offline rj-firebat.
   const tower = "tower" as NodeName;
-  s.registry.upsertNode({ name: tower, tailnetHost: "tower.tail.ts.net", tailnetNodeId: "nTOWER" as TailnetNodeId });
+  s.registry.nodes.upsertNode({ name: tower, tailnetHost: "tower.tail.ts.net", tailnetNodeId: "nTOWER" as TailnetNodeId });
   s.registry.threads.apply({ record: "node", node: tower, state: "online", capacity });
   const dialogOf = (html: string) => html.split('<dialog id="project-dialog"')[1]!.split("</dialog>")[0]!;
 
@@ -1928,7 +1928,7 @@ test("every page carries the start dialog, which offers every project and node a
   assert.match(spread, /name="project" required value="spread" data-node="auto" data-branch="main"/, "client.js names no node for a project whose default node is auto");
 
   await s.call("POST", "/v1/images", image);
-  s.registry.setCurrentImage(image.id as ImageId);
+  s.registry.images.setCurrentImage(image.id as ImageId);
   const home = (await s.call("GET", "/")).text;
   assert.doesNotMatch(home, /data-autoopen/, "the dialog stays closed until asked for");
   assert.match(textOf(home.split('<dialog id="start-dialog"')[1]!.replace(/^[^>]*>/, "")), /^Start a thread ✕ Worker Claude Code .* Title \(optional\) Project acme /);
@@ -2592,7 +2592,7 @@ test("a node's page frames its graphs outside the live region, with a range pick
   // As main.ts wraps every probe client.
   const probe = recordingHealth({ command: () => Promise.reject(new Error("unused")), stream: () => Promise.reject(new Error("unused")), health: async () => { if (health instanceof Error) throw health; return health; } }, (h) => record(h), () => {});
   const s = await seeded(t, { ...landingOptions(), probes: new Map([[node, probe]]) });
-  record = (h) => s.registry.recordHealthSample(node, sampleOf(h, Date.now(), (p) => s.registry.threads.pylon(p)?.thread ?? null));
+  record = (h) => s.registry.nodeMetrics.recordHealthSample(node, sampleOf(h, Date.now(), (p) => s.registry.threads.pylon(p)?.thread ?? null));
   const started = await s.start("acme", "Busy thread");
   health = { ...health, pylons: [{ pylonId: started.pylonId, processes: 2, cpuPercent: 112.5, residentGiB: 6.25 }, { pylonId: "pylon-orphan" as PylonId, processes: 1, cpuPercent: 0, residentGiB: 0.1 }] };
   const before = Date.now();
@@ -2607,7 +2607,7 @@ test("a node's page frames its graphs outside the live region, with a range pick
     ["Load per CPU", "Load against CPUs", "Memory", "Swap", "Disk free", "Temperatures", "Pylon CPU", "Pylon memory"]);
   const sample = JSON.parse(textOf(/data-sample="([^"]*)"/.exec(region)![1]!)) as { at: number; values: Record<string, number>; labels: Record<string, string> };
   assert.ok(sample.at >= before && sample.at <= Date.now(), "the sample is timed by the control plane's clock");
-  assert.deepEqual({ at: sample.at, values: sample.values }, s.registry.latestHealthSample(node), "the page carries what the registry recorded");
+  assert.deepEqual({ at: sample.at, values: sample.values }, s.registry.nodeMetrics.latestHealthSample(node), "the page carries what the registry recorded");
   const busy = `${started.pylonId}:${started.id}`;
   assert.deepEqual(sample.values, {
     cpus: 16, diskTotal: 457, diskFree: 180.5, load1: 2.5, load5: 1.75, load15: 1, memTotal: 62.8, memAvailable: 40.25, swapTotal: 8, swapUsed: 2,
@@ -2626,7 +2626,7 @@ test("a node's page frames its graphs outside the live region, with a range pick
 test("the work in flight lists each item at its phase, an item held for the person is in Needs you with Approve and Cancel, its card says what it is after, and no page links /pipeline", async (t) => {
   const s = await seeded(t, { deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} } });
   assert.doesNotMatch((await s.call("GET", "/")).text, /href="\/pipeline"/, "no page links it");
-  s.registry.editProject("acme" as ProjectId, (p) => ({ ...p, pipeline: { autoStart: false } }));
+  s.registry.projects.editProject("acme" as ProjectId, (p) => ({ ...p, pipeline: { autoStart: false } }));
   const add = async (title: string, after: string[] = []) => {
     const res = await s.call("POST", "/v1/items", { project: "acme", title, message: `Build ${title}.`, after });
     assert.equal(res.status, 201, res.text);
@@ -2685,7 +2685,7 @@ test("the home page holds two columns, Needs you before the work in flight by ph
 
 test("the sidebar's Needs you count, the phone's tab and the list count the same things, work held for approval included", async (t) => {
   const s = await seeded(t);
-  s.registry.editProject("acme" as ProjectId, (p) => ({ ...p, pipeline: { autoStart: false } }));
+  s.registry.projects.editProject("acme" as ProjectId, (p) => ({ ...p, pipeline: { autoStart: false } }));
   assert.equal((await s.call("POST", "/v1/items", { project: "acme", title: "Greet by name", message: "Build it.", after: [] })).status, 201);
   const failed = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Port the CLI", claude: "port it" })).text) as Thread;
   claudeWorkerAt(s.registry, failed.id, "failed", { message: "Claude launch did not complete" });
@@ -2700,7 +2700,7 @@ test("the sidebar's Needs you count, the phone's tab and the list count the same
 test("/nodes/<name> is the Cluster page with that node picked, and /cluster picks the first", async (t) => {
   const s = await seeded(t, landingOptions());
   const tower = "tower" as NodeName;
-  s.registry.upsertNode({ name: tower, tailnetHost: "tower.tail.ts.net", tailnetNodeId: "nTOWER" as TailnetNodeId });
+  s.registry.nodes.upsertNode({ name: tower, tailnetHost: "tower.tail.ts.net", tailnetNodeId: "nTOWER" as TailnetNodeId });
   const picked = (page: string) => [...page.matchAll(/<article class="node-card( picked)?" data-node="([^"]+)"/g)].map((m) => `${m[2]}${m[1] ?? ""}`);
   const page = await s.call("GET", `/nodes/${tower}`);
   assert.equal(page.status, 200);
@@ -2724,9 +2724,9 @@ test("the Cluster page asks only the picked node's probe, and shows each other n
   const attic = "attic" as NodeName;
   const probes = new Map([node, tower, attic].map((name) => [name, { ...unused, health: async () => { asked.push(name); return health; } }] as const));
   const s = await seeded(t, { ...landingOptions(), probes });
-  for (const [name, id] of [[tower, "nTOWER"], [attic, "nATTIC"]] as const) s.registry.upsertNode({ name, tailnetHost: `${name}.tail.ts.net`, tailnetNodeId: id as TailnetNodeId });
-  s.registry.recordHealthSample(tower, sampleOf({ ...health, cpus: 8, load: { one: 6.25, five: 1, fifteen: 1 } }, Date.now() - 30_000, () => null));
-  s.registry.recordHealthSample(attic, sampleOf(health, Date.now() - 10 * 60_000, () => null));
+  for (const [name, id] of [[tower, "nTOWER"], [attic, "nATTIC"]] as const) s.registry.nodes.upsertNode({ name, tailnetHost: `${name}.tail.ts.net`, tailnetNodeId: id as TailnetNodeId });
+  s.registry.nodeMetrics.recordHealthSample(tower, sampleOf({ ...health, cpus: 8, load: { one: 6.25, five: 1, fifteen: 1 } }, Date.now() - 30_000, () => null));
+  s.registry.nodeMetrics.recordHealthSample(attic, sampleOf(health, Date.now() - 10 * 60_000, () => null));
   const page = await s.call("GET", `/nodes/${node}`);
   assert.equal(page.status, 200);
   const card = (name: string) => textOf(page.text.split(`data-node="${name}"`)[1]!.split("</article>")[0]!);
@@ -2741,7 +2741,7 @@ test("a node card says why it has no reading: its probe failed, or the caller ma
   const tower = "tower" as NodeName;
   const probes = new Map([node, tower].map((name) => [name, { ...unused, health: () => Promise.reject(new Error(`${name} is unreachable`)) }] as const));
   const s = await seeded(t, { ...landingOptions(), probes });
-  s.registry.upsertNode({ name: tower, tailnetHost: "tower.tail.ts.net", tailnetNodeId: "nTOWER" as TailnetNodeId });
+  s.registry.nodes.upsertNode({ name: tower, tailnetHost: "tower.tail.ts.net", tailnetNodeId: "nTOWER" as TailnetNodeId });
   const load = (page: string, name: string) => /<dt>Load<\/dt><dd>[\s\S]*?<span class="meter-words">([\s\S]*?)<\/span><\/dd>/.exec(page.split(`data-node="${name}"`)[1]!)![1]!;
   const failed = (await s.call("GET", `/nodes/${node}`)).text;
   assert.equal(load(failed, node), `<span class="dim" title="${node} is unreachable">not read</span>`, "a failed read names its error");
@@ -2904,8 +2904,8 @@ test("a page reads the threads, the queue and the release reports as often whate
   const reads = async (projects: number, nodes: number) => {
     const s = await setup(t);
     assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
-    s.registry.setCurrentImage(image.id as ImageId);
-    for (let n = 1; n < nodes; n++) s.registry.upsertNode({ name: `node-${n}` as NodeName, tailnetHost: `node-${n}.tail.ts.net`, tailnetNodeId: `nNODE${n}` as TailnetNodeId });
+    s.registry.images.setCurrentImage(image.id as ImageId);
+    for (let n = 1; n < nodes; n++) s.registry.nodes.upsertNode({ name: `node-${n}` as NodeName, tailnetHost: `node-${n}.tail.ts.net`, tailnetNodeId: `nNODE${n}` as TailnetNodeId });
     let thread: Thread | undefined;
     for (let p = 0; p < projects; p++) {
       assert.equal((await s.call("POST", "/v1/projects", project(`p${p}`))).status, 201);
@@ -2913,7 +2913,7 @@ test("a page reads the threads, the queue and the release reports as often whate
       assert.equal((await s.call("POST", "/v1/threads", { project: `p${p}`, title: `Queued ${p}`, after: [thread.id] })).status, 201);
     }
     const counted = [["threads", t.mock.method(s.registry.threads, "threads")], ["queuedThreads", t.mock.method(s.registry.queue, "queuedThreads")],
-      ["releaseReports", t.mock.method(s.registry, "releaseReports")]] as const;
+      ["releaseReports", t.mock.method(s.registry.releases, "releaseReports")]] as const;
     const counts: Record<string, Record<string, number>> = {};
     for (const path of ["/", `/threads/${thread!.id}`, "/cluster"]) {
       for (const [, mock] of counted) mock.mock.resetCalls();
@@ -2931,9 +2931,9 @@ test("a page reads the threads, the queue and the release reports as often whate
 test("the sidebar's release lines read as the release view does: stale and missing reports pending, and a control line only for the node that reported one", async (t) => {
   const s = await seeded(t);
   const tower = "tower" as NodeName;
-  s.registry.upsertNode({ name: tower, tailnetHost: "tower.tail.ts.net", tailnetNodeId: "nTOWER" as TailnetNodeId });
+  s.registry.nodes.upsertNode({ name: tower, tailnetHost: "tower.tail.ts.net", tailnetNodeId: "nTOWER" as TailnetNodeId });
   const commit = "a".repeat(40);
-  const report = (role: "control" | "probe", observedAt: number) => s.registry.reportRelease({ node, role, commit, target: commit, state: "healthy", reason: null, observedAt });
+  const report = (role: "control" | "probe", observedAt: number) => s.registry.releases.reportRelease({ node, role, commit, target: commit, state: "healthy", reason: null, observedAt });
   report("control", Date.now());
   report("probe", Date.now() - 90_000);
   const lines = (await nodeHeads(s)).split(/<span><svg class="i i-server"/).slice(1)

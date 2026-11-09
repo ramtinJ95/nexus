@@ -76,7 +76,7 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
   const registry = openRegistry(join(dir, `${randomUUID()}.db`), clock);
   const images = imagesOf?.(registry);
   const backfill = backfillOf?.(registry);
-  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  registry.nodes.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   let caller: TailnetNodeId | null = laptop;
   let requests = 0;
   /** Every whois waits for it, so a test can hold a request at admission, and tells `asked` it got there. */
@@ -132,7 +132,7 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
     ...(deployment === null ? {} : { deployment: deployment ?? { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} } }),
     startThread,
     features: { ...noFeatures, reviews, cleanup, doctor, queue, pipeline, planning: plans, images: images ?? null, usageBackfill: backfill ?? null },
-    gate: turnGate(() => isDraining(registry.drain(), registry.now())),
+    gate: turnGate(() => isDraining(registry.releases.drain(), registry.now())),
     health: () => null,
     hostnames: new Set(["127.0.0.1"]),
     harness,
@@ -207,7 +207,7 @@ export async function withThread(t: import("node:test").TestContext, options: { 
   const s = await testApi(t, options);
   assert.equal((await s.call("POST", "/v1/projects", options.project ?? project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
-  s.registry.setCurrentImage(image.id as ImageId);
+  s.registry.images.setCurrentImage(image.id as ImageId);
   const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Fix checkout" });
   assert.equal(started.status, 201, JSON.stringify(started.body));
   return { ...s, thread: started.body as Thread };
@@ -216,7 +216,7 @@ export async function withThread(t: import("node:test").TestContext, options: { 
 /** Puts a node online with this capacity and grants, holding the current image unless told otherwise. */
 export function observeNode(s: Awaited<ReturnType<typeof testApi>>, name: string, memory: { total: number; committed: number }, over: Partial<NodeObservation> = {}) {
   const at = name as NodeName;
-  s.registry.upsertNode({ name: at, tailnetHost: `${name}.tail.ts.net`, tailnetNodeId: `n${name.toUpperCase()}` as TailnetNodeId });
+  s.registry.nodes.upsertNode({ name: at, tailnetHost: `${name}.tail.ts.net`, tailnetNodeId: `n${name.toUpperCase()}` as TailnetNodeId });
   const capacity = testCapacity({ committedCpus: 4, memoryGiB: memory.total, committedMemoryGiB: memory.committed, diskFreeGiB: 200, committedDiskGiB: 60 });
   s.registry.threads.apply({ record: "node", node: at, state: "online", capacity });
   s.registry.threads.ingested(testObservation(at, {
@@ -228,7 +228,7 @@ export async function withImage(t: import("node:test").TestContext) {
   const s = await testApi(t);
   assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
-  s.registry.setCurrentImage(image.id as ImageId);
+  s.registry.images.setCurrentImage(image.id as ImageId);
   return s;
 }
 
@@ -329,7 +329,7 @@ export async function withQueue(t: import("node:test").TestContext) {
   const s = await testApi(t, { queue: true });
   assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
-  s.registry.setCurrentImage(image.id as ImageId);
+  s.registry.images.setCurrentImage(image.id as ImageId);
   const first = await s.call("POST", "/v1/threads", { project: "acme", title: "First" });
   assert.equal(first.status, 201, JSON.stringify(first.body));
   return { ...s, first: first.body as Thread };

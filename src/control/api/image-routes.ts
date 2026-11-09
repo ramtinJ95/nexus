@@ -16,7 +16,7 @@ export function imageRoutes(kit: ApiKit, features: Features): readonly RouteEntr
 
   function recordImage(body: unknown): ImageManifest {
     const manifest: ImageManifest = parse(imageSchema, body);
-    registry.saveImage(manifest, null);
+    registry.images.saveImage(manifest, null);
     return manifest;
   }
 

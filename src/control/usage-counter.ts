@@ -16,7 +16,7 @@ import type { EventKind } from "./events.ts";
 import { runningProbe } from "./locator.ts";
 import type { Registry } from "./registry.ts";
 
-type UsageCounterRegistry = Pick<Registry, "threads" | "node" | "usage">;
+type UsageCounterRegistry = Pick<Registry, "threads" | "nodes" | "usage">;
 
 export interface UsageCounter {
   /** Reads every thread but the deleted ones now. */

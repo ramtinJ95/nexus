@@ -55,27 +55,27 @@ test("records survive closing and reopening the file", async (t) => {
     attempts: { count: 1, last: { at: 5, code: "backend", message: "pylon-th-1: the controller exited" } },
   };
   first.threads.savePylon(submitted);
-  first.saveImage(image, "c".repeat(40));
-  first.setCurrentImage(image.id);
+  first.images.saveImage(image, "c".repeat(40));
+  first.images.setCurrentImage(image.id);
   const key = { project: project.id, image: image.id, setupHash: "s" };
   const template: TemplateRecord = {
     id: "tpl-000000000000", key, state: "building", on: node, submitted: null,
     inputs: { key, repo: { url: project.repoUrl, branch: "main", commit: "c".repeat(40) }, preSetup: null, allowedHosts: [], resources: project.resources },
   };
-  first.saveTemplate(template);
+  first.images.saveTemplate(template);
   first.close();
 
   const second = testRegistry(t, path);
-  assert.deepEqual(second.projects(), [project]);
+  assert.deepEqual(second.projects.projects(), [project]);
   assert.deepEqual(second.threads.thread(threadId), thread);
   assert.deepEqual(second.threads.threads(project.id), [thread]);
   assert.deepEqual(second.threads.threads("other" as ProjectId), []);
   assert.deepEqual(second.threads.pylon(pylonId), submitted);
   assert.deepEqual(second.threads.pylonsOn(node), [submitted]);
-  assert.deepEqual(second.image(image.id), { ...image, release: "c".repeat(40) });
-  assert.equal(second.currentImage(), image.id);
-  assert.deepEqual(second.templates(project.id), [template]);
-  assert.deepEqual(second.node(node), { name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT", state: "offline", capacity: null, observation: null });
+  assert.deepEqual(second.images.image(image.id), { ...image, release: "c".repeat(40) });
+  assert.equal(second.images.currentImage(), image.id);
+  assert.deepEqual(second.images.templates(project.id), [template]);
+  assert.deepEqual(second.nodes.node(node), { name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT", state: "offline", capacity: null, observation: null });
 });
 
 test("a thread and its pylon must match", async (t) => {
@@ -87,22 +87,22 @@ test("a thread and its pylon must match", async (t) => {
 
 test("only a recorded image can become current", async (t) => {
   const registry = seeded(t, tempDb());
-  assert.equal(registry.currentImage(), null);
-  assert.throws(() => registry.setCurrentImage("img-ffffffffffff"), /no image/);
+  assert.equal(registry.images.currentImage(), null);
+  assert.throws(() => registry.images.setCurrentImage("img-ffffffffffff"), /no image/);
 });
 
 test("the image a new current one replaces becomes previous, and making it current again swaps them", async (t) => {
   const registry = seeded(t, tempDb());
   const next = { ...image, id: "img-111111111111" as const };
-  registry.saveImage(image, null);
-  registry.saveImage(next, null);
-  registry.setCurrentImage(image.id);
-  assert.deepEqual([registry.currentImage(), registry.previousImage()], [image.id, null], "the first current image replaces none");
-  registry.setCurrentImage(next.id);
-  registry.setCurrentImage(next.id);
-  assert.deepEqual([registry.currentImage(), registry.previousImage()], [next.id, image.id], "making the current image current again keeps previous");
-  registry.setCurrentImage(image.id);
-  assert.deepEqual([registry.currentImage(), registry.previousImage()], [image.id, next.id]);
+  registry.images.saveImage(image, null);
+  registry.images.saveImage(next, null);
+  registry.images.setCurrentImage(image.id);
+  assert.deepEqual([registry.images.currentImage(), registry.images.previousImage()], [image.id, null], "the first current image replaces none");
+  registry.images.setCurrentImage(next.id);
+  registry.images.setCurrentImage(next.id);
+  assert.deepEqual([registry.images.currentImage(), registry.images.previousImage()], [next.id, image.id], "making the current image current again keeps previous");
+  registry.images.setCurrentImage(image.id);
+  assert.deepEqual([registry.images.currentImage(), registry.images.previousImage()], [image.id, next.id]);
 });
 
 test("a Claude message recorded before senders were reads as unknown, and only its thread tells Nexus's prompts by their prefix", async (t) => {
@@ -131,7 +131,7 @@ test("an image recorded before images carried their release reads as of no known
   db.prepare("INSERT INTO images (id, manifest) VALUES (?, ?)").run(image.id, JSON.stringify(image));
   db.close();
   const registry = testRegistry(t, path);
-  assert.deepEqual(registry.images(), [{ ...image, release: null }]);
+  assert.deepEqual(registry.images.images(), [{ ...image, release: null }]);
 });
 
 test("activity timestamps only move forward", async (t) => {
@@ -159,20 +159,20 @@ test("ingest writes fold into records, and applying one twice changes nothing", 
   ] as const;
   for (const write of [...writes, ...writes]) registry.threads.apply(write);
 
-  assert.equal(registry.node(node)?.state, "online");
-  assert.deepEqual(registry.node(node)?.capacity, capacity);
+  assert.equal(registry.nodes.node(node)?.state, "online");
+  assert.deepEqual(registry.nodes.node(node)?.capacity, capacity);
   assert.deepEqual(registry.threads.sessions(pylonId), [{ pylon: pylonId, id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working", title: null, message: null }]);
   assert.deepEqual(registry.threads.outputs(threadId), [{ thread: threadId, kind: "branch", ref: "nexus/fix-it" }]);
 
-  registry.markOffline(node);
-  assert.equal(registry.node(node)?.state, "offline");
+  registry.nodes.markOffline(node);
+  assert.equal(registry.nodes.node(node)?.state, "offline");
 });
 
 test("an observation is stored only together with the writes derived from it", async (t) => {
   const registry = seeded(t, tempDb());
   const first = testObservation(node, { observedAt: "2027-01-01T00:00:00Z", capacity });
   registry.threads.ingested(first, [{ record: "node", node, state: "online", capacity }]);
-  assert.deepEqual(registry.node(node)?.observation, first);
+  assert.deepEqual(registry.nodes.node(node)?.observation, first);
 
   const second = { ...first, observedAt: "2027-01-01T00:01:00Z" };
   const sessions = [{ id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: null, title: null, status: "working", message: null }] as const;
@@ -181,7 +181,7 @@ test("an observation is stored only together with the writes derived from it", a
     { record: "sessions", pylonId, sessions },
     { record: "sessions", pylonId: "pylon-unknown" as PylonId, sessions },
   ]));
-  assert.deepEqual(registry.node(node)?.observation, first);
+  assert.deepEqual(registry.nodes.node(node)?.observation, first);
   assert.deepEqual(registry.threads.sessions(pylonId), []);
 });
 
@@ -294,7 +294,7 @@ test("preview ports are unique on a node, survive reopening the file, and asking
   const path = tempDb();
   const first = seed(openRegistry(path));
   const peer = "infra-testbench" as NodeName;
-  first.upsertNode({ name: peer, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
+  first.nodes.upsertNode({ name: peer, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
   const neighbour = addPylon(first, "th-2");
   const elsewhere = addPylon(first, "th-3", peer);
   first.threads.allocatePreviews(pylonId, ["web", "api"], ports);
@@ -395,9 +395,9 @@ test("previews and allocatePreviews answer the same with the node's observation 
     pylons: [runningPylon(pylonId, { services: [{ name: "web", state: "failed", port: 8000, declared: true, wantsPreview: true }] })],
   });
   for (const registry of [withIt, without]) registry.threads.ingested(observation, []);
-  withIt.threads.allocatePreviews(pylonId, ["web", "api"], ports, withIt.node(node)!.observation);
+  withIt.threads.allocatePreviews(pylonId, ["web", "api"], ports, withIt.nodes.node(node)!.observation);
   without.threads.allocatePreviews(pylonId, ["web", "api"], ports);
-  assert.deepEqual(withIt.threads.previews(pylonId, withIt.node(node)!.observation), without.threads.previews(pylonId));
+  assert.deepEqual(withIt.threads.previews(pylonId, withIt.nodes.node(node)!.observation), without.threads.previews(pylonId));
   assert.deepEqual(portsOf(without, pylonId), ["api 10202", "web 10201"]);
   assert.equal(without.threads.previews(pylonId).find((p) => p.service === "web")!.failed, "the service web failed. `nexus service logs web` in the pylon shows why");
 
@@ -586,15 +586,15 @@ test("desired release, reports and drain survive reopening the registry", () => 
   const first = openRegistry(path);
   const desired = { commit: "a".repeat(40), requestedBy: "nMac", requestedAt: 100 };
   const report = { node, role: "control" as const, commit: "b".repeat(40), target: desired.commit, state: "rolled-back" as const, reason: "unhealthy", observedAt: 200 };
-  first.setDesiredRelease(desired);
-  first.reportRelease(report);
-  first.setDrain({ commit: desired.commit, expiresAt: 300 });
+  first.releases.setDesiredRelease(desired);
+  first.releases.reportRelease(report);
+  first.releases.setDrain({ commit: desired.commit, expiresAt: 300 });
   first.close();
   const reopened = openRegistry(path);
   try {
-    assert.deepEqual(reopened.desiredRelease(), desired);
-    assert.deepEqual(reopened.releaseReports(), [report]);
-    assert.deepEqual(reopened.drain(), { commit: desired.commit, expiresAt: 300 });
+    assert.deepEqual(reopened.releases.desiredRelease(), desired);
+    assert.deepEqual(reopened.releases.releaseReports(), [report]);
+    assert.deepEqual(reopened.releases.drain(), { commit: desired.commit, expiresAt: 300 });
   } finally { reopened.close(); }
 });
 
@@ -1442,8 +1442,8 @@ test("a write waits while another process, such as a second open of the registry
   t.after(() => { holder.kill(); holder.stdout.destroy(); });
   await new Promise<void>((resolve) => holder.stdout.once("data", () => resolve()));
   writeFileSync(writing, "");
-  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
-  assert.deepEqual(registry.nodes().map((n) => n.name), [node], "the write waited for the lock rather than failing");
+  registry.nodes.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  assert.deepEqual(registry.nodes.nodes().map((n) => n.name), [node], "the write waited for the lock rather than failing");
   await new Promise((resolve) => holder.once("exit", resolve));
 });
 
@@ -1463,8 +1463,8 @@ test("a registry made when landing asked for a passkey keeps neither passkey tab
 
 test("a queued thread's row and its queue record's start commit together, and a record no longer queued starts nothing", (t) => {
   const registry = testRegistry(t, ":memory:");
-  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
-  registry.createProject(project);
+  registry.nodes.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  registry.projects.createProject(project);
   const record: QueuedRecord = {
     id: threadId, title: thread.title, project: project.id, startedBy: "nLAPTOP", createdAt: 500, after: ["th-0" as ThreadId],
     request: { project: project.id, title: thread.title, node, resources: project.resources }, message: "Fix it.",
@@ -1487,19 +1487,19 @@ test("a queued thread's row and its queue record's start commit together, and a 
 test("the migration that adds pipeline items turns the pipeline on for project nexus once, and never back on once it is off", (t) => {
   const path = tempDb();
   const registry = openRegistry(path);
-  for (const id of ["nexus", "other"]) registry.createProject({ ...project, id: id as ProjectId });
+  for (const id of ["nexus", "other"]) registry.projects.createProject({ ...project, id: id as ProjectId });
   registry.close();
   const rewind = () => rewindTo(path, versionBefore(/CREATE TABLE IF NOT EXISTS pipeline_items\b/));
   rewind();
   const upgraded = openRegistry(path);
-  assert.deepEqual(upgraded.project("nexus" as ProjectId)?.pipeline, { autoStart: true });
-  assert.equal(upgraded.project("other" as ProjectId)?.pipeline, undefined);
-  assert.deepEqual(upgraded.items(), []);
-  upgraded.editProject("nexus" as ProjectId, (p) => ({ ...p, pipeline: null }));
+  assert.deepEqual(upgraded.projects.project("nexus" as ProjectId)?.pipeline, { autoStart: true });
+  assert.equal(upgraded.projects.project("other" as ProjectId)?.pipeline, undefined);
+  assert.deepEqual(upgraded.pipeline.items(), []);
+  upgraded.projects.editProject("nexus" as ProjectId, (p) => ({ ...p, pipeline: null }));
   upgraded.close();
   rewind();
   const again = testRegistry(t, path);
-  assert.equal(again.project("nexus" as ProjectId)?.pipeline, null, "the person turned it off, and a rewound registry keeps it off");
+  assert.equal(again.projects.project("nexus" as ProjectId)?.pipeline, null, "the person turned it off, and a rewound registry keeps it off");
 });
 
 test("the migration that records archive times stamps each thread archived before it with its own time, and no other", (t) => {
@@ -1592,7 +1592,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   const rewind = () => rewindTo(path, versionBefore(/CREATE TABLE IF NOT EXISTS judgments\b/));
   rewind();
   const upgraded = openRegistry(path);
-  assert.equal(upgraded.judgmentSince(), before, "the failure before the upgrade is at the watermark");
+  assert.equal(upgraded.judgments.judgmentSince(), before, "the failure before the upgrade is at the watermark");
   assert.ok(upgraded.threads.failure(threadId)!.event === failed && failed <= before);
   upgraded.threads.retryPylon(pylonId);
   upgraded.threads.savePylon({ ...upgraded.threads.pylon(pylonId)!, failed: "gave up again" });
@@ -1601,7 +1601,7 @@ test("judgments begin at the newest event, so failures from before are never jud
   db.exec(migrations[versionBefore(/CREATE TABLE IF NOT EXISTS judgments\b/)]!);
   db.close();
   const again = testRegistry(t, path);
-  assert.equal(again.judgmentSince(), before, "applied again, the migration keeps the first watermark");
+  assert.equal(again.judgments.judgmentSince(), before, "applied again, the migration keeps the first watermark");
   const raw = new DatabaseSync(path);
   t.after(() => raw.close());
   assert.equal(raw.prepare("SELECT count(*) AS n FROM judgment_since").get()!.n, 1, "and adds no second one");
@@ -1661,19 +1661,19 @@ test("a judgment is saved only over the record as it was read, with what it does
     phase: { kind: "judging", deadline: null },
   } as const;
   let acted = 0;
-  assert.equal(registry.saveJudgment(judgment, null, () => acted++), true);
-  assert.equal(registry.saveJudgment({ ...judgment, conversation: 9 }, null, () => acted++), false, "a second record of the failure is refused");
-  assert.equal(registry.saveJudgment({ ...judgment, conversation: 9 }, judgment, () => acted++), true);
-  assert.equal(registry.saveJudgment({ ...judgment, conversation: 10 }, judgment, () => acted++), false, "a pass that read the record before that save changes nothing");
+  assert.equal(registry.judgments.saveJudgment(judgment, null, () => acted++), true);
+  assert.equal(registry.judgments.saveJudgment({ ...judgment, conversation: 9 }, null, () => acted++), false, "a second record of the failure is refused");
+  assert.equal(registry.judgments.saveJudgment({ ...judgment, conversation: 9 }, judgment, () => acted++), true);
+  assert.equal(registry.judgments.saveJudgment({ ...judgment, conversation: 10 }, judgment, () => acted++), false, "a pass that read the record before that save changes nothing");
   assert.equal(acted, 2, "only the saves that wrote acted");
-  assert.deepEqual(registry.judgment(7), { ...judgment, conversation: 9 });
-  assert.deepEqual(registry.judgments(threadId).map((j) => j.conversation), [9]);
+  assert.deepEqual(registry.judgments.judgment(7), { ...judgment, conversation: 9 });
+  assert.deepEqual(registry.judgments.judgments(threadId).map((j) => j.conversation), [9]);
 });
 
 test("a move takes a failed pylon to another node with a fresh boot, and its thread's placement and setup with it", (t) => {
   const registry = seeded(t, tempDb());
   const other = "rj-other" as NodeName;
-  registry.upsertNode({ name: other, tailnetHost: "rj-other.tail.ts.net", tailnetNodeId: "nOTHER" as TailnetNodeId });
+  registry.nodes.upsertNode({ name: other, tailnetHost: "rj-other.tail.ts.net", tailnetNodeId: "nOTHER" as TailnetNodeId });
   const to = {
     node: other, firstBoot: { kind: "fresh", preSetup: "apt-get install -y jq" }, live: { previews: [], overlay: [] }, liveHash: "hash-2" as LiveHash,
     placement: { how: "auto", node: other, weighed: [{ node: other, left: { cpus: 6, memoryGiB: 20, diskGiB: 90 } }] }, setup: { how: "fresh", reason: "the pylon moved" },
@@ -1690,37 +1690,37 @@ test("a move takes a failed pylon to another node with a fresh boot, and its thr
 test("a registry from before join tokens keeps its nodes as they were, with none joined", (t) => {
   const path = tempDb();
   const before = openRegistry(path);
-  before.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  before.nodes.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   before.close();
   rewindTo(path, versionBefore(/CREATE TABLE IF NOT EXISTS join_tokens\b/));
   const registry = testRegistry(t, path);
-  assert.deepEqual(registry.nodes().map((n) => [n.name, n.tailnetHost, n.tailnetNodeId]), [[node, "rj-firebat.tail.ts.net", "nFIREBAT"]]);
-  assert.deepEqual(registry.joinedNodes(), []);
+  assert.deepEqual(registry.nodes.nodes().map((n) => [n.name, n.tailnetHost, n.tailnetNodeId]), [[node, "rj-firebat.tail.ts.net", "nFIREBAT"]]);
+  assert.deepEqual(registry.nodes.joinedNodes(), []);
 });
 
 test("a join token records one node, once, before it expires", (t) => {
   const registry = testRegistry(t, ":memory:");
-  registry.addJoinToken("hash", 2_000);
+  registry.nodes.addJoinToken("hash", 2_000);
   const joining = { name: "infra-2" as NodeName, tailnetHost: "infra-2.tail.ts.net", tailnetNodeId: "nINFRA2" as TailnetNodeId, deployKey: "a".repeat(64) };
-  assert.equal(registry.joinNode("unknown", joining, 1_000), false);
-  assert.equal(registry.joinNode("hash", joining, 2_000), false, "expired at 2000");
-  assert.deepEqual(registry.joinedNodes(), []);
-  assert.deepEqual(registry.nodes(), []);
-  assert.equal(registry.joinNode("hash", joining, 1_999), true);
-  assert.equal(registry.joinNode("hash", { ...joining, deployKey: "b".repeat(64) }, 1_999), false, "used");
-  assert.deepEqual(registry.joinedNodes(), [{ ...joining, joinedAt: 1_999 }]);
-  assert.deepEqual(registry.joinToken("hash"), { expiresAt: 2_000, usedAt: 1_999 });
-  assert.equal(registry.node(joining.name)?.state, "offline");
+  assert.equal(registry.nodes.joinNode("unknown", joining, 1_000), false);
+  assert.equal(registry.nodes.joinNode("hash", joining, 2_000), false, "expired at 2000");
+  assert.deepEqual(registry.nodes.joinedNodes(), []);
+  assert.deepEqual(registry.nodes.nodes(), []);
+  assert.equal(registry.nodes.joinNode("hash", joining, 1_999), true);
+  assert.equal(registry.nodes.joinNode("hash", { ...joining, deployKey: "b".repeat(64) }, 1_999), false, "used");
+  assert.deepEqual(registry.nodes.joinedNodes(), [{ ...joining, joinedAt: 1_999 }]);
+  assert.deepEqual(registry.nodes.joinToken("hash"), { expiresAt: 2_000, usedAt: 1_999 });
+  assert.equal(registry.nodes.node(joining.name)?.state, "offline");
 });
 
 test("a node by its tailnet ID carries the key it joined with, and a configured node none", (t) => {
   const registry = testRegistry(t, ":memory:");
-  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
-  registry.addJoinToken("hash", 2_000);
-  registry.joinNode("hash", { name: "infra-2" as NodeName, tailnetHost: "infra-2.tail.ts.net", tailnetNodeId: "nINFRA2" as TailnetNodeId, deployKey: "a".repeat(64) }, 1_000);
-  assert.deepEqual(registry.nodeByTailnetId("nFIREBAT" as TailnetNodeId), { name: node, deployKey: null });
-  assert.deepEqual(registry.nodeByTailnetId("nINFRA2" as TailnetNodeId), { name: "infra-2", deployKey: "a".repeat(64) });
-  assert.equal(registry.nodeByTailnetId("nLAPTOP" as TailnetNodeId), undefined);
+  registry.nodes.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  registry.nodes.addJoinToken("hash", 2_000);
+  registry.nodes.joinNode("hash", { name: "infra-2" as NodeName, tailnetHost: "infra-2.tail.ts.net", tailnetNodeId: "nINFRA2" as TailnetNodeId, deployKey: "a".repeat(64) }, 1_000);
+  assert.deepEqual(registry.nodes.nodeByTailnetId("nFIREBAT" as TailnetNodeId), { name: node, deployKey: null });
+  assert.deepEqual(registry.nodes.nodeByTailnetId("nINFRA2" as TailnetNodeId), { name: "infra-2", deployKey: "a".repeat(64) });
+  assert.equal(registry.nodes.nodeByTailnetId("nLAPTOP" as TailnetNodeId), undefined);
 });
 
 /**
@@ -1803,12 +1803,12 @@ test("storedThreads reads only the threads' own rows, by status and by who start
 
 test("a deploy drain set to null reads back as null, as does one never set", (t) => {
   const registry = testRegistry(t, ":memory:");
-  assert.equal(registry.drain(), null);
-  assert.equal(registry.desiredRelease(), null);
-  registry.setDrain({ commit: "c".repeat(40), expiresAt: 300 });
-  assert.deepEqual(registry.drain(), { commit: "c".repeat(40), expiresAt: 300 });
-  registry.setDrain(null);
-  assert.equal(registry.drain(), null);
+  assert.equal(registry.releases.drain(), null);
+  assert.equal(registry.releases.desiredRelease(), null);
+  registry.releases.setDrain({ commit: "c".repeat(40), expiresAt: 300 });
+  assert.deepEqual(registry.releases.drain(), { commit: "c".repeat(40), expiresAt: 300 });
+  registry.releases.setDrain(null);
+  assert.equal(registry.releases.drain(), null);
 });
 
 test("the harness threads at start are those whose agent is a conversation, less deleted ones whose abort is recorded", (t) => {
@@ -1835,7 +1835,7 @@ test("a node's tallies and room count each of its pylons by what it holds, and a
   const { nodePylons, roomLeft } = await import("./placement.ts");
   const registry = seeded(t, tempDb());
   const other = "rj-other" as NodeName;
-  registry.upsertNode({ name: other, tailnetHost: "rj-other.tail.ts.net", tailnetNodeId: "nOTHER" as TailnetNodeId });
+  registry.nodes.upsertNode({ name: other, tailnetHost: "rj-other.tail.ts.net", tailnetNodeId: "nOTHER" as TailnetNodeId });
   const placed = (id: string, active: boolean, on = node) => {
     const p = addPylon(registry, id, on);
     if (active) registry.threads.recordActivity(id as ThreadId, { human: Date.now() });
@@ -1850,7 +1850,7 @@ test("a node's tallies and room count each of its pylons by what it holds, and a
   for (const id of ["th-archived", "th-reading"]) registry.threads.setThreadStatus(id as ThreadId, "archived");
   registry.usage.startUsageBackfill(["th-reading" as ThreadId], Date.now());
   registry.usage.holdUsageBackfill("th-reading" as ThreadId, Date.now());
-  const release = registry.reserve("pylon-th-starting" as PylonId, node, { cpus: 1, memoryGiB: 1, diskGiB: 1 });
+  const release = registry.placement.reserve("pylon-th-starting" as PylonId, node, { cpus: 1, memoryGiB: 1, diskGiB: 1 });
   t.after(release);
   const stopped = (pylonId: PylonId) => stoppedPylon(pylonId, { sessions: null });
   registry.threads.ingested(testObservation(node, {
@@ -1859,7 +1859,7 @@ test("a node's tallies and room count each of its pylons by what it holds, and a
       { pylonId: crashed, phase: "broken", detail: "the controller exited", cause: "controller", logTail: "" },
       { pylonId: "pylon-gone" as PylonId, phase: "booting" }, { pylonId: elsewhere, phase: "booting" }],
   }), []);
-  const record = registry.node(node)!;
+  const record = registry.nodes.node(node)!;
   assert.deepEqual(nodePylons(registry, record), {
     up: { pylons: 1, cpus: 2, memoryGiB: 4 }, paused: { pylons: 2, cpus: 4, memoryGiB: 8 }, archived: { pylons: 2, cpus: 4, memoryGiB: 8 },
     crashed: { pylons: 1, cpus: 2, memoryGiB: 4 }, orphaned: ["pylon-gone", elsewhere],

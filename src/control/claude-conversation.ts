@@ -26,7 +26,7 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { Watch } from "./conversation-view.ts";
 
-type ClaudeConversationRegistry = Pick<Registry, "threads" | "node" | "questions">;
+type ClaudeConversationRegistry = Pick<Registry, "threads" | "nodes" | "questions">;
 
 export interface ClaudeConversations {
   /** From the registry alone, so it never reaches the pylon. */

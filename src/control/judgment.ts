@@ -33,7 +33,7 @@ import type { StoredPylon, Thread } from "./thread-store.ts";
 import type { Registry } from "./registry.ts";
 import { answers, type Judgment, type Outcome, type Phase, type Verdict } from "./judgment-store.ts";
 
-type JudgmentRegistry = Pick<Registry, "threads" | "questions" | "judgment" | "judgmentSince" | "judgments" | "latestHealthSample" | "node" | "nodes" | "now" | "project" | "usage" | "reserved" | "saveJudgment" | "unfinishedJudgments">;
+type JudgmentRegistry = Pick<Registry, "threads" | "questions" | "judgments" | "nodeMetrics" | "nodes" | "now" | "projects" | "usage" | "placement">;
 
 /** A judgment as `nexus show` and the thread page show it. */
 export interface JudgmentView {
@@ -191,11 +191,11 @@ export function judgmentPass(options: {
 
   const rule = (why: string): Verdict => ({ answer: "person", why, by: "control plane" });
   const observed = (pylon: StoredPylon): PylonObservation | "absent" => observedPylon(registry, pylon) ?? "absent";
-  const retriesSpent = (thread: ThreadId) => registry.judgments(thread).filter((j) => j.phase.kind === "done" && j.phase.outcome.kind !== "left" && j.phase.outcome.on === "verdict").length;
+  const retriesSpent = (thread: ThreadId) => registry.judgments.judgments(thread).filter((j) => j.phase.kind === "done" && j.phase.outcome.kind !== "left" && j.phase.outcome.on === "verdict").length;
 
   /** A builder whose project the pipeline runs for, which a person started and has not archived. */
   function judged(t: Thread): boolean {
-    return roleOf(t.startedBy) === "builder" && isOpenStatus(t.status) && registry.project(t.project)?.pipeline != null;
+    return roleOf(t.startedBy) === "builder" && isOpenStatus(t.status) && registry.projects.project(t.project)?.pipeline != null;
   }
 
   /** Only a node that holds nothing of the pylon lets it go, since Nexus has no job that moves a disk or a preview. */
@@ -239,15 +239,15 @@ export function judgmentPass(options: {
     const agent = registry.threads.agent(t).kind;
     return {
       token, thread: t, agent: agent === "harness" ? "a Nexus agent" : agent === "claude" ? "a Claude worker" : "none", pylon,
-      listed: observedPylon(registry, pylon), online: registry.node(pylon.node)?.state === "online", health: await health(pylon.node),
-      others: weighNodes(registry, pylon.boot, pylon.node).weighed, earlier: registry.judgments(t.id).filter((j) => j.failure < failure),
+      listed: observedPylon(registry, pylon), online: registry.nodes.node(pylon.node)?.state === "online", health: await health(pylon.node),
+      others: weighNodes(registry, pylon.boot, pylon.node).weighed, earlier: registry.judgments.judgments(t.id).filter((j) => j.failure < failure),
       retriesLeft: maxRetries - retriesSpent(t.id), retry: retryRefusal(observed(pylon)), move: move(pylon),
     };
   }
 
   /** Saves the next record in place of `j` with the action that goes with it, and logs what changed. */
   function save(j: Judgment | null, next: Judgment, alongside?: () => void): boolean {
-    if (!registry.saveJudgment(next, j, alongside)) return false;
+    if (!registry.judgments.saveJudgment(next, j, alongside)) return false;
     if (j?.phase.kind !== next.phase.kind) {
       const said = next.phase.kind === "judging" ? "judging" : `${verdictText(next.phase.verdict)}${next.phase.kind === "done" ? `; ${outcomeText(next.phase.outcome)}` : next.phase.kind === "asked" ? `; asked the person on question ${judgmentId(next.failure)}` : ""}`;
       log(`${next.thread}: judgment of failure ${next.failure} on ${next.node}: ${said}`);
@@ -258,7 +258,7 @@ export function judgmentPass(options: {
   async function start(t: Thread) {
     if (!judged(t)) return;
     const failure = registry.threads.failure(t.id)?.event;
-    if (failure === undefined || failure <= registry.judgmentSince() || registry.judgment(failure) !== null) return;
+    if (failure === undefined || failure <= registry.judgments.judgmentSince() || registry.judgments.judgment(failure) !== null) return;
     const pylon = registry.threads.pylon(t.pylonId)!;
     const base = { failure, thread: t.id, node: pylon.node, failed: pylon.failed!, startedAt: now(), conversation: null, reply: null };
     if (retriesSpent(t.id) >= maxRetries) {
@@ -327,7 +327,7 @@ export function judgmentPass(options: {
 
   /** The record once Nexus moved the pylon and retried it there, and the move. A fresh boot, since templates stay on their node. */
   function moved(j: Judgment, verdict: Verdict, pylon: StoredPylon, to: Extract<Move, { to: NodeName }>, on: "verdict" | "answer"): { next: Judgment; act: () => void; nodes: NodeName[] } {
-    const project = registry.project(registry.threads.thread(j.thread)!.project)!;
+    const project = registry.projects.project(registry.threads.thread(j.thread)!.project)!;
     const live = pylonLive({ ...pylon, node: to.to }, project, []);
     const setup: ThreadSetup = { how: "fresh", reason: `the pylon moved from ${pylon.node} after it failed there, and templates stay on the node that built them` };
     return {
@@ -378,7 +378,7 @@ export function judgmentPass(options: {
       if (last !== null) registry.usage.recordUsage(j.thread, calls, [{ source: "harness", key: String(conversation), position: last, before: "" }]);
     }
     // Nothing below awaits, so what it reads is what the save acts on.
-    const withheld = registry.project(registry.threads.thread(j.thread)!.project)?.pipeline == null ? "the project's pipeline was turned off"
+    const withheld = registry.projects.project(registry.threads.thread(j.thread)!.project)?.pipeline == null ? "the project's pipeline was turned off"
       : retriesSpent(j.thread) >= maxRetries ? `Nexus already retried this thread's pylon ${maxRetries} times on its own` : null;
     carryOut(j, verdict, settled(j), (pylon) => {
       switch (verdict.answer) {
@@ -429,10 +429,10 @@ export function judgmentPass(options: {
   async function pass() {
     // A judgment of a thread archived or deleted since it started still steps, to its end.
     const startable = new Set(registry.threads.storedThreads({ status: openStatuses }).map((t) => t.id));
-    const ids = new Set([...registry.unfinishedJudgments().map((j) => j.thread), ...startable]);
+    const ids = new Set([...registry.judgments.unfinishedJudgments().map((j) => j.thread), ...startable]);
     for (const id of ids) {
       try {
-        for (const j of registry.judgments(id)) await step(j);
+        for (const j of registry.judgments.judgments(id)) await step(j);
         // Read again after the steps, which may have retried the pylon.
         if (startable.has(id)) await start(registry.threads.thread(id)!);
         errors.delete(id);

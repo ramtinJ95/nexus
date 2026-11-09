@@ -14,7 +14,7 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import { landingVerb, type HoldCause, type Phase, type Review } from "./review-model.ts";
 
-type LandingRegistry = Pick<Registry, "desiredRelease" | "drain" | "nodes" | "now" | "project" | "releaseReports" | "reviews" | "setDesiredRelease">;
+type LandingRegistry = Pick<Registry, "releases" | "nodes" | "now" | "projects" | "reviews">;
 type Releasing = Extract<Phase, { kind: "deploying" | "rolling-back" }>;
 
 export interface LandingDeps {
@@ -36,7 +36,7 @@ export function landing({ registry, release, mayLand, now, toPerson }: LandingDe
   const view = () => releaseView(registry, release.self, now());
   /** Makes `commit` the desired release, unless it is already, and marks the deploy or rollback requested. */
   const requestRelease = (r: Review, phase: Releasing, commit: string, by: string): Review => {
-    if (registry.desiredRelease()?.commit !== commit) registry.setDesiredRelease({ commit, requestedBy: by, requestedAt: now() });
+    if (registry.releases.desiredRelease()?.commit !== commit) registry.releases.setDesiredRelease({ commit, requestedBy: by, requestedAt: now() });
     return { ...r, phase: { ...phase, requested: true } };
   };
   /** `r` while its release is pending before the deadline, which moves on while a node waits for idle to deploy, or null. */
@@ -55,14 +55,14 @@ export function landing({ registry, release, mayLand, now, toPerson }: LandingDe
      */
     ahead(r: Review): string | null {
       if (!deploys(r)) return null;
-      if (isDraining(registry.drain(), registry.now())) return "a deploy drains the control plane";
+      if (isDraining(registry.releases.drain(), registry.now())) return "a deploy drains the control plane";
       for (const other of registry.reviews.reviews()) {
         const verb = other.id === r.id || !deploys(other) ? null : landingVerb(other);
         if (verb !== null) return `${other.id} ${verb}`;
       }
       // A landing whose deploy and rollback both failed, or one with no release to roll back to, leaves its release
       // desired, which must not become the next landing's rollback target.
-      const desired = registry.desiredRelease();
+      const desired = registry.releases.desiredRelease();
       if (desired !== null && releaseOutcome(view(), desired.commit) !== "healthy") return `not every service reports ${desired.commit.slice(0, 12)} healthy`;
       return null;
     },
@@ -70,7 +70,7 @@ export function landing({ registry, release, mayLand, now, toPerson }: LandingDe
     /** Why the caller `r`'s landing merges and deploys for may not, now. The project's landing is for whoever turned it on, while it stays on. */
     unauthorized(r: Review, builder: Thread): Hold[] {
       const land = r.land!;
-      const setting = registry.project(builder.project)?.autoReview;
+      const setting = registry.projects.project(builder.project)?.autoReview;
       if (land.fromProject && !landsOnItsOwn(setting)) return [{ code: "loop", text: `Project ${builder.project} no longer lands its builders' pull requests on its own, so this one is the person's to land.` }];
       const by = land.fromProject ? setting!.enabledBy : land.requestedBy;
       return mayLand(by) ? [] : [{ code: "loop", text: `${by}, who ${land.fromProject ? `turned on landing for project ${builder.project}` : "asked for this landing"}, is not among the control plane's deployers, so only the person can land it.` }];
@@ -79,7 +79,7 @@ export function landing({ registry, release, mayLand, now, toPerson }: LandingDe
     /** `r` once its PR merged as `commit`: landed, or deploying it with the desired release as its rollback target. */
     merged(r: Review, commit: string): Review {
       if (!deploys(r)) return { ...r, merged: commit, phase: { kind: "landed", commit } };
-      return { ...r, merged: commit, phase: { kind: "deploying", commit, previous: registry.desiredRelease()?.commit ?? null, requested: false, deadline: now() + deployWaitMs } };
+      return { ...r, merged: commit, phase: { kind: "deploying", commit, previous: registry.releases.desiredRelease()?.commit ?? null, requested: false, deadline: now() + deployWaitMs } };
     },
 
     steps: {

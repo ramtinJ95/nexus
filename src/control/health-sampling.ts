@@ -30,7 +30,7 @@ export function healthSampling(options: {
   return {
     /** Starts a read of each online node that has none in flight. Returns without waiting for them. */
     poll() {
-      for (const { name, state } of registry.nodes()) {
+      for (const { name, state } of registry.nodes.nodes()) {
         const probe = probes.get(name);
         if (state === "online" && probe !== undefined && !reading.has(name)) read(name, probe);
       }
