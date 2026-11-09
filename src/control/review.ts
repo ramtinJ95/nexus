@@ -19,7 +19,7 @@
  * ended because the agent's model failed gets the same request again, after a wait that grows with each failure in a row.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { checkCaller, latest, mint, reviewerCaller, verifyCaller } from "./agent-protocol.ts";
+import { checkCaller, mint, reviewerCaller, tokenBlocks, verifyCaller } from "./agent-protocol.ts";
 import { scopedFlight } from "../single-flight.ts";
 import type { SecretGrant } from "../protocol/secret-grants.ts";
 import { agentKinds } from "../protocol/agent-kinds.ts";
@@ -278,11 +278,12 @@ export function reviewLoop(deps: ReviewDeps) {
   };
   /** The round's findings go to the builder, who owes an answer to each. */
   const toBuilder = (r: Review): Review => send({ ...r, phase: { kind: "fixing" } }, "builder", (token) => builderFindings(r, token));
-  /** What `party` did since the loop's last message to it, and its `answer` block with its token, or null. */
+  /** What `party` did since the loop's last message to it, and its `answer` blocks with its token merged, or null. */
   const hear = async <T extends { token: string }>(r: Review, party: Party, answer: FencedAnswer<T>) => {
     const c = conversation(r, party);
     const state = await agentState(registry.threads.thread(c.thread)!, c.talk.since);
-    return { state, answer: state.mayAnswer ? latest(state.replies, answer.fence, answer.schema, c.talk.expect) : null };
+    const blocks = state.mayAnswer ? tokenBlocks(state.replies, answer.fence, answer.schema, c.talk.expect) : [];
+    return { state, answer: blocks.length === 0 ? null : answer.merge(blocks) };
   };
   /**
    * The next round's request to each reviewer, which hears only of its own findings' answers. A second reviewer that
@@ -593,10 +594,12 @@ export function reviewLoop(deps: ReviewDeps) {
       // A turn after the request went again that did not fail ends the model's failures in a row, though the loop may
       // still wait for the push its answer promises. An answer from before, or from the failed turn itself, does not.
       if (phase.failing !== undefined && r.since >= phase.failing.retryAt && state.ended !== null && state.failure === null) return { ...r, phase: { kind: "fixing" } };
-      const unanswered = findingsOf(round).filter(blocks).filter((f) => !answered(f, found.answers));
-      if (unanswered.length) return wait(r, phase, "builder", state, `Your answers leave ${unanswered.map((f) => f.id).join(", ")} without a fix or a reason to reject.`);
-      const withAnswers = withRound(r, { answers: found.answers });
-      const fixed = found.answers.some((a) => a.action === "fixed");
+      // Merged blocks keep an answer to an ID the builder corrected since, which answers no finding of the round.
+      const answers = found.answers.filter((a) => findingsOf(round).some((f) => f.id === a.id));
+      const unanswered = findingsOf(round).filter(blocks).filter((f) => !answered(f, answers));
+      if (unanswered.length) return wait(r, phase, "builder", state, `Your answers leave ${unanswered.map((f) => f.id).join(", ")} without a fix or a reason to reject. Every finding needs an answer.`);
+      const withAnswers = withRound(r, { answers });
+      const fixed = answers.some((a) => a.action === "fixed");
       const snapshot = await read(r);
       if (snapshot.pr.state !== "open") return outside(withAnswers, snapshot.pr.state) ?? toPerson(withAnswers, "outside", `Pull request #${r.pr.number} was ${snapshot.pr.state} during the review.`);
       if (fixed && snapshot.detail.head === round.head) {
@@ -607,7 +610,7 @@ export function reviewLoop(deps: ReviewDeps) {
       }
       // The reviewer cannot change a gate's result, so a failed gate at an unmoved head is the person's.
       if (gate !== null && snapshot.detail.head === round.head) {
-        const answer = found.answers.find((a) => a.id === gate.finding.id);
+        const answer = answers.find((a) => a.id === gate.finding.id);
         return toPerson(withAnswers, "gate", { code: gate.code, text: `${gate.pushedNothing}${answer === undefined ? "." : `: ${answer.reason}`}` }, ...gate.output === null ? [] : [gate.output]);
       }
       // Commits pushed with answers that fixed nothing are still unreviewed, so only an unmoved head skips a round.

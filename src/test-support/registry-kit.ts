@@ -13,6 +13,7 @@ import type { WatchedPr } from "../control/pr-watch-store.ts";
 import { openRegistry, type Registry } from "../control/registry.ts";
 import type { StoredPylon, Thread } from "../control/thread-store.ts";
 import type { Review } from "../control/review-model.ts";
+import type { ClaudeConversations } from "../control/claude-conversation.ts";
 
 export const testNode = "rj-firebat" as NodeName;
 /** The tailnet IDs tests assert for their nodes. Another node gets `n<name>`. */
@@ -109,3 +110,6 @@ export function testReview(over: Partial<Review> = {}): Review {
     outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0, rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }], phase: { kind: "reviewing" }, ...over,
   };
 }
+
+/** Claude transcripts that no refresh reads, so a read of a Claude worker answers what the registry stores. */
+export const storedTranscripts: Pick<ClaudeConversations, "refresh"> = { refresh: async () => {} };

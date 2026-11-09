@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { testPylon, testRegistry, testReview, testThread, claudeWorkerAt } from "../test-support/registry-kit.ts";
+import { testPylon, testRegistry, testReview, testThread, claudeWorkerAt, storedTranscripts } from "../test-support/registry-kit.ts";
 import { personPhase, type Phase } from "./review-model.ts";
 import { agentInbox } from "./inbox.ts";
 import { agentReader } from "./agent-conversation.ts";
@@ -29,7 +29,7 @@ function fixture(t: import("node:test").TestContext) {
   const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command as Extract<PylonCommand, { kind: "send-claude" }>); return { kind: "send-claude", outcome, herdrPane: "w1:p1", resumed: true }; } };
   const harness = { async send() { throw new Error("a Claude worker's message never reaches the harness"); } };
   const inbox = agentInbox({ log: assert.fail, registry, harness, probes: new Map([[node, probe]]), wake() {} });
-  const resumer = deadTurnResumer({ registry, inbox, personWroteTo: agentReader(registry, { async watch() { throw new Error("no harness thread here"); } }).personWrote, clock: () => now, log() {} });
+  const resumer = deadTurnResumer({ registry, inbox, personWroteTo: agentReader(registry, { async watch() { throw new Error("no harness thread here"); } }, storedTranscripts).personWrote, clock: () => now, log() {} });
   let sequence = 0;
   const seq = new Map<ThreadId, number>();
   const pylons: PylonId[] = [];

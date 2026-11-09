@@ -136,9 +136,12 @@ export function claudeConversations(options: { registry: ClaudeConversationRegis
       const t = registry.threads.thread(id);
       const session = registry.threads.claudeWorker(id)?.session ?? null;
       if (t === undefined || t.status === "deleted" || session === null) return;
-      const probe = runningProbe(registry, probes, t, "usage");
-      if (probe === null) return;
       const stored = registry.threads.claudeTranscript(id);
+      const probe = runningProbe(registry, probes, t, "usage");
+      if (probe === null) {
+        if ((t.lastReplyAt ?? 0) > (stored?.readAt ?? 0)) r.failures.failed("transcript", `${t.pylonId}: Claude's transcript was not read, as no node lists the pylon running, so it shows the last read, which lacks the turn that ended since`);
+        return;
+      }
       const startedAt = Date.now();
       const from = stored?.session === session ? stored.cursor : transcriptStart;
       let found: TranscriptRead | null;

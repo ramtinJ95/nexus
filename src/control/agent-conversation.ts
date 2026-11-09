@@ -3,7 +3,9 @@
  * worker's transcript as last read, or its harness conversation now. The review loop, the planner and the nudge each
  * take what they need from one read of it.
  */
+import { setTimeout as sleep } from "node:timers/promises";
 import type { ConversationView } from "@earendil-works/pi-durable";
+import type { ClaudeConversations } from "./claude-conversation.ts";
 import { errorStop, type ClaudeEntry } from "./claude-transcript.ts";
 import type { HarnessHost } from "./harness/host.ts";
 import { busyOf } from "./conversation-view.ts";
@@ -33,6 +35,11 @@ export function harnessView(harness: Pick<HarnessHost, "watch">): (t: Pick<Threa
     }
   };
 }
+
+const claudeReadMs = 5_000;
+/** Reads what the transcript of `t`'s Claude worker gained, or stops waiting after `claudeReadMs`. */
+export const refreshClaude = (claude: Pick<ClaudeConversations, "refresh">, t: Thread) =>
+  Promise.race([claude.refresh(t), sleep(claudeReadMs, undefined, { ref: false })]);
 
 function harnessConversation(view: ConversationView): Conversation {
   const models = view.entries.flatMap((entry) => (entry.model ?? []).map((message) => ({ entry, message })));
@@ -90,7 +97,7 @@ export interface AgentRead {
   busy(t: Pick<Thread, "id">): Promise<boolean>;
 }
 
-export function agentReads(registry: AgentConversationRegistry, harness: Pick<HarnessHost, "watch">): Record<ThreadAgent["kind"], AgentRead> {
+export function agentReads(registry: AgentConversationRegistry, harness: Pick<HarnessHost, "watch">, claude: Pick<ClaudeConversations, "refresh">): Record<ThreadAgent["kind"], AgentRead> {
   const view = harnessView(harness);
   /**
    * A conversation in the control plane is opened only once a turn ended after `since`. Until then it can hold no
@@ -120,7 +127,10 @@ export function agentReads(registry: AgentConversationRegistry, harness: Pick<Ha
     },
     claude: {
       conversation: async (t) => claudeConversation(registry, t.id, registry.threads.claudeEntries(t.id)),
+      // The session events that read the transcript can miss a reply the hook reported, so a turn that ended would
+      // otherwise be heard without its answer.
       async state(t, since) {
+        await refreshClaude(claude, t);
         const entries = registry.threads.claudeEntries(t.id);
         const c = claudeConversation(registry, t.id, entries);
         return { ...heard(t, entries, since), replies: repliesOf(c), failure: c.failure };
@@ -133,8 +143,8 @@ export function agentReads(registry: AgentConversationRegistry, harness: Pick<Ha
   };
 }
 
-export function agentReader(registry: AgentConversationRegistry, harness: Pick<HarnessHost, "watch">) {
-  const reads = agentReads(registry, harness);
+export function agentReader(registry: AgentConversationRegistry, harness: Pick<HarnessHost, "watch">, claude: Pick<ClaudeConversations, "refresh">) {
+  const reads = agentReads(registry, harness, claude);
   const of = (t: Thread) => reads[registry.threads.agent(t).kind];
   return {
     conversation: (t: Thread) => of(t).conversation(t),

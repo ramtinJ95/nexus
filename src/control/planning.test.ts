@@ -7,6 +7,7 @@ import { planBlocks, planning, proposalItem } from "./planning.ts";
 import { planningPrefix } from "./agent-protocol.ts";
 import { openRegistry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
+import { storedTranscripts } from "../test-support/registry-kit.ts";
 import { agentReader } from "./agent-conversation.ts";
 import { threadServices } from "./thread-services.ts";
 import type { NodeName, ProjectId, TailnetNodeId } from "../ids.ts";
@@ -60,7 +61,7 @@ async function fixture(t: import("node:test").TestContext, path = ":memory:", fa
   const start = services.api.startThread;
   const queue = services.api.queue!;
   const items = services.api.pipeline!;
-  const plans = planning({ registry, pipeline: items, replies: agentReader(registry, fake.harness).replies, now: () => asked });
+  const plans = planning({ registry, pipeline: items, replies: agentReader(registry, fake.harness, storedTranscripts).replies, now: () => asked });
   t.after(async () => { await plans.close(); await services.close(); });
   return {
     registry, fake, plans, items, queue,
