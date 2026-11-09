@@ -1,7 +1,7 @@
 /**
- * The codemod that moved the thread store family off the flat Registry onto its sub-objects (U102). Run on the tree
- * before that change, `node scripts/registry-sub-objects.ts` rewrites every caller: `registry.thread(id)` becomes
- * `registry.threads.thread(id)`, a destructured member moves into its store's pattern, and a `Pick<Registry, ...>`
+ * The codemod that moved the registry's stores off the flat Registry onto sub-objects: the thread store family in U102,
+ * the rest in U103, whose stores the map below names. Run on the tree before U103, `node scripts/registry-sub-objects.ts`
+ * rewrites every caller: `registry.node(name)` becomes `registry.nodes.node(name)`, a destructured member moves into its store's pattern, and a `Pick<Registry, ...>`
  * or `Registry["x"]` names the store. It finds members through the type checker, so a `thread` that is not the
  * registry's is left alone. registry.ts, and an object literal that stands in for registry members without spreading
  * one, are edited by hand.
@@ -13,15 +13,20 @@ import { isBindingElement, isIdentifier, isIndexedAccessTypeNode, isLiteralTypeN
 
 const root = process.cwd();
 const stores: Record<string, string> = {
-  "src/control/thread-store.ts": "threads",
-  "src/control/claude-worker.ts": "threads",
-  "src/control/review-store.ts": "reviews",
-  "src/control/question-store.ts": "questions",
-  "src/control/nudge-store.ts": "nudges",
-  "src/control/pr-watch-store.ts": "prWatches",
-  "src/control/queue-store.ts": "queue",
-  "src/control/usage-store.ts": "usage",
+  "src/control/placement-model.ts": "placement",
+  "src/control/planning-store.ts": "planning",
+  "src/control/judgment-store.ts": "judgments",
+  "src/control/release-store.ts": "releases",
+  "src/control/health-store.ts": "health",
+  "src/control/node-store.ts": "nodes",
+  "src/control/node-metrics-store.ts": "nodeMetrics",
+  "src/control/project-store.ts": "projects",
+  "src/control/pipeline-store.ts": "pipeline",
+  "src/control/image-store.ts": "images",
 };
+/** The thread store family moved in U102; its files read the stores above through their own types, not the registry. */
+const familyFiles = ["src/control/thread-store.ts", "src/control/claude-worker.ts", "src/control/review-store.ts", "src/control/question-store.ts",
+  "src/control/nudge-store.ts", "src/control/pr-watch-store.ts", "src/control/queue-store.ts", "src/control/usage-store.ts"];
 
 const api = new API({ cwd: root });
 const project = api.updateSnapshot({ openProject: "tsconfig.json" }).getProjects()[0]!;
@@ -137,7 +142,7 @@ function pick(sf: SourceFile, keys: Node): Edit[] {
   return [{ start: keys.getStart(sf), end: keys.end, text: out.map((k) => `"${k}"`).join(" | ") }];
 }
 
-const skip = new Set(["src/control/registry.ts", ...Object.keys(stores)]);
+const skip = new Set(["src/control/registry.ts", ...Object.keys(stores), ...familyFiles]);
 let changed = 0;
 for (const fileName of program.getSourceFileNames()) {
   const path = relative(root, fileName);
