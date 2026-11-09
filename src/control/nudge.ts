@@ -21,7 +21,7 @@ import { deliverDurable } from "./durable-message.ts";
 import { prLocationOf, threadRole } from "./work-model.ts";
 import { isOpenStatus, openStatuses } from "./reconcile.ts";
 
-type NudgeRegistry = Pick<Registry, "isReviewer" | "node" | "nudge" | "nudgedThreads" | "outputs" | "planning" | "prWatch" | "project" | "pylon" | "review" | "saveNudge" | "storedThreads" | "thread">;
+type NudgeRegistry = Pick<Registry, "reviews" | "node" | "nudges" | "threads" | "planning" | "prWatches" | "project">;
 
 const text = `${senders.nudge.prefix}
 Your turn ended, and Nexus finds no pull request from this thread. This project reviews its builders' pull requests on its own, so the work moves on only once one is open. If the task is not done, go on with it. When it is, commit, push the branch and open a pull request. If you are blocked or the task needs no pull request, say why in one line: after two nudges without a pull request, Nexus hands this thread to the person.`;
@@ -52,7 +52,7 @@ export function builderNudger(options: {
    * pylon's snapshot says nothing of git, so a turn whose pushes were not known before the pause waits for a wake.
    */
   function pushedKnown(t: Thread, turn: number): boolean {
-    const pylon = registry.pylon(t.pylonId);
+    const pylon = registry.threads.pylon(t.pylonId);
     const observation = pylon === undefined ? null : registry.node(pylon.node)?.observation ?? null;
     const facts = observation?.pylons.find((p) => p.pylonId === t.pylonId);
     return facts?.phase === "running" && facts.git !== null && Date.parse(observation!.observedAt) - gitPollMs >= turn;
@@ -75,15 +75,15 @@ export function builderNudger(options: {
   const hasPullRequest = (t: Thread) => prLocationOf(registry, t.id).kind !== "none";
   /** The thread as the registry has it now, if a nudge may still go to it: an await may have let a turn, a PR link, or an archive in. */
   const idleBuilder = (id: Thread["id"]) => {
-    const fresh = registry.thread(id);
+    const fresh = registry.threads.thread(id);
     return fresh === undefined || builderRepo(fresh) === null || hasPullRequest(fresh) || fresh.usageLimit !== undefined || fresh.turnDied !== undefined || fresh.working ? undefined : fresh;
   };
 
   async function judge(t: Thread) {
-    const record = registry.nudge(t.id);
+    const record = registry.nudges.nudge(t.id);
     if (record?.state === "left-alone") return;
-    const clear = () => { if (record !== null) registry.saveNudge(t.id, null); };
-    const leaveAlone = () => registry.saveNudge(t.id, { state: "left-alone" });
+    const clear = () => { if (record !== null) registry.nudges.saveNudge(t.id, null); };
+    const leaveAlone = () => registry.nudges.saveNudge(t.id, { state: "left-alone" });
     const repo = builderRepo(t);
     if (repo === null || hasPullRequest(t)) return clear();
     // A turn its usage limit stopped did not stall, and the next turn ends the limit. One that died is the resumer's.
@@ -107,7 +107,7 @@ export function builderNudger(options: {
     if (t.working || turn === null || (record !== null && record.turn >= turn) || !watched(t, turn)) return;
     if (await personWroteTo(t)) return leaveAlone();
     try {
-      if (await opened(t, repo)) return registry.saveNudge(t.id, { state: "opened", turn });
+      if (await opened(t, repo)) return registry.nudges.saveNudge(t.id, { state: "opened", turn });
     } catch (err) {
       // Never log transport errors' text: a fetch implementation may put authorization headers in them.
       log(`${t.id}: nudge could not search GitHub for its pull request and will retry (${(err as Error).name})`);
@@ -116,22 +116,22 @@ export function builderNudger(options: {
     const fresh = idleBuilder(t.id);
     if (fresh === undefined || fresh.lastReplyAt !== turn) return;
     const count = record?.state === "nudged" ? record.count : 0;
-    if (count >= maxNudges) return registry.saveNudge(t.id, { state: "person", turn });
+    if (count >= maxNudges) return registry.nudges.saveNudge(t.id, { state: "person", turn });
     const sending: Nudge = { state: "sending", turn, count: count + 1 };
-    registry.saveNudge(t.id, sending);
+    registry.nudges.saveNudge(t.id, sending);
     await deliver(fresh, sending);
   }
 
   async function deliver(t: Thread, { turn, count }: Extract<Nudge, { state: "sending" }>) {
-    await deliverDurable({ id: requestIds.nudge(t.id, turn), text }, (m) => inbox(t, { ...m, sender: "nudge" }), () => registry.saveNudge(t.id, { state: "nudged", turn, count }));
+    await deliverDurable({ id: requestIds.nudge(t.id, turn), text }, (m) => inbox(t, { ...m, sender: "nudge" }), () => registry.nudges.saveNudge(t.id, { state: "nudged", turn, count }));
   }
 
   async function pass() {
     // A thread archived since its nudge has its record cleared, so an unarchived one starts its count over.
-    const ids = new Set([...registry.storedThreads({ status: openStatuses }).map((t) => t.id), ...registry.nudgedThreads()]);
+    const ids = new Set([...registry.threads.storedThreads({ status: openStatuses }).map((t) => t.id), ...registry.nudges.nudgedThreads()]);
     for (const id of ids) {
       // Read again after the passes before it, which another thread's sends may have outrun.
-      const t = registry.thread(id);
+      const t = registry.threads.thread(id);
       if (t === undefined) continue;
       try {
         await judge(t);

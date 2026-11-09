@@ -30,13 +30,13 @@ test("a project, an edit or a start that asks for less memory than a pylon VM bo
   assert.equal((await s.call("POST", "/v1/projects", { ...project, resources: { ...project.resources, memoryGiB: 3 } })).status, 201, "the floor itself boots");
   await refusedWith("PATCH", "/v1/projects/acme", { resources: { memoryGiB: 2 } });
   await refusedWith("POST", "/v1/threads", { project: "acme", title: "Small", resources: { memoryGiB: 2 } });
-  assert.equal(s.registry.threads("acme" as Thread["project"]).length, 0, "no thread was created");
+  assert.equal(s.registry.threads.threads("acme" as Thread["project"]).length, 0, "no thread was created");
 
   s.registry.createProject({ ...project, id: "older" as ProjectId, resources: { ...project.resources, memoryGiB: 2 } } as never);
   const inherited = await s.call("POST", "/v1/threads", { project: "older", title: "Inherits 2 GiB" });
   assert.equal(inherited.status, 400, "a project stored before the floor cannot start a pylon at its size");
   assert.match(inherited.body.error, /^the pylon would get 2 GiB, but pylon VMs need at least 3 GiB: a 2 GiB Gondolin 0\.13\.0 guest hangs at boot/);
-  assert.equal(s.registry.threads("older" as Thread["project"]).length, 0, "no thread was created");
+  assert.equal(s.registry.threads.threads("older" as Thread["project"]).length, 0, "no thread was created");
 });
 
 test("a scratch project has no repository, and each of its threads starts an empty one on its branch", async (t) => {
@@ -52,18 +52,18 @@ test("a scratch project has no repository, and each of its threads starts an emp
   assert.equal(started.status, 201, JSON.stringify(started.body));
   assert.deepEqual(started.body.setup, { how: "fresh", reason: "the project is scratch, so it has no template" });
   assert.deepEqual(s.reads, [], "a scratch project has no remote to read");
-  const pylon = s.registry.pylon(started.body.pylonId)!;
+  const pylon = s.registry.threads.pylon(started.body.pylonId)!;
   assert.deepEqual(pylon.boot.repo, { kind: "empty", branch: "main" });
   assert.deepEqual(pylon.boot.network, { allowedHosts: ["api.github.com", "github.com"], secrets: [githubTokenGrant] }, "the grant opens GitHub, and no repo host joins");
   assert.match(pylon.live.overlay[2]!.content, /new repository on branch main with no commits and no remote/);
 
   const trunk = await s.call("POST", "/v1/threads", { project: "sketch", title: "Trunk", branch: "trunk" });
-  assert.deepEqual(s.registry.pylon(trunk.body.pylonId)!.boot.repo, { kind: "empty", branch: "trunk" });
+  assert.deepEqual(s.registry.threads.pylon(trunk.body.pylonId)!.boot.repo, { kind: "empty", branch: "trunk" });
 
   const pinned = await s.call("POST", "/v1/threads", { project: "sketch", title: "Pinned", commit: "abc123" });
   assert.equal(pinned.status, 400);
   assert.match(pinned.body.error, /sketch is a scratch project, so it has no commit to check out/);
-  assert.equal(s.registry.threads("sketch" as Thread["project"]).length, 2, "no thread was created");
+  assert.equal(s.registry.threads.threads("sketch" as Thread["project"]).length, 2, "no thread was created");
   assert.equal(s.calls.length, 2, "no conversation was started");
 });
 
@@ -72,12 +72,12 @@ test("a pylon's allowlist reaches its project's HTTPS repo host and the HTTPS do
     project: { ...project, repoUrl: "https://github.com/octocat/Spoon-Knife.git", allowedHosts: [], secrets: [], logins: [] },
     dotfiles: { repo: "https://gitlab.example.com/ramtin/dotfiles.git", ref: "main" },
   });
-  assert.deepEqual(s.registry.pylon(s.thread.pylonId)!.boot.network.allowedHosts, ["github.com", "gitlab.example.com"]);
+  assert.deepEqual(s.registry.threads.pylon(s.thread.pylonId)!.boot.network.allowedHosts, ["github.com", "gitlab.example.com"]);
 });
 
 test("project edits validate before saving, flag older grants, and leave checkpoint boots unchanged", async (t) => {
   const s = await withThread(t);
-  const before = s.registry.pylon(s.thread.pylonId)!.boot;
+  const before = s.registry.threads.pylon(s.thread.pylonId)!.boot;
   const secrets = [...project.secrets, { name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }];
   const edited = await s.call("PATCH", "/v1/projects/acme", { secrets, logins: ["claude"] });
   assert.equal(edited.status, 200);
@@ -85,9 +85,9 @@ test("project edits validate before saving, flag older grants, and leave checkpo
   assert.equal((await s.call("GET", `/v1/threads/${s.thread.id}`)).body.pylon.grantsOutdated, true);
   await s.call("POST", `/v1/threads/${s.thread.id}/archive`);
   await s.call("POST", `/v1/threads/${s.thread.id}/unarchive`);
-  assert.deepEqual(s.registry.pylon(s.thread.pylonId)!.boot, before);
+  assert.deepEqual(s.registry.threads.pylon(s.thread.pylonId)!.boot, before);
   const next = await s.call("POST", "/v1/threads", { project: "acme", title: "New grants" });
-  assert.deepEqual(s.registry.pylon(next.body.pylonId)!.boot.network.secrets, secrets);
+  assert.deepEqual(s.registry.threads.pylon(next.body.pylonId)!.boot.network.secrets, secrets);
   for (const patch of [{ id: "other" }, { repoUrl: "https://example.com/new" }, { defaultNode: "missing" }, { resources: { cpus: 0, memoryGiB: 4, diskGiB: 10 } }, { secrets: [{ name: "TOKEN", hosts: [] }] }, { secrets: [{ name: "TOKEN", hosts: ["*.example.com"] }] }]) {
     assert.equal((await s.call("PATCH", "/v1/projects/acme", patch)).status, 400);
     assert.deepEqual(s.registry.project(project.id as ProjectId), edited.body);
@@ -99,7 +99,7 @@ test("project edits validate before saving, flag older grants, and leave checkpo
 
 test("a thread started with HTTPS dotfiles shows its grants current until its project's hosts change", async (t) => {
   const s = await withThread(t, { dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" } });
-  assert.ok(s.registry.pylon(s.thread.pylonId)!.boot.network.allowedHosts.includes("github.com"), "the dotfiles host is in the boot's allowlist");
+  assert.ok(s.registry.threads.pylon(s.thread.pylonId)!.boot.network.allowedHosts.includes("github.com"), "the dotfiles host is in the boot's allowlist");
   const outdated = async () => (await s.call("GET", `/v1/threads/${s.thread.id}`)).body.pylon.grantsOutdated;
   assert.equal(await outdated(), false);
   assert.equal((await s.call("PATCH", "/v1/projects/acme", { allowedHosts: [...project.allowedHosts, "another.example.com"] })).status, 200);
@@ -109,12 +109,12 @@ test("a thread started with HTTPS dotfiles shows its grants current until its pr
 test("pylon boot inherits the person's identity and a project can override or clear it", async (t) => {
   const gitIdentity = { name: "Example Person", email: "person@example.com" };
   const s = await withThread(t, { gitIdentity });
-  assert.deepEqual(s.registry.pylon(s.thread.pylonId)!.boot.gitIdentity, gitIdentity);
+  assert.deepEqual(s.registry.threads.pylon(s.thread.pylonId)!.boot.gitIdentity, gitIdentity);
   const override = { name: "Work Person", email: "work@example.com" };
   for (const identity of [override, null]) {
     assert.equal((await s.call("PATCH", "/v1/projects/acme", { gitIdentity: identity })).status, 200);
     const next = await s.call("POST", "/v1/threads", { project: "acme", title: "Identity" });
-    const pylon = s.registry.pylon(next.body.pylonId)!;
+    const pylon = s.registry.threads.pylon(next.body.pylonId)!;
     assert.deepEqual(pylon.boot.gitIdentity, identity ?? gitIdentity);
     assert.ok(pylon.live.overlay[2]!.content.includes((identity ?? gitIdentity).email));
   }
@@ -146,8 +146,8 @@ test("grant comparison ignores order and duplicates but detects changed access",
   const s = await withThread(t, { project: original });
   const outdated = async () => (await s.call("GET", `/v1/threads/${s.thread.id}`)).body.pylon.grantsOutdated;
   assert.equal(await outdated(), false);
-  const pylon = s.registry.pylon(s.thread.pylonId)!;
-  s.registry.savePylon({ ...pylon, boot: { ...pylon.boot, network: { ...pylon.boot.network, allowedHosts: [...pylon.boot.network.allowedHosts].reverse() } } });
+  const pylon = s.registry.threads.pylon(s.thread.pylonId)!;
+  s.registry.threads.savePylon({ ...pylon, boot: { ...pylon.boot, network: { ...pylon.boot.network, allowedHosts: [...pylon.boot.network.allowedHosts].reverse() } } });
   const reordered = {
     allowedHosts: [...original.allowedHosts].reverse(),
     logins: [...original.logins].reverse(),

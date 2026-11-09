@@ -46,7 +46,7 @@ test("the node's cleanup is a card on its page and in Needs you, and Delete dele
   s.callAs(laptop);
   await pass.poll();
 
-  const [q] = s.registry.openNodeQuestions();
+  const [q] = s.registry.questions.openNodeQuestions();
   assert.ok(q !== undefined);
   const page = (await html(`/nodes/${node}`));
   const card = page.split('id="node-cleanup"')[1]!.split('id="node-health"')[0]!;
@@ -91,10 +91,10 @@ test("the Cluster page says in one line what each node's latest cleanup freed an
   const hour = 3_600_000;
   const now = Date.now();
   const deleted = (bytes: number): DeleteOutcome => ({ state: "deleted", bytes });
-  const ask = (on: NodeName, askedAt: number, items: Parameters<typeof cleanupQuestion>[1]) => s.registry.askQuestion(cleanupQuestion(on, items, askedAt));
+  const ask = (on: NodeName, askedAt: number, items: Parameters<typeof cleanupQuestion>[1]) => s.registry.questions.askQuestion(cleanupQuestion(on, items, askedAt));
   const answer = (id: string, option: "Delete" | "Keep", at: number, outcomes: Record<string, DeleteOutcome> = {}) => {
-    s.registry.answerQuestion(s.registry.question(id)!, { option, by: laptop, at });
-    if (Object.keys(outcomes).length > 0) s.registry.recordCleanup(id, outcomes);
+    s.registry.questions.answerQuestion(s.registry.questions.question(id)!, { option, by: laptop, at });
+    if (Object.keys(outcomes).length > 0) s.registry.questions.recordCleanup(id, outcomes);
   };
   const old = ask(testbench, now - 50 * hour, [{ kind: "image", id: older, bytes: 9 * 1024 ** 3 }]);
   answer(old.id, "Delete", now - 49 * hour, { [older]: deleted(9 * 1024 ** 3) });

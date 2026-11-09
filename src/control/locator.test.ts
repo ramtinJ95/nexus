@@ -53,7 +53,7 @@ test("the wait for a deleted thread's pylon ends at once", async (t) => {
   const registry = seeded(t);
   const { locator: l, wake } = locator(registry);
   const located = l.awaitRunning(pylonId);
-  registry.setThreadStatus(threadId, "deleted");
+  registry.threads.setThreadStatus(threadId, "deleted");
   wake();
   await assert.rejects(located, /is deleted/);
 });
@@ -62,8 +62,8 @@ test("a boot a settle sealed is neither located nor handed out for work until it
   const registry = seeded(t);
   const probes = new Map([[node, "probe"]]);
   observeNode(registry, { node, capacity, pylons: [running] });
-  registry.sealBoot(pylonId, running.bootedAt);
-  registry.setThreadStatus(threadId, "active");
+  registry.threads.sealBoot(pylonId, running.bootedAt);
+  registry.threads.setThreadStatus(threadId, "active");
   const { locator: l, wake } = locator(registry);
   const located = l.awaitRunning(pylonId);
   let found = false;

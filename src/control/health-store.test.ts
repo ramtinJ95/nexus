@@ -47,7 +47,7 @@ test("changes are read newest first and each check's latest as its state, and a 
   raw.close();
   assert.deepEqual(registry.healthChanges().map((c) => c.id), [fail!.id, down!.id, warn!.id]);
   assert.deepEqual(registry.healthStates().map((c) => [c.name, c.status]), [["online", "fail"], ["disk", "fail"]]);
-  assert.deepEqual(registry.events("0", { kinds: ["health.changed"] }).map((e) => [e.thread, e.payload.id, e.payload.status]), [[null, warn!.id, "warn"], [null, down!.id, "fail"], [null, fail!.id, "fail"]], "each change is an event the dashboard alerts on");
+  assert.deepEqual(registry.threads.events("0", { kinds: ["health.changed"] }).map((e) => [e.thread, e.payload.id, e.payload.status]), [[null, warn!.id, "warn"], [null, down!.id, "fail"], [null, fail!.id, "fail"]], "each change is an event the dashboard alerts on");
 });
 
 test("a row that is not a change is logged once, however often the history is read", (t) => {

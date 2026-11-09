@@ -40,9 +40,9 @@ function fixture(t: import("node:test").TestContext, setting: PipelineSetting | 
     add: (title: string, after: readonly ItemId[] = [], over: Partial<StartRequest> = {}) => items.add(request(title, over), over.claude === undefined ? `Build ${title}.` : null, after, laptop).id,
     /** A pass of the pipeline, then of the queue, as their timers run them. */
     async passes() { await items.poll(); await queue.poll(); },
-    links(id: ThreadId, ...prs: PullRequest[]) { registry.savePrWatch(id, { links: prs.map((p) => ({ pr: p, seen: [], failed: false })), commentWakes: 0, pending: null, error: null }); },
+    links(id: ThreadId, ...prs: PullRequest[]) { registry.prWatches.savePrWatch(id, { links: prs.map((p) => ({ pr: p, seen: [], failed: false })), commentWakes: 0, pending: null, error: null }); },
     review(id: ThreadId, phase: Phase, land: string | null = null) {
-      registry.saveReview(testReview({
+      registry.reviews.saveReview(testReview({
         id: `r-${id}`, expect: "", sent: 0, builder: id, reviewer: `${id}-reviewer` as ThreadId, pr: { repo: "acme/acme", number: 9, url: "", title: "", branch: "feature" },
         models: { builder: "a", reviewer: "b" }, land: land === null ? null : { requestedBy: land, fromProject: true }, auto: true,
         rounds: [{ head: "h", verdict: null, check: null, answers: null }], merged: phase.kind === "landed" ? phase.commit : null, phase,
@@ -77,8 +77,8 @@ test("an item moves through every phase its records put it in, from planned to l
   f.items.approve(b, laptop);
   await f.passes();
   const ta = thread(r, a);
-  assert.equal(r.thread(ta)?.title, "A", "an item with nothing ahead of it starts on the queue's next pass");
-  assert.equal(r.thread(ta)?.startedBy, laptop, "its thread is started by whoever added the item");
+  assert.equal(r.threads.thread(ta)?.title, "A", "an item with nothing ahead of it starts on the queue's next pass");
+  assert.equal(r.threads.thread(ta)?.startedBy, laptop, "its thread is started by whoever added the item");
   assert.equal(phase(r, a), "building: no pull request yet");
   assert.equal(phase(r, b), `queued: waits for A: has no pull request yet`);
 
@@ -107,11 +107,11 @@ test("an item moves through every phase its records put it in, from planned to l
   f.review(ta, { kind: "deploying", commit: "c".repeat(40), previous: null, requested: true, deadline: 0 }, laptop);
   assert.equal(phase(r, a), "landing: PR #9 is deploying");
   f.review(ta, { kind: "landed", commit: "c".repeat(40) }, laptop);
-  r.setThreadStatus(ta, "archived");
+  r.threads.setThreadStatus(ta, "archived");
   assert.equal(phase(r, a), `landed: PR #9 merged as ${"c".repeat(12)}`, "a landed item stays landed once the review loop archives its thread");
   await f.passes();
   const tb = thread(r, b);
-  assert.equal(r.thread(tb)?.title, "B", "the second item starts once the first one's pull request merged");
+  assert.equal(r.threads.thread(tb)?.title, "B", "the second item starts once the first one's pull request merged");
   assert.equal(phase(r, b), "building: no pull request yet");
 });
 
@@ -125,18 +125,18 @@ test("an item is held for the person by its review, its thread's attention, a bl
   assert.equal(phase(r, a), "held: its review ended for the person: the rounds ran out");
   f.review(tb!, { kind: "approved" });
   assert.equal(phase(r, b), `held: PR #9 is approved, and lands once the person runs nexus land ${tb}`);
-  r.askQuestion({ kind: "holds", id: "q1", thread: tc!, text: "Rebuild the image?", options: ["yes", "no"], reserved: "image-rebuild", answerer: "deployer", askedAt: 1, holds: { review: "rv-1", head: "h", base: null, holds: [] } });
+  r.questions.askQuestion({ kind: "holds", id: "q1", thread: tc!, text: "Rebuild the image?", options: ["yes", "no"], reserved: "image-rebuild", answerer: "deployer", askedAt: 1, holds: { review: "rv-1", head: "h", base: null, holds: [] } });
   assert.equal(phase(r, c), "held: its thread needs the person's decision");
   f.links(td!, f.pr(4, "closed"));
   assert.equal(phase(r, d), "held: PR #4 closed without merging");
   const e = f.add("E");
   await f.passes();
   const te = thread(r, e);
-  r.recordParked(te, true);
+  r.threads.recordParked(te, true);
   assert.equal(phase(r, e), "held: its thread is parked", "a thread stuck where only the person moves it holds its item, as its card says");
-  r.recordParked(te, false);
+  r.threads.recordParked(te, false);
   f.review(te, { kind: "landed", commit: "c".repeat(40) });
-  r.askQuestion({ kind: "judgment", id: "q2", thread: te, text: "Clean up the branch?", options: ["yes", "no"], reserved: null, answerer: "person", askedAt: 1, failure: 0 });
+  r.questions.askQuestion({ kind: "judgment", id: "q2", thread: te, text: "Clean up the branch?", options: ["yes", "no"], reserved: null, answerer: "person", askedAt: 1, failure: 0 });
   assert.equal(phase(r, e), "held: its thread needs the person's decision", "a question holds an item whatever its review says");
 
   const after = f.add("After D", [d]);
@@ -159,7 +159,7 @@ test("an archived thread, a cancelled queued thread and a PR merged outside any 
   const queuedBehind = f.add("Behind A", [a]);
   await f.items.poll();
   const [ta, tb] = [thread(r, a), thread(r, b)];
-  r.setThreadStatus(ta, "archived");
+  r.threads.setThreadStatus(ta, "archived");
   assert.equal(phase(r, a), "archived: its thread is archived");
   f.queue.setStatus(thread(r, queuedBehind), "archived");
   assert.equal(phase(r, queuedBehind), "cancelled: its queued thread was cancelled");
@@ -173,7 +173,7 @@ test("an archived thread, a cancelled queued thread and a PR merged outside any 
   assert.equal(phase(r, c), "landed: PR #6 merged", "a pull request reopened and merged after its review closed lands the item");
   f.links(tc, f.pr(6, "open"));
   f.review(tc, { kind: "cancelled", who: "builder", status: "deleted" });
-  r.setThreadStatus(tc, "deleted");
+  r.threads.setThreadStatus(tc, "deleted");
   assert.equal(phase(r, c), "archived: its thread is deleted");
   assert.throws(() => f.items.cancel(b, laptop), (err: { kind?: string; message: string }) => err.kind === "conflict" && err.message.includes(`is thread ${tb} now`));
 });
@@ -185,8 +185,8 @@ test("an item is queued once across passes and restarts, under its request ID", 
   const b = first.add("B", [a], { claude: "Build B" });
   await Promise.all([first.items.poll(), first.items.poll(), first.items.poll()]);
   const ta = thread(first.registry, a), tb = thread(first.registry, b);
-  assert.deepEqual(first.registry.queuedThread(tb)!.after, [ta], "the second waits on the first item's thread");
-  assert.equal(first.registry.queuedThread(tb)!.request.claude, "Build B");
+  assert.deepEqual(first.registry.queue.queuedThread(tb)!.after, [ta], "the second waits on the first item's thread");
+  assert.equal(first.registry.queue.queuedThread(tb)!.request.claude, "Build B");
   await first.items.close();
   await first.queue.close();
   first.registry.close();
@@ -194,9 +194,9 @@ test("an item is queued once across passes and restarts, under its request ID", 
   const second = fixture(t, { autoStart: true }, path);
   await second.passes();
   await second.passes();
-  assert.equal(second.registry.queuedThreads().length, 2, "a restart queues nothing again");
+  assert.equal(second.registry.queue.queuedThreads().length, 2, "a restart queues nothing again");
   assert.equal(thread(second.registry, a), ta);
-  assert.equal(second.registry.thread(ta)?.title, "A");
+  assert.equal(second.registry.threads.thread(ta)?.title, "A");
   assert.deepEqual(itemView(second.registry, second.registry.item(b)!, Date.now()), {
     id: b, project: "acme", title: "B", addedBy: laptop, addedAt: second.registry.item(b)!.addedAt, after: [a], worker: "claude", model: "claude-opus-5-5",
     brief: "Build B", thread: tb, phase: { kind: "queued", why: "waits for A: has no pull request yet" }, approved: null,
@@ -228,11 +228,11 @@ test("an item whose review asks about its holds holds only itself: it is held, a
   await f.passes();
   const ta = thread(r, a);
   f.review(ta, { kind: "reviewing" });
-  r.askQuestion({
+  r.questions.askQuestion({
     kind: "holds", id: "holds-r-a-1", thread: ta, text: "Land pull request #9?", options: ["Land", "Leave it"], reserved: "auth", answerer: "deployer", askedAt: 1,
     holds: { review: `r-${ta}`, head: "h", base: "main", holds: [{ code: "reserved-path:auth", text: "Always needs the person: changes to login or auth, as it changes src/control/api.ts." }] },
   });
-  assert.equal(r.attention(ta), "decision");
+  assert.equal(r.threads.attention(ta), "decision");
   assert.equal(phase(r, a), "held: its thread needs the person's decision", "the holds question is the person's, as its card in Needs you says");
   assert.equal(phase(r, b), "building: no pull request yet");
   const c = f.add("C");

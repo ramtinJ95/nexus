@@ -114,7 +114,7 @@ const changes = (...findings: ReturnType<typeof finding>[]) => ({ token: "t", ve
 const approve = (...findings: ReturnType<typeof finding>[]) => ({ token: "t", verdict: "approve" as const, findings, reserved: [], notCheckedLive: null });
 
 function linkPr(d: Demo, t: Thread, p: WatchedPr) {
-  d.registry.savePrWatch(t.id, { links: [{ pr: p, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  d.registry.prWatches.savePrWatch(t.id, { links: [{ pr: p, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
 }
 
 function talk(d: Demo, t: Thread, messages: readonly Message[]) {
@@ -123,9 +123,9 @@ function talk(d: Demo, t: Thread, messages: readonly Message[]) {
 }
 
 function claudeTranscript(d: Demo, t: Thread, entries: readonly ClaudeEntry[], session = `${t.id}-s1`) {
-  d.registry.moveClaudeWorker(t.id, { to: "starting", session });
-  d.registry.moveClaudeWorker(t.id, { to: "started" });
-  d.registry.appendClaudeRead(t.id, { session, from: transcriptStart, entries, cursor: { ...transcriptStart, offset: entries.length }, reset: false, readAt: now() });
+  d.registry.threads.moveClaudeWorker(t.id, { to: "starting", session });
+  d.registry.threads.moveClaudeWorker(t.id, { to: "started" });
+  d.registry.threads.appendClaudeRead(t.id, { session, from: transcriptStart, entries, cursor: { ...transcriptStart, offset: entries.length }, reset: false, readAt: now() });
 }
 
 const threads: ThreadSpec[] = [
@@ -134,13 +134,13 @@ const threads: ThreadSpec[] = [
     extra(d, t) {
       talk(d, t, longConversation(t.createdAt).messages);
       linkPr(d, t, pr("nexus", 402, "feat: graph each node's health on its page"));
-      d.registry.apply({ record: "sessions", pylonId: t.pylonId, sessions: [
+      d.registry.threads.apply({ record: "sessions", pylonId: t.pylonId, sessions: [
         { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "pi", harnessSessionId: "/home/user/.pi/sessions/graphs.jsonl", status: "working", title: "agent", message: null },
         { id: "w2:p1", state: "running", herdrPane: "w2:p1", harness: "shell", harnessSessionId: null, status: "idle", title: "dev server", message: null },
       ] });
-      d.registry.allocatePreviews(t.pylonId, ["web"], { first: 10200, last: 10299 });
-      d.registry.apply({ record: "preview", pylonId: t.pylonId, service: "web", httpsPort: 10200, ready: true });
-      for (const [kind, ref] of [["branch", "origin/feat/node-graphs"], ["diff", "3f9c2e1"], ["preview", "web"]] as const) d.registry.apply({ record: "output", pylonId: t.pylonId, kind, ref });
+      d.registry.threads.allocatePreviews(t.pylonId, ["web"], { first: 10200, last: 10299 });
+      d.registry.threads.apply({ record: "preview", pylonId: t.pylonId, service: "web", httpsPort: 10200, ready: true });
+      for (const [kind, ref] of [["branch", "origin/feat/node-graphs"], ["diff", "3f9c2e1"], ["preview", "web"]] as const) d.registry.threads.apply({ record: "output", pylonId: t.pylonId, kind, ref });
     },
   },
   {
@@ -160,7 +160,7 @@ const threads: ThreadSpec[] = [
       c.open("Bash", { command: "node scripts/simulate-deploy.ts --drain 20s", description: "Simulate a deploy" });
       claudeTranscript(d, t, c.entries);
       linkPr(d, t, pr("nexus", 401, "feat: the dashboard's terminal and nexus attach survive a deploy and a slow pylon", { checks: "pending" }));
-      d.registry.apply({ record: "sessions", pylonId: t.pylonId, sessions: [
+      d.registry.threads.apply({ record: "sessions", pylonId: t.pylonId, sessions: [
         { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: `${t.id}-s1`, status: "working", title: "worker", message: null },
       ] });
       w.live.working.push(t);
@@ -185,7 +185,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
         { block: "b1", index: 1, key: "prune", title: "Prune events older than 90 days", brief: "Add a pruning pass for events, keeping thread.failed events a judgment still needs.", after: [] },
         { block: "b1", index: 2, key: "cleanup", title: "Move cleanup onto the new model", brief: "Port cleanup.ts to cleanup-model.ts's pure rules.", after: ["split"] },
       ];
-      for (const p of block) d.registry.askQuestion(proposalQuestion(t, p, block, now() - 25 * minute));
+      for (const p of block) d.registry.questions.askQuestion(proposalQuestion(t, p, block, now() - 25 * minute));
     },
   },
   {
@@ -196,7 +196,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
         .say(`Done in \`protocol/client.ts\`:\n\n${typescriptSnippet}\n\nOpened #398. The review ran out of rounds on one finding I rejected, so it's held for you.`).messages);
       const p = pr("nexus", 398, "fix: the probe client retries a reset with backoff", { summary: "The probe client now retries a connection reset with jittered backoff, up to a 30 s deadline." });
       linkPr(d, t, p);
-      d.registry.saveReview(review(t, p, {
+      d.registry.reviews.saveReview(review(t, p, {
         rounds: [
           round("a1", { verdict: changes(finding("F1", "P1", "src/protocol/client.ts:212", "The deadline restarts on each retry, so a node that flaps never gives up."), finding("F2", "P3", "src/protocol/client.ts:190", "Name the magic 500 ms.")), answers: [{ id: "F1", action: "fixed", reason: "The deadline is set once per call now." }, { id: "F2", action: "fixed", reason: "Named it baseDelayMs." }] }),
           round("a2", { verdict: changes(finding("F3", "P2", "src/protocol/client.test.ts", "No test covers a reset after the deadline.")), answers: [{ id: "F3", action: "rejected", reason: "probe client gives up after the deadline covers it, at line 140." }] }),
@@ -218,7 +218,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
         .say("Opened #408. The reviewer approved round 2 and the checks passed; it touches the token broker, so it's held for you to land.").messages);
       const p = pr("nexus", 408, "fix: a pylon gets a fresh GitHub token on wake", { checks: "passing", summary: "A waking pylon asks the broker for a fresh GitHub token before its agent resumes, so pushes after a long sleep stop failing with 401." });
       linkPr(d, t, p);
-      d.registry.saveReview(review(t, p, {
+      d.registry.reviews.saveReview(review(t, p, {
         rounds: [
           round("d1", { verdict: changes(finding("F1", "P1", "src/control/secrets.ts:88", "The old token stays valid until it expires, so a leaked one outlives the rotation.")), answers: [{ id: "F1", action: "fixed", reason: "The broker revokes the old token once the new one is in place." }] }),
           round("282d29de", { verdict: { ...approve(finding("N1", "P3", "src/control/secrets.ts:120", "The retry count could be a named constant.")), notCheckedLive: "## Not checked live\n\nA real wake after the token expired: the demo pylons never sleep a day." }, check: { passed: true, output: testOutput }, live: { kind: "ran", thread: `${t.id}-verify` as ThreadId, passed: true, output: "ok wake: fresh token in 1.4 s" } }),
@@ -238,7 +238,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
         .say("Opened #400. The reviewer approved round 2, checks passed, and it's landing now.").messages);
       const p = pr("nexus", 400, "feat: a deploy drains running turns first");
       linkPr(d, t, p);
-      d.registry.saveReview(review(t, p, {
+      d.registry.reviews.saveReview(review(t, p, {
         land: { requestedBy: laptop },
         rounds: [
           round("b1", { verdict: changes(finding("F1", "P1", "src/control/drain.ts:44", "A turn that starts during the drain is not counted.")), answers: [{ id: "F1", action: "fixed", reason: "The gate closes before counting." }] }),
@@ -254,7 +254,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
       talk(d, t, harnessTalk(t.createdAt).person("Turn the daily report into health alerts on the dashboard.").say("Merged as #403 and deployed.").messages);
       const p = pr("nexus", 403, "feat: turn the control plane's daily report into health alerts", { state: "merged" });
       linkPr(d, t, p);
-      d.registry.saveReview(review(t, p, { land: { requestedBy: laptop }, merged: head("f4"), rounds: [round("c1", { verdict: approve(), check: { passed: true, output: testOutput }, live: { kind: "absent" } })], phase: { kind: "landed", commit: head("f4") } }));
+      d.registry.reviews.saveReview(review(t, p, { land: { requestedBy: laptop }, merged: head("f4"), rounds: [round("c1", { verdict: approve(), check: { passed: true, output: testOutput }, live: { kind: "absent" } })], phase: { kind: "landed", commit: head("f4") } }));
     },
   },
   {
@@ -264,16 +264,16 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
         .bash("openssl x509 -enddate -noout -in /var/lib/nexus/cert.pem", "notAfter=Dec 30 12:00:00 2026 GMT")
         .fail("pylon is broken: the controller exited\nqemu-system-x86_64: terminating on signal 15 from pid 1").messages);
       const reason = "pylon is broken: the controller exited";
-      d.registry.savePylon({ ...d.registry.pylon(t.pylonId)!, failed: reason });
-      d.registry.appendEvent("thread.failed", t.id, { message: reason, cause: "pylon" });
-      const failure = d.registry.failure(t.id)!.event;
+      d.registry.threads.savePylon({ ...d.registry.threads.pylon(t.pylonId)!, failed: reason });
+      d.registry.threads.appendEvent("thread.failed", t.id, { message: reason, cause: "pylon" });
+      const failure = d.registry.threads.failure(t.id)!.event;
       d.registry.saveJudgment({
         failure, thread: t.id, node: firebat, failed: `${reason}\nqemu: terminating on signal 15`, startedAt: now() - 40 * minute,
         request: { brief: "The pylon of thread 'Fix doctor's certificate check' failed on rj-firebat. Was it the node, the thread's work, or neither?", token: "t" }, conversation: 9,
         reply: "The node was swapping at the time: 7.8 of 8 GiB swap used. Retrying elsewhere is safest, but infra-testbench is near its memory limit too.",
         phase: { kind: "asked", verdict: { answer: "person", why: "neither node has room for a 4 GiB pylon without overcommitting", by: "judgment" } },
       }, null);
-      d.registry.askQuestion({ kind: "judgment", id: `judgment:${failure}`, thread: t.id, failure, text: "The pylon failed on rj-firebat while the node was swapping. Retry it there, move it to infra-testbench, or leave it failed?", options: ["Retry on rj-firebat", "Move to infra-testbench", "Leave it failed"], reserved: null, answerer: "person", askedAt: now() - 30 * minute });
+      d.registry.questions.askQuestion({ kind: "judgment", id: `judgment:${failure}`, thread: t.id, failure, text: "The pylon failed on rj-firebat while the node was swapping. Retry it there, move it to infra-testbench, or leave it failed?", options: ["Retry on rj-firebat", "Move to infra-testbench", "Leave it failed"], reserved: null, answerer: "person", askedAt: now() - 30 * minute });
     },
   },
   {
@@ -295,7 +295,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
         .bash("top -b -n1 | head -12", "  PID USER      PR  NI    VIRT    RES  %CPU COMMAND\n 2211 user      20   0  812m  94m  14.7 herdr\n 2302 user      20   0  402m  51m   0.3 node")
         .bash("strace -c -p 2211 -f -e trace=all 2>&1 | head", "% time     seconds  usecs/call     calls    errors syscall\n 97.12    0.412000          3    131072           epoll_wait")
         .say(`Found it. **Herdr polls with a 0 ms timeout** when no client is attached:\n\n\`\`\`rust\nlet timeout = if clients.is_empty() { Duration::ZERO } else { TICK };\n\`\`\`\n\nThat's 131k \`epoll_wait\` calls a second. A fix upstream is one line; I can also pin a patched build in the image. Which do you prefer?`).messages);
-      d.registry.recordReply(t.id, now() - 6 * minute);
+      d.registry.threads.recordReply(t.id, now() - 6 * minute);
     },
   },
   {
@@ -318,7 +318,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
       ];
       const id = c.open("AskUserQuestion", { questions });
       claudeTranscript(d, t, c.entries);
-      d.registry.setWaitingAsks(t.id, [{ ask: { session: `${t.id}-s1`, toolUseId: id, questions }, at: now() - 12 * minute }]);
+      d.registry.questions.setWaitingAsks(t.id, [{ ask: { session: `${t.id}-s1`, toolUseId: id, questions }, at: now() - 12 * minute }]);
     },
   },
   {
@@ -331,7 +331,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
         .say("Round 1 asked for a fallback when `canMakePayment` rejects. Fixed and pushed; round 2 is under review.").messages);
       const p = pr("storefront", 88, "feat(checkout): Apple Pay via the Payment Request Button", { checks: "pending" });
       linkPr(d, t, p);
-      d.registry.saveReview(review(t, p, {
+      d.registry.reviews.saveReview(review(t, p, {
         rounds: [
           round("d1", { verdict: changes(finding("F1", "P1", "src/checkout/PaymentStep.tsx:31", "canMakePayment() can reject in Safari private mode; the button then never hides."), finding("F2", "P2", "src/checkout/PaymentStep.tsx:12", "The amount is sent in dollars, Stripe wants cents.")), answers: [{ id: "F1", action: "fixed", reason: "Caught, treated as unavailable." }, { id: "F2", action: "fixed", reason: "Uses cart.totalCents." }] }),
           round("d2"),
@@ -339,8 +339,8 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
         reviewer: w.threads.get("applepay-review")!.id,
         phase: { kind: "reviewing" },
       }));
-      d.registry.allocatePreviews(t.pylonId, ["web"], { first: 10200, last: 10299 });
-      d.registry.apply({ record: "preview", pylonId: t.pylonId, service: "web", httpsPort: 10201, ready: true });
+      d.registry.threads.allocatePreviews(t.pylonId, ["web"], { first: 10200, last: 10299 });
+      d.registry.threads.apply({ record: "preview", pylonId: t.pylonId, service: "web", httpsPort: 10201, ready: true });
       w.live.working.push(t);
     },
   },
@@ -367,7 +367,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
       claudeTranscript(d, t, c.entries);
       const p = pr("storefront", 91, "fix(cart): keep totals in integer cents", { checks: "failed" });
       linkPr(d, t, p);
-      d.registry.saveReview(review(t, p, {
+      d.registry.reviews.saveReview(review(t, p, {
         reviewerKind: "claude", models: { builder: "claude-opus-5-5", reviewer: "claude-sonnet-5-5" },
         rounds: [round("e1", { verdict: changes(finding("F1", "P0", "src/cart/totals.ts:40", "Refunds still use floats, so a partial refund can be off by a cent.", "refundLine() divides by 100 before summing."), finding("F2", "P2", "src/cart/format.ts", "Use Intl.NumberFormat for the currency.")) })],
         phase: { kind: "fixing" },
@@ -381,7 +381,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
       talk(d, t, harnessTalk(t.createdAt).person("Write Playwright tests for full and partial refunds.").say("Opened #90 with 6 tests. Review approved; the checks are running now.").messages);
       const p = pr("storefront", 90, "test: end-to-end refund flow");
       linkPr(d, t, p);
-      d.registry.saveReview(review(t, p, { rounds: [round("f1", { verdict: approve(finding("N1", "P3", "e2e/refund.spec.ts", "The fixtures could share a factory.")) })], phase: { kind: "checking", startedAt: now() - 4 * minute, thread: w.threads.get("refunds-check")!.id } }));
+      d.registry.reviews.saveReview(review(t, p, { rounds: [round("f1", { verdict: approve(finding("N1", "P3", "e2e/refund.spec.ts", "The fixtures could share a factory.")) })], phase: { kind: "checking", startedAt: now() - 4 * minute, thread: w.threads.get("refunds-check")!.id } }));
     },
   },
   {
@@ -395,7 +395,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
     key: "inventory", project: "storefront", title: "Inventory sync webhook", ago: 3 * hour, worker: "harness", pylon: "running", replied: 40 * minute, seen: true,
     extra(d, t) {
       talk(d, t, harnessTalk(t.createdAt).person("Sync inventory from the warehouse webhook into Postgres.").say("The webhook signs with HMAC-SHA256, but the docs don't say which header carries it. Can you check the warehouse dashboard, or should I log the headers of the next delivery?").messages);
-      d.registry.reportSession(firebat, { sequence: 1, pylon: t.pylonId, time: now() - 40 * minute, event: { kind: "session.waiting", session: "w1:p1", message: "Asked which header carries the signature" } });
+      d.registry.threads.reportSession(firebat, { sequence: 1, pylon: t.pylonId, time: now() - 40 * minute, event: { kind: "session.waiting", session: "w1:p1", message: "Asked which header carries the signature" } });
     },
   },
   {
@@ -428,7 +428,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
       talk(d, t, harnessTalk(t.createdAt).person("When two devices edit one note offline, merge by paragraph instead of last-write-wins.").say("Opened #57. Approved; the live check is running in a verify pylon.").messages);
       const p = pr("field-notes", 57, "feat(sync): merge offline edits by paragraph");
       linkPr(d, t, p);
-      d.registry.saveReview(review(t, p, { rounds: [round("g1", { verdict: approve(), check: { passed: true, output: testOutput } })], phase: { kind: "verifying", startedAt: now() - 6 * minute, thread: w.threads.get("sync-verify")!.id } }));
+      d.registry.reviews.saveReview(review(t, p, { rounds: [round("g1", { verdict: approve(), check: { passed: true, output: testOutput } })], phase: { kind: "verifying", startedAt: now() - 6 * minute, thread: w.threads.get("sync-verify")!.id } }));
     },
   },
   {
@@ -438,7 +438,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
     key: "dark", project: "field-notes", title: "Dark mode for the reader", ago: 5 * hour, worker: "harness", pylon: "running", replied: 15 * minute,
     extra(d, t) {
       talk(d, t, harnessTalk(t.createdAt).person("Add a dark mode to the reader that follows the system setting.").say(`Done. The reader follows \`prefers-color-scheme\`, and the toggle in the header overrides it. The colours come from three tokens:\n\n\`\`\`css\n:root { --ink: #1d1d1f; --paper: #fbfaf7; --accent: #2f6fde; }\n@media (prefers-color-scheme: dark) { :root { --ink: #e8e6e3; --paper: #16171a; } }\n\`\`\``).messages);
-      d.registry.recordReply(t.id, now() - 15 * minute);
+      d.registry.threads.recordReply(t.id, now() - 15 * minute);
     },
   },
   {
@@ -454,8 +454,8 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
     extra(d, t) {
       talk(d, t, harnessTalk(t.createdAt).person("The app crashes opening an empty notebook.").messages);
       const reason = "pylon is broken: Setup exited 1. pip could not resolve tagger==0.9.2";
-      d.registry.savePylon({ ...d.registry.pylon(t.pylonId)!, failed: reason });
-      d.registry.appendEvent("thread.failed", t.id, { message: reason, cause: "pylon" });
+      d.registry.threads.savePylon({ ...d.registry.threads.pylon(t.pylonId)!, failed: reason });
+      d.registry.threads.appendEvent("thread.failed", t.id, { message: reason, cause: "pylon" });
     },
   },
   {
@@ -521,7 +521,7 @@ const checkoutFiles = {
 
 /** The pylons running on `node`, which its health lists with their processes. */
 const runningOn = (registry: Demo["registry"], node: NodeName) =>
-  registry.pylonsWithThreadsOn(node).filter(({ pylon }) => running.has(pylon.pylonId)).map(({ pylon }) => pylon.pylonId);
+  registry.threads.pylonsWithThreadsOn(node).filter(({ pylon }) => running.has(pylon.pylonId)).map(({ pylon }) => pylon.pylonId);
 /** The pylons the seed reported running, which only they list as processes. */
 const running = new Set<PylonId>();
 
@@ -570,7 +570,7 @@ function health(node: NodeName, at: number, pylons: readonly PylonId[]): NodeHea
 function seedHealthHistory(d: Demo) {
   for (const node of [firebat, testbench]) {
     const pylons = runningOn(d.registry, node);
-    const threadOf = (p: PylonId) => d.registry.pylon(p)?.thread ?? null;
+    const threadOf = (p: PylonId) => d.registry.threads.pylon(p)?.thread ?? null;
     const end = now();
     // Five-minute samples over 31 days, then every minute for the last six hours, as the sampler takes them.
     for (let at = end - 31 * day; at < end - 6 * hour; at += 5 * minute) d.registry.recordHealthSample(node, sampleOf(health(node, at, pylons), at, threadOf));
@@ -626,11 +626,11 @@ function seedUsage(d: Demo, world: World) {
     const count = 12 + (n % 5) * 9;
     for (let i = 0; i < count; i++) {
       const [agent, model, weight] = models[(n + i) % models.length]!;
-      if ((agent === "claude") !== (d.registry.agent(t).kind === "claude") && i % 4 !== 0) continue;
+      if ((agent === "claude") !== (d.registry.threads.agent(t).kind === "claude") && i % 4 !== 0) continue;
       const at = Math.round(t.createdAt + (span * i) / count);
       calls.push({ id: `${agent}:${t.id}-${i}`, agent, model, at, input: Math.round(4_000 + weight * 22_000 * ((i % 7) + 1) / 4), output: Math.round(400 + weight * 2_600 * ((i % 3) + 1)), cacheWrite: i % 5 === 0 ? 30_000 : 0, cacheRead: Math.round(weight * 90_000) });
     }
-    d.registry.recordUsage(t.id, calls);
+    d.registry.usage.recordUsage(t.id, calls);
     n++;
   }
 }
@@ -663,7 +663,7 @@ function seedNodeExtras(d: Demo) {
   d.registry.reportRelease({ node: firebat, role: "probe", commit: current, target: current, state: "healthy", reason: null, observedAt: now() - minute });
   d.registry.reportRelease({ node: testbench, role: "probe", commit: "4209370e1c2b5d1a9f0e3b7c6d8a2e4f1b3c5d7e", target: current, state: "waiting-for-idle", reason: "2 pylons have running turns", observedAt: now() - 2 * minute });
   const gib = 1024 ** 3;
-  d.registry.askQuestion({
+  d.registry.questions.askQuestion({
     kind: "cleanup", id: "cleanup:infra-testbench:1", node: testbench, reserved: null, answerer: "deployer", askedAt: now() - 3 * hour, options: ["Delete", "Keep"],
     text: "infra-testbench has 33 GiB free for pylons. These are unused: delete them to free 61.4 GiB?",
     cleanup: { outcomes: {}, items: [
@@ -691,13 +691,13 @@ const liveReplies = [
 function liveClock(d: Demo, world: World) {
   let n = 0;
   const tick = setInterval(() => {
-    for (const t of world.live.working) d.registry.recordActivity(t.id, { agent: now(), agentTurnRunning: true });
-    for (const node of [firebat, testbench]) d.registry.recordHealthSample(node, sampleOf(health(node, now(), runningOn(d.registry, node)), now(), (p) => d.registry.pylon(p)?.thread ?? null));
+    for (const t of world.live.working) d.registry.threads.recordActivity(t.id, { agent: now(), agentTurnRunning: true });
+    for (const node of [firebat, testbench]) d.registry.recordHealthSample(node, sampleOf(health(node, now(), runningOn(d.registry, node)), now(), (p) => d.registry.threads.pylon(p)?.thread ?? null));
     const talker = world.live.talker;
     if (talker !== null && ++n % 3 === 0) {
       const text = liveReplies[(n / 3 - 1) % liveReplies.length]!;
       talk(d, talker, harnessTalk(now() - 40_000).say(text).messages);
-      d.registry.recordReply(talker.id, now());
+      d.registry.threads.recordReply(talker.id, now());
     }
   }, 20_000);
   return () => clearInterval(tick);
@@ -710,7 +710,7 @@ function liveClock(d: Demo, world: World) {
  */
 export function demoReviews(registryOf: () => Demo["registry"]): NonNullable<Features["reviews"]> {
   const reviewOf = (builder: ThreadId) => {
-    const r = registryOf().review(builder);
+    const r = registryOf().reviews.review(builder);
     if (r === null) throw new Error(`thread ${builder} has no review`);
     return r;
   };
@@ -720,21 +720,21 @@ export function demoReviews(registryOf: () => Demo["registry"]): NonNullable<Fea
     cancel(builder, by) {
       const r = reviewOf(builder);
       const next: Review = { ...r, phase: { kind: "cancelled", who: "person", by } };
-      registryOf().saveReview(next, [], r);
+      registryOf().reviews.saveReview(next, [], r);
       return next;
     },
     land(builder, by) {
       const r = reviewOf(builder);
       const next: Review = { ...r, land: { requestedBy: by }, phase: { kind: "merging", authorized: null } };
-      registryOf().saveReview(next, [], r);
+      registryOf().reviews.saveReview(next, [], r);
       return next;
     },
     answerHolds(question, option, by) {
-      const answered = registryOf().answerQuestion(question, { option, by, at: now() });
+      const answered = registryOf().questions.answerQuestion(question, { option, by, at: now() });
       const r = reviewOf(question.thread);
       if (option === "Land") {
         const waiver = { head: question.holds.head, holds: question.holds.holds.map((h) => h.text), codes: question.holds.holds.map((h) => h.code), by, at: now(), change: null };
-        registryOf().saveReview({ ...r, waiver, land: { requestedBy: by }, phase: { kind: "merging", authorized: null } }, [], r);
+        registryOf().reviews.saveReview({ ...r, waiver, land: { requestedBy: by }, phase: { kind: "merging", authorized: null } }, [], r);
       }
       return answered;
     },
@@ -774,10 +774,10 @@ export async function seedDemo(d: Demo) {
   }
 
   for (const node of [firebat, testbench]) {
-    const on = threads.filter((s) => d.registry.pylon(world.threads.get(s.key)!.pylonId)!.node === node);
+    const on = threads.filter((s) => d.registry.threads.pylon(world.threads.get(s.key)!.pylonId)!.node === node);
     const pylons = on.flatMap((s): PylonObservation[] => {
       const t = world.threads.get(s.key)!;
-      const live = d.registry.pylon(t.pylonId)!;
+      const live = d.registry.threads.pylon(t.pylonId)!;
       if (s.pylon === "absent") return [];
       if (s.pylon === "paused" || s.archived) return [stoppedPylon(t.pylonId, { checkpoint: `ck-${t.id}` as never })];
       if (s.pylon === "broken") return [{ pylonId: t.pylonId, phase: "broken" as const, detail: "the controller exited", cause: "controller" as const, logTail: "qemu-system-x86_64: terminating on signal 15 from pid 1\n" }];
@@ -787,17 +787,17 @@ export async function seedDemo(d: Demo) {
     const capacity = testCapacity(node === firebat
       ? { cpus: 16, committedCpus: 12, memoryGiB: 64, committedMemoryGiB: 30, diskFreeGiB: 523, committedDiskGiB: 260, disks: health(node, now(), []).disks! }
       : { cpus: 8, committedCpus: 8, memoryGiB: 32, committedMemoryGiB: 26, diskFreeGiB: 33, committedDiskGiB: 120, disks: health(node, now(), []).disks! });
-    d.registry.apply({ record: "node", node, state: "online", capacity });
-    d.registry.ingested(testObservation(node, { capacity, pylons, artifacts: [image.id], grants: { secrets: ["STRIPE_KEY", "GH_TOKEN", "NEXUS_CHATGPT_TOKEN"], gitSsh: true } }), []);
+    d.registry.threads.apply({ record: "node", node, state: "online", capacity });
+    d.registry.threads.ingested(testObservation(node, { capacity, pylons, artifacts: [image.id], grants: { secrets: ["STRIPE_KEY", "GH_TOKEN", "NEXUS_CHATGPT_TOKEN"], gitSsh: true } }), []);
   }
 
   for (const spec of threads) {
     const t = world.threads.get(spec.key)!;
-    await back(spec.ago - minute, () => spec.extra?.(d, d.registry.thread(t.id)!, world));
-    if (spec.working) d.registry.recordActivity(t.id, { agent: now() - (2 + (spec.title.length % 9) * 3) * minute - spec.title.length * 1_000, agentTurnRunning: true });
-    else d.registry.recordActivity(t.id, { agent: now() - (spec.replied ?? spec.ago - 10 * minute), agentTurnRunning: false });
-    if (spec.replied !== undefined) d.registry.recordReply(t.id, now() - spec.replied);
-    if (spec.seen) d.registry.markSeen(t.id, false, now() - spec.replied! + minute);
+    await back(spec.ago - minute, () => spec.extra?.(d, d.registry.threads.thread(t.id)!, world));
+    if (spec.working) d.registry.threads.recordActivity(t.id, { agent: now() - (2 + (spec.title.length % 9) * 3) * minute - spec.title.length * 1_000, agentTurnRunning: true });
+    else d.registry.threads.recordActivity(t.id, { agent: now() - (spec.replied ?? spec.ago - 10 * minute), agentTurnRunning: false });
+    if (spec.replied !== undefined) d.registry.threads.recordReply(t.id, now() - spec.replied);
+    if (spec.seen) d.registry.threads.markSeen(t.id, false, now() - spec.replied! + minute);
     if (spec.archived) await d.call("POST", `/v1/threads/${t.id}/archive`);
   }
   world.live.talker = world.threads.get("spin")!;

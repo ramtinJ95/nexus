@@ -23,12 +23,12 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
 
   async function setStatus(t: Thread, status: "archived" | "deleted"): Promise<Thread> {
     guard(t, { status: "kept" });
-    registry.setThreadStatus(t.id, status);
+    registry.threads.setThreadStatus(t.id, status);
     wakeThread(t);
     if (status === "deleted") {
       for (const s of open) if (s.thread === t.id) s.end();
       // After the status, which each agent's delete relies on.
-      await agents[registry.agent(t).kind].delete(t);
+      await agents[registry.threads.agent(t).kind].delete(t);
     }
     return { ...t, status };
   }
@@ -36,10 +36,10 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
   /** Activity never unarchives a thread, because opening its page is activity too. */
   function unarchive(t: Thread): Thread {
     if (t.status !== "archived") throw new HttpError(409, `thread ${t.id} is ${t.status}, not archived`);
-    registry.setThreadStatus(t.id, "active");
-    registry.recordActivity(t.id, { human: Date.now() });
+    registry.threads.setThreadStatus(t.id, "active");
+    registry.threads.recordActivity(t.id, { human: Date.now() });
     wakeThread(t);
-    return registry.thread(t.id)!;
+    return registry.threads.thread(t.id)!;
   }
 
   /**
@@ -53,16 +53,16 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
    */
   function retryPylon(t: Thread) {
     guard(t, { status: "kept" });
-    const refused = retryRefusal(observedPylon(registry, registry.pylon(t.pylonId)!) ?? "absent");
+    const refused = retryRefusal(observedPylon(registry, registry.threads.pylon(t.pylonId)!) ?? "absent");
     if (refused !== null) throw new HttpError(409, `pylon ${t.pylonId} cannot be retried. ${refused}`);
-    if (!registry.retryPylon(t.pylonId)) throw new HttpError(409, `pylon ${t.pylonId} has not failed`);
-    registry.recordActivity(t.id, { human: Date.now() });
+    if (!registry.threads.retryPylon(t.pylonId)) throw new HttpError(409, `pylon ${t.pylonId} has not failed`);
+    registry.threads.recordActivity(t.id, { human: Date.now() });
     wakeThread(t);
   }
 
   function recordActivity(t: Thread, body: unknown) {
     parse(activitySchema, body);
-    registry.recordActivity(t.id, { human: Date.now() });
+    registry.threads.recordActivity(t.id, { human: Date.now() });
     wakeThread(t);
   }
 
@@ -80,7 +80,7 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
     if (requestId === undefined) return startOnce(fields, caller);
     const key = startKey(requestId, fields);
     const pending = starting.get(requestId);
-    const made = registry.startRequest(requestId);
+    const made = registry.threads.startRequest(requestId);
     const earlier = pending ?? made;
     if (earlier !== undefined && earlier.body !== key.body) {
       throw new HttpError(409, `request ID ${requestId} ${made === undefined ? "is starting a thread" : `started thread ${made.thread}`} with another body. Start a new thread under a new request ID`);
@@ -94,35 +94,35 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
   async function startOnce({ after, message, planning, ...request }: Omit<z.infer<typeof startSchema>, "requestId">, caller: string, key?: StartKey, made?: ThreadId): Promise<Thread | QueuedThread> {
     const plans = planning ? feature(features, "planning") : null;
     if (after === undefined) {
-      const t = made === undefined ? await startThread({ request, caller, role: planning ? "planning" : "builder", key }) : registry.thread(made)!;
+      const t = made === undefined ? await startThread({ request, caller, role: planning ? "planning" : "builder", key }) : registry.threads.thread(made)!;
       plans?.begin(t);
       if (message !== undefined && isOpenStatus(t.status)) {
         const requestId = requestIds.brief(t.id);
-        await registry.sendWithStandingRules(t.id, requestId, message, (brief) => harness.send(t.id, plans?.compose(t, requestId, brief) ?? brief, requestId, "followUp")).then(() => plans?.sent(t, requestId), (err: Error) => {
+        await registry.threads.sendWithStandingRules(t.id, requestId, message, (brief) => harness.send(t.id, plans?.compose(t, requestId, brief) ?? brief, requestId, "followUp")).then(() => plans?.sent(t, requestId), (err: Error) => {
           const why = `started ${t.id}, but its first message was not sent: ${err.message}. ${key === undefined ? `Send it with POST /v1/threads/${t.id}/messages` : `Start it again under request ID ${key.requestId} to send it`}`;
           throw err instanceof Refusal ? new Refusal(err.kind, why) : new Error(why);
         });
-        const revision = registry.thread(t.id)?.standingRulesRevision;
+        const revision = registry.threads.thread(t.id)?.standingRulesRevision;
         return revision === undefined ? t : { ...t, standingRulesRevision: revision };
       }
       return t;
     }
     const queue = queueOrRefuse();
-    const record = made === undefined ? queue.add(request, message ?? null, after, caller, key) : registry.queuedThread(made)!;
+    const record = made === undefined ? queue.add(request, message ?? null, after, caller, key) : registry.queue.queuedThread(made)!;
     void queue.poll();
-    return record.status === "started" ? registry.thread(record.id)! : queuedView(registry, record);
+    return record.status === "started" ? registry.threads.thread(record.id)! : queuedView(registry, record);
   }
 
   const seen = (unseen: boolean) => async ({ thread: id }: { thread: string }, r: { body(empty?: unknown): Promise<unknown> }) => {
     const t = thread(id);
     const body = parse(seenSchema, await r.body({}));
-    registry.markSeen(t.id, unseen, registry.now(), body.lastReplyAt);
+    registry.threads.markSeen(t.id, unseen, registry.now(), body.lastReplyAt);
     return noContent;
   };
 
   return [
     on(routes.list, anyAllowed, (_, r) => {
-      const threads = registry.threads(r.query.project as ProjectId | undefined);
+      const threads = registry.threads.threads(r.query.project as ProjectId | undefined);
       return ok((r.query.deleted === false ? threads.filter((t) => t.status !== "deleted") : threads).map(row));
     }),
     on(routes.start, { role: "person", action: "start a thread", startsTurn: true }, async (_, r) => {
@@ -130,10 +130,10 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
     }),
     on(routes.queued, anyAllowed, (_, r) => {
       const { project, status } = r.query;
-      return ok(registry.queuedThreads().filter((q) => q.status !== "started" && (project === undefined || q.project === project) && (status === undefined || q.status === status)).map((q) => queuedView(registry, q)));
+      return ok(registry.queue.queuedThreads().filter((q) => q.status !== "started" && (project === undefined || q.project === project) && (status === undefined || q.status === status)).map((q) => queuedView(registry, q)));
     }),
     on(routes.queuedThread, anyAllowed, ({ thread: id }) => {
-      const queued = registry.queuedThread(id as ThreadId);
+      const queued = registry.queue.queuedThread(id as ThreadId);
       if (queued === undefined || queued.status === "started") throw new HttpError(404, `no queued thread ${id}`);
       return ok(queuedView(registry, queued));
     }),
@@ -164,7 +164,7 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
     }),
     on(routes.abort, { role: "person", action: "abort a thread's turn" }, async ({ thread: id }) => {
       const t = thread(id, { status: "kept" });
-      await agents[registry.agent(t).kind].abort(t);
+      await agents[registry.threads.agent(t).kind].abort(t);
       return noContent;
     }),
     on(routes.retry, { role: "person", action: "retry a thread's turn", startsTurn: true }, async ({ thread: id }) => {
@@ -177,7 +177,7 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
     }),
     on(routes.conversation, anyAllowed, async ({ thread: id }) => {
       const t = thread(id, { status: "kept" });
-      return ok(await agents[registry.agent(t).kind].read(t));
+      return ok(await agents[registry.threads.agent(t).kind].read(t));
     }),
   ];
 }

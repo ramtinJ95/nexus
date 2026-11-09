@@ -28,7 +28,7 @@ import { isItemId, itemIdFrom, type ItemId, type ThreadId } from "../ids.ts";
 import { notConfigured } from "./not-configured.ts";
 import { isOpenStatus } from "./reconcile.ts";
 
-type PlanningRegistry = Pick<Registry, "agent" | "askQuestion" | "planning" | "planningThreads" | "question" | "questions" | "savePlanning" | "thread">;
+type PlanningRegistry = Pick<Registry, "threads" | "questions" | "planning" | "planningThreads" | "savePlanning">;
 
 const planFence = "nexus-plan";
 /** A proposal question's options, which its answer names. The dashboard's cards.ts gives each its label. */
@@ -105,14 +105,14 @@ export function planning(options: { registry: PlanningRegistry; pipeline: Pick<P
 
   async function pass() {
     for (const { thread } of registry.planningThreads()) {
-      const t = registry.thread(thread);
+      const t = registry.threads.thread(thread);
       const read = registry.planning(thread)!.read;
       if (!isOpenStatus(t?.status) || t.working || t.lastReplyAt === null || t.lastReplyAt <= read) continue;
       const through = t.lastReplyAt;
       try {
         for (const block of planBlocks(await replies(t), registry.planning(thread)!.token)) {
           const at = now();
-          for (const p of block) registry.askQuestion(proposalQuestion(t, p, block, at));
+          for (const p of block) registry.questions.askQuestion(proposalQuestion(t, p, block, at));
         }
         registry.savePlanning({ ...registry.planning(thread)!, read: through });
       } catch (err) {
@@ -123,7 +123,7 @@ export function planning(options: { registry: PlanningRegistry; pipeline: Pick<P
 
   /** What an accepted proposal waits on, as item IDs: items as named, and earlier proposals of its block by the items they became. */
   function resolveAfter(q: ProposalQuestion): ItemId[] {
-    const siblings = registry.questions(q.thread).filter((s): s is ProposalQuestion => s.kind === "proposal" && s.proposal.block === q.proposal.block && s.proposal.index < q.proposal.index);
+    const siblings = registry.questions.questions(q.thread).filter((s): s is ProposalQuestion => s.kind === "proposal" && s.proposal.block === q.proposal.block && s.proposal.index < q.proposal.index);
     return q.proposal.after.map((ref) => {
       const sibling = siblings.find((s) => s.proposal.key === ref);
       if (sibling === undefined) return ref as ItemId;
@@ -137,7 +137,7 @@ export function planning(options: { registry: PlanningRegistry; pipeline: Pick<P
   return {
     /** Marks a thread as planning, once. A repeat keeps its token. */
     begin(t: Thread): void {
-      if (registry.agent(t).kind !== "harness") throw new Refusal("invalid", "a planning thread is a Nexus agent thread, not a Claude worker");
+      if (registry.threads.agent(t).kind !== "harness") throw new Refusal("invalid", "a planning thread is a Nexus agent thread, not a Claude worker");
       if (registry.planning(t.id) === null) registry.savePlanning({ thread: t.id, token: mint(t.id), read: 0, sent: [] });
     },
     /**
@@ -151,10 +151,10 @@ export function planning(options: { registry: PlanningRegistry; pipeline: Pick<P
       if (entry === undefined) {
         const delivered = record.sent.filter((s) => s.delivered);
         const told = new Set(delivered.flatMap((s) => s.told));
-        entry = { requestId, guide: delivered.length === 0, told: registry.questions(t.id).filter((q) => q.kind === "proposal" && q.answer !== null && !told.has(q.id)).map((q) => q.id), delivered: false };
+        entry = { requestId, guide: delivered.length === 0, told: registry.questions.questions(t.id).filter((q) => q.kind === "proposal" && q.answer !== null && !told.has(q.id)).map((q) => q.id), delivered: false };
         registry.savePlanning({ ...record, sent: [...record.sent, entry] });
       }
-      const tells = entry.told.map((id) => registry.question(id) as ProposalQuestion);
+      const tells = entry.told.map((id) => registry.questions.question(id) as ProposalQuestion);
       return [...entry.guide ? [guide(record.token)] : [], ...tells.length === 0 ? [] : [answers(tells)], text].join("\n\n");
     },
     /** The harness took the message composed under `requestId`. */
@@ -170,7 +170,7 @@ export function planning(options: { registry: PlanningRegistry; pipeline: Pick<P
     answered(q: ProposalQuestion): ItemRecord | null {
       if (q.answer?.option !== proposalOptions.accept) return null;
       if (options.pipeline === null) throw new Refusal("conflict", notConfigured.pipeline);
-      const t = registry.thread(q.thread)!;
+      const t = registry.threads.thread(q.thread)!;
       return options.pipeline.add({ project: t.project, title: q.proposal.title }, q.proposal.brief, resolveAfter(q), q.answer.by, proposalItem(q.id));
     },
     poll: passes.rerun,

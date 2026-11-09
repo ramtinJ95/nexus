@@ -29,11 +29,11 @@ export function pylonAccess({ registry, probes, wake, guard, current }: {
    */
   async function inPylon<T>(t: Thread, act: (probe: Pick<ProbeClient, "command" | "stream">, pylonId: PylonId) => Promise<T>, wakes = true): Promise<T> {
     guard(t, { status: "pylon" });
-    const pylon = registry.pylon(t.pylonId)!;
+    const pylon = registry.threads.pylon(t.pylonId)!;
     const probe = probes.get(pylon.node);
     if (probe === undefined) throw new Refusal("unavailable", `no probe is configured for ${pylon.node}`);
     if (wakes) {
-      registry.recordActivity(t.id, { human: Date.now() });
+      registry.threads.recordActivity(t.id, { human: Date.now() });
       wake(pylon.node);
     } else if (!running(pylon)) throw new Refusal("conflict", notRunning(pylon.pylonId, false), "not-running");
     // A sealed boot runs no work, and the wake pauses it for the next.

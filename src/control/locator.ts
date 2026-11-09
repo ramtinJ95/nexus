@@ -16,25 +16,25 @@ import type { StoredPylon } from "./thread-store.ts";
 /** "work" for every path that brings the pylon work, "usage" for the reads of its usage. */
 export type Reach = "work" | "usage";
 
-export function listsRunning(registry: Pick<Registry, "sealedBoot">, observation: NodeObservation | null, pylonId: PylonId, reach: Reach): boolean {
-  const sealed = reach === "work" ? registry.sealedBoot(pylonId) : undefined;
+export function listsRunning(registry: Pick<Registry, "threads">, observation: NodeObservation | null, pylonId: PylonId, reach: Reach): boolean {
+  const sealed = reach === "work" ? registry.threads.sealedBoot(pylonId) : undefined;
   return observation?.pylons.some((p) => p.pylonId === pylonId && p.phase === "running" && p.bootedAt !== sealed) === true;
 }
 
 /** Whether the pylon's node lists it running on the boot a settle sealed. */
-export function runsSealed(registry: Pick<Registry, "node" | "sealedBoot">, pylon: Pick<StoredPylon, "node" | "pylonId">): boolean {
-  const sealed = registry.sealedBoot(pylon.pylonId);
+export function runsSealed(registry: Pick<Registry, "node" | "threads">, pylon: Pick<StoredPylon, "node" | "pylonId">): boolean {
+  const sealed = registry.threads.sealedBoot(pylon.pylonId);
   const o = observedPylon(registry, pylon);
   return sealed !== undefined && o !== null && o !== "absent" && o.phase === "running" && o.bootedAt === sealed;
 }
 
-export function runningNode(registry: Pick<Registry, "pylon" | "node" | "sealedBoot">, pylonId: PylonId, reach: Reach): NodeRecord | null {
-  const pylon = registry.pylon(pylonId);
+export function runningNode(registry: Pick<Registry, "threads" | "node">, pylonId: PylonId, reach: Reach): NodeRecord | null {
+  const pylon = registry.threads.pylon(pylonId);
   const node = pylon === undefined ? undefined : registry.node(pylon.node);
   return node?.state === "online" && listsRunning(registry, node.observation, pylonId, reach) ? node : null;
 }
 
-export function runningProbe<P>(registry: Pick<Registry, "pylon" | "node" | "sealedBoot">, probes: ReadonlyMap<NodeName, P>, t: { pylonId: PylonId }, reach: Reach): P | null {
+export function runningProbe<P>(registry: Pick<Registry, "threads" | "node">, probes: ReadonlyMap<NodeName, P>, t: { pylonId: PylonId }, reach: Reach): P | null {
   const node = runningNode(registry, t.pylonId, reach);
   return node === null ? null : probes.get(node.name) ?? null;
 }
@@ -44,7 +44,7 @@ export function runningProbe<P>(registry: Pick<Registry, "pylon" | "node" | "sea
  * each wake a thread change asks for, and every few seconds. It gives up `waitMs` after it was asked.
  */
 export function registryLocator<P>(options: {
-  registry: Pick<Registry, "node" | "pylon" | "sealedBoot" | "threadStatus">;
+  registry: Pick<Registry, "node" | "threads">;
   probes: ReadonlyMap<NodeName, P>;
   woken: () => Promise<void>;
   waitMs: number;
@@ -54,9 +54,9 @@ export function registryLocator<P>(options: {
     async awaitRunning(pylonId) {
       const deadline = Date.now() + waitMs;
       for (;;) {
-        const pylon = registry.pylon(pylonId);
+        const pylon = registry.threads.pylon(pylonId);
         if (pylon === undefined) throw new Error(`the registry has no pylon ${pylonId}`);
-        if (registry.threadStatus(pylon.thread) === "deleted") throw new Error(`the thread of ${pylonId} is deleted`);
+        if (registry.threads.threadStatus(pylon.thread) === "deleted") throw new Error(`the thread of ${pylonId} is deleted`);
         const node = runningNode(registry, pylonId, "work");
         const client = node === null ? undefined : probes.get(node.name);
         if (node !== null && client !== undefined) {

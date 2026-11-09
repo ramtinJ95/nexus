@@ -26,7 +26,7 @@ async function claudeThread(t: TestContext, failed?: string) {
   claudeWorkerAt(s.registry, thread.id, failed === undefined ? "started" : "failed", { session: "builder", ...failed === undefined ? {} : { message: failed } });
   let sequence = 0;
   const report = (kind: "session.turn-started" | "session.turn-ended" | "session.ended", session: string) =>
-    s.registry.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session, at: Date.now() + sequence } });
+    s.registry.threads.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session, at: Date.now() + sequence } });
   const row = async () => ((await s.call("GET", "/v1/threads")).body as ThreadRow[]).find((r) => r.id === thread.id)!;
   const attention = async () => (await row()).attention;
   return { report, attention, row, registry: s.registry, thread };
@@ -60,7 +60,7 @@ test("a new session in the worker's pane after /clear replies when its turn ends
   const { report, attention, registry, thread } = await claudeThread(t);
   report("session.turn-started", "builder");
   report("session.turn-ended", "builder");
-  registry.markSeen(thread.id, false);
+  registry.threads.markSeen(thread.id, false);
   assert.equal(await attention(), null, "the person saw the reply");
   report("session.ended", "builder");
   report("session.turn-started", "cleared");

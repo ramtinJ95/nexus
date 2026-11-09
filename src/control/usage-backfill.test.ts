@@ -26,9 +26,9 @@ let created = 0;
 /** An archived thread is settled unless `settled` is false, so only the run reads it. */
 function addThread(registry: Registry, node: NodeName, title: string, status: Thread["status"] = "archived", settled = true): Thread {
   const { id } = addTestThread(registry, { node, boot: { image }, thread: { title, createdAt: 1_000 + created++, lastHumanActivityAt: 0 } });
-  if (status !== "active") registry.setThreadStatus(id, status);
-  if (status === "archived" && settled) registry.finishSettle(id, null, Date.now());
-  return registry.thread(id)!;
+  if (status !== "active") registry.threads.setThreadStatus(id, status);
+  if (status === "archived" && settled) registry.usage.finishSettle(id, null, Date.now());
+  return registry.threads.thread(id)!;
 }
 
 /** A pylon `running` from a wake for reading, which reports no liveHash, and one running `since archive` with its sessions. */
@@ -40,7 +40,7 @@ function observe(registry: Registry, node: NodeName, pylons: readonly [PylonId, 
 }
 
 /** Records `calls` calls no read had counted, `tokens` in all, as a backfill's read of the thread does. */
-const recover = (registry: Registry, thread: ThreadId, calls: number, tokens: number) => registry.recordUsage(thread, Array.from({ length: calls }, (_, i) => ({
+const recover = (registry: Registry, thread: ThreadId, calls: number, tokens: number) => registry.usage.recordUsage(thread, Array.from({ length: calls }, (_, i) => ({
   id: `claude:msg_${thread}_${i}`, agent: "claude" as const, model: "claude-opus-5-5", at: 1_000, input: i === 0 ? tokens - calls + 1 : 1, output: 0, cacheWrite: 0, cacheRead: 0,
 })), [], true);
 
@@ -82,53 +82,53 @@ async function until<T>(what: string, read: () => T, ok: (value: T) => boolean):
 }
 
 const current = (registry: Registry) => {
-  const run = registry.usageBackfill();
+  const run = registry.usage.usageBackfill();
   return run.state === "never" ? null : run.current;
 };
 const held = (registry: Registry, thread: Thread, phase: "reading" | "pausing") =>
   until(`${thread.title} is held ${phase}`, () => current(registry), (c) => c?.thread === thread.id && c.phase === phase);
-const row = (registry: Registry, thread: Thread) => registry.usageBackfillThreads().find((r) => r.thread === thread.id);
+const row = (registry: Registry, thread: Thread) => registry.usage.usageBackfillThreads().find((r) => r.thread === thread.id);
 const settling = (registry: Registry, thread: Thread, phase: "reading" | "pausing") =>
-  until(`${thread.title}'s settle holds it ${phase}`, () => registry.settleHold(), (h) => h?.thread === thread.id && h.phase === phase);
-const released = (registry: Registry) => until("the settle lets go of its pylon", () => registry.settleHold(), (h) => h === null);
-const desired = (registry: Registry, thread: Thread) => desiredPhase(registry.thread(thread.id)!, Date.now());
+  until(`${thread.title}'s settle holds it ${phase}`, () => registry.usage.settleHold(), (h) => h?.thread === thread.id && h.phase === phase);
+const released = (registry: Registry) => until("the settle lets go of its pylon", () => registry.usage.settleHold(), (h) => h === null);
+const desired = (registry: Registry, thread: Thread) => desiredPhase(registry.threads.thread(thread.id)!, Date.now());
 const nothing = { calls: 0, tokens: 0 };
 
 test("a start lists each thread once and leaves a running run as it is, and a later start pends again only the skipped threads it lists", (t) => {
   const path = join(dir, `${randomUUID()}.db`);
   let registry = seedRegistry(openRegistry(path), { nodes: [n1, n2] });
   const [a, b, c] = ["a", "b", "c"].map((title) => addThread(registry, n1, title));
-  assert.deepEqual(registry.usageBackfill(), { state: "never" });
+  assert.deepEqual(registry.usage.usageBackfill(), { state: "never" });
 
-  assert.deepEqual(registry.startUsageBackfill([a!.id, b!.id], 100), {
+  assert.deepEqual(registry.usage.startUsageBackfill([a!.id, b!.id], 100), {
     state: "running", startedAt: 100, finishedAt: null, current: null, waiting: null, read: 0, of: 2, recovered: nothing, skipped: [],
   });
-  assert.deepEqual(registry.startUsageBackfill([a!.id, b!.id, c!.id], 200), registry.usageBackfill(), "a second start while one runs changes nothing");
-  assert.deepEqual(registry.usageBackfillThreads().map((r) => r.title), ["a", "b"]);
+  assert.deepEqual(registry.usage.startUsageBackfill([a!.id, b!.id, c!.id], 200), registry.usage.usageBackfill(), "a second start while one runs changes nothing");
+  assert.deepEqual(registry.usage.usageBackfillThreads().map((r) => r.title), ["a", "b"]);
   recover(registry, a!.id, 5, 500);
-  registry.finishUsageBackfillThread(a!.id, "done", null, 300);
-  registry.finishUsageBackfillThread(b!.id, "skipped", "its node holds no disk for its pylon", 310);
-  registry.finishUsageBackfill(400);
+  registry.usage.finishUsageBackfillThread(a!.id, "done", null, 300);
+  registry.usage.finishUsageBackfillThread(b!.id, "skipped", "its node holds no disk for its pylon", 310);
+  registry.usage.finishUsageBackfill(400);
   const skippedB = { thread: b!.id, title: "b", state: "skipped", reason: "its node holds no disk for its pylon", calls: 0, tokens: 0, at: 310 };
-  assert.deepEqual(registry.usageBackfill(), {
+  assert.deepEqual(registry.usage.usageBackfill(), {
     state: "done", startedAt: 100, finishedAt: 400, current: null, waiting: null, read: 2, of: 2, recovered: { calls: 5, tokens: 500 }, skipped: [skippedB],
   });
 
   registry.close();
   registry = opened(t, path);
-  assert.equal(registry.usageBackfill().state, "done", "the run outlives a restart");
-  assert.deepEqual(registry.startUsageBackfill([b!.id, c!.id], 500), {
+  assert.equal(registry.usage.usageBackfill().state, "done", "the run outlives a restart");
+  assert.deepEqual(registry.usage.startUsageBackfill([b!.id, c!.id], 500), {
     state: "running", startedAt: 500, finishedAt: null, current: null, waiting: null, read: 1, of: 3, recovered: { calls: 5, tokens: 500 }, skipped: [],
   });
-  assert.deepEqual(registry.usageBackfillThreads().map((r) => [r.title, r.state]), [["a", "done"], ["b", "pending"], ["c", "pending"]]);
+  assert.deepEqual(registry.usage.usageBackfillThreads().map((r) => [r.title, r.state]), [["a", "done"], ["b", "pending"], ["c", "pending"]]);
 
-  registry.holdUsageBackfill(c!.id, 600);
+  registry.usage.holdUsageBackfill(c!.id, 600);
   assert.deepEqual([desired(registry, a!), desired(registry, c!)], ["paused", "reading"]);
-  assert.equal(registry.thread(c!.id)!.readingUsage, true);
-  registry.finishUsageBackfillThread(c!.id, "done", null, 700);
+  assert.equal(registry.threads.thread(c!.id)!.readingUsage, true);
+  registry.usage.finishUsageBackfillThread(c!.id, "done", null, 700);
   assert.deepEqual(current(registry), { thread: c!.id, phase: "pausing", since: 700 });
   assert.equal(desired(registry, c!), "paused", "a read pylon's desired phase is paused again, while the run waits for its pause");
-  assert.equal(registry.stopUsageBackfill(800).state, "stopped");
+  assert.equal(registry.usage.stopUsageBackfill(800).state, "stopped");
   assert.equal(current(registry), null);
 });
 
@@ -140,7 +140,7 @@ test("a run wakes one archived thread's pylon at a time, across nodes, reads it 
   observe(registry, n1, [[a.pylonId, "stopped"]]);
   observe(registry, n2, [[b.pylonId, "stopped"]]);
   const { job, woken, counter } = backfill(t, registry);
-  assert.deepEqual(job.start(), { state: "running", startedAt: (registry.usageBackfill() as { startedAt: number }).startedAt, finishedAt: null, current: null, waiting: null, read: 0, of: 2, recovered: nothing, skipped: [] }, "only archived threads are read");
+  assert.deepEqual(job.start(), { state: "running", startedAt: (registry.usage.usageBackfill() as { startedAt: number }).startedAt, finishedAt: null, current: null, waiting: null, read: 0, of: 2, recovered: nothing, skipped: [] }, "only archived threads are read");
 
   await held(registry, a, "reading");
   assert.deepEqual([desired(registry, a), desired(registry, b)], ["reading", "paused"]);
@@ -157,7 +157,7 @@ test("a run wakes one archived thread's pylon at a time, across nodes, reads it 
   observe(registry, n2, [[b.pylonId, "running"]]);
   await held(registry, b, "pausing");
   observe(registry, n2, [[b.pylonId, "stopped"]]);
-  const run = await until("the run is done", () => registry.usageBackfill(), (r) => r.state === "done");
+  const run = await until("the run is done", () => registry.usage.usageBackfill(), (r) => r.state === "done");
   assert.ok(run.state === "done");
   assert.deepEqual([run.read, run.of, run.recovered, run.skipped, run.current], [2, 2, { calls: 6, tokens: 600 }, [], null]);
   assert.deepEqual(counter.reads, [a.id, b.id]);
@@ -168,23 +168,23 @@ test("a run waits while the pylon's node is offline, is busy with a job, or woul
   const a = addThread(registry, n1, "archived");
   const other = addThread(registry, n1, "other", "idle");
   const { job } = backfill(t, registry);
-  const waiting = (why: string) => until(`the run waits because ${why}`, () => registry.usageBackfill(), (r) => r.state === "running" && r.waiting === why);
+  const waiting = (why: string) => until(`the run waits because ${why}`, () => registry.usage.usageBackfill(), (r) => r.state === "running" && r.waiting === why);
   job.start();
 
   await waiting("rj-firebat is offline");
   observe(registry, n1, [[a.pylonId, "stopped"]], { jobs: [{ jobId: "j1" as JobId, subject: other.pylonId, kind: "spawn", state: "running", startedAt: "2027-01-01T00:00:00Z" }] });
   await waiting("rj-firebat is busy with a job");
   observe(registry, n1, [[a.pylonId, "stopped"]]);
-  registry.savePylon({ ...registry.pylon(other.pylonId)!, submitted: envelope({ kind: "pause", pylonId: other.pylonId, checkpoint: "ckpt-other-1" }, n1, Date.now()) });
+  registry.threads.savePylon({ ...registry.threads.pylon(other.pylonId)!, submitted: envelope({ kind: "pause", pylonId: other.pylonId, checkpoint: "ckpt-other-1" }, n1, Date.now()) });
   await waiting("rj-firebat is busy with a job");
-  registry.savePylon({ ...registry.pylon(other.pylonId)!, submitted: null });
+  registry.threads.savePylon({ ...registry.threads.pylon(other.pylonId)!, submitted: null });
   observe(registry, n1, [[a.pylonId, "stopped"]], {}, { total: 10, committed: 4 });
   await waiting("rj-firebat would have 2 GiB of memory left with it up, less than the 4 GiB of the largest project's pylon");
   assert.equal(desired(registry, a), "paused");
 
   observe(registry, n1, [[a.pylonId, "stopped"]], {}, { total: 12, committed: 4 });
   await held(registry, a, "reading");
-  assert.equal((registry.usageBackfill() as { waiting: string | null }).waiting, null);
+  assert.equal((registry.usage.usageBackfill() as { waiting: string | null }).waiting, null);
 });
 
 test("a wake that fails, or does not boot in time, is skipped with why, its attempt cleared so its pylon pauses rather than fails", async (t) => {
@@ -193,24 +193,24 @@ test("a wake that fails, or does not boot in time, is skipped with why, its atte
   const b = addThread(registry, n1, "slow");
   observe(registry, n1, [[a.pylonId, "stopped"], [b.pylonId, "stopped"]]);
   const before = { at: Date.now(), code: "backend" as const, message: "a failure from before the thread was archived" };
-  registry.savePylon({ ...registry.pylon(a.pylonId)!, attempts: { count: 2, last: before } });
+  registry.threads.savePylon({ ...registry.threads.pylon(a.pylonId)!, attempts: { count: 2, last: before } });
   const { job } = backfill(t, registry, fakeCounter(registry), { bootMs: 200 });
   job.start();
 
   await held(registry, a, "reading");
-  assert.deepEqual(registry.pylon(a.pylonId)!.attempts, { count: 0, last: null }, "the hold forgets a failure that was not its wake's");
-  registry.failUsageRead(a.id, { at: Date.now(), code: "setup-failed", message: "the disk is full" });
+  assert.deepEqual(registry.threads.pylon(a.pylonId)!.attempts, { count: 0, last: null }, "the hold forgets a failure that was not its wake's");
+  registry.usage.failUsageRead(a.id, { at: Date.now(), code: "setup-failed", message: "the disk is full" });
   await held(registry, a, "pausing");
   assert.deepEqual([row(registry, a)!.state, row(registry, a)!.reason], ["skipped", "the pylon did not boot: setup-failed: the disk is full"]);
-  assert.deepEqual(registry.pylon(a.pylonId)!.attempts, { count: 0, last: null });
-  assert.equal(registry.pylon(a.pylonId)!.failed, null);
+  assert.deepEqual(registry.threads.pylon(a.pylonId)!.attempts, { count: 0, last: null });
+  assert.equal(registry.threads.pylon(a.pylonId)!.failed, null);
   assert.equal(desired(registry, a), "paused");
 
   await held(registry, b, "reading");
   await held(registry, b, "pausing");
   assert.equal(row(registry, b)!.state, "skipped");
   assert.match(row(registry, b)!.reason!, /^its pylon did not boot within [\d.]+ minutes$/);
-  const run = await until("the run is done", () => registry.usageBackfill(), (r) => r.state === "done");
+  const run = await until("the run is done", () => registry.usage.usageBackfill(), (r) => r.state === "done");
   assert.ok(run.state === "done" && run.read === 2 && run.skipped.length === 2);
 });
 
@@ -223,14 +223,14 @@ test("a failed wake for reading is skipped with why, as the loop hands it to the
   backfill(t, registry).job.start();
 
   await held(registry, failed, "reading");
-  registry.failUsageRead(failed.id, failure);
+  registry.usage.failUsageRead(failed.id, failure);
   await held(registry, failed, "pausing");
   assert.deepEqual([row(registry, failed)!.state, row(registry, failed)!.reason], ["skipped", "the pylon did not boot: setup-failed: the disk is full"]);
-  assert.deepEqual(registry.pylon(failed.pylonId)!.attempts, { count: 0, last: null });
+  assert.deepEqual(registry.threads.pylon(failed.pylonId)!.attempts, { count: 0, last: null });
 
   await held(registry, unarchived, "reading");
-  registry.setThreadStatus(unarchived.id, "active");
-  registry.failUsageRead(unarchived.id, failure);
+  registry.threads.setThreadStatus(unarchived.id, "active");
+  registry.usage.failUsageRead(unarchived.id, failure);
   await held(registry, unarchived, "pausing");
   assert.deepEqual([row(registry, unarchived)!.state, row(registry, unarchived)!.reason], ["skipped", "it was unarchived while it was read, so live counting reads it"]);
 });
@@ -239,10 +239,10 @@ test("a failed wake for reading from an earlier run is cleared before the next r
   const registry = opened(t);
   const a = addThread(registry, n1, "earlier");
   observe(registry, n1, [[a.pylonId, "stopped"]]);
-  registry.savePylon({ ...registry.pylon(a.pylonId)!, attempts: { count: 1, last: { at: Date.now(), code: "backend", message: "an earlier run's wake" } } });
+  registry.threads.savePylon({ ...registry.threads.pylon(a.pylonId)!, attempts: { count: 1, last: { at: Date.now(), code: "backend", message: "an earlier run's wake" } } });
   backfill(t, registry).job.start();
   await held(registry, a, "reading");
-  assert.deepEqual(registry.pylon(a.pylonId)!.attempts, { count: 0, last: null }, "the hold forgets a failure that was not its wake's");
+  assert.deepEqual(registry.threads.pylon(a.pylonId)!.attempts, { count: 0, last: null }, "the hold forgets a failure that was not its wake's");
 });
 
 test("a thread whose pylon's image no online node holds is skipped, and woken once another node holds it", async (t) => {
@@ -251,7 +251,7 @@ test("a thread whose pylon's image no online node holds is skipped, and woken on
   observe(registry, n1, [[a.pylonId, "stopped"]], { artifacts: [] });
   const { job } = backfill(t, registry);
   job.start();
-  await until("the run is done", () => registry.usageBackfill().state, (s) => s === "done");
+  await until("the run is done", () => registry.usage.usageBackfill().state, (s) => s === "done");
   assert.deepEqual([row(registry, a)!.state, row(registry, a)!.reason], ["skipped", `no online node holds its image ${image}`]);
   assert.equal(desired(registry, a), "paused");
 
@@ -266,7 +266,7 @@ test("a thread archived for a day, its usage read and backed up since, is skippe
   const expired = addThread(registry, n1, "expired");
   now = Date.now();
   const kept = addThread(registry, n1, "kept");
-  registry.recordBackedUp(Date.now() + 1);
+  registry.threads.recordBackedUp(Date.now() + 1);
   observe(registry, n1, [[expired.pylonId, "stopped"], [kept.pylonId, "stopped"]]);
   const { job, counter } = backfill(t, registry);
   job.start();
@@ -274,7 +274,7 @@ test("a thread archived for a day, its usage read and backed up since, is skippe
   observe(registry, n1, [[expired.pylonId, "stopped"], [kept.pylonId, "running"]]);
   await until("kept is read", () => counter.reads, (r) => r.includes(kept.id));
   observe(registry, n1, [[expired.pylonId, "stopped"], [kept.pylonId, "stopped"]]);
-  await until("the run is done", () => registry.usageBackfill().state, (s) => s === "done");
+  await until("the run is done", () => registry.usage.usageBackfill().state, (s) => s === "done");
   assert.deepEqual([row(registry, expired)!.state, row(registry, expired)!.reason], ["skipped", "its disk was deleted 24 hours after it was archived, once its usage was read and backed up"]);
   assert.deepEqual(counter.reads, [kept.id]);
   assert.equal(desired(registry, expired), "deleted");
@@ -315,10 +315,10 @@ test("a thread unarchived or deleted while its pylon is read is skipped and let 
   job.start();
 
   await held(registry, a, "reading");
-  registry.setThreadStatus(a.id, "idle");
+  registry.threads.setThreadStatus(a.id, "idle");
   await held(registry, b, "reading");
   assert.equal(row(registry, a)!.reason, "it was unarchived while it was read, so live counting reads it");
-  registry.setThreadStatus(b.id, "deleted");
+  registry.threads.setThreadStatus(b.id, "deleted");
   await held(registry, c, "reading");
   assert.equal(row(registry, b)!.reason, "it was deleted while it was read");
 });
@@ -343,12 +343,12 @@ test("a control plane restarted mid-run goes on with the pylon it held, and a se
   observe(registry, n1, [[a.pylonId, "stopped"], [b.pylonId, "since archive"]]);
   await held(registry, b, "pausing");
   observe(registry, n1, [[a.pylonId, "stopped"], [b.pylonId, "stopped"]]);
-  await until("the run is done", () => registry.usageBackfill().state, (s) => s === "done");
+  await until("the run is done", () => registry.usage.usageBackfill().state, (s) => s === "done");
   assert.deepEqual(counter.reads, [a.id, b.id]);
 
   assert.deepEqual(job.plan(), []);
   assert.equal(job.start().state, "running");
-  const again = await until("the second run is done", () => registry.usageBackfill(), (r) => r.state === "done");
+  const again = await until("the second run is done", () => registry.usage.usageBackfill(), (r) => r.state === "done");
   assert.ok(again.state === "done" && again.read === 2 && again.of === 2);
   assert.deepEqual(counter.reads, [a.id, b.id], "the second run read nothing");
 });
@@ -360,10 +360,10 @@ test("the dry run lists each archived thread a start would read, with its node a
   const fresh = addThread(registry, n1, "never read");
   addThread(registry, n1, "active", "idle");
   addThread(registry, n1, "deleted", "deleted");
-  registry.startUsageBackfill([skipped.id, done.id], 1);
-  registry.finishUsageBackfillThread(skipped.id, "skipped", "infra-testbench holds no disk for its pylon", 2);
-  registry.finishUsageBackfillThread(done.id, "done", null, 3);
-  registry.stopUsageBackfill(4);
+  registry.usage.startUsageBackfill([skipped.id, done.id], 1);
+  registry.usage.finishUsageBackfillThread(skipped.id, "skipped", "infra-testbench holds no disk for its pylon", 2);
+  registry.usage.finishUsageBackfillThread(done.id, "done", null, 3);
+  registry.usage.stopUsageBackfill(4);
   const { job } = backfill(t, registry);
   assert.deepEqual(job.plan(), [
     { thread: skipped.id, project: "acme", node: n2, title: "skipped before", reason: "infra-testbench holds no disk for its pylon" },
@@ -379,7 +379,7 @@ test("an archive whose last read was missed is woken for reading once its pylon 
   observe(registry, n1, [[a.pylonId, "since archive"]]);
   const { woken, counter } = backfill(t, registry);
   await delay(50);
-  assert.deepEqual([registry.settleHold(), woken, counter.reads], [null, [], []], "a pylon still running from before its archive's pause is not read, as a turn may still come");
+  assert.deepEqual([registry.usage.settleHold(), woken, counter.reads], [null, [], []], "a pylon still running from before its archive's pause is not read, as a turn may still come");
   assert.equal(desired(registry, a), "paused");
 
   observe(registry, n1, [[a.pylonId, "stopped"]]);
@@ -388,17 +388,17 @@ test("an archive whose last read was missed is woken for reading once its pylon 
   observe(registry, n1, [[a.pylonId, "running"]]);
   await settling(registry, a, "pausing");
   assert.deepEqual([counter.reads, counter.sealed], [[a.id], [a.id]], "the read is sealed, so no hook or service of the wake adds a call after it");
-  const settled = registry.thread(a.id)!;
+  const settled = registry.threads.thread(a.id)!;
   assert.ok(settled.usageSettledAt !== undefined && settled.usageSettledAt >= now);
   assert.deepEqual([desired(registry, a), diskKept(settled)], ["paused", "it waits for a backup that begins after its token usage was read"]);
   assert.deepEqual(woken, [n1, n1], "the read wakes the node, so the pylon pauses");
   observe(registry, n1, [[a.pylonId, "stopped"]]);
   await released(registry);
-  assert.equal(registry.usageBackfill().state, "never", "a settle is no run of the backfill");
+  assert.equal(registry.usage.usageBackfill().state, "never", "a settle is no run of the backfill");
 
-  registry.recordBackedUp(settled.usageSettledAt);
+  registry.threads.recordBackedUp(settled.usageSettledAt);
   assert.equal(desired(registry, a), "paused", "a backup that began as the read ended may not hold it");
-  registry.recordBackedUp(settled.usageSettledAt + 1);
+  registry.threads.recordBackedUp(settled.usageSettledAt + 1);
   assert.equal(desired(registry, a), "deleted");
   await delay(50);
   assert.deepEqual(counter.reads, [a.id], "a settled archive is not read again");
@@ -417,9 +417,9 @@ test("a settle that fails keeps the disk, counts the failures in a row with the 
     await settling(registry, a, "reading");
     observe(registry, n1, [[a.pylonId, "running"]]);
     await settling(registry, a, "pausing");
-    const failure = registry.thread(a.id)!.settleFailure;
+    const failure = registry.threads.thread(a.id)!.settleFailure;
     assert.deepEqual(failure && { ...failure, at: 0 }, { reason: "reading it failed: the pipe to the pylon was lost", at: 0, count });
-    assert.match(diskKept(registry.thread(a.id)!)!, new RegExp(`reading it failed ${count === 1 ? "once" : "2 times in a row"}, the last because reading it failed: the pipe`));
+    assert.match(diskKept(registry.threads.thread(a.id)!)!, new RegExp(`reading it failed ${count === 1 ? "once" : "2 times in a row"}, the last because reading it failed: the pipe`));
     observe(registry, n1, [[a.pylonId, "stopped"]]);
     await released(registry);
     const again = await settling(registry, a, "reading");
@@ -427,7 +427,7 @@ test("a settle that fails keeps the disk, counts the failures in a row with the 
   }
   observe(registry, n1, [[a.pylonId, "running"]]);
   await settling(registry, a, "pausing");
-  const settled = registry.thread(a.id)!;
+  const settled = registry.threads.thread(a.id)!;
   assert.deepEqual([settled.usageSettledAt !== undefined, settled.settleFailure], [true, undefined], "a settle that reads it forgets the failures");
 });
 
@@ -438,19 +438,19 @@ test("a settle wakes no pylon whose node has no disk for it, which is settled as
   const failed = addThread(registry, n1, "failed", "archived", false);
   const imageless = addThread(registry, n2, "imageless", "archived", false);
   now = Date.now();
-  registry.savePylon({ ...registry.pylon(failed.pylonId)!, failed: "gave up after 5 failed attempts, the last with backend: boom\nthe log's last line" });
+  registry.threads.savePylon({ ...registry.threads.pylon(failed.pylonId)!, failed: "gave up after 5 failed attempts, the last with backend: boom\nthe log's last line" });
   observe(registry, n1, [[failed.pylonId, "stopped"]], { artifacts: [] });
   observe(registry, n2, [[imageless.pylonId, "stopped"]], { artifacts: [] });
   const { woken } = backfill(t, registry);
-  await until("each is settled or unread", () => [gone, failed, imageless].map((x) => registry.thread(x.id)!), (ts) => ts.every((x) => x.usageSettledAt !== undefined || x.usageUnread !== undefined));
-  assert.ok(registry.thread(gone.id)!.usageSettledAt !== undefined, "a pylon its online node does not have has no disk to lose");
-  assert.deepEqual([failed, imageless].map((x) => registry.thread(x.id)!.usageUnread), ["its pylon failed: gave up after 5 failed attempts, the last with backend: boom", `no online node holds its image ${image}`]);
-  assert.deepEqual([failed, imageless].map((x) => [registry.thread(x.id)!.settleFailure, desired(registry, x)]), [[undefined, "deleted"], [undefined, "deleted"]], "no settle failed, and no backup is waited for");
+  await until("each is settled or unread", () => [gone, failed, imageless].map((x) => registry.threads.thread(x.id)!), (ts) => ts.every((x) => x.usageSettledAt !== undefined || x.usageUnread !== undefined));
+  assert.ok(registry.threads.thread(gone.id)!.usageSettledAt !== undefined, "a pylon its online node does not have has no disk to lose");
+  assert.deepEqual([failed, imageless].map((x) => registry.threads.thread(x.id)!.usageUnread), ["its pylon failed: gave up after 5 failed attempts, the last with backend: boom", `no online node holds its image ${image}`]);
+  assert.deepEqual([failed, imageless].map((x) => [registry.threads.thread(x.id)!.settleFailure, desired(registry, x)]), [[undefined, "deleted"], [undefined, "deleted"]], "no settle failed, and no backup is waited for");
   await delay(50);
-  assert.deepEqual([woken, registry.settleHold()], [[], null]);
+  assert.deepEqual([woken, registry.usage.settleHold()], [[], null]);
 
   observe(registry, n2, [[imageless.pylonId, "stopped"]]);
-  await until("an archive whose image a node holds again can be read", () => registry.thread(imageless.id)!.usageUnread, (u) => u === undefined);
+  await until("an archive whose image a node holds again can be read", () => registry.threads.thread(imageless.id)!.usageUnread, (u) => u === undefined);
   await settling(registry, imageless, "reading");
   assert.equal(desired(registry, imageless), "reading");
 });
@@ -471,15 +471,15 @@ test("one pylon is up at a time across the run and the settles, a settle goes fi
   await settling(registry, late, "pausing");
   observe(registry, n2, [[early.pylonId, "since archive"], [late.pylonId, "stopped"]]);
   await held(registry, read, "reading");
-  assert.equal(registry.settleHold(), null);
+  assert.equal(registry.usage.settleHold(), null);
   observe(registry, n1, [[read.pylonId, "running"]]);
   await held(registry, read, "pausing");
   await delay(50);
-  assert.equal(registry.settleHold(), null, "a settle waits while the run holds a pylon");
+  assert.equal(registry.usage.settleHold(), null, "a settle waits while the run holds a pylon");
   observe(registry, n1, [[read.pylonId, "stopped"]]);
   await held(registry, early, "reading");
   await held(registry, early, "pausing");
-  assert.equal(registry.thread(early.id)!.usageSettledAt, undefined, "a read of a pylon that has not paused since its archive proves nothing");
+  assert.equal(registry.threads.thread(early.id)!.usageSettledAt, undefined, "a read of a pylon that has not paused since its archive proves nothing");
   observe(registry, n2, [[early.pylonId, "stopped"], [late.pylonId, "stopped"]]);
   await settling(registry, early, "reading");
   assert.deepEqual(counter.reads, [late.id, read.id, early.id]);
@@ -498,7 +498,7 @@ test("a control plane restarted while a settle holds a pylon lets it pause, and 
 
   const registry = opened(t, path);
   observe(registry, n1, [[a.pylonId, "running"]]);
-  assert.deepEqual([registry.settleHold(), desired(registry, a)], [null, "paused"], "the pylon the lost hold woke pauses");
+  assert.deepEqual([registry.usage.settleHold(), desired(registry, a)], [null, "paused"], "the pylon the lost hold woke pauses");
   const { counter } = backfill(t, registry);
   await delay(50);
   assert.deepEqual(counter.reads, [], "a pylon running from a wake no settle holds is not read");
@@ -506,7 +506,7 @@ test("a control plane restarted while a settle holds a pylon lets it pause, and 
   await settling(registry, a, "reading");
   observe(registry, n1, [[a.pylonId, "running"]]);
   await settling(registry, a, "pausing");
-  assert.ok(registry.thread(a.id)!.usageSettledAt !== undefined);
+  assert.ok(registry.threads.thread(a.id)!.usageSettledAt !== undefined);
 });
 
 test("a settle's read that an unarchive and a new archive overtook settles neither archive, and the new one is read again", async (t) => {
@@ -524,18 +524,18 @@ test("a settle's read that an unarchive and a new archive overtook settles neith
   await settling(registry, a, "reading");
   observe(registry, n1, [[a.pylonId, "running"]]);
   await until("the settle reads it", () => counter.reads.length, (n) => n === 1);
-  registry.setThreadStatus(a.id, "idle");
+  registry.threads.setThreadStatus(a.id, "idle");
   now = 2_000;
-  registry.setThreadStatus(a.id, "archived");
+  registry.threads.setThreadStatus(a.id, "archived");
   reading.resolve();
   await settling(registry, a, "pausing");
-  assert.equal(registry.thread(a.id)!.usageSettledAt, undefined, "a turn may have run between the archives");
+  assert.equal(registry.threads.thread(a.id)!.usageSettledAt, undefined, "a turn may have run between the archives");
   observe(registry, n1, [[a.pylonId, "stopped"]]);
   await released(registry);
   await settling(registry, a, "reading");
   observe(registry, n1, [[a.pylonId, "running"]]);
   await settling(registry, a, "pausing");
-  assert.notEqual(registry.thread(a.id)!.usageSettledAt, undefined, "a read after the new archive settles it");
+  assert.notEqual(registry.threads.thread(a.id)!.usageSettledAt, undefined, "a read after the new archive settles it");
 });
 
 test("after a restart lost a settle's hold, no other pylon is woken until the one it woke has paused", async (t) => {
@@ -554,7 +554,7 @@ test("after a restart lost a settle's hold, no other pylon is woken until the on
   observe(registry, n2, [[b.pylonId, "stopped"]]);
   const { woken } = backfill(t, registry);
   await delay(50);
-  assert.deepEqual([registry.settleHold(), woken], [null, []], "the pylon the lost hold woke is still up");
+  assert.deepEqual([registry.usage.settleHold(), woken], [null, []], "the pylon the lost hold woke is still up");
   observe(registry, n1, [[a.pylonId, "stopped"]]);
   await settling(registry, a, "reading");
 });
@@ -571,10 +571,10 @@ test("a thread unarchived while its settle waits to seal its pylon is not sealed
   await settling(registry, a, "reading");
   observe(registry, n1, [[a.pylonId, "running"]]);
   await until("the settle waits on the read before it", () => counter.reads, (r) => r.length === 1);
-  registry.setThreadStatus(a.id, "idle");
+  registry.threads.setThreadStatus(a.id, "idle");
   earlier.resolve();
-  await until("the settle gives up", () => registry.settleHold(), (h) => h?.phase !== "reading");
-  assert.deepEqual([counter.sealed, registry.sealedBoot(a.pylonId)], [[], undefined], "an unarchived thread's pylon is never sealed");
+  await until("the settle gives up", () => registry.usage.settleHold(), (h) => h?.phase !== "reading");
+  assert.deepEqual([counter.sealed, registry.threads.sealedBoot(a.pylonId)], [[], undefined], "an unarchived thread's pylon is never sealed");
   observe(registry, n1, [[a.pylonId, "since archive"]]);
   await released(registry);
 
@@ -583,7 +583,7 @@ test("a thread unarchived while its settle waits to seal its pylon is not sealed
   await settling(registry, b, "reading");
   observe(registry, n2, [[b.pylonId, "running"]]);
   await settling(registry, b, "pausing");
-  assert.deepEqual([counter.sealed, registry.sealedBoot(b.pylonId)], [[b.id], "2027-01-01T00:00:00Z"], "the boot it sealed is recorded");
+  assert.deepEqual([counter.sealed, registry.threads.sealedBoot(b.pylonId)], [[b.id], "2027-01-01T00:00:00Z"], "the boot it sealed is recorded");
 });
 
 test("a run wakes nothing while a pylon a restart's lost settle woke is still up, and goes on once it paused", async (t) => {
@@ -604,7 +604,7 @@ test("a run wakes nothing while a pylon a restart's lost settle woke is still up
   job.start();
   await delay(50);
   assert.deepEqual([current(registry), woken], [null, []], "the run waits for the pylon up for reading");
-  assert.equal(registry.thread(a.id)!.settleWaiting, undefined, "the archive whose pylon is up is the one it waits for");
+  assert.equal(registry.threads.thread(a.id)!.settleWaiting, undefined, "the archive whose pylon is up is the one it waits for");
   observe(registry, n1, [[a.pylonId, "stopped"]]);
   await settling(registry, a, "reading");
   observe(registry, n1, [[a.pylonId, "running"]]);
@@ -623,9 +623,9 @@ test("a pylon stuck up for reading holds the settles back only for the pause's t
   const job = polled(usageBackfill({ registry, counter: fakeCounter(registry), wake: () => {}, intervalMs: 5, pauseMs: 200, log: (m) => logs.push(m) }));
   t.after(() => job.close());
   await delay(50);
-  assert.equal(registry.settleHold(), null);
-  assert.match(registry.thread(next.id)!.settleWaiting!, new RegExp(`${stuck.pylonId} on rj-firebat is up for reading`));
-  assert.match(diskKept(registry.thread(next.id)!)!, /Its next read waits, as .* is up for reading, and one pylon is woken at a time/);
+  assert.equal(registry.usage.settleHold(), null);
+  assert.match(registry.threads.thread(next.id)!.settleWaiting!, new RegExp(`${stuck.pylonId} on rj-firebat is up for reading`));
+  assert.match(diskKept(registry.threads.thread(next.id)!)!, /Its next read waits, as .* is up for reading, and one pylon is woken at a time/);
   await settling(registry, next, "reading");
   assert.ok(logs.some((m) => m.includes(`${stuck.pylonId} has been up for reading`)), "the pylon it stopped waiting for is logged");
 });
@@ -637,8 +637,8 @@ test("an archive whose settle waits says why: its node is offline, or has no roo
   observe(registry, n2, [[full.pylonId, "stopped"]], {}, { total: 64, committed: 60 });
   registry.markOffline(n1);
   backfill(t, registry);
-  await until("both record why they wait", () => [offline, full].map((x) => registry.thread(x.id)!.settleWaiting), (w) => w.every((r) => r !== undefined));
-  assert.equal(registry.thread(offline.id)!.settleWaiting, "rj-firebat is offline");
-  assert.match(registry.thread(full.id)!.settleWaiting!, /^infra-testbench would have .* GiB of memory left with it up/);
-  assert.equal(registry.settleHold(), null);
+  await until("both record why they wait", () => [offline, full].map((x) => registry.threads.thread(x.id)!.settleWaiting), (w) => w.every((r) => r !== undefined));
+  assert.equal(registry.threads.thread(offline.id)!.settleWaiting, "rj-firebat is offline");
+  assert.match(registry.threads.thread(full.id)!.settleWaiting!, /^infra-testbench would have .* GiB of memory left with it up/);
+  assert.equal(registry.usage.settleHold(), null);
 });

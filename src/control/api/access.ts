@@ -94,7 +94,7 @@ const statusNeeds: Readonly<Record<"kept" | "open" | "pylon" | "active", { refus
 };
 interface Need { status?: keyof typeof statusNeeds; agent?: "harness" | "claude" }
 
-export const threadWaker = (registry: Pick<Registry, "pylon">, wake: (node: NodeName) => void) => (t: Pick<Thread, "pylonId">) => wake(registry.pylon(t.pylonId)!.node);
+export const threadWaker = (registry: Pick<Registry, "threads">, wake: (node: NodeName) => void) => (t: Pick<Thread, "pylonId">) => wake(registry.threads.pylon(t.pylonId)!.node);
 
 export function apiAccess(registry: Registry, wake: (node: NodeName) => void, options: { deployment?: Deployment | undefined; allowed: ReadonlySet<TailnetNodeId> }) {
   /**
@@ -119,9 +119,9 @@ export function apiAccess(registry: Registry, wake: (node: NodeName) => void, op
 
   /** The thread `id` names, or the queue record of one that has not started, which has no row. */
   function lookup(id: string): { thread: Thread } | { queued: QueuedRecord } {
-    const found = registry.thread(id as ThreadId);
+    const found = registry.threads.thread(id as ThreadId);
     if (found !== undefined) return { thread: found };
-    const queued = registry.queuedThread(id as ThreadId);
+    const queued = registry.queue.queuedThread(id as ThreadId);
     if (queued !== undefined && queued.status !== "started") return { queued };
     throw new HttpError(404, `no thread ${id}`);
   }
@@ -136,7 +136,7 @@ export function apiAccess(registry: Registry, wake: (node: NodeName) => void, op
   function threadRefusal(t: Thread, need: Need): string | null {
     const status = need.status === undefined ? undefined : statusNeeds[need.status];
     if (status?.refuses.includes(t.status)) return `thread ${t.id} is ${t.status}${status.paused ? ", so its pylon stays paused" : ""}`;
-    if (need.agent === undefined || registry.agent(t).kind === need.agent) return null;
+    if (need.agent === undefined || registry.threads.agent(t).kind === need.agent) return null;
     return need.agent === "claude" ? `thread ${t.id} has no Claude worker` : noConversation(t);
   }
 
@@ -147,7 +147,7 @@ export function apiAccess(registry: Registry, wake: (node: NodeName) => void, op
   }
 
   /** The thread with its status now, which a request that waited may have seen change. */
-  const current = (t: Thread): Thread => ({ ...t, status: registry.threadStatus(t.id)! });
+  const current = (t: Thread): Thread => ({ ...t, status: registry.threads.threadStatus(t.id)! });
 
   return { lookup, thread, threadRefusal, guard, current, wakeThread: threadWaker(registry, wake), roleOf };
 }

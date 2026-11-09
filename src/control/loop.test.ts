@@ -307,16 +307,16 @@ test("a thread's pylon follows its thread: spawn, pause on archive, resume on ac
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   assert.equal(registry.node(node)?.state, "online");
 
-  registry.setThreadStatus(thread.id, "archived");
+  registry.threads.setThreadStatus(thread.id, "archived");
   await until("the pylon is paused", () => fake.pylons.get(thread.pylonId)?.phase === "stopped");
-  await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1);
+  await until("the pause is folded in", () => registry.threads.pylon(thread.pylonId)?.pauses === 1);
 
-  registry.setThreadStatus(thread.id, "active");
-  registry.recordActivity(thread.id, { human: Date.now() });
+  registry.threads.setThreadStatus(thread.id, "active");
+  registry.threads.recordActivity(thread.id, { human: Date.now() });
   await until("the pylon runs again", () => fake.pylons.get(thread.pylonId)?.phase === "running");
 
-  registry.setThreadStatus(thread.id, "deleted");
-  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.pylon(thread.pylonId)?.submitted === null);
+  registry.threads.setThreadStatus(thread.id, "deleted");
+  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.threads.pylon(thread.pylonId)?.submitted === null);
 
   assert.deepEqual(fake.submitted.map((job) => job.kind === "spawn" ? `spawn ${job.boot.source.kind}` : job.kind), ["spawn fresh", "pause", "spawn resume", "delete"]);
   const resume = fake.submitted[2]!;
@@ -336,12 +336,12 @@ function shiftedRegistry(path = tempDb()) {
  */
 async function archivedAgo(registry: Registry, shift: { ms: number }, thread: Thread, ms: number, read = true) {
   shift.ms = -ms;
-  registry.setThreadStatus(thread.id, "archived");
+  registry.threads.setThreadStatus(thread.id, "archived");
   shift.ms = 0;
   if (!read) return;
-  const archivedAt = registry.thread(thread.id)!.archivedAt!;
-  registry.finishSettle(thread.id, null, archivedAt + 1);
-  registry.recordBackedUp(archivedAt + 2);
+  const archivedAt = registry.threads.thread(thread.id)!.archivedAt!;
+  registry.usage.finishSettle(thread.id, null, archivedAt + 1);
+  registry.threads.recordBackedUp(archivedAt + 2);
 }
 
 test("a pylon archived 23h59m ago only pauses, and no pass deletes it", async (t) => {
@@ -366,22 +366,22 @@ test("a pylon archived 24 hours ago keeps its disk until its usage was read to t
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
 
   await archivedAgo(registry, shift, thread, archivedDiskMs, false);
-  registry.recordBackedUp(Date.now());
+  registry.threads.recordBackedUp(Date.now());
   await until("the pylon is paused", () => fake.pylons.get(thread.pylonId)?.phase === "stopped");
   for (let i = 0; i < 5; i++) await settled(fake, loop);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause"], "a backup of numbers never read from its disk keeps it");
 
   const read = Date.now() + 10;
-  registry.finishSettle(thread.id, null, read);
-  registry.recordBackedUp(read);
+  registry.usage.finishSettle(thread.id, null, read);
+  registry.threads.recordBackedUp(read);
   for (let i = 0; i < 5; i++) await settled(fake, loop);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause"], "a backup that began as the read ended may not hold its numbers");
   assert.equal(fake.pylons.get(thread.pylonId)?.phase, "stopped");
 
-  registry.recordBackedUp(read + 1);
-  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.pylon(thread.pylonId)?.submitted === null);
+  registry.threads.recordBackedUp(read + 1);
+  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.threads.pylon(thread.pylonId)?.submitted === null);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "delete"]);
-  assert.equal(registry.thread(thread.id)?.status, "archived");
+  assert.equal(registry.threads.thread(thread.id)?.status, "archived");
 });
 
 test("a pylon whose archive's last read was missed is woken for reading once paused, read whole, paused again, and deleted after a backup that began after the read", async (t) => {
@@ -400,7 +400,7 @@ test("a pylon whose archive's last read was missed is woken for reading once pau
   };
   const settler = polled(usageBackfill({ registry, counter: { readWhole }, wake: (n) => void loop.wake(n), intervalMs: 10, log: () => {} }));
   t.after(() => settler.close());
-  await until("the settle lets go of the pylon it read", () => registry.thread(thread.id)?.usageSettledAt !== undefined && registry.settleHold() === null);
+  await until("the settle lets go of the pylon it read", () => registry.threads.thread(thread.id)?.usageSettledAt !== undefined && registry.usage.settleHold() === null);
   await settler.close();
   assert.deepEqual(reads, [`${thread.id} running`]);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume", "pause"]);
@@ -409,8 +409,8 @@ test("a pylon whose archive's last read was missed is woken for reading once pau
   for (let i = 0; i < 3; i++) await settled(fake, loop);
   assert.equal(fake.pylons.get(thread.pylonId)?.phase, "stopped", "no backup began after the read yet");
 
-  registry.recordBackedUp(registry.thread(thread.id)!.usageSettledAt! + 1);
-  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.pylon(thread.pylonId)?.submitted === null);
+  registry.threads.recordBackedUp(registry.threads.thread(thread.id)!.usageSettledAt! + 1);
+  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.threads.pylon(thread.pylonId)?.submitted === null);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume", "pause", "delete"]);
 });
 
@@ -421,20 +421,20 @@ test("a boot a settle sealed is paused before an unarchive runs work on it, thou
   const loop = run(t, registry, fake.probe);
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   await archivedAgo(registry, shift, thread, 60_000, false);
-  await until("the pylon is paused", () => fake.pylons.get(thread.pylonId)?.phase === "stopped" && registry.pylon(thread.pylonId)?.submitted === null);
-  registry.holdSettle(thread.id, Date.now());
+  await until("the pylon is paused", () => fake.pylons.get(thread.pylonId)?.phase === "stopped" && registry.threads.pylon(thread.pylonId)?.submitted === null);
+  registry.usage.holdSettle(thread.id, Date.now());
   void loop.wake(firebat);
-  await until("the pylon is woken for reading", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.pylon(thread.pylonId)?.submitted === null);
+  await until("the pylon is woken for reading", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.threads.pylon(thread.pylonId)?.submitted === null);
   const sealed = fake.pylons.get(thread.pylonId) as Extract<PylonObservation, { phase: "running" }>;
-  registry.sealBoot(thread.pylonId, sealed.bootedAt);
-  registry.releaseUsageHold({ by: "settle" });
+  registry.threads.sealBoot(thread.pylonId, sealed.bootedAt);
+  registry.usage.releaseUsageHold({ by: "settle" });
 
-  registry.setThreadStatus(thread.id, "active");
-  registry.apply({ record: "activity", pylonId: thread.pylonId, human: Date.now(), agent: null });
+  registry.threads.setThreadStatus(thread.id, "active");
+  registry.threads.apply({ record: "activity", pylonId: thread.pylonId, human: Date.now(), agent: null });
   void loop.wake(firebat);
   await until("the pylon runs on a new boot", () => {
     const o = fake.pylons.get(thread.pylonId);
-    return o?.phase === "running" && o.bootedAt !== sealed.bootedAt && registry.pylon(thread.pylonId)?.submitted === null;
+    return o?.phase === "running" && o.bootedAt !== sealed.bootedAt && registry.threads.pylon(thread.pylonId)?.submitted === null;
   });
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume", "pause", "spawn resume"], "the sealed boot pauses before any spawn brings work back");
   const wake = fake.submitted[4]!;
@@ -448,18 +448,18 @@ test("a failed archived pylon, whose usage cannot be read, is deleted 24 hours a
   const loop = run(t, registry, fake.probe);
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   await archivedAgo(registry, shift, thread, archivedDiskMs, false);
-  await until("the pylon is paused", () => fake.pylons.get(thread.pylonId)?.phase === "stopped" && registry.pylon(thread.pylonId)?.submitted === null);
-  registry.savePylon({ ...registry.pylon(thread.pylonId)!, failed: "gave up after 5 failed attempts, the last with backend: boom" });
+  await until("the pylon is paused", () => fake.pylons.get(thread.pylonId)?.phase === "stopped" && registry.threads.pylon(thread.pylonId)?.submitted === null);
+  registry.threads.savePylon({ ...registry.threads.pylon(thread.pylonId)!, failed: "gave up after 5 failed attempts, the last with backend: boom" });
   for (let i = 0; i < 3; i++) await settled(fake, loop);
   assert.equal(fake.pylons.get(thread.pylonId)?.phase, "stopped", "until a settle finds its usage cannot be read, the disk stays");
 
   const reads: string[] = [];
   const settler = polled(usageBackfill({ registry, counter: { readWhole: async (id) => { reads.push(id); return { calls: 0, tokens: 0 }; } }, wake: (n) => void loop.wake(n), intervalMs: 10, log: () => {} }));
   t.after(() => settler.close());
-  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.pylon(thread.pylonId)?.submitted === null);
+  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.threads.pylon(thread.pylonId)?.submitted === null);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "delete"]);
   for (let i = 0; i < 3; i++) await settled(fake, loop);
-  const kept = registry.thread(thread.id)!;
+  const kept = registry.threads.thread(thread.id)!;
   assert.deepEqual([reads, kept.usageSettledAt, kept.settleFailure, kept.backedUpAt], [[], undefined, undefined, undefined], "no read, no settle and no backup came first");
   assert.equal(kept.usageUnread, "its pylon failed: gave up after 5 failed attempts, the last with backend: boom", "the loss stays on record once the disk is gone");
 });
@@ -470,20 +470,20 @@ test("a pylon archived 24 hours ago is deleted, its thread and conversation kept
   seedRegistry(registry, { nodes: [node] });
   const thread = addThread(registry, { node, boot: { image }, thread: { conversationId: "conv-1" as Thread["conversationId"] } });
   const entries = [{ kind: "reply" as const, at: 1, text: "kept" }];
-  assert.ok(registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt: 1 }));
+  assert.ok(registry.threads.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt: 1 }));
   const fake = fakeNode({ autoFinish: true });
   const first = polled(startLoop({ registry, probes: [fake.probe], ingest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail }));
   t.after(() => first.close());
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
 
   await archivedAgo(registry, shift, thread, archivedDiskMs);
-  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.pylon(thread.pylonId)?.submitted === null);
+  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.threads.pylon(thread.pylonId)?.submitted === null);
   await first.close();
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "delete"]);
-  const kept = registry.thread(thread.id)!;
+  const kept = registry.threads.thread(thread.id)!;
   assert.deepEqual([kept.status, kept.conversationId], ["archived", "conv-1"]);
-  assert.deepEqual(registry.claudeEntries(thread.id), entries);
-  assert.deepEqual(registry.claudeTranscript(thread.id)?.cursor, transcriptStart, "the session's new transcript reads from its start");
+  assert.deepEqual(registry.threads.claudeEntries(thread.id), entries);
+  assert.deepEqual(registry.threads.claudeTranscript(thread.id)?.cursor, transcriptStart, "the session's new transcript reads from its start");
   registry.close();
 
   const after = openRegistry(path);
@@ -491,11 +491,11 @@ test("a pylon archived 24 hours ago is deleted, its thread and conversation kept
   for (let i = 0; i < 3; i++) await settled(fake, loop);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "delete"], "a restarted control plane sends nothing more");
 
-  after.setThreadStatus(thread.id, "active");
-  after.recordActivity(thread.id, { human: Date.now() });
+  after.threads.setThreadStatus(thread.id, "active");
+  after.threads.recordActivity(thread.id, { human: Date.now() });
   await until("the pylon runs again", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "delete", "spawn fresh"]);
-  assert.equal(after.thread(thread.id)?.status, "active");
+  assert.equal(after.threads.thread(thread.id)?.status, "active");
 });
 
 test("a pylon unarchived 23h59m after its archive is never deleted", async (t) => {
@@ -507,8 +507,8 @@ test("a pylon unarchived 23h59m after its archive is never deleted", async (t) =
 
   await archivedAgo(registry, shift, thread, archivedDiskMs - 60_000);
   await until("the pylon is paused", () => fake.pylons.get(thread.pylonId)?.phase === "stopped");
-  registry.setThreadStatus(thread.id, "active");
-  registry.recordActivity(thread.id, { human: Date.now() });
+  registry.threads.setThreadStatus(thread.id, "active");
+  registry.threads.recordActivity(thread.id, { human: Date.now() });
   await until("the pylon runs again", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   for (let i = 0; i < 3; i++) await settled(fake, loop);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume"]);
@@ -531,17 +531,17 @@ test("an unarchive while a pass waits on the probe gets no delete, though the pa
     },
   };
   const loop = run(t, registry, probe, { intervalMs: 600_000 });
-  await until("the pylon runs", () => { void loop.wake(node); return fake.pylons.get(thread.pylonId)?.phase === "running" && registry.pylon(thread.pylonId)?.submitted === null; });
+  await until("the pylon runs", () => { void loop.wake(node); return fake.pylons.get(thread.pylonId)?.phase === "running" && registry.threads.pylon(thread.pylonId)?.submitted === null; });
   await settled(fake, loop);
 
   // An envelope the probe never took, as a control plane that died mid-submit leaves, sends the pass to the probe.
-  registry.savePylon({ ...registry.pylon(thread.pylonId)!, submitted: envelope({ kind: "pause", pylonId: thread.pylonId, checkpoint: `ckpt-${thread.id}-1` }, node, Date.now() - 60_000) });
+  registry.threads.savePylon({ ...registry.threads.pylon(thread.pylonId)!, submitted: envelope({ kind: "pause", pylonId: thread.pylonId, checkpoint: `ckpt-${thread.id}-1` }, node, Date.now() - 60_000) });
   await archivedAgo(registry, shift, thread, archivedDiskMs);
   hold = Promise.withResolvers();
   const pass = loop.wake(node);
   await began.promise;
-  registry.setThreadStatus(thread.id, "active");
-  registry.recordActivity(thread.id, { human: Date.now() });
+  registry.threads.setThreadStatus(thread.id, "active");
+  registry.threads.recordActivity(thread.id, { human: Date.now() });
   hold.resolve();
   await pass;
   await settled(fake, loop);
@@ -553,22 +553,22 @@ test("a thread unarchived while its pylon's delete runs boots fresh, its Claude 
   const { registry, shift } = shiftedRegistry();
   const thread = seed(registry);
   const entries = [{ kind: "reply" as const, at: 1, text: "kept" }];
-  assert.ok(registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt: 1 }));
+  assert.ok(registry.threads.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt: 1 }));
   const fake = fakeNode({ autoFinish: false });
   run(t, registry, fake.probe);
   await until("the spawn runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!);
-  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.pylon(thread.pylonId)?.submitted === null);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.threads.pylon(thread.pylonId)?.submitted === null);
 
   await archivedAgo(registry, shift, thread, archivedDiskMs);
   await until("the delete runs", () => fake.running().length === 1);
-  registry.setThreadStatus(thread.id, "active");
-  registry.recordActivity(thread.id, { human: Date.now() });
+  registry.threads.setThreadStatus(thread.id, "active");
+  registry.threads.recordActivity(thread.id, { human: Date.now() });
   fake.finish(fake.running()[0]!);
   await until("the fresh spawn runs", () => fake.running().length === 1);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "delete", "spawn fresh"]);
-  assert.deepEqual(registry.claudeTranscript(thread.id)?.cursor, transcriptStart);
-  assert.deepEqual(registry.claudeEntries(thread.id), entries);
+  assert.deepEqual(registry.threads.claudeTranscript(thread.id)?.cursor, transcriptStart);
+  assert.deepEqual(registry.threads.claudeEntries(thread.id), entries);
 });
 
 test("only a failed pylon whose archived disk was deleted loses its failure and boots fresh on unarchive", async (t) => {
@@ -576,7 +576,7 @@ test("only a failed pylon whose archived disk was deleted loses its failure and 
   seedRegistry(registry, { nodes: [node] });
   const add = (id: string) => {
     const thread = addThread(registry, { node, boot: { image }, thread: { id: id as Thread["id"] } });
-    registry.savePylon({ ...registry.pylon(thread.pylonId)!, failed: "gave up after 5 failed attempts" });
+    registry.threads.savePylon({ ...registry.threads.pylon(thread.pylonId)!, failed: "gave up after 5 failed attempts" });
     return thread;
   };
   const deleted = add("th-deleted");
@@ -588,12 +588,12 @@ test("only a failed pylon whose archived disk was deleted loses its failure and 
   const fake = fakeNode({ autoFinish: true });
   for (const { pylonId } of [deleted, recent]) fake.pylons.set(pylonId, { pylonId, phase: "broken", detail: "setup failed", cause: "services", logTail: "" });
   const loop = run(t, registry, fake.probe);
-  await until("the disk's delete is folded in", () => !fake.pylons.has(deleted.pylonId) && registry.pylon(deleted.pylonId)?.submitted === null);
-  assert.equal(registry.pylon(deleted.pylonId)?.failed, null);
+  await until("the disk's delete is folded in", () => !fake.pylons.has(deleted.pylonId) && registry.threads.pylon(deleted.pylonId)?.submitted === null);
+  assert.equal(registry.threads.pylon(deleted.pylonId)?.failed, null);
 
   for (const thread of [deleted, diskless, recent]) {
-    registry.setThreadStatus(thread.id, "active");
-    registry.recordActivity(thread.id, { human: Date.now() });
+    registry.threads.setThreadStatus(thread.id, "active");
+    registry.threads.recordActivity(thread.id, { human: Date.now() });
   }
   await until("the deleted pylon boots fresh", () => fake.pylons.get(deleted.pylonId)?.phase === "running");
   for (let i = 0; i < 3; i++) await settled(fake, loop);
@@ -601,7 +601,7 @@ test("only a failed pylon whose archived disk was deleted loses its failure and 
   assert.deepEqual(jobsOf(deleted.pylonId), ["delete", "spawn fresh"]);
   for (const kept of [diskless, recent]) {
     assert.deepEqual(jobsOf(kept.pylonId), [], `${kept.id} gets no job`);
-    assert.equal(registry.pylon(kept.pylonId)?.failed, "gave up after 5 failed attempts", `${kept.id} keeps its failure`);
+    assert.equal(registry.threads.pylon(kept.pylonId)?.failed, "gave up after 5 failed attempts", `${kept.id} keeps its failure`);
   }
 });
 
@@ -609,17 +609,17 @@ test("a fresh spawn the disk delete did not cause, as a retry of a failed setup,
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
   const cursor = { ...transcriptStart, offset: 9 };
-  assert.ok(registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries: [], cursor, reset: false, readAt: 1 }));
+  assert.ok(registry.threads.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries: [], cursor, reset: false, readAt: 1 }));
   const fake = fakeNode({ autoFinish: false });
   const loop = run(t, registry, fake.probe, { log: () => {} });
   await until("the spawn runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 1));
-  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
-  assert.equal(registry.retryPylon(thread.pylonId), true);
+  await until("the planner gives up", () => registry.threads.pylon(thread.pylonId)?.failed !== null);
+  assert.equal(registry.threads.retryPylon(thread.pylonId), true);
   void loop.wake(node);
   await until("a fresh spawn runs", () => fake.running().length === 1 && fake.submitted.length === 2);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "spawn fresh"]);
-  assert.deepEqual(registry.claudeTranscript(thread.id)?.cursor, cursor);
+  assert.deepEqual(registry.threads.claudeTranscript(thread.id)?.cursor, cursor);
 });
 
 test("a disk delete the probe forgot across a control-plane and probe restart still keeps the Claude entries and clears the failure", async (t) => {
@@ -627,19 +627,19 @@ test("a disk delete the probe forgot across a control-plane and probe restart st
   const { registry, shift } = shiftedRegistry(path);
   const thread = seed(registry);
   const entries = [{ kind: "reply" as const, at: 1, text: "kept" }];
-  assert.ok(registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt: 1 }));
+  assert.ok(registry.threads.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt: 1 }));
   const fake = fakeNode({ autoFinish: false });
   const first = polled(startLoop({ registry, probes: [fake.probe], ingest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail }));
   t.after(() => first.close());
   await until("the spawn runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!);
-  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.pylon(thread.pylonId)?.submitted === null);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.threads.pylon(thread.pylonId)?.submitted === null);
   const failure = { at: 1, code: "backend" as const, message: "boom" };
-  registry.savePylon({ ...registry.pylon(thread.pylonId)!, failed: "gave up after 5 failed attempts", attempts: { count: 5, last: failure } });
+  registry.threads.savePylon({ ...registry.threads.pylon(thread.pylonId)!, failed: "gave up after 5 failed attempts", attempts: { count: 5, last: failure } });
 
   await archivedAgo(registry, shift, thread, archivedDiskMs);
   await until("the delete runs", () => fake.running().length === 1);
-  assert.notEqual(registry.diskDeleteRequestedAt(thread.pylonId), undefined);
+  assert.notEqual(registry.threads.diskDeleteRequestedAt(thread.pylonId), undefined);
   await first.close();
   registry.close();
   fake.finish(fake.running()[0]!);
@@ -648,25 +648,25 @@ test("a disk delete the probe forgot across a control-plane and probe restart st
 
   const after = openRegistry(path);
   // The outage outlasted the probe's retention, so the envelope's 30 s are long past as well.
-  const stale = after.pylon(thread.pylonId)!;
-  after.savePylon({ ...stale, submitted: { ...stale.submitted!, notAfter: new Date(Date.now() - 600_000).toISOString() } });
+  const stale = after.threads.pylon(thread.pylonId)!;
+  after.threads.savePylon({ ...stale, submitted: { ...stale.submitted!, notAfter: new Date(Date.now() - 600_000).toISOString() } });
   run(t, after, fake.probe);
-  await until("the disk delete is finished", () => after.diskDeleteRequestedAt(thread.pylonId) === undefined && after.pylon(thread.pylonId)?.submitted === null);
-  assert.equal(after.pylon(thread.pylonId)?.failed, null);
-  assert.deepEqual(after.pylon(thread.pylonId)?.attempts, { count: 0, last: null }, "the deleted disk's failed attempts go with it");
-  assert.deepEqual(after.claudeTranscript(thread.id)?.cursor, transcriptStart);
-  after.setThreadStatus(thread.id, "active");
-  after.recordActivity(thread.id, { human: Date.now() });
+  await until("the disk delete is finished", () => after.threads.diskDeleteRequestedAt(thread.pylonId) === undefined && after.threads.pylon(thread.pylonId)?.submitted === null);
+  assert.equal(after.threads.pylon(thread.pylonId)?.failed, null);
+  assert.deepEqual(after.threads.pylon(thread.pylonId)?.attempts, { count: 0, last: null }, "the deleted disk's failed attempts go with it");
+  assert.deepEqual(after.threads.claudeTranscript(thread.id)?.cursor, transcriptStart);
+  after.threads.setThreadStatus(thread.id, "active");
+  after.threads.recordActivity(thread.id, { human: Date.now() });
   await until("the fresh spawn runs", () => fake.running().length === 1);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "delete", "spawn fresh"]);
-  assert.deepEqual(after.claudeEntries(thread.id), entries);
+  assert.deepEqual(after.threads.claudeEntries(thread.id), entries);
 });
 
 test("an unarchive before the disk's delete ran keeps the old disk and the transcript's read, and a disk that never stopped keeps the disk delete", async (t) => {
   const { registry, shift } = shiftedRegistry();
   const thread = seed(registry);
   const cursor = { ...transcriptStart, offset: 9 };
-  assert.ok(registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries: [], cursor, reset: false, readAt: 1 }));
+  assert.ok(registry.threads.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries: [], cursor, reset: false, readAt: 1 }));
   const fake = fakeNode({ autoFinish: true });
   let refused = 0;
   const probe: ProbeClient = {
@@ -681,15 +681,15 @@ test("an unarchive before the disk's delete ran keeps the old disk and the trans
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
 
   await archivedAgo(registry, shift, thread, archivedDiskMs);
-  await until("the delete is refused", () => refused > 0 && registry.pylon(thread.pylonId)?.submitted === null);
-  assert.notEqual(registry.diskDeleteRequestedAt(thread.pylonId), undefined);
-  registry.setThreadStatus(thread.id, "active");
-  registry.recordActivity(thread.id, { human: Date.now() });
+  await until("the delete is refused", () => refused > 0 && registry.threads.pylon(thread.pylonId)?.submitted === null);
+  assert.notEqual(registry.threads.diskDeleteRequestedAt(thread.pylonId), undefined);
+  registry.threads.setThreadStatus(thread.id, "active");
+  registry.threads.recordActivity(thread.id, { human: Date.now() });
   for (let i = 0; i < 3; i++) await settled(fake, loop);
-  assert.notEqual(registry.diskDeleteRequestedAt(thread.pylonId), undefined, "a boot from before the request proves nothing");
+  assert.notEqual(registry.threads.diskDeleteRequestedAt(thread.pylonId), undefined, "a boot from before the request proves nothing");
   assert.equal(fake.pylons.get(thread.pylonId)?.phase, "running", "the old disk stays");
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh"]);
-  assert.deepEqual(registry.claudeTranscript(thread.id)?.cursor, cursor);
+  assert.deepEqual(registry.threads.claudeTranscript(thread.id)?.cursor, cursor);
 });
 
 for (const listed of ["stopped", "running"] as const) {
@@ -698,13 +698,13 @@ test(`a stale ${listed} listing of a pylon whose delete the probe forgot keeps t
   const { registry, shift } = shiftedRegistry(path);
   const thread = seed(registry);
   const entries = [{ kind: "reply" as const, at: 1, text: "kept" }];
-  assert.ok(registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt: 1 }));
+  assert.ok(registry.threads.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt: 1 }));
   const fake = fakeNode({ autoFinish: false });
   const first = polled(startLoop({ registry, probes: [fake.probe], ingest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail }));
   t.after(() => first.close());
   await until("the spawn runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!);
-  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.pylon(thread.pylonId)?.submitted === null);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.threads.pylon(thread.pylonId)?.submitted === null);
   await archivedAgo(registry, shift, thread, archivedDiskMs);
   await until("the delete runs", () => fake.running().length === 1);
   await first.close();
@@ -715,21 +715,21 @@ test(`a stale ${listed} listing of a pylon whose delete the probe forgot keeps t
   // As the reviewer synthesized: the node still lists the pylon whose delete it ran and forgot.
   fake.pylons.set(thread.pylonId, listed === "stopped" ? stoppedPylon(thread.pylonId, { checkpoint: `ckpt-${thread.id}-1` }) : runningPylon(thread.pylonId, { bootedAt: new Date(0).toISOString() }));
   const after = openRegistry(path);
-  const stale = after.pylon(thread.pylonId)!;
-  after.savePylon({ ...stale, submitted: { ...stale.submitted!, notAfter: new Date(Date.now() - 600_000).toISOString() } });
-  after.setThreadStatus(thread.id, "active");
-  after.recordActivity(thread.id, { human: Date.now() });
+  const stale = after.threads.pylon(thread.pylonId)!;
+  after.threads.savePylon({ ...stale, submitted: { ...stale.submitted!, notAfter: new Date(Date.now() - 600_000).toISOString() } });
+  after.threads.setThreadStatus(thread.id, "active");
+  after.threads.recordActivity(thread.id, { human: Date.now() });
   const loop = run(t, after, fake.probe);
   if (listed === "stopped") await until("the resume is sent", () => fake.running().length === 1);
   for (let i = 0; i < 3; i++) await settled(fake, loop);
-  assert.notEqual(after.diskDeleteRequestedAt(thread.pylonId), undefined, "a listing alone keeps the disk delete");
-  assert.deepEqual(after.claudeTranscript(thread.id)?.cursor, { ...transcriptStart, offset: 9 });
+  assert.notEqual(after.threads.diskDeleteRequestedAt(thread.pylonId), undefined, "a listing alone keeps the disk delete");
+  assert.deepEqual(after.threads.claudeTranscript(thread.id)?.cursor, { ...transcriptStart, offset: 9 });
 
   fake.pylons.delete(thread.pylonId);
   fake.announce();
-  await until("the disk delete is finished", () => after.diskDeleteRequestedAt(thread.pylonId) === undefined);
-  assert.deepEqual(after.claudeTranscript(thread.id)?.cursor, transcriptStart);
-  assert.deepEqual(after.claudeEntries(thread.id), entries);
+  await until("the disk delete is finished", () => after.threads.diskDeleteRequestedAt(thread.pylonId) === undefined);
+  assert.deepEqual(after.threads.claudeTranscript(thread.id)?.cursor, transcriptStart);
+  assert.deepEqual(after.threads.claudeEntries(thread.id), entries);
 });
 }
 
@@ -737,7 +737,7 @@ test("an old disk resumed after an unarchive before the disk's delete ran drops 
   const { registry, shift } = shiftedRegistry();
   const thread = seed(registry);
   const cursor = { ...transcriptStart, offset: 9 };
-  assert.ok(registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries: [], cursor, reset: false, readAt: 1 }));
+  assert.ok(registry.threads.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries: [], cursor, reset: false, readAt: 1 }));
   const fake = fakeNode({ autoFinish: false });
   let refused = 0;
   const probe: ProbeClient = {
@@ -751,27 +751,27 @@ test("an old disk resumed after an unarchive before the disk's delete ran drops 
   const loop = run(t, registry, probe);
   await until("the spawn runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!);
-  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.pylon(thread.pylonId)?.submitted === null);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.threads.pylon(thread.pylonId)?.submitted === null);
   await archivedAgo(registry, shift, thread, archivedDiskMs - 60_000);
   await until("the pause runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!);
-  await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1);
+  await until("the pause is folded in", () => registry.threads.pylon(thread.pylonId)?.pauses === 1);
 
-  registry.setThreadStatus(thread.id, "active");
+  registry.threads.setThreadStatus(thread.id, "active");
   await archivedAgo(registry, shift, thread, archivedDiskMs);
-  await until("the delete is refused", () => refused > 0 && registry.pylon(thread.pylonId)?.submitted === null);
-  assert.notEqual(registry.diskDeleteRequestedAt(thread.pylonId), undefined);
-  registry.setThreadStatus(thread.id, "active");
-  registry.recordActivity(thread.id, { human: Date.now() });
+  await until("the delete is refused", () => refused > 0 && registry.threads.pylon(thread.pylonId)?.submitted === null);
+  assert.notEqual(registry.threads.diskDeleteRequestedAt(thread.pylonId), undefined);
+  registry.threads.setThreadStatus(thread.id, "active");
+  registry.threads.recordActivity(thread.id, { human: Date.now() });
   await until("the resume runs", () => fake.running().length === 1);
   for (let i = 0; i < 3; i++) await settled(fake, loop);
-  assert.notEqual(registry.diskDeleteRequestedAt(thread.pylonId), undefined, "a stopped listing keeps the disk delete");
+  assert.notEqual(registry.threads.diskDeleteRequestedAt(thread.pylonId), undefined, "a stopped listing keeps the disk delete");
 
   fake.finish(fake.running()[0]!);
-  await until("the disk delete is dropped", () => registry.diskDeleteRequestedAt(thread.pylonId) === undefined);
+  await until("the disk delete is dropped", () => registry.threads.diskDeleteRequestedAt(thread.pylonId) === undefined);
   assert.equal(fake.pylons.get(thread.pylonId)?.phase, "running");
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume"]);
-  assert.deepEqual(registry.claudeTranscript(thread.id)?.cursor, cursor);
+  assert.deepEqual(registry.threads.claudeTranscript(thread.id)?.cursor, cursor);
 });
 
 test("each pass sends the template builds recorded for its node, before its pylons", async (t) => {
@@ -785,7 +785,7 @@ test("each pass sends the template builds recorded for its node, before its pylo
   await until("the pylon's spawn is sent", () => fake.submitted.some((job) => job.kind === "spawn"));
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["build-template", "spawn"]);
   assert.deepEqual(fake.submitted[0], { kind: "build-template", template: "tpl-aaaaaaaaaaaa", inputs });
-  assert.equal(registry.pylon(thread.pylonId)!.submitted?.job.kind, "spawn");
+  assert.equal(registry.threads.pylon(thread.pylonId)!.submitted?.job.kind, "spawn");
 });
 
 test("a job that fails for good gives up with the probe's message and the end of its log", async (t) => {
@@ -799,9 +799,9 @@ test("a job that fails for good gives up with the probe's message and the end of
   const setupLines = Array.from({ length: 80 }, (_, i) => `setup line ${i}`);
   const fatal = "fatal: unable to access 'https://github.com/octocat/Spoon-Knife.git/': The requested URL returned error: 403";
   fake.finish(fake.running()[0]!, { code: "setup-failed", message: `  ${thread.pylonId}: Setup exited 128. Read controller logs\n`, logTail: `${[...setupLines, fatal].join("\n")}\n\n` });
-  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
+  await until("the planner gives up", () => registry.threads.pylon(thread.pylonId)?.failed !== null);
 
-  const failed = registry.pylon(thread.pylonId)!.failed;
+  const failed = registry.threads.pylon(thread.pylonId)!.failed;
   assert.equal(failed, [
     `last job failed with setup-failed, which is not retryable: ${thread.pylonId}: Setup exited 128. Read controller logs`,
     ...setupLines.slice(-59), fatal,
@@ -820,11 +820,11 @@ const serviceFailed = (pylonId: PylonId) => ({
 
 /** Pauses a running pylon of an archived thread, as the planner does, and folds the pause in. */
 async function archive(registry: Registry, fake: ReturnType<typeof fakeNode>, loop: Loop, thread: Thread) {
-  registry.setThreadStatus(thread.id, "archived");
+  registry.threads.setThreadStatus(thread.id, "archived");
   void loop.wake(node);
   await until("the pause runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!);
-  await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1);
+  await until("the pause is folded in", () => registry.threads.pylon(thread.pylonId)?.pauses === 1);
 }
 
 test("a wake for reading that fails after the backfill let go of its pylon fails nothing, and the thread's next wake boots at once", async (t) => {
@@ -837,31 +837,31 @@ test("a wake for reading that fails after the backfill let go of its pylon fails
   fake.finish(fake.running()[0]!);
   await archive(registry, fake, loop, thread);
 
-  registry.startUsageBackfill([thread.id], Date.now());
-  registry.holdUsageBackfill(thread.id, Date.now());
+  registry.usage.startUsageBackfill([thread.id], Date.now());
+  registry.usage.holdUsageBackfill(thread.id, Date.now());
   void loop.wake(node);
   await until("the wake for reading runs", () => fake.running().length === 1);
   const wake = fake.submitted.at(-1)!;
   assert.ok(wake.kind === "spawn" && wake.relaunch === false);
-  registry.stopUsageBackfill(Date.now());
+  registry.usage.stopUsageBackfill(Date.now());
   fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 1));
-  await until("the failure is folded in", () => registry.pylon(thread.pylonId)!.submitted === null);
+  await until("the failure is folded in", () => registry.threads.pylon(thread.pylonId)!.submitted === null);
   await settled(fake, loop);
-  const read = registry.pylon(thread.pylonId)!;
+  const read = registry.threads.pylon(thread.pylonId)!;
   assert.equal(read.failed, null, "a failure the backfill no longer waits on fails nothing");
   assert.deepEqual(read.attempts, { count: 0, last: null }, "the failed wake for reading is not one of the wake's tries");
   assert.deepEqual(logged, []);
 
-  registry.setThreadStatus(thread.id, "active");
-  registry.recordActivity(thread.id, { human: Date.now() });
+  registry.threads.setThreadStatus(thread.id, "active");
+  registry.threads.recordActivity(thread.id, { human: Date.now() });
   void loop.wake(node);
   await until("the thread's wake runs", () => fake.running().length === 1);
   const next = fake.submitted.at(-1)!;
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume", "spawn resume"]);
   assert.ok(next.kind === "spawn" && next.relaunch === undefined, "the wake brings the sessions back");
   fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 1));
-  await until("the wake's failure is folded in", () => registry.pylon(thread.pylonId)!.attempts.last !== null);
-  assert.equal(registry.pylon(thread.pylonId)!.attempts.count, 1, "the failed wake for reading is not one of the wake's tries");
+  await until("the wake's failure is folded in", () => registry.threads.pylon(thread.pylonId)!.attempts.last !== null);
+  assert.equal(registry.threads.pylon(thread.pylonId)!.attempts.count, 1, "the failed wake for reading is not one of the wake's tries");
 });
 
 test("a record from before failed wakes for reading were kept apart, whose last failure is one, plans the thread's next wake at once", async (t) => {
@@ -873,14 +873,14 @@ test("a record from before failed wakes for reading were kept apart, whose last 
   fake.finish(fake.running()[0]!);
   await archive(registry, fake, loop, thread);
   const failure = { at: Date.now(), code: "setup-failed" as const, message: "the disk is full" };
-  registry.savePylon({ ...registry.pylon(thread.pylonId)!, attempts: upgradeAttempts({ count: 1, last: { ...failure, reading: true } as typeof failure }).attempts });
+  registry.threads.savePylon({ ...registry.threads.pylon(thread.pylonId)!, attempts: upgradeAttempts({ count: 1, last: { ...failure, reading: true } as typeof failure }).attempts });
 
-  registry.setThreadStatus(thread.id, "active");
-  registry.recordActivity(thread.id, { human: Date.now() });
+  registry.threads.setThreadStatus(thread.id, "active");
+  registry.threads.recordActivity(thread.id, { human: Date.now() });
   void loop.wake(node);
   await until("the thread's wake runs", () => fake.running().length === 1);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume"], "a setup-failed wake for reading neither fails the pylon nor holds its wake");
-  assert.deepEqual(registry.pylon(thread.pylonId)!.attempts, { count: 0, last: null });
+  assert.deepEqual(registry.threads.pylon(thread.pylonId)!.attempts, { count: 0, last: null });
 });
 
 test("a wake for reading the planner gives up on, as for an image no online node holds, is an attempt the backfill skips, never a failed pylon", async (t) => {
@@ -892,22 +892,22 @@ test("a wake for reading the planner gives up on, as for an image no online node
   await until("the spawn runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!);
   await archive(registry, fake, loop, thread);
-  const pylon = registry.pylon(thread.pylonId)!;
-  registry.savePylon({ ...pylon, boot: { ...pylon.boot, image: "img-111111111111" } });
+  const pylon = registry.threads.pylon(thread.pylonId)!;
+  registry.threads.savePylon({ ...pylon, boot: { ...pylon.boot, image: "img-111111111111" } });
 
-  registry.startUsageBackfill([thread.id], Date.now());
-  registry.holdUsageBackfill(thread.id, Date.now());
-  await until("the planner gives up", () => registry.usageBackfillThreads()[0]!.state !== "pending" || registry.pylon(thread.pylonId)!.failed !== null);
+  registry.usage.startUsageBackfill([thread.id], Date.now());
+  registry.usage.holdUsageBackfill(thread.id, Date.now());
+  await until("the planner gives up", () => registry.usage.usageBackfillThreads()[0]!.state !== "pending" || registry.threads.pylon(thread.pylonId)!.failed !== null);
   await settled(fake, loop);
-  const read = registry.pylon(thread.pylonId)!;
+  const read = registry.threads.pylon(thread.pylonId)!;
   assert.deepEqual([read.failed, read.attempts], [null, { count: 0, last: null }]);
-  assert.deepEqual([registry.usageBackfillThreads()[0]!.state, registry.usageBackfillThreads()[0]!.reason], ["skipped", "the pylon did not boot: artifact-missing: no online node holds img-111111111111"], "the run gives the thread up for it");
+  assert.deepEqual([registry.usage.usageBackfillThreads()[0]!.state, registry.usage.usageBackfillThreads()[0]!.reason], ["skipped", "the pylon did not boot: artifact-missing: no online node holds img-111111111111"], "the run gives the thread up for it");
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause"]);
   assert.deepEqual(logged, []);
 
-  registry.stopUsageBackfill(Date.now());
+  registry.usage.stopUsageBackfill(Date.now());
   await settled(fake, loop);
-  assert.equal(registry.pylon(thread.pylonId)!.failed, null, "the paused pylon needs no image");
+  assert.equal(registry.threads.pylon(thread.pylonId)!.failed, null, "the paused pylon needs no image");
 });
 
 test("a fetch of its image for a wake for reading that fails after the backfill let go of the pylon fails nothing, and the thread's next wake has every try", async (t) => {
@@ -924,30 +924,30 @@ test("a fetch of its image for a wake for reading that fails after the backfill 
   await until("the spawn runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!);
   await archive(registry, fake, loop, thread);
-  const pylon = registry.pylon(thread.pylonId)!;
-  registry.savePylon({ ...pylon, boot: { ...pylon.boot, image: other } });
+  const pylon = registry.threads.pylon(thread.pylonId)!;
+  registry.threads.savePylon({ ...pylon, boot: { ...pylon.boot, image: other } });
 
-  registry.startUsageBackfill([thread.id], Date.now());
-  registry.holdUsageBackfill(thread.id, Date.now());
+  registry.usage.startUsageBackfill([thread.id], Date.now());
+  registry.usage.holdUsageBackfill(thread.id, Date.now());
   void loop.wake(node);
   await until("the fetch for reading runs", () => fake.running().length === 1);
   assert.equal(fake.submitted.at(-1)!.kind, "fetch-artifact");
-  registry.stopUsageBackfill(Date.now());
+  registry.usage.stopUsageBackfill(Date.now());
   fake.finish(fake.running()[0]!, { code: "invalid", message: `${testbench} refuses the copy`, logTail: "" });
-  await until("the failure is folded in", () => registry.pylon(thread.pylonId)!.submitted === null);
+  await until("the failure is folded in", () => registry.threads.pylon(thread.pylonId)!.submitted === null);
   await settled(fake, loop);
-  const read = registry.pylon(thread.pylonId)!;
+  const read = registry.threads.pylon(thread.pylonId)!;
   assert.deepEqual([read.failed, read.attempts], [null, { count: 0, last: null }], "a failure the backfill no longer waits on fails nothing");
   assert.deepEqual(logged, []);
 
-  registry.setThreadStatus(thread.id, "active");
-  registry.recordActivity(thread.id, { human: Date.now() });
+  registry.threads.setThreadStatus(thread.id, "active");
+  registry.threads.recordActivity(thread.id, { human: Date.now() });
   void loop.wake(node);
   await until("the thread's wake fetches its image", () => fake.running().length === 1);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "fetch-artifact", "fetch-artifact"]);
   fake.finish(fake.running()[0]!, { code: "backend", message: "the copy was cut short", logTail: "" });
-  await until("the wake's failure is folded in", () => registry.pylon(thread.pylonId)!.attempts.last !== null);
-  assert.equal(registry.pylon(thread.pylonId)!.attempts.count, 1, "the failed fetch for reading is not one of the wake's tries");
+  await until("the wake's failure is folded in", () => registry.threads.pylon(thread.pylonId)!.attempts.last !== null);
+  assert.equal(registry.threads.pylon(thread.pylonId)!.attempts.count, 1, "the failed fetch for reading is not one of the wake's tries");
 });
 
 test("a human retry of a pylon whose fresh setup failed spawns it fresh again, and the new setup's failure is the verdict", async (t) => {
@@ -957,17 +957,17 @@ test("a human retry of a pylon whose fresh setup failed spawns it fresh again, a
   const loop = run(t, registry, fake.probe, { log: () => {} });
   await until("the spawn runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 1));
-  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
+  await until("the planner gives up", () => registry.threads.pylon(thread.pylonId)?.failed !== null);
   assert.equal(fake.pylons.has(thread.pylonId), false, "the node removed the instance, as pylon-vm does");
 
-  assert.equal(registry.retryPylon(thread.pylonId), true);
-  assert.equal(registry.pylon(thread.pylonId)!.retrying, true);
+  assert.equal(registry.threads.retryPylon(thread.pylonId), true);
+  assert.equal(registry.threads.pylon(thread.pylonId)!.retrying, true);
   void loop.wake(node);
   await until("a fresh spawn runs", () => fake.running().length === 1 && fake.submitted.length === 2);
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "spawn fresh"], "the new instance runs setup again");
   fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 2));
-  await until("the planner gives up again", () => registry.pylon(thread.pylonId)?.failed !== null);
-  const again = registry.pylon(thread.pylonId)!;
+  await until("the planner gives up again", () => registry.threads.pylon(thread.pylonId)?.failed !== null);
+  const again = registry.threads.pylon(thread.pylonId)!;
   assert.match(again.failed!, /^last job failed with setup-failed, which is not retryable: .*\(run 2\)/);
   assert.equal(again.attempts.count, 1);
   assert.equal(again.retrying, false);
@@ -977,27 +977,27 @@ test("a retry and a wake boot the size the thread started with, though its proje
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
   const sized = { cpus: 4, memoryGiB: 12, diskGiB: 40 };
-  const seeded = registry.pylon(thread.pylonId)!;
+  const seeded = registry.threads.pylon(thread.pylonId)!;
   // As threadStarter freezes a start's --memory 12 --cpus 4 --disk 40 into the pylon's boot.
-  registry.savePylon({ ...seeded, boot: { ...seeded.boot, resources: sized } });
+  registry.threads.savePylon({ ...seeded, boot: { ...seeded.boot, resources: sized } });
   const fake = fakeNode({ autoFinish: false });
   const loop = run(t, registry, fake.probe, { log: () => {} });
   await until("the spawn runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 1));
-  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
+  await until("the planner gives up", () => registry.threads.pylon(thread.pylonId)?.failed !== null);
 
   registry.editProject(thread.project, (p) => ({ ...p, resources: { cpus: 8, memoryGiB: 16, diskGiB: 80 } }));
-  assert.equal(registry.retryPylon(thread.pylonId), true);
+  assert.equal(registry.threads.retryPylon(thread.pylonId), true);
   void loop.wake(node);
   await until("the retry's spawn runs", () => fake.running().length === 1 && fake.submitted.length === 2);
   fake.finish(fake.running()[0]!);
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
-  registry.setThreadStatus(thread.id, "archived");
+  registry.threads.setThreadStatus(thread.id, "archived");
   await until("the pause runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!);
-  await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1);
-  registry.setThreadStatus(thread.id, "active");
-  registry.recordActivity(thread.id, { human: Date.now() });
+  await until("the pause is folded in", () => registry.threads.pylon(thread.pylonId)?.pauses === 1);
+  registry.threads.setThreadStatus(thread.id, "active");
+  registry.threads.recordActivity(thread.id, { human: Date.now() });
   await until("the wake runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!);
   await until("the pylon runs again", () => fake.pylons.get(thread.pylonId)?.phase === "running");
@@ -1016,15 +1016,15 @@ test("a human retry of a pylon broken after a resume pauses it onto its newest d
     return fake.running()[0]!;
   };
   fake.finish(await next("the first spawn runs"));
-  registry.setThreadStatus(thread.id, "archived");
+  registry.threads.setThreadStatus(thread.id, "archived");
   fake.finish(await next("the pause runs"));
-  await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1);
-  registry.setThreadStatus(thread.id, "active");
-  registry.recordActivity(thread.id, { human: Date.now() });
+  await until("the pause is folded in", () => registry.threads.pylon(thread.pylonId)?.pauses === 1);
+  registry.threads.setThreadStatus(thread.id, "active");
+  registry.threads.recordActivity(thread.id, { human: Date.now() });
   fake.finish(await next("the resume runs"), serviceFailed(thread.pylonId));
-  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
+  await until("the planner gives up", () => registry.threads.pylon(thread.pylonId)?.failed !== null);
 
-  assert.equal(registry.retryPylon(thread.pylonId), true);
+  assert.equal(registry.threads.retryPylon(thread.pylonId), true);
   void loop.wake(node);
   fake.finish(await next("the retry's pause runs"));
   fake.finish(await next("the resume after it runs"));
@@ -1033,7 +1033,7 @@ test("a human retry of a pylon broken after a resume pauses it onto its newest d
   const resumed = fake.submitted.at(-1)!;
   assert.ok(resumed.kind === "spawn" && resumed.boot.source.kind === "resume");
   assert.equal(resumed.boot.source.checkpoint, `ckpt-${thread.id}-2`);
-  assert.deepEqual(registry.pylon(thread.pylonId)!.failed, null);
+  assert.deepEqual(registry.threads.pylon(thread.pylonId)!.failed, null);
 });
 
 test("a broken pylon nobody retried is never replaced, even after an earlier retry", async (t) => {
@@ -1043,17 +1043,17 @@ test("a broken pylon nobody retried is never replaced, even after an earlier ret
   const loop = run(t, registry, fake.probe, { log: () => {} });
   await until("the spawn runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 1));
-  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
-  registry.retryPylon(thread.pylonId);
+  await until("the planner gives up", () => registry.threads.pylon(thread.pylonId)?.failed !== null);
+  registry.threads.retryPylon(thread.pylonId);
   void loop.wake(node);
   await until("the fresh spawn runs", () => fake.running().length === 1 && fake.submitted.length === 2);
   fake.finish(fake.running()[0]!);
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
-  await until("the spawn's success uses up the retry", () => registry.pylon(thread.pylonId)?.retrying === false);
+  await until("the spawn's success uses up the retry", () => registry.threads.pylon(thread.pylonId)?.retrying === false);
 
   fake.breakPylon(thread.pylonId, "the controller exited without completing a stop");
-  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
-  assert.equal(registry.pylon(thread.pylonId)!.failed, "pylon is broken: the controller exited without completing a stop");
+  await until("the planner gives up", () => registry.threads.pylon(thread.pylonId)?.failed !== null);
+  assert.equal(registry.threads.pylon(thread.pylonId)!.failed, "pylon is broken: the controller exited without completing a stop");
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "spawn fresh"]);
 });
 
@@ -1067,17 +1067,17 @@ test("a retry never deletes a pylon whose checkpoint the registry did not count"
     return fake.running()[0]!;
   };
   fake.finish(await next("the first spawn runs"));
-  registry.setThreadStatus(thread.id, "archived");
+  registry.threads.setThreadStatus(thread.id, "archived");
   fake.finish(await next("the pause runs"));
-  await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1);
+  await until("the pause is folded in", () => registry.threads.pylon(thread.pylonId)?.pauses === 1);
   // A probe restart that lost the pause's result: settle drops an unknown envelope without counting the pause.
-  registry.savePylon({ ...registry.pylon(thread.pylonId)!, pauses: 0 });
-  registry.setThreadStatus(thread.id, "active");
-  registry.recordActivity(thread.id, { human: Date.now() });
+  registry.threads.savePylon({ ...registry.threads.pylon(thread.pylonId)!, pauses: 0 });
+  registry.threads.setThreadStatus(thread.id, "active");
+  registry.threads.recordActivity(thread.id, { human: Date.now() });
   fake.finish(await next("the resume of the checkpoint runs"), serviceFailed(thread.pylonId));
-  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
+  await until("the planner gives up", () => registry.threads.pylon(thread.pylonId)?.failed !== null);
 
-  registry.retryPylon(thread.pylonId);
+  registry.threads.retryPylon(thread.pylonId);
   void loop.wake(node);
   fake.finish(await next("the retry's pause runs"));
   fake.finish(await next("the resume after it runs"));
@@ -1092,35 +1092,35 @@ test("a retry of a pylon left broken by a fresh setup, as an older backend left 
   // The older backend kept the VM whose first boot's setup failed, so the planner gave up on the broken pylon.
   fake.breakPylon(thread.pylonId, "Setup exited 128. Read controller logs", "setup");
   const loop = run(t, registry, fake.probe, { log: () => {} });
-  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
-  assert.equal(registry.pylon(thread.pylonId)!.failed, "pylon is broken: Setup exited 128. Read controller logs");
+  await until("the planner gives up", () => registry.threads.pylon(thread.pylonId)?.failed !== null);
+  assert.equal(registry.threads.pylon(thread.pylonId)!.failed, "pylon is broken: Setup exited 128. Read controller logs");
 
-  assert.equal(registry.retryPylon(thread.pylonId), true);
+  assert.equal(registry.threads.retryPylon(thread.pylonId), true);
   void loop.wake(node);
   await until("the retry's pause runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!);
   await until("a fresh spawn runs", () => fake.running().length === 1 && fake.submitted.length === 2);
   assert.equal(fake.pylons.has(thread.pylonId), false, "the pause removed the VM, whose disk had no checkpoint");
   fake.finish(fake.running()[0]!, setupFailed(thread.pylonId, 2));
-  await until("the planner gives up again", () => registry.pylon(thread.pylonId)?.failed !== null);
+  await until("the planner gives up again", () => registry.threads.pylon(thread.pylonId)?.failed !== null);
   assert.deepEqual(kinds(fake.submitted), ["pause", "spawn fresh"], "the new instance runs setup again");
-  assert.match(registry.pylon(thread.pylonId)!.failed!, /^last job failed with setup-failed, which is not retryable: .*\(run 2\)/);
+  assert.match(registry.threads.pylon(thread.pylonId)!.failed!, /^last job failed with setup-failed, which is not retryable: .*\(run 2\)/);
 });
 
 test("an idle pylon whose fresh setup failed is removed by its pause, so its wake runs setup again", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
-  registry.setThreadStatus(thread.id, "archived");
+  registry.threads.setThreadStatus(thread.id, "archived");
   const fake = fakeNode({ autoFinish: false });
   // A probe that died between the setup failure and the instance's removal, so the planner sees only the broken pylon.
   fake.breakPylon(thread.pylonId, "Setup exited 128. Read controller logs", "setup");
   run(t, registry, fake.probe, { log: () => {} });
   await until("the idle broken pylon's pause runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!);
-  await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1);
+  await until("the pause is folded in", () => registry.threads.pylon(thread.pylonId)?.pauses === 1);
   assert.equal(fake.pylons.has(thread.pylonId), false, "no checkpoint holds the failed setup");
-  registry.setThreadStatus(thread.id, "active");
-  registry.recordActivity(thread.id, { human: Date.now() });
+  registry.threads.setThreadStatus(thread.id, "active");
+  registry.threads.recordActivity(thread.id, { human: Date.now() });
   await until("the wake spawns", () => fake.submitted.length === 2);
   assert.deepEqual(kinds(fake.submitted), ["pause", "spawn fresh"]);
 });
@@ -1133,14 +1133,14 @@ test("a retry of a pylon whose checkpoint holds a failed setup boots nothing aga
   const loop = run(t, registry, fake.probe, { log: () => {} });
   await until("the resume runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!);
-  await until("the planner gives up", () => registry.pylon(thread.pylonId)?.failed !== null);
-  assert.match(registry.pylon(thread.pylonId)!.failed!, /^last job failed with setup-failed/);
+  await until("the planner gives up", () => registry.threads.pylon(thread.pylonId)?.failed !== null);
+  assert.match(registry.threads.pylon(thread.pylonId)!.failed!, /^last job failed with setup-failed/);
   assert.deepEqual(fake.pylons.get(thread.pylonId), { pylonId: thread.pylonId, phase: "broken", logTail: "", detail: "Setup exited 128. Read controller logs", cause: "saved-setup" }, "the checkpoint replays its failed setup");
 
-  registry.retryPylon(thread.pylonId);
+  registry.threads.retryPylon(thread.pylonId);
   void loop.wake(node);
-  await until("the planner gives up again", () => registry.pylon(thread.pylonId)?.failed !== null);
-  assert.equal(registry.pylon(thread.pylonId)!.failed, "pylon is broken: Setup exited 128. Read controller logs. Its disk holds the failed setup, and every boot of that disk fails the same way, so a retry cannot help. Start again from the project");
+  await until("the planner gives up again", () => registry.threads.pylon(thread.pylonId)?.failed !== null);
+  assert.equal(registry.threads.pylon(thread.pylonId)!.failed, "pylon is broken: Setup exited 128. Read controller logs. Its disk holds the failed setup, and every boot of that disk fails the same way, so a retry cannot help. Start again from the project");
   assert.deepEqual(kinds(fake.submitted), ["spawn resume"], "no pause and resume of the poisoned disk");
 });
 
@@ -1148,18 +1148,18 @@ test("a retry made while a pass waits on the probe for another pylon is not undo
   const registry = openRegistry(tempDb());
   const [first, second] = [seed(registry), seed(registry)].sort((a, b) => a.pylonId.localeCompare(b.pylonId));
   // The pass ticks the first pylon, whose spawn waits on the probe, before it reaches the failed second one.
-  registry.savePylon({ ...registry.pylon(second!.pylonId)!, failed: "gave up after 5 failed attempts", attempts: { count: 5, last: { at: 1, code: "backend", message: "boot failed" } } });
+  registry.threads.savePylon({ ...registry.threads.pylon(second!.pylonId)!, failed: "gave up after 5 failed attempts", attempts: { count: 5, last: { at: 1, code: "backend", message: "boot failed" } } });
   const fake = fakeNode({ autoFinish: false });
   const release = fake.holdSubmits();
   run(t, registry, fake.probe, { log: () => {} });
-  await until("the first pylon's tick waits on its submit", () => registry.pylon(first!.pylonId)?.submitted !== null);
+  await until("the first pylon's tick waits on its submit", () => registry.threads.pylon(first!.pylonId)?.submitted !== null);
 
-  assert.equal(registry.retryPylon(second!.pylonId), true);
+  assert.equal(registry.threads.retryPylon(second!.pylonId), true);
   // A preview changes the second pylon's LiveSpec, so its tick saves the record before planning.
-  registry.allocatePreviews(second!.pylonId, ["web"], previewPorts);
+  registry.threads.allocatePreviews(second!.pylonId, ["web"], previewPorts);
   release();
   await until("the second pylon spawns", () => fake.submitted.some((job) => job.kind === "spawn" && job.pylonId === second!.pylonId));
-  const retried = registry.pylon(second!.pylonId)!;
+  const retried = registry.threads.pylon(second!.pylonId)!;
   assert.equal(retried.failed, null);
   assert.equal(retried.live.previews.length, 1);
 });
@@ -1167,20 +1167,20 @@ test("a retry made while a pass waits on the probe for another pylon is not undo
 test("a pylon moved to another node while a pass waits on the probe for another pylon gets no job from its old node", async (t) => {
   const registry = openRegistry(tempDb());
   const [first, second] = [seed(registry), seed(registry)].sort((a, b) => a.pylonId.localeCompare(b.pylonId));
-  registry.savePylon({ ...registry.pylon(second!.pylonId)!, failed: "gave up after 5 failed attempts", attempts: { count: 5, last: { at: 1, code: "backend", message: "boot failed" } } });
+  registry.threads.savePylon({ ...registry.threads.pylon(second!.pylonId)!, failed: "gave up after 5 failed attempts", attempts: { count: 5, last: { at: 1, code: "backend", message: "boot failed" } } });
   const other = "infra-testbench" as NodeName;
   registry.upsertNode({ name: other, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
   const fake = fakeNode({ autoFinish: false });
   const release = fake.holdSubmits();
   const loop = run(t, registry, fake.probe, { log: () => {} });
-  await until("the first pylon's tick waits on its submit", () => registry.pylon(first!.pylonId)?.submitted !== null);
+  await until("the first pylon's tick waits on its submit", () => registry.threads.pylon(first!.pylonId)?.submitted !== null);
 
-  const stored = registry.pylon(second!.pylonId)!;
-  assert.equal(registry.movePylon(second!.pylonId, node, { node: other, firstBoot: stored.firstBoot, live: stored.live, liveHash: stored.liveHash, placement: { how: "named", node: other }, setup: { how: "fresh", reason: "moved" } }), true);
+  const stored = registry.threads.pylon(second!.pylonId)!;
+  assert.equal(registry.threads.movePylon(second!.pylonId, node, { node: other, firstBoot: stored.firstBoot, live: stored.live, liveHash: stored.liveHash, placement: { how: "named", node: other }, setup: { how: "fresh", reason: "moved" } }), true);
   release();
   await loop.wake(node);
   assert.deepEqual(fake.submitted.filter((job) => "pylonId" in job && job.pylonId === second!.pylonId), [], "the old node's pass left the moved pylon alone");
-  assert.equal(registry.pylon(second!.pylonId)!.node, other);
+  assert.equal(registry.threads.pylon(second!.pylonId)!.node, other);
 });
 
 test("a pass over several running pylons reads its node's record at most once", async (t) => {
@@ -1206,7 +1206,7 @@ test("a pylon pauses once its agent turn ends and nobody has used it for a while
   run(t, registry, fake.probe);
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
 
-  registry.recordActivity(thread.id, { agentTurnRunning: false });
+  registry.threads.recordActivity(thread.id, { agentTurnRunning: false });
   await until("the pylon is paused", () => fake.pylons.get(thread.pylonId)?.phase === "stopped");
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn", "pause"]);
 });
@@ -1219,9 +1219,9 @@ function rebooted(t: import("node:test").TestContext, before: "running" | "stopp
   const registry = openRegistry(tempDb());
   const longAgo = Date.now() - 60 * 60_000;
   const thread = seed(registry, { lastAgentActivityAt: longAgo, lastHumanActivityAt: longAgo });
-  if (archived) registry.setThreadStatus(thread.id, "archived");
+  if (archived) registry.threads.setThreadStatus(thread.id, "archived");
   const seen = before === "running" ? runningPylon(thread.pylonId) : stoppedPylon(thread.pylonId, { checkpoint: `ckpt-${thread.id}-1` });
-  registry.ingested(testObservation(node, { artifacts: [image], pylons: [seen] }), []);
+  registry.threads.ingested(testObservation(node, { artifacts: [image], pylons: [seen] }), []);
   const fake = fakeNode({ autoFinish: true });
   fake.pylons.set(thread.pylonId, after(thread));
   const loop = run(t, registry, fake.probe, { ingest: realIngest });
@@ -1238,8 +1238,8 @@ test("an idle thread whose running pylon a reboot paused wakes from the shutdown
   assert.deepEqual(kinds(fake.submitted), ["spawn resume"]);
   const resume = fake.submitted[0]!;
   assert.ok(resume.kind === "spawn" && resume.boot.source.kind === "resume" && resume.boot.source.checkpoint === checkpoint, JSON.stringify(resume));
-  assert.ok(registry.thread(thread.id)!.lastAgentActivityAt > longAgo, "the wake is agent activity");
-  assert.equal(registry.thread(thread.id)!.lastHumanActivityAt, longAgo, "and no person's");
+  assert.ok(registry.threads.thread(thread.id)!.lastAgentActivityAt > longAgo, "the wake is agent activity");
+  assert.equal(registry.threads.thread(thread.id)!.lastHumanActivityAt, longAgo, "and no person's");
 });
 
 test("an archived thread's pylon that a reboot paused stays paused, though the node marks it for a wake", async (t) => {
@@ -1272,8 +1272,8 @@ test("a probe draining for its node's shutdown refuses a spawn, which counts no 
   };
   run(t, registry, probe);
   await until("the probe refused the spawn twice", () => refused >= 2);
-  assert.deepEqual(registry.pylon(thread.pylonId)!.attempts, { count: 0, last: null });
-  assert.equal(registry.pylon(thread.pylonId)!.failed, null);
+  assert.deepEqual(registry.threads.pylon(thread.pylonId)!.attempts, { count: 0, last: null });
+  assert.equal(registry.threads.pylon(thread.pylonId)!.failed, null);
   draining = false;
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh"]);
@@ -1286,7 +1286,7 @@ test("an unreachable node gets no jobs, is recorded offline after the grace peri
   fake.disconnect();
   run(t, registry, fake.probe, { offlineAfterMs: 30 });
 
-  registry.apply({ record: "node", node, state: "online", capacity: testCapacity({ memoryGiB: 1, diskFreeGiB: 1 }) });
+  registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity({ memoryGiB: 1, diskFreeGiB: 1 }) });
   await until("the node is recorded offline", () => registry.node(node)?.state === "offline");
   assert.equal(fake.submitted.length, 0);
 
@@ -1305,14 +1305,14 @@ test("an unreachable node gets no delete for a pylon archived 24 hours ago, and 
   fake.disconnect();
   run(t, registry, fake.probe, { offlineAfterMs: 30 });
 
-  registry.apply({ record: "node", node, state: "online", capacity: testCapacity({ memoryGiB: 1, diskFreeGiB: 1 }) });
+  registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity({ memoryGiB: 1, diskFreeGiB: 1 }) });
   await until("the node is recorded offline", () => registry.node(node)?.state === "offline");
   assert.equal(fake.submitted.length, 0);
 
   fake.reconnect();
   await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId));
   assert.deepEqual(kinds(fake.submitted), ["delete"]);
-  assert.equal(registry.thread(thread.id)?.status, "archived");
+  assert.equal(registry.threads.thread(thread.id)?.status, "archived");
 });
 
 test("with the real ingest, a pylon's sessions reach the registry and a working one keeps the pylon up", async (t) => {
@@ -1325,22 +1325,22 @@ test("with the real ingest, a pylon's sessions reach the registry and a working 
 
   const working: SessionFact = { id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working", title: "plan" };
   fake.setSessions(thread.pylonId, [working]);
-  await until("the session is recorded", () => registry.sessions(thread.pylonId).length === 1);
-  assert.deepEqual(registry.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...working, message: null }]);
-  assert.ok(registry.thread(thread.id)!.lastAgentActivityAt > longAgo);
+  await until("the session is recorded", () => registry.threads.sessions(thread.pylonId).length === 1);
+  assert.deepEqual(registry.threads.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...working, message: null }]);
+  assert.ok(registry.threads.thread(thread.id)!.lastAgentActivityAt > longAgo);
 
   // The turn ends, but the working session counts as agent activity, so the pylon stays up.
-  registry.recordActivity(thread.id, { agentTurnRunning: false });
+  registry.threads.recordActivity(thread.id, { agentTurnRunning: false });
   await settled(fake, loop);
   assert.equal(fake.pylons.get(thread.pylonId)?.phase, "running");
 
   // Sessions the probe could not read leave the registry as it was, and the next read is diffed against the last one.
   fake.setSessions(thread.pylonId, null);
   await settled(fake, loop);
-  assert.deepEqual(registry.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...working, message: null }]);
+  assert.deepEqual(registry.threads.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...working, message: null }]);
 
   fake.setSessions(thread.pylonId, []);
-  await until("the closed session is removed", () => registry.sessions(thread.pylonId).length === 0);
+  await until("the closed session is removed", () => registry.threads.sessions(thread.pylonId).length === 0);
   assert.deepEqual(nodePylons(registry, registry.node(fake.probe.node)!)?.orphaned, []);
 });
 
@@ -1352,27 +1352,27 @@ test("with the real ingest, a paused pylon lists its sessions as paused, and onc
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   const review: SessionFact = { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", status: "working", title: "review" };
   fake.setSessions(thread.pylonId, [review]);
-  await until("the session is recorded", () => registry.sessions(thread.pylonId).length === 1);
+  await until("the session is recorded", () => registry.threads.sessions(thread.pylonId).length === 1);
 
-  registry.setThreadStatus(thread.id, "archived");
-  await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1 && registry.sessions(thread.pylonId)[0]?.state === "paused");
-  assert.deepEqual(registry.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...review, state: "paused", message: null }], "it keeps its pane and its last status");
+  registry.threads.setThreadStatus(thread.id, "archived");
+  await until("the pause is folded in", () => registry.threads.pylon(thread.pylonId)?.pauses === 1 && registry.threads.sessions(thread.pylonId)[0]?.state === "paused");
+  assert.deepEqual(registry.threads.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...review, state: "paused", message: null }], "it keeps its pane and its last status");
 
-  registry.setThreadStatus(thread.id, "active");
-  registry.recordActivity(thread.id, { human: Date.now() });
+  registry.threads.setThreadStatus(thread.id, "active");
+  registry.threads.recordActivity(thread.id, { human: Date.now() });
   await until("the pylon runs again", () => registry.node(node)!.observation?.pylons.find((p) => p.pylonId === thread.pylonId)?.phase === "running");
   // Its sessions are not read yet, so the stored observation knows none, and the session runs in its pane, its status unknown.
   const stored = registry.node(node)!.observation!.pylons.find((p) => p.pylonId === thread.pylonId);
   assert.ok(stored?.phase === "running" && stored.sessions === null);
-  assert.deepEqual(registry.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...review, status: "unknown", message: null }]);
+  assert.deepEqual(registry.threads.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...review, status: "unknown", message: null }]);
 
   const moved: SessionFact = { ...review, id: "w3:p1", herdrPane: "w3:p1", status: "working" };
   fake.setSessions(thread.pylonId, [moved]);
-  await until("the relaunched session replaces the resumed one", () => registry.sessions(thread.pylonId)[0]?.id === "w3:p1");
-  assert.deepEqual(registry.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...moved, message: null }]);
+  await until("the relaunched session replaces the resumed one", () => registry.threads.sessions(thread.pylonId)[0]?.id === "w3:p1");
+  assert.deepEqual(registry.threads.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...moved, message: null }]);
   fake.setSessions(thread.pylonId, [{ ...moved, status: "idle" }]);
-  await until("its turn ends", () => registry.sessions(thread.pylonId)[0]?.status === "idle");
-  assert.equal(registry.sessions(thread.pylonId)[0]?.state, "running");
+  await until("its turn ends", () => registry.threads.sessions(thread.pylonId)[0]?.status === "idle");
+  assert.equal(registry.threads.sessions(thread.pylonId)[0]?.state, "running");
 });
 
 test("a restarted control plane writes each pylon's session list on its first observation, though the stored one has the same list", async (t) => {
@@ -1384,18 +1384,18 @@ test("a restarted control plane writes each pylon's session list on its first ob
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   const review: SessionFact = { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", status: "idle", title: "review" };
   fake.setSessions(thread.pylonId, [review]);
-  await until("the session is recorded", () => before.sessions(thread.pylonId).length === 1);
-  before.setThreadStatus(thread.id, "archived");
-  await until("the pause is folded in", () => before.pylon(thread.pylonId)?.pauses === 1 && before.sessions(thread.pylonId)[0]?.state === "paused");
+  await until("the session is recorded", () => before.threads.sessions(thread.pylonId).length === 1);
+  before.threads.setThreadStatus(thread.id, "archived");
+  await until("the pause is folded in", () => before.threads.pylon(thread.pylonId)?.pauses === 1 && before.threads.sessions(thread.pylonId)[0]?.state === "paused");
   await first.close();
   // As a control plane from before paused sessions left it: the observation with the paused list, and no rows.
-  before.ingested(before.node(node)!.observation!, [{ record: "sessions", pylonId: thread.pylonId, sessions: [] }]);
+  before.threads.ingested(before.node(node)!.observation!, [{ record: "sessions", pylonId: thread.pylonId, sessions: [] }]);
   before.close();
 
   const after = openRegistry(path);
   run(t, after, fake.probe, { ingest: realIngest });
-  await until("the paused list is written again", () => after.sessions(thread.pylonId).length === 1);
-  assert.deepEqual(after.sessions(thread.pylonId).map((s) => [s.id, s.state]), [["w1:p1", "paused"]]);
+  await until("the paused list is written again", () => after.threads.sessions(thread.pylonId).length === 1);
+  assert.deepEqual(after.threads.sessions(thread.pylonId).map((s) => [s.id, s.state]), [["w1:p1", "paused"]]);
 });
 
 test("with the real ingest, sessions the probe could not read record no agent activity", async (t) => {
@@ -1408,17 +1408,17 @@ test("with the real ingest, sessions the probe could not read record no agent ac
 
   const working: SessionFact = { id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: "s.jsonl", status: "working" };
   fake.setSessions(thread.pylonId, [working]);
-  await until("the working session counts as agent activity", () => registry.thread(thread.id)!.lastAgentActivityAt > longAgo);
-  const seen = registry.thread(thread.id)!.lastAgentActivityAt;
+  await until("the working session counts as agent activity", () => registry.threads.thread(thread.id)!.lastAgentActivityAt > longAgo);
+  const seen = registry.threads.thread(thread.id)!.lastAgentActivityAt;
 
   // The stored observation still lists the working session, but only a fresh read of it is activity.
   for (let i = 0; i < 2; i++) {
     fake.setSessions(thread.pylonId, null);
     await settled(fake, loop);
-    assert.equal(registry.thread(thread.id)!.lastAgentActivityAt, seen);
+    assert.equal(registry.threads.thread(thread.id)!.lastAgentActivityAt, seen);
   }
   fake.setSessions(thread.pylonId, [working]);
-  await until("a fresh read is activity again", () => registry.thread(thread.id)!.lastAgentActivityAt > seen);
+  await until("a fresh read is activity again", () => registry.threads.thread(thread.id)!.lastAgentActivityAt > seen);
 });
 
 test("services the probe could not read change nothing: the next diff sees the last list read", async (t) => {
@@ -1495,8 +1495,8 @@ test("each snapshot is ingested against the last observation ingested for each k
     },
   });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
-  registry.setThreadStatus(thread.id, "archived");
-  await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1);
+  registry.threads.setThreadStatus(thread.id, "archived");
+  await until("the pause is folded in", () => registry.threads.pylon(thread.pylonId)?.pauses === 1);
   await until("the snapshot after the pause is ingested", () => previous.length === 3);
   // On connect nothing was observed yet, after the spawn the last observation had no pylon, and after the pause it ran.
   assert.deepEqual(previous, [["absent"], ["absent"], ["running"]]);
@@ -1513,13 +1513,13 @@ test("a snapshot's journal applies each report past the node's receipt in order,
   const started = report(1, "session.turn-started", "s1", 0);
   fake.send({ type: "session-event", report: started });
   await settled(fake, loop);
-  assert.equal(registry.thread(thread.id)!.working, true);
+  assert.equal(registry.threads.thread(thread.id)!.working, true);
 
   const ended = report(2, "session.turn-ended", "s1", 1);
   const waiting = report(3, "session.waiting", "s2", 2);
   fake.announce([started, ended, waiting]);
   await settled(fake, loop);
-  const after = registry.thread(thread.id)!;
+  const after = registry.threads.thread(thread.id)!;
   assert.equal(after.working, false);
   assert.equal(after.sessionWaiting, true);
 
@@ -1527,7 +1527,7 @@ test("a snapshot's journal applies each report past the node's receipt in order,
   fake.announce([started, ended, waiting]);
   fake.send({ type: "session-event", report: report(4, "session.turn-ended", "s2", 3) });
   await settled(fake, loop);
-  const last = registry.thread(thread.id)!;
+  const last = registry.threads.thread(thread.id)!;
   assert.equal(last.working, false);
   assert.equal(last.sessionWaiting, undefined);
 });
@@ -1537,7 +1537,7 @@ test("session, job and preview-hit events apply their writes and leave the store
   const thread = seed(registry);
   const fake = fakeNode({ autoFinish: false });
   const loop = run(t, registry, fake.probe, { ingest: realIngest });
-  await until("the spawn's job event is ingested", () => registry.job(thread.pylonId)?.state === "running");
+  await until("the spawn's job event is ingested", () => registry.threads.job(thread.pylonId)?.state === "running");
   await settled(fake, loop);
   const stored = registry.node(node)!.observation;
   assert.deepEqual(stored?.jobs, [], "the job event came after the snapshot");
@@ -1546,8 +1546,8 @@ test("session, job and preview-hit events apply their writes and leave the store
   fake.send({ type: "preview-hit", pylonId: thread.pylonId, service: "web", at: new Date(hit).toISOString(), login: null });
   fake.send({ type: "session-event", report: { sequence: 1, pylon: thread.pylonId, time: hit, event: { kind: "session.turn-started", session: "s1", at: hit } } });
   await settled(fake, loop);
-  assert.equal(registry.thread(thread.id)!.lastHumanActivityAt, hit);
-  assert.equal(registry.thread(thread.id)!.working, true);
+  assert.equal(registry.threads.thread(thread.id)!.lastHumanActivityAt, hit);
+  assert.equal(registry.threads.thread(thread.id)!.working, true);
   assert.deepEqual(registry.node(node)!.observation, stored);
 });
 
@@ -1563,14 +1563,14 @@ test("a job in flight survives a control-plane restart: the new process asks the
   before.close();
 
   const after = openRegistry(path);
-  assert.equal(after.pylon(thread.pylonId)?.submitted?.jobId, fake.running()[0]);
+  assert.equal(after.threads.pylon(thread.pylonId)?.submitted?.jobId, fake.running()[0]);
   const loop = run(t, after, fake.probe);
   await loop.wake(node);
   await loop.wake(node);
   assert.equal(fake.submitted.length, 1, "no job is sent while the first one runs");
 
   fake.finish(fake.running()[0]!);
-  await until("the finished job is folded in", () => after.pylon(thread.pylonId)?.submitted === null);
+  await until("the finished job is folded in", () => after.threads.pylon(thread.pylonId)?.submitted === null);
   await loop.wake(node);
   assert.equal(fake.pylons.get(thread.pylonId)?.phase, "running");
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn"]);
@@ -1579,24 +1579,24 @@ test("a job in flight survives a control-plane restart: the new process asks the
 test("an envelope saved by a control plane that died mid-submit holds the pylon until it expires", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
-  const pylon = registry.pylon(thread.pylonId)!;
+  const pylon = registry.threads.pylon(thread.pylonId)!;
   // The request may still be on its way to the probe, so a new job could land before it.
   const inTransit = envelope({ kind: "delete", pylonId: thread.pylonId }, node, Date.now());
-  registry.savePylon({ ...pylon, submitted: inTransit });
+  registry.threads.savePylon({ ...pylon, submitted: inTransit });
   const fake = fakeNode({ autoFinish: true });
   const loop = run(t, registry, fake.probe);
   await until("the node is online", () => registry.node(node)?.state === "online");
   await loop.wake(node);
   await loop.wake(node);
   assert.equal(fake.submitted.length, 0);
-  assert.equal(registry.pylon(thread.pylonId)?.submitted?.jobId, inTransit.jobId);
+  assert.equal(registry.threads.pylon(thread.pylonId)?.submitted?.jobId, inTransit.jobId);
 
   // Past notAfter the probe refuses it, so it can never run. It is dropped without counting an attempt.
   const expired = envelope({ kind: "delete", pylonId: thread.pylonId }, node, Date.now() - 31_000);
-  registry.savePylon({ ...pylon, submitted: expired });
+  registry.threads.savePylon({ ...pylon, submitted: expired });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn"]);
-  assert.equal(registry.pylon(thread.pylonId)?.attempts.count, 0);
+  assert.equal(registry.threads.pylon(thread.pylonId)?.attempts.count, 0);
 });
 
 /**
@@ -1607,7 +1607,7 @@ test("an envelope saved by a control plane that died mid-submit holds the pylon 
 async function heldLoop(t: import("node:test").TestContext) {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
-  registry.savePylon({ ...registry.pylon(thread.pylonId)!, submitted: envelope({ kind: "delete", pylonId: thread.pylonId }, node, Date.now()) });
+  registry.threads.savePylon({ ...registry.threads.pylon(thread.pylonId)!, submitted: envelope({ kind: "delete", pylonId: thread.pylonId }, node, Date.now()) });
   const testbench = "infra-testbench" as NodeName;
   registry.upsertNode({ name: testbench, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
   const fake = fakeNode({ autoFinish: false });
@@ -1706,16 +1706,16 @@ test("a service that wants a preview gets a port, and the next spawn publishes i
 
   const worker: ServiceFact = { name: "worker", state: "ready", port: 9000, declared: true, wantsPreview: false };
   fake.setServices(thread.pylonId, [web, worker]);
-  await until("the preview is ready", () => registry.previews(thread.pylonId).some((p) => p.ready));
+  await until("the preview is ready", () => registry.threads.previews(thread.pylonId).some((p) => p.ready));
 
-  assert.deepEqual(registry.previews(thread.pylonId), [{ pylon: thread.pylonId, service: "web", httpsPort: 10200, ready: true, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" }]);
+  assert.deepEqual(registry.threads.previews(thread.pylonId), [{ pylon: thread.pylonId, service: "web", httpsPort: 10200, ready: true, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" }]);
   const live = fake.lives.get(thread.pylonId);
   assert.deepEqual(live?.previews, [{ service: "web", httpsPort: 10200 }]);
   assert.deepEqual(previewsIn(live), [{ service: "web", url: "https://rj-firebat.tail.ts.net:10200/" }]);
   assert.match(overlayFile(live, "/home/user/.nexus/PYLON.md"), /- web: https:\/\/rj-firebat\.tail\.ts\.net:10200\//);
-  assert.equal(registry.pylon(thread.pylonId)?.liveHash, liveHashOf(live!));
+  assert.equal(registry.threads.pylon(thread.pylonId)?.liveHash, liveHashOf(live!));
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn", "spawn"], "the running pylon gets the new LiveSpec in a second spawn");
-  assert.deepEqual(registry.outputs(thread.id).filter((o) => o.kind === "preview"), [{ thread: thread.id, kind: "preview", ref: "web" }]);
+  assert.deepEqual(registry.threads.outputs(thread.id).filter((o) => o.kind === "preview"), [{ thread: thread.id, kind: "preview", ref: "web" }]);
 });
 
 test("a linked port's preview goes once a read of the pylon's services leaves it out, and a read that failed changes nothing", async (t) => {
@@ -1725,19 +1725,19 @@ test("a linked port's preview goes once a read of the pylon's services leaves it
   const loop = run(t, registry, fake.probe, { ingest: realIngest });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   const linked: ServiceFact = { name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true };
-  const services = () => registry.previews(thread.pylonId).map((p) => `${p.service} ${p.httpsPort}`);
+  const services = () => registry.threads.previews(thread.pylonId).map((p) => `${p.service} ${p.httpsPort}`);
   const published = () => fake.lives.get(thread.pylonId)?.previews.map((p) => `${p.service} ${p.httpsPort}`);
   fake.setServices(thread.pylonId, [web, linked]);
-  await until("both previews are ready", () => registry.previews(thread.pylonId).filter((p) => p.ready).length === 2);
+  await until("both previews are ready", () => registry.threads.previews(thread.pylonId).filter((p) => p.ready).length === 2);
 
   fake.setServices(thread.pylonId, [web]);
   await until("the next spawn publishes the previews without the port", () => JSON.stringify(published()) === JSON.stringify(["web 10200"]));
   assert.deepEqual(services(), ["web 10200"], "a declared service keeps its preview");
 
   fake.setServices(thread.pylonId, [web, linked]);
-  await until("the port is published again", () => registry.previews(thread.pylonId).filter((p) => p.ready).length === 2);
+  await until("the port is published again", () => registry.threads.previews(thread.pylonId).filter((p) => p.ready).length === 2);
   // As the API does once the pylon unlinks the port. A read that fails then carries the list read before the unlink.
-  registry.releasePreview(thread.pylonId, "port-3000");
+  registry.threads.releasePreview(thread.pylonId, "port-3000");
   fake.setServices(thread.pylonId, null);
   await settled(fake, loop);
   assert.deepEqual(services(), ["web 10200"], "a list carried from an earlier read gives no port back");
@@ -1752,23 +1752,23 @@ test("preview ports are unique on a node and keep their port across pause, a con
   const first = polled(startLoop({ registry: before, probes: [fake.probe], ingest: realIngest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail }));
   await until("both pylons run", () => [a, b].every((th) => fake.pylons.get(th.pylonId)?.phase === "running"));
   fake.setServices(a.pylonId, [web]);
-  await until("a's preview is ready", () => before.previews(a.pylonId)[0]?.ready === true);
+  await until("a's preview is ready", () => before.threads.previews(a.pylonId)[0]?.ready === true);
   fake.setServices(b.pylonId, [web]);
-  await until("b's preview is ready", () => before.previews(b.pylonId)[0]?.ready === true);
+  await until("b's preview is ready", () => before.threads.previews(b.pylonId)[0]?.ready === true);
   assert.deepEqual([a, b].map((th) => fake.lives.get(th.pylonId)?.previews), [[{ service: "web", httpsPort: 10200 }], [{ service: "web", httpsPort: 10201 }]]);
 
-  before.setThreadStatus(a.id, "archived");
+  before.threads.setThreadStatus(a.id, "archived");
   await until("a is paused", () => fake.pylons.get(a.pylonId)?.phase === "stopped");
-  await until("a's preview is not ready", () => before.previews(a.pylonId)[0]?.ready === false);
+  await until("a's preview is not ready", () => before.threads.previews(a.pylonId)[0]?.ready === false);
   await first.close();
   before.close();
 
   const after = openRegistry(path);
   run(t, after, fake.probe, { ingest: realIngest });
-  assert.deepEqual(after.previews(a.pylonId), [{ pylon: a.pylonId, service: "web", httpsPort: 10200, ready: false, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" }]);
-  after.setThreadStatus(a.id, "active");
-  after.recordActivity(a.id, { human: Date.now() });
-  await until("a's preview is ready again", () => after.previews(a.pylonId)[0]?.ready === true);
+  assert.deepEqual(after.threads.previews(a.pylonId), [{ pylon: a.pylonId, service: "web", httpsPort: 10200, ready: false, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" }]);
+  after.threads.setThreadStatus(a.id, "active");
+  after.threads.recordActivity(a.id, { human: Date.now() });
+  await until("a's preview is ready again", () => after.threads.previews(a.pylonId)[0]?.ready === true);
   const wake = fake.submitted.at(-1)!;
   assert.ok(wake.kind === "spawn" && wake.boot.source.kind === "resume", "the wake resumes a from its checkpoint");
   assert.deepEqual(wake.live.previews, [{ service: "web", httpsPort: 10200 }], "the wake publishes the same port, though a reports no services yet");
@@ -1787,13 +1787,13 @@ test("a deleted thread's ports go back only once its node no longer has the pylo
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   fake.setServices(thread.pylonId, [web]);
   await finishNext("spawn");
-  await until("the preview is ready", () => registry.previews(thread.pylonId)[0]?.ready === true);
+  await until("the preview is ready", () => registry.threads.previews(thread.pylonId)[0]?.ready === true);
 
-  registry.setThreadStatus(thread.id, "deleted");
+  registry.threads.setThreadStatus(thread.id, "deleted");
   await until("the delete runs", () => fake.running().length === 1 && fake.submitted.at(-1)?.kind === "delete");
-  assert.deepEqual(registry.previews(thread.pylonId).map((p) => p.httpsPort), [10200], "the port is held while the node may still serve it");
+  assert.deepEqual(registry.threads.previews(thread.pylonId).map((p) => p.httpsPort), [10200], "the port is held while the node may still serve it");
   fake.finish(fake.running()[0]!);
-  await until("the port is released", () => registry.previews(thread.pylonId).length === 0);
+  await until("the port is released", () => registry.threads.previews(thread.pylonId).length === 0);
 });
 
 test("a port the node still serves for a pylon the registry lost goes to no new preview, and its route is left alone", async (t) => {
@@ -1806,7 +1806,7 @@ test("a port the node still serves for a pylon the registry lost goes to no new 
   run(t, registry, fake.probe, { ingest: realIngest });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   fake.setServices(thread.pylonId, [web]);
-  await until("web is published", () => registry.previews(thread.pylonId)[0]?.ready === true);
+  await until("web is published", () => registry.threads.previews(thread.pylonId)[0]?.ready === true);
   assert.deepEqual(fake.lives.get(thread.pylonId)?.previews, [{ service: "web", httpsPort: 10201 }]);
   assert.deepEqual(fake.routes.get(10200), { httpsPort: 10200, pylonId: lost, service: "web" });
   assert.ok(!fake.submitted.some((job) => "pylonId" in job && job.pylonId === lost), "the planner sends nothing for a pylon it does not know");
@@ -1825,18 +1825,18 @@ test("a deleted thread whose pylon was removed by hand gets a delete that unpubl
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   fake.setServices(thread.pylonId, [web]);
   await finishNext("spawn");
-  await until("the preview is ready", () => registry.previews(thread.pylonId)[0]?.ready === true);
-  registry.setThreadStatus(thread.id, "archived");
+  await until("the preview is ready", () => registry.threads.previews(thread.pylonId)[0]?.ready === true);
+  registry.threads.setThreadStatus(thread.id, "archived");
   await finishNext("pause");
   await until("the pylon is paused", () => fake.pylons.get(thread.pylonId)?.phase === "stopped");
 
   fake.pylons.delete(thread.pylonId);
   fake.announce();
-  registry.setThreadStatus(thread.id, "deleted");
+  registry.threads.setThreadStatus(thread.id, "deleted");
   await until("a delete runs for the absent pylon", () => fake.running().length === 1 && fake.submitted.at(-1)?.kind === "delete");
-  assert.deepEqual(registry.previews(thread.pylonId).map((p) => p.httpsPort), [10200], "the port is held while the node still routes it");
+  assert.deepEqual(registry.threads.previews(thread.pylonId).map((p) => p.httpsPort), [10200], "the port is held while the node still routes it");
   fake.finish(fake.running()[0]!);
-  await until("the port is released", () => registry.previews(thread.pylonId).length === 0);
+  await until("the port is released", () => registry.threads.previews(thread.pylonId).length === 0);
   assert.deepEqual([...fake.routes.keys()], []);
   const deletes = () => fake.submitted.filter((job) => job.kind === "delete").length;
   const sent = deletes();
@@ -1850,8 +1850,8 @@ test("a deleted thread's pylon that is gone is torn down again whenever its node
   const fake = fakeNode({ autoFinish: true });
   const loop = run(t, registry, fake.probe, { ingest: realIngest });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
-  registry.setThreadStatus(thread.id, "deleted");
-  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.pylon(thread.pylonId)?.submitted === null);
+  registry.threads.setThreadStatus(thread.id, "deleted");
+  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.threads.pylon(thread.pylonId)?.submitted === null);
   const deletes = () => fake.submitted.filter((job) => job.kind === "delete").length;
   await settled(fake, loop);
   assert.equal(deletes(), 1);
@@ -1880,8 +1880,8 @@ test("follow leaves out a deleted thread's pylon its node no longer lists, and d
     },
   });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
-  registry.setThreadStatus(thread.id, "deleted");
-  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.pylon(thread.pylonId)?.submitted === null);
+  registry.threads.setThreadStatus(thread.id, "deleted");
+  await until("the pylon is gone", () => !fake.pylons.has(thread.pylonId) && registry.threads.pylon(thread.pylonId)?.submitted === null);
   await settled(fake, loop);
   fake.announce();
   await settled(fake, loop);
@@ -1902,51 +1902,51 @@ test("a deleted thread's pylon removed by hand while the control plane was down 
   const first = polled(startLoop({ registry: before, probes: [fake.probe], ingest: realIngest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail }));
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   fake.setSessions(thread.pylonId, [{ id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", status: "idle", title: "review" }]);
-  before.setThreadStatus(thread.id, "archived");
-  await until("the pause is folded in", () => before.pylon(thread.pylonId)?.pauses === 1 && before.sessions(thread.pylonId)[0]?.state === "paused");
+  before.threads.setThreadStatus(thread.id, "archived");
+  await until("the pause is folded in", () => before.threads.pylon(thread.pylonId)?.pauses === 1 && before.threads.sessions(thread.pylonId)[0]?.state === "paused");
   await first.close();
-  before.setThreadStatus(thread.id, "deleted");
+  before.threads.setThreadStatus(thread.id, "deleted");
   fake.pylons.delete(thread.pylonId);
   before.close();
 
   const after = openRegistry(path);
   run(t, after, fake.probe, { ingest: realIngest });
-  await until("the paused session is cleared", () => after.sessions(thread.pylonId).length === 0);
+  await until("the paused session is cleared", () => after.threads.sessions(thread.pylonId).length === 0);
 });
 
 test("a deleted thread's ports go back after a restart between its delete and their release", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
-  registry.allocatePreviews(thread.pylonId, ["web"], previewPorts);
-  registry.setThreadStatus(thread.id, "deleted");
+  registry.threads.allocatePreviews(thread.pylonId, ["web"], previewPorts);
+  registry.threads.setThreadStatus(thread.id, "deleted");
   const fake = fakeNode({ autoFinish: true });
   run(t, registry, fake.probe);
-  await until("the port is released", () => registry.previews(thread.pylonId).length === 0);
+  await until("the port is released", () => registry.threads.previews(thread.pylonId).length === 0);
   assert.deepEqual(fake.submitted, []);
 });
 
 test("a deleted thread whose pylon was retried just before the delete settles the retry, though its pylon is gone", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
-  registry.savePylon({ ...registry.pylon(thread.pylonId)!, failed: "gave up" });
-  assert.ok(registry.retryPylon(thread.pylonId));
-  registry.setThreadStatus(thread.id, "deleted");
+  registry.threads.savePylon({ ...registry.threads.pylon(thread.pylonId)!, failed: "gave up" });
+  assert.ok(registry.threads.retryPylon(thread.pylonId));
+  registry.threads.setThreadStatus(thread.id, "deleted");
   const fake = fakeNode({ autoFinish: true });
   const loop = run(t, registry, fake.probe);
-  await until("the retry is settled", () => registry.pylon(thread.pylonId)?.retrying === false);
+  await until("the retry is settled", () => registry.threads.pylon(thread.pylonId)?.retrying === false);
   await settled(fake, loop);
-  assert.deepEqual(registry.pylonIdsToTick(node, []), [], "once settled, the pass leaves the pylon out");
+  assert.deepEqual(registry.threads.pylonIdsToTick(node, []), [], "once settled, the pass leaves the pylon out");
   assert.deepEqual(fake.submitted, []);
 });
 
 test("a deleted thread whose Claude launch was cut off has the launch failed, though its pylon is gone", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry, {}, "hello");
-  registry.setThreadStatus(thread.id, "deleted");
+  registry.threads.setThreadStatus(thread.id, "deleted");
   claudeWorkerAt(registry, thread.id, "starting", { session: "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30" });
   const fake = fakeNode({ autoFinish: true });
   run(t, registry, fake.probe);
-  await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed");
+  await until("worker failed", () => registry.threads.claudeWorker(thread.id)?.state === "failed");
   assert.deepEqual(fake.submitted, []);
 });
 
@@ -1958,7 +1958,7 @@ test("a used-up port range is logged, and the services that got a port are still
   run(t, registry, fake.probe, { ingest: realIngest, previewPorts: { first: 10200, last: 10200 }, log: (line) => logged.push(line) });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   fake.setServices(thread.pylonId, [web, { ...web, name: "api", port: 8001 }]);
-  await until("web is published", () => registry.previews(thread.pylonId)[0]?.ready === true);
+  await until("web is published", () => registry.threads.previews(thread.pylonId)[0]?.ready === true);
   assert.deepEqual(fake.lives.get(thread.pylonId)?.previews, [{ service: "web", httpsPort: 10200 }]);
   assert.ok(logged.includes(`${thread.pylonId}: no https port is free for the preview of api: pylons on ${node} hold or ${node} serves every port from 10200 to 10200`), logged.join("\n"));
 });
@@ -1994,21 +1994,21 @@ test("a node reporting a pylon the registry places on another node gets no ports
   elsewhere.setServices(thread.pylonId, [web]);
   await until("the copy is listed as an orphan", () => nodePylons(registry, registry.node(peer)!)?.orphaned.includes(thread.pylonId) === true);
   await loop.wake(firebat);
-  assert.deepEqual(registry.previews(thread.pylonId), []);
+  assert.deepEqual(registry.threads.previews(thread.pylonId), []);
   assert.deepEqual(home.submitted.map((job) => job.kind), ["spawn"]);
 });
 
 test("a boot asking for a held secret waits for a probe older than it, and boots once the upgraded probe has it", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
-  const stored = registry.pylon(thread.pylonId)!;
-  registry.savePylon({ ...stored, boot: { ...stored.boot, network: { allowedHosts: [], secrets: [chatgptTokenGrant] } } });
+  const stored = registry.threads.pylon(thread.pylonId)!;
+  registry.threads.savePylon({ ...stored, boot: { ...stored.boot, network: { allowedHosts: [], secrets: [chatgptTokenGrant] } } });
   const fake = fakeNode({ autoFinish: true });
   const loop = run(t, registry, fake.probe);
   await until("the node is online", () => registry.node(node)?.state === "online");
   await settled(fake, loop);
   assert.deepEqual(fake.submitted, [], "no spawn reaches a probe that does not take the held secret");
-  assert.equal(registry.pylon(thread.pylonId)!.failed, null);
+  assert.equal(registry.threads.pylon(thread.pylonId)!.failed, null);
 
   fake.upgrade([chatgptTokenGrant.name]);
   await settled(fake, loop);
@@ -2017,7 +2017,7 @@ test("a boot asking for a held secret waits for a probe older than it, and boots
   await fake.probe.putSecret(chatgptTokenGrant.name, "token");
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh"]);
-  assert.equal(registry.pylon(thread.pylonId)!.attempts.count, 0);
+  assert.equal(registry.threads.pylon(thread.pylonId)!.attempts.count, 0);
 });
 
 test("a boot asking for the ChatGPT token right after a probe restart boots once the handoff the restart set off arrives", async (t) => {
@@ -2042,8 +2042,8 @@ test("a boot asking for the ChatGPT token right after a probe restart boots once
 
   fake.restartProbe();
   const thread = seed(registry);
-  const stored = registry.pylon(thread.pylonId)!;
-  registry.savePylon({ ...stored, boot: { ...stored.boot, network: { allowedHosts: [], secrets: [chatgptTokenGrant] } } });
+  const stored = registry.threads.pylon(thread.pylonId)!;
+  registry.threads.savePylon({ ...stored, boot: { ...stored.boot, network: { allowedHosts: [], secrets: [chatgptTokenGrant] } } });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh"]);
   assert.deepEqual(registry.node(node)?.observation?.grants?.secrets, [chatgptTokenGrant.name]);
@@ -2064,11 +2064,11 @@ test("every new boot takes the configured git identity, but a checkpoint keeps i
   assert.deepEqual(fresh.boot.gitIdentity, gitIdentity);
   const override = { name: "Work Person", email: "work@example.com" };
   registry.editProject(thread.project, (p) => ({ ...p, gitIdentity: override, secrets: [{ name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }], logins: ["claude"] }));
-  assert.deepEqual(registry.pylon(thread.pylonId)!.boot.gitIdentity, gitIdentity, "a running pylon keeps its boot identity");
-  registry.setThreadStatus(thread.id, "archived");
-  await until("the pause is folded in", () => registry.pylon(thread.pylonId)?.pauses === 1);
-  registry.setThreadStatus(thread.id, "active");
-  registry.recordActivity(thread.id, { human: Date.now() });
+  assert.deepEqual(registry.threads.pylon(thread.pylonId)!.boot.gitIdentity, gitIdentity, "a running pylon keeps its boot identity");
+  registry.threads.setThreadStatus(thread.id, "archived");
+  await until("the pause is folded in", () => registry.threads.pylon(thread.pylonId)?.pauses === 1);
+  registry.threads.setThreadStatus(thread.id, "active");
+  registry.threads.recordActivity(thread.id, { human: Date.now() });
   await until("the pylon runs again", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   const resume = fake.submitted.findLast((job) => job.kind === "spawn")!;
   assert.ok(resume.kind === "spawn" && resume.boot.source.kind === "resume");
@@ -2088,7 +2088,7 @@ test("a queued Claude worker launches once after its pylon runs", async (t) => {
     return { kind: "open-session", herdrPane: "w1:p1" };
   } };
   const loop = run(t, registry, probe);
-  await until("worker started", () => registry.claudeWorker(thread.id)?.state === "started");
+  await until("worker started", () => registry.threads.claudeWorker(thread.id)?.state === "started");
   await loop.wake(node);
   assert.deepEqual(commands, [{ kind: "open-session", harness: "claude-code", title: "t", resume: (commands[0] as { resume: string }).resume, prompt: "/poteto-mode implement it", model: "claude-opus-5-5" }]);
 });
@@ -2103,12 +2103,12 @@ test("a stalled Claude launch reports its screen and failed attention without re
     return { kind: "open-session", herdrPane: "w1:p1", stalled: "no UserPromptSubmit within 30 seconds. The pane showed:\nChoose the text style" };
   } };
   const loop = run(t, registry, probe, { log: () => {} });
-  await until("worker stalled", () => registry.claudeWorker(thread.id)?.state === "stalled");
+  await until("worker stalled", () => registry.threads.claudeWorker(thread.id)?.state === "stalled");
   await loop.wake(node);
   assert.equal(launches, 1);
-  assert.match(registry.claudeWorker(thread.id)!.message!, /Choose the text style/);
-  assert.ok(registry.events().some((e) => e.kind === "thread.failed" && String(e.payload.message).includes("Choose the text style")));
-  assert.ok(registry.events().some((e) => e.kind === "attention.changed" && e.payload.attention === "failed"));
+  assert.match(registry.threads.claudeWorker(thread.id)!.message!, /Choose the text style/);
+  assert.ok(registry.threads.events().some((e) => e.kind === "thread.failed" && String(e.payload.message).includes("Choose the text style")));
+  assert.ok(registry.threads.events().some((e) => e.kind === "attention.changed" && e.payload.attention === "failed"));
 });
 
 test("a launch error that says the launch stalled is a failed launch, since only the result marks a stall", async (t) => {
@@ -2119,8 +2119,8 @@ test("a launch error that says the launch stalled is a failed launch, since only
     throw new Error("Claude launch stalled: no UserPromptSubmit within 30 seconds");
   } };
   run(t, registry, probe, { log: () => {} });
-  await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed");
-  assert.match(registry.claudeWorker(thread.id)!.message!, /Claude launch stalled: no UserPromptSubmit/);
+  await until("worker failed", () => registry.threads.claudeWorker(thread.id)?.state === "failed");
+  assert.match(registry.threads.claudeWorker(thread.id)!.message!, /Claude launch stalled: no UserPromptSubmit/);
 });
 
 test("a submission receipt wins over a late launch error without a contradictory failed event", async (t) => {
@@ -2132,16 +2132,16 @@ test("a submission receipt wins over a late launch error without a contradictory
     assert.equal(command.kind, "open-session");
     if (command.kind !== "open-session") throw new Error("wrong command");
     launches++;
-    registry.reportSession(node, { sequence: 1, pylon: thread.pylonId, time: Date.now(), event: { kind: "session.turn-started", session: command.resume! } });
+    registry.threads.reportSession(node, { sequence: 1, pylon: thread.pylonId, time: Date.now(), event: { kind: "session.turn-started", session: command.resume! } });
     throw new Error("Herdr timed out waiting for readiness");
   } };
   const loop = run(t, registry, probe);
-  await until("worker submitted", () => registry.claudeWorker(thread.id)?.state === "started");
+  await until("worker submitted", () => registry.threads.claudeWorker(thread.id)?.state === "started");
   await loop.wake(node);
   assert.equal(launches, 1);
-  assert.equal(registry.claudeWorker(thread.id)!.message, undefined);
-  assert.equal(registry.events().some((e) => e.kind === "thread.failed"), false);
-  assert.equal(registry.events().filter((e) => e.kind === "attention.changed").at(-1)?.payload.attention, "working");
+  assert.equal(registry.threads.claudeWorker(thread.id)!.message, undefined);
+  assert.equal(registry.threads.events().some((e) => e.kind === "thread.failed"), false);
+  assert.equal(registry.threads.events().filter((e) => e.kind === "attention.changed").at(-1)?.payload.attention, "working");
 });
 
 test("a submission receipt wins over a late stalled result without a contradictory failed event", async (t) => {
@@ -2150,14 +2150,14 @@ test("a submission receipt wins over a late stalled result without a contradicto
   const fake = fakeNode({ autoFinish: true });
   const probe: ProbeClient = { ...fake.probe, command: async (_pylon, command) => {
     if (command.kind !== "open-session") throw new Error("wrong command");
-    registry.reportSession(node, { sequence: 1, pylon: thread.pylonId, time: Date.now(), event: { kind: "session.turn-started", session: command.resume! } });
+    registry.threads.reportSession(node, { sequence: 1, pylon: thread.pylonId, time: Date.now(), event: { kind: "session.turn-started", session: command.resume! } });
     return { kind: "open-session", herdrPane: "w1:p1", stalled: "no UserPromptSubmit within 30 seconds" };
   } };
   const loop = run(t, registry, probe);
-  await until("worker submitted", () => registry.claudeWorker(thread.id)?.state === "started");
+  await until("worker submitted", () => registry.threads.claudeWorker(thread.id)?.state === "started");
   await loop.wake(node);
-  assert.equal(registry.claudeWorker(thread.id)!.state, "started");
-  assert.equal(registry.events().some((e) => e.kind === "thread.failed"), false);
+  assert.equal(registry.threads.claudeWorker(thread.id)!.state, "started");
+  assert.equal(registry.threads.events().some((e) => e.kind === "thread.failed"), false);
 });
 
 test("a failed launch persists the same diagnostic it publishes and never resubmits", async (t) => {
@@ -2170,13 +2170,13 @@ test("a failed launch persists the same diagnostic it publishes and never resubm
     throw new Error("seeding Claude state failed: invalid JSON");
   } };
   const loop = run(t, registry, probe, { log: () => {} });
-  await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed");
+  await until("worker failed", () => registry.threads.claudeWorker(thread.id)?.state === "failed");
   await loop.wake(node);
   assert.equal(launches, 1);
-  const worker = registry.claudeWorker(thread.id)!;
+  const worker = registry.threads.claudeWorker(thread.id)!;
   assert.match(worker.message!, /seeding Claude state failed: invalid JSON/);
-  assert.equal(registry.events().filter((e) => e.kind === "thread.failed").at(-1)?.payload.message, worker.message);
-  assert.equal(registry.events().filter((e) => e.kind === "attention.changed").at(-1)?.payload.attention, "failed");
+  assert.equal(registry.threads.events().filter((e) => e.kind === "thread.failed").at(-1)?.payload.message, worker.message);
+  assert.equal(registry.threads.events().filter((e) => e.kind === "attention.changed").at(-1)?.payload.attention, "failed");
 });
 
 /**
@@ -2201,10 +2201,10 @@ test("a Claude launch whose probe restarts mid-way is sent again under its sessi
   const commands: PylonCommand[] = [];
   const logged: string[] = [];
   run(t, registry, restartingProbe(fake, ["restart", "restart", { kind: "open-session", herdrPane: "w1:p1" }], commands), { log: (line) => logged.push(line) });
-  await until("worker started", () => registry.claudeWorker(thread.id)?.state === "started");
+  await until("worker started", () => registry.threads.claudeWorker(thread.id)?.state === "started");
   assert.equal(commands.length, 3);
-  assert.deepEqual(new Set(commands.map((c) => c.kind === "open-session" && c.resume)), new Set([registry.claudeWorker(thread.id)!.session]), "every send names the session recorded before the first");
-  assert.equal(registry.events().some((e) => e.kind === "thread.failed"), false);
+  assert.deepEqual(new Set(commands.map((c) => c.kind === "open-session" && c.resume)), new Set([registry.threads.claudeWorker(thread.id)!.session]), "every send names the session recorded before the first");
+  assert.equal(registry.threads.events().some((e) => e.kind === "thread.failed"), false);
   assert.ok(logged.some((line) => line.includes("the Claude launch lost its probe (rj-firebat: socket hang up). Sending it again")));
 });
 
@@ -2219,10 +2219,10 @@ test("a Claude launch whose probe stays away fails once the wait is over", async
     throw Object.assign(new Error(`${node}: socket hang up`), { code: "unreachable" });
   } };
   run(t, registry, probe, { log: () => {}, claudeLaunchRetryMs: 200 });
-  await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed");
+  await until("worker failed", () => registry.threads.claudeWorker(thread.id)?.state === "failed");
   assert.equal(commands.length, 1);
-  assert.match(registry.claudeWorker(thread.id)!.message!, /socket hang up, and the probe did not come back within 0\.2 seconds$/);
-  assert.ok(registry.events().some((e) => e.kind === "thread.failed"));
+  assert.match(registry.threads.claudeWorker(thread.id)!.message!, /socket hang up, and the probe did not come back within 0\.2 seconds$/);
+  assert.ok(registry.threads.events().some((e) => e.kind === "thread.failed"));
 });
 
 test("a Claude launch a control plane restart cut off goes again under its session", async (t) => {
@@ -2232,14 +2232,14 @@ test("a Claude launch a control plane restart cut off goes again under its sessi
   const fake = fakeNode({ autoFinish: true });
   const commands: PylonCommand[] = [];
   run(t, registry, restartingProbe(fake, [{ kind: "open-session", herdrPane: "w1:p1" }], commands));
-  await until("worker started", () => registry.claudeWorker(thread.id)?.state === "started");
+  await until("worker started", () => registry.threads.claudeWorker(thread.id)?.state === "started");
   assert.deepEqual(commands.map((c) => c.kind === "open-session" && c.resume), ["6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30"]);
 });
 
 test("a control plane that opens on an observation stored from a probe older than routes, grants, held secrets and counting boots its pylon from the probe's first snapshot", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);
-  registry.ingested({
+  registry.threads.ingested({
     node, observedAt: "2027-01-01T00:00:00Z", probeBootId: "boot-0", capacity: { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 }, artifacts: [image], jobs: [],
     pylons: [{ pylonId: thread.pylonId, phase: "stopped", checkpoint: null }],
   } as never, []);
@@ -2260,8 +2260,8 @@ test("a Claude launch a control plane restart cut off before it recorded a sessi
   const fake = fakeNode({ autoFinish: true });
   const sent: PylonCommand[] = [];
   run(t, registry, restartingProbe(fake, [], sent));
-  await until("worker failed", () => registry.claudeWorker(thread.id)?.state === "failed");
-  assert.equal(registry.claudeWorker(thread.id)!.message, "Claude launch was interrupted; attach to check before starting another session");
+  await until("worker failed", () => registry.threads.claudeWorker(thread.id)?.state === "failed");
+  assert.equal(registry.threads.claudeWorker(thread.id)!.message, "Claude launch was interrupted; attach to check before starting another session");
   assert.deepEqual(sent, []);
 });
 
@@ -2271,12 +2271,12 @@ test("retry of a failed job stops its still-running boot before resuming its new
   const fake = fakeNode({ autoFinish: true });
   const loop = run(t, registry, fake.probe, { log: () => {} });
   await until("the first boot runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
-  await until("the first spawn is settled", () => registry.pylon(thread.pylonId)?.submitted === null);
+  await until("the first spawn is settled", () => registry.threads.pylon(thread.pylonId)?.submitted === null);
   await settled(fake, loop);
   const old = fake.pylons.get(thread.pylonId)!;
   assert.equal(old.phase, "running");
-  registry.savePylon({ ...registry.pylon(thread.pylonId)!, failed: "Guest command got no answer within 40000 ms" });
-  assert.equal(registry.retryPylon(thread.pylonId), true);
+  registry.threads.savePylon({ ...registry.threads.pylon(thread.pylonId)!, failed: "Guest command got no answer within 40000 ms" });
+  assert.equal(registry.threads.retryPylon(thread.pylonId), true);
   void loop.wake(node);
   await until("retry boots again", () => fake.submitted.length === 3 && fake.pylons.get(thread.pylonId)?.phase === "running");
   await settled(fake, loop);
@@ -2293,13 +2293,13 @@ for (const phase of ["booting", "stopping"] as const) test(`retry recovers a con
   const thread = seed(registry);
   const fake = fakeNode({ autoFinish: true });
   const loop = run(t, registry, fake.probe, { log: () => {} });
-  await until("the first spawn is settled", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.pylon(thread.pylonId)?.submitted === null);
+  await until("the first spawn is settled", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.threads.pylon(thread.pylonId)?.submitted === null);
   await settled(fake, loop);
-  registry.savePylon({ ...registry.pylon(thread.pylonId)!, failed: "Guest command got no answer within 40000 ms" });
+  registry.threads.savePylon({ ...registry.threads.pylon(thread.pylonId)!, failed: "Guest command got no answer within 40000 ms" });
   fake.pylons.set(thread.pylonId, { pylonId: thread.pylonId, phase });
   fake.forgetJobs();
   await until("the controller's transitional state is observed", () => registry.node(node)?.observation?.pylons.find((p) => p.pylonId === thread.pylonId)?.phase === phase);
-  assert.equal(registry.retryPylon(thread.pylonId), true);
+  assert.equal(registry.threads.retryPylon(thread.pylonId), true);
   void loop.wake(node);
   await until("retry boots again", () => fake.submitted.length === 3 && fake.pylons.get(thread.pylonId)?.phase === "running");
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh", "pause", "spawn resume"]);

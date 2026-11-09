@@ -62,8 +62,8 @@ test("a deployer's image operations answer 200 once done and 202 while running, 
     images: (registry) => startImageRollout({ registry, probes: new Map([[node, { submit: noJobs, job: noJobs, manifest: async (id) => registry.image(id as ImageId) ?? null }]]), buildNode: node, recipe: async () => recipe, release: null, intervalMs: 600_000, log: () => {} }),
   });
   for (const manifest of [image, built]) assert.equal((await s.call("POST", "/v1/images", manifest)).status, 201);
-  s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
-  s.registry.ingested(testObservation(node, { observedAt: "2027-01-01T00:01:00Z", artifacts: [image.id as ImageId] }), []);
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  s.registry.threads.ingested(testObservation(node, { observedAt: "2027-01-01T00:01:00Z", artifacts: [image.id as ImageId] }), []);
   const entries = [{ ...built, release: null, nodes: [] }, { ...image, release: null, nodes: [node] }];
   assert.deepEqual((await s.call("GET", "/v1/images")).body, { current: null, previous: null, images: entries, operation: null }, "newest build first");
 

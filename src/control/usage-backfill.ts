@@ -25,7 +25,7 @@ import type { UsageCounter } from "./usage-counter.ts";
 import type { UsageHold } from "./usage-store.ts";
 import type { BackfillPlanRow, UsageBackfill } from "../contract/usage.ts";
 
-type UsageBackfillRegistry = Pick<Registry, "clearPylonAttempts" | "finishUsageBackfill" | "finishUsageBackfillThread" | "finishUsageHold" | "holdSettle" | "holdUsageBackfill" | "keptArchives" | "markUnread" | "node" | "nodes" | "now" | "projects" | "pylon" | "pylonsOn" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseUsageHold" | "reserved" | "sealBoot" | "startUsageBackfill" | "stopUsageBackfill" | "storedThreads" | "thread" | "threads" | "usageBackfill" | "usageBackfillThreads" | "usageHold" | "waitSettle" | "waitUsageBackfill">;
+type UsageBackfillRegistry = Pick<Registry, "threads" | "usage" | "node" | "nodes" | "now" | "projects" | "reserved">;
 
 export interface UsageBackfillJob {
   status(): UsageBackfill;
@@ -73,7 +73,7 @@ export function usageBackfill(options: {
     if (t.status === "deleted") return "it was deleted, and its pylon with it";
     if (t.status !== "archived") return "it is not archived any more, so live counting reads it";
     if (desiredPhase(t, Date.now()) === "deleted") return "its disk was deleted 24 hours after it was archived, once its usage was read and backed up";
-    const p = registry.pylon(t.pylonId);
+    const p = registry.threads.pylon(t.pylonId);
     if (p === undefined) return "its pylon has no record";
     if (p.failed !== null) return `its pylon failed: ${p.failed}`;
     const o = seen(p);
@@ -90,7 +90,7 @@ export function usageBackfill(options: {
     const node = registry.node(p.node);
     const o = node?.state === "online" ? node.observation : null;
     if (o == null) return `${p.node} is offline`;
-    if (o.jobs.some((j) => j.state === "running") || registry.pylonsOn(p.node).some((other) => other.submitted !== null)) return `${p.node} is busy with a job`;
+    if (o.jobs.some((j) => j.state === "running") || registry.threads.pylonsOn(p.node).some((other) => other.submitted !== null)) return `${p.node} is busy with a job`;
     const observed = o.pylons.find((seen) => seen.pylonId === p.pylonId);
     if (observed !== undefined && observed.phase !== "stopped" && observed.phase !== "running") return `its pylon is ${observed.phase}`;
     const largest = Math.max(0, ...registry.projects().map((project) => project.resources.memoryGiB));
@@ -100,25 +100,25 @@ export function usageBackfill(options: {
   }
 
   function next(now: number) {
-    for (const row of registry.usageBackfillThreads()) {
+    for (const row of registry.usage.usageBackfillThreads()) {
       if (row.state !== "pending") continue;
-      const t = registry.thread(row.thread)!;
+      const t = registry.threads.thread(row.thread)!;
       const why = unreadable(t);
       if (why !== null) {
-        registry.finishUsageBackfillThread(t.id, "skipped", why, now);
+        registry.usage.finishUsageBackfillThread(t.id, "skipped", why, now);
         continue;
       }
-      const p = registry.pylon(t.pylonId)!;
+      const p = registry.threads.pylon(t.pylonId)!;
       const waiting = blocked(p);
-      registry.waitUsageBackfill(waiting);
+      registry.usage.waitUsageBackfill(waiting);
       if (waiting !== null) return;
       // A failure from before the thread was archived would hold the wake in backoff, or give it up as the run's own.
-      if (p.attempts.last !== null) registry.clearPylonAttempts(p.pylonId);
-      registry.holdUsageBackfill(t.id, now);
+      if (p.attempts.last !== null) registry.threads.clearPylonAttempts(p.pylonId);
+      registry.usage.holdUsageBackfill(t.id, now);
       wake(p.node);
       return;
     }
-    registry.finishUsageBackfill(now);
+    registry.usage.finishUsageBackfill(now);
   }
 
   /** When each archived pylon was first seen up while nothing held it, so one stuck up stops holding every settle back. */
@@ -131,8 +131,8 @@ export function usageBackfill(options: {
    * waited for no more.
    */
   function upPylon(now: number): StoredPylon | null {
-    const up = registry.storedThreads({ status: ["archived"] }).flatMap((t) => {
-      const p = registry.pylon(t.pylonId);
+    const up = registry.threads.storedThreads({ status: ["archived"] }).flatMap((t) => {
+      const p = registry.threads.pylon(t.pylonId);
       const o = p === undefined || p.failed !== null ? null : seen(p);
       return o !== null && o !== "absent" && (o.phase === "booting" || o.phase === "stopping" || (o.phase === "running" && o.liveHash === null)) ? [p!] : [];
     });
@@ -161,45 +161,45 @@ export function usageBackfill(options: {
    * `settleRetryMs` after. Each archive that waits records why, which its thread shows.
    */
   function nextSettle(now: number): "held" | "up" | "none" {
-    const archives = registry.keptArchives().filter((t) => t.usageSettledAt === undefined);
+    const archives = registry.threads.keptArchives().filter((t) => t.usageSettledAt === undefined);
     const up = upPylon(now);
     if (up !== null) {
-      for (const t of archives) if (t.pylonId !== up.pylonId) registry.waitSettle(t.id, `${up.pylonId} on ${up.node} is up for reading, and one pylon is woken at a time`);
+      for (const t of archives) if (t.pylonId !== up.pylonId) registry.usage.waitSettle(t.id, `${up.pylonId} on ${up.node} is up for reading, and one pylon is woken at a time`);
       return "up";
     }
     for (const t of archives) {
-      const p = registry.pylon(t.pylonId);
+      const p = registry.threads.pylon(t.pylonId);
       if (p === undefined) continue;
       // A failure ends with its log, so only its first line is kept.
       if (p.failed !== null) {
-        registry.markUnread(t.id, `its pylon failed: ${p.failed.split("\n")[0]!}`);
+        registry.threads.markUnread(t.id, `its pylon failed: ${p.failed.split("\n")[0]!}`);
         continue;
       }
       const o = seen(p);
       if (o === null) {
-        registry.waitSettle(t.id, `${p.node} is offline`);
+        registry.usage.waitSettle(t.id, `${p.node} is offline`);
         continue;
       }
       if (o === "absent") {
         // A disk that went with its usage unread keeps that on record.
-        if (p.submitted === null && t.usageUnread === undefined) registry.finishUsageHold({ by: "settle", thread: t.id }, null, Date.now());
+        if (p.submitted === null && t.usageUnread === undefined) registry.usage.finishUsageHold({ by: "settle", thread: t.id }, null, Date.now());
         continue;
       }
       if (o.phase === "stopped" && !imageHeld(p)) {
-        registry.markUnread(t.id, `no online node holds its image ${p.boot.image}`);
+        registry.threads.markUnread(t.id, `no online node holds its image ${p.boot.image}`);
         continue;
       }
-      if (t.usageUnread !== undefined) registry.markUnread(t.id, null);
+      if (t.usageUnread !== undefined) registry.threads.markUnread(t.id, null);
       if (t.settleFailure !== undefined && now - t.settleFailure.at < settleRetryMs) continue;
       if (o.phase !== "stopped") {
-        registry.waitSettle(t.id, o.phase === "running" ? "its pylon has not paused since its archive yet" : `its pylon is ${o.phase}`);
+        registry.usage.waitSettle(t.id, o.phase === "running" ? "its pylon has not paused since its archive yet" : `its pylon is ${o.phase}`);
         continue;
       }
       const waiting = blocked(p);
-      registry.waitSettle(t.id, waiting);
+      registry.usage.waitSettle(t.id, waiting);
       if (waiting !== null) continue;
-      if (p.attempts.last !== null) registry.clearPylonAttempts(p.pylonId);
-      registry.holdSettle(t.id, now);
+      if (p.attempts.last !== null) registry.threads.clearPylonAttempts(p.pylonId);
+      registry.usage.holdSettle(t.id, now);
       wake(p.node);
       return "held";
     }
@@ -208,10 +208,10 @@ export function usageBackfill(options: {
 
   async function reading(hold: UsageHold, now: number) {
     const id = hold.thread;
-    const t = registry.thread(id)!;
-    const p = registry.pylon(t.pylonId);
+    const t = registry.threads.thread(id)!;
+    const p = registry.threads.pylon(t.pylonId);
     const finish = (reason: string | null) => {
-      registry.finishUsageHold(hold, reason, Date.now());
+      registry.usage.finishUsageHold(hold, reason, Date.now());
       if (p !== undefined) wake(p.node);
     };
     if (t.status === "deleted") return finish("it was deleted while it was read");
@@ -225,7 +225,7 @@ export function usageBackfill(options: {
         await counter.readWhole(id, shutdown.signal, hold.by === "settle" ? () => sealing(id) : undefined);
       } catch (err) {
         // A stop or a shutdown cut the read short, so the thread waits for the next run or settle.
-        const held = registry.usageHold();
+        const held = registry.usage.usageHold();
         if (shutdown.signal.aborted || held?.by !== hold.by || held.thread !== id) return;
         return finish(`reading it failed: ${(err as Error).message}`);
       }
@@ -235,13 +235,13 @@ export function usageBackfill(options: {
   }
 
   function pausing(hold: UsageHold, now: number) {
-    const t = registry.thread(hold.thread)!;
-    const p = registry.pylon(t.pylonId);
+    const t = registry.threads.thread(hold.thread)!;
+    const p = registry.threads.pylon(t.pylonId);
     const o = p === undefined ? "absent" : seen(p);
     const paused = o === "absent" || o?.phase === "stopped";
     if (!paused && t.status === "archived" && now - hold.since < pauseMs) return;
     if (!paused && t.status === "archived") log(`usage backfill: ${t.pylonId} did not pause within ${minutes(pauseMs)}, so the next pylon is woken without it`);
-    registry.releaseUsageHold(hold);
+    registry.usage.releaseUsageHold(hold);
   }
 
   /**
@@ -249,44 +249,44 @@ export function usageBackfill(options: {
    * first, so the planner pauses it rather than run work on it, whatever comes after.
    */
   function sealing(id: ThreadId) {
-    const t = registry.thread(id);
-    const p = t === undefined ? undefined : registry.pylon(t.pylonId);
+    const t = registry.threads.thread(id);
+    const p = t === undefined ? undefined : registry.threads.pylon(t.pylonId);
     const o = p === undefined ? null : seen(p);
     if (t?.status !== "archived") throw new Error("it was unarchived before its transcripts were sealed");
     if (o === null || o === "absent" || o.phase !== "running") throw new Error("its pylon is not running");
-    registry.sealBoot(p!.pylonId, o.bootedAt);
+    registry.threads.sealBoot(p!.pylonId, o.bootedAt);
   }
 
   async function step() {
     const now = Date.now();
-    const hold = registry.usageHold();
+    const hold = registry.usage.usageHold();
     if (hold !== null) return hold.phase === "reading" ? reading(hold, now) : pausing(hold, now);
-    if (nextSettle(now) !== "none" || registry.usageBackfill().state !== "running") return;
+    if (nextSettle(now) !== "none" || registry.usage.usageBackfill().state !== "running") return;
     next(now);
   }
 
   function plan(): BackfillPlanRow[] {
-    const rows = new Map(registry.usageBackfillThreads().map((r) => [r.thread, r]));
-    return registry.threads().flatMap((t) => {
+    const rows = new Map(registry.usage.usageBackfillThreads().map((r) => [r.thread, r]));
+    return registry.threads.threads().flatMap((t) => {
       const row = rows.get(t.id);
-      const p = registry.pylon(t.pylonId);
+      const p = registry.threads.pylon(t.pylonId);
       if (t.status !== "archived" || p === undefined || row?.state === "done") return [];
       return [{ thread: t.id, project: t.project, node: p.node, title: t.title, reason: row?.state === "skipped" ? row.reason : null }];
     });
   }
 
   return {
-    status: () => registry.usageBackfill(),
+    status: () => registry.usage.usageBackfill(),
     plan,
     start() {
-      const state = registry.startUsageBackfill(plan().map((r) => r.thread), Date.now());
+      const state = registry.usage.startUsageBackfill(plan().map((r) => r.thread), Date.now());
       void steps.rerun();
       return state;
     },
     stop() {
-      const run = registry.usageBackfill();
-      const state = registry.stopUsageBackfill(Date.now());
-      const held = run.state === "running" && run.current !== null ? registry.pylon(registry.thread(run.current.thread)!.pylonId) : undefined;
+      const run = registry.usage.usageBackfill();
+      const state = registry.usage.stopUsageBackfill(Date.now());
+      const held = run.state === "running" && run.current !== null ? registry.threads.pylon(registry.threads.thread(run.current.thread)!.pylonId) : undefined;
       if (held !== undefined) wake(held.node);
       return state;
     },

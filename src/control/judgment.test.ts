@@ -108,14 +108,14 @@ function builder(registry: Registry, id: string, options: { project?: string; st
     boot: { repo: { kind: "clone", url: "https://github.com/acme/repo.git", checkout: { branch: "main", commit: "origin/main" } }, dotfiles: { repo: "https://github.com/acme/dotfiles.git", ref: "main" } },
     firstBoot: options.firstBoot === "template" ? { kind: "template", template: "tpl-1" as never } : { kind: "fresh", preSetup: null },
   });
-  registry.createThread(thread, pylon);
+  registry.threads.createThread(thread, pylon);
   return thread.id;
 }
 
 /** The planner gives up on the thread's pylon, as the loop's tick saves it. */
 function fail(registry: Registry, id: ThreadId, reason: string, pauses = 0) {
-  const pylon = registry.pylon(`pylon-${id}` as PylonId)!;
-  registry.savePylon({ ...pylon, pauses, failed: reason, attempts: { count: 5, last: { at: 1, code: "backend", message: "the controller exited" } } });
+  const pylon = registry.threads.pylon(`pylon-${id}` as PylonId)!;
+  registry.threads.savePylon({ ...pylon, pauses, failed: reason, attempts: { count: 5, last: { at: 1, code: "backend", message: "the controller exited" } } });
 }
 
 const only = (registry: Registry, id: ThreadId): Judgment => {
@@ -133,12 +133,12 @@ test("a retry answer retries the pylon on its node, closes the judgment and coun
 
   const j = only(w.registry, id);
   assert.deepEqual(j.phase, { kind: "done", verdict: { answer: "retry", why: "scripted judgment: the brief says judge: retry", by: "judgment" }, outcome: { kind: "retried", node: nodeA, on: "verdict" } });
-  const pylon = w.registry.pylon(`pylon-${id}` as PylonId)!;
+  const pylon = w.registry.threads.pylon(`pylon-${id}` as PylonId)!;
   assert.deepEqual([pylon.failed, pylon.attempts, pylon.retrying], [null, { count: 0, last: null }, true]);
-  assert.equal(desiredPhase(w.registry.thread(id)!, Date.now()), "running", "the retry wants the pylon running");
+  assert.equal(desiredPhase(w.registry.threads.thread(id)!, Date.now()), "running", "the retry wants the pylon running");
   assert.ok(w.wakes.includes(nodeA));
   assert.deepEqual(await w.host.judgmentReplies(j.conversation as ConversationId), [j.reply], "its run is over");
-  assert.equal(w.registry.usageReport({ since: null, thread: id }).total.calls, 1, "the judgment's model call counts under the builder");
+  assert.equal(w.registry.usage.usageReport({ since: null, thread: id }).total.calls, 1, "the judgment's model call counts under the builder");
 
   assert.equal(w.seen.length, 1);
   assert.deepEqual(w.seen[0]!.tools, [], "the judgment is offered no tools");
@@ -161,9 +161,9 @@ test("a retry-elsewhere answer moves a pylon its node holds nothing of to the ot
   assert.deepEqual(only(w.registry, id).phase, {
     kind: "done", verdict: { answer: "retry-elsewhere", why: "scripted judgment: the brief says judge: retry-elsewhere", by: "judgment" }, outcome: { kind: "moved", from: nodeA, to: nodeB, on: "verdict" },
   });
-  const pylon = w.registry.pylon(`pylon-${id}` as PylonId)!;
+  const pylon = w.registry.threads.pylon(`pylon-${id}` as PylonId)!;
   assert.deepEqual([pylon.node, pylon.firstBoot, pylon.failed], [nodeB, { kind: "fresh", preSetup: "apt-get install -y jq" }, null]);
-  const t2 = w.registry.thread(id)!;
+  const t2 = w.registry.threads.thread(id)!;
   assert.equal(t2.placement?.node, nodeB);
   assert.equal(t2.setup?.how, "fresh");
   assert.ok(w.wakes.includes(nodeA) && w.wakes.includes(nodeB));
@@ -181,10 +181,10 @@ test("a move goes to the person when the failed node still lists the pylon or ho
   for (const [id, why] of [[listed, "node-a still lists it broken, and Nexus has no move job"], [paused, "its disk is on node-a, and Nexus has no move job"]] as const) {
     const j = only(w.registry, id);
     assert.deepEqual(j.phase, { kind: "asked", verdict: { answer: "person", why: `the judgment answered retry-elsewhere, which cannot run: ${why}`, by: "control plane" } });
-    const question = w.registry.question(`judgment:${j.failure}`) as JudgmentQuestion;
+    const question = w.registry.questions.question(`judgment:${j.failure}`) as JudgmentQuestion;
     assert.deepEqual([question.thread, question.answerer, question.answer, question.options], [id, "person", null, ["Retry", "Leave it failed"]]);
-    assert.equal(w.registry.pylon(`pylon-${id}` as PylonId)!.node, nodeA);
-    assert.equal(w.registry.attention(id), "failed");
+    assert.equal(w.registry.threads.pylon(`pylon-${id}` as PylonId)!.node, nodeA);
+    assert.equal(w.registry.threads.attention(id), "failed");
   }
 });
 
@@ -193,20 +193,20 @@ test("a person answer asks with the actions that can run, and each answer does w
   const ids = ["th-p1", "th-p2", "th-p3"].map((id) => builder(w.registry, id));
   for (const id of ids) fail(w.registry, id, brokenWith("person"));
   await w.until(() => ids.every((id) => phaseOf(w, id) === "asked"));
-  const questions = ids.map((id) => w.registry.question(`judgment:${only(w.registry, id).failure}`)!);
+  const questions = ids.map((id) => w.registry.questions.question(`judgment:${only(w.registry, id).failure}`)!);
   for (const q of questions) {
     assert.deepEqual(q.options, ["Retry", "Retry on another node", "Leave it failed"]);
     assert.match(q.text, /^The pylon failed on node-a: pylon is broken: the controller exited\n\nIts judgment leaves it to you: scripted judgment: the brief says judge: person\n/);
   }
 
   const answered = Date.now();
-  for (const [q, option] of questions.map((q, i) => [q, q.options[i]!] as const)) w.registry.answerQuestion(q, { option, by: laptop, at: answered });
+  for (const [q, option] of questions.map((q, i) => [q, q.options[i]!] as const)) w.registry.questions.answerQuestion(q, { option, by: laptop, at: answered });
   await w.until(() => ids.every((id) => phaseOf(w, id) === "done"));
 
   const outcomes = ids.map((id) => { const p = only(w.registry, id).phase; return p.kind === "done" ? p.outcome : null; });
   assert.deepEqual(outcomes, [{ kind: "retried", node: nodeA, on: "answer" }, { kind: "moved", from: nodeA, to: nodeB, on: "answer" }, { kind: "left", why: "the person left it failed" }]);
-  assert.deepEqual(ids.map((id) => w.registry.pylon(`pylon-${id}` as PylonId)!.failed === null), [true, true, false]);
-  assert.ok(w.registry.thread(ids[0]!)!.lastHumanActivityAt >= answered, "the person's retry is their activity");
+  assert.deepEqual(ids.map((id) => w.registry.threads.pylon(`pylon-${id}` as PylonId)!.failed === null), [true, true, false]);
+  assert.ok(w.registry.threads.thread(ids[0]!)!.lastHumanActivityAt >= answered, "the person's retry is their activity");
 });
 
 test("archiving a thread withdraws its failure's open question and drops the failed attention, which unarchiving brings back", async (t) => {
@@ -215,25 +215,25 @@ test("archiving a thread withdraws its failure's open question and drops the fai
   fail(w.registry, id, brokenWith("person"));
   await w.until(() => phaseOf(w, id) === "asked");
   const asked = `judgment:${only(w.registry, id).failure}`;
-  assert.equal((w.registry.question(asked) as JudgmentQuestion).failure, only(w.registry, id).failure);
-  assert.equal(w.registry.attention(id), "failed");
+  assert.equal((w.registry.questions.question(asked) as JudgmentQuestion).failure, only(w.registry, id).failure);
+  assert.equal(w.registry.threads.attention(id), "failed");
 
   const archivedAt = Date.now();
-  w.registry.setThreadStatus(id, "archived");
-  const withdrawn = w.registry.question(asked)!;
+  w.registry.threads.setThreadStatus(id, "archived");
+  const withdrawn = w.registry.questions.question(asked)!;
   assert.equal(withdrawn.answer, null);
   assert.equal(withdrawn.withdrawn?.by, "archive");
   assert.ok(withdrawn.withdrawn.at >= archivedAt);
-  assert.equal(w.registry.attention(id), null);
-  assert.deepEqual(w.registry.events("0", { thread: id, kinds: ["attention.changed"] }).map((e) => e.payload.attention), ["failed", null]);
-  assert.deepEqual(w.registry.answerQuestion(w.registry.question(asked)!, { option: "Retry", by: laptop, at: Date.now() }), withdrawn, "a withdrawn question takes no answer");
+  assert.equal(w.registry.threads.attention(id), null);
+  assert.deepEqual(w.registry.threads.events("0", { thread: id, kinds: ["attention.changed"] }).map((e) => e.payload.attention), ["failed", null]);
+  assert.deepEqual(w.registry.questions.answerQuestion(w.registry.questions.question(asked)!, { option: "Retry", by: laptop, at: Date.now() }), withdrawn, "a withdrawn question takes no answer");
   await w.until(() => phaseOf(w, id) === "done");
   const phase = only(w.registry, id).phase;
   assert.deepEqual(phase.kind === "done" && phase.outcome, { kind: "left", why: "the thread is archived" });
 
-  w.registry.setThreadStatus(id, "active");
-  assert.equal(w.registry.attention(id), "failed", "the pylon is still failed");
-  assert.deepEqual(w.registry.question(asked), withdrawn);
+  w.registry.threads.setThreadStatus(id, "active");
+  assert.equal(w.registry.threads.attention(id), "failed", "the pylon is still failed");
+  assert.deepEqual(w.registry.questions.question(asked), withdrawn);
 });
 
 test("a judgment whose question an archive withdrew ends though the thread is unarchived before the next pass", async (t) => {
@@ -241,12 +241,12 @@ test("a judgment whose question an archive withdrew ends though the thread is un
   const id = builder(w.registry, "th-back");
   fail(w.registry, id, brokenWith("person"));
   await w.until(() => phaseOf(w, id) === "asked");
-  w.registry.setThreadStatus(id, "archived");
-  w.registry.setThreadStatus(id, "active");
+  w.registry.threads.setThreadStatus(id, "archived");
+  w.registry.threads.setThreadStatus(id, "active");
   await w.until(() => phaseOf(w, id) === "done");
   const phase = only(w.registry, id).phase;
   assert.deepEqual(phase.kind === "done" && phase.outcome, { kind: "left", why: "the thread was archived, which withdrew the question" });
-  assert.equal(w.registry.attention(id), "failed", "the person retries the pylon themselves");
+  assert.equal(w.registry.threads.attention(id), "failed", "the person retries the pylon themselves");
 });
 
 test("a thread archived before archives withdrew failure questions has its open one withdrawn as of its archive once the registry migrates", async (t) => {
@@ -265,9 +265,9 @@ test("a thread archived before archives withdrew failure questions has its open 
   rewindTo(join(dir, "registry.db"), versionBefore(/'\$\.withdrawn', json_object\('by', 'archive'/));
 
   const w = await open(t, dir);
-  const q = w.registry.question(asked) as JudgmentQuestion;
+  const q = w.registry.questions.question(asked) as JudgmentQuestion;
   assert.deepEqual([q.failure, q.answer, q.withdrawn], [only(w.registry, id).failure, null, { by: "archive", at: 1234 }]);
-  assert.equal(w.registry.attention(id), null);
+  assert.equal(w.registry.threads.attention(id), null);
 });
 
 test("a reply with a malformed block or none goes to the person, by the control plane's rule", async (t) => {
@@ -281,8 +281,8 @@ test("a reply with a malformed block or none goes to the person, by the control 
     const j = only(w.registry, id);
     assert.deepEqual(j.phase, { kind: "asked", verdict: { answer: "person", why: "the judgment's reply had no valid nexus-judgment block with its token", by: "control plane" } });
     assert.ok(j.reply!.startsWith("scripted judgment"));
-    assert.equal(w.registry.question(`judgment:${j.failure}`)!.answer, null);
-    assert.equal(w.registry.attention(id), "failed");
+    assert.equal(w.registry.questions.question(`judgment:${j.failure}`)!.answer, null);
+    assert.equal(w.registry.threads.attention(id), "failed");
   }
 });
 
@@ -297,7 +297,7 @@ test("a judgment that does not answer in time is closed and goes to the person, 
   await w.judge.poll();
   assert.deepEqual([phaseOf(w, slow), phaseOf(w, deleted)], ["judging", "judging"], "a judgment waits for its answer");
 
-  w.registry.setThreadStatus(deleted, "deleted");
+  w.registry.threads.setThreadStatus(deleted, "deleted");
   await w.until(() => phaseOf(w, deleted) === "done");
   const ended = only(w.registry, deleted);
   assert.deepEqual(ended.phase, { kind: "done", verdict: { answer: "person", why: "the thread was deleted before the judgment answered", by: "control plane" }, outcome: { kind: "left", why: "the thread is deleted" } });
@@ -308,7 +308,7 @@ test("a judgment that does not answer in time is closed and goes to the person, 
   const j = only(w.registry, slow);
   assert.deepEqual(j.phase, { kind: "asked", verdict: { answer: "person", why: "the judgment did not answer within 15 minutes", by: "control plane" } });
   assert.notEqual(await w.host.judgmentReplies(j.conversation as ConversationId), null, "its conversation is closed");
-  assert.notEqual(w.registry.pylon(`pylon-${slow}` as PylonId)!.failed, null);
+  assert.notEqual(w.registry.threads.pylon(`pylon-${slow}` as PylonId)!.failed, null);
 });
 
 test("a judgment the control plane stopped before its answer goes on after a restart, briefed once and acted on once", async (t) => {
@@ -386,7 +386,7 @@ test("failures from before judgments, projects without the pipeline and threads 
   for (let i = 0; i < 3; i++) await w.judge.poll();
   for (const id of [old, ...ids]) assert.deepEqual(w.registry.judgments(id), [], id);
   assert.equal(w.seen.length, 0);
-  assert.notEqual(w.registry.pylon(`pylon-${old}` as PylonId)!.failed, null, "the person's failed pylon stays failed");
+  assert.notEqual(w.registry.threads.pylon(`pylon-${old}` as PylonId)!.failed, null, "the person's failed pylon stays failed");
 
   const now = builder(w.registry, "th-now");
   fail(w.registry, now, brokenWith("retry"));
@@ -433,7 +433,7 @@ test("a judgment whose project turns its pipeline off before Nexus acts asks the
 
   const j = only(w.registry, id);
   assert.deepEqual(j.phase, { kind: "asked", verdict: { answer: "person", why: "the judgment answered retry, which cannot run: the project's pipeline was turned off", by: "control plane" } });
-  assert.notEqual(w.registry.pylon(`pylon-${id}` as PylonId)!.failed, null, "nothing retried the pylon");
+  assert.notEqual(w.registry.threads.pylon(`pylon-${id}` as PylonId)!.failed, null, "nothing retried the pylon");
 });
 
 test("an answer to a judgment whose failure Nexus can no longer tell from a later one with the same reason does nothing", async (t) => {
@@ -443,28 +443,28 @@ test("an answer to a judgment whose failure Nexus can no longer tell from a late
   await w.until(() => phaseOf(w, id) === "asked");
   const { failure } = only(w.registry, id);
 
-  assert.equal(w.registry.retryPylon(`pylon-${id}` as PylonId), true);
+  assert.equal(w.registry.threads.retryPylon(`pylon-${id}` as PylonId), true);
   fail(w.registry, id, brokenWith("person"));
-  for (let i = 0; i < 10_000; i++) w.registry.appendEvent("attention.changed", null, {});
-  w.registry.retainEvents();
-  assert.equal(w.registry.failure(id), null, "both failures' events are pruned");
-  w.registry.answerQuestion(w.registry.question(`judgment:${failure}`)!, { option: "Retry", by: laptop, at: Date.now() });
+  for (let i = 0; i < 10_000; i++) w.registry.threads.appendEvent("attention.changed", null, {});
+  w.registry.threads.retainEvents();
+  assert.equal(w.registry.threads.failure(id), null, "both failures' events are pruned");
+  w.registry.questions.answerQuestion(w.registry.questions.question(`judgment:${failure}`)!, { option: "Retry", by: laptop, at: Date.now() });
   await w.until(() => phaseOf(w, id) === "done");
 
   const j = only(w.registry, id);
   assert.deepEqual(j.phase.kind === "done" && j.phase.outcome, { kind: "left", why: "the event of this failure is gone from the registry's event log, so Nexus cannot tell it from a later failure" });
-  assert.notEqual(w.registry.pylon(`pylon-${id}` as PylonId)!.failed, null, "the later failure stays for the person");
+  assert.notEqual(w.registry.threads.pylon(`pylon-${id}` as PylonId)!.failed, null, "the later failure stays for the person");
 });
 
 test("a pass reads no archived thread, and steps a judgment of a thread archived while it waits to its end", async (t) => {
   const read: ThreadId[] = [];
-  const w = await world(t, { held: () => new Promise(() => {}), pass: (registry) => ({ ...registry, thread: (id) => { read.push(id); return registry.thread(id); } }) });
+  const w = await world(t, { held: () => new Promise(() => {}), pass: (registry) => ({ ...registry, threads: { ...registry.threads, thread: (id) => { read.push(id); return registry.threads.thread(id); } } }) });
   const idle = builder(w.registry, "th-idle");
   const waiting = builder(w.registry, "th-waiting");
   fail(w.registry, waiting, brokenWith("retry"));
   await w.until(() => w.seen.length === 1);
-  w.registry.setThreadStatus(idle, "archived");
-  w.registry.setThreadStatus(waiting, "archived");
+  w.registry.threads.setThreadStatus(idle, "archived");
+  w.registry.threads.setThreadStatus(waiting, "archived");
   read.length = 0;
   await w.until(() => phaseOf(w, waiting) === "done");
   assert.deepEqual(only(w.registry, waiting).phase, { kind: "done", verdict: { answer: "person", why: "the thread was archived before the judgment answered", by: "control plane" }, outcome: { kind: "left", why: "the thread is archived" } });

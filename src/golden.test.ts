@@ -77,13 +77,13 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
   const threads = [...demo.world.threads, ...await seedReviews(s)];
 
   const id = (key: string) => threads.find(([k]) => k === key)![1].id;
-  const queued = s.registry.queuedThreads().filter((q) => q.status === "queued");
+  const queued = s.registry.queue.queuedThreads().filter((q) => q.status === "queued");
   const items = s.registry.items();
   const nodes = s.registry.nodes().map((n) => n.name);
   const projects = s.registry.projects().map((p) => p.id);
   /** An answer of the last option to the thread's first open question. */
   const answerLast = (key: string) => {
-    const q = s.registry.questions(id(key)).find((q) => q.answer === null)!;
+    const q = s.registry.questions.questions(id(key)).find((q) => q.answer === null)!;
     return api(`/v1/questions/${encodeURIComponent(q.id)}/answer`, "POST", { option: q.options.at(-1) });
   };
   const checked = id("graphs");
@@ -97,7 +97,7 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
     ...queued.map((q, i): [string, string] => [q.id, `th-queued-${i + 1}`]),
     ...items.filter((i) => /^it-[0-9a-f]{12}$/.test(i.id)).map((item, i): [string, string] => [item.id, `it-added-${i + 1}`]),
   ]);
-  for (const [i, thread] of s.registry.threads().filter((t) => !named.has(t.id)).entries()) named.set(thread.id, `th-seeded-${i + 1}`);
+  for (const [i, thread] of s.registry.threads.threads().filter((t) => !named.has(t.id)).entries()) named.set(thread.id, `th-seeded-${i + 1}`);
   /** Set while the writes run, which alone mint IDs, one write at a time, so each new ID is named in the order it appears. */
   let minting = false;
   // The registry's first migration takes it from SQLite's clock, which is the host's.
@@ -301,7 +301,7 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
     ...both("changes", checked), ...both("changes", checked, "--uncommitted"), ...both("changes", checked, "--turn"),
     ...both("diff", checked), ...both("diff", checked, "README.md"),
   ];
-  const beforeWrites = s.registry.newestEvent();
+  const beforeWrites = s.registry.threads.newestEvent();
   // Each changes the world, so they run one at a time in this order, after every read.
   const writes: Capture[] = [
     as(node, "deployer-node", api("/v1/deployer/release", "GET", undefined, reporterHeaders)),

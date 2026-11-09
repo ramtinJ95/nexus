@@ -12,15 +12,15 @@ test("a follower reconnects across a registry restart without missing events", (
   const path = join(dir, "registry.sqlite");
   let registry = openRegistry(path);
   try {
-    const first = registry.appendEvent("release.changed", null, { state: "installing" });
-    assert.deepEqual(registry.events().map((e) => e.id), [first.id]);
+    const first = registry.threads.appendEvent("release.changed", null, { state: "installing" });
+    assert.deepEqual(registry.threads.events().map((e) => e.id), [first.id]);
     registry.close();
     registry = openRegistry(path);
-    const second = registry.appendEvent("release.changed", null, { state: "healthy" });
-    const third = registry.appendEvent("release.changed", null, { state: "pending" });
-    assert.deepEqual(registry.events(first.id).map((e) => e.id), [second.id, third.id]);
-    assert.deepEqual(registry.events(third.id), []);
-    assert.deepEqual(registry.events("0", { kinds: ["session.turn-ended"] }), []);
+    const second = registry.threads.appendEvent("release.changed", null, { state: "healthy" });
+    const third = registry.threads.appendEvent("release.changed", null, { state: "pending" });
+    assert.deepEqual(registry.threads.events(first.id).map((e) => e.id), [second.id, third.id]);
+    assert.deepEqual(registry.threads.events(third.id), []);
+    assert.deepEqual(registry.threads.events("0", { kinds: ["session.turn-ended"] }), []);
   } finally {
     registry.close();
     rmSync(dir, { recursive: true, force: true });
@@ -44,11 +44,11 @@ test("pylon event input rejects other threads, unknown kinds and oversized paylo
 test("bounded retention reports an expired cursor instead of silently skipping", () => {
   const registry = openRegistry(":memory:");
   try {
-    for (let i = 0; i < 10_002; i++) registry.appendEvent("release.changed", null, {});
-    registry.retainEvents();
-    assert.equal(registry.events().length, 10_000);
-    assert.throws(() => registry.events("1"), /expired/);
-    assert.equal(registry.events("2").length, 10_000);
+    for (let i = 0; i < 10_002; i++) registry.threads.appendEvent("release.changed", null, {});
+    registry.threads.retainEvents();
+    assert.equal(registry.threads.events().length, 10_000);
+    assert.throws(() => registry.threads.events("1"), /expired/);
+    assert.equal(registry.threads.events("2").length, 10_000);
   } finally { registry.close(); }
 });
 
@@ -300,14 +300,14 @@ test("filtered reads advance the scanned watermark through retention rollover", 
   try {
     let since = "0";
     for (let batch = 0; batch < 3; batch++) {
-      for (let i = 0; i < 5000; i++) registry.appendEvent("release.changed", null, { message: "x".repeat(2048) });
-      const result = registry.eventBatch(since, { kinds: ["session.turn-ended"] });
+      for (let i = 0; i < 5000; i++) registry.threads.appendEvent("release.changed", null, { message: "x".repeat(2048) });
+      const result = registry.threads.eventBatch(since, { kinds: ["session.turn-ended"] });
       assert.deepEqual(result.events, []);
       assert.equal(result.watermark, String((batch + 1) * 5000));
       since = result.watermark;
     }
-    const matching = registry.appendEvent("session.turn-ended", null, {});
-    assert.deepEqual(registry.eventBatch(since, { kinds: ["session.turn-ended"] }).events, [matching]);
+    const matching = registry.threads.appendEvent("session.turn-ended", null, {});
+    assert.deepEqual(registry.threads.eventBatch(since, { kinds: ["session.turn-ended"] }).events, [matching]);
   } finally { registry.close(); }
 });
 
@@ -323,7 +323,7 @@ test("SQL filters before decoding payloads, including intersecting thread and pr
     insert.run("t2", "p1", "session.turn-ended", "not JSON");
     insert.run("t1", "p2", "session.turn-ended", "not JSON");
     insert.run("t1", "p1", "release.changed", "not JSON");
-    const result = registry.eventBatch("0", { thread: "t1", project: "p1", kinds: ["session.turn-ended", "session.waiting"] });
+    const result = registry.threads.eventBatch("0", { thread: "t1", project: "p1", kinds: ["session.turn-ended", "session.waiting"] });
     assert.equal(result.watermark, "4");
     assert.deepEqual(result.events.map((e) => e.payload), [{ match: true }]);
   } finally { db.close(); registry.close(); rmSync(dir, { recursive: true, force: true }); }

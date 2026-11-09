@@ -30,7 +30,7 @@ export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortR
   /** What each source of a conversation's image reads it with. Null is an image that is gone. */
   const imageReaders: { [K in ImageSource["source"]]: (t: Thread, source: Extract<ImageSource, { source: K }>) => Promise<Buffer | null> } = {
     async transcript(t, { source: _, ...image }) {
-      const session = registry.claudeWorker(guard(t, { status: "kept", agent: "claude" }).id)?.session ?? null;
+      const session = registry.threads.claudeWorker(guard(t, { status: "kept", agent: "claude" }).id)?.session ?? null;
       if (session === null) return null;
       return whileRunning(t, (probe, pylonId) => readTranscriptImage((argv) => probe.stream(pylonId, argv), session, image));
     },
@@ -57,7 +57,7 @@ export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortR
 
   /** Reads the pylon's checkout for the Files and Changes views, over one raw pipe per read. */
   async function inCheckout<T>(t: Thread, read: (checkout: CheckoutReader) => Promise<T>, via: typeof inPylon = inPylon): Promise<T> {
-    const turn = await agents[registry.agent(t).kind].latestTurn(t);
+    const turn = await agents[registry.threads.agent(t).kind].latestTurn(t);
     return via(t, (probe, pylonId) => read(checkoutReader((argv) => probe.stream(pylonId, argv), checkoutDir, undefined, turn)));
   }
 
@@ -74,9 +74,9 @@ export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortR
   async function linkPort(t: Thread, body: unknown): Promise<Preview> {
     const { port } = parse(previewSchema, body);
     const { service } = await pylonCommand(t, { kind: "link-port", port });
-    registry.allocatePreviews(t.pylonId, [service], previewPorts);
+    registry.threads.allocatePreviews(t.pylonId, [service], previewPorts);
     wakeThread(t);
-    return registry.previews(t.pylonId).find((p) => p.service === service)!;
+    return registry.threads.previews(t.pylonId).find((p) => p.service === service)!;
   }
 
   /**
@@ -88,7 +88,7 @@ export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortR
   async function unlinkPort(t: Thread, port: number): Promise<void> {
     const { refused } = await pylonCommand(t, { kind: "unlink-port", port });
     if (refused !== null) throw new HttpError(422, refused);
-    registry.releasePreview(t.pylonId, linkedName(port));
+    registry.threads.releasePreview(t.pylonId, linkedName(port));
     wakeThread(t);
   }
 
@@ -111,7 +111,7 @@ export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortR
    * brought its session back in another one, and gave this one to another session.
    */
   async function closeSession(t: Thread, id: string): Promise<void> {
-    const session = registry.session(t.pylonId, id);
+    const session = registry.threads.session(t.pylonId, id);
     if (session?.state === "paused" && t.status !== "deleted") {
       const resumes = t.status === "archived" ? `when \`nexus unarchive ${t.id}\` wakes its pylon` : "when its pylon wakes";
       throw new HttpError(409, `session ${id} is paused with its pylon and resumes ${resumes}. Close it once it runs`);

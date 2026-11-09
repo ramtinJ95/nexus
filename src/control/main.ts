@@ -163,7 +163,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   /** Every health read, the node page's, the API's and a judgment's, goes through the client, so each is recorded here. */
   const connect = (node: NodeAddress) => {
     const client = recordingHealth(probe?.(node) ?? connectProbe(node.name, node.tailnetHost, node.tailnetNodeId, { whois }),
-      (h) => registry.recordHealthSample(node.name, sampleOf(h, Date.now(), (p) => registry.pylon(p)?.thread ?? null)), log);
+      (h) => registry.recordHealthSample(node.name, sampleOf(h, Date.now(), (p) => registry.threads.pylon(p)?.thread ?? null)), log);
     probeMap.set(node.name, client);
     return client;
   };
@@ -181,7 +181,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const wake = (node: NodeName) => { void loop.wake(node); };
   const wakeThread = threadWaker(registry, wake);
 
-  const conversations = registry.harnessThreads().map((thread) => ({ thread, id: Number(thread.conversationId) as ConversationId }));
+  const conversations = registry.threads.harnessThreads().map((thread) => ({ thread, id: Number(thread.conversationId) as ConversationId }));
   const rawHarness = services.start(await openHarnessHost({
     storagePath: config.harness.storage,
     models,
@@ -190,13 +190,13 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     tailscaled,
     threads: conversations.filter(({ thread }) => thread.status !== "deleted").map(({ thread, id }) => ({ threadId: thread.id, conversationId: id, agentTurnRunning: thread.agentTurnRunning })),
     deleted: conversations.filter(({ thread }) => thread.status === "deleted").map(({ id }) => id),
-    onAborted: (id) => registry.recordAborted(String(id)),
+    onAborted: (id) => registry.threads.recordAborted(String(id)),
     // The registry row is what the planner and the dashboard read.
-    onParked: (id, parked) => registry.recordParked(id as ThreadId, parked),
-    onReply: (id, at) => registry.recordReply(id as ThreadId, at),
+    onParked: (id, parked) => registry.threads.recordParked(id as ThreadId, parked),
+    onReply: (id, at) => registry.threads.recordReply(id as ThreadId, at),
     onActivity(threadId, facts) {
-      const t = registry.thread(threadId as ThreadId)!;
-      registry.recordActivity(t.id, { agent: facts.lastAgentActivityAt, agentTurnRunning: facts.agentTurnRunning });
+      const t = registry.threads.thread(threadId as ThreadId)!;
+      registry.threads.recordActivity(t.id, { agent: facts.lastAgentActivityAt, agentTurnRunning: facts.agentTurnRunning });
       wakeThread(t);
     },
     log,
@@ -231,9 +231,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     wake: wakeThread,
     log,
   }) });
-  const watch = services.start({ everyMs: prWatchMs, ...prWatcher({ registry, github, inbox, linked: reviews?.auto, fresh: (t) => loop.readGit(registry.pylon(t.pylonId)!.node, t.pylonId) }) });
+  const watch = services.start({ everyMs: prWatchMs, ...prWatcher({ registry, github, inbox, linked: reviews?.auto, fresh: (t) => loop.readGit(registry.threads.pylon(t.pylonId)!.node, t.pylonId) }) });
   // The events only run a step sooner: each poll above stays its fallback.
-  services.start({ close: registry.followEvents(["session.turn-ended", "thread.turn-ended", "release.changed"], (events) => {
+  services.start({ close: registry.threads.followEvents(["session.turn-ended", "thread.turn-ended", "release.changed"], (events) => {
     for (const id of new Set(events.flatMap((e) => e.kind === "release.changed" ? [] : e.thread ?? []))) {
       void watch.turnEnded(id as ThreadId);
       void reviews?.wake(id as ThreadId);
@@ -241,7 +241,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     if (!events.some((e) => wakesDeployers(registry, e))) return;
     for (const probe of probeMap.values()) probe.wakeDeployer().catch((err: unknown) => log(`${probe.node}: waking its deployer failed: ${(err as Error).message}`));
   }) });
-  services.start({ everyMs: passMs, poll: () => registry.retainEvents() });
+  services.start({ everyMs: passMs, poll: () => registry.threads.retainEvents() });
   for (const polled of threads.polls) services.start(polled && { everyMs: passMs, poll: () => polled.poll() });
   services.start(github === null ? null : { everyMs: passMs, ...builderNudger({ registry, github, inbox, personWroteTo: agents.personWrote, watch }) });
   services.start({ everyMs: passMs, ...deadTurnResumer({ registry, inbox, personWroteTo: agents.personWrote }) });
@@ -259,7 +259,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   // An archived disk kept for its usage goes once a backup that began after its read verified.
   services.start({ everyMs: 60_000, poll: () => readBackupStatus(backupStatusFile).then((s) => {
     const at = backedUpAt(s);
-    if (at !== null) registry.recordBackedUp(at);
+    if (at !== null) registry.threads.recordBackedUp(at);
   }).catch((err: unknown) => log(`recording the newest backup failed: ${(err as Error).message}`)) });
   const health = services.start({ everyMs: checkEveryMs, ...healthPasses({ registry, run: doctor, startedAt }) });
   services.start({ everyMs: backgroundReadMs, ...healthSampling({ registry, probes: probeMap, log }) });

@@ -523,7 +523,7 @@ test("only a person starts a thread, starts a queued one now or messages one, ne
   s.registry.upsertNode({ name: "infra-testbench" as NodeName, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: testbench });
   const queued = (await s.call("POST", "/v1/threads", { project: "acme", title: "Then", after: [s.first.id] })).body as QueuedThread;
   // A pylon's request leaves through its node, so whois names that node.
-  const pylonNode = s.registry.nodes().find((n) => n.name === s.registry.pylon(s.first.pylonId)!.node)!.tailnetNodeId;
+  const pylonNode = s.registry.nodes().find((n) => n.name === s.registry.threads.pylon(s.first.pylonId)!.node)!.tailnetNodeId;
   const routes = [
     ["start a thread", "/v1/threads", { project: "acme", title: "Another" }, 201],
     ["start a queued thread", `/v1/threads/${queued.id}/start`, undefined, 201],
@@ -537,7 +537,7 @@ test("only a person starts a thread, starts a queued one now or messages one, ne
     }
   }
   assert.equal(s.calls.length, 1, "no refused request started or messaged a thread");
-  assert.equal(s.registry.queuedThread(queued.id)?.status, "queued");
+  assert.equal(s.registry.queue.queuedThread(queued.id)?.status, "queued");
 
   s.callAs(phone);
   for (const [action, path, body, status] of routes) {
@@ -556,7 +556,7 @@ test("only a person acts on a thread, its pylon or a project, never the control 
   const s = await withThread(t, { reviews });
   const testbench = "nTESTBENCH" as TailnetNodeId;
   s.registry.upsertNode({ name: "infra-testbench" as NodeName, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: testbench });
-  const pylonNode = s.registry.nodes().find((n) => n.name === s.registry.pylon(s.thread.pylonId)!.node)!.tailnetNodeId;
+  const pylonNode = s.registry.nodes().find((n) => n.name === s.registry.threads.pylon(s.thread.pylonId)!.node)!.tailnetNodeId;
   const id = s.thread.id;
   const routes = [
     ["abort a thread's turn", "POST", `/v1/threads/${id}/abort`, undefined, 204],
@@ -586,11 +586,11 @@ test("only a person acts on a thread, its pylon or a project, never the control 
     assert.deepEqual([attached.status, attached.body.error], [403, "caller may not attach to a thread's pylon: only a person may, never the control plane, infrastructure nodes or pylons"]);
   }
   assert.deepEqual([s.calls.length, s.commands, s.streams, reviewed], [harnessCalls, [], [], []], "no refused request reached the harness, the probe or the review loop");
-  assert.equal(s.registry.thread(id)!.status, "active");
+  assert.equal(s.registry.threads.thread(id)!.status, "active");
   assert.equal(s.registry.project("acme" as ProjectId)!.defaultBranch, project.defaultBranch);
 
   s.callAs(phone);
-  s.registry.savePylon({ ...s.registry.pylon(s.thread.pylonId)!, failed: "last job failed with setup-failed" });
+  s.registry.threads.savePylon({ ...s.registry.threads.pylon(s.thread.pylonId)!, failed: "last job failed with setup-failed" });
   for (const [action, method, path, body, status] of routes) {
     const answer = await s.call(method, path, body);
     assert.equal(answer.status, status, `a person who is not a deployer may ${action}: ${JSON.stringify(answer.body)}`);

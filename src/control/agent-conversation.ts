@@ -12,7 +12,7 @@ import type { Registry } from "./registry.ts";
 import type { Thread, ThreadAgent } from "./thread-store.ts";
 import type { ThreadId } from "../ids.ts";
 
-type AgentConversationRegistry = Pick<Registry, "agent" | "claudeEntries" | "claudeWorker" | "claudeMessage" | "claudeMessageSenders" | "node" | "pylon" | "recordActivity" | "sealedBoot" | "setClaudeMessage">;
+type AgentConversationRegistry = Pick<Registry, "threads" | "node">;
 
 /** In order: a reply of the agent's, or a message to it and whether the person wrote it. */
 export type Message = { role: "assistant"; text: string } | { role: "user"; person: boolean };
@@ -119,13 +119,13 @@ export function agentReads(registry: AgentConversationRegistry, harness: Pick<Ha
       },
     },
     claude: {
-      conversation: async (t) => claudeConversation(registry, t.id, registry.claudeEntries(t.id)),
+      conversation: async (t) => claudeConversation(registry, t.id, registry.threads.claudeEntries(t.id)),
       async state(t, since) {
-        const entries = registry.claudeEntries(t.id);
+        const entries = registry.threads.claudeEntries(t.id);
         const c = claudeConversation(registry, t.id, entries);
         return { ...heard(t, entries, since), replies: repliesOf(c), failure: c.failure };
       },
-      brief: async (t) => registry.claudeWorker(t.id)!.prompt,
+      brief: async (t) => registry.threads.claudeWorker(t.id)!.prompt,
       // Its turns run in its pylon, which a deploy of the control plane leaves alone.
       busy: async () => false,
     },
@@ -135,7 +135,7 @@ export function agentReads(registry: AgentConversationRegistry, harness: Pick<Ha
 
 export function agentReader(registry: AgentConversationRegistry, harness: Pick<HarnessHost, "watch">) {
   const reads = agentReads(registry, harness);
-  const of = (t: Thread) => reads[registry.agent(t).kind];
+  const of = (t: Thread) => reads[registry.threads.agent(t).kind];
   return {
     conversation: (t: Thread) => of(t).conversation(t),
     state: (t: Thread, since: number) => of(t).state(t, since),

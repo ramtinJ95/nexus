@@ -9,7 +9,7 @@ import { node, laptop, phone, project, image, claudeSession, testApi, withThread
 
 test("a person answers a question, a deployer question needs a deployer, and no node or pylon answers one", async (t) => {
   const s = await withThread(t, { deployment });
-  const ask = (id: string, answerer: Question["answerer"]) => s.registry.askQuestion({
+  const ask = (id: string, answerer: Question["answerer"]) => s.registry.questions.askQuestion({
     kind: "judgment", id, thread: s.thread.id, failure: 0, text: "Rebuild the pylon image?\nIt changes the base layer.", options: ["Rebuild", "Not now"], reserved: null, answerer, askedAt: 1,
   });
   ask("qn-person", "person");
@@ -50,7 +50,7 @@ test("without deployment options the control node is unknown, so no one answers 
   s.registry.setCurrentImage(image.id as ImageId);
   const thread = await s.startThread({ request: { project: "acme", title: "Fix checkout" }, caller: laptop, role: "builder" });
   for (const answerer of ["person", "deployer"] as const) {
-    s.registry.askQuestion({ kind: "judgment", id: `qn-${answerer}`, thread: thread.id, text: "Go?", options: ["Yes", "No"], reserved: null, answerer, askedAt: 1, failure: 0 });
+    s.registry.questions.askQuestion({ kind: "judgment", id: `qn-${answerer}`, thread: thread.id, text: "Go?", options: ["Yes", "No"], reserved: null, answerer, askedAt: 1, failure: 0 });
   }
   for (const caller of [laptop, "nFIREBAT" as TailnetNodeId]) {
     s.callAs(caller);
@@ -70,7 +70,7 @@ const extras = { question: "What goes in it?", header: "Extras", multiSelect: tr
 async function claudeAsking(t: import("node:test").TestContext) {
   const s = await withClaude(t);
   const at = Date.now();
-  s.registry.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: at, event: { kind: "session.turn-started", session: claudeSession, at } });
+  s.registry.threads.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: at, event: { kind: "session.turn-started", session: claudeSession, at } });
   s.pylon.asks = [{ session: claudeSession, toolUseId: "toolu_1", at: at + 1, input: { questions: [drink, extras] } }];
   const read = () => s.call("GET", `/v1/threads/${s.thread.id}/conversation`);
   assert.equal((await read()).status, 200);
@@ -116,7 +116,7 @@ test("a person answers a Claude worker's AskUserQuestion with a choice per quest
   assert.deepEqual(await s.answer({ choices }), { status: 200, body: first }, "a retried answer gets the first one's record");
   assert.deepEqual(await s.answer({ choices: [{ picked: ["Coffee"] }, { picked: ["Sugar"] }] }), { status: 409, body: { error: `question ask-toolu_1 was answered "Drink: Tea; Extras: Milk, Oat cream" by ${laptop}`, code: null, retryable: false } });
   assert.equal(s.delivered().length, 1, "an answered ask is not handed to Claude again");
-  s.registry.askQuestion({ kind: "judgment", id: "qn-plain", thread: s.thread.id, text: "Go?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: 1, failure: 0 });
+  s.registry.questions.askQuestion({ kind: "judgment", id: "qn-plain", thread: s.thread.id, text: "Go?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: 1, failure: 0 });
   assert.deepEqual(await s.call("POST", "/v1/questions/qn-plain/answer", { choices }), { status: 400, body: { error: `question qn-plain is answered with {"option": "<one of its options>"}`, code: null, retryable: false } });
 });
 
@@ -150,7 +150,7 @@ test("Land on a question about a review's holds goes to the review loop, which r
   const answered: unknown[][] = [];
   const reviews = { answerHolds(question: Question, option: string, by: string) { answered.push([question.id, option, by]); return { ...question, answer: { option, by, at: 1 } }; } } as never as ReviewLoop;
   const s = await withThread(t, { deployment, reviews });
-  s.registry.askQuestion({
+  s.registry.questions.askQuestion({
     kind: "holds", id: "holds-rv-1-a", thread: s.thread.id, text: "Land pull request #7?", options: ["Land", "Leave it"], reserved: "auth", answerer: "deployer", askedAt: 1,
     holds: { review: "rv-1", head: "a".repeat(40), base: "main", holds: [{ code: "reserved-path:auth", text: "Always needs the person: changes to login or auth, as it changes src/control/api.ts." }] },
   });

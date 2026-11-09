@@ -29,7 +29,7 @@ test("starting a thread creates its pylon, boots fresh from the current image, a
   assert.deepEqual((await s.call("GET", "/v1/threads?project=acme")).body, [row]);
   assert.deepEqual((await s.call("GET", "/v1/threads?project=other")).body, []);
 
-  const pylon = s.registry.pylon(thread.pylonId)!;
+  const pylon = s.registry.threads.pylon(thread.pylonId)!;
   assert.equal(pylon.node, node);
   assert.deepEqual(pylon.firstBoot, { kind: "fresh", preSetup: null });
   assert.deepEqual(pylon.boot, {
@@ -62,16 +62,16 @@ test("thread detail derives the actual state from the node's last observation", 
     said: { guest: null, disk: null, usage: null, paused: "paused, resumes on wake", prWatch: "PR watch: off (no control-plane GitHub token configured)", review: null },
   });
 
-  s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
-  const pylon = s.registry.pylon(thread.pylonId)!;
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  const pylon = s.registry.threads.pylon(thread.pylonId)!;
   const running = runningPylon(thread.pylonId, { liveHash: pylon.liveHash, bootedFrom: { image: image.id, checkpoint: null } });
-  s.registry.ingested(testObservation(node, { observedAt: "2027-01-01T00:01:00Z", pylons: [running] }), []);
+  s.registry.threads.ingested(testObservation(node, { observedAt: "2027-01-01T00:01:00Z", pylons: [running] }), []);
   const pause = { jobId: "job-1" as JobId, subject: thread.pylonId, kind: "pause" as const };
-  s.registry.apply({ record: "job", status: { ...pause, state: "running", startedAt: "2027-01-01T00:00:59Z" } });
-  s.registry.apply({ record: "sessions", pylonId: thread.pylonId, sessions: [{ id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle", title: "plan", message: null }] });
-  s.registry.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: "nexus/fix" });
-  s.registry.allocatePreviews(thread.pylonId, ["web"], { first: 8443, last: 8443 });
-  s.registry.apply({ record: "preview", pylonId: thread.pylonId, service: "web", httpsPort: 8443, ready: true });
+  s.registry.threads.apply({ record: "job", status: { ...pause, state: "running", startedAt: "2027-01-01T00:00:59Z" } });
+  s.registry.threads.apply({ record: "sessions", pylonId: thread.pylonId, sessions: [{ id: "p1", state: "running", herdrPane: "p1", harness: "pi", harnessSessionId: null, status: "idle", title: "plan", message: null }] });
+  s.registry.threads.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: "nexus/fix" });
+  s.registry.threads.allocatePreviews(thread.pylonId, ["web"], { first: 8443, last: 8443 });
+  s.registry.threads.apply({ record: "preview", pylonId: thread.pylonId, service: "web", httpsPort: 8443, ready: true });
 
   const d = await detail();
   assert.equal(d.pylon.actualState, "pausing");
@@ -80,7 +80,7 @@ test("thread detail derives the actual state from the node's last observation", 
   assert.deepEqual(d.outputs, [{ thread: thread.id, kind: "branch", ref: "nexus/fix" }]);
   assert.deepEqual(d.previews, [{ pylon: thread.pylonId, service: "web", httpsPort: 8443, ready: true, failed: null, url: "https://rj-firebat.tail.ts.net:8443/" }]);
 
-  s.registry.apply({ record: "job", status: { ...pause, state: "succeeded", finishedAt: "2027-01-01T00:01:30Z" } });
+  s.registry.threads.apply({ record: "job", status: { ...pause, state: "succeeded", finishedAt: "2027-01-01T00:01:30Z" } });
   assert.equal((await detail()).pylon.actualState, "running");
   s.registry.markOffline(node);
   assert.equal((await detail()).pylon.actualState, "unknown");
@@ -90,19 +90,19 @@ test("a failed pylon shows failed with its reason until its thread is deleted, a
   const s = await withThread(t);
   const { thread } = s;
   const detail = async () => (await s.call("GET", `/v1/threads/${thread.id}`)).body as ThreadDetail;
-  s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
   const reason = "last job failed with setup-failed, which is not retryable: pylon-x: Setup exited 128\nfatal: unable to access";
-  s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed: reason });
+  s.registry.threads.savePylon({ ...s.registry.threads.pylon(thread.pylonId)!, failed: reason });
   assert.deepEqual((await detail()).pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "failed", failed: reason, observedAt: null, retryRefused: null, resources: project.resources });
   const [row] = (await s.call("GET", "/v1/threads")).body as ThreadRow[];
   assert.deepEqual([row!.desired, row!.pylon], [(await detail()).desired, { node, actualState: "failed", failed: reason }], "the list reports the pylon as its detail does");
 
   await s.call("DELETE", `/v1/threads/${thread.id}`);
   const del = { jobId: "job-del" as JobId, subject: thread.pylonId, kind: "delete" as const };
-  s.registry.apply({ record: "job", status: { ...del, state: "running", startedAt: "2027-01-01T00:00:00Z" } });
+  s.registry.threads.apply({ record: "job", status: { ...del, state: "running", startedAt: "2027-01-01T00:00:00Z" } });
   assert.equal((await detail()).pylon.actualState, "deleting");
-  s.registry.apply({ record: "job", status: { ...del, state: "succeeded", finishedAt: "2027-01-01T00:00:05Z" } });
-  s.registry.ingested(testObservation(node, { observedAt: "2027-01-01T00:00:06Z" }), []);
+  s.registry.threads.apply({ record: "job", status: { ...del, state: "succeeded", finishedAt: "2027-01-01T00:00:05Z" } });
+  s.registry.threads.ingested(testObservation(node, { observedAt: "2027-01-01T00:00:06Z" }), []);
   assert.deepEqual((await detail()).pylon, { grantsOutdated: false, id: thread.pylonId, node, actualState: "absent", failed: reason, observedAt: "2027-01-01T00:00:06Z", retryRefused: null, resources: project.resources });
 });
 
@@ -126,23 +126,23 @@ test("retrying a failed pylon clears the planner's verdict and its attempts, mar
   assert.equal((await retry()).status, 409, "a pylon that has not failed has nothing to retry");
 
   const failed = {
-    ...s.registry.pylon(thread.pylonId)!,
+    ...s.registry.threads.pylon(thread.pylonId)!,
     attempts: { count: 1, last: { at: 1, code: "setup-failed" as const, message: "fatal: could not read from remote repository" } },
     failed: "last job failed with setup-failed, which is not retryable: fatal: could not read from remote repository",
   };
-  s.registry.savePylon(failed);
+  s.registry.threads.savePylon(failed);
   assert.equal((await retry({ "content-type": "text/plain" })).status, 415);
   assert.equal((await retry({ host: "evil.example" })).status, 403);
   s.callAs("nSTRANGER" as TailnetNodeId);
   assert.equal((await retry()).status, 403);
   s.callAs(laptop);
-  assert.deepEqual(s.registry.pylon(thread.pylonId), failed, "a refused retry leaves the pylon failed");
+  assert.deepEqual(s.registry.threads.pylon(thread.pylonId), failed, "a refused retry leaves the pylon failed");
 
   s.woken.length = 0;
   const before = Date.now();
   assert.equal((await retry()).status, 204, "a human may retry a failure the planner would not");
-  assert.deepEqual(s.registry.pylon(thread.pylonId), { ...failed, attempts: { count: 0, last: null }, failed: null, retrying: true });
-  assert.ok(s.registry.thread(thread.id)!.lastHumanActivityAt >= before, "the pylon is wanted at once");
+  assert.deepEqual(s.registry.threads.pylon(thread.pylonId), { ...failed, attempts: { count: 0, last: null }, failed: null, retrying: true });
+  assert.ok(s.registry.threads.thread(thread.id)!.lastHumanActivityAt >= before, "the pylon is wanted at once");
   assert.deepEqual(s.woken, [node]);
   assert.equal((await s.call("GET", `/v1/threads/${thread.id}`)).body.pylon.failed, null);
   assert.equal((await retry()).status, 409, "a second retry finds nothing to clear");
@@ -151,24 +151,24 @@ test("retrying a failed pylon clears the planner's verdict and its attempts, mar
 test("a pylon whose disk holds a failed setup cannot be retried, and its detail says why", async (t) => {
   const s = await withThread(t);
   const { thread } = s;
-  s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
-  const broken = (cause: "setup" | "saved-setup" | "services") => s.registry.ingested(testObservation(node, {
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  const broken = (cause: "setup" | "saved-setup" | "services") => s.registry.threads.ingested(testObservation(node, {
     observedAt: "2027-01-01T00:01:00Z", pylons: [{ pylonId: thread.pylonId, phase: "broken", detail: "Setup exited 128. Read controller logs", cause, logTail: "" }],
   }), []);
   broken("saved-setup");
-  s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed: "pylon is broken: Setup exited 128. Read controller logs" });
+  s.registry.threads.savePylon({ ...s.registry.threads.pylon(thread.pylonId)!, failed: "pylon is broken: Setup exited 128. Read controller logs" });
   const refusal = "Its disk holds the failed setup, and every boot of that disk fails the same way, so a retry cannot help. Start again from the project";
   assert.equal((await s.call("GET", `/v1/threads/${thread.id}`)).body.pylon.retryRefused, refusal);
   const res = await s.call("POST", `/v1/threads/${thread.id}/pylon/retry`);
   assert.deepEqual(res, { status: 409, body: { error: `pylon ${thread.pylonId} cannot be retried. ${refusal}`, code: null, retryable: false } });
-  assert.notEqual(s.registry.pylon(thread.pylonId)!.failed, null, "a refused retry leaves the verdict");
+  assert.notEqual(s.registry.threads.pylon(thread.pylonId)!.failed, null, "a refused retry leaves the verdict");
 
   broken("services");
   assert.equal((await s.call("GET", `/v1/threads/${thread.id}`)).body.pylon.retryRefused, null);
   assert.equal((await s.call("POST", `/v1/threads/${thread.id}/pylon/retry`)).status, 204, "a service that failed may start on the next boot");
 
   broken("setup");
-  s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed: "pylon is broken: Setup exited 128. Read controller logs" });
+  s.registry.threads.savePylon({ ...s.registry.threads.pylon(thread.pylonId)!, failed: "pylon is broken: Setup exited 128. Read controller logs" });
   assert.equal((await s.call("GET", `/v1/threads/${thread.id}`)).body.pylon.retryRefused, null);
   assert.equal((await s.call("POST", `/v1/threads/${thread.id}/pylon/retry`)).status, 204, "the pause removes a VM whose setup failed on this boot, so setup runs again");
 });
@@ -176,12 +176,12 @@ test("a pylon whose disk holds a failed setup cannot be retried, and its detail 
 test("an archived thread's failed pylon can be retried and stays archived, and a deleted thread's cannot", async (t) => {
   const s = await withThread(t);
   const { thread } = s;
-  const fail = () => s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed: "gave up after 5 failed attempts" });
+  const fail = () => s.registry.threads.savePylon({ ...s.registry.threads.pylon(thread.pylonId)!, failed: "gave up after 5 failed attempts" });
   await s.call("POST", `/v1/threads/${thread.id}/archive`);
   fail();
   assert.equal((await s.call("POST", `/v1/threads/${thread.id}/pylon/retry`)).status, 204);
-  assert.equal(s.registry.pylon(thread.pylonId)!.failed, null);
-  assert.equal(s.registry.thread(thread.id)!.status, "archived", "a retry settles the pylon rather than unarchiving it");
+  assert.equal(s.registry.threads.pylon(thread.pylonId)!.failed, null);
+  assert.equal(s.registry.threads.thread(thread.id)!.status, "archived", "a retry settles the pylon rather than unarchiving it");
 
   fail();
   await s.call("DELETE", `/v1/threads/${thread.id}`);
@@ -199,8 +199,8 @@ test("thread detail says why an archived thread's disk is kept past its 24 hours
   assert.equal(await kept(), null, "under its 24 hours");
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() + 25 * 60 * 60_000 });
   assert.equal(await kept(), "its token usage is not read to its end yet");
-  s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
-  s.registry.ingested(testObservation(node, { observedAt: "2027-01-01T00:01:00Z", pylons: [] }), []);
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  s.registry.threads.ingested(testObservation(node, { observedAt: "2027-01-01T00:01:00Z", pylons: [] }), []);
   assert.equal((await s.call("GET", `/v1/threads/${thread.id}`)).body.pylon.actualState, "absent");
   assert.equal(await kept(), null, "an absent pylon has no disk to keep");
 });
@@ -212,13 +212,13 @@ test("archive, delete, and activity update the thread and wake its node", async 
   const before = Date.now();
 
   assert.equal((await s.call("POST", `/v1/threads/${thread.id}/activity`, { kind: "human" })).status, 204);
-  assert.ok(s.registry.thread(thread.id)!.lastHumanActivityAt >= before);
+  assert.ok(s.registry.threads.thread(thread.id)!.lastHumanActivityAt >= before);
   assert.equal((await s.call("POST", `/v1/threads/${thread.id}/activity`, { kind: "agent", turnRunning: true })).status, 400, "agent activity comes from the harness");
 
   assert.equal((await s.call("POST", `/v1/threads/${thread.id}/archive`)).body.status, "archived");
-  assert.equal(s.registry.thread(thread.id)!.status, "archived");
+  assert.equal(s.registry.threads.thread(thread.id)!.status, "archived");
   assert.equal((await s.call("DELETE", `/v1/threads/${thread.id}`)).body.status, "deleted");
-  assert.equal(s.registry.thread(thread.id)!.status, "deleted");
+  assert.equal(s.registry.threads.thread(thread.id)!.status, "deleted");
   assert.deepEqual(s.calls.at(-1), ["delete", { threadId: thread.id, pylonId: thread.pylonId }]);
   assert.equal((await s.call("POST", `/v1/threads/${thread.id}/archive`)).status, 409);
   assert.equal((await s.call("GET", `/v1/threads/${thread.id}`)).body.agent, null);
@@ -234,7 +234,7 @@ test("a message goes to the thread's conversation and counts as human activity",
 
   const sent = await s.call("POST", `/v1/threads/${thread.id}/messages`, { text: "run the tests", requestId: "msg:1" });
   assert.deepEqual(sent, { status: 202, body: { submission: 7 } });
-  assert.ok(s.registry.thread(thread.id)!.lastHumanActivityAt >= before);
+  assert.ok(s.registry.threads.thread(thread.id)!.lastHumanActivityAt >= before);
   assert.deepEqual(s.woken, [node]);
   assert.equal((await s.call("POST", `/v1/threads/${thread.id}/messages`, { text: "now", requestId: "msg:2", mode: "steer" })).status, 202);
   assert.equal((await s.call("POST", `/v1/threads/${thread.id}/messages`, { text: "", requestId: "msg:3" })).status, 400);
@@ -295,30 +295,30 @@ test("attention ranks failure, unwatched parked tasks, unread reply, then work; 
     return row.attention;
   };
   assert.equal(await attention(), null);
-  s.registry.recordActivity(id, { agentTurnRunning: true });
+  s.registry.threads.recordActivity(id, { agentTurnRunning: true });
   assert.equal(await attention(), "working");
-  s.registry.recordReply(id, 1000);
+  s.registry.threads.recordReply(id, 1000);
   assert.equal(await attention(), "reply");
   s.fake.park(id, 2);
   assert.equal(await attention(), "parked");
   assert.ok(!s.calls.some(([kind]) => kind === "watch"), "parked is known without a client watch");
-  const pylon = s.registry.pylon(s.thread.pylonId)!;
-  s.registry.savePylon({ ...pylon, failed: "gave up" });
+  const pylon = s.registry.threads.pylon(s.thread.pylonId)!;
+  s.registry.threads.savePylon({ ...pylon, failed: "gave up" });
   assert.equal(await attention(), "failed");
-  s.registry.savePylon(pylon);
+  s.registry.threads.savePylon(pylon);
   s.fake.park(id, 0);
-  s.registry.recordActivity(id, { agentTurnRunning: false });
+  s.registry.threads.recordActivity(id, { agentTurnRunning: false });
   s.woken.length = 0;
-  const human = s.registry.thread(id)!.lastHumanActivityAt;
+  const human = s.registry.threads.thread(id)!.lastHumanActivityAt;
   for (const status of ["active", "archived"] as const) {
-    s.registry.setThreadStatus(id, status);
+    s.registry.threads.setThreadStatus(id, status);
     assert.equal((await s.call("POST", `${base}/seen`)).status, 204);
     assert.equal(await attention(), null);
     assert.equal((await s.call("POST", `${base}/unseen`)).status, 204);
-    assert.equal(s.registry.thread(id)!.seenAt, 999);
+    assert.equal(s.registry.threads.thread(id)!.seenAt, 999);
     assert.equal(await attention(), "reply");
-    assert.equal(s.registry.thread(id)!.lastHumanActivityAt, human);
-    assert.deepEqual(s.registry.pylon(s.thread.pylonId), pylon);
+    assert.equal(s.registry.threads.thread(id)!.lastHumanActivityAt, human);
+    assert.deepEqual(s.registry.threads.pylon(s.thread.pylonId), pylon);
     assert.deepEqual(s.woken, []);
   }
 });
@@ -327,7 +327,7 @@ test("attention ranks failure, unwatched parked tasks, unread reply, then work; 
 test("the API reports the attention the event stream last reported, and a deleted thread's run is not parked", async (t) => {
   const s = await withThread(t);
   const id = s.thread.id;
-  const reported = () => s.registry.events("0", { kinds: ["attention.changed"], thread: id }).at(-1)?.payload.attention ?? null;
+  const reported = () => s.registry.threads.events("0", { kinds: ["attention.changed"], thread: id }).at(-1)?.payload.attention ?? null;
   const shown = async () => ((await s.call("GET", `/v1/threads/${id}`)).body as ThreadDetail).attention;
   s.fake.park(id, 1);
   assert.deepEqual([await shown(), reported()], ["parked", "parked"]);
@@ -348,10 +348,10 @@ test("seen is bounded by the rendered reply, not a newer reply discovered by att
   const s = await withThread(t);
   const id = s.thread.id;
   const base = `/v1/threads/${id}`;
-  s.registry.recordReply(id, 1000);
-  const renderedReplyAt = s.registry.thread(id)!.lastReplyAt;
-  s.registry.recordReply(id, 2000);
-  const human = s.registry.thread(id)!.lastHumanActivityAt;
+  s.registry.threads.recordReply(id, 1000);
+  const renderedReplyAt = s.registry.threads.thread(id)!.lastReplyAt;
+  s.registry.threads.recordReply(id, 2000);
+  const human = s.registry.threads.thread(id)!.lastHumanActivityAt;
   s.woken.length = 0;
   assert.equal((await s.call("POST", `${base}/seen`, { lastReplyAt: renderedReplyAt })).status, 204);
   let detail = (await s.call("GET", base)).body as ThreadDetail;
@@ -359,17 +359,17 @@ test("seen is bounded by the rendered reply, not a newer reply discovered by att
   assert.equal(detail.lastReplyAt, 2000);
   assert.equal(detail.attention, "reply");
   assert.equal((await s.call("POST", `${base}/seen`, { lastReplyAt: null })).status, 204);
-  assert.equal(s.registry.thread(id)!.seenAt, 1000);
+  assert.equal(s.registry.threads.thread(id)!.seenAt, 1000);
   await s.call("POST", `${base}/seen`, { lastReplyAt: 2000 });
   detail = (await s.call("GET", base)).body as ThreadDetail;
   assert.equal(detail.seenAt, 2000);
   assert.equal(detail.attention, null);
   await s.call("POST", `${base}/seen`, { lastReplyAt: 1000 });
-  assert.equal(s.registry.thread(id)!.seenAt, 2000, "a stale page does not undo another client's seen mark");
+  assert.equal(s.registry.threads.thread(id)!.seenAt, 2000, "a stale page does not undo another client's seen mark");
   for (const lastReplyAt of [-1, 1.5, "2000"]) {
     assert.equal((await s.call("POST", `${base}/seen`, { lastReplyAt })).status, 400);
   }
-  assert.equal(s.registry.thread(id)!.lastHumanActivityAt, human);
+  assert.equal(s.registry.threads.thread(id)!.lastHumanActivityAt, human);
   assert.deepEqual(s.woken, []);
 });
 
@@ -449,7 +449,7 @@ test("a start that failed under a request ID made nothing, so the ID starts a co
   const claude = await s.call("POST", "/v1/threads", { project: "acme", title: "x", claude: "Fix it", message: "hi", requestId: "start:claude" });
   assert.equal(claude.status, 400);
   assert.match(claude.body.error, /message is for a Nexus agent thread/);
-  assert.equal(s.registry.startRequest("start:claude"), undefined);
+  assert.equal(s.registry.threads.startRequest("start:claude"), undefined);
   const plain = await s.call("POST", "/v1/threads", { project: "acme", title: "No ID", message: "Look around." });
   assert.equal(plain.status, 201, JSON.stringify(plain.body));
   assert.deepEqual(s.calls.at(-1), ["send", (plain.body as Thread).id, "Look around.", `brief:${(plain.body as Thread).id}`, "followUp"], "a start without a request ID sends its first message too");
@@ -469,7 +469,7 @@ test("a start whose first message failed keeps its request ID, and a repeat send
     const failed = await s.call("POST", "/v1/threads", body);
     s.fake.harness.send = send;
     assert.equal(failed.status, 500, JSON.stringify(failed.body));
-    const id = s.registry.startRequest(requestId)?.thread;
+    const id = s.registry.threads.startRequest(requestId)?.thread;
     assert.ok(id !== undefined, `${requestId}: the thread committed, so its request ID is kept`);
     assert.equal(failed.body.error, `started ${id}, but its first message was not sent: ${requestId === "start:refused" ? "the harness is unreachable" : "the acknowledgement was lost"}. Start it again under request ID ${requestId} to send it`);
     assert.equal((await s.call("POST", "/v1/threads", { ...body, message: "Another brief" })).status, 409, `${requestId}: another body is refused`);

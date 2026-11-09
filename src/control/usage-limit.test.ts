@@ -23,14 +23,14 @@ function fixture(t: import("node:test").TestContext, limit: { resetsAt: number |
   const threads = ids.map((id) => testThread({ id: id as ThreadId, title: "test", project: project.id, startedBy: "test", createdAt: 1, lastHumanActivityAt: 1 }));
   for (const thread of threads) {
     const pylon = testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } } });
-    registry.createThread(thread, pylon, { claude: { prompt: "/poteto-mode fix it" } });
+    registry.threads.createThread(thread, pylon, { claude: { prompt: "/poteto-mode fix it" } });
     claudeWorkerAt(registry, thread.id, "started", { session });
     const stop: ClaudeEntry = { kind: "notice", at: 5000, tone: "error", text: "You've hit your session limit", usageLimit: limit };
-    registry.appendClaudeRead(thread.id, { session, from: transcriptStart, entries: [stop], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 1 });
+    registry.threads.appendClaudeRead(thread.id, { session, from: transcriptStart, entries: [stop], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 1 });
   }
   const thread = threads[0]!;
-  registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
-  registry.ingested(testObservation(node, { pylons: threads.map((th) => runningPylon(th.pylonId, { liveHash: "hash" as LiveHash })) }), []);
+  registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  registry.threads.ingested(testObservation(node, { pylons: threads.map((th) => runningPylon(th.pylonId, { liveHash: "hash" as LiveHash })) }), []);
   const typed: Extract<PylonCommand, { kind: "send-claude" }>[] = [];
   let outcome: "sent" | "blocked" = "sent";
   const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command as Extract<PylonCommand, { kind: "send-claude" }>); return { kind: "send-claude", outcome, herdrPane: "w1:p1", resumed: false }; } };
@@ -39,7 +39,7 @@ function fixture(t: import("node:test").TestContext, limit: { resetsAt: number |
   let gate: Promise<void> | null = null;
   const gated: typeof inbox = async (th, message) => { await gate; return inbox(th, message); };
   const resumer = usageLimitResumer({ log: assert.fail, registry, inbox: gated, clock: () => now, graceMs });
-  const continued = () => registry.events("0", { kinds: ["usage-limit.continued"] });
+  const continued = () => registry.threads.events("0", { kinds: ["usage-limit.continued"] });
   return { registry, id: thread.id, typed, resumer, continued, setNow(at: number) { now = at; }, setOutcome(o: typeof outcome) { outcome = o; }, hold(until: Promise<void> | null) { gate = until; } };
 }
 
@@ -55,8 +55,8 @@ test("a worker stopped on its usage limit is told to continue once, after the re
   assert.equal(f.typed[0]!.text, `${senders["usage-limit"].prefix} The usage limit reset. Continue where you stopped.`);
   const requestId = `usage-limit:${session}:5000`;
   assert.deepEqual(f.continued().map((e) => e.payload), [{ session, stoppedAt: 5000, resetsAt, requestId }]);
-  assert.notEqual(f.registry.claudeMessage(f.id, requestId), undefined);
-  assert.ok(f.registry.thread(f.id)!.usageLimit, "the thread still shows the stop until Claude's next turn starts");
+  assert.notEqual(f.registry.threads.claudeMessage(f.id, requestId), undefined);
+  assert.ok(f.registry.threads.thread(f.id)!.usageLimit, "the thread still shows the stop until Claude's next turn starts");
   await f.resumer.poll();
   assert.equal(f.typed.length, 1, "a stop gets one message");
   assert.equal(f.continued().length, 1);
@@ -72,7 +72,7 @@ test("a worker whose usage limit names no reset, a reset no later than the stop,
   await past.resumer.poll();
   assert.equal(past.typed.length, 0, "a reset that had passed when the limit stopped the worker would stop it again");
   const archived = fixture(t);
-  archived.registry.setThreadStatus(archived.id, "archived");
+  archived.registry.threads.setThreadStatus(archived.id, "archived");
   await archived.resumer.poll();
   assert.equal(archived.typed.length, 0);
   assert.equal(archived.continued().length, 0);
@@ -97,8 +97,8 @@ test("a thread archived or continued while an earlier thread's message is being 
   const poll = f.resumer.poll();
   await new Promise((resolve) => setImmediate(resolve));
   f.hold(null);
-  f.registry.setThreadStatus("th-2" as ThreadId, "archived");
-  f.registry.appendClaudeRead("th-3" as ThreadId, { session, from: { ...transcriptStart, offset: 1 }, entries: [{ kind: "prompt", at: 6000, text: "continue", from: "person" }], cursor: { ...transcriptStart, offset: 2 }, reset: false, readAt: 2 });
+  f.registry.threads.setThreadStatus("th-2" as ThreadId, "archived");
+  f.registry.threads.appendClaudeRead("th-3" as ThreadId, { session, from: { ...transcriptStart, offset: 1 }, entries: [{ kind: "prompt", at: 6000, text: "continue", from: "person" }], cursor: { ...transcriptStart, offset: 2 }, reset: false, readAt: 2 });
   released.resolve();
   await poll;
   assert.deepEqual(f.continued().map((e) => e.thread), ["th-1"], "only the thread that was still stopped when its turn came was told to continue");
@@ -136,13 +136,13 @@ test("close waits for the pass in flight", async (t) => {
 
 test("a pass that throws rejects every poll that joined it, and the next poll runs a new pass", async (t) => {
   const f = fixture(t);
-  const threads = f.registry.storedThreads;
-  f.registry.storedThreads = () => { throw new Error("database is locked"); };
+  const threads = f.registry.threads.storedThreads;
+  f.registry.threads.storedThreads = () => { throw new Error("database is locked"); };
   await Promise.all([
     assert.rejects(f.resumer.poll(), /database is locked/),
     assert.rejects(f.resumer.poll(), /database is locked/),
   ]);
-  f.registry.storedThreads = threads;
+  f.registry.threads.storedThreads = threads;
   await f.resumer.poll();
   assert.equal(f.typed.length, 1);
   await f.resumer.close();
@@ -164,12 +164,12 @@ test("a send that fails the same way every pass is logged once, and again after 
 
 test("a pass reads no archived or deleted thread", async (t) => {
   const f = fixture(t, { resetsAt }, ["th-1", "th-archived", "th-deleted"]);
-  f.registry.setThreadStatus("th-archived" as ThreadId, "archived");
-  f.registry.setThreadStatus("th-deleted" as ThreadId, "deleted");
+  f.registry.threads.setThreadStatus("th-archived" as ThreadId, "archived");
+  f.registry.threads.setThreadStatus("th-deleted" as ThreadId, "deleted");
   const read: ThreadId[] = [];
-  const registry = { ...f.registry, thread: (id: ThreadId) => { read.push(id); return f.registry.thread(id); } };
+  const registry = { ...f.registry, threads: { ...f.registry.threads, thread: (id: ThreadId) => { read.push(id); return f.registry.threads.thread(id); } } };
   const resumer = usageLimitResumer({ log: assert.fail, registry, inbox: async () => "delivered", clock: () => resetsAt + graceMs, graceMs });
   await resumer.poll();
   assert.deepEqual(read, ["th-1"]);
-  assert.equal(registry.events("0", { kinds: ["usage-limit.continued"] }).length, 1);
+  assert.equal(registry.threads.events("0", { kinds: ["usage-limit.continued"] }).length, 1);
 });

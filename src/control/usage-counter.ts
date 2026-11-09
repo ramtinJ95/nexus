@@ -16,7 +16,7 @@ import type { EventKind } from "./events.ts";
 import { runningProbe } from "./locator.ts";
 import type { Registry } from "./registry.ts";
 
-type UsageCounterRegistry = Pick<Registry, "agent" | "followEvents" | "node" | "pylon" | "recordUsage" | "sealedBoot" | "storedThreads" | "thread" | "usageCursor" | "usageCursors">;
+type UsageCounterRegistry = Pick<Registry, "threads" | "node" | "usage">;
 
 export interface UsageCounter {
   /** Reads every thread but the deleted ones now. */
@@ -74,26 +74,26 @@ export function usageCounter(options: {
   }
 
   const readHarness = (id: ThreadId) => once(`${id}/harness`, async () => {
-    const t = registry.thread(id);
-    const agent = t === undefined ? undefined : registry.agent(t);
+    const t = registry.threads.thread(id);
+    const agent = t === undefined ? undefined : registry.threads.agent(t);
     if (agent?.kind !== "harness") return;
     const conversation = agent.conversationId;
-    const after = registry.usageCursor("harness", conversation)?.position ?? null;
+    const after = registry.usage.usageCursor("harness", conversation)?.position ?? null;
     const { calls, last } = await harness.usage(Number(conversation) as ConversationId, after);
-    if (last !== null && last !== after) registry.recordUsage(id, calls, [{ source: "harness", key: conversation, position: last, before: "" }]);
+    if (last !== null && last !== after) registry.usage.recordUsage(id, calls, [{ source: "harness", key: conversation, position: last, before: "" }]);
   });
 
   async function readOn(id: ThreadId, cursors: (pylon: PylonId) => ReadonlyMap<string, FileCursor>, backfill = false) {
-    const t = registry.thread(id);
+    const t = registry.threads.thread(id);
     if (t === undefined || t.status === "deleted") return null;
     const probe = runningProbe(registry, probes, t, "usage");
     if (probe === null) return null;
     const read = await readAgentUsage((argv) => probe.stream(t.pylonId, argv), cursors(t.pylonId), logs);
-    const added = registry.recordUsage(id, read.calls, [...read.offsets].map(([key, [position, before]]) => ({ source: t.pylonId, key, position, before })), backfill);
+    const added = registry.usage.recordUsage(id, read.calls, [...read.offsets].map(([key, [position, before]]) => ({ source: t.pylonId, key, position, before })), backfill);
     return { ...added, offsets: read.offsets, more: read.more };
   }
 
-  const recorded = (pylon: PylonId) => new Map([...registry.usageCursors(pylon)].map(([path, c]): [string, FileCursor] => [path, [c.position, c.before]]));
+  const recorded = (pylon: PylonId) => new Map([...registry.usage.usageCursors(pylon)].map(([path, c]): [string, FileCursor] => [path, [c.position, c.before]]));
   const readPylon = (id: ThreadId) => once(`${id}/pylon`, async () => {
     for (let n = 0; n < maxReadsPerPylon && !closed; n++) {
       if ((await readOn(id, recorded))?.more !== true) return;
@@ -101,7 +101,7 @@ export function usageCounter(options: {
   });
 
   async function sealing(id: ThreadId, seal: () => void) {
-    const t = registry.thread(id);
+    const t = registry.threads.thread(id);
     const probe = t === undefined ? null : runningProbe(registry, probes, t, "usage");
     if (probe === null) throw new Error("its pylon is not running");
     seal();
@@ -134,7 +134,7 @@ export function usageCounter(options: {
   }
 
   async function sweep() {
-    const swept = registry.storedThreads({ status: ["active", "idle", "archived"] }).map((t) => t.id);
+    const swept = registry.threads.storedThreads({ status: ["active", "idle", "archived"] }).map((t) => t.id);
     await Promise.all(swept.flatMap((id) => [readHarness(id), readPylon(id)]));
     const keys = new Set(swept.flatMap((id) => [`${id}/harness`, `${id}/pylon`]));
     for (const [key, flight] of reads) {
@@ -145,7 +145,7 @@ export function usageCounter(options: {
   }
 
   // From the newest event, as the sweep at start reads what came before.
-  const stopFollowing = registry.followEvents([...pylonKinds, ...harnessKinds], (events) => {
+  const stopFollowing = registry.threads.followEvents([...pylonKinds, ...harnessKinds], (events) => {
     for (const e of events) {
       if (e.thread === null) continue;
       void (pylonKinds.includes(e.kind) ? readPylon : readHarness)(e.thread as ThreadId);

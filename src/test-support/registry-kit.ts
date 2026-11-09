@@ -74,7 +74,7 @@ export function testPylon(thread: Pick<Thread, "id" | "pylonId">, { node = testN
 /** Creates a thread and its pylon. `claudePrompt` makes it a Claude thread whose worker gets that prompt. */
 export function addThread(registry: Registry, options: PylonOptions & { thread?: Partial<Thread>; claudePrompt?: string | undefined } = {}): Thread {
   const thread = testThread(options.thread);
-  registry.createThread(thread, testPylon(thread, options), options.claudePrompt === undefined ? {} : { claude: { prompt: options.claudePrompt } });
+  registry.threads.createThread(thread, testPylon(thread, options), options.claudePrompt === undefined ? {} : { claude: { prompt: options.claudePrompt } });
   return thread;
 }
 
@@ -83,15 +83,15 @@ export function addThread(registry: Registry, options: PylonOptions & { thread?:
  * says `message`, and appends its thread.failed event.
  */
 export function claudeWorkerAt(registry: Registry, thread: ThreadId, to: "starting" | "started" | "stalled" | "failed", { session = "launch", message = "" }: { session?: string; message?: string } = {}) {
-  assert.ok(registry.moveClaudeWorker(thread, { to: "starting", session }), `${thread} has a pending Claude worker`);
-  if (to === "started") registry.moveClaudeWorker(thread, { to });
-  else if (to !== "starting") registry.moveClaudeWorker(thread, { to, message });
+  assert.ok(registry.threads.moveClaudeWorker(thread, { to: "starting", session }), `${thread} has a pending Claude worker`);
+  if (to === "started") registry.threads.moveClaudeWorker(thread, { to });
+  else if (to !== "starting") registry.threads.moveClaudeWorker(thread, { to, message });
 }
 
 /** Ingests a snapshot of `over.node` (testNode by default) together with the node online, as the loop ingests one. */
 export function observeNode(registry: Registry, over: Partial<NodeObservation> = {}): NodeObservation {
   const observation = testObservation(over.node ?? testNode, over);
-  registry.ingested(observation, [{ record: "node", node: observation.node, state: "online", capacity: observation.capacity }]);
+  registry.threads.ingested(observation, [{ record: "node", node: observation.node, state: "online", capacity: observation.capacity }]);
   return observation;
 }
 

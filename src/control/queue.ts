@@ -23,7 +23,7 @@ import { prLocationOf, servesReview, threadRole } from "./work-model.ts";
 import { brokenRule, startRules } from "../contract/threads-parse.ts";
 import { isOpenStatus } from "./reconcile.ts";
 
-type QueueRegistry = Pick<Registry, "createThread" | "currentImage" | "isReviewer" | "latestHealthSample" | "node" | "nodes" | "now" | "planning" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveQueued" | "saveTemplate" | "templates" | "thread">;
+type QueueRegistry = Pick<Registry, "threads" | "currentImage" | "reviews" | "latestHealthSample" | "node" | "nodes" | "now" | "planning" | "prWatches" | "project" | "queue" | "reserve" | "reserved" | "saveTemplate" | "templates">;
 
 export interface ThreadQueue {
   /** Validates and records, with `key` if given; throws a Refusal. Does not start it; the caller calls poll() after. */
@@ -45,16 +45,16 @@ const blocked = (thread: ThreadId, why: string): Wait => ({ thread, state: "bloc
 
 /** A merge wins over an archive, so a predecessor archived after its pull request merged still landed. */
 export function waitOf(registry: QueueRegistry, id: ThreadId): Wait {
-  const t = registry.thread(id);
+  const t = registry.threads.thread(id);
   if (t === undefined) {
-    switch (registry.queuedThread(id)?.status) {
+    switch (registry.queue.queuedThread(id)?.status) {
       case "queued": return waiting(id, "is queued");
       case "archived": return blocked(id, "was cancelled while queued");
       case "deleted": return blocked(id, "was deleted while queued");
       default: return blocked(id, "does not exist");
     }
   }
-  const review = registry.review(id);
+  const review = registry.reviews.review(id);
   const where = prLocationOf(registry, id);
   if (where.kind === "merged") return landed(id, `PR #${where.number} merged`);
   if (!isOpenStatus(t.status)) return blocked(id, `is ${t.status} and its pull request did not merge`);
@@ -83,7 +83,7 @@ const statusName = (status: QueuedRecord["status"]) => status === "archived" ? "
 export const refusedRetryMs = 10 * 60_000;
 
 export function threadQueue(options: {
-  registry: QueueRegistry & Pick<Registry, "sendWithStandingRules">;
+  registry: QueueRegistry & Pick<Registry, "threads">;
   startThread: (start: Start) => Promise<Thread>;
   /** A human message, the harness's followUp. A repeated request ID answers with the first submission. */
   send: (thread: ThreadId, text: string, requestId: string) => Promise<unknown>;
@@ -95,7 +95,7 @@ export function threadQueue(options: {
   const starting = new Map<ThreadId, Promise<Thread>>();
 
   function queued(id: ThreadId): QueuedRecord {
-    const record = registry.queuedThread(id);
+    const record = registry.queue.queuedThread(id);
     if (record === undefined) throw new Refusal("missing", `no queued thread ${id}`);
     if (record.status === "started") throw new Refusal("conflict", `thread ${id} has started, so it is no longer queued`);
     return record;
@@ -103,33 +103,33 @@ export function threadQueue(options: {
 
   /** An archived or deleted thread gets its first message once it is unarchived, or never. */
   async function deliver(id: ThreadId) {
-    const record = registry.queuedThread(id);
+    const record = registry.queue.queuedThread(id);
     if (record?.status !== "started" || record.firstMessage !== "pending" || record.message === null) return;
-    const t = registry.thread(id);
+    const t = registry.threads.thread(id);
     if (!isOpenStatus(t?.status)) return;
     await deliverDurable({ id: requestIds.queued(id), text: record.message }, async (m) => {
-      await registry.sendWithStandingRules(id, m.id, m.text, (text) => send(id, text, m.id));
+      await registry.threads.sendWithStandingRules(id, m.id, m.text, (text) => send(id, text, m.id));
       return "delivered";
-    }, () => registry.saveQueued({ ...registry.queuedThread(id)!, firstMessage: "sent" }));
+    }, () => registry.queue.saveQueued({ ...registry.queue.queuedThread(id)!, firstMessage: "sent" }));
   }
 
   async function attempt(id: ThreadId): Promise<Thread> {
-    const record = registry.queuedThread(id);
+    const record = registry.queue.queuedThread(id);
     if (record?.status !== "queued") throw new Refusal("conflict", `thread ${id} is no longer queued`);
     let t: Thread;
     try {
       t = await gate.run(() => startThread({ request: record.request, caller: record.startedBy, role: "builder", queued: id }));
     } catch (err) {
       const message = (err as Error).message;
-      const now = registry.queuedThread(id);
+      const now = registry.queue.queuedThread(id);
       if (now?.status !== "queued") throw err instanceof Refusal ? err : new Refusal("conflict", message);
       if (now.lastError !== message) log(`queued thread ${id} did not start: ${message}`);
       const { refused: _, ...rest } = now;
-      registry.saveQueued({ ...rest, lastError: message, ...err instanceof Refusal && (err.code === "no-branch" || err.code === "too-long") ? { refused: { at: Date.now() } } : {} });
+      registry.queue.saveQueued({ ...rest, lastError: message, ...err instanceof Refusal && (err.code === "no-branch" || err.code === "too-long") ? { refused: { at: Date.now() } } : {} });
       throw err;
     }
     await deliver(id).catch((err: unknown) => log(`queued thread ${id} started, but its first message was not sent yet: ${(err as Error).message}`));
-    const revision = registry.thread(id)?.standingRulesRevision;
+    const revision = registry.threads.thread(id)?.standingRulesRevision;
     return revision === undefined ? t : { ...t, standingRulesRevision: revision };
   }
 
@@ -144,7 +144,7 @@ export function threadQueue(options: {
   }
 
   async function pass() {
-    for (const record of registry.queuedThreads()) {
+    for (const record of registry.queue.queuedThreads()) {
       if (record.status === "started") {
         await deliver(record.id).catch((err: unknown) => log(`queued thread ${record.id} started, but its first message was not sent yet: ${(err as Error).message}`));
       } else if (record.status === "queued" && (record.refused === undefined || Date.now() - record.refused.at >= refusedRetryMs)
@@ -163,8 +163,8 @@ export function threadQueue(options: {
       const project = checkStart(registry, { request, role: "builder" });
       const ids = [...new Set(after)] as ThreadId[];
       for (const id of ids) {
-        const t = registry.thread(id);
-        if (t === undefined && registry.queuedThread(id) === undefined) throw new Refusal("missing", `no thread ${id}`);
+        const t = registry.threads.thread(id);
+        if (t === undefined && registry.queue.queuedThread(id) === undefined) throw new Refusal("missing", `no thread ${id}`);
         if (t !== undefined && servesReview(threadRole(registry, t))) throw new Refusal("invalid", `thread ${id} is a review loop's reviewer, check or verify thread, which merges no pull request of its own`);
       }
       const record: QueuedRecord = {
@@ -172,13 +172,13 @@ export function threadQueue(options: {
         request: { ...request, resources: resourcesOf(request.resources, project) },
         message, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
       };
-      registry.saveQueued(record, key);
+      registry.queue.saveQueued(record, key);
       return record;
     },
     async startNow(id, caller) {
       const record = queued(id);
       if (record.status !== "queued") throw new Refusal("conflict", `thread ${id} is ${statusName(record.status)}, not queued`);
-      if (record.startNow === null) registry.saveQueued({ ...record, startNow: { by: caller, at: Date.now() } });
+      if (record.startNow === null) registry.queue.saveQueued({ ...record, startNow: { by: caller, at: Date.now() } });
       return start(id);
     },
     setStatus(id, status) {
@@ -186,7 +186,7 @@ export function threadQueue(options: {
       const allowed = status === "archived" ? record.status === "queued" : status === "queued" ? record.status === "archived" : record.status !== "deleted";
       if (!allowed) throw new Refusal("conflict", status === "queued" ? `thread ${id} is ${statusName(record.status)}, not cancelled` : `thread ${id} is ${statusName(record.status)}`);
       const next = { ...record, status };
-      registry.saveQueued(next);
+      registry.queue.saveQueued(next);
       return next;
     },
     poll: passes.join,

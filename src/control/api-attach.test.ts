@@ -83,12 +83,12 @@ test("an attach to a pylon running on the boot a settle sealed waits, opening no
   const pipe = fakePipe();
   s.probePipes(async () => pipe.stream);
   observeRunning(s, {});
-  s.registry.sealBoot(s.thread.pylonId, "2027-01-01T00:00:00Z");
+  s.registry.threads.sealBoot(s.thread.pylonId, "2027-01-01T00:00:00Z");
   const a = await attachTo(s.port, attachPathOf(s.thread.id, "cols=100&rows=30"));
   assert.ok("ws" in a);
   await sleep(200);
   assert.deepEqual([a.received.some((m) => (m as { type: string }).type === "attached"), s.streams.length], [false, 0], "no terminal opens on the sealed boot");
-  s.registry.ingested(testObservation(node, { pylons: [runningPylon(s.thread.pylonId, { bootedAt: "2027-01-01T00:05:00Z" })] }), []);
+  s.registry.threads.ingested(testObservation(node, { pylons: [runningPylon(s.thread.pylonId, { bootedAt: "2027-01-01T00:05:00Z" })] }), []);
   await until("the attached message", () => a.received.some((m) => (m as { type: string }).type === "attached"));
   assert.equal(s.streams.length, 1);
   a.ws.close();
@@ -107,7 +107,7 @@ test("an attach wakes the pylon, waits for it, and carries keys, resizes and out
   assert.ok("ws" in a);
   await until("a waiting message", () => a.received.length === 1);
   assert.deepEqual(a.received, [{ type: "waiting", pylon: "unknown" }]);
-  assert.ok(s.registry.thread(s.thread.id)!.lastHumanActivityAt >= before, "attaching is human activity");
+  assert.ok(s.registry.threads.thread(s.thread.id)!.lastHumanActivityAt >= before, "attaching is human activity");
   assert.ok(s.woken.includes(node), "and wakes the node");
   observeRunning(s, {});
   running = true;
@@ -141,7 +141,7 @@ test("a Claude worker's attach lands in the pane of its Claude session, one that
   claudeWorkerAt(s.registry, claude.thread.id, "started", { session: claudeSession });
   const session = (herdrPane: string, harness: "shell" | "claude-code", harnessSessionId: string | null) => ({ id: herdrPane, state: "running" as const, herdrPane, harness, harnessSessionId, status: "idle" as const, title: "x", message: null });
   observeRunning(claude, {});
-  s.registry.apply({ record: "sessions", pylonId: claude.thread.pylonId, sessions: [session("w1:p1", "shell", null), session("w2:p1", "claude-code", "another-session"), session("w3:p1", "claude-code", claudeSession)] });
+  s.registry.threads.apply({ record: "sessions", pylonId: claude.thread.pylonId, sessions: [session("w1:p1", "shell", null), session("w2:p1", "claude-code", "another-session"), session("w3:p1", "claude-code", claudeSession)] });
   s.probePipes(async (argv) => argv[0] === "python3" ? fakePipe().stream : processStream("true", [], () => {}));
   const landsIn = async (thread: string, query?: string) => {
     const a = await attachTo(s.port, attachPathOf(thread, query));

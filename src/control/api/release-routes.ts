@@ -15,8 +15,8 @@ export function releaseRoutes(kit: ApiKit, options: { deployment?: DeploymentOpt
   async function busyTurns() {
     const entering = gate.busy();
     const threads: string[] = [];
-    for (const t of registry.storedThreads()) {
-      if (t.status !== "deleted" && await agents[registry.agent(t).kind].busy(t)) threads.push(t.id);
+    for (const t of registry.threads.storedThreads()) {
+      if (t.status !== "deleted" && await agents[registry.threads.agent(t).kind].busy(t)) threads.push(t.id);
     }
     return { threads, entering: entering || gate.busy() };
   }

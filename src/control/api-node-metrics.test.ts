@@ -19,7 +19,7 @@ test("a node's metrics are labelled for a person: a plain series by name, a sens
     pylons: [{ pylonId: s.thread.pylonId, processes: 2, cpuPercent: 12.5, residentGiB: 6.2 }, { pylonId: "pylon-gone" as PylonId, processes: 1, cpuPercent: 3, residentGiB: 0.5 }],
   };
   const at = Date.now() - 1_000;
-  s.registry.recordHealthSample(node, sampleOf(health, at, (p) => s.registry.pylon(p)?.thread ?? null));
+  s.registry.recordHealthSample(node, sampleOf(health, at, (p) => s.registry.threads.pylon(p)?.thread ?? null));
   const { status, body } = await s.call("GET", `/v1/nodes/${node}/metrics?from=${at - hour}&to=${at + 1}`);
   assert.equal(status, 200);
   const metrics = body as NodeMetrics;

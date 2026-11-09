@@ -27,7 +27,7 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { Sent, ThreadDetail } from "./wire.ts";
 
-type ThreadAgentRegistry = Pick<Registry, "agent" | "claudeEntries" | "claudeMessage" | "claudeMessageSenders" | "claudeWorker" | "latestClaudeTurn" | "node" | "pylon" | "recordActivity" | "sealedBoot" | "sendWithStandingRules" | "setClaudeMessage">;
+type ThreadAgentRegistry = Pick<Registry, "threads" | "node">;
 
 /** A message for the thread's agent, as `POST /v1/threads/:id/messages` takes it. */
 export interface AgentMessage { text: string; requestId: string; mode: "followUp" | "steer" }
@@ -71,7 +71,7 @@ export function threadAgents(options: {
 }): ThreadAgents {
   const { registry, harness, claude, inPylon, whileRunning, wake, planning } = options;
   const refuse = (t: Thread): never => { throw new Refusal("conflict", noConversation(t)); };
-  const worker = (t: Thread) => registry.claudeWorker(t.id)!;
+  const worker = (t: Thread) => registry.threads.claudeWorker(t.id)!;
 
   const view = harnessView(harness);
   const reads = agentReads(registry, harness);
@@ -85,10 +85,10 @@ export function threadAgents(options: {
       frames: viewFrames,
       /** A message is human activity, so the pylon wakes while the model answers. */
       async send(t, message) {
-        registry.recordActivity(t.id, { human: Date.now() });
+        registry.threads.recordActivity(t.id, { human: Date.now() });
         wake(t);
         // A builder started without a first message gets its rules with the first one the person sends.
-        const submission = await registry.sendWithStandingRules(t.id, message.requestId, message.text,
+        const submission = await registry.threads.sendWithStandingRules(t.id, message.requestId, message.text,
           (text) => harness.send(t.id, planning?.compose(t, message.requestId, text) ?? text, message.requestId, message.mode));
         planning?.sent(t, message.requestId);
         return { submission: submission.id };
@@ -128,7 +128,7 @@ export function threadAgents(options: {
         if (problem !== null) throw new Refusal("invalid", `Claude cannot take this message as typed: ${problem}`);
         const { session, model } = worker(t);
         if (session === null) throw new Refusal("conflict", `the Claude worker of ${t.id} has not started a session yet, so it takes no messages. Send it once it has started`, "not-ready");
-        const stored = registry.claudeMessage(t.id, message.requestId);
+        const stored = registry.threads.claudeMessage(t.id, message.requestId);
         if (stored?.state === "sent") return { claude: stored.result };
         const typed = await inPylon(t, (probe, pylonId) => typeIntoClaude(registry, t.id, session, model, message.requestId, text, (command) => probe.command(pylonId, command)).catch((err: Partial<ProbeError>) => {
           if (err.code !== "unreachable") throw err;
@@ -163,7 +163,7 @@ export function threadAgents(options: {
           "not-running": `no pane runs Claude session ${session}, so there is no turn to interrupt`,
         }[outcome], outcome === "blocked" ? "blocked" : undefined);
       },
-      latestTurn: async (t) => registry.latestClaudeTurn(t.id),
+      latestTurn: async (t) => registry.threads.latestClaudeTurn(t.id),
       detail(t) {
         const { model, state, message } = worker(t);
         return { claudeWorker: { model, state, ...message === undefined ? {} : { message } }, agent: null };

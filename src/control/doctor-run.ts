@@ -17,7 +17,7 @@ import type { Registry } from "./registry.ts";
 import type { NewHealthChange } from "./health-store.ts";
 
 export interface DoctorSources {
-  registry: Pick<Registry, "nodes" | "now" | "node" | "pylon" | "keptArchives" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserved" | "desiredRelease" | "nodeByTailnetId" | "releaseReports">;
+  registry: Pick<Registry, "nodes" | "now" | "node" | "threads" | "reserved" | "desiredRelease" | "nodeByTailnetId" | "releaseReports">;
   self: TailnetNodeId;
   backupStatus(): Promise<BackupStatusRead>;
   login(): Promise<LoginState>;
@@ -47,8 +47,8 @@ export async function runDoctor(s: DoctorSources): Promise<DoctorReport> {
     controlNode: s.registry.nodeByTailnetId(s.self)?.name ?? null,
     backup, login, certificate,
     // A pylon its node does not list has no disk to keep, as one whose disk was deleted before disks waited for their usage.
-    keptArchives: s.registry.keptArchives().filter((t) => {
-      const p = s.registry.pylon(t.pylonId);
+    keptArchives: s.registry.threads.keptArchives().filter((t) => {
+      const p = s.registry.threads.pylon(t.pylonId);
       return p !== undefined && observedPylon(s.registry, p) !== "absent";
     }),
   });

@@ -25,7 +25,7 @@ function passes(t: import("node:test").TestContext, registry = testRegistry(t), 
   let checks: Check[] = [backup("ok"), disk("ok")];
   const logged: string[] = [];
   const health = healthPasses({ registry, startedAt, clock: () => now, log: (m) => logged.push(m), run: async () => ({ at: new Date(now).toISOString(), status: "ok", checks }) });
-  const alerts = () => registry.events("0", { kinds: ["health.changed"] }).map((e) => e.payload as { name: string; from: Status; status: Status });
+  const alerts = () => registry.threads.events("0", { kinds: ["health.changed"] }).map((e) => e.payload as { name: string; from: Status; status: Status });
   return {
     registry, logged, health, alerts,
     async pass(...next: Check[]) {
@@ -97,7 +97,7 @@ test("the first pass waits 5 minutes after a start, and a restart neither alerts
   let runs = 0;
   let checks = [backup("warn")];
   const health = (startedAt: number) => healthPasses({ registry, startedAt, clock: () => now, log: () => {}, run: async () => { runs++; return { at: new Date(now).toISOString(), status: "warn", checks }; } });
-  const alerts = () => registry.events("0", { kinds: ["health.changed"] }).length;
+  const alerts = () => registry.threads.events("0", { kinds: ["health.changed"] }).length;
   let first = health(start);
   now += 5 * minute - 1;
   await first.poll();
@@ -167,8 +167,8 @@ test("the doctor reads each node, the release and the control node from the regi
   const node = "rj-firebat" as NodeName;
   registry.upsertNode({ name: node, tailnetHost: "rj-firebat.example.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   const now = Date.now();
-  registry.apply({ record: "node", node, state: "online", capacity: testCapacity({ disks: [{ paths: ["/var/lib/nexus/pylons"], totalGiB: 500, freeGiB: 5, pylons: true }] }) });
-  registry.ingested(testObservation(node, { observedAt: new Date(now - 10_000).toISOString() }), []);
+  registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity({ disks: [{ paths: ["/var/lib/nexus/pylons"], totalGiB: 500, freeGiB: 5, pylons: true }] }) });
+  registry.threads.ingested(testObservation(node, { observedAt: new Date(now - 10_000).toISOString() }), []);
   registry.setDesiredRelease({ commit: "c".repeat(40), requestedBy: "nLAPTOP", requestedAt: now - day });
   const r = await runDoctor({
     registry, self: "nFIREBAT" as TailnetNodeId, clock: () => now, startedAt: now - 3 * day,
@@ -188,10 +188,10 @@ test("the doctor counts each archived disk kept past its 24 hours for its usage 
   let clock = Date.now() - 25 * 60 * minute;
   const registry = seedRegistry(testRegistry(t, ":memory:", () => clock), { nodes: ["rj-firebat" as NodeName] });
   const [kept, gone, young] = ["th-kept", "th-gone", "th-young"].map((id) => addThread(registry, { node: "rj-firebat" as NodeName, thread: { id: id as ThreadId, title: id } }));
-  registry.setThreadStatus(kept!.id, "archived");
-  registry.setThreadStatus(gone!.id, "archived");
+  registry.threads.setThreadStatus(kept!.id, "archived");
+  registry.threads.setThreadStatus(gone!.id, "archived");
   clock = Date.now();
-  registry.setThreadStatus(young!.id, "archived");
+  registry.threads.setThreadStatus(young!.id, "archived");
   observeNode(registry, { node: "rj-firebat" as NodeName, pylons: [stoppedPylon(kept!.pylonId), stoppedPylon(young!.pylonId)] });
   const doctor = () => runDoctor({
     registry, self: "nFIREBAT" as TailnetNodeId, startedAt: clock - 3 * day,
@@ -201,7 +201,7 @@ test("the doctor counts each archived disk kept past its 24 hours for its usage 
   const verdict = async () => (await doctor()).checks.find((c) => c.node === null && c.name === "archived-disks")!;
   assert.deepEqual(await verdict(), { node: null, name: "archived-disks", status: "warn", text: "th-kept (th-kept) is kept past its 24 hours, as its token usage is not read to its end yet. Each is read once its pylon paused, while its node is online with a current probe and room for it" },
     "a disk its node no longer has is kept nowhere, and one archived under 24 hours ago not yet");
-  registry.finishSettle(kept!.id, null, Date.now());
+  registry.usage.finishSettle(kept!.id, null, Date.now());
   assert.match((await verdict()).text, /^1 archived disk waits past the 24 hours for the next backup/);
 });
 

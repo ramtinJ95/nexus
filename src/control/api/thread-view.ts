@@ -35,12 +35,12 @@ function networkGrantsKey(network: BootInputs["network"]): string {
 export function threadViews(registry: Registry, agents: ThreadAgents, options: { prWatchEnabled?: boolean | undefined }) {
   /** The thread's pylon, its node, what that node last reported of it, and what it is doing, from one read of each. */
   function pylonState(t: Pick<Thread, "pylonId" | "status">) {
-    const pylon = registry.pylon(t.pylonId)!;
+    const pylon = registry.threads.pylon(t.pylonId)!;
     const node = registry.node(pylon.node)!;
     const observed = observedPylon({ node: () => node }, pylon) ?? "absent";
     // The planner deletes a failed pylon all the same, so a deleted thread's pylon shows the delete.
     const gaveUp = pylon.failed !== null && t.status !== "deleted";
-    return { pylon, node, observed, actualState: actualState(observed, registry.job(pylon.pylonId) ?? null, node.state === "online", gaveUp) };
+    return { pylon, node, observed, actualState: actualState(observed, registry.threads.job(pylon.pylonId) ?? null, node.state === "online", gaveUp) };
   }
 
   function pylonOf({ pylon, node, observed, actualState }: ReturnType<typeof pylonState>, project: Project): ThreadDetail["pylon"] {
@@ -65,29 +65,29 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
 
   function row(t: Thread): ThreadRow {
     const { pylon, actualState } = pylonState(t);
-    return { ...t, attention: registry.attention(t.id), desired: desiredPhase(t, Date.now()), pylon: { node: pylon.node, actualState, failed: pylon.failed } };
+    return { ...t, attention: registry.threads.attention(t.id), desired: desiredPhase(t, Date.now()), pylon: { node: pylon.node, actualState, failed: pylon.failed } };
   }
 
   function detail(t: Thread): ServerDetail {
     const state = pylonState(t);
-    const previews = registry.previews(t.pylonId);
-    const watch = registry.prWatch(t.id);
-    const { claudeWorker, agent } = agents[registry.agent(t).kind].detail(t);
-    const review = registry.review(t.id);
-    const questions = registry.questions(t.id);
+    const previews = registry.threads.previews(t.pylonId);
+    const watch = registry.prWatches.prWatch(t.id);
+    const { claudeWorker, agent } = agents[registry.threads.agent(t).kind].detail(t);
+    const review = registry.reviews.review(t.id);
+    const questions = registry.questions.questions(t.id);
     const now = Date.now();
     const d: Omit<ServerDetail, "said"> = {
       thread: t,
-      ...claudeWorker === undefined ? {} : { claudeWorker, resume: registry.claudeResume(t.id) },
-      attention: registry.attention(t.id), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
+      ...claudeWorker === undefined ? {} : { claudeWorker, resume: registry.threads.claudeResume(t.id) },
+      attention: registry.threads.attention(t.id), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
       desired: desiredPhase(t, now),
       // An absent pylon has no disk to keep.
       keptPastDay: state.actualState === "absent" ? null : keptPastDay(t, now),
       pylon: pylonOf(state, registry.project(t.project)!),
-      sessions: registry.sessions(t.pylonId),
+      sessions: registry.threads.sessions(t.pylonId),
       previews,
       ports: portsOf(state.observed, previews),
-      outputs: registry.outputs(t.id),
+      outputs: registry.threads.outputs(t.id),
       prWatch: { enabled: options.prWatchEnabled ?? false, stopped: watchStopped(watch), error: watch?.error ?? null },
       pullRequests: watch?.links.map((l) => l.pr) ?? [],
       review,
@@ -108,7 +108,7 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
   }
 
   async function conversation(t: Thread): Promise<AgentView | null> {
-    const view = await agents[registry.agent(t).kind].view(t);
+    const view = await agents[registry.threads.agent(t).kind].view(t);
     return view === null ? null : agentView(view);
   }
 

@@ -16,7 +16,7 @@ const crashed = (p: PylonObservation) => p.phase === "broken" && p.cause === "co
 /** The VM holds its CPUs and memory. */
 const isUp = (p: PylonObservation) => p.phase !== "stopped" && !crashed(p);
 
-type PlacementRegistry = Pick<Registry, "nodes" | "now" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserved">;
+type PlacementRegistry = Pick<Registry, "nodes" | "now" | "reserved"> & { threads: Pick<Registry["threads"], "pylonsWithStatusOn" | "pylonsWithThreadsOn"> };
 type WeighingRegistry = PlacementRegistry & Pick<Registry, "latestHealthSample">;
 
 type Need = Pick<BootInputs, "image" | "resources" | "network" | "repo" | "dotfiles">;
@@ -89,7 +89,7 @@ function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighe
  * placement counts it as free, and `freeHeldRoom` pauses them once the node needs it.
  */
 function heldOnly(registry: PlacementRegistry, node: NodeName, now: number) {
-  return registry.pylonsWithThreadsOn(node).filter(({ pylon, thread: { awaitedUntil, ...unheld } }) => pylon.failed === null && awaitedUntil !== undefined
+  return registry.threads.pylonsWithThreadsOn(node).filter(({ pylon, thread: { awaitedUntil, ...unheld } }) => pylon.failed === null && awaitedUntil !== undefined
     && desiredPhase({ ...unheld, awaitedUntil }, now) === "running" && desiredPhase(unheld, now) === "paused");
 }
 const heldRoom = (registry: PlacementRegistry, node: NodeName, now: number) => heldOnly(registry, node, now).reduce((gib, { pylon }) => gib + pylon.boot.resources.memoryGiB, 0);
@@ -110,7 +110,7 @@ export function freeHeldRoom(registry: WeighingRegistry & Pick<Registry, "releas
   const free = freeMemory(registry, node, o, o.capacity, now);
   // A pylon still up that is to pause, as one whose hold went on an earlier pass, gives its room back soon.
   const up = new Set(o.pylons.filter(isUp).map((p) => p.pylonId));
-  const pausing = registry.pylonsWithThreadsOn(node).filter(({ pylon, thread }) => up.has(pylon.pylonId) && !wantsToRun(thread, now))
+  const pausing = registry.threads.pylonsWithThreadsOn(node).filter(({ pylon, thread }) => up.has(pylon.pylonId) && !wantsToRun(thread, now))
     .reduce((gib, { pylon }) => gib + pylon.boot.resources.memoryGiB, 0);
   let short = Math.max(-left.memoryGiB, free === null ? 0 : memoryHeadroomGiB - (free.availableGiB - free.untouchedGiB - pending.memoryGiB)) - pausing;
   const released: ThreadId[] = [];
@@ -152,7 +152,7 @@ function freeMemory(registry: WeighingRegistry, node: NodeName, o: NodeObservati
   }));
   const namesProcesses = c.disks?.some((d) => d.pylons === true) === true;
   const seen = new Map(o.pylons.map((p) => [p.pylonId, p]));
-  const placed = registry.pylonsWithStatusOn(node).map(({ pylon }) => pylon);
+  const placed = registry.threads.pylonsWithStatusOn(node).map(({ pylon }) => pylon);
   let placedUpGiB = 0;
   let untouchedGiB = 0;
   for (const pylon of placed) {
@@ -195,7 +195,7 @@ export function namedDiskShort(registry: PlacementRegistry, name: NodeName, need
 export function roomLeft(registry: PlacementRegistry, node: NodeName, o: NodeObservation, c: NodeCapacity, need: Room): { left: Room; pending: Room } {
   const now = registry.now();
   const seen = new Map(o.pylons.map((p) => [p.pylonId, p]));
-  const pending = [...registry.pylonsWithThreadsOn(node)
+  const pending = [...registry.threads.pylonsWithThreadsOn(node)
     .filter(({ pylon, thread }) => pylon.failed === null && wantsToRun(thread, now))
     .map(({ pylon }) => uncounted(pylon, seen.get(pylon.pylonId))), ...registry.reserved(node)]
     .reduce((total, r) => ({ cpus: total.cpus + r.cpus, memoryGiB: total.memoryGiB + r.memoryGiB, diskGiB: total.diskGiB + r.diskGiB }), { cpus: 0, memoryGiB: 0, diskGiB: 0 });
@@ -239,7 +239,7 @@ export function nodePylons(registry: PlacementRegistry, node: NodeRecord): NodeP
   const zero = (): Tally => ({ pylons: 0, cpus: 0, memoryGiB: 0 });
   const tallies = { up: zero(), paused: zero(), archived: zero(), crashed: zero() };
   const orphaned: PylonId[] = [];
-  const placed = new Map(registry.pylonsWithStatusOn(node.name).map((p) => [p.pylon.pylonId, p]));
+  const placed = new Map(registry.threads.pylonsWithStatusOn(node.name).map((p) => [p.pylon.pylonId, p]));
   for (const seen of node.observation.pylons) {
     const found = placed.get(seen.pylonId);
     if (found === undefined) {

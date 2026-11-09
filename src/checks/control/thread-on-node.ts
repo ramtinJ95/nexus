@@ -287,8 +287,8 @@ async function deleteThread(pylonId: string): Promise<string> {
 function plannerState(pylonId: PylonId) {
   const registry = openRegistry(config.db);
   try {
-    const { failed, attempts, retrying, submitted } = registry.pylon(pylonId)!;
-    return { failed, attempts, retrying, job: registry.job(pylonId) ?? null, submitted };
+    const { failed, attempts, retrying, submitted } = registry.threads.pylon(pylonId)!;
+    return { failed, attempts, retrying, job: registry.threads.job(pylonId) ?? null, submitted };
   } finally {
     registry.close();
   }

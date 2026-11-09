@@ -38,8 +38,8 @@ function fakeNodes(registry: Registry, names: readonly NodeName[]) {
 
   function observe(node: NodeName) {
     const capacity = testCapacity({ diskFreeGiB: 200 });
-    registry.apply({ record: "node", node, state: "online", capacity });
-    registry.ingested(testObservation(node, { capacity, artifacts: [...stores.get(node)!.keys()] }), []);
+    registry.threads.apply({ record: "node", node, state: "online", capacity });
+    registry.threads.ingested(testObservation(node, { capacity, artifacts: [...stores.get(node)!.keys()] }), []);
   }
 
   const probe = (node: NodeName): Pick<ProbeClient, "submit" | "job" | "manifest"> => ({

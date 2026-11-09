@@ -33,7 +33,7 @@ import type { StoredPylon, Thread } from "./thread-store.ts";
 import type { Registry } from "./registry.ts";
 import { answers, type Judgment, type Outcome, type Phase, type Verdict } from "./judgment-store.ts";
 
-type JudgmentRegistry = Pick<Registry, "agent" | "askQuestion" | "failure" | "judgment" | "judgmentSince" | "judgments" | "latestHealthSample" | "movePylon" | "node" | "nodes" | "now" | "previews" | "project" | "pylon" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "question" | "recordActivity" | "recordUsage" | "reserved" | "retryPylon" | "saveJudgment" | "storedThreads" | "thread" | "unfinishedJudgments">;
+type JudgmentRegistry = Pick<Registry, "threads" | "questions" | "judgment" | "judgmentSince" | "judgments" | "latestHealthSample" | "node" | "nodes" | "now" | "project" | "usage" | "reserved" | "saveJudgment" | "unfinishedJudgments">;
 
 /** A judgment as `nexus show` and the thread page show it. */
 export interface JudgmentView {
@@ -203,7 +203,7 @@ export function judgmentPass(options: {
     if (pylon.pauses > 0) return { refused: `its disk is on ${pylon.node}, and Nexus has no move job` };
     const listed = observed(pylon);
     if (listed !== "absent") return { refused: `${pylon.node} still lists it ${listed.phase}, and Nexus has no move job` };
-    if (registry.previews(pylon.pylonId).length > 0) return { refused: `its previews are published on ${pylon.node}` };
+    if (registry.threads.previews(pylon.pylonId).length > 0) return { refused: `its previews are published on ${pylon.node}` };
     if (pylon.submitted !== null) return { refused: `a job for it is in flight on ${pylon.node}` };
     const { best, weighed } = weighNodes(registry, pylon.boot, pylon.node);
     if (best === null) return { refused: weighed.length === 0 ? "Nexus has no other node" : `no other node can run it: ${refusals(weighed)}` };
@@ -212,11 +212,11 @@ export function judgmentPass(options: {
 
   /** Why the failure needs nothing more from Nexus, or null while its pylon still holds it. */
   function settled(j: Judgment): string | null {
-    const t = registry.thread(j.thread)!;
+    const t = registry.threads.thread(j.thread)!;
     if (!isOpenStatus(t.status)) return `the thread is ${t.status}`;
-    if (registry.pylon(t.pylonId)?.failed == null) return "the pylon was retried before Nexus acted";
+    if (registry.threads.pylon(t.pylonId)?.failed == null) return "the pylon was retried before Nexus acted";
     // A retry clears `failed`, and a later failure, even with the same reason, appends a newer event.
-    const current = registry.failure(t.id)?.event;
+    const current = registry.threads.failure(t.id)?.event;
     if (current === undefined) return "the event of this failure is gone from the registry's event log, so Nexus cannot tell it from a later failure";
     if (current !== j.failure) return "the pylon was retried and failed again before Nexus acted, and that failure gets a judgment of its own";
     return null;
@@ -236,7 +236,7 @@ export function judgmentPass(options: {
   }
 
   async function facts(t: Thread, pylon: StoredPylon, failure: number, token: string): Promise<Facts> {
-    const agent = registry.agent(t).kind;
+    const agent = registry.threads.agent(t).kind;
     return {
       token, thread: t, agent: agent === "harness" ? "a Nexus agent" : agent === "claude" ? "a Claude worker" : "none", pylon,
       listed: observedPylon(registry, pylon), online: registry.node(pylon.node)?.state === "online", health: await health(pylon.node),
@@ -257,9 +257,9 @@ export function judgmentPass(options: {
 
   async function start(t: Thread) {
     if (!judged(t)) return;
-    const failure = registry.failure(t.id)?.event;
+    const failure = registry.threads.failure(t.id)?.event;
     if (failure === undefined || failure <= registry.judgmentSince() || registry.judgment(failure) !== null) return;
-    const pylon = registry.pylon(t.pylonId)!;
+    const pylon = registry.threads.pylon(t.pylonId)!;
     const base = { failure, thread: t.id, node: pylon.node, failed: pylon.failed!, startedAt: now(), conversation: null, reply: null };
     if (retriesSpent(t.id) >= maxRetries) {
       const verdict = rule(`Nexus already retried this thread's pylon ${maxRetries} times on its own, so this failure is the person's`);
@@ -270,14 +270,14 @@ export function judgmentPass(options: {
     const token = mint(judgmentId(failure));
     const brief = briefOf(await facts(t, pylon, failure, token));
     // The health read let a retry or an archive in.
-    const fresh = registry.thread(t.id)!;
-    if (!judged(fresh) || registry.failure(t.id)?.event !== failure) return;
+    const fresh = registry.threads.thread(t.id)!;
+    if (!judged(fresh) || registry.threads.failure(t.id)?.event !== failure) return;
     const record: Judgment = { ...base, request: { brief, token }, phase: { kind: "judging", deadline: null } };
     if (save(null, record)) await judging(record, record.phase as Extract<Phase, { kind: "judging" }>);
   }
 
   async function judging(j: Judgment, phase: Extract<Phase, { kind: "judging" }>) {
-    const t = registry.thread(j.thread)!;
+    const t = registry.threads.thread(j.thread)!;
     if (!isOpenStatus(t.status)) {
       return decided(j, { ...j, phase: { kind: "acting", verdict: rule(`the thread was ${t.status} before the judgment answered`) } });
     }
@@ -317,9 +317,9 @@ export function judgmentPass(options: {
     return {
       next: { ...j, phase: { kind: "done", verdict, outcome: { kind: "retried", node: pylon.node, on } } },
       act: () => {
-        registry.retryPylon(pylon.pylonId);
+        registry.threads.retryPylon(pylon.pylonId);
         // A retry wants the pylon running. The person's answer is their activity, as a retry from the API is.
-        registry.recordActivity(j.thread, on === "answer" ? { human: now() } : { agent: now() });
+        registry.threads.recordActivity(j.thread, on === "answer" ? { human: now() } : { agent: now() });
       },
       nodes: [pylon.node],
     };
@@ -327,14 +327,14 @@ export function judgmentPass(options: {
 
   /** The record once Nexus moved the pylon and retried it there, and the move. A fresh boot, since templates stay on their node. */
   function moved(j: Judgment, verdict: Verdict, pylon: StoredPylon, to: Extract<Move, { to: NodeName }>, on: "verdict" | "answer"): { next: Judgment; act: () => void; nodes: NodeName[] } {
-    const project = registry.project(registry.thread(j.thread)!.project)!;
+    const project = registry.project(registry.threads.thread(j.thread)!.project)!;
     const live = pylonLive({ ...pylon, node: to.to }, project, []);
     const setup: ThreadSetup = { how: "fresh", reason: `the pylon moved from ${pylon.node} after it failed there, and templates stay on the node that built them` };
     return {
       next: { ...j, phase: { kind: "done", verdict, outcome: { kind: "moved", from: pylon.node, to: to.to, on } } },
       act: () => {
-        registry.movePylon(pylon.pylonId, pylon.node, { node: to.to, placement: { how: "auto", node: to.to, weighed: to.weighed }, setup, firstBoot: { kind: "fresh", preSetup: project.preSetup }, live, liveHash: liveHashOf(live) });
-        registry.recordActivity(j.thread, on === "answer" ? { human: now() } : { agent: now() });
+        registry.threads.movePylon(pylon.pylonId, pylon.node, { node: to.to, placement: { how: "auto", node: to.to, weighed: to.weighed }, setup, firstBoot: { kind: "fresh", preSetup: project.preSetup }, live, liveHash: liveHashOf(live) });
+        registry.threads.recordActivity(j.thread, on === "answer" ? { human: now() } : { agent: now() });
       },
       nodes: [pylon.node, to.to],
     };
@@ -355,7 +355,7 @@ export function judgmentPass(options: {
     ].join("\n\n");
     return {
       next: { ...j, phase: { kind: "asked", verdict } },
-      act: () => { registry.askQuestion({ kind: "judgment", id: judgmentId(j.failure), thread: j.thread, failure: j.failure, text, options: choices, reserved: null, answerer: "person", askedAt: now() }); },
+      act: () => { registry.questions.askQuestion({ kind: "judgment", id: judgmentId(j.failure), thread: j.thread, failure: j.failure, text, options: choices, reserved: null, answerer: "person", askedAt: now() }); },
       nodes: [],
     };
   }
@@ -366,7 +366,7 @@ export function judgmentPass(options: {
 
   /** Saves the judgment done for `why`, or else what `plan` makes of the thread's pylon, and wakes the nodes the plan names. */
   function carryOut(j: Judgment, verdict: Verdict, why: string | null, plan: (pylon: StoredPylon) => Plan) {
-    const next = why !== null ? done(j, verdict, why) : plan(registry.pylon(registry.thread(j.thread)!.pylonId)!);
+    const next = why !== null ? done(j, verdict, why) : plan(registry.threads.pylon(registry.threads.thread(j.thread)!.pylonId)!);
     if (save(j, next.next, next.act)) for (const node of next.nodes) wake(node);
   }
 
@@ -375,10 +375,10 @@ export function judgmentPass(options: {
       const conversation = j.conversation as ConversationId;
       await harness.abortJudgment(conversation);
       const { calls, last } = await harness.usage(conversation, null);
-      if (last !== null) registry.recordUsage(j.thread, calls, [{ source: "harness", key: String(conversation), position: last, before: "" }]);
+      if (last !== null) registry.usage.recordUsage(j.thread, calls, [{ source: "harness", key: String(conversation), position: last, before: "" }]);
     }
     // Nothing below awaits, so what it reads is what the save acts on.
-    const withheld = registry.project(registry.thread(j.thread)!.project)?.pipeline == null ? "the project's pipeline was turned off"
+    const withheld = registry.project(registry.threads.thread(j.thread)!.project)?.pipeline == null ? "the project's pipeline was turned off"
       : retriesSpent(j.thread) >= maxRetries ? `Nexus already retried this thread's pylon ${maxRetries} times on its own` : null;
     carryOut(j, verdict, settled(j), (pylon) => {
       switch (verdict.answer) {
@@ -397,7 +397,7 @@ export function judgmentPass(options: {
   }
 
   function asked(j: Judgment, verdict: Verdict) {
-    const question = registry.question(judgmentId(j.failure));
+    const question = registry.questions.question(judgmentId(j.failure));
     const answer = question?.answer ?? null;
     // An unarchive before this pass leaves the failure on the pylon, and the question withdrawn.
     const why = settled(j) ?? (question?.withdrawn !== undefined ? "the thread was archived, which withdrew the question" : null);
@@ -428,13 +428,13 @@ export function judgmentPass(options: {
 
   async function pass() {
     // A judgment of a thread archived or deleted since it started still steps, to its end.
-    const startable = new Set(registry.storedThreads({ status: openStatuses }).map((t) => t.id));
+    const startable = new Set(registry.threads.storedThreads({ status: openStatuses }).map((t) => t.id));
     const ids = new Set([...registry.unfinishedJudgments().map((j) => j.thread), ...startable]);
     for (const id of ids) {
       try {
         for (const j of registry.judgments(id)) await step(j);
         // Read again after the steps, which may have retried the pylon.
-        if (startable.has(id)) await start(registry.thread(id)!);
+        if (startable.has(id)) await start(registry.threads.thread(id)!);
         errors.delete(id);
       } catch (err) {
         const message = (err as Error).message;

@@ -11,17 +11,17 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 
 /** `isReviewer` also names a reviewer that a later review of the same builder replaced. */
-export function threadRole(registry: Pick<Registry, "isReviewer" | "planning">, t: Pick<Thread, "id" | "startedBy">): Role {
+export function threadRole(registry: Pick<Registry, "reviews" | "planning">, t: Pick<Thread, "id" | "startedBy">): Role {
   const role = roleOf(t.startedBy);
   if (role === "reviewer" || role === "check" || role === "verify") return role;
-  if (registry.isReviewer(t.id)) return "reviewer";
+  if (registry.reviews.isReviewer(t.id)) return "reviewer";
   return registry.planning(t.id) === null ? "builder" : "planning";
 }
 
 /** A reviewer, check or verify thread serves a builder's review, and merges no pull request of its own. */
 export const servesReview = (role: Role) => role === "reviewer" || role === "check" || role === "verify";
 
-export const prLocationOf = (registry: Pick<Registry, "review" | "prWatch">, id: ThreadId): PrLocation => prLocation(registry.review(id), watchedPrs(registry.prWatch(id)));
+export const prLocationOf = (registry: Pick<Registry, "reviews" | "prWatches">, id: ThreadId): PrLocation => prLocation(registry.reviews.review(id), watchedPrs(registry.prWatches.prWatch(id)));
 
 /**
  * A thing of a thread's that waits on the person: one of an open thread's own needs, the open thread itself stopped
@@ -33,12 +33,12 @@ export type PersonNeed = Need | { kind: "disk"; since: number } | { kind: "threa
  * A new reply does not wait on the person, so it has no need, but it outranks a dialog in the terminal, which the
  * session's own state says waits.
  */
-export function personNeeds(registry: Pick<Registry, "attention" | "needs">, t: Thread, now: number): PersonNeed[] {
+export function personNeeds(registry: Pick<Registry, "threads">, t: Thread, now: number): PersonNeed[] {
   if (t.status === "archived") return settleStuck(t, now) ? [{ kind: "disk", since: t.archivedAt! + archivedDiskMs }] : [];
   if (!isOpenStatus(t.status)) return [];
-  const attention = registry.attention(t.id);
+  const attention = registry.threads.attention(t.id);
   const stuck = attention === "failed" || attention === "parked" || attention === "limited" ? attention : attention !== "decision" && t.sessionWaiting === true ? "waiting" : null;
-  const own: PersonNeed[] = [...registry.needs(t.id)];
+  const own: PersonNeed[] = [...registry.threads.needs(t.id)];
   if (stuck !== null) own.push({ kind: "thread", attention: stuck, since: t.usageLimit?.stoppedAt ?? Math.max(t.createdAt, t.lastAgentActivityAt) });
   return own;
 }

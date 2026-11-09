@@ -6,7 +6,7 @@ import type { ThreadId } from "../../ids.ts";
 import { HttpError } from "../http-error.ts";
 import { apiPingMs } from "../../contract/route.ts";
 
-type EventBatch = ReturnType<Registry["eventBatch"]>;
+type EventBatch = ReturnType<Registry["threads"]["eventBatch"]>;
 
 /** Streams open at once, across threads and callers. Each holds a watch, and the streams of one thread page share its renders. */
 export const maxStreams = 16;

@@ -37,7 +37,7 @@ function addThread(registry: Registry, options: { startedBy?: string; conversati
   // As a start does: a harness thread has no Claude worker.
   const { id, pylonId } = addTestThread(registry, { node, boot: { image }, thread: { conversationId, startedBy: options.startedBy ?? "nLAPTOP" }, claudePrompt: conversationId === null ? "hello" : undefined });
   observe(registry, pylonId, options.phase ?? "running");
-  return registry.thread(id)!;
+  return registry.threads.thread(id)!;
 }
 
 function observe(registry: Registry, pylonId: PylonId, phase: "running" | "paused") {
@@ -82,7 +82,7 @@ const sum = (a: Tokens & { calls: number }, b: Tokens & { calls: number }) => ({
   calls: a.calls + b.calls, input: a.input + b.input, output: a.output + b.output, cacheWrite: a.cacheWrite + b.cacheWrite, cacheRead: a.cacheRead + b.cacheRead,
 });
 const totals = (registry: Registry, thread?: ThreadId) => {
-  const { calls, input, output, cacheWrite, cacheRead } = registry.usageReport({ since: null, thread: thread ?? null }).total;
+  const { calls, input, output, cacheWrite, cacheRead } = registry.usage.usageReport({ since: null, thread: thread ?? null }).total;
   return { calls, input, output, cacheWrite, cacheRead };
 };
 
@@ -96,7 +96,7 @@ test("a pylon's Claude transcripts and pi sessions count each call once, however
   await counter.sweep();
   const both = sum(claudeFixture, piFixture);
   assert.deepEqual(totals(registry), both);
-  const report = registry.usageReport({ since: null, by: ["kind", "model", "role"] });
+  const report = registry.usage.usageReport({ since: null, by: ["kind", "model", "role"] });
   assert.deepEqual(report.by.kind!.map((r) => [r.key, r.calls]), [["claude", 9], ["pi", 2]]);
   assert.deepEqual(report.by.model!.map((r) => r.key), ["claude-sonnet-5-5", "gpt-6-astra"]);
   assert.deepEqual(report.by.role!.map((r) => r.key), ["builder"]);
@@ -176,7 +176,7 @@ test("a whole read counts every call from the start of each transcript, past whe
     const bytes = readFileSync(path);
     return { source: thread.pylonId, key: path, position: bytes.length, before: createHash("sha256").update(bytes.subarray(Math.max(0, bytes.length - 4096))).digest("hex") };
   };
-  registry.recordUsage(thread.id, [], [end(transcript), end(session)]);
+  registry.usage.recordUsage(thread.id, [], [end(transcript), end(session)]);
   const probe = localProbe();
   const counter = usageCounter({ registry, probes: new Map([[node, probe]]), harness: noHarness, logs, sweepMs: 3_600_000 });
   t.after(() => counter.close());
@@ -210,31 +210,31 @@ test("a whole read cut short keeps what its finished reads recovered on the thre
   probe.stream = (pylon, argv) => probe.reads === 1 && lost ? Promise.reject(new Error("the pipe to the pylon was lost")) : stream(pylon, argv);
   const counter = usageCounter({ registry, probes: new Map([[node, probe]]), harness: noHarness, logs, sweepMs: 3_600_000 });
   t.after(() => counter.close());
-  registry.startUsageBackfill([thread.id], Date.now());
+  registry.usage.startUsageBackfill([thread.id], Date.now());
   observe(registry, thread.pylonId, "running");
   const row = () => {
-    const { calls, tokens } = registry.usageBackfillThreads()[0]!;
+    const { calls, tokens } = registry.usage.usageBackfillThreads()[0]!;
     return { calls, tokens };
   };
   const recorded = () => {
-    const { calls, total } = registry.usageReport({ since: null }).total;
+    const { calls, total } = registry.usage.usageReport({ since: null }).total;
     return { calls, tokens: total };
   };
 
   await assert.rejects(counter.readWhole(thread.id), { message: "the pipe to the pylon was lost" });
   assert.ok(recorded().calls > 0 && recorded().calls < 8_000, `the first read recorded part of the calls: ${recorded().calls}`);
   assert.deepEqual(row(), recorded(), "the row holds what the read recorded before it failed");
-  registry.finishUsageBackfillThread(thread.id, "skipped", "reading it failed: the pipe to the pylon was lost", Date.now());
+  registry.usage.finishUsageBackfillThread(thread.id, "skipped", "reading it failed: the pipe to the pylon was lost", Date.now());
   assert.deepEqual(row(), recorded(), "skipping the thread keeps it");
 
   lost = false;
-  registry.startUsageBackfill([thread.id], Date.now());
+  registry.usage.startUsageBackfill([thread.id], Date.now());
   await counter.readWhole(thread.id);
-  registry.finishUsageBackfillThread(thread.id, "done", null, Date.now());
+  registry.usage.finishUsageBackfillThread(thread.id, "done", null, Date.now());
   const all = sum(claudeFixture, piFixture);
   assert.deepEqual(recorded(), { calls: all.calls + 8_000, tokens: all.input + all.output + all.cacheWrite + all.cacheRead + 8_000 * 3 });
   assert.deepEqual(row(), recorded(), "the read after it recovered the rest, and the row holds both");
-  const run = registry.usageBackfill();
+  const run = registry.usage.usageBackfill();
   assert.ok(run.state === "running" && run.recovered.calls === recorded().calls);
 });
 
@@ -249,7 +249,7 @@ test("the counts survive a restart, which reads on from where the last read stop
   registry.close();
 
   const reopened = openOnline(t, path);
-  assert.equal(reopened.usageCursors(thread.pylonId).size, 2);
+  assert.equal(reopened.usage.usageCursors(thread.pylonId).size, 2);
   const second = usageCounter({ registry: reopened, probes: new Map([[node, localProbe()]]), harness: noHarness, logs, sweepMs: 3_600_000 });
   t.after(() => second.close());
   await second.sweep();
@@ -281,7 +281,7 @@ test("deleting a thread keeps its counts, and a paused or deleted thread's pylon
   observe(registry, thread.pylonId, "paused");
   await counter.sweep();
   assert.equal(probe.reads, reads, "a paused pylon is not woken to read it");
-  registry.setThreadStatus(thread.id, "deleted");
+  registry.threads.setThreadStatus(thread.id, "deleted");
   await counter.sweep();
   assert.equal(probe.reads, reads);
   assert.deepEqual(totals(registry, thread.id), sum(claudeFixture, piFixture));
@@ -305,8 +305,8 @@ test("the Nexus agent's calls are read from the harness after the last entry rea
   await counter.sweep();
   assert.deepEqual(totals(registry), { calls: 3, input: 600, output: 6, cacheWrite: 0, cacheRead: 60 });
   entries.push({ id: "harness:7/4", agent: "pi", model: "gpt-6-astra", at: 4_000, input: 400, output: 4, cacheWrite: 0, cacheRead: 40 });
-  registry.setThreadStatus(thread.id, "deleted");
-  registry.recordReply(thread.id, Date.now());
+  registry.threads.setThreadStatus(thread.id, "deleted");
+  registry.threads.recordReply(thread.id, Date.now());
   for (let i = 0; i < 100 && totals(registry).calls < 4; i++) await delay(10);
   assert.deepEqual(totals(registry), { calls: 4, input: 1000, output: 10, cacheWrite: 0, cacheRead: 100 });
   assert.equal(asked.at(-1), 3, "the turn's end reads on from the last entry read");
@@ -322,8 +322,8 @@ test("a sweep reads an archived thread's Nexus agent from the harness, and a del
   t.after(() => counter.close());
   await counter.sweep();
   assert.deepEqual(new Set(asked), new Set([7, 8]));
-  registry.setThreadStatus(deleted.id, "deleted");
-  registry.setThreadStatus(archived.id, "archived");
+  registry.threads.setThreadStatus(deleted.id, "deleted");
+  registry.threads.setThreadStatus(archived.id, "archived");
   asked.length = 0;
   await counter.sweep();
   assert.deepEqual(asked, [8]);
@@ -350,14 +350,14 @@ test("a deleted thread's harness read in flight through a sweep still runs one a
   const counter = usageCounter({ registry, probes: new Map(), harness, sweepMs: 3_600_000 });
   t.after(() => { open(); return counter.close(); });
   await counter.sweep();
-  registry.setThreadStatus(thread.id, "deleted");
+  registry.threads.setThreadStatus(thread.id, "deleted");
   hold = true;
-  registry.recordReply(thread.id, Date.now());
+  registry.threads.recordReply(thread.id, Date.now());
   for (let i = 0; i < 100 && running === 0; i++) await delay(10);
   const before = calls;
   void counter.sweep();
   await delay(50);
-  registry.recordReply(thread.id, Date.now());
+  registry.threads.recordReply(thread.id, Date.now());
   await delay(100);
   assert.equal(calls, before, "the next turn's end waits for the read in flight");
   hold = false;
@@ -395,15 +395,15 @@ test("a forked pi session, a replaced transcript of the same size, and another t
   assert.equal(totals(registry).calls, both.calls + 1, "a replacement of the same size is read from its start, and its one new call counts");
 
   const other = addThread(registry, { startedBy: reviewerCaller });
-  const before = registry.usageReport({ since: null, by: ["role"] }).by.role;
-  registry.recordUsage(other.id, [{ id: "claude:msg_replaced", agent: "claude", model: "claude-sonnet-5-5", at: 0, input: 999, output: 999, cacheWrite: 999, cacheRead: 999 }]);
-  assert.deepEqual(registry.usageReport({ since: null, by: ["role"] }).by.role, before, "another thread's read of a call changes nothing");
+  const before = registry.usage.usageReport({ since: null, by: ["role"] }).by.role;
+  registry.usage.recordUsage(other.id, [{ id: "claude:msg_replaced", agent: "claude", model: "claude-sonnet-5-5", at: 0, input: 999, output: 999, cacheWrite: 999, cacheRead: 999 }]);
+  assert.deepEqual(registry.usage.usageReport({ since: null, by: ["role"] }).by.role, before, "another thread's read of a call changes nothing");
 });
 
 test("a pylon's read is refused whole when a call claims another agent's ID or a count past 10⁹", async (t) => {
   const registry = openOnline(t);
   const thread = addThread(registry);
-  registry.recordUsage(thread.id, [{ id: "harness:7/1", agent: "pi", model: "gpt-6-astra", at: 0, input: 1, output: 1, cacheWrite: 0, cacheRead: 0 }]);
+  registry.usage.recordUsage(thread.id, [{ id: "harness:7/1", agent: "pi", model: "gpt-6-astra", at: 0, input: 1, output: 1, cacheWrite: 0, cacheRead: 0 }]);
   const call = (id: string, input: number) => JSON.stringify({ id, agent: "pi", model: "gpt-6-astra", at: 1, input, output: 0, cacheWrite: 0, cacheRead: 0 });
   // The counter's sweep at start takes the first reply, and the sweep after it the second.
   const lines = [[call("pi:ok", 5), call("harness:7/1", 1_000_000)], [call("pi:ok", 5), call("pi:huge", 2e9)], [call("pi:ok", 5)]];
@@ -432,9 +432,9 @@ test("a pylon's turn end is read however many events come before it and however 
   t.after(() => counter.close());
   await counter.sweep();
   const reads = probe.reads;
-  for (let i = 0; i < 10_002; i++) registry.appendEvent("release.changed", null, {});
-  registry.retainEvents();
-  registry.appendEvent("session.turn-ended", thread.id, {});
+  for (let i = 0; i < 10_002; i++) registry.threads.appendEvent("release.changed", null, {});
+  registry.threads.retainEvents();
+  registry.threads.appendEvent("session.turn-ended", thread.id, {});
   for (let i = 0; i < 200 && probe.reads === reads; i++) await delay(10);
   assert.equal(probe.reads, reads + 1, "the turn end read the pylon again");
   assert.deepEqual(totals(registry), sum(claudeFixture, piFixture));
@@ -451,8 +451,8 @@ test("each thread's role comes from who started it", () => {
 test("a verify pylon's calls count under the verify role", (t) => {
   const registry = openOnline(t);
   const verify = addThread(registry, { startedBy: verifyCaller });
-  registry.recordUsage(verify.id, [{ id: "v", agent: "claude", model: "claude-opus-5-5", at: Date.now(), input: 10, output: 1, cacheWrite: 0, cacheRead: 0 }]);
-  assert.deepEqual(registry.usageReport({ since: null, by: ["role"] }).by.role!.map((r) => [r.key, r.calls]), [["verify", 1]]);
+  registry.usage.recordUsage(verify.id, [{ id: "v", agent: "claude", model: "claude-opus-5-5", at: Date.now(), input: 10, output: 1, cacheWrite: 0, cacheRead: 0 }]);
+  assert.deepEqual(registry.usage.usageReport({ since: null, by: ["role"] }).by.role!.map((r) => [r.key, r.calls]), [["verify", 1]]);
 });
 
 test("the report groups calls by model, project, kind, role and UTC day, within the period and project asked for", (t) => {
@@ -461,17 +461,17 @@ test("the report groups calls by model, project, kind, role and UTC day, within 
   const reviewer = addThread(registry, { startedBy: reviewerCaller });
   const call = (id: string, at: number, model: string, input: number): AgentCall => ({ id, agent: "pi", model, at, input, output: 1, cacheWrite: 2, cacheRead: 3 });
   const day = Date.UTC(2026, 9, 26);
-  registry.recordUsage(builder.id, [call("a", day + 1_000, "gpt-6-astra", 10), call("b", day + 86_400_000, "gpt-6-astra", 20)]);
-  registry.recordUsage(reviewer.id, [call("c", day + 86_400_000 + 5, "claude-opus-5-5", 1000)]);
+  registry.usage.recordUsage(builder.id, [call("a", day + 1_000, "gpt-6-astra", 10), call("b", day + 86_400_000, "gpt-6-astra", 20)]);
+  registry.usage.recordUsage(reviewer.id, [call("c", day + 86_400_000 + 5, "claude-opus-5-5", 1000)]);
   // A later read of the same call with a larger count keeps the larger, and its time stays.
-  registry.recordUsage(builder.id, [{ ...call("a", day + 9_000_000, "gpt-6-astra", 15), output: 0 }]);
-  const report = registry.usageReport({ since: null, by: ["model", "role", "day"] });
+  registry.usage.recordUsage(builder.id, [{ ...call("a", day + 9_000_000, "gpt-6-astra", 15), output: 0 }]);
+  const report = registry.usage.usageReport({ since: null, by: ["model", "role", "day"] });
   assert.deepEqual(report.total, { input: 1035, output: 3, cacheWrite: 6, cacheRead: 9, total: 1053, calls: 3 });
   assert.deepEqual(report.by.model!.map((r) => [r.key, r.total]), [["claude-opus-5-5", 1006], ["gpt-6-astra", 47]]);
   assert.deepEqual(report.by.role!.map((r) => [r.key, r.calls]), [["reviewer", 1], ["builder", 2]]);
   assert.deepEqual(report.by.day!.map((r) => [r.key, r.calls]), [["2026-10-27", 2], ["2026-10-26", 1]]);
-  assert.equal(registry.usageReport({ since: day + 86_400_000, by: [] }).total.calls, 2);
-  assert.equal(registry.usageReport({ since: null, project: "other" as ProjectId, by: [] }).total.calls, 0);
+  assert.equal(registry.usage.usageReport({ since: day + 86_400_000, by: [] }).total.calls, 2);
+  assert.equal(registry.usage.usageReport({ since: null, project: "other" as ProjectId, by: [] }).total.calls, 0);
   assert.ok(Math.abs(report.countingSince - Date.now()) < 60_000);
 });
 

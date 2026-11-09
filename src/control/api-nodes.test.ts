@@ -14,8 +14,8 @@ test("nodes are listed with their state and capacity, without the observation", 
   assert.deepEqual(await s.call("GET", "/v1/nodes"), { status: 200, body: [offline] });
   const capacity = testCapacity();
   const none = { pylons: 0, cpus: 0, memoryGiB: 0 };
-  s.registry.apply({ record: "node", node, state: "online", capacity });
-  s.registry.ingested(testObservation(node, { observedAt: "2027-01-01T00:01:00Z" }), []);
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity });
+  s.registry.threads.ingested(testObservation(node, { observedAt: "2027-01-01T00:01:00Z" }), []);
   assert.deepEqual((await s.call("GET", "/v1/nodes")).body, [{ ...offline, state: "online", capacity, observedAt: "2027-01-01T00:01:00Z", pylons: { up: none, paused: none, archived: none, crashed: none, orphaned: [] } }]);
 });
 
@@ -25,7 +25,7 @@ test("nodes report whether they are overcommitted, and their observed pylons as 
   observeNode(s, "a", { total: 64, committed: 0 });
   const [up, paused, archived, failing, crashed, given] = [await started("Up"), await started("Paused"), await started("Archived"), await started("Failing"), await started("Crashed"), await started("Given up")];
   for (const thread of [archived, given]) assert.equal((await s.call("POST", `/v1/threads/${thread.id}/archive`)).status, 200);
-  s.registry.savePylon({ ...s.registry.pylon(up.pylonId)!, boot: { ...s.registry.pylon(up.pylonId)!.boot, resources: { cpus: 4, memoryGiB: 8, diskGiB: 10 } } });
+  s.registry.threads.savePylon({ ...s.registry.threads.pylon(up.pylonId)!, boot: { ...s.registry.threads.pylon(up.pylonId)!.boot, resources: { cpus: 4, memoryGiB: 8, diskGiB: 10 } } });
   const stopped = (t: Thread) => stoppedPylon(t.pylonId, { sessions: null });
   observeNode(s, "a", { total: 6, committed: 8 }, {
     pylons: [{ pylonId: up.pylonId, phase: "booting" }, stopped(paused), stopped(archived), { pylonId: "pylon-gone" as PylonId, phase: "booting" },
