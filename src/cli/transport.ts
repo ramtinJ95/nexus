@@ -232,6 +232,8 @@ function exchange(via: Agent | Socket, host: string, method: string, path: strin
     req.on("error", (err) => {
       // The server closed the pooled connection as the request went out. A silence is the API's, and is not tried again.
       if (req.reusedSocket && !answered && !retried && !(err instanceof CliError)) resolve(exchange(via, host, method, path, body, idleMs, true));
+      // A silence after a change went out leaves the change made or not, which only the API can tell.
+      else if (method !== "GET" && req.writableFinished && err instanceof CliError) reject(new CliError(err.kind, `${err.message} after ${method} ${path} went out, so the request may have gone through. Check with nexus show <thread> before you try again`));
       else reject(lost(host, err));
     });
     req.end(payload);

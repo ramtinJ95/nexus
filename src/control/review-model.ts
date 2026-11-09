@@ -235,6 +235,8 @@ export interface Review extends Talk<Outbox & { to: "builder" | "reviewer" }> {
   sent: number;
   builder: ThreadId;
   reviewer: ThreadId;
+  /** False until the loop starts the reviewer's thread, under the ID the review was recorded with. */
+  reviewerStarted: boolean;
   pr: { repo: string; number: number; url: string; title: string; branch: string };
   models: { builder: string; reviewer: string };
   /**

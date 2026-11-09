@@ -16,15 +16,15 @@ const unrecordedChange: Change = { kind: "unknown", why: "the waiver was saved b
 
 /**
  * A stored record as this code reads it: a review saved with more rounds stops at the cap, one saved before earlier
- * reviews' rounds counted counts none, old findings get priorities, one saved before waivers has none, holds and a
- * waiver saved before hold codes get them from their texts, a waiver saved before changes gets one that is unknown, a
- * hold saved before causes gets one from its label, and a verdict saved before its findings decided its word says
- * "changes" unless it approved with no blocking finding.
+ * reviews' rounds counted counts none, one saved before the loop started reviewers has started its own, old findings
+ * get priorities, one saved before waivers has none, holds and a waiver saved before hold codes get them from their
+ * texts, a waiver saved before changes gets one that is unknown, a hold saved before causes gets one from its label,
+ * and a verdict saved before its findings decided its word says "changes" unless it approved with no blocking finding.
  */
 export function upgradeReview(record: Review): Review {
   const { phase, waiver } = record;
   return {
-    ...record, maxRounds: Math.min(record.maxRounds, maxRounds), earlierRounds: record.earlierRounds ?? 0, auto: record.auto ?? false,
+    ...record, maxRounds: Math.min(record.maxRounds, maxRounds), earlierRounds: record.earlierRounds ?? 0, reviewerStarted: record.reviewerStarted ?? true, auto: record.auto ?? false,
     waiver: waiver == null ? null : { ...waiver, codes: waiver.codes ?? waiver.holds.map(codeOfText), change: waiver.change === undefined ? unrecordedChange : waiver.change },
     phase: phase.kind === "needs-person" ? {
       ...phase, cause: phase.cause ?? (phase.label === undefined ? "unrecorded" : "rounds"),

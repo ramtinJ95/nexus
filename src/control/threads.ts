@@ -133,7 +133,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     const network = bootNetwork(project, dotfiles.repo);
 
     const resources = resourcesOf(request.resources, project);
-    const id = queued ?? newThreadId();
+    const id = queued ?? start.id ?? newThreadId();
     const pylonId = pylonIdOf(id);
     const need = { image, resources, network, repo: freshRepo, dotfiles };
     const placement: Placement = named ? { how: "named", node: request.node as NodeName }

@@ -35,7 +35,7 @@ import type { AgentState } from "./agent-conversation.ts";
 import { prWatchMs, reviewedPr, watchedPrs, watchStopped } from "./pr-watch-model.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
-import type { NodeName, ProjectId, TailnetNodeId, ThreadId } from "../ids.ts";
+import { newThreadId, type NodeName, type ProjectId, type TailnetNodeId, type ThreadId } from "../ids.ts";
 import { holdOptions, landOption } from "../contract/reviews.ts";
 import { askingHolds, isOpen, type HeldQuestion, type HoldsQuestion, type Unanswered } from "./questions.ts";
 import {
@@ -815,12 +815,13 @@ export function reviewLoop(deps: ReviewDeps) {
       const gone = outside(r, watchedPr(r)?.state);
       if (gone !== null) return gone;
     }
-    for (const [who, t] of [["builder", builder], ["reviewer", reviewer]] as const) {
+    for (const [who, t] of [["builder", builder], ...r.reviewerStarted ? [["reviewer", reviewer] as const] : []] as const) {
       if (landing || t?.status === "active") continue;
       // The loop archives a review's threads only once it can no longer use them, so here the person did.
       if (t !== undefined && !isOpenStatus(t.status)) return end(r, { kind: "cancelled", who, status: t.status });
       return toPerson(r, "thread", `The ${who} thread ${t?.id ?? ""} is ${t?.status ?? "gone"}, so the review stopped.`);
     }
+    if (!r.reviewerStarted) return await startFirst(r, builder!);
     // A second reviewer gone is no approval, so the review waits on the person, who can start it again.
     const second = r.second?.kind === "claude" ? r.second : null;
     const secondThread = second === null ? undefined : registry.threads.thread(second.thread);
@@ -863,8 +864,6 @@ export function reviewLoop(deps: ReviewDeps) {
    */
   const usesReviewer = (r: Review) => !ended(r) || (r.merged === null && (landable(r) || heldForGate(r)));
   const reviewersOf = (r: Review): ThreadId[] => [r.reviewer, ...r.second?.kind === "claude" ? [r.second.thread] : []];
-  /** Reviewers begin() has started and not yet saved a review for. */
-  let beginning = 0;
 
   /** A pass over the reviews whose builder, reviewer or gate thread `only` names, or over every review and the sweeps. */
   async function pass(only: ReadonlySet<ThreadId> | null) {
@@ -878,15 +877,13 @@ export function reviewLoop(deps: ReviewDeps) {
     for (const t of registry.threads.storedThreads({ status: ["active"], startedBy: verifyCaller })) if (t.lastHumanActivityAt === t.createdAt && !held.has(t.id)) live.discard(t.id);
     // So has a reviewer its builder's current review can no longer use, as one whose review ended other than by landing
     // or was replaced, one in a turn as its review landed, or one a crash left before its review saved. A reviewer the
-    // person has been to since it started is theirs.
-    if (beginning === 0) {
-      // A second reviewer is never asked to quote, so a review that waits at an approval does not use it.
-      const using = new Set(reviews.filter(usesReviewer).flatMap((r) => ended(r) ? [r.reviewer] : reviewersOf(r)));
-      const left = registry.threads.storedThreads({ status: openStatuses, startedBy: reviewerCaller }).filter((t) => !using.has(t.id) && t.lastHumanActivityAt === t.createdAt);
-      for (const t of finished(...left.map((t) => t.id))) {
-        registry.threads.setThreadStatus(t.id, "archived");
-        deps.wake(t);
-      }
+    // person has been to since it started is theirs. Reviewers start only in a pass, and passes run one at a time.
+    // A second reviewer is never asked to quote, so a review that waits at an approval does not use it.
+    const using = new Set(reviews.filter(usesReviewer).flatMap((r) => ended(r) ? [r.reviewer] : reviewersOf(r)));
+    const left = registry.threads.storedThreads({ status: openStatuses, startedBy: reviewerCaller }).filter((t) => !using.has(t.id) && t.lastHumanActivityAt === t.createdAt);
+    for (const t of finished(...left.map((t) => t.id))) {
+      registry.threads.setThreadStatus(t.id, "archived");
+      deps.wake(t);
     }
     await stepEach(reviews);
     // A review no pass steps any more, such as one saved settled outside the loop's steps, asks nothing.
@@ -935,7 +932,10 @@ export function reviewLoop(deps: ReviewDeps) {
     if (existing !== null && !ended(existing)) throw new Refusal("conflict", `review ${existing.id} of ${builder} is ${existing.phase.kind}${cancellable(existing) ? `. Cancel it with nexus review --cancel ${builder} to start another` : ""}`);
   }
 
-  /** Starts a review of `pr`, a PR of the builder's: the reviewer thread, its first request, and the record. */
+  /**
+   * Records a review of `pr`, a PR of the builder's, with its first request. The loop's next pass starts its reviewer
+   * threads, whose starts read the remote and may take longer than the person's request waits.
+   */
   async function begin(builder: Thread, { repo, number }: Pick<PullRequest, "repo" | "number">, request: { rounds?: number | undefined; land: Review["land"]; auto: boolean }): Promise<Review> {
     // A review that replaces one of the same PR spends what the earlier ones left, unless the person grants rounds.
     const previous = registry.reviews.review(builder.id);
@@ -962,23 +962,15 @@ export function reviewLoop(deps: ReviewDeps) {
     const pr = { repo, number, url: snapshot.pr.url, title: snapshot.pr.title, branch: snapshot.detail.branch };
     const asked = reviewerRequest({ pr, models, brief }, snapshot.detail, expect, kind.model);
     const at = now();
-    beginning++;
-    let review: Review;
-    try {
-      const reviewer = await startReviewer(builder, `Review of #${number}: ${snapshot.pr.title}`, pr.branch, kind.model, kind.claude, asked);
-      const started: Review = {
-        id, expect, sent: 0, builder: builder.id, reviewer: reviewer.id, pr, models, reviewerKind: kind.claude ? "claude" : "harness",
-        maxRounds: rounds, earlierRounds, land: request.land, auto: request.auto, brief, ...second,
-        rounds: [{ head: snapshot.detail.head, base: snapshot.detail.base, ...verdictsFor(seatsFor(second)), check: null, answers: null }], merged: null, waiver: null, phase: { kind: "reviewing" }, outbox: null,
-        since: at, nudges: 0, startedAt: at, asked,
-      };
-      // A Claude reviewer's first request is its first prompt, which still takes the first message's number.
-      review = kind.claude ? { ...started, sent: 1 } : resend(started, "reviewer");
-      if (secondReads(review)) review = await startSecond(review, snapshot.detail);
-      registry.reviews.saveReview(review);
-    } finally {
-      beginning--;
-    }
+    const started: Review = {
+      id, expect, sent: 0, builder: builder.id, reviewer: newThreadId(), reviewerStarted: false, pr, models, reviewerKind: kind.claude ? "claude" : "harness",
+      maxRounds: rounds, earlierRounds, land: request.land, auto: request.auto, brief, ...second,
+      rounds: [{ head: snapshot.detail.head, base: snapshot.detail.base, ...verdictsFor(seatsFor(second)), check: null, answers: null }], merged: null, waiver: null, phase: { kind: "reviewing" }, outbox: null,
+      since: at, nudges: 0, startedAt: at, asked,
+    };
+    // A Claude reviewer's first request is its first prompt, which still takes the first message's number.
+    const review = kind.claude ? { ...started, sent: 1 } : resend(started, "reviewer");
+    registry.reviews.saveReview(review);
     void poll();
     return review;
   }
@@ -987,10 +979,25 @@ export function reviewLoop(deps: ReviewDeps) {
    * A reviewer's thread on `model`, started near the builder with its first request: a Claude worker's first prompt,
    * or else the harness reviewer's first message, which its review sends.
    */
-  const startReviewer = (builder: Thread, title: string, branch: string, model: string, claude: boolean, request: string) => deps.startThread({
+  const startReviewer = (builder: Thread, title: string, branch: string, model: string, claude: boolean, request: string, id?: ThreadId) => deps.startThread({
     request: { project: builder.project, title: title.slice(0, 200), near: registry.threads.pylon(builder.pylonId)!.node, branch, ...(claude ? { claude: request, model } : {}) },
-    caller: reviewerCaller, role: "reviewer",
+    caller: reviewerCaller, role: "reviewer", id,
   });
+  /**
+   * The first reviewer's thread, under the ID its review was recorded with, unless a start that went through before a
+   * crash made it. A refused start, such as of a branch the remote no longer has, holds the review for the person.
+   */
+  async function startFirst(r: Review, builder: Thread): Promise<Review> {
+    if (registry.threads.thread(r.reviewer) === undefined) {
+      try {
+        await startReviewer(builder, `Review of #${r.pr.number}: ${r.pr.title}`, r.pr.branch, r.models.reviewer, r.reviewerKind === "claude", r.asked, r.reviewer);
+      } catch (err) {
+        if (!(err instanceof Refusal)) throw err;
+        return toPerson(r, "thread", `The reviewer thread ${r.reviewer} did not start: ${err.message}.`);
+      }
+    }
+    return { ...r, reviewerStarted: true };
+  }
   /** A second reviewer for `rule` on a model neither the builder nor the first reviewer runs, to start, or why none can run. */
   const secondFor = (rule: string, models: Review["models"], secrets: Project["secrets"]): SecondReviewer => {
     const model = secondReviewerFor([models.builder, models.reviewer], secrets);
