@@ -82,6 +82,9 @@ function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighe
   const held = heldRoom(registry, node.name, registry.now());
   pending.memoryGiB -= held;
   left.memoryGiB += held;
+  // Disk frees only as pylons are deleted, not as they pause, so a node short of it is no wait for room, even short of memory too.
+  const disk = diskShort(c, left, need.resources);
+  if (disk !== null) return refused(disk);
   const committed = `${gib(c.committedMemoryGiB + pending.memoryGiB)} of ${gib(c.memoryGiB)} GiB of memory committed`;
   if (c.committedMemoryGiB + pending.memoryGiB > c.memoryGiB) return short(`is overcommitted, with ${committed}`);
   if (left.memoryGiB < 0) return short(`has ${committed}, and the pylon needs ${need.resources.memoryGiB}`);
@@ -95,9 +98,6 @@ function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighe
     }
     left.memoryGiB = Math.min(left.memoryGiB, freeLeft);
   }
-  // Disk frees only as pylons are deleted, not as they pause, so a node short of it is no wait for room.
-  const disk = diskShort(c, left, need.resources);
-  if (disk !== null) return refused(disk);
   return { node: node.name, left };
 }
 
