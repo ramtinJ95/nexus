@@ -190,7 +190,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
   },
   start: {
     help: [
-      "  nexus start --project P [--title T] [--message M | --claude PROMPT [--model ID]] [--node N|auto] [--branch B] [--commit C]",
+      "  nexus start [--project P] [--title T] [--message M | --claude PROMPT [--model ID]] [--node N|auto] [--branch B] [--commit C]",
       "              [--cpus n] [--memory GiB] [--disk GiB] [--after THREAD[,THREAD...]] [--request-id ID] [--plan]",
       "    --after queues it to start once each of those threads' pull requests has merged",
       "    --plan makes it a planning thread, whose proposed items become questions you accept or reject",

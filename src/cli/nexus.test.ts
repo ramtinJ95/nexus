@@ -279,6 +279,7 @@ test("a thread is named by a unique prefix of its ID, with or without th-, or by
   assert.equal((await s.json(["show", "@last"])).thread.id, second.id, "@last is the newest thread");
   await s.json(["delete", "@last"]);
   assert.equal((await s.json(["show", "@last"])).thread.id, first.id, "a deleted thread is never @last");
+  assert.equal((await s.json(["show", "th-"])).thread.id, first.id, "a deleted thread makes no prefix ambiguous");
   await s.json(["delete", first.id]);
   assert.deepEqual([(await s.nexus(["show", "@last"])).code, (await s.nexus(["show", "@last"])).stderr], [4, "nexus: @last names the newest thread that is not deleted, and there is none\n"]);
 });
@@ -303,6 +304,11 @@ test("without --project, start takes the one project whose repository is the che
   assert.deepEqual([other.code, other.stderr], [64, "nexus: start needs --project, since no project has this checkout's origin, https://github.com/other/repo.git. Run nexus --help for usage\n"]);
   const bare = await s.nexus(["start", "--title", "x"], undefined, await checkout(null));
   assert.deepEqual([bare.code, bare.stderr], [64, "nexus: start needs --project. Run nexus --help for usage\n"]);
+  s.registry.projects.createProject({ ...project, id: "ported" as ProjectId, repoUrl: "https://git.example:8443/team/repo.git" });
+  const ported = await s.nexus(["start", "--title", "ported"], undefined, await checkout("https://git.example:8443/team/repo"));
+  assert.deepEqual([ported.code, ported.stderr], [0, "nexus: project ported, from this checkout's origin\n"], "a port other than the scheme's default is kept");
+  const elsewhere = await s.nexus(["start", "--title", "x"], undefined, await checkout("https://git.example:9443/team/repo.git"));
+  assert.deepEqual([elsewhere.code, elsewhere.stderr], [64, "nexus: start needs --project, since no project has this checkout's origin, https://git.example:9443/team/repo.git. Run nexus --help for usage\n"], "another port is another server");
   s.registry.projects.createProject({ ...project, id: "spoon" as ProjectId, repoUrl: "git@github.com:octocat/Spoon-Knife.git" });
   const two = await s.nexus(["item", "add", "--message", "x"], undefined, await checkout("https://github.com/octocat/Spoon-Knife.git"));
   assert.deepEqual([two.code, two.stderr], [64, "nexus: item add needs --project, since projects acme, spoon all have this checkout's origin, https://github.com/octocat/Spoon-Knife.git. Run nexus --help for usage\n"]);
