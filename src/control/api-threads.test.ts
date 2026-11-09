@@ -121,6 +121,25 @@ test("the thread list leaves deleted threads out when asked, as the dashboard as
   assert.deepEqual(await ids("/v1/threads?project=acme&deleted=false"), [s.thread.id]);
 });
 
+test("the thread list lists only active and idle threads when asked for open ones, and refuses any other status", async (t) => {
+  const s = await withImage(t);
+  const [active, idle, archived, deleted] = [1, 2, 3, 4].map((createdAt) => addThread(s.registry, { thread: { createdAt } }));
+  s.registry.threads.setThreadStatus(idle!.id, "idle");
+  s.registry.threads.setThreadStatus(archived!.id, "archived");
+  s.registry.threads.setThreadStatus(deleted!.id, "deleted");
+  const ids = async (path: string) => ((await s.call("GET", path)).body as ThreadRow[]).map((r) => r.id);
+  assert.deepEqual(await ids("/v1/threads?status=open"), [active!.id, idle!.id]);
+  assert.deepEqual(await ids("/v1/threads?status=open&deleted=false&project=acme"), [active!.id, idle!.id]);
+  assert.deepEqual(await ids("/v1/threads?status=open&project=other"), []);
+  assert.deepEqual(await ids("/v1/threads"), [active!.id, idle!.id, archived!.id, deleted!.id], "the default lists every thread");
+  const all = (await s.call("GET", "/v1/threads")).body as ThreadRow[];
+  assert.deepEqual((await s.call("GET", "/v1/threads?status=open")).body, all.slice(0, 2), "an open thread's row is the one the whole list has");
+  for (const status of ["archived", "", "Open"]) {
+    const refused = await s.call("GET", `/v1/threads?status=${status}`);
+    assert.equal(refused.status, 400, status);
+  }
+});
+
 test("each row of the list says what its thread's detail says, over threads on two nodes", async (t) => {
   const s = await withImage(t);
   const bench = "infra-testbench" as NodeName;

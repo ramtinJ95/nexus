@@ -633,7 +633,10 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       const row = sql("SELECT thread, body FROM start_requests WHERE request_id = ?").get(requestId);
       return row === undefined ? undefined : { thread: row.thread as ThreadId, body: row.body as string };
     },
-    threads: (project?: ProjectId) => withSessions(project === undefined ? sql("SELECT * FROM threads ORDER BY created_at, id").all() : sql("SELECT * FROM threads WHERE project = ? ORDER BY created_at, id").all(project)),
+    /** The threads of `project` with any of the statuses, all of them by default. */
+    threads: (filter: { project?: ProjectId | undefined; status?: readonly ThreadStatus[] | undefined } = {}) => withSessions(sql(`SELECT * FROM threads
+      WHERE ($project IS NULL OR project = $project) AND ($statuses IS NULL OR status IN (SELECT value FROM json_each($statuses))) ORDER BY created_at, id`)
+      .all({ $project: filter.project ?? null, $statuses: filter.status === undefined ? null : JSON.stringify(filter.status) })),
     thread,
     /** The threads with any of the statuses and started by `startedBy`, each as its row holds it, without what its sessions say. */
     storedThreads(filter: { status?: readonly ThreadStatus[]; startedBy?: string } = {}): StoredThread[] {
