@@ -1392,6 +1392,45 @@ test("a check the pylon cannot run goes to the person with its output, and costs
   assert.deepEqual(f.discarded, f.checkThreads);
 });
 
+test("a check or live check that cannot check out a commit force-pushed away starts a round on the PR's new head", async (t) => {
+  const gone = `The check pylon did not boot: pylon-th-check could not check out its commit on its template's disk: Setup exited 128\nfatal: reference is not a tree: ${head1}`;
+  const forcePushed = (f: ReturnType<typeof fixture>) => { f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } }; };
+
+  const f = fixture(t);
+  f.check = { kind: "running" };
+  await approved(f, null);
+  assert.equal(f.review().phase.kind, "checking");
+  forcePushed(f);
+  f.check = { kind: "unrunnable", output: gone };
+  await f.loop().poll();
+  assert.equal(f.review().phase.kind, "reviewing", "the check's commit is gone, so no person is asked");
+  assert.deepEqual(f.review().rounds.map((r) => r.head), [head1, head2]);
+  assert.deepEqual(f.discarded, f.checkThreads);
+
+  const g = fixture(t);
+  g.check = { kind: "unrunnable", output: gone };
+  const loop = g.loop();
+  await loop.start(g.builder, { land: null });
+  await loop.poll();
+  forcePushed(g);
+  g.reply(g.review().reviewer, verdict(g.review(), {}));
+  await loop.poll();
+  assert.equal(g.review().phase.kind, "reviewing", "the check beside the reviewer could not run at a head the PR left");
+  assert.deepEqual(g.review().rounds.map((r) => r.head), [head1, head2]);
+
+  const h = fixture(t);
+  h.verifies = true;
+  h.live = { kind: "running" };
+  await approved(h, null);
+  assert.equal(h.review().phase.kind, "verifying");
+  forcePushed(h);
+  h.live = { kind: "unrunnable", output: gone.replace("check pylon", "verify pylon") };
+  await h.loop().poll();
+  assert.equal(h.review().phase.kind, "reviewing", "the live check's commit is gone, so no person is asked");
+  assert.deepEqual(h.review().rounds.map((r) => r.head), [head1, head2]);
+  assert.equal(h.archived.length, 1, "the verify pylon is archived");
+});
+
 test("a failed check the builder answers without a push goes to the person at once, not back to the reviewer", async (t) => {
   const f = fixture(t);
   f.check = { kind: "done", passed: false, output: "npm error code SELF_SIGNED_CERT_IN_CHAIN" };

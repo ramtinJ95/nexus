@@ -272,7 +272,7 @@ export function createDockerBackend(options: DockerBackendOptions): VmBackend {
       const { exitCode, output } = await runSetup(pylonId, setup.commands);
       if (exitCode !== 0) {
         await removeContainer(pylonId);
-        throw setupRemoved(pylonId, setup.retry, `Setup ${exitCode === null ? "passed its 20-minute limit" : `exited ${exitCode}`}`, output.slice(-4096));
+        throw setupRemoved(pylonId, setup.retry, `Setup ${exitCode === null ? "passed its 20-minute limit" : `exited ${exitCode}`}`, output.slice(-4096), exitCode ?? undefined);
       }
       if (output !== "") await log(output.trimEnd());
     }

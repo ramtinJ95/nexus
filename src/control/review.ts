@@ -259,9 +259,21 @@ export function reviewLoop(deps: ReviewDeps) {
   };
   /** The check's result at `head` from any round of `r`, which every round there keeps, since the check clones that commit alone. */
   const checkedAt = (r: Review, head: string) => r.rounds.findLast((round) => round.head === head && round.check !== null)?.check ?? null;
-  /** The check could not run at the round's head, which a fresh pylon would not change, so the person gets its output. */
-  const unrunnable = (r: Review, output: string): Review =>
-    toPerson(r, "no-verdict", { code: "check-failed", text: `.nexus/check could not run at ${r.rounds.at(-1)!.head}.` }, checkOutput(output));
+  /**
+   * The check or live check could not run at the round's head, which a fresh pylon would not change, so the person gets
+   * its output. A PR at another head by then, such as after a force-push that took the round's commit off the remote,
+   * gets a round of its own instead.
+   */
+  const unrunnable = async (r: Review, hold: Hold, output: string): Promise<Review> => {
+    const { pr, detail } = await read(r);
+    if (pr.state !== "open" || detail.head === r.rounds.at(-1)!.head) return toPerson(r, "no-verdict", hold, output);
+    const next = await newHead(r, detail.head, detail.base, `The pull request's head moved to ${detail.head}`);
+    const gate = gateThread(r.phase);
+    if (gate !== null) gate.runs.discard(gate.thread);
+    return next;
+  };
+  const checkUnrunnable = (r: Review, output: string) =>
+    unrunnable(r, { code: "check-failed", text: `.nexus/check could not run at ${r.rounds.at(-1)!.head}.` }, checkOutput(output));
   /** The last message to `party` again, under the review's next request ID, so it keeps its token. */
   const resend = (r: Review, party: Party): Review => {
     const c = conversation(r, party);
@@ -572,7 +584,7 @@ export function reviewLoop(deps: ReviewDeps) {
       }
       const n = roundsSpent(next);
       if (reviewerApproved(round)) {
-        if (phase.check?.unrunnable !== undefined) return unrunnable(next, phase.check.unrunnable);
+        if (phase.check?.unrunnable !== undefined) return await checkUnrunnable(next, phase.check.unrunnable);
         const after: Phase = phase.check === undefined || phase.check.refused !== undefined ? checking() : { kind: "checking", startedAt: phase.check.startedAt, thread: phase.check.thread };
         return reviewersFindings(round).length ? send({ ...next, phase: after }, "builder", () => builderNotes(next)) : { ...next, phase: after, nudges: 0 };
       }
@@ -640,7 +652,7 @@ export function reviewLoop(deps: ReviewDeps) {
       const step = await stepGate(r, "check", phase, builder);
       if (step.kind === "ended") return step.review;
       if (step.kind === "run") return step.run === phase ? r : { ...r, phase: { kind: "checking", ...step.run } };
-      if (step.kind === "unrunnable") return unrunnable(r, step.output);
+      if (step.kind === "unrunnable") return await checkUnrunnable(r, step.output);
       // Read while the check thread is held, so a read that fails is retried with the check's result. A landing tried
       // again keeps the round's live check, which ran at the same head.
       const verifies = step.passed && round.live === undefined && await github.has(r.pr.repo, round.head, ".nexus/verify");
@@ -656,7 +668,7 @@ export function reviewLoop(deps: ReviewDeps) {
       const step = await stepGate(r, "live", phase, builder);
       if (step.kind === "ended") return step.review;
       if (step.kind === "run") return step.run === phase ? r : { ...r, phase: { kind: "verifying", ...step.run } };
-      if (step.kind === "unrunnable") return toPerson(r, "no-verdict", { code: "live-failed", text: `The live check could not run at ${round.head}.` }, liveOutput(step.output));
+      if (step.kind === "unrunnable") return await unrunnable(r, { code: "live-failed", text: `The live check could not run at ${round.head}.` }, liveOutput(step.output));
       const next = withRound({ ...r, phase: { kind: "verifying", startedAt: phase.startedAt, thread: null } }, { live: { kind: "ran", thread: step.thread, passed: step.passed, output: step.output } });
       // Read while the verify pylon is held, as the check's result is.
       const after = step.passed ? await checked(next) : gateFailed(r, next);

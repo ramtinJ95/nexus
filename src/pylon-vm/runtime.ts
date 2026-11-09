@@ -3,7 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { posix } from "node:path";
 import { VM, type VMOptions, VmCheckpoint } from "@earendil-works/gondolin";
 import { z } from "zod";
-import type { Action, BootSpec, SandboxRecord } from "./contracts.ts";
+import { setupExited, type Action, type BootSpec, type SandboxRecord } from "./contracts.ts";
 import {
 	checked,
 	freeReservedSlots,
@@ -253,7 +253,7 @@ export class SandboxRuntime {
 			if (setup.length) {
 				const exitCode = await runToEnd(this.processes, await this.processes.launch(chained(setup), config.workspace, true, 1200));
 				if (exitCode !== 0) {
-					this.failures.push({ kind: "setup", message: `Setup exited ${exitCode}. Read controller logs. No prepared template was published` });
+					this.failures.push({ kind: "setup", message: setupExited(exitCode) });
 					if (prepare) throw new Error(this.setupError);
 				}
 			}
