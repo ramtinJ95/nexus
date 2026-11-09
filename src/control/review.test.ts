@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { setTimeout } from "node:timers/promises";
 import { join } from "node:path";
 import { openRegistry, type Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
@@ -175,7 +176,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       const refused = refuseStart(start.request);
       if (refused !== null) throw new Refusal("conflict", refused);
       started.push(start);
-      const id = add(`th-reviewer-${started.length}`, start.request.claude !== undefined, start.caller);
+      const id = add(start.id ?? `th-reviewer-${started.length}`, start.request.claude !== undefined, start.caller);
       await onStart();
       return registry.threads.thread(id)!;
     },
@@ -294,9 +295,9 @@ test("a Claude builder's PR gets a harness reviewer, and findings, fixes and new
   const started = await loop.start(f.builder, { land: null });
   assert.deepEqual(started.models, { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, "another model family than the builder's");
   assert.equal(started.maxRounds, 5, "a review runs 5 rounds unless asked for fewer");
+  await loop.poll();
   assert.equal(f.started[0]!.request.claude, undefined, "the reviewer is a harness thread");
   assert.equal(f.started[0]!.request.branch, "feature");
-  await loop.poll();
   const reviewer = f.review().reviewer;
   assert.equal(f.sent.length, 1);
   assert.equal(f.sent[0]!.to, reviewer);
@@ -751,8 +752,10 @@ test("a harness builder gets a Claude reviewer only where the project grants a C
   const f = fixture(t, { claudeBuilder: false });
   await assert.rejects(f.loop().start(f.builder, { land: null }), /no reviewer on another model can run/);
   const g = fixture(t, { claudeBuilder: false, secrets: [{ name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }] });
-  const review = await g.loop().start(g.builder, { land: null });
+  const gLoop = g.loop();
+  const review = await gLoop.start(g.builder, { land: null });
   assert.deepEqual(review.models, { builder: "gpt-6-astra", reviewer: "claude-opus-5-5" });
+  await gLoop.poll();
   assert.equal(g.started[0]!.role, "reviewer", "no /poteto-mode in front of the reviewer's request");
   assert.ok(g.started[0]!.request.claude!.startsWith(senders.review.prefix));
   assert.equal(review.outbox, null, "a Claude reviewer's request is its first prompt");
@@ -1133,13 +1136,20 @@ test("reviewers left behind before the loop archived them, by a replaced review 
   assert.deepEqual(f.woken.toSorted(), [crashed, earlier]);
 });
 
-test("a reviewer whose review is still starting is not taken for a leftover by a pass that runs meanwhile", async (t) => {
-  const f = fixture(t);
+test("a review's start answers once the review is recorded, and the loop starts its reviewers after", async (t) => {
+  const f = fixture(t, { secondReview: { always: true }, secrets: claudeToken });
   const loop = f.loop();
-  f.onStart = () => loop.poll();
-  await loop.start(f.builder, { land: null });
+  const starting = Promise.withResolvers<void>();
+  f.onStart = () => starting.promise;
+  const started = await Promise.race([loop.start(f.builder, { land: "nLAPTOP" }), setTimeout(2_000, "still starting" as const)]);
+  if (started === "still starting") assert.fail("the start does not wait for a reviewer thread");
+  assert.deepEqual([f.review().id, f.review().reviewer], [started.id, started.reviewer], "the answer is the recorded review");
+  starting.resolve();
   await loop.poll();
-  assert.equal(f.review().phase.kind, "reviewing");
+  await loop.poll();
+  assert.equal(f.started[0]!.id, started.reviewer, "the first reviewer starts under the ID the review was recorded with");
+  assert.equal(f.review().second?.kind, "claude", "the second reviewer starts in the loop too");
+  assert.deepEqual(f.sent.map((s) => s.to), [started.reviewer], "the first reviewer gets its first request once its thread exists");
   assert.deepEqual(f.statuses(), ["active", "active"]);
 });
 
@@ -3310,14 +3320,14 @@ const holds: { kind: string; hold(f: ReturnType<typeof fixture>): Promise<void>;
     f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
     await approved(f, "nLAPTOP");
   } },
-  { kind: "thread while reviewing", cause: "thread", reasons: ["The reviewer thread th-reviewer-1 is idle, so the review stopped."], landable: false, round: false, async hold(f) {
+  { kind: "thread while reviewing", cause: "thread", reasons: ["The reviewer thread <reviewer> is idle, so the review stopped."], landable: false, round: false, async hold(f) {
     await f.loop().start(f.builder, { land: null });
     await f.loop().poll();
     f.registry.threads.setThreadStatus(f.review().reviewer, "idle");
     await f.loop().poll();
     f.registry.threads.setThreadStatus(f.review().reviewer, "active");
   } },
-  { kind: "thread while verifying", cause: "thread", reasons: ["The reviewer thread th-reviewer-1 is idle, so the review stopped."], landable: true, round: true, async hold(f) {
+  { kind: "thread while verifying", cause: "thread", reasons: ["The reviewer thread <reviewer> is idle, so the review stopped."], landable: true, round: true, async hold(f) {
     f.verifies = true;
     f.refuse = "every node is offline";
     await approved(f, null);
@@ -3333,7 +3343,7 @@ test("each kind of hold says whether nexus land takes the review and whether a h
     await hold(f);
     const r = f.review();
     assert.equal(r.phase.kind, "needs-person", kind);
-    assert.deepEqual({ cause: (r.phase as { cause: HoldCause }).cause, reasons: (r.phase as { reasons: string[] }).reasons }, { cause, reasons }, kind);
+    assert.deepEqual({ cause: (r.phase as { cause: HoldCause }).cause, reasons: (r.phase as { reasons: string[] }).reasons.map((text) => text.replace(r.reviewer, "<reviewer>")) }, { cause, reasons }, kind);
     assert.equal(landable(r), lands, kind);
     pushed(f, head2);
     await f.loop().poll();
@@ -4621,7 +4631,9 @@ const secondVerdict = (r: Review, fields: Record<string, unknown>) => verdict({ 
 test("a project without a second reviewer's setting, or a change its rule does not name, gets one reviewer as before", async (t) => {
   const f = fixture(t);
   f.files = sized(400, "src/cache.ts");
-  const review = await f.loop().start(f.builder, { land: null });
+  const loop = f.loop();
+  const review = await loop.start(f.builder, { land: null });
+  await loop.poll();
   assert.equal(review.second, undefined);
   assert.equal(f.started.length, 1);
   assert.equal(review.rounds[0]!.secondVerdict, undefined);
@@ -4677,12 +4689,12 @@ test("a second reviewer reads the same change beside the first, unaware of it, a
   const loop = f.loop();
   const started = await loop.start(f.builder, { land: null });
   assert.deepEqual(started.models, { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" });
-  const second = secondOf(started);
+  await loop.poll();
+  const second = secondOf(f.review());
   assert.equal(second.model, "claude-fable-5-1");
   assert.equal(second.rule, "the change has 160 changed lines, at least the 150 the project sets");
   assert.deepEqual([f.started[1]!.request.claude !== undefined, f.started[1]!.request.model, f.started[1]!.role], [true, "claude-fable-5-1", "reviewer"]);
   assert.equal(f.registry.reviews.isReviewer(second.thread), true);
-  await loop.poll();
   const reviewer = f.review().reviewer;
   const first = f.sent.find((s) => s.to === reviewer)!.message.text;
   assert.equal(f.started[1]!.request.claude, first.replace("you run on gpt-6-astra", "you run on claude-fable-5-1").replace(f.review().expect, second.expect), "the second gets the first's request, on its own model and token");
@@ -4692,7 +4704,7 @@ test("a second reviewer reads the same change beside the first, unaware of it, a
   assert.equal(f.review().phase.kind, "reviewing", "one approval is not the round's");
   assert.equal(f.review().rounds[0]!.verdict?.verdict, "approve");
   assert.equal(f.review().rounds[0]!.secondVerdict, null);
-  assert.match(reviewSaidText(f.review()), /the reviewer th-reviewer-1 on gpt-6-astra approves, and the second reviewer th-reviewer-2 on claude-fable-5-1 has not answered/);
+  assert.ok(reviewSaidText(f.review()).includes(`the reviewer ${reviewer} on gpt-6-astra approves, and the second reviewer ${second.thread} on claude-fable-5-1 has not answered`));
   assert.equal(f.sent.filter((s) => s.to === f.builder).length, 0);
 
   f.reply(second.thread, secondVerdict(f.review(), { verdict: "changes", findings: [serious] }));
@@ -4702,7 +4714,7 @@ test("a second reviewer reads the same change beside the first, unaware of it, a
   assert.equal(fix.to, f.builder);
   assert.match(fix.message.text, /by a reviewer on gpt-6-astra and a second reviewer on claude-fable-5-1: changes requested/);
   assert.match(fix.message.text, /From the second reviewer on claude-fable-5-1:\n\n2\.F1 \(P1\) src\/cache.ts:1: The cache never expires/);
-  assert.match(reviewSaidText(f.review()), /th-reviewer-1 on gpt-6-astra approves, and the second reviewer th-reviewer-2 on claude-fable-5-1 asks for changes \(P1\)/);
+  assert.ok(reviewSaidText(f.review()).includes(`${reviewer} on gpt-6-astra approves, and the second reviewer ${second.thread} on claude-fable-5-1 asks for changes (P1)`));
 
   f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Wrong ID." }]));
   await loop.poll();
@@ -4727,8 +4739,8 @@ test("a second reviewer reads the same change beside the first, unaware of it, a
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "approved" });
   assert.equal(roundsSpent(f.review()), 2, "one round runs both reviewers");
-  assert.match(reviewSaidText(f.review()), /round 2: the reviewer th-reviewer-1 on gpt-6-astra approves, and the second reviewer th-reviewer-2 on claude-fable-5-1 approves/);
-  assert.deepEqual(f.registry.threads.events("0", { kinds: ["review.changed"] }).map((e) => e.payload.second), Array(5).fill(second.thread), "the review's events name the second reviewer");
+  assert.ok(reviewSaidText(f.review()).includes(`round 2: the reviewer ${reviewer} on gpt-6-astra approves, and the second reviewer ${second.thread} on claude-fable-5-1 approves`));
+  assert.deepEqual(f.registry.threads.events("0", { kinds: ["review.changed"] }).map((e) => e.payload.second), [undefined, ...Array(4).fill(second.thread)], "the review's events name the second reviewer once it started");
 });
 
 test("a second reviewer that never answers, answers without the block or whose model keeps failing holds the review for the person, never approving it", async (t) => {
@@ -4809,6 +4821,7 @@ test("a review whose rule asks for a second reviewer that no other model can run
   const f = fixture(t, { secondReview: { always: true } });
   const loop = f.loop();
   const review = await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
   assert.equal(f.started.length, 1, "the same model is never started twice");
   assert.deepEqual(review.second, { kind: "none", rule: "the project gives every pull request one", why: "the harness runs only claude-opus-5-5 and gpt-6-astra, and the project grants no Claude token for a Claude worker on another model. Grant CLAUDE_CODE_OAUTH_TOKEN for api.anthropic.com to the project (`nexus project edit`)" });
   assert.match(reviewSaidText(review), /No second reviewer runs, though the project gives every pull request one: the harness runs only/);
@@ -4902,8 +4915,8 @@ test("each pull request a second model caught on 2026-11-04 gets a second review
     f.files = files;
     const loop = f.loop();
     const review = await loop.start(f.builder, { land: "nLAPTOP" });
-    assert.equal(review.second?.kind, "claude", `#${pr} gets a second reviewer: ${review.second?.rule}`);
     await loop.poll();
+    assert.equal(f.review().second?.kind, "claude", `#${pr} gets a second reviewer: ${f.review().second?.rule}`);
     f.reply(review.reviewer, verdict(f.review(), {}));
     f.reply(secondOf(f.review()).thread, secondVerdict(f.review(), { verdict: "changes", findings: [finding] }));
     await loop.poll();
@@ -4927,7 +4940,9 @@ test("both reviewers get the builder's brief, cut as the description is, so a ch
 
   const g = fixture(t, { claudeBuilder: false, secrets: claudeToken });
   g.briefs.set(g.builder, "x".repeat(9_000));
-  await g.loop().start(g.builder, { land: null });
+  const gLoop = g.loop();
+  await gLoop.start(g.builder, { land: null });
+  await gLoop.poll();
   assert.equal(g.review().brief, "x".repeat(8_000), "a harness builder's first message, cut at 8,000 characters");
   assert.match(g.started[0]!.request.claude!, new RegExp(`<brief>\\n${"x".repeat(8_000)}\\n</brief>`));
 });
@@ -4992,9 +5007,9 @@ test("a second reviewer whose thread does not start yet is tried again each minu
   const f = fixture(t, { secondReview: { always: true }, secrets: claudeToken });
   f.refuseStart = (request) => request.model === "claude-fable-5-1" ? "no node has room for this pylon" : null;
   const loop = f.loop();
-  const review = await loop.start(f.builder, { land: "nLAPTOP" });
-  assert.deepEqual({ ...review.second, since: 0, tried: 0 }, { kind: "starting", rule: "the project gives every pull request one", model: "claude-fable-5-1", since: 0, tried: 0, why: "no node has room for this pylon" });
+  await loop.start(f.builder, { land: "nLAPTOP" });
   await loop.poll();
+  assert.deepEqual({ ...f.review().second, since: 0, tried: 0 }, { kind: "starting", rule: "the project gives every pull request one", model: "claude-fable-5-1", since: 0, tried: 0, why: "no node has room for this pylon" });
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
   assert.equal(f.review().phase.kind, "reviewing", "a reviewer that has not started has not approved");

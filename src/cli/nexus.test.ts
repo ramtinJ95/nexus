@@ -1182,7 +1182,7 @@ test("an API that stays silent behind a working proxy is named as the culprit, n
   const proxy = await socksProxy(t);
   try {
     await assert.rejects(call({ url: new URL(`http://${apiName}:${port}`), socks: { host: "127.0.0.1", port: proxy.port } }, "DELETE", "/v1/threads/th-x/previews/8003", undefined, 200),
-      (err) => err instanceof CliError && err.kind === "unreachable" && err.message === `the control plane at ${apiName}:${port} sent nothing for 0.2s`);
+      (err) => err instanceof CliError && err.kind === "unreachable" && err.message === `the control plane at ${apiName}:${port} sent nothing for 0.2s after DELETE /v1/threads/th-x/previews/8003 went out, so the request may have gone through. Check with nexus show <thread> before you try again`);
   } finally {
     // The proxy keeps its leg to the silent server open after the CLI gives up, which would hold the server's close.
     for (const socket of held) socket.destroy();
