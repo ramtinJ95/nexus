@@ -26,7 +26,7 @@ async function filesUnder(dir: string): Promise<string[]> {
 
 const sources = [
   ...await filesUnder("./golden/"), ...await filesUnder("./test-support/"), ...await filesUnder("./fixtures/"),
-  new URL("./control/dashboard/demo-fixtures.ts", import.meta.url), new URL("./control/harness/test-fixture.ts", import.meta.url),
+  new URL("../dev/demo/fixtures.ts", import.meta.url), new URL("./control/harness/test-fixture.ts", import.meta.url),
 ];
 const text = (await Promise.all(sources.map((f) => readFile(f, "utf8")))).join("\n");
 const found = (pattern: RegExp) => [...new Set([...text.matchAll(pattern)].map((m) => m[1]!))];

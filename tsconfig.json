@@ -14,5 +14,5 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["src", "images"]
+  "include": ["src", "images", "dev"]
 }

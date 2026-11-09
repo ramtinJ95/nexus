@@ -12,30 +12,32 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { Message } from "@earendil-works/pi-ai";
-import { processStream } from "../../process-stream.ts";
-import type { ByteStream } from "../../protocol/streams.ts";
-import { observeNode, image, laptop, type testApi } from "../../test-support/api-kit.ts";
-import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../../test-support/kit.ts";
-import { sampleOf } from "../node-metrics.ts";
-import { personPhase, type Review, type Round } from "../review-model.ts";
-import { personOnly } from "../holds.ts";
-import { reservedNames } from "../../contract/reserved.ts";
-import { proposalQuestion } from "../planning.ts";
-import { startKey } from "../threads.ts";
-import { checkoutDir, claudeHook } from "../../../images/pylon/nexus-contract.ts";
-import { transcriptStart, type ClaudeEntry } from "../claude-transcript.ts";
-import { checkCaller, reviewerCaller, senders, verifyCaller } from "../agent-protocol.ts";
-import type { AgentCall } from "../agent-usage.ts";
-import { requestIds, type ImageId, type ItemId, type NodeName, type ProjectId, type PylonId, type ThreadId } from "../../ids.ts";
-import type { ItemRecord } from "../pipeline-store.ts";
-import type { Thread } from "../thread-store.ts";
-import type { NodeHealth } from "../../protocol/client.ts";
-import type { PylonObservation } from "../../protocol/observations.ts";
-import type { CommandResult } from "../../protocol/commands.ts";
-import type { DoctorReport, Check } from "../doctor-model.ts";
-import type { PullRequest } from "../github.ts";
-import type { WatchedPr } from "../pr-watch-store.ts";
-import { claudeTalk, diffSnippet, failingTests, harnessTalk, longConversation, testOutput, typescriptSnippet } from "./demo-talk.ts";
+import { processStream } from "../../src/process-stream.ts";
+import type { ByteStream } from "../../src/protocol/streams.ts";
+import { observeNode, image, laptop, type testApi } from "../../src/test-support/api-kit.ts";
+import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../../src/test-support/kit.ts";
+import { testPr, testReview } from "../../src/test-support/registry-kit.ts";
+import { sampleOf } from "../../src/control/node-metrics.ts";
+import { personPhase, type Review, type Round } from "../../src/control/review-model.ts";
+import { personOnly } from "../../src/control/holds.ts";
+import { reservedNames } from "../../src/contract/reserved.ts";
+import { proposalQuestion } from "../../src/control/planning.ts";
+import { startKey } from "../../src/control/threads.ts";
+import { checkoutDir, claudeHook } from "../../images/pylon/nexus-contract.ts";
+import { transcriptStart, type ClaudeEntry } from "../../src/control/claude-transcript.ts";
+import { checkCaller, reviewerCaller, senders, verifyCaller } from "../../src/control/agent-protocol.ts";
+import type { AgentCall } from "../../src/control/agent-usage.ts";
+import { requestIds, type ImageId, type ItemId, type NodeName, type ProjectId, type PylonId, type ThreadId } from "../../src/ids.ts";
+import type { ItemRecord } from "../../src/control/pipeline-store.ts";
+import type { Thread } from "../../src/control/thread-store.ts";
+import type { NodeHealth } from "../../src/protocol/client.ts";
+import type { PylonObservation } from "../../src/protocol/observations.ts";
+import type { CommandResult } from "../../src/protocol/commands.ts";
+import type { DoctorReport, Check } from "../../src/control/doctor-model.ts";
+import type { PullRequest } from "../../src/control/github.ts";
+import type { WatchedPr } from "../../src/control/pr-watch-store.ts";
+import type { Features } from "../../src/control/features.ts";
+import { claudeTalk, failingTests, harnessTalk, longConversation, testOutput, typescriptSnippet } from "./talk.ts";
 
 type Demo = Awaited<ReturnType<typeof testApi>>;
 
@@ -45,16 +47,15 @@ const hour = 60 * minute;
 const day = 24 * hour;
 const callerRoles = { [reviewerCaller]: "reviewer", [checkCaller]: "check", [verifyCaller]: "verify" } as const;
 
-/** The registry's clock is Date.now, which the demo shifts into the past while it seeds. */
-export const clock = { shift: 0 };
-const realNow = Date.now;
-Date.now = () => realNow() - clock.shift;
-const now = () => realNow();
+let shift = 0;
+/** The registry's clock, which the demo shifts into the past while it seeds. */
+export const demoClock = () => Date.now() - shift;
+const now = () => Date.now();
 /** Runs `seed` as if it were `ago` before now. */
 async function back<T>(ago: number, seed: () => T | Promise<T>): Promise<T> {
-  const before = clock.shift;
-  clock.shift = ago;
-  try { return await seed(); } finally { clock.shift = before; }
+  const before = shift;
+  shift = ago;
+  try { return await seed(); } finally { shift = before; }
 }
 
 const firebat = "rj-firebat" as NodeName;
@@ -96,17 +97,15 @@ interface ThreadSpec {
 interface World { threads: Map<string, Thread>; live: { working: Thread[]; talker: Thread | null } }
 
 const pr = (project: string, number: number, title: string, over: Partial<WatchedPr> = {}): WatchedPr =>
-  ({ repo: repos[project]!, number, title, url: `https://github.com/${repos[project]}/pull/${number}`, state: "open", checks: "passing", review: "none", conflict: false, ...over });
+  testPr({ repo: repos[project]!, number, title, checks: "passing", ...over });
 
 const head = (seed: string) => seed.repeat(40).slice(0, 40);
 
 function review(t: Thread, p: PullRequest, over: Partial<Review>): Review {
-  return {
+  return testReview({
     id: `rv-${p.number}`, builder: t.id, reviewer: `${t.id}-review` as ThreadId, pr: { repo: p.repo, number: p.number, url: p.url, title: p.title, branch: `nexus/${p.number}` },
-    reviewerKind: "harness", models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: true, merged: null, waiver: null,
-    expect: `rv-${p.number}:t`, sent: 3, outbox: null, asked: "", since: now() - 20 * minute, nudges: 0, startedAt: now() - 3 * hour,
-    rounds: [], phase: { kind: "reviewing" }, ...over,
-  };
+    auto: true, expect: `rv-${p.number}:t`, sent: 3, since: now() - 20 * minute, startedAt: now() - 3 * hour, rounds: [], ...over,
+  });
 }
 
 const finding = (id: string, priority: "P0" | "P1" | "P2" | "P3", where: string, summary: string, detail?: string) => ({ id, priority, where, summary, detail: detail ?? null });
@@ -704,29 +703,42 @@ function liveClock(d: Demo, world: World) {
   return () => clearInterval(tick);
 }
 
-/** A review loop that only records what the person asked: a land starts merging, a cancel cancels, and nothing reaches GitHub. */
-export function demoReviews(registryOf: () => Demo["registry"]) {
-  const reviewOf = (builder: string) => {
-    const r = registryOf().review(builder as ThreadId);
-    if (r === null || r === undefined) throw new Error(`thread ${builder} has no review`);
+/**
+ * The review loop's API seat, which only records what the person asked: a land, or a Land answer to a question about
+ * holds, starts merging, a cancel cancels, and nothing reaches GitHub. The real loop would step every review at once,
+ * and the demo's reviews name reviewer threads it never started.
+ */
+export function demoReviews(registryOf: () => Demo["registry"]): NonNullable<Features["reviews"]> {
+  const reviewOf = (builder: ThreadId) => {
+    const r = registryOf().review(builder);
+    if (r === null) throw new Error(`thread ${builder} has no review`);
     return r;
   };
   return {
-    deploys: (r: Review) => r.pr.repo === repos.nexus,
-    async start(builder: string) { return reviewOf(builder); },
-    cancel(builder: string, by: string) {
+    deploys: (r) => r.pr.repo === repos.nexus,
+    async start(builder) { return reviewOf(builder); },
+    cancel(builder, by) {
       const r = reviewOf(builder);
       const next: Review = { ...r, phase: { kind: "cancelled", who: "person", by } };
       registryOf().saveReview(next, [], r);
       return next;
     },
-    land(builder: string, by: string) {
+    land(builder, by) {
       const r = reviewOf(builder);
       const next: Review = { ...r, land: { requestedBy: by }, phase: { kind: "merging", authorized: null } };
       registryOf().saveReview(next, [], r);
       return next;
     },
-  } as never as import("../review.ts").ReviewLoop;
+    answerHolds(question, option, by) {
+      const answered = registryOf().answerQuestion(question, { option, by, at: now() });
+      const r = reviewOf(question.thread);
+      if (option === "Land") {
+        const waiver = { head: question.holds.head, holds: question.holds.holds.map((h) => h.text), codes: question.holds.holds.map((h) => h.code), by, at: now(), change: null };
+        registryOf().saveReview({ ...r, waiver, land: { requestedBy: by }, phase: { kind: "merging", authorized: null } }, [], r);
+      }
+      return answered;
+    },
+  };
 }
 
 export async function seedDemo(d: Demo) {

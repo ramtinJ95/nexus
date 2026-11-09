@@ -1,6 +1,6 @@
 /**
  * Golden captures: the API's JSON, the CLI's text and --json, the dashboard's pages and the first frames of its
- * streams, read from the demo's world (dashboard/demo-fixtures.ts, with golden/reviews.ts's reviews) under a stopped
+ * streams, read from the demo's world (dev/demo/fixtures.ts, with golden/reviews.ts's reviews) under a stopped
  * clock, each kept as a file under src/golden/. Then the main writes, one capture each, in order, and a refusal of
  * each role. A change that keeps behavior leaves every file as it is.
  *
@@ -28,7 +28,7 @@ await import("./golden/frozen.ts");
 const { deployToken, laptop, phone, reporterHeaders, testApi } = await import("./test-support/api-kit.ts");
 const { tokenDigest } = await import("./protocol/deploy.ts");
 const { tempDir } = await import("./test-support/kit.ts");
-const { demoCheckout, demoProbes, demoReviews, seedDemo } = await import("./control/dashboard/demo-fixtures.ts");
+const { demoCheckout, demoClock, demoProbes, demoReviews, seedDemo } = await import("../dev/demo/fixtures.ts");
 const { seedReviews } = await import("./golden/reviews.ts");
 const { utc } = await import("./contract/usage.ts");
 const { version } = await import("./version.ts");
@@ -55,29 +55,18 @@ interface Capture { file: string; read(signal: AbortSignal): Promise<string> }
 test("the API, the CLI and the dashboard answer the demo world as their golden captures record", async (t) => {
   // A check must fail on a changed capture, never rewrite it.
   assert.ok(!update || (process.env.CI === undefined && process.env.NEXUS_CHECK === undefined), "NEXUS_GOLDEN_UPDATE=1 is refused where CI or NEXUS_CHECK is set");
-  const context = { after: (close: () => unknown) => t.after(close) } as never as import("node:test").TestContext;
   const checkout = await demoCheckout();
   t.after(() => rm(checkout, { recursive: true, force: true }));
   let report: () => import("./control/doctor-model.ts").DoctorReport | null = () => null;
-  const s = await testApi(context, {
-    pipeline: true, planning: true, probes: demoProbes(() => s.registry, checkout),
+  const s = await testApi(t, {
+    pipeline: true, planning: true, clock: demoClock, probes: demoProbes(() => s.registry, checkout),
     allowed: new Set([laptop, phone, node]),
     // `nexus deploy main` resolves main here, never against GitHub.
     deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: { [node]: tokenDigest(deployToken) }, resolveMain: async () => "b".repeat(40) },
     health: () => report(),
     doctor: async () => report()!,
-    reviews: { ...demoReviews(() => s.registry), answerHolds },
+    reviews: demoReviews(() => s.registry),
   });
-  /** As the demo's review loop does with a land: a Land answer waives the holds it names and starts merging, and nothing reaches GitHub. */
-  function answerHolds(question: import("./control/questions.ts").HoldsQuestion, option: string, by: TailnetNodeId) {
-    const answered = s.registry.answerQuestion(question, { option, by, at: Date.now() });
-    const r = s.registry.review(question.thread)!;
-    if (option === "Land") {
-      const waiver = { head: question.holds.head, holds: question.holds.holds.map((h) => h.text), codes: question.holds.holds.map((h) => h.code), by, at: Date.now(), change: null };
-      s.registry.saveReview({ ...r, waiver, land: { requestedBy: by }, phase: { kind: "merging", authorized: null } }, [], r);
-    }
-    return answered;
-  }
   // The demo seeds 31 days of five-minute samples, which cost most of this test's time. Every half hour of them still
   // fills each tier the metrics serve from.
   const record = s.registry.recordHealthSample.bind(s.registry);

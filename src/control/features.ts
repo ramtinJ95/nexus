@@ -15,7 +15,7 @@ import { notConfigured } from "./not-configured.ts";
 
 export interface Features {
   /** Reads and merges with the control plane's GitHub token. */
-  reviews: ReviewLoop | null;
+  reviews: Pick<ReviewLoop, "start" | "land" | "cancel" | "answerHolds" | "deploys"> | null;
   /** Learns from the GitHub token when a predecessor's pull request merged. */
   queue: ThreadQueue | null;
   /** Starts its items' threads through the queue. */
