@@ -42,3 +42,20 @@ test("a thread archived while its message went out drops the draft it sent, and 
   draft.sent("th-0123456789ab", "sent text");
   assert.equal(items.has("nexus.draft.th-0123456789ab"), false, "the draft that was sent goes");
 });
+
+test("a send in one tab leaves the draft another tab of the thread wrote meanwhile", () => {
+  const items = new Map();
+  const kept = keeping(() => ({ getItem: (k) => items.get(k) ?? null, setItem: (k, v) => void items.set(k, v), removeItem: (k) => void items.delete(k) }));
+  const tab = () => {
+    const prompt = { value: "", form: { dataset: { thread: "th-0123456789ab" } } };
+    return { prompt, draft: composerDraft({ kept }, { document: { getElementById: (id) => id === "prompt-text" ? prompt : null } }) };
+  };
+  const [a, b] = [tab(), tab()];
+  a.prompt.value = "sent from A";
+  a.draft.save(a.prompt);
+  b.prompt.value = "B's own";
+  b.draft.save(b.prompt);
+  a.draft.sent("th-0123456789ab", "sent from A");
+  assert.equal(a.prompt.value, "");
+  assert.equal(items.get("nexus.draft.th-0123456789ab"), "B's own");
+});

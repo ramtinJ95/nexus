@@ -12,17 +12,15 @@ export function composerDraft({ kept }, { document } = globalThis) {
     if (prompt !== null && prompt.value === "") prompt.value = kept.read(storageKeys.draft(prompt.form.dataset.thread)) ?? "";
   }
   /**
-   * After a send of `text` went out, empties the composer if it still holds just that. Text typed since the send is the
-   * next message, so it stays the draft. A thread archived meanwhile has no composer, and drops the draft it sent.
+   * After a send of `text` went out, empties the composer if it still holds just that, and drops the stored draft if
+   * it is that text. Text typed since the send is the next message, so it stays the draft, as does one another tab of
+   * the thread wrote meanwhile. A thread archived meanwhile has no composer.
    */
   function sent(thread, text) {
     const prompt = box();
-    if (prompt === null) {
-      if (kept.read(storageKeys.draft(thread)) === text) kept.write(storageKeys.draft(thread), null);
-      return;
-    }
-    if (prompt.value === text) prompt.value = "";
-    save(prompt);
+    if (prompt !== null && prompt.value !== text) return;
+    if (prompt !== null) prompt.value = "";
+    if (kept.read(storageKeys.draft(thread)) === text) kept.write(storageKeys.draft(thread), null);
   }
   return { restore, save, sent };
 }
