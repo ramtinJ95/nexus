@@ -6,7 +6,8 @@
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import { call, CliError, exitCodes, follow, upgrade, type Endpoint } from "./transport.ts";
 import { version } from "../version.ts";
-import type { Values } from "./kit.ts";
+import type { Api, Values } from "./kit.ts";
+import { threadOf } from "./refs.ts";
 import { settings, checked } from "./config.ts";
 import { usage, usageOf } from "./help.ts";
 import { commands } from "./commands/index.ts";
@@ -40,7 +41,9 @@ async function run(argv: readonly string[]): Promise<number> {
   // not kept, so a watch's next try reads it again.
   let target: Promise<Endpoint> | undefined;
   const endpoint = () => target ??= settings(values).then(checked).catch((err: unknown) => { target = undefined; throw err; });
-  const result = await command.run(async (method, path, body, idleMs) => call(await endpoint(), method, path, body, idleMs), positionals, values,
+  const api: Api = async (method, path, body, idleMs) => call(await endpoint(), method, path, body, idleMs);
+  if (command.thread === true) positionals[0] = await threadOf(api, positionals[0]!);
+  const result = await command.run(api, positionals, values,
     async (path, onEvent, signal, onCursor) => follow(await endpoint(), path, onEvent, signal, onCursor), { connect: async (path) => upgrade(await endpoint(), path) });
   if (result === undefined) return 0;
   process.stdout.write(`${values.json === true ? JSON.stringify(result.json, null, 2) : result.text}\n`);

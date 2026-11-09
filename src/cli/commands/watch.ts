@@ -216,6 +216,7 @@ export const watchCommands: Readonly<Record<string, Command>> = {
   conversation: {
     help: ["  nexus conversation <thread>                  the agent's transcript, or the Claude worker's"],
     args: [1, 1],
+    thread: true,
     async run(api, [id]) {
       const served = agentView((await request(api, threadRoutes.conversation, { thread: id! }))!);
       return { json: served.view, text: served.kind === "claude" ? claudeText(served.view) : conversationText(served.view) };
@@ -224,6 +225,7 @@ export const watchCommands: Readonly<Record<string, Command>> = {
   watch: {
     help: ["  nexus watch <thread> [--interval MS]         the conversation, or the Claude worker's transcript, as it grows"],
     args: [1, 1],
+    thread: true,
     options: { interval: { type: "string" } },
     async run(api, [id], v, follow) {
       const interval = int(str(v, "interval"), "--interval", 2000);
