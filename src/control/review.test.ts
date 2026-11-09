@@ -117,6 +117,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   let onStart = async () => {};
   /** Why the control plane refuses a reviewer thread's start, by the start's model, or null to start it. */
   let refuseStart: (request: StartRequest) => string | null = () => null;
+  /** Why a reviewer thread's start fails other than by a refusal, as when the harness is down, or null. */
+  let failStart: string | null = null;
   const briefs = new Map<ThreadId, string>();
   const deployers = new Set(["nLAPTOP"]);
   const woken: ThreadId[] = [];
@@ -180,6 +182,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     async startThread(start) {
       const refused = refuseStart(start.request);
       if (refused !== null) throw new Refusal("conflict", refused);
+      if (failStart !== null) throw new Error(failStart);
       started.push(start);
       const id = add(start.id ?? `th-reviewer-${started.length}`, start.request.claude !== undefined, start.caller);
       await onStart();
@@ -212,6 +215,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     /** Runs once a reviewer thread exists, before startThread returns it. */
     set onStart(hook: () => Promise<void>) { onStart = hook; },
     set refuseStart(why: (request: StartRequest) => string | null) { refuseStart = why; },
+    set failStart(why: string | null) { failStart = why; },
     /** A harness thread's first message. A Claude worker's is its prompt. */
     briefs,
     set mergeAnswer(a: (sha: string) => MergeResult) { mergeAnswer = a; },
@@ -1286,6 +1290,21 @@ test("a PR runs one review at a time, whichever of its builders starts it, so it
   f.registry.reviews.saveReview({ ...f.review(), phase: { kind: "reviewing" } });
   loop.cancel(f.builder, "nLAPTOP");
   assert.equal((await loop.start(other, { land: null })).builder, other, "once that review ended, another builder's starts");
+});
+
+test("a reviewer whose start keeps failing is tried each pass for 30 minutes, then the review waits on the person", async (t) => {
+  const f = fixture(t);
+  f.failStart = "the harness is unreachable";
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.tick(29 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing", "a failure inside 30 minutes is tried again");
+  assert.equal(f.review().reviewerStarted, false);
+  f.tick(2 * 60_000);
+  await loop.poll();
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [`The reviewer thread ${f.review().reviewer} did not start within 30 minutes: the harness is unreachable.`] });
 });
 
 test("a reviewer thread that a start made before a crash is not started again", async (t) => {
