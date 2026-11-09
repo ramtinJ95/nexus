@@ -131,7 +131,8 @@ export function builderNudger(options: {
       log(`${t.id}: nudge could not search GitHub for its pull request and will retry (${(err as Error).name})`);
       return;
     }
-    const declared = latest(await replies(t), noChangeAnswer.fence, noChangeAnswer.schema, t.id);
+    // Only the final answer counts, so a reply after a declaration, such as a correction, takes it back.
+    const declared = latest((await replies(t)).slice(-1), noChangeAnswer.fence, noChangeAnswer.schema, t.id);
     const fresh = idleBuilder(t.id);
     if (fresh === undefined || fresh.lastReplyAt !== turn) return;
     if (declared !== null) {

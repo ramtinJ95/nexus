@@ -55,7 +55,7 @@ test("thread detail derives the actual state from the node's last observation", 
 
   assert.deepEqual(await detail(), {
     thread,
-    attention: null, seenAt: null, lastReplyAt: null,
+    attention: null, seenAt: null, lastReplyAt: null, noChange: null,
     desired: "running",
     pylon: { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null, resources: project.resources },
     sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], reviewView: null, keptPastDay: null, questions: [], judgments: [], planning: false, attach: "herdr --session nexus", agent: { parkedTasks: 0 },

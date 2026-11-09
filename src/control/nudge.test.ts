@@ -192,6 +192,7 @@ test("a builder that declares its task needs no change is archived instead of nu
   const f = fixture(t);
   const builder = await f.add("th-u56", { claude: true });
   const quoting = await f.add("th-quoting");
+  const corrected = await f.add("th-corrected");
   const starts: ThreadId[] = [];
   const queue = threadQueue({ registry: f.registry, gate: { run: (action) => action() }, send: async () => {}, async startThread({ queued }) { starts.push(queued!); throw new Error("not started in this test"); } });
   f.registry.queue.saveQueued({
@@ -202,11 +203,14 @@ test("a builder that declares its task needs no change is archived instead of nu
   const declaration = (token: string) => `\`\`\`nexus-no-change\n${JSON.stringify({ token, reason })}\n\`\`\``;
   f.turn(builder, `Checked main: nothing is left to do.\n\n${declaration(builder)}`);
   f.turn(quoting, `The other thread said:\n\n${declaration(builder)}`);
+  f.turn(corrected, declaration(corrected));
+  f.tick(1);
+  f.turn(corrected, "Correction: the task does need changes, and I am blocked on the schema.");
   const turnEnd = f.registry.threads.thread(builder)!.lastReplyAt!;
   f.tick(gitPollMs);
   await f.pass();
   await queue.poll();
-  assert.deepEqual(f.nudges().map((n) => n.thread), [quoting], "only the builder whose own token is in its block goes without a nudge");
+  assert.deepEqual(f.nudges().map((n) => n.thread).sort(), [corrected, quoting], "only a final answer that ends with the builder's own token goes without a nudge");
   assert.equal(f.registry.threads.thread(builder)!.status, "archived");
   assert.deepEqual(f.registry.nudges.nudge(builder), { state: "no-change", turn: turnEnd, reason });
   assert.deepEqual(waitOf(f.registry, builder), { thread: builder, state: "landed", why: `needs no change: ${reason}` });
@@ -215,6 +219,8 @@ test("a builder that declares its task needs no change is archived instead of nu
   await f.pass();
   assert.deepEqual(f.registry.nudges.nudge(builder)?.state, "no-change", "the archive keeps the declaration");
   assert.equal(f.typed.length, 0, "the builder is never nudged");
+  f.link(builder, 546);
+  assert.deepEqual(waitOf(f.registry, builder), { thread: builder, state: "blocked", why: "is archived and its pull request did not merge" }, "a pull request linked since decides instead");
 });
 
 test("a pull request opened before the turn ended, whose branch the probe reports after a minute, gets no nudge", async (t) => {

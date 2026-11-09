@@ -46,7 +46,7 @@ const blocked = (thread: ThreadId, why: string): Wait => ({ thread, state: "bloc
 
 /**
  * A merge wins over an archive, so a predecessor archived after its pull request merged still landed. So does a
- * builder's declaration that its task needs no change (nudge.ts), which archives it with no pull request.
+ * builder's declaration that its task needs no change (nudge.ts), which archives it, while it has no pull request.
  */
 export function waitOf(registry: QueueRegistry, id: ThreadId): Wait {
   const t = registry.threads.thread(id);
@@ -62,7 +62,8 @@ export function waitOf(registry: QueueRegistry, id: ThreadId): Wait {
   const where = prLocationOf(registry, id);
   if (where.kind === "merged") return landed(id, `PR #${where.number} merged`);
   const nudge = registry.nudges.nudge(id);
-  if (nudge?.state === "no-change") return landed(id, `needs no change: ${nudge.reason}`);
+  // A pull request opened since the declaration, even an archived thread's, decides instead.
+  if (nudge?.state === "no-change" && where.kind === "none") return landed(id, `needs no change: ${nudge.reason}`);
   if (!isOpenStatus(t.status)) return blocked(id, `is ${t.status} and its pull request did not merge`);
   if (review?.phase.kind === "needs-person") return blocked(id, `its review ended for the person: ${review.phase.holds[0]?.text ?? "no reason given"}`);
   if (where.kind === "closed") return blocked(id, `PR #${where.number} closed without merging`);
