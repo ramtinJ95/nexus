@@ -26,7 +26,7 @@ export class Refusal extends Error {
 }
 
 /**
- * A start no node has room for now, though a node refused it for room alone, so the same start can succeed once room
+ * A start no node has room for now, though a node refused it for memory alone, so the same start can succeed once room
  * frees, as when running pylons pause. The API answers it as any conflict.
  */
 export class NoRoom extends Refusal {}

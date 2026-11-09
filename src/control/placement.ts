@@ -47,7 +47,7 @@ export function placeNear(registry: WeighingRegistry, need: Need, near: NodeName
 
 /**
  * Every node but `except` weighed for the pylon, and the one with the most room left once it boots there, if any can run
- * it. `roomFrees` when a node refused it for room alone, its memory or disk, so a node could take it once room frees.
+ * it. `roomFrees` when a node refused it for its memory alone, so a node could take it once its pylons pause.
  */
 export function weighNodes(registry: WeighingRegistry, need: Need, except?: NodeName): { best: NodeName | null; weighed: Weighed[]; roomFrees: boolean } {
   const weighings = registry.nodes.nodes().filter((n) => n.name !== except).map((n) => weigh(registry, n, need));
@@ -95,8 +95,9 @@ function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighe
     }
     left.memoryGiB = Math.min(left.memoryGiB, freeLeft);
   }
+  // Disk frees only as pylons are deleted, not as they pause, so a node short of it is no wait for room.
   const disk = diskShort(c, left, need.resources);
-  if (disk !== null) return short(disk);
+  if (disk !== null) return refused(disk);
   return { node: node.name, left };
 }
 
