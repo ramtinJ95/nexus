@@ -224,6 +224,16 @@ export const recordSchema = z.strictObject({
 	labels,
 });
 export type SandboxRecord = z.infer<typeof recordSchema>;
+/**
+ * The message of a setup that exited `exitCode`. The status carries the exit status only in it, so a probe rolled back
+ * to before it reads the status of a controller that outlived it.
+ */
+export const setupExited = (exitCode: number | undefined) => `Setup exited ${exitCode}. Read controller logs. No prepared template was published`;
+/** The exit status a setup failure's message gives, if any. */
+export const setupExitCode = (message: string): number | undefined => {
+	const exited = /^Setup exited (\d+)\./.exec(message);
+	return exited === null ? undefined : Number(exited[1]);
+};
 export const statusSchema = z.strictObject({
 	name: nameSchema,
 	state: z.enum([

@@ -80,9 +80,21 @@ export function repoInitCommand(repo: RepoInit, dir = checkoutDir): string {
   }
 }
 
-/** The setup of a pylon booted from a template, run once: the template's clone moves to the pylon's remote and commit. */
-function checkoutCommands({ url, checkout }: CloneRepo): string[] {
-  return [asUserIn(`git remote set-url origin ${q(url)} && git fetch --quiet origin && git checkout --quiet -B ${q(checkout.branch)} ${q(checkout.commit)} && ${recordBase(checkoutDir, "HEAD")}`, checkoutDir)];
+/** What a template boot's checkout exits with when the remote it fetched does not have its commit, which no retry changes. */
+export const commitMissing = 66;
+
+/**
+ * The setup of a pylon booted from a template, run once: the template's clone moves to the pylon's remote and commit.
+ * A commit no branch has is fetched by itself, and one the remote says it does not have, as after a force-push took it
+ * off the branch, exits `commitMissing`. Any other failed fetch may pass. Tests run it in `dir` to check out as a pylon does.
+ */
+export function templateCheckout({ url, checkout }: CloneRepo, dir = checkoutDir): string {
+  const [commit, git] = [q(checkout.commit), `git -C ${q(dir)}`];
+  return [
+    `${git} remote set-url origin ${q(url)} && ${git} fetch --quiet origin`,
+    `{ ${git} cat-file -e ${commit}^{commit} 2>/dev/null || fetched=$(${git} fetch --quiet origin ${commit} 2>&1) || { echo "$fetched"; case $fetched in *"not our ref"*|*"unadvertised object"*) echo ${q(`${checkout.commit} is not on ${url}`)}; exit ${commitMissing};; esac; exit 1; }; }`,
+    `${git} checkout --quiet -B ${q(checkout.branch)} ${commit} && ${recordBase(dir, "HEAD")}`,
+  ].join(" && ");
 }
 
 /**
@@ -94,7 +106,7 @@ export function diskSetup(boot: BootInputs & { source: { kind: "fresh" | "templa
     case "fresh": return { commands: setupCommands(boot.repo, boot.source.preSetup), retry: false };
     case "template":
       if (boot.repo.kind === "empty") throw new JobFailure("invalid", `${boot.pylonId} boots from template ${boot.source.template}, but its project is scratch, which has no template`);
-      return { commands: checkoutCommands(boot.repo), retry: true };
+      return { commands: [asUserIn(templateCheckout(boot.repo), checkoutDir)], retry: true };
   }
 }
 
@@ -105,11 +117,13 @@ export const templateSetup = ({ repo, preSetup }: Pick<TemplateBuildInputs, "rep
 export const resumeCommands: readonly string[] = [asUserIn("if test -e .nexus/resume; then ./.nexus/resume; fi", checkoutDir)];
 
 /**
- * What a boot fails with when its setup failed on a disk that holds nothing of the user's, which its backend therefore
- * removed. A template boot's checkout (`retry`) boots from the template again on the job's retry. A fresh boot's
- * failure stays final, and a human retry boots the pylon fresh.
+ * What a boot fails with when its setup, which exited `exitCode` if known, failed on a disk that holds nothing of the
+ * user's, which its backend therefore removed. A template boot's checkout (`retry`) boots from the template again on
+ * the job's retry, unless its commit is missing from the remote. A fresh boot's failure stays final, and a human retry
+ * boots the pylon fresh.
  */
-export function setupRemoved(pylonId: PylonId, retry: boolean, startupError: string, logTail: string): JobFailure {
+export function setupRemoved(pylonId: PylonId, retry: boolean, startupError: string, logTail: string, exitCode?: number): JobFailure {
+  if (retry && exitCode === commitMissing) return new JobFailure("setup-failed", `${pylonId}: ${startupError}. Its commit is not on its remote, so it was removed, and no retry can check it out`, logTail);
   if (!retry) return new JobFailure("setup-failed", `${pylonId}: ${startupError}. Its instance had no checkpoint, so it was removed, and a retry boots the pylon fresh`, logTail);
   return new JobFailure("backend", `${pylonId} could not check out its commit on its template's disk, so it was removed and boots from the template again: ${startupError}`, logTail);
 }

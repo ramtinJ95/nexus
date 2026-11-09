@@ -27,7 +27,7 @@ import * as templates from "./pylon-vm-templates.ts";
 import { publicUrls } from "../../public-urls.ts";
 import { finishRelaunch, pauseSessions, type RelaunchMark } from "../../probe/guest/session-wake.ts";
 import { run, socketPathLimit, sweepScratch } from "../../pylon-vm/client.ts";
-import { imageLabel, settled, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
+import { imageLabel, settled, setupExitCode, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
 import { bridgePylonHeader } from "../../pylon-vm/host-bridge.ts";
 import { directory, instanceFiles, stateFiles } from "../../pylon-vm/instance-layout.ts";
 import { listenHostBridge, type HostBridge } from "../../host-bridge.ts";
@@ -309,7 +309,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     if (!checkoutFailed && !freshFailed) return new JobFailure("setup-failed", `${pylonId}: ${startupError}`, log);
     const name = instanceName(pylonId);
     await sandbox({ action: "destroy", kind: "instances", name, confirm: name });
-    return setupRemoved(pylonId, checkoutFailed, startupError, log);
+    return setupRemoved(pylonId, checkoutFailed, startupError, log, setupExitCode(status.startupFailures?.find((f) => f.kind === "setup")?.message ?? ""));
   }
 
   /** CPUs, memory, the allowlist, secrets and SSH remotes apply at every boot. The image and the disk size are fixed at create. */

@@ -16,9 +16,9 @@ import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import type { BackendPylon } from "../backend.ts";
 import { createPylonVmBackend, hostNestsKvm, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
-import { asUserIn, bootHooks } from "../pylon-boot.ts";
+import { asUserIn, bootHooks, commitMissing } from "../pylon-boot.ts";
 import { launchers } from "../../probe/guest/launchers.ts";
-import { settled, type Inspection } from "../../pylon-vm/contracts.ts";
+import { settled, setupExited, type Inspection } from "../../pylon-vm/contracts.ts";
 import { groupMembers, identityOf } from "../../pylon-vm/identity.ts";
 import { imageEnv, pylonGuest, type Sandbox } from "./pylon-guest.ts";
 import { saveJson } from "../../node-base/json-file.ts";
@@ -794,7 +794,7 @@ test("a template boot copies the template's disk in and sets up only the pylon's
   assert.equal(record.config.image, assets);
   assert.equal(record.config.setup.length, 1);
   assert.equal(record.config.retrySetup, true, "a failed checkout is not kept on the disk");
-  assert.match(record.config.setup[0], /git remote set-url origin .*Hello-World\.git.* && git fetch --quiet origin && git checkout --quiet -B .*master.* .*7fd1a60b.* && git -C .*\/home\/user\/workspace\/repo.* update-ref refs\/nexus\/base HEAD/);
+  assert.match(record.config.setup[0], /git -C .*repo.* remote set-url origin .*Hello-World\.git.* && git -C .*repo.* fetch --quiet origin && .* && git -C .*repo.* checkout --quiet -B .*master.* .*7fd1a60b.* && git -C .*\/home\/user\/workspace\/repo.* update-ref refs\/nexus\/base HEAD/);
   assert.doesNotMatch(record.config.setup[0], / git update-ref/, "update-ref is git's own subcommand");
   assert.deepEqual(JSON.parse(await readFile(join(dir, "intent.json"), "utf8")), { prepare: false });
 });
@@ -947,6 +947,16 @@ test("a template pylon whose checkout failed on a disk that never finished setup
   await assert.rejects(backend.ensureRunning(fromTemplate("pylon-recheck"), live, signal()), (err: Error & { code?: string; logTail?: string }) =>
     err.code === "backend" && /could not check out its commit on its template's disk, so it was removed/.test(err.message) && err.logTail?.includes("unable to access") === true);
   assert.equal(existsSync(dir), false, "the next spawn boots from the template again");
+});
+
+test("a template pylon whose checkout found its commit missing from the remote is removed, and the failure stays final", async (t) => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-gone", "running", 8, true);
+  await writeFile(join(dir, "controller.log"), `${"1".repeat(40)} is not on https://github.com/octocat/Hello-World.git\n`);
+  await failedController(t, dir, [{ ...checkoutFailed, message: setupExited(commitMissing) }], false);
+  await assert.rejects(backend.ensureRunning(fromTemplate("pylon-gone"), live, signal()), (err: Error & { code?: string }) =>
+    err.code === "setup-failed" && /Its commit is not on its remote/.test(err.message));
+  assert.equal(existsSync(dir), false);
 });
 
 test("a fresh pylon whose setup failed before its first checkpoint is removed, and the failure stays final", async (t) => {
