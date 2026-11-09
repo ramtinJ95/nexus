@@ -304,6 +304,7 @@ test("without --project, start takes the one project whose repository is the che
   assert.deepEqual([other.code, other.stderr], [64, "nexus: start needs --project, since no project has this checkout's origin, https://github.com/other/repo.git. Run nexus --help for usage\n"]);
   const bare = await s.nexus(["start", "--title", "x"], undefined, await checkout(null));
   assert.deepEqual([bare.code, bare.stderr], [64, "nexus: start needs --project. Run nexus --help for usage\n"]);
+  s.registry.projects.createProject({ ...project, id: "escaped" as ProjectId, repoUrl: "https://git.example/team/100%.git" });
   s.registry.projects.createProject({ ...project, id: "ported" as ProjectId, repoUrl: "https://git.example:8443/team/repo.git" });
   const ported = await s.nexus(["start", "--title", "ported"], undefined, await checkout("https://git.example:8443/team/repo"));
   assert.deepEqual([ported.code, ported.stderr], [0, "nexus: project ported, from this checkout's origin\n"], "a port other than the scheme's default is kept");

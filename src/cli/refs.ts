@@ -55,7 +55,7 @@ export function repoKey(url: string): string | null {
       return null;
     }
     const scheme = u.protocol.slice(0, -1).toLowerCase();
-    [host, path] = [u.hostname, decodeURIComponent(u.pathname)];
+    [host, path] = [u.hostname, u.pathname];
     if (u.port !== "" && u.port !== defaultPorts[scheme]) port = `:${u.port}`;
   } else {
     const scp = /^(?:[^@/]+@)?([^/:]+):(.+)$/.exec(given);
