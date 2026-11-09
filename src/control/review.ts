@@ -898,7 +898,11 @@ export function reviewLoop(deps: ReviewDeps) {
         const builder = registry.threads.thread(r.builder);
         if (builder?.working === true && isOpenStatus(builder.status)) continue;
         const { inTurn, ...phase } = r.phase;
-        const archive = builder !== undefined && isOpenStatus(builder.status) && !await deps.personWrote(builder, inTurn) ? [builder] : [];
+        const theirs = builder === undefined || !isOpenStatus(builder.status) || await deps.personWrote(builder, inTurn);
+        // The read yields, so a turn, an archive or a delete meanwhile decides instead.
+        const fresh = registry.threads.thread(r.builder);
+        if (fresh?.working === true && isOpenStatus(fresh.status)) continue;
+        const archive = !theirs && fresh !== undefined && isOpenStatus(fresh.status) ? [fresh] : [];
         if (registry.reviews.saveReview({ ...r, phase }, archive.map((t) => t.id), r)) for (const t of archive) deps.wake(t);
         retried.ok(`${r.id} builder`);
       } catch (err) {

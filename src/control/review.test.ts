@@ -46,7 +46,7 @@ const tempDb = () => join(registries, `${randomUUID()}.db`);
 const previous = "p".repeat(40);
 
 /** `agentState` replaces the fake that reads replies and model failures from the fixture's maps. */
-function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview; secondReview?: SecondReview; agentState?: (registry: Registry) => ReviewDeps["agentState"] } = {}) {
+function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview; secondReview?: SecondReview; agentState?: (registry: Registry) => ReviewDeps["agentState"]; personWrote?: (registry: Registry) => ReviewDeps["personWrote"] } = {}) {
   const registry = openRegistry(options.path ?? ":memory:");
   t.after(() => { try { registry.close(); } catch { /* closed by a restart */ } });
   const repo = options.repo ?? "ramtinJ95/nexus";
@@ -169,7 +169,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     wake: (target) => { woken.push(target.id); },
     log: (message) => { logged.push(message); },
     now: () => clock,
-    personWrote: agentReader(registry, { async watch() { throw new Error("no harness thread here"); } }).personWrote,
+    personWrote: options.personWrote?.(registry) ?? agentReader(registry, { async watch() { throw new Error("no harness thread here"); } }).personWrote,
     brief: async (target) => { const agent = registry.threads.agent(target); return agent.kind === "claude" ? agent.worker.prompt : briefs.get(target.id) ?? null; },
     async startThread(start) {
       const refused = refuseStart(start.request);
@@ -1064,6 +1064,24 @@ test("a builder the person wrote to after its review landed stays open once its 
   await loop.poll();
   assert.deepEqual(f.statuses(), ["active", "archived"], "the person's message since the landing makes it theirs");
   assert.deepEqual(f.woken, [f.review().reviewer]);
+});
+
+test("a builder that starts a turn or is deleted while the loop reads whether the person wrote to it is not archived", async (t) => {
+  for (const meanwhile of ["turn", "deleted"] as const) {
+    const f = fixture(t, {
+      repo: "acme/shop",
+      personWrote: (registry) => async (target) => {
+        if (meanwhile === "turn") registry.threads.recordActivity(target.id, { agent: 3, agentTurnRunning: true });
+        else registry.threads.setThreadStatus(target.id, "deleted");
+        return false;
+      },
+    });
+    f.registry.threads.recordActivity(f.builder, { agent: 1, agentTurnRunning: true });
+    const loop = await approved(f, "nLAPTOP");
+    f.registry.threads.recordActivity(f.builder, { agent: 2, agentTurnRunning: false });
+    await loop.poll();
+    assert.deepEqual(f.statuses(), [meanwhile === "turn" ? "active" : "deleted", "archived"], meanwhile);
+  }
 });
 
 test("a review that ends merged, closed, cancelled by its builder's archive, or out of rounds archives its reviewer by the next pass", async (t) => {
