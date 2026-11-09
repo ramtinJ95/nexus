@@ -162,18 +162,22 @@ export interface ThreadParticipant {
 interface AwaitWindow { from: number; until: number }
 
 const deleted = { deletedWithThread: true } as const;
+const byThread = { purge: "thread = $thread" } as const;
+const byPylon = { purge: "pylon = $pylon" } as const;
 export const holding = {
   tables: {
-    threads: {}, pylons: {}, sessions: {}, previews: {}, outputs: {}, jobs: {}, events: {}, event_receipts: {}, session_activity: {},
-    session_order: deleted, session_order_floor: deleted, thread_attention: {}, start_requests: {}, aborted_conversations: {},
-    thread_archives: {}, disk_cleanups: deleted,
+    threads: {}, pylons: byThread, sessions: byPylon, previews: byPylon, outputs: byThread, jobs: { purge: "subject = $pylon" },
+    events: { keptOnPurge: "retainEvents keeps the newest 10,000, and deleting a thread's from among them could move the oldest past a cursor, which then reads as expired" },
+    event_receipts: {}, session_activity: byThread, session_order: deleted, session_order_floor: deleted, thread_attention: byThread,
+    start_requests: { keptOnPurge: "a repeat of the request ID would start the thread again, and the pipeline would queue its item again" },
+    aborted_conversations: { purge: "conversation = $conversation" }, thread_archives: byThread, disk_cleanups: deleted,
   },
   settings: ["backed-up-at"],
 } as const satisfies Holding;
 
 export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, "node" | "saveObservation" | "saveNodeState">,
   holdReleased: (thread: ThreadId, until: number) => boolean) {
-  const { transaction, afterCommit, sql, deleteThreadRows } = db;
+  const { transaction, afterCommit, sql, deleteThreadRows, purgeThreadRows } = db;
   const { setting, setSetting } = db.hold(holding);
   const { node } = nodes;
   let participants: readonly ThreadParticipant[] = [];
@@ -658,6 +662,18 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       transaction(() => { recordReply(at, id); appendEvent("thread.turn-ended", id, {} , at); updateAttention(id); });
     },
     setThreadStatus,
+    /**
+     * Removes the deleted thread from the registry: its rows of every table whose holding purges them (db.ts), and its
+     * own row last, in one transaction. A thread that is not deleted is left as it is.
+     */
+    purgeThread(id: ThreadId) {
+      transaction(() => {
+        const row = threadRecord(id);
+        if (row?.status !== "deleted") return;
+        purgeThreadRows({ thread: id, pylon: pylonIdOf(id), conversation: row.conversation_id as string | null });
+        sql("DELETE FROM threads WHERE id = ?").run(id);
+      });
+    },
     /** Timestamps only move forward, so a late or repeated report cannot make a thread look idle sooner. */
     recordActivity(id: ThreadId, activity: { human?: number; agent?: number; agentTurnRunning?: boolean }) {
       transaction(() => {

@@ -15,11 +15,19 @@ export type Db = ReturnType<typeof openDb>;
  * What one store holds in the registry: its tables, and the keys of the `settings` table only it reads and writes, where
  * a key ending in ":" holds every key it begins. `record` names the key column of a table that keeps each record as
  * JSON in a `record` column. `deletedWithThread` deletes a thread's rows, by its `thread` column, with the thread.
+ *
+ * A table whose rows name a thread or its pylon says what a thread's purge from the registry does with them.
+ * `purge` is the SQL condition of the rows the purge deletes, over `$thread`, the thread's ID, `$pylon`, its pylon's,
+ * and `$conversation`, its harness conversation's or null. A `deletedWithThread` table's purge deletes its rows by
+ * its `thread` column too. `keptOnPurge` says why the table keeps them.
  */
 export interface Holding {
-  readonly tables: Readonly<Record<string, { readonly record?: string; readonly deletedWithThread?: true }>>;
+  readonly tables: Readonly<Record<string, TableHolding>>;
   readonly settings?: readonly string[];
 }
+type TableHolding = { readonly record?: string; readonly deletedWithThread?: true } & ({ readonly purge?: string; readonly keptOnPurge?: never } | { readonly keptOnPurge?: string; readonly purge?: never });
+/** What names a thread's rows in a purge's conditions. */
+export interface PurgedThread { thread: string; pylon: string; conversation: string | null }
 type RecordTable<H extends Holding> = { [T in keyof H["tables"]]: H["tables"][T] extends { record: string } ? T : never }[keyof H["tables"]] & string;
 type SettingKey<H extends Holding> = H["settings"] extends readonly (infer K extends string)[] ? K | `${Extract<K, `${string}:`>}${string}` : never;
 
@@ -27,6 +35,13 @@ export const holding = { tables: { settings: {} } } as const satisfies Holding;
 
 export const deletedWithThread = (holdings: readonly Holding[]): string[] =>
   holdings.flatMap((h) => Object.entries(h.tables).flatMap(([table, t]) => t.deletedWithThread ? [table] : []));
+
+/** Each table a purge deletes rows of, with the condition of those rows. */
+export const purged = (holdings: readonly Holding[]): [table: string, where: string][] =>
+  holdings.flatMap((h) => Object.entries(h.tables).flatMap(([table, t]): [string, string][] => {
+    const where = t.purge ?? (t.deletedWithThread ? "thread = $thread" : undefined);
+    return where === undefined ? [] : [[table, where]];
+  }));
 
 const overlap = (a: string, b: string) => a === b || (a.endsWith(":") && b.startsWith(a)) || (b.endsWith(":") && a.startsWith(b));
 
@@ -90,7 +105,24 @@ export function openDb(path: string) {
     for (const table of deletedWithThread(held)) sql(`DELETE FROM ${table} WHERE thread = ?`).run(thread);
   }
 
-  return { db, transaction, afterCommit, sql, hold, deleteThreadRows };
+  /**
+   * Deletes the thread's rows of every table whose holding purges them, in the transaction of the caller, which deletes
+   * the thread's own row. The foreign keys are checked at its commit, so the tables go in any order, and a row left
+   * behind that names the thread fails the commit, which keeps everything.
+   */
+  function purgeThreadRows(keys: PurgedThread) {
+    transaction(() => {
+      sql("PRAGMA defer_foreign_keys = ON").run();
+      for (const [table, where] of purged(held)) {
+        const statement = sql(`DELETE FROM ${table} WHERE ${where}`);
+        // Each condition names only the keys it needs.
+        statement.setAllowUnknownNamedParameters(true);
+        statement.run({ ...keys });
+      }
+    });
+  }
+
+  return { db, transaction, afterCommit, sql, hold, deleteThreadRows, purgeThreadRows };
 }
 
 function migrate(db: DatabaseSync) {

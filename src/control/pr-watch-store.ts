@@ -26,7 +26,7 @@ export interface PrWatchState {
   error: string | null;
 }
 
-export const holding = { tables: { pr_watches: { record: "thread" } } } as const satisfies Holding;
+export const holding = { tables: { pr_watches: { record: "thread", purge: "thread = $thread" } } } as const satisfies Holding;
 
 export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: ThreadId, payload: Record<string, unknown>) => unknown) {
   const { transaction } = db;

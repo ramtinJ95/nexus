@@ -15,7 +15,7 @@ interface PlanningRecord {
   sent: readonly { requestId: string; guide: boolean; told: readonly string[]; delivered: boolean }[];
 }
 
-export const holding = { tables: { planning_threads: { record: "thread" } } } as const satisfies Holding;
+export const holding = { tables: { planning_threads: { record: "thread", purge: "thread = $thread" } } } as const satisfies Holding;
 
 export function planningStore(db: Db) {
   const { sql } = db;

@@ -10,7 +10,7 @@ import { askQuestionId, askRecord, isOpen, type CleanupQuestion, type HoldsQuest
 import type { DeleteOutcome } from "../protocol/cleanup.ts";
 import type { Need } from "./attention.ts";
 
-export const holding = { tables: { questions: { record: "id" }, waiting_asks: {} } } as const satisfies Holding;
+export const holding = { tables: { questions: { record: "id", purge: "thread = $thread" }, waiting_asks: { purge: "thread = $thread" } } } as const satisfies Holding;
 
 /** isOpen, as SQL. */
 const openWhere = "json_extract(record, '$.answer') IS NULL AND json_extract(record, '$.withdrawn') IS NULL";

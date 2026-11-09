@@ -18,7 +18,14 @@ interface UsageCursor { source: string; key: string; position: number; before: s
  */
 export interface UsageHold { by: "run" | "settle"; thread: ThreadId; phase: "reading" | "pausing"; since: number }
 
-export const holding = { tables: { usage_records: {}, usage_days: {}, usage_cursors: {}, usage_since: {}, usage_backfill: {}, usage_backfill_threads: {} } } as const satisfies Holding;
+/** A purged thread's calls go, and the day's sums they added to stay. A harness conversation's cursor is keyed by its ID. */
+export const holding = {
+  tables: {
+    usage_records: { purge: "thread = $thread" }, usage_days: {}, usage_cursors: { purge: "source = $pylon OR (source = 'harness' AND key = $conversation)" }, usage_since: {},
+    usage_backfill: { keptOnPurge: "it is the backfill's one run, which names the thread only while it holds its pylon, and retention keeps a held thread" },
+    usage_backfill_threads: { purge: "thread = $thread" },
+  },
+} as const satisfies Holding;
 
 export function usageStore(db: Db, threads: {
   threadRecord(id: ThreadId): Row | undefined;

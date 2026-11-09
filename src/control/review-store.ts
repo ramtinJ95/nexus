@@ -11,7 +11,8 @@ import { builderAwaited, kindsWhere, roundsSpent, waitsOnPerson, type Review, ty
 import { upgradeReview } from "./record-upgrade.ts";
 import type { Need } from "./attention.ts";
 
-export const holding = { tables: { reviews: { record: "builder" }, reviewed_prs: {}, review_rounds: {} } } as const satisfies Holding;
+/** A purged builder's review goes with it, and the pull requests its reviews read and the rounds they spent stay counted. */
+export const holding = { tables: { reviews: { record: "builder", purge: "builder = $thread" }, reviewed_prs: {}, review_rounds: {} } } as const satisfies Holding;
 
 export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, status: ThreadStatus) => void; appendEvent: (kind: EventKind, thread: ThreadId, payload: Record<string, unknown>) => unknown; updateAttention: (thread: ThreadId) => void; events: (since: string, filter: EventFilter) => NexusEvent[] }) {
   const { transaction, sql } = db;

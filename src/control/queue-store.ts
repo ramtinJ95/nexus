@@ -30,7 +30,9 @@ export interface QueuedRecord {
   firstMessage: "pending" | "sent" | null;
 }
 
-export const holding = { tables: { queued_threads: { record: "id" } } } as const satisfies Holding;
+export const holding = {
+  tables: { queued_threads: { record: "id", keptOnPurge: "it holds the start as it was queued, its message and predecessors, which the thread's row does not" } },
+} as const satisfies Holding;
 
 export function queueStore(db: Db, saveStartKey: (key: StartKey, thread: ThreadId) => void) {
   const { transaction, sql } = db;
