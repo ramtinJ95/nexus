@@ -1,5 +1,5 @@
 import type { NodeName, ProjectId, TailnetNodeId, ThreadId } from "../../ids.ts";
-import type { ThreadDetail, ThreadRow } from "../wire.ts";
+import type { ServerDetail, ThreadRow } from "../wire.ts";
 import type { Thread, ThreadAgent } from "../thread-store.ts";
 import type { NodeRecord } from "../node-store.ts";
 import type { Project } from "../project.ts";
@@ -63,7 +63,7 @@ export interface FoldView { projects: readonly Project[]; offline: ReadonlySet<N
 export interface Latest { reply: { text: string; at: number | null } | null; asked: { text: string; at: number } | null }
 
 export type Peek =
-  | { kind: "thread"; d: ThreadDetail; row: ThreadRow; latest: Latest }
+  | { kind: "thread"; d: ServerDetail; row: ThreadRow; latest: Latest }
   | { kind: "queued"; q: QueuedThread }
   | { kind: "item"; item: PipelineItem };
 
@@ -74,7 +74,7 @@ export type Peek =
  * it waited on in the queue, or null when it started at once, and `item` the pipeline item it started for.
  */
 export interface ThreadView {
-  d: ThreadDetail; row: ThreadRow; node: NodeRecord; role: Role; agent: ThreadAgent; usage: UsageTotals;
+  d: ServerDetail; row: ThreadRow; node: NodeRecord; role: Role; agent: ThreadAgent; usage: UsageTotals;
   view: AgentView | Error | null; items: readonly Item[]; renderedReplyAt: number | null; nudged: boolean; lands: boolean;
   queuedAfter: readonly ThreadId[] | null; item: PipelineItem | undefined;
 }

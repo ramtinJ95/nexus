@@ -71,80 +71,21 @@ exit 0
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-413",
-    "builder": "th-rv-merging",
-    "reviewer": "th-rv-merging-review",
-    "pr": {
-      "repo": "ramtinJ95/nexus",
-      "number": 413,
-      "url": "https://github.com/ramtinJ95/nexus/pull/413",
-      "title": "fix(secrets): rotate the broker's signing key on deploy",
-      "branch": "nexus/413"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": {
-      "requestedBy": "laptop"
-    },
-    "auto": true,
-    "merged": null,
-    "waiver": {
-      "head": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d",
-      "holds": [
-        "Always needs the person: changes to secrets, as it changes src/control/secrets.ts."
-      ],
-      "codes": [
-        "reserved-path:secrets"
-      ],
-      "by": "laptop",
-      "at": 1800014160000,
-      "change": null
-    },
-    "expect": "rv-413:t",
-    "sent": 2,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013800000,
-    "nudges": 0,
-    "startedAt": 1800007200000,
-    "rounds": [
-      {
-        "head": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "approve",
-          "findings": [],
-          "reserved": [],
-          "notCheckedLive": null
-        },
-        "check": {
-          "passed": true,
-          "output": "ℹ tests 412\nℹ pass 412\nℹ fail 0"
-        },
-        "answers": null,
-        "live": {
-          "kind": "ran",
-          "thread": "th-verify-413",
-          "passed": true,
-          "output": "ok rotate: new key in 0.8 s"
-        }
-      }
-    ],
-    "phase": {
-      "kind": "merging",
-      "authorized": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d"
-    }
-  },
   "reviewView": {
     "id": "rv-413",
+    "pr": 413,
     "head": "9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d",
     "ended": false,
+    "phase": {
+      "kind": "merging"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-rv-merging-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": true,
     "holds": [],
     "press": {
       "kind": "lands",
@@ -168,7 +109,9 @@ exit 0
     "prWatch": "PR watch: off (no control-plane GitHub token configured)",
     "review": [
       "review rv-413 of PR #413, started on its own: merging, round 1 of 5, reviewer th-rv-merging-review on gpt-6-astra, landing when approved",
-      "live check passed at 9d9d9d9d9d9d"
+      "live check passed at 9d9d9d9d9d9d",
+      "waived by laptop at 9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d, 2027-01-15T11:56:00.000Z:",
+      "  Always needs the person: changes to secrets, as it changes src/control/secrets.ts."
     ]
   }
 }

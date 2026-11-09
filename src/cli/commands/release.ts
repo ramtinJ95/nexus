@@ -6,8 +6,7 @@ import { CliError } from "../transport.ts";
 import { type Api, type Result, type Command, str, request, int, table, pollUntil } from "../kit.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { deployWaitMs, imageRoutes, releaseRoutes, type ImageEntry, type ImageOperation, type ImagesView } from "../../contract/release.ts";
-import { landOption, questionRoutes, reviewRoutes, type Review } from "../../contract/reviews.ts";
-import { reviewText } from "../thread-text.ts";
+import { landOption, questionRoutes, reviewRoutes, type ReviewView } from "../../contract/reviews.ts";
 
 function releaseText(view: ReleaseView): string {
   return [`Desired: ${view.desired === null ? "none" : `${view.desired.commit} by ${view.desired.requestedBy} at ${new Date(view.desired.requestedAt).toISOString()}`}`,
@@ -94,22 +93,21 @@ export async function confirmWaiver(terminal: Terminal, pr: number, head: string
  */
 export async function pressOf(api: Api, id: string, terminal: Terminal): Promise<{ head?: string; waive?: string[]; question?: string; running?: boolean }> {
   needsTerminal(terminal);
-  const { review, reviewView: view } = await request(api, threadRoutes.show, { thread: id });
-  if (review === null) return {};
-  if (view == null) throw new CliError("failed", "land --waive needs a control plane of 0.71.0 or later, which says what a Land press waives. Upgrade it, or press Land on the dashboard");
+  const { reviewView: view } = await request(api, threadRoutes.show, { thread: id });
+  if (view === null) return {};
   if (view.question !== null) {
-    if (!await confirmWaiver(terminal, review.pr.number, view.question.head, view.question.holds.map((h) => h.text))) throw new CliError("failed", "nothing landed, as you did not confirm the holds it waives");
+    if (!await confirmWaiver(terminal, view.pr, view.question.head, view.question.holds.map((h) => h.text))) throw new CliError("failed", "nothing landed, as you did not confirm the holds it waives");
     return { question: view.question.id, running: !view.ended };
   }
   if (view.press.kind !== "lands" || view.press.waives.length === 0) return { head: view.head };
   const waive = view.press.waives.map((h) => h.text);
-  if (!await confirmWaiver(terminal, review.pr.number, view.head, waive)) throw new CliError("failed", "nothing landed, as you did not confirm the holds it waives");
+  if (!await confirmWaiver(terminal, view.pr, view.head, waive)) throw new CliError("failed", "nothing landed, as you did not confirm the holds it waives");
   return { head: view.head, waive };
 }
 
-export const answeredText = (r: Review, said: readonly string[] | null | undefined, running: boolean) => running
-  ? `Waived the holds at ${r.rounds.at(-1)!.head.slice(0, 12)}. It lands once the reviewer approves and its checks pass.\n${reviewText(r, said)}`
-  : `Landing ${reviewText(r, said)}`;
+export const answeredText = (view: ReviewView, said: readonly string[], running: boolean) => running
+  ? `Waived the holds at ${view.head.slice(0, 12)}. It lands once the reviewer approves and its checks pass.\n${said.join("\n")}`
+  : `Landing ${said.join("\n")}`;
 
 export const releaseCommands: Readonly<Record<string, Command>> = {
   release: {
@@ -131,13 +129,13 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
       if (v.cancel === true) {
         if (v.pr !== undefined || v.rounds !== undefined || v.land !== undefined) throw new CliError("invalid", "--cancel takes no --pr, --rounds or --land");
         const r = await request(api, reviewRoutes.cancel, { thread: id! });
-        return { json: r, text: `Cancelled ${reviewText(r, r.said)}` };
+        return { json: r, text: `Cancelled ${r.said.join("\n")}` };
       }
       const pr = str(v, "pr");
       const rounds = str(v, "rounds");
       const body = { ...pr === undefined ? {} : { pr: int(pr, "--pr", 0) }, ...rounds === undefined ? {} : { rounds: int(rounds, "--rounds", 0) }, ...v.land === true ? { land: true } : {} };
       const r = await request(api, reviewRoutes.start, { thread: id!, body });
-      return { json: r, text: `Started ${reviewText(r, r.said)}` };
+      return { json: r, text: `Started ${r.said.join("\n")}` };
     },
   },
   land: {
@@ -150,11 +148,11 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
       const { question, running, ...press } = v.waive === true ? await pressOf(api, id!, { input: process.stdin, output: process.stderr }) : {};
       if (question !== undefined) {
         await request(api, questionRoutes.answer, { question, body: { option: landOption } });
-        const { review, said } = await request(api, threadRoutes.show, { thread: id! });
-        return { json: review, text: answeredText(review!, said?.review, running === true) };
+        const { reviewView: view, said } = await request(api, threadRoutes.show, { thread: id! });
+        return { json: view, text: answeredText(view!, said.review!, running === true) };
       }
       const r = await request(api, reviewRoutes.land, { thread: id!, body: press });
-      return { json: r, text: `Landing ${reviewText(r, r.said)}` };
+      return { json: r, text: `Landing ${r.said.join("\n")}` };
     },
   },
   deploy: {

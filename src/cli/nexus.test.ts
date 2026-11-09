@@ -23,7 +23,7 @@ import { planningPrefix } from "../control/agent-protocol.ts";
 import type { QueuedThread } from "../contract/threads.ts";
 import type { Thread } from "../control/thread-store.ts";
 import type { ThreadDetail } from "../control/wire.ts";
-import { detailText, reviewText } from "./thread-text.ts";
+import { detailText } from "./thread-text.ts";
 import { personPhase, type Review } from "../control/review-model.ts";
 import { reviewView } from "../control/review-view.ts";
 import { reviewSaid } from "../control/wording.ts";
@@ -295,8 +295,6 @@ test("show says why an archived thread's disk is kept past its 24 hours, and not
   assert.deepEqual(disk(dayOld), ["disk: kept past its 24 hours, as its token usage is not read to its end yet, and reading it failed once, the last because its pylon did not boot within 10 minutes"]);
   observeAbsent(s);
   assert.deepEqual(disk(await s.json(["show", id])), [], "the API's keptPastDay is null for an absent pylon");
-  const { said: _said, ...older } = dayOld;
-  assert.deepEqual(disk(older), [], "a control plane older than 0.73.0 serves no said, and show prints no disk line");
   const { settleFailure: _, ...unfailed } = dayOld.thread;
   assert.equal(keptPastDay({ ...unfailed, usageSettledAt: 1, backedUpAt: 2 }, Date.now()), null);
 });
@@ -314,24 +312,17 @@ test("show says a pylon's guest is not answering, since when and what to do, and
   ]);
 });
 
-test("show of a control plane older than 0.73.0, which serves no said, prints its review as its ID with what it needs from the person, and a paused session as paused", async (t) => {
+test("show prints a review's lines as the API words them, then what it needs from the person and its waiver", async (t) => {
   const s = await setup(t);
-  const { id } = await s.json(["start", "--project", "acme", "--title", "Old control"]);
+  const { id } = await s.json(["start", "--project", "acme", "--title", "Held review"]);
   const detail: ThreadDetail = await s.json(["show", id]);
-  s.registry.apply({ record: "sessions", pylonId: detail.thread.pylonId, sessions: [
-    { id: "w1:p1", state: "paused", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: null, title: "review", status: null, message: null },
-  ] });
-  const { said: _said, ...older }: ThreadDetail = await s.json(["show", id]);
   const pending = "The pull request's GitHub checks are pending.";
   const review = testReview({ builder: id, phase: personPhase("policy", { code: "github-checks", text: pending }), waiver: { head: "1".repeat(40), holds: ["Changes to auth."], codes: ["reserved-path:auth"], by: laptop, at: 0, change: null } });
-  const shown = detailText({ ...older, review }).split("\n");
-  assert.ok(shown.includes("attention: none"));
-  assert.ok(shown.includes('session: claude-code "review" in pane w1:p1, paused'), "a paused session reads paused, without the wording of how it resumes");
-  assert.deepEqual(shown.slice(shown.indexOf("review rv-1")), ["review rv-1", `needs you: ${pending}`, `waived by ${laptop} at ${"1".repeat(40)}, 1970-01-01T00:00:00.000Z:`, "  Changes to auth."], "the review shows as its ID, then its holds and waiver");
-  assert.ok(!shown.some((line) => line.startsWith("PR watch:")), "and no PR watch line");
-  assert.equal(reviewText(review, undefined).split("\n")[0], "review rv-1", "a review route's reply without said also shows as its ID");
+  const shown = detailText({ ...detail, said: { ...detail.said, review: reviewSaid(review) } }).split("\n");
+  const line = shown.findIndex((l) => l.startsWith("review rv-1 of PR #7: needs-person"));
+  assert.deepEqual(shown.slice(line + 1, line + 4), [`needs you: ${pending}`, `waived by ${laptop} at ${"1".repeat(40)}, 1970-01-01T00:00:00.000Z:`, "  Changes to auth."], "the review's line, then its holds and waiver");
   const yolo = { ...review, waiver: { ...review.waiver!, yolo: "nexus" as ProjectId } };
-  assert.match(reviewText(yolo, undefined), new RegExp(`^waived by ${laptop}, by project nexus's yolo setting, at 1{40}, `, "m"), "a yolo waiver names the project whose setting gave it");
+  assert.match(reviewSaid(yolo).join("\n"), new RegExp(`^waived by ${laptop}, by project nexus's yolo setting, at 1{40}, `, "m"), "a yolo waiver names the project whose setting gave it");
 });
 
 test("show says an archived thread's usage is unread when its pylon could not be read, before and after its disk goes", async (t) => {
@@ -1329,7 +1320,7 @@ async function bare(t: TestContext, args: readonly string[], env: Record<string,
 }
 
 test("a command refuses a control plane that reports no version, or one older than the CLI reads, and sends nothing past health", async (t) => {
-  // 0.9.99 is older though it sorts after 0.53.0 as text.
+  // 0.9.99 is older though it sorts after 0.74.0 as text.
   for (const [health, runs] of [[{ commit: "a".repeat(40), https: {} }, /older than \d+\.\d+\.\d+/], [{ commit: null, version: "0.9.99" }, /0\.9\.99/]] as const) {
     // A watch and a follow retry through a failing control plane, but not through one too old.
     for (const args of [["projects"], ["events", "--follow"], ["watch", "th-0123456789ab"]]) {
@@ -1675,7 +1666,9 @@ test("review and land reach the review loop's routes, and show prints a review a
   assert.match(shown.stdout, /^review rv-1 of PR #7: needs-person, round 1 of 5, reviewer th-reviewer on claude-opus-5-5, label "needs human review" not added$/m);
   assert.match(shown.stdout, /^needs you: The reviewer still requests changes after 5 rounds, the most this review allows\.$/m);
   assert.match(shown.stdout, /^needs you: Nexus could not add the label "needs human review" to pull request #7 \(GitHub answered 403: Forbidden\)\.$/m);
-  assert.deepEqual((await s.json(["show", thread.id])).review, review);
+  const json: ThreadDetail = await s.json(["show", thread.id]);
+  assert.ok(!("review" in json), "show --json sends no stored review, and so no token");
+  assert.deepEqual(json.reviewView, reviewView(review, []));
 
   s.registry.saveReview({ ...review, phase: { kind: "cancelled", who: "reviewer", status: "archived" } });
   const cancelled = await s.nexus(["show", thread.id]);
@@ -1780,7 +1773,7 @@ test("land --waive shows the head and every hold it waives, and sends them only 
   const review = testReview({ phase: { kind: "approved" }, rounds: [{ ...approvedRound, heldAt: { base: "main", holds: [{ code: "reserved-path:egress", text: egress }, { code: "check-changed", text: check }] } }] });
   const api = (async (method: string, path: string) => {
     assert.deepEqual([method, path], ["GET", "/v1/threads/th-builder"]);
-    return { review, reviewView: reviewView(review, []), questions: [] };
+    return { reviewView: reviewView(review, []), questions: [] };
   }) as Api;
   const yes = confirmingTerminal("yes");
   assert.deepEqual(await pressOf(api, "th-builder", yes.terminal), { head: approvedRound.head, waive: [egress, check] });
@@ -1791,18 +1784,9 @@ test("land --waive shows the head and every hold it waives, and sends them only 
   await assert.rejects(pressOf(api, "th-builder", confirmingTerminal("yes", false).terminal), (err: CliError) => err.kind === "invalid");
   const nothing = confirmingTerminal("yes");
   const unheldReview = { ...review, rounds: [{ ...approvedRound, heldAt: { base: "main", holds: [] } }] };
-  const unheld = (async () => ({ review: unheldReview, reviewView: reviewView(unheldReview, []), questions: [] })) as Api;
+  const unheld = (async () => ({ reviewView: reviewView(unheldReview, []), questions: [] })) as Api;
   assert.deepEqual(await pressOf(unheld, "th-builder", nothing.terminal), { head: approvedRound.head }, "nothing to waive asks nothing");
   assert.equal(nothing.shown(), "");
-  const asked: string[] = [];
-  const olderApi = (async (method: string, path: string) => {
-    asked.push(`${method} ${path}`);
-    return { review, questions: [] };
-  }) as Api;
-  const older = confirmingTerminal("yes");
-  await assert.rejects(pressOf(olderApi, "th-builder", older.terminal), (err: CliError) => err.kind === "failed" && /^land --waive needs a control plane of 0\.71\.0 or later/.test(err.message));
-  assert.equal(older.shown(), "", "a control plane that serves no reviewView gets no prompt");
-  assert.deepEqual(asked, ["GET /v1/threads/th-builder"], "and nothing past the thread's read");
 });
 
 test("land --waive answers the review's question about its holds, once the person confirmed the holds it names, while the review still runs too", async () => {
@@ -1810,16 +1794,16 @@ test("land --waive answers the review's question about its holds, once the perso
   const review = testReview({ phase: { kind: "reviewing" }, rounds: [{ head: approvedRound.head, verdict: null, check: null, answers: null }] });
   const question: Question = { kind: "holds", id: "holds-rv-1-a", thread: "th-builder" as ThreadId, text: "Land?", options: ["Land", "Leave it"], reserved: "egress", answerer: "deployer", askedAt: 1, answer: null,
     holds: { review: review.id, head: approvedRound.head, base: "main", holds: [{ code: "reserved-path:egress", text: egress }] } };
-  const api = (async () => ({ review, reviewView: reviewView(review, [question]), questions: [question] })) as Api;
+  const api = (async () => ({ reviewView: reviewView(review, [question]), questions: [question] })) as Api;
   const yes = confirmingTerminal("yes");
   assert.deepEqual(await pressOf(api, "th-builder", yes.terminal), { question: question.id, running: true });
-  assert.match(answeredText(review, reviewSaid(review), true), /^Waived the holds at 111111111111\. It lands once the reviewer approves and its checks pass\.\nreview rv-\S+ of PR #7: reviewing,/, "a review still under way is not landing yet");
+  assert.match(answeredText(reviewView(review, []), reviewSaid(review), true), /^Waived the holds at 111111111111\. It lands once the reviewer approves and its checks pass\.\nreview rv-\S+ of PR #7: reviewing,/, "a review still under way is not landing yet");
   const checking: Review = { ...review, phase: { kind: "checking", startedAt: 1, thread: null } };
-  assert.match(answeredText(checking, reviewSaid(checking), false), /^Landing review /);
+  assert.match(answeredText(reviewView(checking, []), reviewSaid(checking), false), /^Landing review /);
   assert.equal(yes.shown(), `Land pull request #7 at ${approvedRound.head}, waiving the holds the merge policy reserves for you:\n  ${egress}\nType yes to waive them and land: `);
   await assert.rejects(pressOf(api, "th-builder", confirmingTerminal("no").terminal), (err: CliError) => err.kind === "failed");
   const answeredQuestion: Question = { ...question, answer: { option: "Leave it", by: laptop, at: 2 } };
-  const answered = (async () => ({ review, reviewView: reviewView(review, [answeredQuestion]), questions: [answeredQuestion] })) as Api;
+  const answered = (async () => ({ reviewView: reviewView(review, [answeredQuestion]), questions: [answeredQuestion] })) as Api;
   assert.deepEqual(await pressOf(answered, "th-builder", confirmingTerminal("yes").terminal), { head: approvedRound.head }, "an answered question is not asked again");
 });
 

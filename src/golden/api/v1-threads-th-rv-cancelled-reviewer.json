@@ -70,53 +70,21 @@
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-100",
-    "builder": "th-rv-cancelled-reviewer",
-    "reviewer": "th-seeded-1",
-    "pr": {
-      "repo": "ramtinJ95/storefront",
-      "number": 100,
-      "url": "https://github.com/ramtinJ95/storefront/pull/100",
-      "title": "fix(cart): a coupon applies once per cart",
-      "branch": "nexus/100"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": null,
-    "auto": true,
-    "merged": null,
-    "waiver": null,
-    "expect": "rv-100:t",
-    "sent": 2,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013800000,
-    "nudges": 0,
-    "startedAt": 1800007200000,
-    "rounds": [
-      {
-        "head": "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4",
-        "base": "main",
-        "verdict": null,
-        "check": null,
-        "answers": null
-      }
-    ],
-    "phase": {
-      "kind": "cancelled",
-      "who": "reviewer",
-      "status": "deleted"
-    }
-  },
   "reviewView": {
     "id": "rv-100",
+    "pr": 100,
     "head": "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4",
     "ended": true,
+    "phase": {
+      "kind": "cancelled"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-seeded-1",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": false,
     "holds": [],
     "press": {
       "kind": "lands",

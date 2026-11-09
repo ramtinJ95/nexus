@@ -70,7 +70,6 @@ exit 0
     "error": null
   },
   "pullRequests": [],
-  "review": null,
   "reviewView": null,
   "questions": [
     {

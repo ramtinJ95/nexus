@@ -71,103 +71,21 @@ exit 0
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-92",
-    "builder": "th-rv-fixing-failing",
-    "reviewer": "th-rv-fixing-failing-review",
-    "pr": {
-      "repo": "ramtinJ95/storefront",
-      "number": 92,
-      "url": "https://github.com/ramtinJ95/storefront/pull/92",
-      "title": "fix(checkout): keep the shipping quote across a reload",
-      "branch": "nexus/92"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": null,
-    "auto": true,
-    "merged": null,
-    "waiver": null,
-    "expect": "rv-92:t",
-    "sent": 2,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013800000,
-    "nudges": 0,
-    "startedAt": 1800007200000,
-    "rounds": [
-      {
-        "head": "4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "changes",
-          "findings": [
-            {
-              "id": "F1",
-              "priority": "P2",
-              "where": "src/checkout/Shipping.tsx:58",
-              "summary": "The quote is read from sessionStorage before the cart loads.",
-              "detail": null
-            }
-          ],
-          "reserved": [],
-          "notCheckedLive": null
-        },
-        "check": null,
-        "answers": null,
-        "secondVerdict": {
-          "token": "t",
-          "verdict": "changes",
-          "findings": [
-            {
-              "id": "F1",
-              "priority": "P1",
-              "where": "src/checkout/quote.ts:22",
-              "summary": "A stale quote outlives a changed address.",
-              "detail": null
-            },
-            {
-              "id": "F2",
-              "priority": "P3",
-              "where": "src/checkout/quote.ts",
-              "summary": "Name the 15-minute expiry.",
-              "detail": null
-            }
-          ],
-          "reserved": [],
-          "notCheckedLive": null
-        }
-      }
-    ],
-    "phase": {
-      "kind": "fixing",
-      "failing": {
-        "count": 1,
-        "last": "500 Internal Server Error from claude-opus-5-5",
-        "retryAt": 1800014580000
-      }
-    },
-    "second": {
-      "kind": "claude",
-      "rule": "the change touches checkout",
-      "thread": "th-rv-fixing-failing-second",
-      "model": "claude-sonnet-5-5",
-      "expect": "t2",
-      "asked": "",
-      "since": 1800013680000,
-      "nudges": 0,
-      "outbox": null
-    }
-  },
   "reviewView": {
     "id": "rv-92",
+    "pr": 92,
     "head": "4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e",
     "ended": false,
+    "phase": {
+      "kind": "fixing"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-rv-fixing-failing-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": false,
     "holds": [],
     "press": {
       "kind": "lands",

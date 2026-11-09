@@ -81,62 +81,21 @@
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-57",
-    "builder": "th-sync",
-    "reviewer": "th-sync-review",
-    "pr": {
-      "repo": "ramtinJ95/field-notes",
-      "number": 57,
-      "url": "https://github.com/ramtinJ95/field-notes/pull/57",
-      "title": "feat(sync): merge offline edits by paragraph",
-      "branch": "nexus/57"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": null,
-    "auto": true,
-    "merged": null,
-    "waiver": null,
-    "expect": "rv-57:t",
-    "sent": 3,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013200000,
-    "nudges": 0,
-    "startedAt": 1800003600000,
-    "rounds": [
-      {
-        "head": "g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "approve",
-          "findings": [],
-          "reserved": [],
-          "notCheckedLive": null
-        },
-        "check": {
-          "passed": true,
-          "output": "> nexus@0.0.0 test\n> node --test 'src/**/*.test.ts'\n\n✔ probe client reconnects after a reset (412ms)\n✔ probe client gives up after the deadline (1.2s)\n✔ backoff stays under its cap (3ms)\nℹ tests 1342\nℹ suites 0\nℹ pass 1342\nℹ fail 0\nℹ duration_ms 84213"
-        },
-        "answers": null
-      }
-    ],
-    "phase": {
-      "kind": "verifying",
-      "startedAt": 1800014040000,
-      "thread": "th-sync-verify"
-    }
-  },
   "reviewView": {
     "id": "rv-57",
+    "pr": 57,
     "head": "g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1g1",
     "ended": false,
+    "phase": {
+      "kind": "verifying"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-sync-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": false,
     "holds": [],
     "press": {
       "kind": "lands",

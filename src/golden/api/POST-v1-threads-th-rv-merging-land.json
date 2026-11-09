@@ -70,6 +70,8 @@
   },
   "said": [
     "review rv-413 of PR #413, started on its own: merging, round 1 of 5, reviewer th-rv-merging-review on gpt-6-astra, landing when approved",
-    "live check passed at 9d9d9d9d9d9d"
+    "live check passed at 9d9d9d9d9d9d",
+    "waived by laptop at 9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d, 2027-01-15T11:56:00.000Z:",
+    "  Always needs the person: changes to secrets, as it changes src/control/secrets.ts."
   ]
 }

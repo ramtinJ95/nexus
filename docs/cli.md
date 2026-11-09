@@ -95,7 +95,7 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `events [--follow] [--since ID] [--thread T] [--project P] [--kind K]...` | `GET /v1/events?since=ID&thread=T&project=P&kind=K`, with `follow=true` and `--follow`, as [Event stream and Claude workers](#event-stream-and-claude-workers) describes | One `NexusEvent` per line |
 | `review <thread> [--pr N] [--rounds N] [--land]` | `POST /v1/threads/<thread>/review` with `{"pr"?: number, "rounds"?: number, "land"?: true}`, which answers 201 | `Review`, the review it started, with `said`, its line and notes as the text prints them, as each review route's reply has |
 | `review --cancel <thread>` | `POST /v1/threads/<thread>/review/cancel` with `{}`. It takes no `--pr`, `--rounds` or `--land` | `Review` with `said`, ended `cancelled` |
-| `land <thread> [--waive]` | `POST /v1/threads/<thread>/land` with `{}`, or with `--waive` `{"head", "waive"?}` read from `GET /v1/threads/<thread>` | `Review` with `said`, moved back to its check. A `--waive` that answered the review's question prints the thread's `review` from `GET /v1/threads/<thread>`, which has no `said` |
+| `land <thread> [--waive]` | `POST /v1/threads/<thread>/land` with `{}`, or with `--waive` `{"head", "waive"?}` read from `GET /v1/threads/<thread>` | `Review` with `said`, moved back to its check. A `--waive` that answered the review's question prints the thread's `reviewView` from `GET /v1/threads/<thread>` |
 | `deploy <commit\|main> [--wait]` | `PUT /v1/release` with `{"commit": string}`, then `GET /v1/release` while waiting | `ReleaseView`, described below |
 | `release` | `GET /v1/release` | `ReleaseView` |
 | `image build [--wait]` | `POST /v1/images/build` with `{}`, then `GET /v1/images` while waiting | `ImageOperation`, the build, or `ImagesView` with `--wait` |
@@ -216,7 +216,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 | `backedUpAt` | optional number | On an archived thread only: when the newest backup the control plane has seen verify began, in milliseconds. Its disk waits for one that began after `usageSettledAt` |
 | `attention`, `desired`, `pylon` | | In `ThreadRow` only. `ThreadDetail` has them at its top level, beside `thread` |
 
-`ThreadDetail` has `thread`, `attention`, `seenAt`, `lastReplyAt`, `desired`, `pylon` (`id`, `node`, `actualState`, `failed`, `observedAt`, `grantsOutdated` and `retryRefused`, why a retry cannot help or null, and since 0.60.0 `notAnswering` while its guest gives no answer to its guest commands), `sessions`, `previews`, `ports`, `outputs`, `prWatch`, `pullRequests`, `review`, since 0.71.0 `reviewView` (what a Land press does to `review` now, described below, or null) and `keptPastDay` (why an archived thread's disk is kept past its 24 hours, or null), `questions` (every question the thread asked, answered or not, as [Questions](#questions) describes), `judgments` (every judgment of its failed pylon, as [Failure judgments](#failure-judgments) describes), `attach`, since 0.73.0 `said` (the sentences plain `show` prints of the thread's state and review: `guest`, `disk`, `usage`, `paused`, `prWatch` and `review`, each null where the state is not, apart from `paused` and `prWatch`), `agent` (`{ parkedTasks }`, or null for a thread without a Nexus agent conversation), and for a Claude worker thread `claudeWorker` (`model`, `state`, optional `message`) and since 0.64.0 `resume`, Nexus resuming its turns that died, or null.
+`ThreadDetail` has `thread`, `attention`, `seenAt`, `lastReplyAt`, `desired`, `pylon` (`id`, `node`, `actualState`, `failed`, `observedAt`, `grantsOutdated` and `retryRefused`, why a retry cannot help or null, and `notAnswering` while its guest gives no answer to its guest commands), `sessions`, `previews`, `ports`, `outputs`, `prWatch`, `pullRequests`, `reviewView` (the thread's latest review as a builder and what a Land press does to it now, described below, or null), `keptPastDay` (why an archived thread's disk is kept past its 24 hours, or null), `questions` (every question the thread asked, answered or not, as [Questions](#questions) describes), `judgments` (every judgment of its failed pylon, as [Failure judgments](#failure-judgments) describes), `attach`, `said` (the sentences plain `show` prints of the thread's state and review: `guest`, `disk`, `usage`, `paused`, `prWatch` and `review`, each null where the state is not, apart from `paused` and `prWatch`), `agent` (`{ parkedTasks }`, or null for a thread without a Nexus agent conversation), and for a Claude worker thread `claudeWorker` (`model`, `state`, optional `message`) and `resume`, Nexus resuming its turns that died, or null.
 
 ### Attention and shared seen state
 
@@ -631,7 +631,7 @@ Both fail with exit code 5 when the control plane has no GitHub token (`github.t
 
 Since 0.45.0 `review --cancel` ends the thread's running review, and prints it. The review ends `{"kind": "cancelled", "who": "person", "by": <caller>}`, its reviewer thread is archived, as a landing archives it, or, when it is in a turn, by a later pass once the turn ends, unless the person has been to it since it started, and a check thread or verify pylon the review holds is thrown away. The builder stays as it is, with its pull request open, and `review` may start a new review of it at once. A running review's refusal of `review` says so. A landing that has begun its merge, the phase `merging` once its `authorized` is set, or is `deploying` or `rolling-back`, is seen through whatever the person asks, so `review --cancel` fails with exit code 5 and says that it ends landed or with the person. So does a review that already ended, except one that ended `needs-person`, and a thread with no review. Since 0.46.0 such a review is cancelled as a running one is, so it no longer waits on the person, which nothing else does once its pull request merged outside it. The dashboard's review line in a builder's Outputs has a Cancel review button, behind a confirmation, while the review may be cancelled. A pass of the review loop that was stepping the review as it was cancelled, or as the person ran `land`, saves nothing over it: the loop saves a step only over the record it read, and the next pass steps from what the person saved.
 
-`ThreadDetail.review` is the thread's latest review as a builder, or null:
+`Review` is a builder's latest review as the control plane stores it, and as the review routes answer it. `GET /v1/threads/<thread>` sends none of it, and serves its public facts as `ThreadDetail.reviewView`, described below:
 
 <!-- types: src/control/review-model.ts Review Talk Outbox SecondReviewer LandRequest Round LiveCheck HeldAt Waiver Phase GateRun HoldCause ModelFailure -->
 ```ts
@@ -804,16 +804,26 @@ Since 0.48.0 a turn that ends because the agent's model failed is not a turn wit
 
 `Verdict` and `Answer` are in [`src/control/review-model.ts`](../src/control/review-model.ts). Each of a verdict's findings has a `priority` of `"P0"` to `"P3"`, as [the merge policy](merge-policy.md) defines them, in place of the `severity` before 0.24.0. A stored finding with `severity` reads `"serious"` as `"P1"` and `"minor"` as `"P3"`. Only P0 to P2 findings block, and the builder answers only those. A verdict's `verdict` is `"approve"` exactly when none of its findings is P0 to P2, whatever the reviewer wrote.
 
-Since 0.71.0 `ThreadDetail.reviewView` says what the merge policy makes of `review` now, so a client shows it without running the policy. It is null when `review` is null. `question` may have been asked at an earlier head than `head`, between a push and the loop's next pass, and Land on it is refused then, so a client that offers it compares the two:
+`ThreadDetail.reviewView` is the thread's latest review as a builder, or null: its public facts, never its `expect` token, `asked` or outbox, and what the merge policy makes of it now, so a client shows it without running the policy. `round` counts the rounds against `maxRounds` as `show` prints `round <n> of <max>`, so it is below the number of `rounds` when an approval was carried to a new head or repeated at the same head. `question` may have been asked at an earlier head than `head`, between a push and the loop's next pass, and Land on it is refused then, so a client that offers it compares the two:
 
 <!-- types: src/control/review-view.ts ReviewView src/control/holds.ts HoldRule src/control/policy.ts LandPress -->
 ```ts
 // src/control/review-view.ts
 interface ReviewView {
   id: string;
+  /** The number of the pull request it reviews. */
+  pr: number;
   /** The latest round's head, which a Land press names. */
   head: string;
   ended: boolean;
+  /** The review's phase, and while it waits on the person, why. */
+  phase: { kind: Exclude<PhaseKind, "needs-person"> } | { kind: "needs-person"; reasons: readonly string[] };
+  /** The rounds that count against `maxRounds`, as `nexus show` counts them, so a carried or repeated approval is not one. */
+  round: number;
+  maxRounds: number;
+  reviewer: { thread: ThreadId; model: string };
+  /** Whether it lands under the merge policy once approved, as `review --land` and `--auto-review land` ask. */
+  landsWhenApproved: boolean;
   /** The holds on the review now, each with whether it meets every landing of the head again and whether the person may waive it. */
   holds: readonly (Hold & HoldRule)[];
   press: LandPress;

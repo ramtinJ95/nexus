@@ -2,53 +2,57 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.74.0
+
+Removes `review`, the stored review record, from `ThreadDetail`, so `GET /v1/threads/<thread>` and `show --json` no longer send the reviewer's token, the loop's asks or its outbox. `reviewView` carries the review's public facts in its place: `pr`, the pull request's number, `phase`, its kind and while it is `needs-person` its `reasons`, `round` and `maxRounds`, `reviewer`, the reviewer thread and its model, and `landsWhenApproved`, as [Reviews and landing](cli.md#reviews-and-landing) describes. `said.review`, and the `said` of the review routes, now also hold a failed live check's last 20 lines of output, what the review needs from the person and its waiver, which the CLI printed from the record. `land --waive` that answered the review's question prints `reviewView` with `--json`, in place of the record. The review routes still answer with the record. The CLI now needs a control plane of 0.74.0 or later.
+
 ## 0.73.0
 
-Adds the sentences the CLI prints of a thread and its review to the replies, worded once by the control plane. `ThreadDetail` gains `said`: what a guest that stopped answering fails and what gives it a fresh VM, why an archived thread's disk is kept, why its token usage is unread, how a paused session resumes, the PR watch's state, and the review's line and notes. The `Review` that `POST /v1/threads/<thread>/review`, `/review/cancel` and `/land` answer gains `said`, the review's line and notes. Every other field is as before. A control plane older than 0.73.0 sends no `said`, so the CLI's `show` prints no guest, disk, usage or PR watch line there, a paused session as `paused`, and a review as its ID with what it needs from the person.
+Adds the sentences the CLI prints of a thread and its review to the replies, worded once by the control plane. `ThreadDetail` gains `said`: what a guest that stopped answering fails and what gives it a fresh VM, why an archived thread's disk is kept, why its token usage is unread, how a paused session resumes, the PR watch's state, and the review's line and notes. The `Review` that `POST /v1/threads/<thread>/review`, `/review/cancel` and `/land` answer gains `said`, the review's line and notes. Every other field is as before.
 
 ## 0.72.0
 
-Adds `Question.kind`, which names what a question is about and how it is answered: `proposal`, `ask`, `holds`, `judgment` or `cleanup`, as [Questions](cli.md#questions) describes. `reserved` is still on every question, and null on every kind but `holds`. Every other field is as before. A control plane older than 0.72.0 sends no `kind`, which the CLI does not need.
+Adds `Question.kind`, which names what a question is about and how it is answered: `proposal`, `ask`, `holds`, `judgment` or `cleanup`, as [Questions](cli.md#questions) describes. `reserved` is still on every question, and null on every kind but `holds`. Every other field is as before.
 
 ## 0.71.0
 
-Adds what the clients worked out from the stored records to the replies. `ThreadDetail` gains `reviewView`, the merge policy's answer for the thread's review: its holds, what a Land press does, and the review's open question about its holds. It also gains `keptPastDay`, why an archived thread's disk is kept past its 24 hours. `ReleaseView` gains `controlNode`, the node the control plane runs on. Each frame of `GET /v1/threads/<thread>/events` gains `busy`, whether the agent's run is working and how many messages wait for it, on the first frame and whenever it changed. `review` and every other field are as before. A control plane older than 0.71.0 sends none of the four, so the CLI's `show` prints no disk line there, and `land --waive` refuses.
+Adds what the clients worked out from the stored records to the replies. `ThreadDetail` gains `reviewView`, the merge policy's answer for the thread's review: its holds, what a Land press does, and the review's open question about its holds. It also gains `keptPastDay`, why an archived thread's disk is kept past its 24 hours. `ReleaseView` gains `controlNode`, the node the control plane runs on. Each frame of `GET /v1/threads/<thread>/events` gains `busy`, whether the agent's run is working and how many messages wait for it, on the first frame and whenever it changed. `review` and every other field are as before.
 
 ## 0.70.0
 
-Adds `status=queued` to `GET /v1/queued`, which leaves out cancelled and deleted queued threads, and `cancelled=false` to `GET /v1/items`, which leaves out cancelled items. `threads` and `items` ask for them rather than filtering the reply, unless `--all` is given. A control plane older than 0.70.0 ignores both, so `threads` and `items` there also list what was cancelled.
+Adds `status=queued` to `GET /v1/queued`, which leaves out cancelled and deleted queued threads, and `cancelled=false` to `GET /v1/items`, which leaves out cancelled items. `threads` and `items` ask for them rather than filtering the reply, unless `--all` is given.
 
 ## 0.69.0
 
-Adds the code `queued` to the 409 a thread route answers for a thread that has not started, and makes the clients branch on `code` and `retryable` rather than on the status: `show` reads `GET /v1/queued/<thread>` only after a 409 with code `queued`, and the CLI's and the dashboard's waits for a running pylon try again only a refusal whose `retryable` is true, so they now also wait through `draining`, and the dashboard no longer waits out a 409 that no wait fixes, such as `blocked`. `events --follow`, `watch` and `attach` reconnect on one schedule: 1 second, then twice as long each time, up to 30 seconds, and `watch` up to its interval. A control plane older than 0.69.0 sends no `queued`, so `show` of a queued thread fails with exit code 5, and one older than 0.68.0 sends no `retryable`, so a wait for a paused pylon fails at once with exit code 5.
+Adds the code `queued` to the 409 a thread route answers for a thread that has not started, and makes the clients branch on `code` and `retryable` rather than on the status: `show` reads `GET /v1/queued/<thread>` only after a 409 with code `queued`, and the CLI's and the dashboard's waits for a running pylon try again only a refusal whose `retryable` is true, so they now also wait through `draining`, and the dashboard no longer waits out a 409 that no wait fixes, such as `blocked`. `events --follow`, `watch` and `attach` reconnect on one schedule: 1 second, then twice as long each time, up to 30 seconds, and `watch` up to its interval.
 
 ## 0.68.0
 
-Adds `retryable` to the API's error body, and sets `code` on every error reply, null where the API sends no code, so the body is `{"error": string, "code": string | null, "retryable": boolean}`, as [Failures](cli.md#failures) describes. It also adds the codes `draining`, `probe-unreachable` and `probe-forbidden`. A control plane older than 0.68.0 sends no `retryable`, sends `code` only where it is set, and sends none of these three codes. The CLI reads a missing `code` as null, so it acts the same with either.
+Adds `retryable` to the API's error body, and sets `code` on every error reply, null where the API sends no code, so the body is `{"error": string, "code": string | null, "retryable": boolean}`, as [Failures](cli.md#failures) describes. It also adds the codes `draining`, `probe-unreachable` and `probe-forbidden`.
 
 ## 0.67.0
 
-Adds yolo landing: `project edit --auto-review yolo`, and `--auto-review` on `project add`, under which the review loop answers each review's holds question with Land for the deployer who turned it on, as [Yolo landing](merge-policy.md#yolo-landing) describes. `Project.autoReview` is now `{ mode, enabledBy }`, `mode` being `review`, `land` or `yolo`, and `PATCH /v1/projects/<id>` takes `autoReview: { mode }`, and still `{ land }`. `Waiver.yolo` names the project whose setting gave a waiver, which `show` prints and the `review.waived` event carries. A control plane older than 0.67.0 refuses `{ mode }` with 400, so `--auto-review` fails with exit code 64, and sends `{ land, enabledBy }`, which the CLI reads as the mode it means.
+Adds yolo landing: `project edit --auto-review yolo`, and `--auto-review` on `project add`, under which the review loop answers each review's holds question with Land for the deployer who turned it on, as [Yolo landing](merge-policy.md#yolo-landing) describes. `Project.autoReview` is now `{ mode, enabledBy }`, `mode` being `review`, `land` or `yolo`, and `PATCH /v1/projects/<id>` takes `autoReview: { mode }`, and still `{ land }`. `Waiver.yolo` names the project whose setting gave a waiver, which `show` prints and the `review.waived` event carries.
 
 ## 0.66.0
 
-Adds a second reviewer on another model: `project edit --second-reviewer off|on|always|reserved,lines=N`, `Project.secondReview` and `secondReview` in `PATCH /v1/projects/<id>`, `Review.second`, `Round.secondVerdict`, the hold `no-second-reviewer`, `second` in the `review.changed` event, and the line `show` prints of both reviewers' verdicts, as [Reviews and landing](cli.md#reviews-and-landing) and [Project editing](cli.md#project-editing) describe. A control plane older than 0.66.0 refuses `secondReview` with 400, so `--second-reviewer` fails with exit code 64.
+Adds a second reviewer on another model: `project edit --second-reviewer off|on|always|reserved,lines=N`, `Project.secondReview` and `secondReview` in `PATCH /v1/projects/<id>`, `Review.second`, `Round.secondVerdict`, the hold `no-second-reviewer`, `second` in the `review.changed` event, and the line `show` prints of both reviewers' verdicts, as [Reviews and landing](cli.md#reviews-and-landing) and [Project editing](cli.md#project-editing) describe.
 
 ## 0.65.0
 
-Adds `Question.holds`, the question a review asks about the holds at its head that the person may waive, as soon as Nexus knows them, and makes `land --waive` answer it with `Land`, through `POST /v1/questions/<id>/answer`, while the review still runs too, as [Questions](cli.md#questions) and [Reviews and landing](cli.md#reviews-and-landing) describe. A control plane older than 0.65.0 asks no such question, and `land --waive` sends to the land route as before.
+Adds `Question.holds`, the question a review asks about the holds at its head that the person may waive, as soon as Nexus knows them, and makes `land --waive` answer it with `Land`, through `POST /v1/questions/<id>/answer`, while the review still runs too, as [Questions](cli.md#questions) and [Reviews and landing](cli.md#reviews-and-landing) describe.
 
 ## 0.64.0
 
-Adds `Thread.turnDied`, `ThreadDetail.resume`, the `thread.resumed` event, the `decision` attention for a Claude worker whose turns Nexus stopped resuming, and the `turn died:` and `resume:` lines of `show`, as [Turns that died](cli.md#turns-that-died) describes. A control plane older than 0.64.0 sends none of them and resumes no turn.
+Adds `Thread.turnDied`, `ThreadDetail.resume`, the `thread.resumed` event, the `decision` attention for a Claude worker whose turns Nexus stopped resuming, and the `turn died:` and `resume:` lines of `show`, as [Turns that died](cli.md#turns-that-died) describes.
 
 ## 0.63.0
 
-Adds a project's standing rules, Markdown the person sets once that each builder thread the project starts gets with its first message: `Project.standingRules`, `standingRules` in `POST /v1/projects` and `PATCH /v1/projects/<id>`, `Thread.standingRulesRevision` and the `standing rules:` line of `show`, `project show`, `project add --rules-file`, and `project edit --rules-file` and `--clear-rules`, as [Standing rules](cli.md#standing-rules) describes. A control plane older than 0.63.0 refuses `standingRules` with 400, so the rules flags fail with exit code 64. `project show` reads only `GET /v1/projects`, which every control plane the CLI reads has.
+Adds a project's standing rules, Markdown the person sets once that each builder thread the project starts gets with its first message: `Project.standingRules`, `standingRules` in `POST /v1/projects` and `PATCH /v1/projects/<id>`, `Thread.standingRulesRevision` and the `standing rules:` line of `show`, `project show`, `project add --rules-file`, and `project edit --rules-file` and `--clear-rules`, as [Standing rules](cli.md#standing-rules) describes.
 
 ## 0.62.0
 
-Makes `start --branch` refuse a branch the project's remote does not have, with exit code 64, the error code `no-branch` and nothing booted, as [the start notes](cli.md#commands) describe, and holds such a queued thread for the person, as [When it starts](cli.md#when-it-starts) describes. A control plane older than 0.62.0 starts the thread, whose pylon then fails its setup. It also adds `Question.failure` and `Question.withdrawn`, and makes archiving a thread withdraw its open failure question and drop its `failed` attention, as [Failure judgments](cli.md#failure-judgments) describes.
+Makes `start --branch` refuse a branch the project's remote does not have, with exit code 64, the error code `no-branch` and nothing booted, as [the start notes](cli.md#commands) describe, and holds such a queued thread for the person, as [When it starts](cli.md#when-it-starts) describes. It also adds `Question.failure` and `Question.withdrawn`, and makes archiving a thread withdraw its open failure question and drop its `failed` attention, as [Failure judgments](cli.md#failure-judgments) describes.
 
 ## 0.61.0
 
@@ -56,7 +60,7 @@ Adds `land --waive`, which reads the thread's review, shows the person the holds
 
 ## 0.60.0
 
-Adds `ThreadDetail.pylon.notAnswering`, `{ since, timeouts }`, set while the pylon's node reports that at least 3 guest commands in a row got no answer from its guest, and the `guest:` line `show` prints for it, as [Node diagnostics](cli.md#node-diagnostics) describes. A control plane older than 0.60.0 sends none, and changes no route.
+Adds `ThreadDetail.pylon.notAnswering`, `{ since, timeouts }`, set while the pylon's node reports that at least 3 guest commands in a row got no answer from its guest, and the `guest:` line `show` prints for it, as [Node diagnostics](cli.md#node-diagnostics) describes.
 
 ## 0.59.0
 
@@ -68,19 +72,19 @@ Lowers the memory `project add` gives a project without `--memory` from 6 to 4 G
 
 ## 0.57.0
 
-Replaces the daily reports with health alerts: it drops `GET /v1/reports` and `GET /v1/reports/<id|latest>`, and adds `GET /v1/checks`, `GET /v1/checks/changes`, `POST /v1/checks/seen`, `HealthView`, `HealthChange` and the `health.changed` event, as [Doctor](cli.md#doctor) describes. The CLI calls none of them. A control plane older than 0.57.0 has no `/v1/checks`, which answers 404, and one of 0.57.0 or later has no `/v1/reports`.
+Replaces the daily reports with health alerts: it drops `GET /v1/reports` and `GET /v1/reports/<id|latest>`, and adds `GET /v1/checks`, `GET /v1/checks/changes`, `POST /v1/checks/seen`, `HealthView`, `HealthChange` and the `health.changed` event, as [Doctor](cli.md#doctor) describes. The CLI calls none of them.
 
 ## 0.56.0
 
-Adds `GET /v1/nodes/<name>/metrics` and `NodeMetrics`, a node's health as the control plane recorded it, once a minute and each time something else read it, for the dashboard's Cluster page to graph, as [Node diagnostics](cli.md#node-diagnostics) describes. The CLI does not call it. A control plane older than 0.56.0 has no such route, which answers 404.
+Adds `GET /v1/nodes/<name>/metrics` and `NodeMetrics`, a node's health as the control plane recorded it, once a minute and each time something else read it, for the dashboard's Cluster page to graph, as [Node diagnostics](cli.md#node-diagnostics) describes. The CLI does not call it.
 
 ## 0.55.0
 
-Makes `attach` reconnect when its link drops or the control plane stops, such as for a deploy, rather than exit, as [the commands](cli.md#commands) describe. It also adds `doctor`, as [Doctor](cli.md#doctor) describes. A control plane older than 0.55.0 answers `doctor` with 404, `no route /v1/doctor`.
+Makes `attach` reconnect when its link drops or the control plane stops, such as for a deploy, rather than exit, as [the commands](cli.md#commands) describe. It also adds `doctor`, as [Doctor](cli.md#doctor) describes.
 
 ## 0.54.0
 
-Adds the filesystems Nexus writes to on a node: `disks` in `NodeSummary.capacity` and in `NodeHealth`, the `disk low at` that plain `nodes` prints for a low one, and a `disk:` line per filesystem from `node`, as [Placement](cli.md#placement) and [Node diagnostics](cli.md#node-diagnostics) describe. It also makes a start on a node it or its project names fail with exit code 5 when the node's pylons' filesystem would keep too little free. A control plane older than 0.54.0 sends no `disks`, and the CLI prints what it printed before.
+Adds the filesystems Nexus writes to on a node: `disks` in `NodeSummary.capacity` and in `NodeHealth`, the `disk low at` that plain `nodes` prints for a low one, and a `disk:` line per filesystem from `node`, as [Placement](cli.md#placement) and [Node diagnostics](cli.md#node-diagnostics) describe. It also makes a start on a node it or its project names fail with exit code 5 when the node's pylons' filesystem would keep too little free.
 
 ## 0.53.0
 

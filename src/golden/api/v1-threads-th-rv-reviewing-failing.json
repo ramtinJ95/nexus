@@ -70,65 +70,21 @@
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-411",
-    "builder": "th-rv-reviewing-failing",
-    "reviewer": "th-rv-reviewing-failing-review",
-    "pr": {
-      "repo": "ramtinJ95/nexus",
-      "number": 411,
-      "url": "https://github.com/ramtinJ95/nexus/pull/411",
-      "title": "fix(probe): report a full disk before a boot fails",
-      "branch": "nexus/411"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": null,
-    "auto": true,
-    "merged": null,
-    "waiver": null,
-    "expect": "rv-411:t",
-    "sent": 2,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013800000,
-    "nudges": 0,
-    "startedAt": 1800007200000,
-    "rounds": [
-      {
-        "head": "2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b",
-        "base": "main",
-        "verdict": null,
-        "check": null,
-        "answers": null,
-        "secondVerdict": null
-      }
-    ],
-    "phase": {
-      "kind": "reviewing",
-      "failing": {
-        "count": 2,
-        "last": "429 Too Many Requests: rate limit reached for gpt-6-astra",
-        "retryAt": 1800014580000
-      }
-    },
-    "second": {
-      "kind": "starting",
-      "rule": "the change touches src/probe/",
-      "model": "claude-sonnet-5-5",
-      "since": 1800013500000,
-      "tried": 1800014100000,
-      "why": "no node had room for a 4 GiB pylon"
-    }
-  },
   "reviewView": {
     "id": "rv-411",
+    "pr": 411,
     "head": "2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b",
     "ended": false,
+    "phase": {
+      "kind": "reviewing"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-rv-reviewing-failing-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": false,
     "holds": [],
     "press": {
       "kind": "lands",

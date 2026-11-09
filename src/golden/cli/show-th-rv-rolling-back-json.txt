@@ -71,70 +71,21 @@ exit 0
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-416",
-    "builder": "th-rv-rolling-back",
-    "reviewer": "th-rv-rolling-back-review",
-    "pr": {
-      "repo": "ramtinJ95/nexus",
-      "number": 416,
-      "url": "https://github.com/ramtinJ95/nexus/pull/416",
-      "title": "perf(registry): index events by thread",
-      "branch": "nexus/416"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": {
-      "requestedBy": "laptop"
-    },
-    "auto": true,
-    "merged": "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2",
-    "waiver": null,
-    "expect": "rv-416:t",
-    "sent": 2,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013800000,
-    "nudges": 0,
-    "startedAt": 1800007200000,
-    "rounds": [
-      {
-        "head": "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "approve",
-          "findings": [],
-          "reserved": [],
-          "notCheckedLive": null
-        },
-        "check": {
-          "passed": true,
-          "output": "ℹ tests 412\nℹ pass 412\nℹ fail 0"
-        },
-        "answers": null,
-        "live": {
-          "kind": "absent"
-        }
-      }
-    ],
-    "phase": {
-      "kind": "rolling-back",
-      "commit": "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2",
-      "previous": "fafafafafafafafafafafafafafafafafafafafa",
-      "why": "rj-firebat's control plane did not turn healthy in 5 minutes: the migration timed out",
-      "requested": true,
-      "deadline": 1800014760000
-    }
-  },
   "reviewView": {
     "id": "rv-416",
+    "pr": 416,
     "head": "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
     "ended": false,
+    "phase": {
+      "kind": "rolling-back"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-rv-rolling-back-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": true,
     "holds": [],
     "press": {
       "kind": "lands",

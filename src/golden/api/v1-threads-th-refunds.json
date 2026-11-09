@@ -81,67 +81,21 @@
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-90",
-    "builder": "th-refunds",
-    "reviewer": "th-refunds-review",
-    "pr": {
-      "repo": "ramtinJ95/storefront",
-      "number": 90,
-      "url": "https://github.com/ramtinJ95/storefront/pull/90",
-      "title": "test: end-to-end refund flow",
-      "branch": "nexus/90"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": null,
-    "auto": true,
-    "merged": null,
-    "waiver": null,
-    "expect": "rv-90:t",
-    "sent": 3,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013200000,
-    "nudges": 0,
-    "startedAt": 1800003600000,
-    "rounds": [
-      {
-        "head": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "approve",
-          "findings": [
-            {
-              "id": "N1",
-              "priority": "P3",
-              "where": "e2e/refund.spec.ts",
-              "summary": "The fixtures could share a factory.",
-              "detail": null
-            }
-          ],
-          "reserved": [],
-          "notCheckedLive": null
-        },
-        "check": null,
-        "answers": null
-      }
-    ],
-    "phase": {
-      "kind": "checking",
-      "startedAt": 1800014160000,
-      "thread": "th-refunds-check"
-    }
-  },
   "reviewView": {
     "id": "rv-90",
+    "pr": 90,
     "head": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1",
     "ended": false,
+    "phase": {
+      "kind": "checking"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-refunds-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": false,
     "holds": [],
     "press": {
       "kind": "lands",

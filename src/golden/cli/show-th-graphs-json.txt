@@ -130,7 +130,6 @@ exit 0
       "conflict": false
     }
   ],
-  "review": null,
   "reviewView": null,
   "questions": [],
   "judgments": [],

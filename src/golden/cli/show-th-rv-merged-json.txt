@@ -71,65 +71,21 @@ exit 0
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-98",
-    "builder": "th-rv-merged",
-    "reviewer": "th-rv-merged-review",
-    "pr": {
-      "repo": "ramtinJ95/storefront",
-      "number": 98,
-      "url": "https://github.com/ramtinJ95/storefront/pull/98",
-      "title": "fix(emails): the receipt's VAT line",
-      "branch": "nexus/98"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": null,
-    "auto": true,
-    "merged": null,
-    "waiver": null,
-    "expect": "rv-98:t",
-    "sent": 2,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013800000,
-    "nudges": 0,
-    "startedAt": 1800007200000,
-    "rounds": [
-      {
-        "head": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "changes",
-          "findings": [
-            {
-              "id": "F1",
-              "priority": "P2",
-              "where": "src/emails/receipt.tsx",
-              "summary": "VAT rounds per line.",
-              "detail": null
-            }
-          ],
-          "reserved": [],
-          "notCheckedLive": null
-        },
-        "check": null,
-        "answers": null
-      }
-    ],
-    "phase": {
-      "kind": "merged"
-    }
-  },
   "reviewView": {
     "id": "rv-98",
+    "pr": 98,
     "head": "f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0",
     "ended": true,
+    "phase": {
+      "kind": "merged"
+    },
+    "round": 1,
+    "maxRounds": 5,
+    "reviewer": {
+      "thread": "th-rv-merged-review",
+      "model": "gpt-6-astra"
+    },
+    "landsWhenApproved": false,
     "holds": [],
     "press": {
       "kind": "lands",

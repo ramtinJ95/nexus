@@ -1,4 +1,4 @@
-import type { ThreadDetail } from "../wire.ts";
+import type { ServerDetail, ThreadDetail } from "../wire.ts";
 import type { Thread } from "../thread-store.ts";
 import type { TailnetNodeId, ThreadId } from "../../ids.ts";
 import { blocks as blocking, cancellable, cannotLand, findingsOf, pushedHead, type Review } from "../review-model.ts";
@@ -162,7 +162,7 @@ ${aq.options.map((o, j) => html`<div class="ask-opt"><label><input type="${aq.mu
  * the pull request, which its head and strip say, and folds what the person need not read to decide. `lands` is whether
  * the thread's project lands its reviews on its own.
  */
-export function landing(c: Context, d: ThreadDetail, lands: boolean, place: Place = "page"): Html | null {
+export function landing(c: Context, d: ServerDetail, lands: boolean, place: Place = "page"): Html | null {
   const r = d.review;
   if (r == null) return null;
   const card = place === "inbox";
@@ -245,7 +245,7 @@ ${moved !== null ? html`<p class="land-note">The PR watch last read the pull req
  * One that merged or closed outside the review has nothing left to review. Cancelling it ends it for the person, who
  * then owns the pull request, and archives its reviewer.
  */
-function heldReview(c: Context, d: ThreadDetail, r: Review, pr: ReturnType<typeof reviewPr>, land: boolean, place: Place): Html {
+function heldReview(c: Context, d: ServerDetail, r: Review, pr: ReturnType<typeof reviewPr>, land: boolean, place: Place): Html {
   const card = place === "inbox";
   const id = namer(place, d.thread.id);
   const outside = pr === undefined || pr.state === "open" ? null : pr.state;
