@@ -90,54 +90,6 @@ test("a node rerun keeps a control plane URL the person set, since the remote po
   assert.equal(written.get(paths.controlPlane)!.state, "unchanged");
 });
 
-test("a rerun over an install from before control-plane.json writes it from probe.json and deployer.json, and leaves their old keys", () => {
-  const first = onDisk(files(run(["--node", "rj-firebat"], fresh, nodeTailnet)));
-  const { controlPlane: _, ...rest } = first;
-  const old: Existing = {
-    ...rest,
-    probe: { ...(first.probe as Record<string, any>), auth: { controlPlane: "nBench1CNTRL", peers: ["nBench1CNTRL"] } },
-    deployer: { ...(first.deployer as Record<string, Json>), controlUrl: "http://rj-firebat.tail1234.ts.net:7471/", controlNodeId: "nBench1CNTRL" },
-  };
-  const written = files(run(["--node", "rj-firebat"], old, nodeTailnet));
-  assert.equal(written.get(paths.controlPlane)!.state, "new");
-  assert.deepEqual(value(written, paths.controlPlane), { tailnetNodeId: "nBench1CNTRL", url: "http://rj-firebat.tail1234.ts.net:7471/" }, "the URL the person set carries over");
-  assert.equal(value(written, paths.probe).auth.controlPlane, "nBench1CNTRL", "a rollback still finds what it reads");
-  assert.equal(value(written, paths.deployer).controlUrl, "http://rj-firebat.tail1234.ts.net:7471/");
-  assert.deepEqual([...written.keys()], [paths.controlPlane, paths.probe, paths.deployer]);
-  assert.equal(files(run(["--node", "rj-firebat"], onDisk(written), nodeTailnet)).get(paths.controlPlane)!.state, "unchanged");
-});
-
-test("a rerun over an install whose probe.json and deployer.json name different control planes refuses and writes nothing", () => {
-  for (const args of [["--node", "rj-firebat"], ["--dotfiles", dotfiles]]) {
-    const net = args[0] === "--node" ? nodeTailnet : tailnet;
-    const { controlPlane: _, ...first } = onDisk(files(run(args, fresh, net)));
-    const self = args[0] === "--node" ? "nBench1CNTRL" : "nSelf1CNTRL";
-    const old: Existing = {
-      ...first,
-      probe: { ...(first.probe as Record<string, any>), auth: { controlPlane: self, peers: [] } },
-      deployer: { ...(first.deployer as Record<string, Json>), controlUrl: "http://100.64.0.9:7470/", controlNodeId: "nOther1CNTRL" },
-    };
-    const result = run(args, old, net);
-    assert.equal(result.ok, false, "no file is written");
-    assert.match(result.ok ? "" : result.errors.join("\n"), /auth\.controlPlane "n\w+" and deployer\.json's controlNodeId "nOther1CNTRL" name different control planes/);
-  }
-});
-
-test("a rerun over an install whose probe.json alone names the control plane carries it over", () => {
-  const { controlPlane: _, deployer: __, ...first } = onDisk(files(run(["--node", "rj-firebat"], fresh, nodeTailnet)));
-  const old: Existing = { ...first, probe: { ...(first.probe as Record<string, any>), auth: { controlPlane: "nBench1CNTRL", peers: [] } } };
-  assert.deepEqual(value(files(run(["--node", "rj-firebat"], old, nodeTailnet)), paths.controlPlane), { tailnetNodeId: "nBench1CNTRL", url: "http://rj-firebat.tail1234.ts.net:7470/" });
-});
-
-test("a probe.json from before the artifact store keeps its images and gains no artifacts beside them", () => {
-  const first = onDisk(files(run(["--dotfiles", dotfiles])));
-  const { artifacts: _, ...backend } = (first.probe as Record<string, any>).backend;
-  const legacy = { ...(first.probe as Record<string, Json>), backend: { ...backend, images: { "img-0123456789ab": "/var/lib/nexus/images/img-0123456789ab" } } };
-  const written = files(run([], { ...first, probe: legacy }));
-  assert.equal(parseProbeConfig(JSON.stringify(value(written, paths.probe))).backend.artifacts, "/var/lib/nexus/images");
-  assert.equal(written.get(paths.probe)!.state, "unchanged");
-});
-
 test("a deployer.json that lacks a token gains one, and the report never prints it", () => {
   const first = onDisk(files(run(["--dotfiles", dotfiles])));
   const { token: _, ...deployer } = first.deployer as Record<string, Json>;
@@ -247,10 +199,8 @@ test("every control-role mistake is reported together", () => {
 test("a first control install needs --dotfiles, and a node cannot become a control plane by accident", () => {
   assert.match(errors(run([])).join("\n"), /--dotfiles <git url> is needed/);
   assert.match(errors(run(["--join", "token", "--dotfiles", dotfiles])).join("\n"), /--join needs --node <the control plane's tailnet name>/);
-  const nodeProbe: Existing = { gitKey: false, probe: { auth: { controlPlane: "nBench1CNTRL", peers: [] } } };
-  assert.match(errors(run(["--dotfiles", dotfiles], nodeProbe)).join("\n"), /already a node of the control plane infra-testbench\. Pass --node infra-testbench/);
   const nodeControlPlane: Existing = { gitKey: false, controlPlane: { tailnetNodeId: "nBench1CNTRL", url: "http://infra-testbench.tail1234.ts.net:7470/" } };
-  assert.match(errors(run(["--dotfiles", dotfiles], nodeControlPlane)).join("\n"), /already a node of the control plane infra-testbench/);
+  assert.match(errors(run(["--dotfiles", dotfiles], nodeControlPlane)).join("\n"), /already a node of the control plane infra-testbench\. Pass --node infra-testbench/);
 });
 
 test("control-only flags and this machine as --node are refused for a node install", () => {

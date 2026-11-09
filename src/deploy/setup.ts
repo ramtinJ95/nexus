@@ -233,26 +233,13 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
 
   if (flags.node === undefined) {
     if (existing.control === undefined && flags.dotfiles === undefined) errors.push("--dotfiles <git url> is needed on the first control install: the dotfiles repository every new pylon pulls on boot");
-    const probeOnDisk = isObject(existing.probe) ? existing.probe : undefined;
-    const servedControl = isObject(existing.controlPlane) ? existing.controlPlane.tailnetNodeId : isObject(probeOnDisk?.auth) ? probeOnDisk.auth.controlPlane : undefined;
+    const servedControl = isObject(existing.controlPlane) ? existing.controlPlane.tailnetNodeId : undefined;
     if (existing.control === undefined && typeof servedControl === "string" && servedControl !== self.id) {
       const known = tailnet.peers.find((p) => p.id === servedControl);
       errors.push(`this machine is already a node of the control plane ${known?.name ?? servedControl}. Pass --node ${known?.name ?? "<control device>"}`);
     }
   }
   if (flags.dotfiles?.startsWith("https://") && !URL.canParse(flags.dotfiles)) errors.push(`--dotfiles ${flags.dotfiles}: not a valid https:// URL`);
-
-  // An install from before control-plane.json named the control plane in probe.json and deployer.json. What they name
-  // carries over, and two different names are refused rather than one picked, as the deployer's upgrade refuses them.
-  const probeTrusted = isObject(existing.probe) && isObject(existing.probe.auth) ? existing.probe.auth.controlPlane : undefined;
-  const legacy: JsonObject | undefined = existing.controlPlane !== undefined ? undefined : {
-    ...probeTrusted === undefined ? {} : { tailnetNodeId: probeTrusted },
-    ...deployerOnDisk?.controlNodeId === undefined ? {} : { tailnetNodeId: deployerOnDisk.controlNodeId },
-    ...deployerOnDisk?.controlUrl === undefined ? {} : { url: deployerOnDisk.controlUrl },
-  };
-  if (legacy !== undefined && probeTrusted !== undefined && deployerOnDisk?.controlNodeId !== undefined && !isDeepStrictEqual(probeTrusted, deployerOnDisk.controlNodeId)) {
-    errors.push(`probe.json's auth.controlPlane ${JSON.stringify(probeTrusted)} and deployer.json's controlNodeId ${JSON.stringify(deployerOnDisk.controlNodeId)} name different control planes. Name the one to trust with sudo deploy/set-control-plane.sh <tailnet node ID> <url>, then rerun`);
-  }
 
   if (errors.length > 0) return { ok: false, errors };
 
@@ -288,11 +275,8 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
     controlUrl = `http://${urlHost(String(listen.host))}:${String(listen.port)}/`;
   }
 
-  const carried = legacy === undefined || Object.keys(legacy).length === 0 ? undefined : legacy;
-  const trusted = file(paths.controlPlane, 0o644, existing.controlPlane ?? carried, { tailnetNodeId: controlId, url: controlUrl }, control === undefined ? ["tailnetNodeId", "url"] : []);
-  files.push(existing.controlPlane === undefined ? { ...trusted, state: "new" } : trusted);
+  files.push(file(paths.controlPlane, 0o644, existing.controlPlane, { tailnetNodeId: controlId, url: controlUrl }, control === undefined ? ["tailnetNodeId", "url"] : []));
 
-  const existingBackend = isObject(existing.probe) ? existing.probe.backend : undefined;
   files.push(file(paths.probe, 0o644, existing.probe, {
     node: self.name,
     listen: { host: self.ip, port: ports.probe },
@@ -300,8 +284,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
     backend: {
       kind: "pylon-vm",
       stateRoot: `${stateDirs.probe}/pylons`,
-      // A probe.json from before the artifact store names its store through `images`, which the probe refuses beside `artifacts`.
-      ...isObject(existingBackend) && "images" in existingBackend ? {} : { artifacts: paths.artifacts },
+      artifacts: paths.artifacts,
       ...existing.gitKey ? { gitSsh: { privateKeyFile: paths.gitKey, knownHostsFile: paths.gitKnownHosts } } : {},
     },
     secretsFile: paths.secrets,

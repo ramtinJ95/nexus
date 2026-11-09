@@ -1,4 +1,4 @@
-import { busyDrainReason, type DesiredRelease, type ReleaseReport, type Role } from "../protocol/deploy.ts";
+import type { DesiredRelease, ReleaseReport, Role } from "../protocol/deploy.ts";
 
 export interface ReleaseHealth { commit: string | null; healthy: boolean }
 /** An outcome the worker recorded at a commit: its journal's transaction, or the target of its last report. */
@@ -25,7 +25,7 @@ export type DeployStep =
 /** The first attempt that failed or rolled back at the desired commit, which holds that commit back until another is requested. */
 export function quarantined(desired: DesiredRelease | null, attempts: readonly Attempt[]): Attempt | null {
   if (desired === null) return null;
-  return attempts.find((a) => a.commit === desired.commit && (a.state === "rolled-back" || a.state === "failed") && !busyDrainReason(a.reason)) ?? null;
+  return attempts.find((a) => a.commit === desired.commit && (a.state === "rolled-back" || a.state === "failed")) ?? null;
 }
 
 /** Control runs `commit` and is healthy there, which a probe waits for before it installs `commit`. */

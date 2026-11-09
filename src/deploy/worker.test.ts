@@ -437,7 +437,6 @@ test("busy turns outlast the old timeout across polls without quarantine, then a
       return program === "journalctl" ? "candidate API failed" : "";
     },
   };
-  await writeFile(join(dir, "control-deploy-report.json"), JSON.stringify({ target: commit, state: "failed", reason: "Error: agent turn still running at drain timeout" }));
   for (let poll = 0; poll < 2; poll++) {
     await reconcileRole("control", config, api, boundary);
     assert.equal(reports.at(-1).state, "waiting-for-idle");
