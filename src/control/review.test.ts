@@ -1467,16 +1467,15 @@ test("the code that enforces the policy, the dependency manifests and what the c
     assert.deepEqual(changed(path), [`Always needs the person: changes to login or auth, as it changes ${path}.`], `${path} enforces the policy`);
   }
   assert.deepEqual(changed("package-lock.json", '@@ -10,3 +10,3 @@\n-      "version": "8.22.0",\n+      "version": "8.22.1",'), ["Always needs the person: changes to secrets, as it changes package-lock.json."], "a release installs the lockfile as root");
-  const manifest = (...lines: string[]) => changed("package.json", lines.join("\n"));
   const secrets = ["Always needs the person: changes to secrets, as it changes package.json."];
-  assert.deepEqual(manifest("@@ -9,3 +9,4 @@", '   "scripts": {', '+    "postinstall": "sh evil.sh",', '     "build": "node src/control/dashboard/build.ts",'), secrets, "a script a release runs as root");
-  assert.deepEqual(manifest("@@ -30,3 +30,4 @@", '     "@earendil-works/chord": "1.4.0",', '+    "left-pad": "1.3.0",', '     "@earendil-works/gondolin": "0.13.0",'), secrets, "a dependency in a hunk that does not show its section");
-  assert.deepEqual(manifest("@@ -20,3 +20,3 @@", '   "devDependencies": {', '-    "esbuild": "0.28.2",', '+    "esbuild": "0.28.3",'), secrets);
-  assert.deepEqual(manifest("@@ -42,3 +42,3 @@", '   "overrides": {', '-    "undici": "7.30.1"', '+    "undici": "7.30.2"'), secrets);
-  assert.deepEqual(manifest("@@ -5,4 +5,4 @@", '-  "engines": {', '+  "scripts": {', '+    "install": "sh evil.sh"', '-    "node": ">=26"'), secrets, "an added line is in the section the file after the change puts it in");
-  assert.deepEqual(manifest("@@ -1,8 +1,8 @@", '   "name": "nexus",', '-  "version": "0.0.0",', '+  "version": "0.0.1",', '   "private": true,', '   "type": "module",', '   "engines": {', '-    "node": ">=26"', '+    "node": ">=26.1"', "   },", '   "scripts": {'), [], "the version and the engines change nothing a release runs");
-  assert.deepEqual(manifest("@@ -42,4 +42,5 @@", '   "overrides": {', '     "undici": "7.30.1"', "   },", '+  "description": "x", "scripts": { "postinstall": "sh evil.sh" },', " }"), secrets, "a second key on a line, whose later scripts npm reads");
-  assert.deepEqual(manifest("@@ -42,4 +42,5 @@", '   "overrides": {', '     "undici": "7.30.1"', "   },", '+  "scr\\u0069pts": {', '+    "postinstall": "sh evil.sh"', "+  },", " }"), secrets, "a key spelled with an escape");
+  // A hunk does not show how deep in the JSON its lines are, so no reading of one proves a line outside scripts and the dependencies.
+  for (const patch of [
+    '@@ -9,3 +9,4 @@\n   "scripts": {\n+    "postinstall": "sh evil.sh",\n     "build": "node src/control/dashboard/build.ts",',
+    '@@ -30,3 +30,4 @@\n     "@earendil-works/chord": "1.4.0",\n+    "left-pad": "1.3.0",\n     "@earendil-works/gondolin": "0.13.0",',
+    '@@ -7,6 +7,7 @@\n     "node": ">=26"\n   },\n   "scripts": {\n+  "postinstall": "sh evil.sh",\n     "build": "node src/control/dashboard/build.ts",',
+    '@@ -42,4 +42,5 @@\n   "overrides": {\n     "undici": "7.30.1"\n   },\n+  "description": "x", "scripts": { "postinstall": "sh evil.sh" },\n }',
+    '@@ -1,4 +1,4 @@\n {\n   "name": "nexus",\n-  "version": "0.0.0",\n+  "version": "0.0.1",',
+  ]) assert.deepEqual(changed("package.json", patch), secrets, patch);
   assert.deepEqual(changed("package.json", ""), [...secrets, "Always needs the person: anything irreversible, as it changes package.json."], "a manifest GitHub shows no patch for may change anything");
 
   const check = (paths: string) => [`The pull request changes ${paths}, the check this policy relies on or what it runs.`];
