@@ -22,6 +22,7 @@ import { settled, setupExited, type Inspection } from "../../pylon-vm/contracts.
 import { groupMembers, identityOf } from "../../pylon-vm/identity.ts";
 import { imageEnv, pylonGuest, type Sandbox } from "./pylon-guest.ts";
 import { saveJson } from "../../node-base/json-file.ts";
+import { retryStopDeadlines } from "../../pylon-vm/client.ts";
 import { chatgptTokenGrant } from "../../protocol/secret-grants.ts";
 import type { BootInputs } from "../../protocol/spawn.ts";
 import type { ImageId, NodeName, ProjectId, PylonId, TailnetNodeId, TemplateId } from "../../ids.ts";
@@ -1101,10 +1102,11 @@ test("an ordinary resume reuses a healthy controller and its boot time", async (
 
 
 /**
- * Retry deadlines that expire at once. A stuck controller never answers a silent stop and ignores SIGTERM, so waiting
- * out the production 30 s and 10 s changes nothing a test can observe.
+ * A stuck controller ignores SIGTERM, so waiting out the 10 s grace changes nothing a test can observe, and neither does
+ * the 30 s stop deadline for one that never answers stop. One whose stop answers an error keeps that deadline, so its error arrives.
  */
-const quickRetry = { retryStop: { stopMs: 0, termGraceMs: 0 } };
+const noGrace = { retryStop: { ...retryStopDeadlines, termGraceMs: 0 } };
+const noWait = { retryStop: { stopMs: 0, termGraceMs: 0 } };
 
 /**
  * A detached controller and a child in its group. Neither cooperates with SIGTERM or shutdown, and a hung one answers no
@@ -1163,7 +1165,7 @@ async function stuckController(t: TestContext, dir: string, id: PylonId, stop: "
 }
 
 for (const stop of ["silent", "error"] as const) test(`retry kills the controller group when stop is ${stop}, preserves the completed disk and starts another controller`, async (t) => {
-  const { backend, instances } = await backendWith(quickRetry);
+  const { backend, instances } = await backendWith(stop === "silent" ? noWait : noGrace);
   const id = `pylon-${stop}` as PylonId;
   const dir = await leftInstance(instances, id, "running");
   await writeFile(join(dir, "disk.qcow2"), "last completed disk");
@@ -1179,6 +1181,7 @@ for (const stop of ["silent", "error"] as const) test(`retry kills the controlle
   assert.equal(await readFile(join(dir, "disk.qcow2"), "utf8"), "last completed disk");
   assert.equal(existsSync(join(dir, "retry-stop.json")), false);
   assert.match(await readFile(join(dir, "controller.log"), "utf8"), new RegExp(`stopped old controller ${controller.pid} .* and its process group`));
+  if (stop === "error") assert.match(await readFile(join(dir, "controller.log"), "utf8"), /stop failed or timed out for controller \d+: checkpoint is blocked/, "the controller's error arrived before any deadline");
   await backend.ensurePaused(id, "ckpt-forced-1", signal(), true);
   assert.equal(await backend.state(id), "stopped");
   await assert.rejects(backend.ensureRunning(bootOf(id), live, signal()), /Sandbox (controller exited|start failed)/);
@@ -1189,7 +1192,7 @@ for (const stop of ["silent", "error"] as const) test(`retry kills the controlle
 });
 
 test("a retry whose controller answers no inspect pauses on what the instance's files say, and ends its process group", async (t) => {
-  const { backend, instances } = await backendWith(quickRetry);
+  const { backend, instances } = await backendWith(noWait);
   const id = "pylon-hung" as PylonId;
   const dir = await leftInstance(instances, id, "running");
   const controller = await stuckController(t, dir, id, "silent", "hang");
@@ -1214,7 +1217,7 @@ test("a retry refuses to pause a controller that answers no inspect when its rec
 });
 
 test("a retry stops a controller that answers no inspect and recorded stopping, whatever its recorded setup failure", async (t) => {
-  const { backend, instances } = await backendWith(quickRetry);
+  const { backend, instances } = await backendWith(noGrace);
   const id = "pylon-hungstop" as PylonId;
   const dir = await leftInstance(instances, id, "running");
   await writeFile(join(dir, "disk.qcow2"), "last completed disk");
@@ -1227,7 +1230,7 @@ test("a retry stops a controller that answers no inspect and recorded stopping, 
 });
 
 test("a retry records the sessions of a guest whose controller answers everything but inspect", async (t) => {
-  const { backend, instances } = await backendWith(quickRetry);
+  const { backend, instances } = await backendWith(noGrace);
   const id = "pylon-slowinspect" as PylonId;
   const dir = await leftInstance(instances, id, "running");
   await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-slowinspect-1", sessions: [] }));
@@ -1285,7 +1288,7 @@ test("a replayed retry pause finishes the journal a crash left after its instanc
 });
 
 for (const controllerDied of [false, true]) test(`a retry whose probe died while stop hung recovers its journal and launch lock (controller died: ${controllerDied})`, async (t) => {
-  const { backend, instances, stateRoot } = await backendWith(quickRetry);
+  const { backend, instances, stateRoot } = await backendWith(noWait);
   const id = "pylon-stopcrash" as PylonId;
   const dir = await leftInstance(instances, id, "running");
   const controller = await stuckController(t, dir, id, "silent");
