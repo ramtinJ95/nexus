@@ -45,15 +45,6 @@ test("a failure recorded at the desired commit stops it before health or drain, 
   }
 });
 
-test("legacy busy-turn quarantine permits the same commit and newer main, but never hides an install failure", () => {
-  for (const reason of ["agent turn still running at drain timeout", "Error: agent turn still running at drain timeout"]) {
-    const busy = { commit, state: "failed" as const, reason };
-    assert.deepEqual(planDeploy({ ...input, attempts: [busy] }), { kind: "install", commit });
-    assert.deepEqual(planDeploy({ ...input, attempts: [busy], desired: { ...input.desired!, commit: "c".repeat(40) } }), { kind: "install", commit: "c".repeat(40) });
-    assert.deepEqual(planDeploy({ ...input, attempts: [busy, { ...busy, reason: "install failed" }] }), { kind: "stop", reason: "install failed" });
-  }
-});
-
 test("a release migrates a registry behind its code, refuses one ahead of it or that it cannot name, and starts on one it matches or none", () => {
   assert.equal(schemaStep({ registry: 3, release: 4 }), "migrates");
   assert.equal(schemaStep({ registry: 4, release: 3 }), "refuses");

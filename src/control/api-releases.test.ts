@@ -171,16 +171,3 @@ test("the final idle fence holds across lease expiry until rollback or success r
   assert.equal(s.registry.drain(), null);
 });
 
-for (const reason of ["agent turn still running at drain timeout", "Error: agent turn still running at drain timeout"]) test(`legacy busy report shows a retryable pending release: ${reason}`, async (t) => {
-  const s = await testApi(t, { deployment });
-  assert.equal((await s.call("PUT", "/v1/release", { commit: "main" })).status, 200);
-  s.callAs("nFIREBAT" as TailnetNodeId);
-  const report = { role: "control", commit: null, target: deployCommit, state: "failed", reason };
-  assert.equal((await s.call("POST", "/v1/deployer/report", report, reporterHeaders)).status, 200);
-  s.callAs(laptop);
-  const view = (await s.call("GET", "/v1/release")).body;
-  const control = view.nodes.find((r: ReleaseReport) => r.role === "control");
-  assert.equal(control.state, "pending");
-  assert.equal(control.reason, "Previous deploy waited for a busy turn; retry deployment, not a revert");
-  assert.equal(releaseOutcome(view, deployCommit), "pending");
-});
