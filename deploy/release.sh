@@ -18,6 +18,27 @@ node_major() {
   PATH=$service_path node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo none
 }
 
+# The commit the checkout at $1 holds, or nothing when its tree has changes, since a release cut from it is then named
+# only by its content.
+checkout_commit() {
+  [ -z "$(git -C "$1" status --porcelain 2>/dev/null)" ] || return 0
+  git -C "$1" rev-parse HEAD 2>/dev/null || true
+}
+
+# Keeps the release the link $1 runs and points $release at it, unless there is none yet, it was cut from the commit
+# the checkout at $2 holds, or $3 is --upgrade. A rerun from a person's checkout then only configures a role that
+# `nexus deploy` moved on. Callers hold the deployer's lock, so the link cannot move after this reads it.
+keeps_release() {
+  local link=$1 target running checkout
+  [ "${3:-}" != --upgrade ] || return 1
+  target=$(readlink "$link") || return 1
+  running=$(tr -d '[:space:]' < "$link/release-commit" 2>/dev/null || true)
+  checkout=$(checkout_commit "$2")
+  if [ -n "$checkout" ] && [ "$running" = "$checkout" ]; then return 1; fi
+  release=$(basename "$target")
+  echo "$(basename "$link") runs ${running:-release $release, which records no commit}, and this checkout holds ${checkout:-uncommitted changes}. This run changes the config and keeps that release. nexus deploy installs another, or --upgrade installs this checkout's"
+}
+
 # Installs the checkout at $1 as a release, unless an identical one exists, and sets $release to its hash.
 install_release() {
   local repo=$1
@@ -46,7 +67,7 @@ install_release() {
     (cd "$staging" && PATH=$service_path npm ci --no-audit --no-fund) || fail "npm ci failed for release $release"
     (cd "$staging" && PATH=$service_path npm run build) || fail "the dashboard build failed for release $release"
     (cd "$staging" && PATH=$service_path npm prune --omit=dev --no-audit --no-fund) || fail "npm prune failed for release $release"
-    printf '%s\n' "${NEXUS_COMMIT:-$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)}" > "$staging/release-commit" || fail "could not record the release's commit"
+    printf '%s\n' "${NEXUS_COMMIT:-$(checkout_commit "$repo")}" > "$staging/release-commit" || fail "could not record the release's commit"
     chown -R root:root "$staging" && chmod -R u+rwX,go+rX,go-w "$staging" || fail "could not make release $release root-owned"
     mv "$staging" "$prefix/releases/$release" || fail "could not publish release $release"
     echo "installed release $release"
@@ -72,6 +93,10 @@ take_deployer_lock() {
 
 # Fails the upgrade on a control-plane.json the deployer would refuse on every poll.
 check_control_plane() { PATH=$service_path node "$1/src/deploy/control-plane.ts" check "$etc"; }
+
+# Fails a manual install, before it changes the release, when the registry is newer than the migrations of the
+# checkout at $1, whose control plane would refuse to start on it. The deployer makes the same check itself.
+check_registry() { PATH=$service_path node "$1/src/deploy/setup.ts" registry "$etc/control.json"; }
 
 # The control plane's upgrade steps from the checkout at $1, which neither switch its link nor start it. The deployer
 # runs them alone, as `NEXUS_PREPARE=1 install-control.sh`.

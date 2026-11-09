@@ -1258,7 +1258,7 @@ test("connect says what this device may do, and the line that admits it when it 
   const s = await setup(t);
   const env = { NEXUS_URL: "", NEXUS_SOCKS: "" };
   const config = join(s.home, ".config", "nexus", "cli.json");
-  const admit = "run this on the control plane's machine, in its nexus checkout: sudo deploy/install.sh --admit";
+  const admit = "run this on the control plane's machine, in its nexus checkout after git pull. It changes the config and keeps the release that runs: sudo deploy/install.sh --admit";
 
   s.callAs(phone);
   const person = await s.nexus(["connect", s.localUrl, "--socks", "none"], env);
