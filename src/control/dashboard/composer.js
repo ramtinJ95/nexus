@@ -76,9 +76,9 @@ document.addEventListener("submit", async (event) => {
 
 // A swap keeps the prompt box, so only a box that was not there before, as on unarchiving, takes the draft.
 onSwap(() => {
-  const had = document.getElementById("prompt-text") !== null;
+  const before = document.getElementById("prompt-text");
   return () => {
-    if (!had) draft.restore();
+    if (document.getElementById("prompt-text") !== before) draft.restore();
     for (const send of document.querySelectorAll("#prompt button[type=submit]")) send.disabled = outgoing?.inFlight === true;
   };
 });
