@@ -2940,6 +2940,20 @@ test("a landing checked on a base that moved since brings the branch up to date 
   assert.equal(f.review().phase.kind, "deploying");
 });
 
+test("an update GitHub accepted but has not pushed yet is asked for once a minute, and nothing merges meanwhile", async (t) => {
+  const f = fixture(t);
+  f.behind.add(head1);
+  const loop = await approved(f, "nLAPTOP");
+  await loop.poll();
+  assert.deepEqual(f.updates, [head1], "one update while GitHub works on it");
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, updated: f.now }, "a merge of the stale head meanwhile is not this review's");
+  f.tick(60_000);
+  await loop.poll();
+  assert.deepEqual(f.updates, [head1, head1]);
+  assert.deepEqual(f.merges, []);
+  assert.equal(f.review().phase.kind, "merging");
+});
+
 test("a branch behind its base that GitHub cannot bring up to date goes to the builder to rebase", async (t) => {
   const f = fixture(t);
   f.behind.add(head1);
