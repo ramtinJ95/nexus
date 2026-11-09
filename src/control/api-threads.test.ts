@@ -6,13 +6,14 @@ import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ThreadDetail, ThreadRow } from "./wire.ts";
+import type { QueuedThread } from "../contract/threads.ts";
 import type { Judgment } from "./judgment-store.ts";
 import type { Thread } from "./thread-store.ts";
 import { liveHashOf } from "../protocol/spawn.ts";
 import { processStream } from "../process-stream.ts";
 import { runningPylon, testCapacity, testObservation } from "../test-support/kit.ts";
 import type { JobId, NodeName, TailnetNodeId } from "../ids.ts";
-import { node, laptop, project, image, dotfiles, withThread, withImage, localCheckout } from "../test-support/api-kit.ts";
+import { node, laptop, project, image, dotfiles, withThread, withImage, withQueue, localCheckout } from "../test-support/api-kit.ts";
 
 test("starting a thread creates its pylon, boots fresh from the current image, and wakes its node", async (t) => {
   const s = await withThread(t);
@@ -416,8 +417,21 @@ test("a start repeated under its request ID answers the same thread and delivers
 
   assert.equal((await s.call("POST", `/v1/threads/${id}/archive`)).status, 200);
   const archived = await s.call("POST", "/v1/threads", body);
-  assert.equal((archived.body as Thread).status, "archived", "a repeat answers the thread as it is now");
+  assert.equal(archived.status, 409, "a repeat does not pass an archived thread off as the start it asks for");
+  assert.equal(archived.body.error, `request ID start:1 started thread ${id}, which is archived, so it starts nothing. Start a new thread under a new request ID`);
   assert.equal(s.calls.filter((c) => c[0] === "send").length, 2, "an archived thread is not sent its brief again");
+});
+
+test("a start repeated under the request ID of a queued start that was cancelled is refused, naming the queued thread", async (t) => {
+  const s = await withQueue(t);
+  const body = { project: "acme", title: "Then", after: [s.first.id], requestId: "start:queued" };
+  const queued = (await s.call("POST", "/v1/threads", body)).body as QueuedThread;
+  assert.equal((await s.call("POST", "/v1/threads", body)).status, 201, "a repeat while it waits answers it");
+  assert.equal((await s.call("POST", `/v1/threads/${queued.id}/archive`)).status, 200);
+  assert.deepEqual(await s.call("POST", "/v1/threads", body), {
+    status: 409, body: { error: `request ID start:queued started thread ${queued.id}, which is cancelled, so it starts nothing. Start a new thread under a new request ID`, code: null, retryable: false },
+  });
+  assert.equal(s.registry.queue.queuedThreads().length, 1, "nothing was queued again");
 });
 
 test("starts repeated at once under one request ID start one thread, and one with another body is refused", async (t) => {
