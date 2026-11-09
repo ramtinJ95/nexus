@@ -19,6 +19,7 @@ import { checkBeside, liveNote, phaseNote, reviewSaid, roundNote } from "./wordi
 import { cannotLand, changeOf, ended, findingsOf, humanLabel, landable, personPhase, roundsSpent, type HoldCause, type Review, type Verdict, type Waiver } from "./review-model.ts";
 import { reviewerFor, reviewLoop, secondReviewerFor, type ReviewDeps } from "./review.ts";
 import { upgradeReview } from "./record-upgrade.ts";
+import { reviewView } from "./review-view.ts";
 import { defaultSecondReview } from "../contract/projects.ts";
 import { agentReader, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
@@ -1140,6 +1141,33 @@ test("a reviewer whose review is still starting is not taken for a leftover by a
   await loop.poll();
   assert.equal(f.review().phase.kind, "reviewing");
   assert.deepEqual(f.statuses(), ["active", "active"]);
+});
+
+test("a restart of a review counts the rounds the PR's earlier reviews spent, and only --rounds grants more", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  await loop.poll();
+  assert.equal(roundsSpent(f.review()), 2);
+  loop.cancel(f.builder, "nLAPTOP");
+
+  const restarted = await loop.start(f.builder, { land: null });
+  assert.equal(restarted.maxRounds, 3, "the restart may spend what the PR's 5 rounds left");
+  assert.match(reviewSaidText(restarted), /round 3 of 5/, "the person reads the rounds the PR spent, not the restart's alone");
+  assert.deepEqual([reviewView(restarted, []).round, reviewView(restarted, []).maxRounds], [3, 5]);
+  loop.cancel(f.builder, "nLAPTOP");
+
+  f.registry.reviews.saveReview({ ...f.review(), maxRounds: 3, rounds: [head1, head2, "3".repeat(40)].map((head) => ({ head, base: "main", verdict: null, check: null, answers: null })) });
+  await assert.rejects(loop.start(f.builder, { land: null }), (err: Error) => err instanceof Refusal
+    && err.message === `pull request #7 has had 5 rounds over its reviews, and Nexus gives one 5 without the person's word. Run nexus review ${f.builder} --rounds N to grant it N more`);
+  const granted = await loop.start(f.builder, { rounds: 2, land: null });
+  assert.equal(granted.maxRounds, 2);
+  assert.match(reviewSaidText(granted), /round 6 of 7/);
 });
 
 test("a token that cannot merge holds the landing for the person, and a later land tries again", async (t) => {
