@@ -4,7 +4,7 @@ What each version of the API contract and the Mac `nexus` CLI changed, newest fi
 
 ## 0.77.0
 
-Adds `status=open` to `GET /v1/threads`, which lists only active and idle threads, and answers 400 to any other `status`. The dashboard reads it for its notifications. Every other query answers as before.
+Adds `status=open` to `GET /v1/threads`, which lists only active and idle threads, and answers 400 to any other `status`. The dashboard reads it for its notifications. `threads --open` asks for it, and prints only the active and idle threads. A control plane older than 0.77.0 ignores `status` and answers every thread but the deleted ones, so `--open` leaves out the archived ones itself. Every other query answers as before.
 
 ## 0.76.0
 
