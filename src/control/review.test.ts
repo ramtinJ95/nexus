@@ -1172,12 +1172,37 @@ test("a restart of a review counts the rounds the PR's earlier reviews spent, an
   assert.deepEqual([reviewView(restarted, []).round, reviewView(restarted, []).maxRounds], [3, 5]);
   loop.cancel(f.builder, "nLAPTOP");
 
-  f.registry.reviews.saveReview({ ...f.review(), maxRounds: 3, rounds: [head1, head2, "3".repeat(40)].map((head) => ({ head, base: "main", verdict: null, check: null, answers: null })) });
+  f.registry.reviews.saveReview({ ...f.review(), reviewerStarted: true, maxRounds: 3, rounds: [head1, head2, "3".repeat(40)].map((head) => ({ head, base: "main", verdict: null, check: null, answers: null })) });
   await assert.rejects(loop.start(f.builder, { land: null }), (err: Error) => err instanceof Refusal
     && err.message === `pull request #7 has had 5 rounds over its reviews, and Nexus gives one 5 without the person's word. Run nexus review ${f.builder} --rounds N to grant it N more`);
   const granted = await loop.start(f.builder, { rounds: 2, land: null });
   assert.equal(granted.maxRounds, 2);
   assert.match(reviewSaidText(granted), /round 6 of 7/);
+});
+
+test("the rounds of a PR's reviews count for it alone, whichever review of the builder's came between", async (t) => {
+  const f = fixture(t);
+  const other = testPr({ repo: "ramtinJ95/nexus", number: 8, title: "Add the queue" });
+  f.others.set(8, { ...f.snapshot, pr: { ...other } });
+  f.registry.prWatches.savePrWatch(f.builder, { links: [{ pr: f.pr, seen: [], failed: false }, { pr: other, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  const loop = f.loop();
+  await loop.start(f.builder, { pr: 7, land: null });
+  loop.cancel(f.builder, "nLAPTOP");
+  f.registry.reviews.saveReview({ ...f.review(), reviewerStarted: true, rounds: [head1, head2, "3".repeat(40), "4".repeat(40), "5".repeat(40)].map((head) => ({ head, base: "main", verdict: null, check: null, answers: null })) });
+  await loop.start(f.builder, { pr: 8, land: null });
+  loop.cancel(f.builder, "nLAPTOP");
+  await assert.rejects(loop.start(f.builder, { pr: 7, land: null }), /pull request #7 has had 5 rounds over its reviews/);
+});
+
+test("a review whose reviewer never started spent no round of its PR's", async (t) => {
+  const f = fixture(t);
+  f.refuseStart = () => "no node has room for this pylon";
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [`The reviewer thread ${f.review().reviewer} did not start: no node has room for this pylon.`] });
+  f.refuseStart = () => null;
+  assert.equal((await loop.start(f.builder, { land: null })).maxRounds, 5);
 });
 
 test("a token that cannot merge holds the landing for the person, and a later land tries again", async (t) => {
