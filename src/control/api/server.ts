@@ -440,8 +440,9 @@ const attach = { role: "person", action: "attach to a thread's pylon" } satisfie
  * Where a request a browser sent comes from, when that is not one of the API's own pages: another site, another
  * origin of this one, or the Origin it names. whois names the machine, so a page of another app, or a preview, which
  * is the API's hostname on another port, could otherwise wake a pylon or hold a stream from the person's browser with
- * a GET it cannot read. A browser sends Sec-Fetch-Site only over HTTPS, and Origin over plain HTTP too on a non-GET, a
- * CORS request such as an EventSource, and a WebSocket. The CLI and the client extensions send neither.
+ * a GET it cannot read. A browser sends Sec-Fetch-Site only to HTTPS and loopback addresses, and Origin over plain HTTP
+ * too on a non-GET, a CORS request such as an EventSource, and a WebSocket. The CLI and the client extensions send
+ * neither.
  */
 function foreignSite(req: IncomingMessage): string | null {
   const site = req.headers["sec-fetch-site"];
