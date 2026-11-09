@@ -121,9 +121,10 @@ export type Phase =
    * `authorized` is the head this review is about to merge, saved before the merge call, so after a restart a PR that
    * merged at it is this review's own merge, and any other merge is someone else's. `waiting` is why a review that
    * deploys has not authorized its merge yet: another landing that deploys is under way, a deploy drains the control
-   * plane, or the desired release is not healthy everywhere.
+   * plane, or the desired release is not healthy everywhere. `updated` is when the loop asked GitHub to bring the
+   * branch up to date with a base that moved since its head's check, whose new head GitHub pushes later.
    */
-  | { kind: "merging"; authorized: string | null; waiting?: string }
+  | { kind: "merging"; authorized: string | null; waiting?: string; updated?: number }
   /** `requested` once the desired release is set. `previous` is the release to roll back to, null if there was none. */
   | { kind: "deploying"; commit: string; previous: string | null; requested: boolean; deadline: number }
   /** The deploy of `commit` failed for `why`, and the fleet goes back to `previous`, the desired release once `requested`. */
