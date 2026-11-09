@@ -124,7 +124,6 @@ function noteCard(note, entry = null, range = null) {
   return card;
 }
 
-/** The note being written: its kind, which the reader can change, and its text. */
 function draftCard(draft, entry = null, range = null) {
   const label = () => `${kinds[review.draft.kind].label} on ${linesLabel(draft.lines)}`;
   const title = el("span", { className: "note-kind", textContent: label() });
@@ -262,7 +261,6 @@ export function reviewSent(sent, text) {
   decorate();
 }
 
-/** The place in an entry's rows of the row an event is on, or null. */
 function rowAt(event) {
   const row = annotated?.view.rowOf(event);
   if (row === null || row === undefined) return null;
@@ -350,7 +348,6 @@ function moveSelection(step, extend) {
   annotated.view.rowElement(selection.entry, rows[selection.entry][selection.head].index)?.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
-/** How many of the review's notes are on a file, beside its name in the tree. */
 export function noteCount(path) {
   const count = review.notes.filter((n) => n.path === path).length;
   return count > 0 && el("span", { className: "note-count", title: `${count} ${count === 1 ? "note" : "notes"} in the review`, textContent: String(count) });

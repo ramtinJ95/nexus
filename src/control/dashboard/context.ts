@@ -1,4 +1,3 @@
-/** What a render of the dashboard reads: the context of one render, what waits on the person, and each page's own view the route reads for it. */
 import type { NodeName, ProjectId, TailnetNodeId, ThreadId } from "../../ids.ts";
 import type { ThreadDetail, ThreadRow } from "../wire.ts";
 import type { Thread, ThreadAgent } from "../thread-store.ts";
@@ -55,16 +54,14 @@ export interface Context {
   review(id: ThreadId): Review | null;
 }
 
-/** What the home page reads beside the context: the nodes that are offline, a thread's role, and the pipeline's items in the order they were added. */
+/** `items` are in the order they were added. */
 export interface HomeView { offline: ReadonlySet<NodeName>; role(thread: Thread): Role; items: readonly PipelineItem[] }
 
-/** A fold's page: the projects it lists, the nodes that are offline, and for the closed fold the queued threads cancelled or deleted before they started, newest first. */
+/** `cancelled` is, for the closed fold, the queued threads cancelled or deleted before they started, newest first. */
 export interface FoldView { projects: readonly Project[]; offline: ReadonlySet<NodeName>; cancelled: readonly QueuedThread[] }
 
-/** The latest reply of a thread's agent, with when the thread last had one, and what the agent was last asked. */
 export interface Latest { reply: { text: string; at: number | null } | null; asked: { text: string; at: number } | null }
 
-/** What the home page's preview shows, as the route read it: a thread with its conversation's latest, a queued thread, or an item. */
 export type Peek =
   | { kind: "thread"; d: ThreadDetail; row: ThreadRow; latest: Latest }
   | { kind: "queued"; q: QueuedThread }
@@ -82,7 +79,6 @@ export interface ThreadView {
   queuedAfter: readonly ThreadId[] | null; item: PipelineItem | undefined;
 }
 
-/** What a node's card shows of its load, memory and disk, or why it shows none. */
 export type NodeReading =
   | { kind: "read"; cpus: number; load: number | null; memory: { totalGiB: number; availableGiB: number } | null; disk: { totalGiB: number; freeGiB: number } }
   | { kind: "failed"; error: string }
@@ -103,5 +99,4 @@ export interface ClusterView {
   pylonThreads: ReadonlyMap<string, { thread: ThreadId; builder: boolean }>;
 }
 
-/** The Usage page: the period and project picked, and what `GET /v1/usage` reports for them. */
 export interface UsageView { period: Period; project: ProjectId | null; report: UsageReport }

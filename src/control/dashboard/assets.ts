@@ -13,7 +13,6 @@ export const entry = "client.js";
 const sources = ["style.css", "favicon.svg"];
 const linked = new Set([...sources, entry]);
 
-/** The stylesheet and icon as they are in src, and each file the build's metafile names. */
 function load(): Map<string, Asset> {
   let metafile: Metafile;
   try { metafile = JSON.parse(readFileSync(new URL("metafile.json", bundle), "utf8")) as Metafile; } catch (error) {

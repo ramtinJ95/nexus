@@ -95,7 +95,6 @@ const statusNeeds: Readonly<Record<"kept" | "open" | "pylon" | "active", { refus
 /** What a route needs of a thread: a status, and an agent of one kind. */
 interface Need { status?: keyof typeof statusNeeds; agent?: "harness" | "claude" }
 
-/** Wakes the loop for the node of the thread's pylon. */
 export const threadWaker = (registry: Pick<Registry, "pylon">, wake: (node: NodeName) => void) => (t: Pick<Thread, "pylonId">) => wake(registry.pylon(t.pylonId)!.node);
 
 export function apiAccess(registry: Registry, wake: (node: NodeName) => void, options: { deployment?: Deployment | undefined; allowed: ReadonlySet<TailnetNodeId> }) {
