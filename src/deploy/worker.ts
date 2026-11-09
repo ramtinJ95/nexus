@@ -1,5 +1,6 @@
 import { copyFile, readFile, readlink, stat, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 import { command, checkoutMerged, type Command, type InstallBoundary, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
@@ -11,6 +12,7 @@ import { checkControlPlaneFile, parseWorkerConfig, readControlPlane, type Contro
 import { readJson, saveJson } from "../node-base/json-file.ts";
 import { controlFields, listenAddress } from "../node-base/node-config.ts";
 import { localApiWhois } from "../node-base/tailscaled.ts";
+import type { Whois } from "../protocol/http.ts";
 import { backupStatusFile, configFiles, deployerFiles, deployerLink, etc, prefix, readReleaseCommit, releasesDir, stateDirs, unitDir, unitNames } from "../node-base/node-layout.ts";
 
 export async function runWorker(check = false): Promise<void> {
@@ -19,18 +21,41 @@ export async function runWorker(check = false): Promise<void> {
   if (mode.uid !== 0 || (mode.mode & 0o077) !== 0) throw new Error("deployer.json must be root-owned mode 0600");
   await checkControlPlaneFile();
   const config = parseWorkerConfig(await readJson(configFiles.deployer, null), await readControlPlane());
-  const peer = { id: config.controlNodeId, whois: localApiWhois() };
-  const api = (path: string, body?: unknown) => jsonRequest(new URL(`/v1/deployer/${path}`, config.controlUrl), body === undefined ? "GET" : "POST", body, config.token, peer);
+  const api = controlApi(config, { id: config.controlNodeId, whois: localApiWhois() });
   if (check) { await api("release"); return; }
   const roles: Role[] = [];
   for (const role of ["control", "probe"] as const) {
     try { await stat(join(prefix, deployerFiles.roles, role)); roles.push(role); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   }
-  await reconcileRoles(roles, config, api);
+  await reconcileRoles(roles, config, api, { ...nodeBoundary, worker: await workerName(prefix) });
   if (roles.includes("probe")) await cleanReleases(prefix, api).catch((error: unknown) => {
-    if (!(error instanceof DeployHttpError && error.status === 404)) console.error(`release cleanup: ${String(error)}`);
+    if (!(error instanceof ControlCallFailed && error.cause instanceof DeployHttpError && error.cause.status === 404)) console.error(`release cleanup: ${String(error)}`);
   });
+}
+
+/** A call to the control plane that did not reach it, timed out, or that it answered with other than 200. */
+class ControlCallFailed extends Error {}
+
+/**
+ * The worker's exit code for a poll whose call to the control plane failed, which says nothing about the worker, so
+ * deploy/supervise-deployer.sh keeps the promoted worker on it. Any other failure exits 1, and the supervisor rejects it.
+ */
+export const controlCallFailedExit = 75;
+export const exitCode = (error: unknown): number => error instanceof ControlCallFailed ? controlCallFailedExit : 1;
+
+export function controlApi(config: WorkerConfig, peer?: { id: string; whois: Whois }): Api {
+  return (path, body) => jsonRequest(new URL(`/v1/deployer/${path}`, config.controlUrl), body === undefined ? "GET" : "POST", body, config.token, peer)
+    .catch((cause: unknown) => { throw new ControlCallFailed(cause instanceof Error ? cause.message : String(cause), { cause }); });
+}
+
+/**
+ * `bootstrap`, or the commit of the release the supervisor promoted the worker in `root` from, or undefined when it runs
+ * from neither. Node resolves deployer-current to the release it names when it loads the worker.
+ */
+export async function workerName(prefix: string, root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")): Promise<string | undefined> {
+  if (root === join(prefix, deployerFiles.bootstrap)) return "bootstrap";
+  return dirname(root) === join(prefix, releasesDir) ? await readReleaseCommit(root) ?? undefined : undefined;
 }
 
 class WaitingForControl extends Error {}
@@ -105,7 +130,8 @@ export function nodeRegistry(paths: RegistryPaths, run: Command = command, budge
 }
 
 const nodeBoundary = { prefix, etc, units: unitDir, run: command, checkout: checkoutMerged, registry: nodeRegistry({ config: configFiles.control, home: stateDirs.control, prefix, status: backupStatusFile }) };
-type NodeBoundary = Omit<typeof nodeBoundary, "registry"> & { registry?: RegistrySchema };
+/** `worker` is what the role's reports say ran the poll. */
+type NodeBoundary = Omit<typeof nodeBoundary, "registry"> & { registry?: RegistrySchema; worker?: string | undefined };
 
 const restoreSteps = `deploy/README.md's "A failed deploy past a registry migration"`;
 const applies = ({ release }: SchemaVersions) => release === null ? "has no src/control/schema.ts to say which migrations it applies" : `applies ${release} registry migrations`;
@@ -297,7 +323,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     return false;
   };
   const report: Report = async (state, target, reason = null) => {
-    const wire: ReportBody = { role, commit: await readReleaseCommit(link), target, state, reason };
+    const wire: ReportBody = { role, commit: await readReleaseCommit(link), target, state, reason, ...boundary.worker === undefined ? {} : { worker: boundary.worker } };
     const saved = await readJson(files.report, null).catch((error: unknown) => {
       console.error(`${role}: rewriting ${files.report}, which could not be read: ${String(error)}`);
       return null;
@@ -305,7 +331,12 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     if (saved === null || (Object.keys(wire) as (keyof typeof wire)[]).some((key) => saved[key] !== wire[key])) {
       await saveJson(files.report, { ...wire, observedAt: Date.now() });
     }
-    await api("report", wire).catch((error: unknown) => { console.error(`could not report ${role} release; retained locally for the next poll: ${String(error)}`); });
+    // A control plane from before `worker` refuses a report that has it.
+    await api("report", wire).catch((error: unknown) => {
+      if (wire.worker === undefined || !(error instanceof ControlCallFailed && error.cause instanceof DeployHttpError && error.cause.status === 400)) throw error;
+      const { worker: _, ...older } = wire;
+      return api("report", older);
+    }).catch((error: unknown) => { console.error(`could not report ${role} release; retained locally for the next poll: ${String(error)}`); });
   };
   const settled = (result: Transaction) => report(result.state === "installing" ? "failed" : result.state, result.commit, result.reason);
   let desired: string | null = null;
@@ -391,4 +422,4 @@ async function promoteWorker(commit: string, repo: string, prefix: string, run: 
   await pointLink(join(prefix, deployerLink), target);
 }
 
-if (import.meta.main) runWorker(process.argv.includes("--check")).catch((error: unknown) => { console.error(error); process.exitCode = 1; });
+if (import.meta.main) runWorker(process.argv.includes("--check")).catch((error: unknown) => { console.error(error); process.exitCode = exitCode(error); });

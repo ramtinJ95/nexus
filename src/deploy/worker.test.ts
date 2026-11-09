@@ -45,25 +45,115 @@ test("the bootstrap that install-deployer.sh copies loads without the repo's nod
   await command(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(join(dir, "src/deploy/worker.ts"))})`], dir);
 });
 
-test("fixed supervisor falls back after a worker crashes or hangs, and accepts a later worker", { skip: supervisorLacks.length > 0 && `the supervisor runs on Linux nodes, and its PATH here lacks ${supervisorLacks.join(" and ")}` }, async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "nexus-supervisor-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const workerDir = (name: string) => join(dir, name, "src/deploy");
-  for (const name of ["deployer/bootstrap", "releases/broken", "releases/fixed"]) await mkdir(workerDir(name), { recursive: true });
-  const marker = join(dir, "ran");
-  await writeFile(join(workerDir("deployer/bootstrap"), "worker.ts"), `require('node:fs').appendFileSync(${JSON.stringify(marker)}, 'fallback\\n');`);
-  await writeFile(join(workerDir("releases/fixed"), "worker.ts"), `require('node:fs').appendFileSync(${JSON.stringify(marker)}, 'fixed\\n');`);
-  const script = (await readFile(new URL("../../deploy/supervise-deployer.sh", import.meta.url), "utf8")).replace("prefix=/opt/nexus", `prefix=${JSON.stringify(dir)}`).replaceAll("900s", "1s");
-  await writeFile(join(dir, "supervise.sh"), script);
-  for (const broken of ["process.exit(1)", "setInterval(() => {}, 1000)"]) {
-    await writeFile(join(workerDir("releases/broken"), "worker.ts"), broken);
-    await symlink("releases/broken", join(dir, "deployer-current"));
-    await command("bash", [join(dir, "supervise.sh")], dir);
-    assert.equal((await readFile(join(dir, "deployer/rejected"), "utf8")).trim(), "releases/broken");
+test("the supervisor rejects a worker that crashes, fails to load or hangs, and keeps one whose poll could not reach the control plane", { skip: supervisorLacks.length > 0 && `the supervisor runs on Linux nodes, and its PATH here lacks ${supervisorLacks.join(" and ")}` }, async (t) => {
+  const { spawnSync } = await import("node:child_process");
+  const { controlCallFailedExit } = await import("./worker.ts");
+  const script = (await readFile(new URL("../../deploy/supervise-deployer.sh", import.meta.url), "utf8")).replace("900s", "1s");
+  const supervise = async (promoted: string) => {
+    const dir = await mkdtemp(join(tmpdir(), "nexus-supervisor-"));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const marker = join(dir, "ran");
+    for (const [name, code] of [["deployer/bootstrap", "'bootstrap'"], ["releases/promoted", promoted]] as const) {
+      await mkdir(join(dir, name, "src/deploy"), { recursive: true });
+      await writeFile(join(dir, name, "src/deploy/worker.ts"), name === "deployer/bootstrap" ? `require('node:fs').appendFileSync(${JSON.stringify(marker)}, 'bootstrap\\n');` : code);
+    }
+    await symlink("releases/promoted", join(dir, "deployer-current"));
+    await writeFile(join(dir, "supervise.sh"), script.replace("prefix=/opt/nexus", `prefix=${JSON.stringify(dir)}`));
+    const { status } = spawnSync("bash", [join(dir, "supervise.sh")], { cwd: dir });
+    return { status, ran: existsSync(marker) ? await readFile(marker, "utf8") : "", rejected: existsSync(join(dir, "deployer/rejected")) ? (await readFile(join(dir, "deployer/rejected"), "utf8")).trim() : null, current: existsSync(join(dir, "deployer-current")) };
+  };
+  for (const [worker, code] of [["succeeds", "process.exit(0)"], ["could not reach the control plane", `process.exit(${controlCallFailedExit})`]]) {
+    assert.deepEqual(await supervise(code!), { status: code === "process.exit(0)" ? 0 : controlCallFailedExit, ran: "", rejected: null, current: true }, `a worker that ${worker} stays promoted and the bootstrap does not run`);
   }
-  await symlink("releases/fixed", join(dir, "deployer-current"));
-  await command("bash", [join(dir, "supervise.sh")], dir);
-  assert.equal(await readFile(marker, "utf8"), "fallback\nfallback\nfixed\n");
+  for (const [worker, code] of [["exits 1", "process.exit(1)"], ["fails to load", "import './missing.ts';"], ["exits as a timeout does", "process.exit(124)"], ["hangs", "setInterval(() => {}, 1000)"]]) {
+    assert.deepEqual(await supervise(code!), { status: 0, ran: "bootstrap\n", rejected: "releases/promoted", current: false }, `a worker that ${worker} is rejected and the bootstrap runs`);
+  }
+});
+
+test("a poll whose call to the control plane fails or is refused exits with the code the supervisor keeps the worker on, and a crash exits 1", async (t) => {
+  const { createServer } = await import("node:http");
+  const { once } = await import("node:events");
+  const { reconcileRoles, controlApi, exitCode, controlCallFailedExit } = await import("./worker.ts");
+  const dir = await mkdtemp(join(tmpdir(), "nexus-exit-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  for (const path of ["etc", "units", "deployer", `releases/${commit}`]) await mkdir(join(dir, path), { recursive: true });
+  await writeFile(join(dir, `releases/${commit}/release-commit`), commit);
+  await symlink(`releases/${commit}`, join(dir, "current"));
+  await writeFile(join(dir, "etc/probe.json"), JSON.stringify({ listen: { host: "127.0.0.1", port: 1 } }));
+  const refusing = createServer((_req, res) => { res.statusCode = 503; res.end("control plane is restarting"); }).listen(0, "127.0.0.1");
+  const closed = createServer().listen(0, "127.0.0.1");
+  await Promise.all([once(refusing, "listening"), once(closed, "listening")]);
+  t.after(() => { refusing.closeAllConnections(); refusing.close(); });
+  const url = (server: typeof closed) => `http://127.0.0.1:${(server.address() as { port: number }).port}/`;
+  const down = url(closed);
+  closed.close();
+  await once(closed, "close");
+  const boundary = { prefix: dir, etc: join(dir, "etc"), units: join(dir, "units"), async checkout() {}, async run() { return ""; } };
+  const poll = (controlUrl: string) => {
+    const config = { controlUrl, controlNodeId: "nControl", token: "a".repeat(64), healthTimeoutMs: 1000, drainTimeoutMs: 0 };
+    return reconcileRoles(["probe"], config, controlApi(config), boundary).then(() => assert.fail("the poll fails"), (error: unknown) => error);
+  };
+  for (const [control, controlUrl] of [["unreachable", down], ["refusing the call", url(refusing)]]) {
+    const error = await poll(controlUrl!);
+    assert.equal(exitCode(error), controlCallFailedExit, `a control plane ${control}: ${String(error)}`);
+  }
+  await rm(join(dir, "etc/probe.json"));
+  assert.equal(exitCode(await poll(url(refusing))), 1, "a poll that fails before it calls the control plane is the worker's fault");
+  assert.equal(exitCode(new Error("crash")), 1);
+});
+
+test("a report says which worker sent it, and goes again without that to a control plane from before the field", async (t) => {
+  const { createServer } = await import("node:http");
+  const { once } = await import("node:events");
+  const { reconcileRole, controlApi } = await import("./worker.ts");
+  const { reportSchema } = await import("../contract/release-parse.ts");
+  const dir = await mkdtemp(join(tmpdir(), "nexus-worker-report-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  for (const path of ["etc", "units", "deployer", `releases/${commit}`]) await mkdir(join(dir, path), { recursive: true });
+  await writeFile(join(dir, `releases/${commit}/release-commit`), commit);
+  await symlink(`releases/${commit}`, join(dir, "current"));
+  let older = false;
+  const received: unknown[] = [];
+  const server = createServer(async (req, res) => {
+    let text = "";
+    for await (const chunk of req) text += chunk;
+    if (req.url === "/v1/health") return res.end(JSON.stringify({ commit }));
+    if (req.url === "/v1/deployer/release") return res.end(JSON.stringify({ desired: { commit, requestedBy: "nMac", requestedAt: 0 }, nodes: [] }));
+    assert.equal(req.url, "/v1/deployer/report");
+    const parsed = (older ? reportSchema.omit({ worker: true }) : reportSchema).safeParse(JSON.parse(text));
+    if (!parsed.success) { res.statusCode = 400; return res.end(parsed.error.message); }
+    received.push(parsed.data);
+    res.end(JSON.stringify({ ok: true }));
+  }).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const port = (server.address() as { port: number }).port;
+  await writeFile(join(dir, "etc/probe.json"), JSON.stringify({ listen: { host: "127.0.0.1", port } }));
+  const config = { controlUrl: `http://127.0.0.1:${port}/`, controlNodeId: "nControl", token: "a".repeat(64), healthTimeoutMs: 1000, drainTimeoutMs: 0 };
+  const boundary = { prefix: dir, etc: join(dir, "etc"), units: join(dir, "units"), worker: "bootstrap", async checkout() {}, async run() { return ""; } };
+  const healthy = { role: "probe", commit, target: commit, state: "healthy", reason: null };
+  await reconcileRole("probe", config, controlApi(config), boundary);
+  older = true;
+  await reconcileRole("probe", config, controlApi(config), boundary);
+  assert.deepEqual(received, [{ ...healthy, worker: "bootstrap" }, healthy]);
+  const { observedAt: _, ...saved } = JSON.parse(await readFile(join(dir, "probe-deploy-report.json"), "utf8"));
+  assert.deepEqual(saved, { ...healthy, worker: "bootstrap" });
+});
+
+test("a worker loaded through deployer-current names the release it was promoted from, and the bootstrap names itself", async (t) => {
+  const repo = new URL("../../", import.meta.url).pathname;
+  const dir = await mkdtemp(join(tmpdir(), "nexus-worker-name-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  for (const copy of [`releases/${commit}`, "deployer/bootstrap"]) {
+    for (const source of ["src/deploy", "src/node-base", "src/protocol"]) await cp(join(repo, source), join(dir, copy, source), { recursive: true });
+    await writeFile(join(dir, copy, "package.json"), '{"type":"module"}\n');
+  }
+  await writeFile(join(dir, `releases/${commit}/release-commit`), commit);
+  await symlink(`releases/${commit}`, join(dir, "deployer-current"));
+  const name = async (copy: string) => ((await import(join(dir, copy, "src/deploy/worker.ts"))) as typeof import("./worker.ts")).workerName(dir);
+  assert.equal(await name("deployer-current"), commit);
+  assert.equal(await name("deployer/bootstrap"), "bootstrap");
+  assert.equal(await (await import("./worker.ts")).workerName(dir), undefined, "a worker run from a checkout names no release");
 });
 
 test("activation failure rolls back through fake service executables in a temporary prefix", async (t) => {
