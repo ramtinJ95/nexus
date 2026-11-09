@@ -1194,6 +1194,40 @@ test("the rounds of a PR's reviews count for it alone, whichever review of the b
   await assert.rejects(loop.start(f.builder, { pr: 7, land: null }), /pull request #7 has had 5 rounds over its reviews/);
 });
 
+test("a PR runs one review at a time, whichever of its builders starts it, so its rounds stay within one budget", async (t) => {
+  const f = fixture(t);
+  const other = f.add("th-other", true);
+  f.registry.prWatches.savePrWatch(other, { links: [{ pr: f.pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  const loop = f.loop();
+  const polled = f.holdPolls();
+  const first = loop.start(f.builder, { land: null });
+  await polled.entered;
+  const raced = loop.start(other, { land: null });
+  polled.release();
+  const [a, b] = await Promise.allSettled([first, raced]);
+  assert.equal(a.status, "fulfilled");
+  assert.equal(b.status, "rejected", "a start that raced the first is refused once it would record a second review");
+  assert.match((b as PromiseRejectedResult).reason.message, new RegExp(`pull request #7 is under review ${f.review().id} of ${f.builder}`));
+  await assert.rejects(loop.start(other, { land: null }), /pull request #7 is under review/);
+  loop.cancel(f.builder, "nLAPTOP");
+  assert.equal((await loop.start(other, { land: null })).builder, other, "once that review ended, another builder's starts");
+});
+
+test("a reviewer thread that a start made before a crash is not started again", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  const r = await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.registry.reviews.saveReview({ ...r, reviewerStarted: false });
+  f.started.length = 0;
+  f.sent.length = 0;
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual(f.started, [], "the thread under the recorded ID is the reviewer");
+  assert.equal(f.review().reviewerStarted, true);
+  assert.deepEqual(f.sent.map((s) => s.to), [r.reviewer], "the reviewer gets its first request");
+});
+
 test("a review whose reviewer never started spent no round of its PR's", async (t) => {
   const f = fixture(t);
   f.refuseStart = () => "no node has room for this pylon";
