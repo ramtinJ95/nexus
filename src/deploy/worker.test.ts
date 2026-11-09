@@ -48,7 +48,7 @@ test("the bootstrap that install-deployer.sh copies loads without the repo's nod
 test("the supervisor rejects a worker that crashes, fails to load or hangs, and keeps one whose poll could not reach the control plane", { skip: supervisorLacks.length > 0 && `the supervisor runs on Linux nodes, and its PATH here lacks ${supervisorLacks.join(" and ")}` }, async (t) => {
   const { spawnSync } = await import("node:child_process");
   const { controlCallFailedExit } = await import("./worker.ts");
-  const script = (await readFile(new URL("../../deploy/supervise-deployer.sh", import.meta.url), "utf8")).replace("900s", "1s");
+  const script = (await readFile(new URL("../../deploy/supervise-deployer.sh", import.meta.url), "utf8")).replace("900s", "${deadline:-900s}");
   const supervise = async (promoted: string) => {
     const dir = await mkdtemp(join(tmpdir(), "nexus-supervisor-"));
     t.after(() => rm(dir, { recursive: true, force: true }));
@@ -58,7 +58,9 @@ test("the supervisor rejects a worker that crashes, fails to load or hangs, and 
       await writeFile(join(dir, name, "src/deploy/worker.ts"), name === "deployer/bootstrap" ? `require('node:fs').appendFileSync(${JSON.stringify(marker)}, 'bootstrap\\n');` : code);
     }
     await symlink("releases/promoted", join(dir, "deployer-current"));
-    await writeFile(join(dir, "supervise.sh"), script.replace("prefix=/opt/nexus", `prefix=${JSON.stringify(dir)}`));
+    // Only a worker that never exits meets the shortened deadline, so the bootstrap after it keeps the real one.
+    const promotedDeadline = promoted.startsWith("setInterval") ? 'deadline=1s run_worker "$worker"' : 'run_worker "$worker"';
+    await writeFile(join(dir, "supervise.sh"), script.replace("prefix=/opt/nexus", `prefix=${JSON.stringify(dir)}`).replace('run_worker "$worker"', promotedDeadline));
     const { status } = spawnSync("bash", [join(dir, "supervise.sh")], { cwd: dir });
     return { status, ran: existsSync(marker) ? await readFile(marker, "utf8") : "", rejected: existsSync(join(dir, "deployer/rejected")) ? (await readFile(join(dir, "deployer/rejected"), "utf8")).trim() : null, current: existsSync(join(dir, "deployer-current")) };
   };
@@ -129,7 +131,7 @@ test("a report says which worker sent it, and goes again without that to a contr
   t.after(() => { server.closeAllConnections(); server.close(); });
   const port = (server.address() as { port: number }).port;
   await writeFile(join(dir, "etc/probe.json"), JSON.stringify({ listen: { host: "127.0.0.1", port } }));
-  const config = { controlUrl: `http://127.0.0.1:${port}/`, controlNodeId: "nControl", token: "a".repeat(64), healthTimeoutMs: 1000, drainTimeoutMs: 0 };
+  const config = { controlUrl: `http://127.0.0.1:${port}/`, controlNodeId: "nControl", token: "a".repeat(64), healthTimeoutMs: 60_000, drainTimeoutMs: 0 };
   const boundary = { prefix: dir, etc: join(dir, "etc"), units: join(dir, "units"), worker: "bootstrap", async checkout() {}, async run() { return ""; } };
   const healthy = { role: "probe", commit, target: commit, state: "healthy", reason: null };
   await reconcileRole("probe", config, controlApi(config), boundary);
