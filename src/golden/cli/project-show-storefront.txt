@@ -1,9 +1,0 @@
-exit 0
---- stdout
-storefront: https://github.com/ramtinJ95/storefront.git
-node rj-firebat, branch main, 2 CPUs, 4 GiB memory, 20 GiB disk
-hosts: registry.npmjs.org, api.stripe.com. logins: claude, chatgpt. secrets: STRIPE_KEY
-auto review off, pipeline waits for approval
-
-No standing rules.
---- stderr

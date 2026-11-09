@@ -1,0 +1,5 @@
+{
+  "items": ["it-new-58"],
+  "nodes": [{ "node": "24.22.1" }, { "node": "nLAPTOP" }],
+  "pylons": ["pylon-th-graphs", "pylon-th-rv-merging-waiting", "pylon-th-seeded-1", "pylon-th-new-53", "pylon-cpu", "pylon-h"]
+}

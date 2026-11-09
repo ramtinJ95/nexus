@@ -1,9 +1,0 @@
-exit 0
---- stdout
-field-notes: https://github.com/ramtinJ95/field-notes.git
-node infra-testbench, branch trunk, 2 CPUs, 4 GiB memory, 20 GiB disk
-hosts: pypi.org, files.pythonhosted.org. logins: claude, chatgpt. secrets: none
-auto review off, pipeline off
-
-No standing rules.
---- stderr

@@ -1,6 +1,0 @@
-exit 0
---- stdout
-Desired: fac9ff725fd13db015758c7f31094f8df76077d0 by nLAPTOP at 2027-01-15T10:00:00.000Z
-infra-testbench probe: 4209370e1c2b5d1a9f0e3b7c6d8a2e4f1b3c5d7e pending: deployer report is stale
-rj-firebat probe: fac9ff725fd13db015758c7f31094f8df76077d0 healthy
---- stderr

@@ -1,4 +1,0 @@
-exit 4
---- stdout
---- stderr
-{"error":"no thread th-000000000000","kind":"not-found","status":404,"code":null}

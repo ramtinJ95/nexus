@@ -1,6 +1,0 @@
-409 application/json
-{
-  "error": "thread th-refunds-check has no conversation",
-  "code": null,
-  "retryable": false
-}

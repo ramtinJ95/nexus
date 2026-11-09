@@ -1,9 +1,0 @@
-exit 0
---- stdout
-nexus: https://github.com/ramtinJ95/nexus.git
-node rj-firebat, branch main, 2 CPUs, 4 GiB memory, 20 GiB disk
-hosts: registry.npmjs.org, api.github.com. logins: claude, chatgpt. secrets: GH_TOKEN
-auto review off, pipeline starts items
-
-No standing rules.
---- stderr

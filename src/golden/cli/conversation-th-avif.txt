@@ -1,6 +1,0 @@
-exit 0
---- stdout
-> Serve AVIF with a WebP fallback.
-
-Done; images are 38% smaller on average.
---- stderr

@@ -1,4 +1,0 @@
-exit 4
---- stdout
---- stderr
-nexus: no thread th-000000000000

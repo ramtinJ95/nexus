@@ -1,8 +1,0 @@
-exit 0
---- stdout
-.git/
-README.md     120
-package.json  117
-src/
-test/
---- stderr

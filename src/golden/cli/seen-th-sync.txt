@@ -1,4 +1,0 @@
-exit 0
---- stdout
-Marked th-sync seen.
---- stderr

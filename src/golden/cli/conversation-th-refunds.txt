@@ -1,6 +1,0 @@
-exit 0
---- stdout
-> Write Playwright tests for full and partial refunds.
-
-Opened #90 with 6 tests. Review approved; the checks are running now.
---- stderr

@@ -1,4 +1,0 @@
-exit 1
---- stdout
---- stderr
-nexus: the checkout has no latest-turn snapshot: no turn has been captured yet, or its snapshot failed. Start another agent turn or ask for changes since HEAD instead

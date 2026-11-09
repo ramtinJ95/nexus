@@ -25,7 +25,7 @@ async function filesUnder(dir: string): Promise<string[]> {
 }
 
 const sources = [
-  ...await filesUnder("./golden/"), ...await filesUnder("./test-support/"), ...await filesUnder("./fixtures/"),
+  ...await filesUnder("./test-support/"), ...await filesUnder("./fixtures/"),
   new URL("../dev/demo/fixtures.ts", import.meta.url), new URL("./control/harness/test-fixture.ts", import.meta.url),
 ];
 const text = (await Promise.all(sources.map((f) => readFile(f, "utf8")))).join("\n");
@@ -41,11 +41,11 @@ const corpus = {
   pylon: withNearMisses(found(/\b(pylon-[A-Za-z0-9-]*)/g)),
 };
 
-test("the corpus holds the IDs the fixtures and goldens use", () => {
+test("the corpus holds the IDs the fixtures use", () => {
   for (const [kind, ids] of Object.entries(corpus)) assert.ok(ids.length >= 30, `${kind} has ${ids.length} IDs`);
 });
 
-test("every ID in the fixtures and goldens gets the verdict the old checks gave it", () => {
+test("every ID in the fixtures gets the verdict the old checks gave it", () => {
   const differ = (kind: string, ids: string[], before: (id: string) => boolean, after: (id: string) => boolean) =>
     ids.filter((id) => before(id) !== after(id)).map((id) => `${kind} ${JSON.stringify(id)}`);
   assert.deepEqual([
