@@ -309,6 +309,43 @@ test("an auto start with no node that has room stays queued, then starts once ro
   assert.equal(f.registry.threads.thread(record.id)?.placement?.how, "auto");
 });
 
+test("a queued builder does not start while a review's gate pylon waits for room, and starts once it took it", async (t) => {
+  const f = fixture(t);
+  const q = f.queue();
+  const a = f.thread("th-a");
+  f.links(a, f.pr(3, "merged"));
+  const record = q.add(f.request(), null, [a], laptop);
+  const gated = f.thread("th-gated");
+  f.review(gated, { kind: "verifying", startedAt: 1, thread: null, refused: "no node can run this pylon: rj-firebat is overcommitted", room: true });
+  await q.poll();
+  assert.deepEqual(f.starts, [], "the verify pylon gets the room first");
+  const now = q.add(f.request({ title: "Now" }), null, [a], laptop);
+  await q.startNow(now.id, laptop);
+  assert.deepEqual(f.starts, [now.id], "the person's start now does not wait");
+  f.review(gated, { kind: "verifying", startedAt: 2, thread: "th-verify-1" as ThreadId });
+  await q.poll();
+  assert.deepEqual(f.starts, [now.id, record.id]);
+
+  const first = q.add(f.request({ title: "First" }), null, [a], laptop);
+  const second = q.add(f.request({ title: "Second" }), null, [a], laptop);
+  const release = f.holdStarts();
+  const pass = q.poll();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(f.starts.slice(2), [first.id]);
+  f.review(gated, { kind: "verifying", startedAt: 3, thread: null, refused: "no node can run this pylon: rj-firebat is overcommitted", room: true });
+  release();
+  await pass;
+  assert.deepEqual(f.starts.slice(2), [first.id], "a wait saved while a start was in flight holds the next start");
+  assert.equal(f.registry.queue.queuedThread(second.id)!.status, "queued");
+
+  f.review(gated, { kind: "reviewing", check: { startedAt: 4, thread: null, refused: "no node has room for this pylon: rj-firebat is overcommitted", room: true } });
+  await q.poll();
+  assert.deepEqual(f.starts.slice(2), [first.id], "a check beside the reviewer that waits for room holds the queue too");
+  f.review(gated, { kind: "reviewing", check: { startedAt: 4, thread: null, refused: "no node has room for this pylon: rj-firebat is offline" } });
+  await q.poll();
+  assert.deepEqual(f.starts.slice(2), [first.id, second.id], "a refusal room cannot end holds nothing");
+});
+
 test("a Nexus agent thread's first message is sent once under its queued request ID, and again under it after a crash", async (t) => {
   const f = fixture(t);
   const a = f.thread("th-a");

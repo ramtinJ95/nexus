@@ -41,7 +41,7 @@ import { askingHolds, isOpen, type HeldQuestion, type HoldsQuestion, type Unansw
 import {
   answered, approves, blocks, cancellable, cannotLand, changedPaths, changeOf, checkOutput, checkThread, descriptionDigest, ended, type EndedKind, findingsOf, gateFailure, gateRun, heldForGate, humanLabel,
   inLanding, landable, landingVerb, liveOutput, maxRounds, personPhase, pushedHead, reviewerApproved, reviewersFindings, roundsSpent, secondReads, seatsFor, settled, seatsOf, verdictAt, verdictsFor,
-  type GateRun, type HoldCause, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type Seat, type SecondReviewer, type Talk, type Waiver,
+  type GateRun, type HoldCause, type Refused, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type Seat, type SecondReviewer, type Talk, type Waiver,
 } from "./review-model.ts";
 import { landsOnItsOwn, type Project } from "./project.ts";
 import { landing } from "./landing.ts";
@@ -364,7 +364,7 @@ export function reviewLoop(deps: ReviewDeps) {
    */
   const checkWhileReading = async (r: Review, phase: Extract<Phase, { kind: "reviewing" }>, builder: Thread): Promise<Review> => {
     const check = phase.check ?? { startedAt: now(), thread: null };
-    if (r.rounds.at(-1)!.check !== null || check.unrunnable !== undefined || check.refused !== undefined) return r;
+    if (r.rounds.at(-1)!.check !== null || check.unrunnable !== undefined || (check.refused !== undefined && check.room === undefined)) return r;
     const step = await stepGate(r, "beside", check, builder);
     if (step.kind === "ended") return step.review;
     if (step.kind === "run") return step.run === check ? r : { ...r, phase: { ...phase, check: step.run } };
@@ -376,11 +376,12 @@ export function reviewLoop(deps: ReviewDeps) {
   /**
    * One step of a gate run at the latest round's head: the run beside the reviewer, the check, or the live check. A run
    * that can give no verdict is thrown away, and the next step starts a fresh one. A run that ended is the caller's to
-   * discard. The check beside the reviewer never overcommits a node, so one no node has room for waits for the
-   * verdict. A live check refused waits for a node that nests KVM with room, which may come before the deadline. Only
-   * those two wait, so a refused check fails the step, which the next pass tries again.
+   * discard. The check beside the reviewer never overcommits a node. One no node has room for starts once room frees,
+   * and one no node could take for another reason waits for the verdict. A live check refused waits for a node that
+   * nests KVM with room. Only those two wait, so a refused check fails the step, which the next pass tries again. A
+   * wait for room alone has no deadline, so the gate's deadline counts from the start that ends it.
    */
-  const stepGate = async <Run extends GateRun & { refused?: string }>(r: Review, kind: "beside" | "check" | "live", run: Run, builder: Thread): Promise<
+  const stepGate = async <Run extends GateRun & Refused>(r: Review, kind: "beside" | "check" | "live", run: Run, builder: Thread): Promise<
     { kind: "ended"; review: Review } | { kind: "run"; run: Run | GateRun } | { kind: "unrunnable"; thread: ThreadId; output: string } | { kind: "done"; thread: ThreadId; passed: boolean; output: string }
   > => {
     const runs = kind === "live" ? live : checks;
@@ -389,9 +390,12 @@ export function reviewLoop(deps: ReviewDeps) {
       const gone = await endedOnGitHub(r);
       if (gone !== null) return { kind: "ended", review: gone };
       const started = await runs.start(builder, r.pr.branch, head, kind === "beside" || undefined);
-      if ("thread" in started) return { kind: "run", run: { startedAt: run.startedAt, thread: started.thread } };
+      const startedAt = run.room === true && !("room" in started && started.room) ? now() : run.startedAt;
+      if ("thread" in started) return { kind: "run", run: { startedAt, thread: started.thread } };
       if (kind === "check") throw new Error(started.refused);
-      return { kind: "run", run: run.refused === started.refused ? run : { ...run, refused: started.refused } };
+      if (run.refused === started.refused && (run.room === true) === started.room) return { kind: "run", run };
+      const { room: _, ...kept } = run;
+      return { kind: "run", run: { ...kept, startedAt, refused: started.refused, ...started.room && { room: true as const } } };
     }
     const state = runs.step(run.thread, head);
     if (state.kind === "void") {
@@ -669,7 +673,7 @@ export function reviewLoop(deps: ReviewDeps) {
     async verifying(r, phase, builder) {
       const round = r.rounds.at(-1)!;
       const refused = phase.refused === undefined ? [] : [`No node could take its verify pylon: ${phase.refused}`];
-      if (now() - phase.startedAt > checkMs) return toPerson(r, "no-verdict", { code: "live-failed", text: `The live check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.` }, ...refused);
+      if (phase.room === undefined && now() - phase.startedAt > checkMs) return toPerson(r, "no-verdict", { code: "live-failed", text: `The live check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.` }, ...refused);
       const step = await stepGate(r, "live", phase, builder);
       if (step.kind === "ended") return step.review;
       if (step.kind === "run") return step.run === phase ? r : { ...r, phase: { kind: "verifying", ...step.run } };

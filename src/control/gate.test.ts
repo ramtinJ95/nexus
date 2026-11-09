@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { checkCaller, verifyCaller } from "./agent-protocol.ts";
 import { checkRuns, imageEnv, verifyGate, type CheckRuns, type CheckState } from "./gate.ts";
-import { Refusal } from "./refusal.ts";
+import { NoRoom, Refusal } from "./refusal.ts";
 import type { Thread } from "./thread-store.ts";
 import { testPylon, testRegistry, testThread } from "../test-support/registry-kit.ts";
 import { processStream } from "../process-stream.ts";
@@ -104,13 +104,13 @@ test("a check runs in a fresh bare check thread of 4 CPUs at the commit, and its
   assert.equal(f.registry.threads.thread(id)!.status, "deleted");
 });
 
-test("a start the control plane refuses says why, with or without room asked for, and any other failure is thrown", async (t) => {
+test("a start the control plane refuses says why and whether room that frees can end it, with or without room asked for, and any other failure is thrown", async (t) => {
   const f = await fixture(t, "echo tests ok");
   const runs = f.runs();
-  f.refuse = new Refusal("conflict", "no node has room for this pylon: node is overcommitted");
-  assert.deepEqual(await runs.start(f.builder, "feature", f.head, true), { refused: "no node has room for this pylon: node is overcommitted" });
+  f.refuse = new NoRoom("conflict", "no node has room for this pylon: node is overcommitted");
+  assert.deepEqual(await runs.start(f.builder, "feature", f.head, true), { refused: "no node has room for this pylon: node is overcommitted", room: true });
   f.refuse = new Refusal("conflict", "no image is current yet, so a pylon has nothing to boot");
-  assert.deepEqual(await runs.start(f.builder, "feature", f.head), { refused: "no image is current yet, so a pylon has nothing to boot" });
+  assert.deepEqual(await runs.start(f.builder, "feature", f.head), { refused: "no image is current yet, so a pylon has nothing to boot", room: false });
   f.refuse = new Error("the registry is closed");
   await assert.rejects(runs.start(f.builder, "feature", f.head), { message: "the registry is closed" });
   f.refuse = null;

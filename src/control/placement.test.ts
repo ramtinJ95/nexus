@@ -7,7 +7,7 @@ import type { NodeRecord } from "./node-store.ts";
 import type { StoredPylon, Thread } from "./thread-store.ts";
 import type { Room } from "./placement-model.ts";
 import { testCapacity, testObservation } from "../test-support/kit.ts";
-import { Refusal } from "./refusal.ts";
+import { NoRoom, Refusal } from "./refusal.ts";
 import { freeHeldRoom, placeAuto, placeNear, weighNodes } from "./placement.ts";
 import { observeNode, withImage } from "../test-support/api-kit.ts";
 
@@ -19,6 +19,8 @@ const need = (memoryGiB = 4) => ({
 
 interface FakeNode {
   name: string; total: number; committed: number; free?: number | "unread"; readAgoMs?: number; reserved?: number | undefined;
+  /** The disk the node has free, 200 GiB unless given. */
+  diskFree?: number;
   /** A pylon-vm probe, which reports its pylons' filesystem and names their processes in a health read. */
   pylonVm?: true | undefined;
   /** VMs the probe reports and commits but the registry has not placed, as the health read names them. */
@@ -31,8 +33,8 @@ function fakeRegistry(nodes: FakeNode[]) {
   const now = Date.now();
   const released = new Set<string>();
   const record = (n: FakeNode): NodeRecord => {
-    const capacity = testCapacity({ memoryGiB: n.total, committedMemoryGiB: n.committed, diskFreeGiB: 200,
-      ...n.pylonVm && { disks: [{ paths: ["/var/lib/nexus/pylons"], totalGiB: 500, freeGiB: 200, pylons: true }] } });
+    const capacity = testCapacity({ memoryGiB: n.total, committedMemoryGiB: n.committed, diskFreeGiB: n.diskFree ?? 200,
+      ...n.pylonVm && { disks: [{ paths: ["/var/lib/nexus/pylons"], totalGiB: 500, freeGiB: n.diskFree ?? 200, pylons: true }] } });
     return { name: n.name as NodeName, tailnetHost: `${n.name}.ts.net`, tailnetNodeId: `n${n.name}`, state: "online", capacity,
       observation: testObservation(n.name as NodeName, { capacity, artifacts: [image], pylons: [...(n.pylons ?? []).filter((p) => p.observed !== false), ...n.orphans ?? []].map((p) => ({ pylonId: `pylon-${p.id}` as PylonId, phase: "booting" })) }) } as NodeRecord;
   };
@@ -83,6 +85,23 @@ test("a start no node has free memory for fails with each node's reason", () => 
   assert.throws(() => placeAuto(registry, need()), (err: unknown) => err instanceof Refusal && err.kind === "conflict"
     && err.message === "no node can run this pylon: a has 4.5 GiB of memory free, and the pylon needs 4 GiB with 1 GiB to spare; b has 3 GiB of memory free, and the pylon needs 4 GiB with 1 GiB to spare");
   assert.equal(placeAuto(registry, need(3.5)).node, "a", "1 GiB to spare is enough");
+});
+
+test("a start refused for room alone is a NoRoom, which room that frees can end, and one no node could ever take is not", () => {
+  const full = fakeRegistry([{ name: "a", total: 32, committed: 30 }, { name: "b", total: 8, committed: 9 }]);
+  assert.throws(() => placeAuto(full, need()), (err: unknown) => err instanceof NoRoom);
+  assert.throws(() => placeNear(full, need(), "a" as NodeName, true), (err: unknown) => err instanceof NoRoom);
+  assert.deepEqual(weighNodes(full, need()).weighed, [
+    { node: "a", refused: "has 30 of 32 GiB of memory committed, and the pylon needs 4" }, { node: "b", refused: "is overcommitted, with 9 of 8 GiB of memory committed" },
+  ], "what a node refused for stays as the thread's placement records it");
+  const kvm = { ...need(), resources: { ...need().resources, nestedVirtualization: true as const } };
+  assert.throws(() => placeAuto(fakeRegistry([{ name: "a", total: 32, committed: 0 }]), kvm), (err: unknown) => err instanceof Refusal && !(err instanceof NoRoom)
+    && /a cannot give a pylon KVM of its own/.test(err.message));
+  assert.throws(() => placeAuto(fakeRegistry([{ name: "a", total: 32, committed: 0 }]), { ...need(), image: "img-elsewhere" }), (err: unknown) => err instanceof Refusal && !(err instanceof NoRoom));
+  assert.throws(() => placeAuto(fakeRegistry([{ name: "small", total: 8, committed: 0 }]), need(8)), (err: unknown) => err instanceof Refusal && !(err instanceof NoRoom)
+    && err.message === "no node can run this pylon: small has 8 GiB of memory, and the pylon needs 8 GiB with 1 GiB to spare", "a pylon no node could hold even empty never waits for room");
+  assert.throws(() => placeAuto(fakeRegistry([{ name: "a", total: 32, committed: 30, pylonVm: true, diskFree: 20 }]), need()), (err: unknown) => err instanceof Refusal && !(err instanceof NoRoom)
+    && /a has 20.0 of 500.0 GiB free on the filesystem/.test(err.message), "pausing pylons frees no disk, so a node short of disk and memory is no wait for room");
 });
 
 test("auto ranks nodes by the smaller of the memory their commitments and their host leave", () => {

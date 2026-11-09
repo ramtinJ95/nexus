@@ -24,3 +24,9 @@ export class Refusal extends Error {
     this.retryable = code !== null && retryableCodes[code];
   }
 }
+
+/**
+ * A start no node has room for now, though a node refused it for memory alone, so the same start can succeed once room
+ * frees, as when running pylons pause. The API answers it as any conflict.
+ */
+export class NoRoom extends Refusal {}

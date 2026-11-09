@@ -7,7 +7,8 @@
  * A queued thread has no `threads` row, so the planner, PR watch, the review loop and placement never see it. Its
  * record keeps the ID the thread gets, and the transaction that inserts the thread's row marks the record started,
  * so it starts once whatever crashes, restarts or concurrent passes come between. What blocks it is derived on every
- * pass and read rather than stored, so a reopened or later-merged pull request unblocks it.
+ * pass and read rather than stored, so a reopened or later-merged pull request unblocks it. None starts on its own while
+ * a review's gate pylon waits for room, so the gate gets the room that frees first.
  */
 import { defaultClaudeModel } from "../protocol/models.ts";
 import { newThreadId, requestIds, type ProjectId, type ThreadId } from "../ids.ts";
@@ -23,6 +24,7 @@ import { deliverDurable } from "./durable-message.ts";
 import { noChangeOf, prLocationOf, servesReview, threadRole } from "./work-model.ts";
 import { brokenRule, startRules } from "../contract/threads-parse.ts";
 import { isOpenStatus } from "./reconcile.ts";
+import { waitsForRoom } from "./review-model.ts";
 
 type QueueRegistry = Pick<Registry, "threads" | "images" | "reviews" | "nodeMetrics" | "nodes" | "now" | "nudges" | "planning" | "prWatches" | "projects" | "queue" | "placement">;
 
@@ -150,11 +152,15 @@ export function threadQueue(options: {
   }
 
   async function pass() {
+    // A gate pylon that waits for room gets it before a builder that would take it, since a review held waiting for
+    // one keeps its pull request, and the threads queued after it, from landing. Read before each start, since the
+    // review loop can save a wait while an earlier start is in flight.
+    const gateWaits = () => registry.reviews.reviewsToStep().some((r) => waitsForRoom(r.phase));
     for (const record of registry.queue.queuedThreads()) {
       if (record.status === "started") {
         await deliver(record.id).catch((err: unknown) => log(`queued thread ${record.id} started, but its first message was not sent yet: ${(err as Error).message}`));
       } else if (record.status === "queued" && (record.refused === undefined || Date.now() - record.refused.at >= refusedRetryMs)
-        && (record.startNow !== null || record.after.every((id) => waitOf(registry, id).state === "landed"))) {
+        && (record.startNow !== null || (record.after.every((id) => waitOf(registry, id).state === "landed") && !gateWaits()))) {
         // attempt records and logs why, and the next pass tries again.
         await start(record.id).catch(() => {});
       }

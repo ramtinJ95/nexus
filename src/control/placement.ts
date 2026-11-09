@@ -1,9 +1,9 @@
 import type { BootInputs } from "../protocol/spawn.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
-import { diskRefusal } from "../disk-space.ts";
+import { diskRefusal, keptFreeGiB } from "../disk-space.ts";
 import { heldSecrets, type NodeCapacity, type NodeObservation, type PylonObservation } from "../protocol/observations.ts";
 import { desiredPhase, isOpenStatus, wantsToRun } from "./reconcile.ts";
-import { Refusal } from "./refusal.ts";
+import { NoRoom, Refusal } from "./refusal.ts";
 import { gib } from "../util/gib.ts";
 import { backgroundReadMs, seriesOf } from "./node-metrics.ts";
 import type { Registry } from "./registry.ts";
@@ -25,9 +25,11 @@ type WeighingRegistry = PlacementRegistry & { nodeMetrics: Pick<Registry["nodeMe
 
 type Need = Pick<BootInputs, "image" | "resources" | "network" | "repo" | "dotfiles">;
 
+const refuse = (roomFrees: boolean, message: string) => roomFrees ? new NoRoom("conflict", message) : new Refusal("conflict", message);
+
 export function placeAuto(registry: WeighingRegistry, need: Need): Placement {
-  const { best, weighed } = weighNodes(registry, need);
-  if (best === null) throw new Refusal("conflict", `no node can run this pylon: ${refusals(weighed)}`);
+  const { best, weighed, roomFrees } = weighNodes(registry, need);
+  if (best === null) throw refuse(roomFrees, `no node can run this pylon: ${refusals(weighed)}`);
   return { how: "auto", node: best, weighed };
 }
 
@@ -37,24 +39,30 @@ export function placeAuto(registry: WeighingRegistry, need: Need): Placement {
  * unless `ifRoom`, as for a check that can wait for the reviewer's verdict instead.
  */
 export function placeNear(registry: WeighingRegistry, need: Need, near: NodeName, ifRoom = false): Placement {
-  const { best, weighed } = weighNodes(registry, need);
-  if (best === null && ifRoom) throw new Refusal("conflict", `no node has room for this pylon: ${refusals(weighed)}`);
+  const { best, weighed, roomFrees } = weighNodes(registry, need);
+  if (best === null && ifRoom) throw refuse(roomFrees, `no node has room for this pylon: ${refusals(weighed)}`);
   if (best === null || weighed.some((w) => w.node === near && "left" in w)) return { how: "named", node: near };
   return { how: "auto", node: best, weighed };
 }
 
-/** Every node but `except` weighed for the pylon, and the one with the most room left once it boots there, if any can run it. */
-export function weighNodes(registry: WeighingRegistry, need: Need, except?: NodeName): { best: NodeName | null; weighed: Weighed[] } {
-  const weighed = registry.nodes.nodes().filter((n) => n.name !== except).map((n) => weigh(registry, n, need));
+/**
+ * Every node but `except` weighed for the pylon, and the one with the most room left once it boots there, if any can run
+ * it. `roomFrees` when a node refused it for its memory alone, so a node could take it once its pylons pause.
+ */
+export function weighNodes(registry: WeighingRegistry, need: Need, except?: NodeName): { best: NodeName | null; weighed: Weighed[]; roomFrees: boolean } {
+  const weighings = registry.nodes.nodes().filter((n) => n.name !== except).map((n) => weigh(registry, n, need));
+  const weighed = weighings.map((w): Weighed => "short" in w ? { node: w.node, refused: w.refused } : w);
   const fits = weighed.flatMap((w) => "left" in w ? [w] : [])
     .sort((a, b) => b.left.memoryGiB - a.left.memoryGiB || b.left.cpus - a.left.cpus || b.left.diskGiB - a.left.diskGiB);
-  return { best: fits[0]?.node ?? null, weighed };
+  return { best: fits[0]?.node ?? null, weighed, roomFrees: weighings.some((w) => "short" in w) };
 }
 
 export const refusals = (weighed: readonly Weighed[]) => weighed.flatMap((w) => "refused" in w ? [`${w.node} ${w.refused}`] : []).join("; ");
 
-function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighed {
+/** `short` marks a node that refused the pylon for its room alone. */
+function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighed | { node: NodeName; refused: string; short: true } {
   const refused = (why: string): Weighed => ({ node: node.name, refused: why });
+  const short = (why: string) => ({ node: node.name, refused: why, short: true as const });
   const o = node.observation;
   if (node.state !== "online" || o === null) return refused("is offline");
   const { capacity: c } = o;
@@ -66,25 +74,30 @@ function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighe
   if (missing.length > 0) return refused(`has no secret ${missing.map(from).join(", ")}`);
   const ssh = [...need.repo.kind === "clone" ? [need.repo.url] : [], need.dotfiles.repo].filter((url) => !url.startsWith("https://"));
   if (ssh.length > 0 && !o.grants.gitSsh) return refused(`has no git SSH key to reach ${ssh.join(" and ")}`);
+  // Room that frees never gives a pylon more than the node has.
+  const disks = c.disks?.find((d) => d.pylons === true);
+  if (need.resources.memoryGiB + memoryHeadroomGiB > c.memoryGiB) return refused(`has ${gib(c.memoryGiB)} GiB of memory, and the pylon needs ${need.resources.memoryGiB} GiB with ${memoryHeadroomGiB} GiB to spare`);
+  if (disks !== undefined && need.resources.diskGiB + keptFreeGiB(disks.totalGiB) > disks.totalGiB) return refused(`has ${gib(disks.totalGiB)} GiB on the filesystem of its pylons' disks, too little for a ${need.resources.diskGiB} GiB pylon disk and the ${gib(keptFreeGiB(disks.totalGiB))} GiB it keeps free`);
   const { left, pending } = roomLeft(registry, node.name, o, c, need.resources);
   const held = heldRoom(registry, node.name, registry.now());
   pending.memoryGiB -= held;
   left.memoryGiB += held;
+  // Disk frees only as pylons are deleted, not as they pause, so a node short of it is no wait for room, even short of memory too.
+  const disk = diskShort(c, left, need.resources);
+  if (disk !== null) return refused(disk);
   const committed = `${gib(c.committedMemoryGiB + pending.memoryGiB)} of ${gib(c.memoryGiB)} GiB of memory committed`;
-  if (c.committedMemoryGiB + pending.memoryGiB > c.memoryGiB) return refused(`is overcommitted, with ${committed}`);
-  if (left.memoryGiB < 0) return refused(`has ${committed}, and the pylon needs ${need.resources.memoryGiB}`);
+  if (c.committedMemoryGiB + pending.memoryGiB > c.memoryGiB) return short(`is overcommitted, with ${committed}`);
+  if (left.memoryGiB < 0) return short(`has ${committed}, and the pylon needs ${need.resources.memoryGiB}`);
   const free = freeMemory(registry, node.name, o, c, registry.now());
   // With no fresh reading of its free memory, the node is weighed by its commitments alone.
   if (free !== null) {
     const freeLeft = free.availableGiB - free.untouchedGiB - pending.memoryGiB - need.resources.memoryGiB;
     if (freeLeft < memoryHeadroomGiB) {
       const less = [free.untouchedGiB > 0 && `${gib(free.untouchedGiB)} GiB its pylons have yet to touch`, pending.memoryGiB > 0 && `${gib(pending.memoryGiB)} GiB for pylons about to boot there`].filter((s) => s !== false);
-      return refused(`has ${gib(free.availableGiB)} GiB of memory free${less.length > 0 ? `, less ${less.join(" and ")}` : ""}, and the pylon needs ${need.resources.memoryGiB} GiB with ${memoryHeadroomGiB} GiB to spare`);
+      return short(`has ${gib(free.availableGiB)} GiB of memory free${less.length > 0 ? `, less ${less.join(" and ")}` : ""}, and the pylon needs ${need.resources.memoryGiB} GiB with ${memoryHeadroomGiB} GiB to spare`);
     }
     left.memoryGiB = Math.min(left.memoryGiB, freeLeft);
   }
-  const short = diskShort(c, left, need.resources);
-  if (short !== null) return refused(short);
   return { node: node.name, left };
 }
 
