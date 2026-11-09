@@ -5,14 +5,12 @@ import { dirname, join, relative, resolve } from "node:path";
 
 const src = resolve(import.meta.dirname, "..");
 const files = readdirSync(import.meta.dirname, { recursive: true, encoding: "utf8" }).filter((file) => /\.(ts|js)$/.test(file));
-/** `import … from`, `import type … from`, a bare `import "x"`, or a dynamic `import("x")`. */
-const anyImport = /^import\s[^;]*?\bfrom\s+["']([^"']+)["']|^import\s+["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']/gm;
+/** Every quoted relative path, whatever the import, export or dynamic import() around it, so no spelling of an import slips past. */
+const relativePath = /["'`](\.\.?\/[^"'`\n]+)["'`]/g;
 
 test("src/control imports nothing from src/cli, tests included, so control tests assert what the API serves, not how the CLI renders it", () => {
-  const cli = files.flatMap((file) => [...readFileSync(join(import.meta.dirname, file), "utf8").matchAll(anyImport)]
-    .map((match) => match[1] ?? match[2] ?? match[3]!)
-    .filter((target) => target.startsWith("."))
-    .map((target) => relative(src, resolve(dirname(join(import.meta.dirname, file)), target)))
+  const cli = files.flatMap((file) => [...readFileSync(join(import.meta.dirname, file), "utf8").matchAll(relativePath)]
+    .map((match) => relative(src, resolve(dirname(join(import.meta.dirname, file)), match[1]!)))
     .filter((target) => target.startsWith("cli/"))
     .map((target) => `${file} imports ${target}`));
   assert.deepEqual(cli, []);
