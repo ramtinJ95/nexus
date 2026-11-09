@@ -266,7 +266,7 @@ export function reviewLoop(deps: ReviewDeps) {
    */
   const unrunnable = async (r: Review, hold: Hold, output: string): Promise<Review> => {
     const { pr, detail } = await read(r);
-    if (pr.state !== "open" || detail.head === r.rounds.at(-1)!.head) return toPerson(r, "no-verdict", hold, output);
+    if (pr.state !== "open" || detail.head === r.rounds.at(-1)!.head) return outside(r, pr.state) ?? toPerson(r, "no-verdict", hold, output);
     const next = await newHead(r, detail.head, detail.base, `The pull request's head moved to ${detail.head}`);
     const gate = gateThread(r.phase);
     if (gate !== null) gate.runs.discard(gate.thread);

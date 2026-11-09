@@ -737,8 +737,9 @@ type Phase =
   /**
    * The reviewer has the round's request and owes its verdict. `check` is the repository's checks at the round's head,
    * run beside it unless the round has their result already, as `checking`'s are. `unrunnable` is the output of a check
-   * the pylon could not run, which goes to the person once the reviewer approves. `refused` is why no node had room for
-   * the check, which then runs in `checking` once the reviewer approves.
+   * the pylon could not run, which goes to the person once the reviewer approves while the PR is still at the round's
+   * head. A PR at another head by then gets a round of its own. `refused` is why no node had room for the check, which
+   * then runs in `checking` once the reviewer approves.
    */
   | { kind: "reviewing"; failing?: ModelFailure; check?: GateRun & { unrunnable?: string; refused?: string } }
   /** The builder has the round's findings and owes an answer to each, and a push for what it fixed. */
