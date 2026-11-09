@@ -1476,6 +1476,9 @@ test("the code that enforces the policy, the dependency manifests and what the c
     '@@ -42,4 +42,5 @@\n   "overrides": {\n     "undici": "7.30.1"\n   },\n+  "description": "x", "scripts": { "postinstall": "sh evil.sh" },\n }',
     '@@ -1,4 +1,4 @@\n {\n   "name": "nexus",\n-  "version": "0.0.0",\n+  "version": "0.0.1",',
   ]) assert.deepEqual(changed("package.json", patch), secrets, patch);
+  for (const path of ["npm-shrinkwrap.json", ".npmrc", "src/control/dashboard/build.ts", "src/control/dashboard/assets.ts"]) {
+    assert.deepEqual(changed(path), [`Always needs the person: changes to secrets, as it changes ${path}.`], `a release's npm ci or npm run build reads or runs ${path} as root`);
+  }
   assert.deepEqual(changed("package.json", ""), [...secrets, "Always needs the person: anything irreversible, as it changes package.json."], "a manifest GitHub shows no patch for may change anything");
 
   const check = (paths: string) => [`The pull request changes ${paths}, the check this policy relies on or what it runs.`];

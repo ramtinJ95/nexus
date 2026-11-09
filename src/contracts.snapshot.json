@@ -61,6 +61,8 @@
     "src/control/api/pylon-access.ts: reserved-path:auth",
     "src/control/api/server.ts: reserved-path:auth",
     "src/control/attach.ts: reserved-path:auth",
+    "src/control/dashboard/assets.ts: reserved-path:secrets",
+    "src/control/dashboard/build.ts: reserved-path:secrets",
     "src/control/gate.ts: reserved-path:auth",
     "src/control/github.ts: reserved-path:auth",
     "src/control/harness/credentials.test.ts: reserved-path:secrets",
