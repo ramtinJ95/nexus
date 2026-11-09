@@ -45,8 +45,8 @@ export const mint = (id: string) => `${id}:${randomBytes(6).toString("hex")}`;
  * The text of each block fenced as `fence` in the replies, oldest first. The closing fence starts a line, which no
  * JSON string can, so a brief or a finding that quotes fenced code stays in its block.
  */
-const fencedBlocks = (replies: readonly string[], fence: string): string[] =>
-  replies.flatMap((text) => [...text.matchAll(new RegExp("```" + fence + "[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```", "g"))].map((m) => m[1]!));
+const blocksIn = (text: string, fence: string) => [...text.matchAll(new RegExp("```" + fence + "[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n[ \\t]*```", "g"))];
+const fencedBlocks = (replies: readonly string[], fence: string): string[] => replies.flatMap((text) => blocksIn(text, fence).map((m) => m[1]!));
 
 /** Every fenced `fence` block in the replies whose JSON matches `schema` and echoes `token`, oldest first. */
 export const tokenBlocks = <T extends { token: string }>(replies: readonly string[], fence: string, schema: z.ZodType<T>, token: string): T[] =>
@@ -62,8 +62,8 @@ export const tokenBlocks = <T extends { token: string }>(replies: readonly strin
  * echoes `token`, or null. Text after the block, such as a correction, takes it back.
  */
 export function endingBlock<T extends { token: string }>(reply: string, fence: string, schema: z.ZodType<T>, token: string): T | null {
-  const last = reply.slice(reply.lastIndexOf("```" + fence));
-  return new RegExp("^```" + fence + "[ \\t]*\\r?\\n[\\s\\S]*?\\r?\\n[ \\t]*```\\s*$").test(last) ? latest([last], fence, schema, token) : null;
+  const last = blocksIn(reply, fence).at(-1);
+  return last === undefined || reply.slice(last.index + last[0].length).trim() !== "" ? null : latest([last[0]], fence, schema, token);
 }
 
 /** The newest fenced `fence` block in the replies whose JSON matches `schema` and echoes `token`, or null when none does. */
