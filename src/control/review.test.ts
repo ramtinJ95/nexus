@@ -46,7 +46,7 @@ const tempDb = () => join(registries, `${randomUUID()}.db`);
 const previous = "p".repeat(40);
 
 /** `agentState` replaces the fake that reads replies and model failures from the fixture's maps. */
-function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview; secondReview?: SecondReview; agentState?: (registry: Registry) => ReviewDeps["agentState"] } = {}) {
+function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview; secondReview?: SecondReview; agentState?: (registry: Registry) => ReviewDeps["agentState"]; personWrote?: (registry: Registry) => ReviewDeps["personWrote"] } = {}) {
   const registry = openRegistry(options.path ?? ":memory:");
   t.after(() => { try { registry.close(); } catch { /* closed by a restart */ } });
   const repo = options.repo ?? "ramtinJ95/nexus";
@@ -169,6 +169,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     wake: (target) => { woken.push(target.id); },
     log: (message) => { logged.push(message); },
     now: () => clock,
+    personWrote: options.personWrote?.(registry) ?? agentReader(registry, { async watch() { throw new Error("no harness thread here"); } }).personWrote,
     brief: async (target) => { const agent = registry.threads.agent(target); return agent.kind === "claude" ? agent.worker.prompt : briefs.get(target.id) ?? null; },
     async startThread(start) {
       const refused = refuseStart(start.request);
@@ -1019,15 +1020,80 @@ test("a review held for the person, or one that stops at approval, archives noth
   assert.deepEqual([...held.woken, ...rolledBack.woken, ...approval.woken], []);
 });
 
-test("a thread in a turn as its review lands stays open, and the other is archived", async (t) => {
+test("a builder in a turn as its review lands, as one answering the approval's notes, is archived once that turn ends, and no holds question stays open", async (t) => {
+  const f = fixture(t, { autoReview: { mode: "yolo", enabledBy: "nLAPTOP" } });
+  released(f, previous);
+  f.files = [{ path: "images/pylon/Dockerfile", previous: null, patch: "@@ -1 +1 @@\n-FROM a\n+FROM b" }];
+  const loop = f.loop();
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
+  await loop.poll();
+  claudeRead(f, [{ kind: "reply", at: f.now, text: "Opened #7." }, { kind: "prompt", at: f.now + 1, text: "Keep the cache small", from: "person" }], []);
+  f.tick(1_000);
+  f.reply(f.review().reviewer, verdict(f.review(), { findings: [{ id: "N1", priority: "P3", where: "src/cache.ts:1", summary: "Name the constant" }] }));
+  await loop.poll();
+  assert.match(f.sent.findLast((s) => s.to === f.builder)!.message.text, /N1 \(P3\)/, "the builder gets the approval's notes");
+  f.registry.threads.recordActivity(f.builder, { agent: f.now, agentTurnRunning: true });
+  for (const role of ["control", "probe"] as const) f.registry.releases.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: Date.now() });
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "landed");
+  assert.deepEqual(f.statuses(), ["active", "archived"], "a builder in a turn stays open as its review lands");
+  assert.deepEqual(holdQuestions(f).filter((q) => q.answer === null && q.withdrawn === undefined), [], "no holds question is open once the review landed");
+  await loop.poll();
+  assert.deepEqual(f.statuses(), ["active", "archived"], "its turn keeps it open");
+  f.tick(60_000);
+  f.registry.threads.recordActivity(f.builder, { agent: f.now, agentTurnRunning: false });
+  await loop.poll();
+  assert.deepEqual(f.statuses(), ["active", "archived"], "its transcript is not read since the landing");
+  f.tick(1_000);
+  claudeRead(f, [{ kind: "reply", at: f.now, text: "Named the constant." }], []);
+  await loop.poll();
+  assert.deepEqual(f.statuses(), ["archived", "archived"], "the person's message before the landing does not keep it");
+  assert.deepEqual(f.woken.at(-1), f.builder, "the planner hears of the archive, so its pylon pauses");
+  f.registry.threads.setThreadStatus(f.builder, "active");
+  await loop.poll();
+  assert.deepEqual(f.statuses(), ["active", "archived"], "a builder the person unarchives stays open");
+});
+
+test("a builder the person wrote to after its review landed stays open once its turn ends, though its transcript is read after that end", async (t) => {
   const f = fixture(t, { repo: "acme/shop" });
   f.registry.threads.recordActivity(f.builder, { agent: 1, agentTurnRunning: true });
   const loop = await approved(f, "nLAPTOP");
-  assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
+  assert.deepEqual(f.review().phase.kind, "landed");
   assert.deepEqual(f.statuses(), ["active", "archived"]);
-  f.registry.threads.recordActivity(f.builder, { agent: 2, agentTurnRunning: false });
+  f.tick(1_000);
+  const wrote = f.now;
+  f.tick(1_000);
+  f.registry.threads.recordActivity(f.builder, { agent: f.now, agentTurnRunning: false });
+  f.registry.threads.recordReply(f.builder, f.now);
   await loop.poll();
-  assert.deepEqual(f.statuses(), ["active", "archived"], "the person archives a builder that was busy as it landed");
+  assert.deepEqual(f.statuses(), ["active", "archived"], "a transcript not read since the turn ended cannot say the person did not write");
+  f.tick(1_000);
+  claudeRead(f, [{ kind: "prompt", at: wrote, text: "Now write the follow-up", from: "person" }, { kind: "reply", at: wrote + 1, text: "On it." }], []);
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual(f.statuses(), ["active", "archived"], "the person's message since the landing makes it theirs");
+  assert.deepEqual(f.review().phase, { kind: "landed", commit: merged }, "and the loop stops reading it");
+  assert.deepEqual(f.woken, [f.review().reviewer]);
+});
+
+test("a builder that starts a turn or is deleted while the loop reads whether the person wrote to it is not archived", async (t) => {
+  for (const meanwhile of ["turn", "deleted"] as const) {
+    const f = fixture(t, {
+      repo: "acme/shop",
+      personWrote: (registry) => async (target) => {
+        if (meanwhile === "turn") registry.threads.recordActivity(target.id, { agent: 3, agentTurnRunning: true });
+        else registry.threads.setThreadStatus(target.id, "deleted");
+        return false;
+      },
+    });
+    f.registry.threads.recordActivity(f.builder, { agent: 1, agentTurnRunning: true });
+    const loop = await approved(f, "nLAPTOP");
+    f.registry.threads.recordActivity(f.builder, { agent: 2, agentTurnRunning: false });
+    f.tick(1_000);
+    claudeRead(f, [], []);
+    await loop.poll();
+    assert.deepEqual(f.statuses(), [meanwhile === "turn" ? "active" : "deleted", "archived"], meanwhile);
+  }
 });
 
 test("a review that ends merged, closed, cancelled by its builder's archive, or out of rounds archives its reviewer by the next pass", async (t) => {

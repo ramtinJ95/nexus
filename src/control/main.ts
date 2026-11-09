@@ -225,6 +225,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     registry, github, inbox, harnessModel: config.harness.model.modelId, startThread,
     agentState: agents.state,
     brief: agents.brief,
+    personWrote: agents.personWrote,
     runs: (ended) => ({ checks: checkRuns({ ...checkRunDeps, ended }), live: checkRuns({ ...checkRunDeps, gate: verifyGate, ended }) }),
     release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)! },
     mayLand: (caller) => isDeployer(registry, deployment, caller as TailnetNodeId),
