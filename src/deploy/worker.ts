@@ -1,4 +1,4 @@
-import { copyFile, readFile, readlink, stat, writeFile } from "node:fs/promises";
+import { copyFile, readFile, readlink, realpath, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
@@ -53,7 +53,9 @@ export function controlApi(config: WorkerConfig, peer?: { id: string; whois: Who
  * `bootstrap`, or the commit of the release the supervisor promoted the worker in `root` from, or undefined when it runs
  * from neither. Node resolves deployer-current to the release it names when it loads the worker.
  */
-export async function workerName(prefix: string, root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")): Promise<string | undefined> {
+export async function workerName(given: string, root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")): Promise<string | undefined> {
+  // root is a real path, so a prefix reached through a symlink is compared as one too.
+  const prefix = await realpath(given).catch(() => given);
   if (root === join(prefix, deployerFiles.bootstrap)) return "bootstrap";
   return dirname(root) === join(prefix, releasesDir) ? await readReleaseCommit(root) ?? undefined : undefined;
 }

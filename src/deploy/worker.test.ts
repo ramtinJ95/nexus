@@ -152,8 +152,11 @@ test("a worker loaded through deployer-current names the release it was promoted
   }
   await writeFile(join(dir, `releases/${commit}/release-commit`), commit);
   await symlink(`releases/${commit}`, join(dir, "deployer-current"));
-  const name = async (copy: string) => ((await import(join(dir, copy, "src/deploy/worker.ts"))) as typeof import("./worker.ts")).workerName(dir);
-  assert.equal(await name("deployer-current"), commit);
+  const linked = `${dir}-link`;
+  await symlink(dir, linked);
+  t.after(() => rm(linked, { force: true }));
+  const name = async (copy: string) => ((await import(join(dir, copy, "src/deploy/worker.ts"))) as typeof import("./worker.ts")).workerName(linked);
+  assert.equal(await name("deployer-current"), commit, "a prefix reached through a symlink still names the release");
   assert.equal(await name("deployer/bootstrap"), "bootstrap");
   assert.equal(await (await import("./worker.ts")).workerName(dir), undefined, "a worker run from a checkout names no release");
 });
