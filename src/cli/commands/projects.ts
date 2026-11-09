@@ -1,4 +1,3 @@
-/** `nexus projects`, `project show`, `project edit` and `project add`. */
 import { readFileSync } from "node:fs";
 import { secretHostPattern, secretNamePattern } from "../../protocol/secret-grants.ts";
 import { CliError } from "../transport.ts";
@@ -6,8 +5,8 @@ import { type Command, str, strs, request, resourcesOf, resourceOptions, table }
 import { defaultSecondReview, projectRoutes, type LoginKind, type Project, type SecondReview } from "../../contract/projects.ts";
 
 /**
- * `NAME:HOST[,HOST...]`, such as GH_TOKEN:api.github.com,github.com. A value pasted by mistake, as in NAME=value,
- * fails the name or host check, so it never reaches the API, and the error does not repeat it.
+ * A value pasted by mistake, as in NAME=value, fails the name or host check, so it never reaches the API, and the
+ * error does not repeat it.
  */
 function secretGrantOf(flag: string) {
   const colon = flag.indexOf(":");
@@ -20,7 +19,6 @@ function secretGrantOf(flag: string) {
 }
 
 const autoReviews = { off: null, review: { mode: "review" }, land: { mode: "land" }, yolo: { mode: "yolo" } } as const;
-/** `--auto-review`, as the API's edit takes it. */
 function autoReviewOf(v: Parameters<typeof str>[0]) {
   const auto = str(v, "auto-review");
   if (auto === undefined) return undefined;
@@ -43,7 +41,6 @@ const secondReviewText = (p: Project) => {
   if (rule.always) return "a second reviewer on another model for every pull request";
   return `a second reviewer on another model for a pull request with ${[...rule.reserved ? ["a reserved path hold"] : [], ...rule.lines === null ? [] : [`at least ${rule.lines} changed lines`]].join(" or ")}`;
 };
-/** `--second-reviewer`: off, on for the default rule, always, or a rule of `reserved` and `lines=N`, such as reserved,lines=150. */
 function secondReviewOf(flag: string): SecondReview | null {
   if (flag === "off") return null;
   if (flag === "on") return defaultSecondReview;
@@ -55,7 +52,7 @@ function secondReviewOf(flag: string): SecondReview | null {
   return { always: false, lines: lines.length ? Number(lines[0]) : null, reserved: parts.includes("reserved") };
 }
 
-/** The text of `--rules-file`, read from stdin for `-`. The API trims it and refuses one that is empty or too long. */
+/** The API trims it and refuses one that is empty or too long. */
 function rulesFileOf(path: string): string {
   try {
     return readFileSync(path === "-" ? 0 : path, "utf8");

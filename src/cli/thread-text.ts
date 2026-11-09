@@ -1,7 +1,3 @@
-/**
- * A thread, a queued thread and a pylon's checkout as text, as `show`, `threads`, `review` and the checkout commands
- * print them.
- */
 import { usageLimitText, type Placement, type QueuedThread, type Room, type ThreadDetail, type ThreadRow, type ThreadSetup, type Wait } from "../contract/threads.ts";
 import type { Question, Review } from "../contract/reviews.ts";
 import { reservedNames } from "../contract/reserved.ts";
@@ -27,10 +23,7 @@ function setupText(s: ThreadSetup): string {
   }
 }
 
-/**
- * A review's state for a person: the lines the API words of its phase, round and reviewers, then what it needs from
- * them. A control plane older than 0.73.0 words none, so its review shows as its ID.
- */
+/** A control plane older than 0.73.0 words none of a review's lines, so its review shows as its ID. */
 export function reviewText(r: Review, said: readonly string[] | null | undefined): string {
   const { live } = r.rounds.at(-1)!;
   return [
@@ -41,10 +34,7 @@ export function reviewText(r: Review, said: readonly string[] | null | undefined
   ].join("\n");
 }
 
-/**
- * A question's first line, its options and reserved case, and who must answer it or how it was answered. A Claude
- * worker's ask has a line per question it asks, and no options of its own.
- */
+/** A Claude worker's ask has a line per question it asks, and no options of its own. */
 function questionText(q: Question): string {
   const [first, ...rest] = q.text.split("\n");
   return [
@@ -57,7 +47,6 @@ function questionText(q: Question): string {
   ].join("\n");
 }
 
-/** A judgment's verdict and who gave it, then what Nexus did or what it waits for. */
 function judgmentText(j: ThreadDetail["judgments"][number]): string {
   return [
     `judgment of failure ${j.failure} on ${j.node}: ${j.verdict === null ? "no verdict yet" : `${j.verdict.answer}, by the ${j.verdict.by}: ${j.verdict.why}`}`,
@@ -65,7 +54,6 @@ function judgmentText(j: ThreadDetail["judgments"][number]): string {
   ].join("\n");
 }
 
-/** Why a Claude worker's latest turn died and what Nexus does about it, or why Nexus stopped resuming it. */
 function deathLines(t: ThreadDetail["thread"], resume: ThreadDetail["resume"]): string[] {
   if (resume?.state === "person") return [`resume: stopped. ${resume.why} Write to it to resume it`];
   if (t.turnDied === undefined) return [];
@@ -145,7 +133,6 @@ export function changesText(c: Changes): string {
   ].join("\n");
 }
 
-/** What a queued thread's row and `show` call its status: an archived one is cancelled. */
 const queuedState = (q: QueuedThread) => q.status === "archived" ? "cancelled" : q.status === "deleted" ? "deleted" : q.blocked ? "blocked" : "queued";
 const waitText = (w: Wait) => `${w.state === "waiting" ? "waits for" : w.state === "landed" ? "landed" : "blocked by"} ${w.thread}: ${w.why}`;
 export const queuedRow = (q: QueuedThread) => {

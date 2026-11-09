@@ -12,7 +12,7 @@ import { WebSocket } from "ws";
 import type { RefusalCode } from "../contract/threads.ts";
 import { apiIdleMs, apiKeepAliveMs } from "../contract/route.ts";
 
-/** Every way a command fails. Each has its own exit code, so a caller can tell them apart without parsing text. */
+/** Each kind has its own exit code, so a caller can tell them apart without parsing text. */
 export type ErrorKind = "failed" | "unreachable" | "refused" | "not-found" | "conflict" | "invalid";
 export const exitCodes: Readonly<Record<ErrorKind, number>> = {
   failed: 1, unreachable: 2, refused: 3, "not-found": 4, conflict: 5,
@@ -22,11 +22,8 @@ export const exitCodes: Readonly<Record<ErrorKind, number>> = {
 
 export class CliError extends Error {
   readonly kind: ErrorKind;
-  /** The API's HTTP status, or null when the CLI failed before or without a reply. */
   readonly status: number | null;
-  /** The `code` of the API's error reply, or null when it sent none. */
   readonly code: RefusalCode | null;
-  /** Whether the API said the same request asked again later can succeed. */
   readonly retryable: boolean;
   constructor(kind: ErrorKind, message: string, status: number | null = null, code: RefusalCode | null = null, retryable = false) {
     super(message);
@@ -40,7 +37,6 @@ export class CliError extends Error {
 export interface HostPort { host: string; port: number }
 export interface Endpoint {
   url: URL;
-  /** Null connects directly. */
   socks: HostPort | null;
 }
 
@@ -76,8 +72,8 @@ function handshake(raw: Socket, host: string): Promise<Socket> {
 }
 
 /**
- * Sends JSON as the API requires and returns its JSON reply, or null for an empty one. A request the API answers
- * only once its work is done, such as a session open that waits for its agent, passes a longer `idleMs`.
+ * A request the API answers only once its work is done, such as a session open that waits for its agent, passes a
+ * longer `idleMs`.
  */
 export async function call(endpoint: Endpoint, method: string, path: string, body?: unknown, idleMs = apiIdleMs): Promise<unknown> {
   // Only a GET shares a connection. An error on a reused one may hide a request that ran, and only a GET may run twice.
@@ -116,11 +112,7 @@ function reply(method: string, path: string, status: number, text: string): unkn
   throw new CliError(statusKinds[status] ?? "failed", typeof message === "string" ? message : `${method} ${path} failed with ${status}`, status, typeof code === "string" ? code as RefusalCode : null, retryable === true);
 }
 
-/**
- * Follows a server-sent event stream, handing `onEvent` each event's data as JSON. Resolves when the API ends the
- * stream or `signal` aborts it, and rejects as `call` does when the API refuses it or the connection fails. The
- * API pings a quiet stream, so the idle timeout still catches a link that hangs.
- */
+/** The API pings a quiet stream, so the idle timeout still catches a link that hangs. */
 export async function follow(endpoint: Endpoint, path: string, onEvent: (data: unknown) => void | Promise<void>, signal: AbortSignal, onCursor?: (id: string) => void): Promise<void> {
   const socket = await open(endpoint);
   const host = endpoint.url.host;
@@ -174,8 +166,7 @@ export async function follow(endpoint: Endpoint, path: string, onEvent: (data: u
 }
 
 /**
- * Opens a WebSocket to the API over the same direct or SOCKS connection as `call`, paused until the caller resumes
- * it. A refused handshake rejects as `call` does.
+ * The WebSocket comes paused, and the caller resumes it. A refused handshake rejects as `call` does.
  * The server's pings keep the idle timeout from firing, so a link that hangs still fails, and the socket's own
  * error, such as that timeout, is what the WebSocket's `error` event carries.
  */
@@ -216,7 +207,6 @@ export async function upgrade(endpoint: Endpoint, path: string): Promise<WebSock
   });
 }
 
-/** Through the pool, or on a connection of its own. */
 function exchange(via: Agent | Socket, host: string, method: string, path: string, body: unknown, idleMs: number, retried = false): Promise<{ status: number; text: string }> {
   const payload = body === undefined ? undefined : JSON.stringify(body);
   return new Promise((resolve, reject) => {

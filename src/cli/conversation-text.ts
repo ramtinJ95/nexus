@@ -1,4 +1,3 @@
-/** A harness conversation and a Claude worker's transcript as text. */
 import type { ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
 import type { ConversationView, EntryRecord, InboxState, LiveState } from "@earendil-works/pi-durable";
 import { usageLimitText, type ClaudeConversation, type ClaudeEntry, type PromptSource } from "../contract/threads.ts";
@@ -25,7 +24,6 @@ function messageText(message: Message): string {
 /** Empty for an entry that holds no model message, such as the head marker. */
 export const entryText = (entry: EntryRecord) => (entry.model ?? []).map(messageText).filter((text) => text !== "").join("\n");
 
-/** What watch and the CLI's renderings read of a conversation. */
 export type View = Pick<ConversationView, "entries" | "docs">;
 
 export const queuedTexts = (view: View) => ((view.docs["pi.inbox"] as InboxState | undefined)?.items ?? [])
@@ -41,7 +39,6 @@ export function conversationText(view: ConversationView): string {
   return parts.length === 0 ? "No messages yet." : parts.join("\n\n");
 }
 
-/** How a prompt's first line names who it came from. A person's is not named. */
 const promptLabel: Record<PromptSource, string> = { person: "", command: "[slash command] ", other: "[Claude Code] " };
 
 /**
@@ -67,10 +64,6 @@ export function claudeEntryText(e: ClaudeEntry, shown: Set<string>, how?: string
   }
 }
 
-/**
- * A Claude worker's transcript: each prompt, reply, notice and task, and each tool call on one line with how it
- * ended, then the messages Claude Code queued and whether Claude works.
- */
 export function claudeText(c: ClaudeConversation): string {
   const results = new Map(c.entries.flatMap((e) => e.kind === "result" ? [[e.toolUseId, e] as const] : []));
   const lastTurn = c.entries.findLastIndex((e) => e.kind === "turn");

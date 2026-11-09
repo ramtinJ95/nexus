@@ -11,15 +11,11 @@ import { terminalSize, type TerminalSize } from "../guest-terminal.ts";
 import { CliError } from "./transport.ts";
 import { reconnectMs } from "./kit.ts";
 
-/** The terminal attach runs in. processTty() is this process's. Tests pass a fake. */
 export interface Tty {
   readonly input: Readable & { readonly isTTY?: boolean; setRawMode(raw: boolean): unknown; unref?(): unknown };
   readonly output: Writable & { readonly isTTY?: boolean; readonly columns: number; readonly rows: number };
-  /** $TERM. */
   readonly term: string | undefined;
-  /** One line for the person, outside the terminal's own output. */
   status(line: string): void;
-  /** Ends the process, after attach put the terminal back. */
   exit(code: number): never;
 }
 
@@ -40,17 +36,15 @@ export function processTty(): Tty {
  */
 const screenReset = "\x1b[?1049l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l\x1b[?2004l\x1b[<u";
 
-/** Signals that end an attach from outside, such as a closed terminal window. Each exits 128 plus its number. */
+/** Signals that end an attach from outside, such as a closed terminal window. */
 const signals = { SIGHUP: 1, SIGTERM: 15 } as const;
 
-/** How often and how soon attach links again after the link drops. */
 export interface Retry {
   readonly tries: number;
-  /** The wait before the retry after `retry` failed ones in a row. */
   delayMs(retry: number): number;
   /**
-   * How long a link stays attached before the count starts over. `attached` comes before Herdr's client runs, so a
-   * pylon whose sshd takes the link and drops it at once would otherwise be tried again every second for good.
+   * `attached` comes before Herdr's client runs, so a pylon whose sshd takes the link and drops it at once would
+   * otherwise be tried again every second for good.
    */
   readonly steadyMs: number;
 }
@@ -58,7 +52,6 @@ export interface Retry {
 /** 8 times, about two minutes. */
 const retry: Retry = { tries: 8, delayMs: reconnectMs, steadyMs: 10_000 };
 
-/** How one WebSocket link to the attach route ended: with the attach, or lost, so attach links again. */
 type LinkEnd = { kind: "over"; message: Extract<ServerMessage, { type: "exit" | "error" }> } | { kind: "lost"; why: string };
 
 interface Link { readonly ws: WebSocket; attached: boolean }
@@ -83,13 +76,10 @@ export async function attachTerminal(connect: (path: string) => Promise<WebSocke
   let raw = false;
   /** Whether Herdr ended the attach itself, and so put back the screen modes it set. */
   let clean = false;
-  /** The open link, and whether Herdr took it, from which point keys go to it. */
   let current: Link | null = null;
-  /** Failed links since the last `attached`. */
   let tries = 0;
   let quit!: () => void;
   const quitting = new Promise<{ kind: "quit" }>((resolve) => { quit = () => resolve({ kind: "quit" }); });
-  /** Puts the terminal back as it was. Safe to repeat, and also run when the process exits. */
   const restore = () => {
     if (!raw) return;
     raw = false;
@@ -123,7 +113,6 @@ export async function attachTerminal(connect: (path: string) => Promise<WebSocke
     current = at;
     let final: LinkEnd | null = null;
     let steady: NodeJS.Timeout | undefined;
-    /** Why the link failed, when it did. */
     let cause: Error | null = null;
     const unwritten = () => {
       // A terminal that takes output slower than Herdr makes it holds the socket, and so Herdr, back.

@@ -1,4 +1,3 @@
-/** The CLI's help text, whole for --help and by command for each command's --help, from each command's `help`. */
 import { version } from "../version.ts";
 import { configFile } from "./config.ts";
 import { commands } from "./commands/index.ts";
@@ -13,7 +12,6 @@ then NEXUS_URL and NEXUS_SOCKS, then ${configFile()}, which \`nexus connect\` wr
 connects directly.
 `;
 
-/** The help of the command and of the commands it is the first word of, as `usage backfill` is of `usage`. */
 export function usageOf(name: string): string {
   const named = Object.entries(commands).filter(([other]) => other === name || other.startsWith(`${name} `));
   return `${[...new Set(named.map(([, command]) => command.help))].flat().join("\n")}\n`;

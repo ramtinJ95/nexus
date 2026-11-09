@@ -1,7 +1,3 @@
-/**
- * The commands on threads: listing, showing and starting them, their ports, previews, files and sessions, sending to
- * their agents, and their lifecycle.
- */
 import { randomUUID } from "node:crypto";
 import { sessionHarnessSchema } from "../../protocol/agent-kinds.ts";
 import { threadRoutes as routes, type Preview } from "../../contract/threads.ts";
@@ -23,7 +19,6 @@ const baseOf = (v: Values): ChangesBase => {
   return v.turn === true ? "turn" : v.uncommitted === true ? "head" : "start";
 };
 
-/** Polls the thread until its node reports the port listening and its preview published and warmed. */
 async function served(api: Api, id: string, port: number): Promise<Preview> {
   let preview: Preview | null | undefined;
   return pollUntil({
@@ -39,11 +34,9 @@ async function served(api: Api, id: string, port: number): Promise<Preview> {
   });
 }
 
-/** "A", "A and B", or "A, B and C". */
 const listed = (names: readonly string[]) => names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 
 const actionHelp = ["  nexus abort|retry|retry-pylon|wake <thread>"];
-/** A thread action whose route answers 204. Its JSON is null. */
 const action = (done: string, call: (api: Api, thread: string) => Promise<null>): Command => ({
   help: actionHelp,
   args: [1, 1],
@@ -54,7 +47,6 @@ const action = (done: string, call: (api: Api, thread: string) => Promise<null>)
 });
 
 const statusHelp = ["  nexus archive|unarchive|delete <thread>"];
-/** A thread action whose route answers the thread, or the queued thread when it has not started. */
 const statusChange = (route: typeof routes.archive | typeof routes.unarchive | typeof routes.delete, done: string, queued: string): Command => ({
   help: statusHelp,
   args: [1, 1],

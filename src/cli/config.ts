@@ -1,4 +1,3 @@
-/** Where the CLI finds the control plane: its flags, the environment and the config file, and the version check. */
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -13,11 +12,9 @@ import { ports } from "../node-base/node-layout.ts";
  * that reports its version, so one that reports none is older.
  */
 export const minControlVersion = "0.53.0";
-/** A control plane older than `minControlVersion`, which no retry fixes. */
+/** No retry fixes a control plane older than `minControlVersion`. */
 class OutdatedControl extends CliError {}
-/** What a watch or a follow reports and retries through: a control plane unreachable or failing, though not one too old. */
 export const transient = (err: CliError): err is CliError & { kind: "unreachable" | "failed" } => (err.kind === "unreachable" || err.kind === "failed") && !(err instanceof OutdatedControl);
-/** Where `connect` looks for the API on a host: the dashboard's HTTPS port, then the plain HTTP port. */
 export const controlPorts = [`https://{host}:${ports.dashboard}`, `http://{host}:${ports.control}`];
 export const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
 
@@ -40,7 +37,6 @@ export async function readConfig(file: string): Promise<Config> {
 type Config = z.infer<typeof configSchema>;
 const env = (name: string) => process.env[name] || undefined;
 
-/** Each setting from its flag, then the environment, then the config file. No URL is set until `connect` saves one. */
 export async function settings(v: Values): Promise<Endpoint> {
   const config = await readConfig(configFile());
   const url = str(v, "url") ?? env("NEXUS_URL") ?? config.url;
@@ -50,13 +46,11 @@ export async function settings(v: Values): Promise<Endpoint> {
 
 const versionParts = (v: unknown) => typeof v === "string" ? /^(\d+)\.(\d+)\.(\d+)$/.exec(v)?.slice(1).map(Number) ?? null : null;
 
-/** Whether a version is `min` or later, by major, minor and patch. */
 function atLeast(parts: readonly number[], min: readonly number[]): boolean {
   const i = parts.findIndex((n, j) => n !== min[j]);
   return i === -1 || parts[i]! > min[i]!;
 }
 
-/** Refuses a control plane older than this CLI reads, by the version its health reply reports. */
 export function checkVersion(url: URL, health: unknown): void {
   const reported = (health as { version?: unknown } | null)?.version;
   const parts = versionParts(reported);

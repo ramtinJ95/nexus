@@ -1,5 +1,3 @@
-/** Every command group, and the one table of commands the CLI runs, in the order `nexus --help` lists them. */
-
 import { connectCommands } from "./connect.ts";
 import { eventsCommands } from "./events.ts";
 import { releaseCommands } from "./release.ts";

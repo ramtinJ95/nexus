@@ -15,9 +15,7 @@ const globalOptions: ParseArgsOptionsConfig = {
   json: { type: "boolean" }, url: { type: "string" }, socks: { type: "string" }, help: { type: "boolean", short: "h" },
 };
 
-/** The exit code a command that printed its result asks for, 0 for most. */
 async function run(argv: readonly string[]): Promise<number> {
-  // `project add` and `session open` and `close` are the commands of two words.
   const twoWords = Object.hasOwn(commands, `${argv[0]} ${argv[1]}`);
   const name = twoWords ? `${argv[0]} ${argv[1]}` : argv[0];
   const rest = argv.slice(twoWords ? 2 : 1);
