@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { migrations } from "../control/schema.ts";
+import { tempDir } from "../test-support/kit.ts";
 import { parseConfig } from "../control/main.ts";
 import { parseProbeConfig } from "../probe/config.ts";
 import { parseControlPlane } from "./control-plane.ts";
@@ -442,4 +446,37 @@ test("the watch's config write names --github-watch where parseFlags reads it, e
   const { ran } = await installing(["--dotfiles", dotfiles, "--"], ["watch"]);
   const rewrite = ran.filter((line) => line.includes(" write ")).at(-1)!;
   assert.equal(parseFlags(rewrite.slice(rewrite.indexOf(" write ") + 1).split(" ")).flags.githubWatch, true, rewrite);
+});
+
+test("--upgrade reaches each role's installer, which installs this checkout's release over one another commit runs, and never the deployer's", async () => {
+  const args = ["--upgrade", "--admit", "macbook"];
+  assert.deepEqual((await installing(args, ["control"])).ran.filter((line) => line.startsWith("bash")), [
+    "bash ./deploy/install-control.sh --upgrade", "bash ./deploy/install-probe.sh --upgrade", "bash ./deploy/install-deployer.sh control probe", "bash ./deploy/install-control.sh --upgrade",
+  ]);
+  assert.equal(parseFlags(["install", "--admit", "macbook"]).flags.upgrade, false);
+});
+
+test("setup.ts registry refuses a registry newer than this checkout's migrations, and passes one it migrates, its own and none", async (t) => {
+  const dir = await tempDir("nexus-registry-", t);
+  const config = join(dir, "control.json");
+  const db = join(dir, "registry.db");
+  await writeFile(config, JSON.stringify({ db }));
+  const check = () => new Promise<{ code: number; stderr: string }>((done) => {
+    execFile(process.execPath, [join(repo, "src/deploy/setup.ts"), "registry", config], (err, _stdout, stderr) => done({ code: err === null ? 0 : err.code as number, stderr }));
+  });
+  assert.deepEqual(await check(), { code: 0, stderr: "" }, "no registry yet");
+  const at = (version: number) => {
+    const registry = new DatabaseSync(db);
+    registry.exec(`PRAGMA user_version = ${version}`);
+    registry.close();
+  };
+  for (const version of [migrations.length - 1, migrations.length]) {
+    at(version);
+    assert.deepEqual(await check(), { code: 0, stderr: "" }, `a registry at ${version}`);
+  }
+  at(migrations.length + 1);
+  assert.deepEqual(await check(), {
+    code: 1,
+    stderr: `install: the registry is at schema version ${migrations.length + 1}, newer than the ${migrations.length} migrations this checkout applies, so its control plane would refuse to start. Install from a newer checkout, or deploy one with nexus deploy\n`,
+  });
 });
