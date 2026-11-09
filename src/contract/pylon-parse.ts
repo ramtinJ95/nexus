@@ -1,4 +1,4 @@
-/** The request schemas of the pylon routes in pylon.ts. They need zod, so they stay out of pylon.ts, which a browser can bundle. */
+/** These schemas need zod, so they stay out of pylon.ts, which a browser can bundle. */
 import { z } from "zod";
 import { pathsFit } from "../checkout-files.ts";
 import { maxRecordBytes } from "../control/claude-transcript.ts";

@@ -1,8 +1,4 @@
-/**
- * The routes of what the control plane reports: the nodes, a node's health and metrics, the usage report and its
- * backfill, and the doctor's checks. The server registers its handlers against them, and the CLI and dashboard call
- * them. It imports nothing at run time, so a browser can bundle it. reports-parse.ts holds the request schemas.
- */
+/** It imports only route.ts at run time, so a browser can bundle it. */
 import type { z } from "zod";
 import type { NodeHealth } from "../protocol/client.ts";
 import type { NodeSummary } from "../control/wire.ts";

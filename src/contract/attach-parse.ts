@@ -1,4 +1,4 @@
-/** The attach route's parsers, for the ends that run in Node. They need zod, so they stay out of attach.ts, which the dashboard bundles. */
+/** These parsers need zod, so they stay out of attach.ts, which the dashboard bundles. */
 import { z } from "zod";
 import { defaultTerm, type AttachRequest, type ClientMessage, type ServerMessage } from "./attach.ts";
 import { terminalSize } from "../guest-terminal.ts";
@@ -9,7 +9,7 @@ const termPattern = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
 
 export const attachRoute = /^\/v1\/threads\/([^/]+)\/attach$/;
 
-/** The server's side of the query. Throws a message for a 400. */
+/** Throws a message for a 400. */
 export function parseAttachQuery(query: URLSearchParams): AttachRequest {
   const side = (name: string) => {
     const value = query.get(name);
@@ -24,7 +24,6 @@ export function parseAttachQuery(query: URLSearchParams): AttachRequest {
   return { size, term, ...(pane === null ? {} : { pane }) };
 }
 
-/** $TERM when the guest can take it, which a terminal type name always can, and xterm-256color otherwise. */
 export function termOf(env: string | undefined): string {
   return env !== undefined && termPattern.test(env) ? env : defaultTerm;
 }
@@ -38,7 +37,6 @@ const serverSchemas = {
   error: z.object({ type: z.literal("error"), kind: z.enum(["conflict", "failed", "unreachable"]), message: z.string() }),
 };
 
-/** Null for a type this end does not know. Throws for anything else that is not a message. */
 export function parseClientMessage(text: string): ClientMessage | null {
   const value: unknown = JSON.parse(text);
   if (typed.parse(value).type !== "resize") return null;
@@ -46,7 +44,6 @@ export function parseClientMessage(text: string): ClientMessage | null {
   return { type: "resize", size: terminalSize(cols, rows) };
 }
 
-/** Null for a type this end does not know. Throws for anything else that is not a message. */
 export function parseServerMessage(text: string): ServerMessage | null {
   const value: unknown = JSON.parse(text);
   const { type } = typed.parse(value);

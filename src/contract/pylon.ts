@@ -1,8 +1,4 @@
-/**
- * The routes of what a person does in a thread's pylon: previews, sessions, and reads of its checkout and
- * conversation images. The server registers its handlers against them, and the CLI and dashboard call them. It
- * imports nothing at run time, so a browser can bundle it. pylon-parse.ts holds the request schemas.
- */
+/** It imports only route.ts at run time, so a browser can bundle it. */
 import type { Preview } from "../control/thread-store.ts";
 import type { SessionHarness } from "../protocol/agent-kinds.ts";
 import { pylonWaitMs, queryOf, route, type FileBytes, type QueryCodec } from "./route.ts";
@@ -17,7 +13,6 @@ export type ChangesBase = (typeof changesBases)[number];
 
 export const changeStatuses = ["added", "modified", "deleted", "renamed", "copied", "typechange"] as const;
 export type ChangeStatus = (typeof changeStatuses)[number];
-/** The letter the dashboard's changes list shows for each status. */
 export const statusLetters: Readonly<Record<ChangeStatus, string>> = { added: "A", modified: "M", deleted: "D", renamed: "R", copied: "C", typechange: "T" };
 
 /** A directory's entries, sorted by name, with a size for a file only. `path` is relative to the checkout, and empty for the checkout itself. */

@@ -1,4 +1,4 @@
-/** The request schemas of the review and question routes in reviews.ts. They need zod, so they stay out of reviews.ts, which a browser can bundle. */
+/** These schemas need zod, so they stay out of reviews.ts, which a browser can bundle. */
 import { z } from "zod";
 import { maxRounds } from "../control/review-model.ts";
 import { commitSchema } from "./release-parse.ts";

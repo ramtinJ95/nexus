@@ -368,7 +368,6 @@ interface ThreadStateEvent {
   queued: number;
   pylon: ActualState;
   failed: string | null;
-  /** ThreadDetail's ports. */
   ports: ThreadDetail["ports"];
 }
 /** What watch reports of the run in flight, as one event whenever any of it changes. */

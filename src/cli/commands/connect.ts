@@ -1,4 +1,3 @@
-/** `nexus connect`: find the control plane on a tailnet name or URL, save it, and say what this device may do. */
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Whoami } from "../../contract/threads.ts";
@@ -7,7 +6,6 @@ import { call, CliError } from "../transport.ts";
 import { type Command, str } from "../kit.ts";
 import { controlPorts, configFile, readConfig, checkVersion, socksOf, controlUrl } from "../config.ts";
 
-/** A URL as given, or a tailnet name at each of the control plane's ports. */
 function candidatesOf(host: string): URL[] {
   if (host.includes("://")) return [controlUrl(host)];
   if (!/^[A-Za-z0-9.-]+$/.test(host)) throw new CliError("invalid", `${host} is neither a tailnet name, such as rj-firebat or rj-firebat.example.ts.net, nor a URL`);

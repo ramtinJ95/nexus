@@ -137,7 +137,6 @@ export function follow(url) {
   });
 }
 
-/** The page at `url`, as the poll reads it. */
 export async function readPage(url) {
   // A link that stalls mid-body would otherwise hold the refresh lock forever.
   const res = await fetch(url, { headers: { accept: "text/html" }, cache: "no-store", signal: AbortSignal.timeout(pollMs * 2) });

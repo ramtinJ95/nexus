@@ -1,8 +1,4 @@
-/**
- * The routes of projects and pipeline items: adding, listing and editing projects, and the items a person adds,
- * approves and cancels. The server registers its handlers against them, and the CLI and dashboard call them. It
- * imports nothing at run time, so a browser can bundle it. projects-parse.ts holds the request schemas.
- */
+/** It imports only route.ts at run time, so a browser can bundle it. */
 import type { z } from "zod";
 import type { Project, SecondReview } from "../control/project.ts";
 import type { PipelineItem } from "../control/pipeline.ts";

@@ -10,10 +10,8 @@ export const shown = (choice, deviceDark) => choice !== "system" ? choice : devi
 /** What the toggle picks from a theme of `scheme`: light from any dark theme, and the last dark one from light. */
 export const toggled = (scheme, lastDark) => scheme === "dark" ? "light" : lastDark ?? "dark";
 
-/** A value of the shown theme's colours, such as `--term-bg`. */
 export const themeValue = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-/** Calls `changed` each time the shown theme changes, until the returned stop. */
 export function onThemeChange(changed) {
   const watch = new MutationObserver(changed);
   watch.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });

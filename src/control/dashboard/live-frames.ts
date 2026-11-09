@@ -53,7 +53,6 @@ export function shownKey(read: AgentView, model: string | null): string {
 /** A render of a thread page's conversation region, with its growing parts apart, and the view it shows. */
 interface LiveRender { region: string; shape: string; parts: readonly string[]; shows: string }
 
-/** A thread's conversation as the rows its page shows, which the route reads for each view. */
 export type ItemsOf = (view: AgentView) => readonly Item[];
 
 /**

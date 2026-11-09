@@ -31,7 +31,6 @@ export const factsOf = (data: Readonly<Record<string, string | undefined>>): Fac
  */
 export const grow = { attr: "data-grow", slots: "[data-grow]", open: "<!--grow-->", close: "<!--/grow-->" } as const;
 const grown = new RegExp(`${grow.open}([\\s\\S]*?)${grow.close}`, "g");
-/** A region with each growing part's inside cut out, and those insides in order. */
 export const growParts = (region: string) => ({ shape: region.replace(grown, grow.open), parts: [...region.matchAll(grown)].map((m) => m[1]!) });
 
 /**

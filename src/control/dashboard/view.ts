@@ -85,7 +85,6 @@ const iconPaths = {
 } as const;
 type IconName = keyof typeof iconPaths;
 export const icon = (name: IconName) => html`<svg class="i i-${name}" viewBox="0 0 16 16" aria-hidden="true"><path d="${iconPaths[name]}"/></svg>`;
-/** The icons client.js clones from the page's `#icons`, for the folders of the changed files' tree. */
 /** Every page's way to the sidebar, and on a phone, where the sidebar is a drawer, to what waits on the person. */
 export const menu = html`<button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><a class="icon-btn phone-only" href="/#needs-you" aria-label="Needs you" title="Needs you">${icon("inbox")}</a>`;
 /** Text a screen reader says that the page shows another way, such as with an icon or a bubble's side. */
@@ -124,7 +123,6 @@ export function workingFor(t: Thread, now: number): Html | null {
   return t.workingSince === undefined ? html`working` : html`working ${since(t.workingSince, now)}`;
 }
 
-/** A `dataset`'s entries as the attributes that set them. */
 export const dataset = (data: Readonly<Record<string, string>>) => Object.entries(data).map(([key, value]) => html` data-${key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}="${value}"`);
 export const act = (action: Action) => html` data-action="${action}"`;
 

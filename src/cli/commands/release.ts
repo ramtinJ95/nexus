@@ -1,4 +1,3 @@
-/** Landing and releasing: `release`, `review`, `land`, `deploy` and the image commands. */
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type { ImageId } from "../../ids.ts";
@@ -31,8 +30,8 @@ function imagesText(view: ImagesView): string {
 }
 
 /**
- * Polls the images every 2 s until the operation ends, through restarts of the control plane, as deploy --wait does. Each
- * change of a running step goes to stderr, so a build of minutes shows where it is and stdout stays one value for --json.
+ * Each change of a running step goes to stderr, so a build of minutes shows where it is and stdout stays one value
+ * for --json.
  */
 async function imageWait(api: Api, started: ImageOperation): Promise<Result> {
   let operation = started;
@@ -57,7 +56,6 @@ async function imageWait(api: Api, started: ImageOperation): Promise<Result> {
   });
 }
 
-/** Starts an image operation, and with --wait follows it until it ends. */
 const imageCommand = (help: Command["help"], args: Command["args"], start: (api: Api, positionals: readonly string[]) => Promise<ImageOperation>): Command => ({
   help, args, options: { wait: { type: "boolean" } },
   async run(api, positionals, v) {
@@ -66,7 +64,6 @@ const imageCommand = (help: Command["help"], args: Command["args"], start: (api:
   },
 });
 
-/** Where the person reads the holds `land --waive` would waive and answers for them. */
 export interface Terminal { input: Readable & { readonly isTTY?: boolean }; output: Writable & { readonly isTTY?: boolean } }
 
 function needsTerminal(terminal: Terminal): void {
@@ -74,8 +71,8 @@ function needsTerminal(terminal: Terminal): void {
 }
 
 /**
- * Shows the person the holds a Land press would waive at `head` and whether they typed yes. An agent on the person's
- * Mac calls as the same tailnet node, so the terminal is what tells the person apart: with no terminal it refuses.
+ * An agent on the person's Mac calls as the same tailnet node, so the terminal is what tells the person apart: with
+ * no terminal it refuses.
  */
 export async function confirmWaiver(terminal: Terminal, pr: number, head: string, holds: readonly string[]): Promise<boolean> {
   needsTerminal(terminal);
@@ -110,7 +107,6 @@ export async function pressOf(api: Api, id: string, terminal: Terminal): Promise
   return { head: view.head, waive };
 }
 
-/** What `land --waive` prints once it answered the review's question: a landing, or a waiver for a review still under way. */
 export const answeredText = (r: Review, said: readonly string[] | null | undefined, running: boolean) => running
   ? `Waived the holds at ${r.rounds.at(-1)!.head.slice(0, 12)}. It lands once the reviewer approves and its checks pass.\n${reviewText(r, said)}`
   : `Landing ${reviewText(r, said)}`;

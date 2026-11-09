@@ -1,7 +1,4 @@
-/**
- * The usage report as the API answers it, and how a client prints its numbers: the token columns, each breakdown's
- * heading, a time and a token count. The dashboard and the CLI both print it so. It imports nothing at run time.
- */
+/** The dashboard and the CLI both print the usage report with these formatters, so the two read alike. It imports nothing at run time. */
 import type { Tokens } from "../control/agent-usage.ts";
 import type { NodeName, ProjectId, ThreadId } from "../ids.ts";
 
@@ -53,7 +50,7 @@ export type UsageBackfill =
 /** An archived thread a start of the backfill would read, with why a run before skipped it, if one did. */
 export interface BackfillPlanRow { thread: ThreadId; project: ProjectId; node: NodeName; title: string; reason: string | null }
 
-/** The token columns of a usage table, with the short name a thread's one-line total gives each. */
+/** `short` is the name a thread's one-line total gives each column. */
 export const tokenColumns = [
   { label: "Input", short: "in", field: "input" },
   { label: "Output", short: "out", field: "output" },
@@ -61,7 +58,6 @@ export const tokenColumns = [
   { label: "Cache read", short: "cache read", field: "cacheRead" },
   { label: "Total", short: "total", field: "total" },
 ] as const;
-/** Each breakdown's heading, and the name of its key column. */
 export const breakdownLook: Readonly<Record<Breakdown, { title: string; key: string }>> = {
   model: { title: "By model", key: "Model" },
   project: { title: "By project", key: "Project" },
@@ -70,10 +66,8 @@ export const breakdownLook: Readonly<Record<Breakdown, { title: string; key: str
   day: { title: "By day (UTC)", key: "Day" },
 };
 
-/** A time to the minute, such as 2026-10-27 12:00 UTC. */
 export const utc = (at: number) => `${new Date(at).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 
-/** 950, 12.3k, 1.2M, 3.4B. */
 export function tokenCount(n: number): string {
   if (n < 1000) return String(n);
   for (const [unit, size] of [["B", 1e9], ["M", 1e6], ["k", 1e3]] as const) {

@@ -1,4 +1,3 @@
-/** The pipeline items: `items` and the `item` commands. */
 import { type Command, str, request, briefOptions, briefOf, ago, table, clip } from "../kit.ts";
 import { itemRules } from "../../contract/threads-parse.ts";
 import { itemRoutes, type PipelineItem } from "../../contract/projects.ts";

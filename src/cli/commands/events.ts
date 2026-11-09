@@ -1,4 +1,3 @@
-/** `nexus events`: the control plane's events, once or followed. */
 import { once } from "node:events";
 import { setTimeout as sleep } from "node:timers/promises";
 import { CliError } from "../transport.ts";

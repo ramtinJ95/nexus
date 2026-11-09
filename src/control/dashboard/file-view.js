@@ -46,7 +46,6 @@ void import("./theme.js").then(({ onThemeChange, startThemes }) => {
   onThemeChange(redrawDiff);
 });
 
-/** Shows a diff read from the pylon, once its lines are drawn. */
 async function drawDiff({ read, head, shown, truncated }) {
   try {
     const { diffView, imagePair } = await import("./diff.js");

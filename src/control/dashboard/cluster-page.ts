@@ -98,7 +98,6 @@ export function liveReading(h: NodeHealth): NodeReading {
 /** How old a recorded sample may be for a card to show it. The control plane samples every online node once a minute. */
 export const recentMs = 5 * 60_000;
 
-/** A node's newest recorded sample in `m`, its metrics over the last `recentMs`, unless it has none from then. */
 export function recordedReading(m: { sampledAt: number | null; series: readonly Pick<MetricSeries, "key" | "avg">[] }, now: number): NodeReading {
   if (m.sampledAt === null || now - m.sampledAt > recentMs) return { kind: "stale" };
   const last = (s: Series) => m.series.find((x) => x.key === seriesKey(s))?.avg.at(-1) ?? null;

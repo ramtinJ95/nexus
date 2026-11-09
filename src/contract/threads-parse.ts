@@ -1,13 +1,11 @@
-/** The request schemas of the thread routes in threads.ts. They need zod, so they stay out of threads.ts, which a browser can bundle. */
+/** These schemas need zod, so they stay out of threads.ts, which a browser can bundle. */
 import { z } from "zod";
 import { maxPromptChars } from "../protocol/commands.ts";
 import { minPylonMemoryGiB, minPylonMemoryReason } from "../protocol/spawn.ts";
 import { titleOf } from "../thread-title.ts";
 
-/** A pylon's size, which a project gives its threads and a thread's start may change. */
 export const resourcesSchema = z.strictObject({ cpus: z.int().positive(), memoryGiB: z.int().min(minPylonMemoryGiB, minPylonMemoryReason), diskGiB: z.int().positive() });
 
-/** The fields of a start or an item that the rules below read together. */
 interface Brief { title?: string | undefined; message?: string | null | undefined; claude?: string | undefined; model?: string | undefined; after?: readonly string[] | undefined; planning?: true | undefined }
 /** `name` gives a field as the caller knows it: the API's field, or the CLI's flag. */
 interface BriefRule { broken(b: Brief): boolean; message(name: (field: keyof Brief) => string): string }
@@ -28,7 +26,7 @@ export const itemRules: readonly BriefRule[] = [
 export const brokenRule = (rules: readonly BriefRule[], b: Brief, name = (field: keyof Brief): string => field) => rules.find((rule) => rule.broken(b))?.message(name);
 
 /**
- * `fields` held to `rules`. Without a title, it takes its brief's first line, which the rules make sure it has, in
+ * Without a title, it takes its brief's first line, which the rules make sure it has, in
  * the title's place among the fields: a start's request ID is stored with a hash of them, which a repeat must match
  * whether or not its caller sent the title, as callers before the server's default did.
  */

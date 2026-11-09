@@ -1,7 +1,4 @@
-/**
- * `nexus watch` and `nexus conversation`: a thread's conversation as it grows, and as it is now. The integrations read
- * the watch's events, whose types src/contract/watch.ts holds.
- */
+/** The integrations read the watch's events, whose types src/contract/watch.ts holds. */
 import { setTimeout as sleep } from "node:timers/promises";
 import type { EntryRecord, LiveState } from "@earendil-works/pi-durable";
 import { CliError } from "../transport.ts";
@@ -21,10 +18,8 @@ function stateOf(d: ThreadDetail, working: boolean, queued: number): ThreadState
   };
 }
 
-/** What watch keeps of a Claude worker's transcript: the stream's entries, the newest maxEntries of them. */
 type Transcript = Omit<ClaudeFrame, "reset">;
 
-/** A Claude worker's run in flight: what Claude Code queued, and each call of the running turn without a result. */
 function claudeLiveOf(id: string, c: Transcript): RunLiveEvent {
   const lastTurn = c.entries.findLastIndex((e) => e.kind === "turn");
   const done = new Set(c.entries.flatMap((e) => e.kind === "result" ? [e.toolUseId] : []));
@@ -50,8 +45,7 @@ function stateText(s: ThreadStateEvent): string {
 }
 
 /**
- * Follows the thread's conversation as the API streams it, and polls the thread. The conversation is pi-durable's
- * active context, not the full history: a new head marker, a compaction or a delete can reorder or drop entries.
+ * The conversation is pi-durable's active context, not the full history: a new head marker, a compaction or a delete can reorder or drop entries.
  * So the first print shows the context whole, a later one that only appends prints each new entry, and any other
  * change prints it whole again. A Claude worker's transcript streams instead, and prints the same way, whole first
  * and when it was replaced. Then the thread's state and the run in flight, when they changed. Every print comes
@@ -67,23 +61,18 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
   };
   const rendered = (entry: EntryRecord): RenderedEntry => ({ entry, text: entryText(entry) });
   const joined = (entries: readonly { text: string }[]) => entries.map((e) => e.text).filter((text) => text !== "").join("\n");
-  /** The IDs of the active context as last printed, or null before the first print. */
   let printed: number[] | null = null;
   let shown: string | null = null;
   let liveShown: string | null = null;
-  /** The thread as last polled, and its conversation as last streamed. */
   let detail: ThreadDetail | null = null;
   let streamed: View | null = null;
-  /** A Claude worker's transcript as streamed, or "none" when it does not stream. */
   let transcript: Transcript | "none" | null = null;
   /** What of the transcript is printed, so each entry prints once across reconnects. */
   const claudePrinted = claudeFrames();
   /** The pull requests printed since the last whole print of the transcript, which Claude Code names again and again. */
   let pullRequests = new Set<string>();
-  /** Whether the text stream has printed any of the transcript, which a replaced one then says it replaces. */
   let textShown = false;
   const firstDetail = Promise.withResolvers<ThreadDetail>();
-  /** What each source failed with last, while it fails. After an outage the state is printed again. */
   const failing = new Map<"poll" | "stream", string>();
   let recovered = false;
   const failed = (source: "poll" | "stream", err: unknown) => {
@@ -95,12 +84,9 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
     if (failing.delete(source) && failing.size === 0) recovered = true;
   };
 
-  /** Prints what the harness conversation gained, and answers what its run does, or null until its first frame. */
   function printConversation(d: ThreadDetail): { working: boolean; live: RunLiveEvent } | null {
-    // A thread with a conversation waits for its first frame.
     if (d.agent !== null && streamed === null) return null;
     const view = d.agent === null ? null : streamed;
-    // Without a conversation, the entries last printed stand. The first print shows an empty context.
     const entries: readonly EntryRecord[] | null = view?.entries ?? (printed === null ? [] : null);
     if (entries !== null) {
       const before = printed;
@@ -119,7 +105,6 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
     return { working: view !== null && busy(view), live: liveOf(id, view) };
   }
 
-  /** Prints what a Claude worker's transcript gained, and answers what its turn does, or null until its first frame. */
   function printTranscript(d: ThreadDetail): { working: boolean; live: RunLiveEvent } | null {
     if (transcript === null) return null;
     if (transcript === "none") return { working: d.thread.sessionTurnRunning === true, live: { type: "live", thread: id, queued: [], tools: [], partial: null, retry: null } };
@@ -176,11 +161,7 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
   };
 
   const stop = new AbortController();
-  /**
-   * A dropped stream is opened again as reconnectMs says, at most the poll interval apart, and counts from the start
-   * again once a frame arrives. A thread without a conversation, or a deleted one, refuses the stream, and never
-   * streams again.
-   */
+  /** A thread without a conversation, or a deleted one, refuses the stream, and never streams again. */
   async function stream() {
     const claude = (await firstDetail.promise).claudeWorker !== undefined;
     for (let attempt = 0; !stop.signal.aborted; attempt++) {

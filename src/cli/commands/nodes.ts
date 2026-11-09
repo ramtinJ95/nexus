@@ -1,4 +1,3 @@
-/** `nexus nodes` and `nexus node`: the nodes' capacity and pylons, and one node's health. */
 import { gib } from "../../util/gib.ts";
 import type { NodeCapacity } from "../../protocol/observations.ts";
 import type { NodeHealth } from "../../protocol/client.ts";

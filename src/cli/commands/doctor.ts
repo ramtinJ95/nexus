@@ -1,8 +1,6 @@
-/** `nexus doctor`: every check of each node and the control plane, run now. */
 import { type Command, request, table } from "../kit.ts";
 import { doctorRoutes, type DoctorReport } from "../../contract/reports.ts";
 
-/** One line per check under its node, or under the control plane, with the statuses in one column. */
 export function doctorText(report: DoctorReport): string {
   const rows = report.checks.map((c) => [`  ${c.status}`, c.name, c.text]);
   const widths = table(rows).split("\n");

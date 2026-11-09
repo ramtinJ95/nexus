@@ -1,4 +1,3 @@
-/** `nexus usage` and `usage backfill`: the tokens the agents spent, and the read of archived threads' transcripts. */
 import { breakdownLook, breakdowns, tokenColumns, tokenCount, utc, type BackfillPlanRow, type UsageBackfill, type UsageReport, type UsageTotals } from "../../contract/usage.ts";
 import { CliError } from "../transport.ts";
 import { type Command, str, request, table } from "../kit.ts";
