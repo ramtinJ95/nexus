@@ -86,9 +86,19 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
       throw new HttpError(409, `request ID ${requestId} ${made === undefined ? "is starting a thread" : `started thread ${made.thread}`} with another body. Start a new thread under a new request ID`);
     }
     if (pending !== undefined) return pending.answer;
+    if (made !== undefined) refuseEnded(requestId, made.thread);
     const answer = startOnce(fields, caller, key, made?.thread).finally(() => starting.delete(requestId));
     starting.set(requestId, { body: key.body, answer });
     return answer;
+  }
+
+  /** A repeat that answered an archived, deleted or cancelled thread would read as a start that went through. */
+  function refuseEnded(requestId: string, id: ThreadId) {
+    const queued = registry.queue.queuedThread(id);
+    const status = queued !== undefined && queued.status !== "started" ? (queued.status === "archived" ? "cancelled" : queued.status) : registry.threads.thread(id)!.status;
+    if (status === "archived" || status === "deleted" || status === "cancelled") {
+      throw new HttpError(409, `request ID ${requestId} started thread ${id}, which is ${status}, so it starts nothing. Start a new thread under a new request ID`);
+    }
   }
 
   async function startOnce({ after, message, planning, ...request }: Omit<z.infer<typeof startSchema>, "requestId">, caller: string, key?: StartKey, made?: ThreadId): Promise<Thread | QueuedThread> {
