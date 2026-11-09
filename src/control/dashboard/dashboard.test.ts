@@ -7,7 +7,6 @@ import { itemThread, type PipelineItem } from "../pipeline.ts";
 import type { QueuedThread } from "../../contract/threads.ts";
 import type { Thread } from "../thread-store.ts";
 import type { ThreadDetail } from "../wire.ts";
-import { detailText } from "../../cli/thread-text.ts";
 import { addThread, observeNode, testPr, testReview, claudeWorkerAt } from "../../test-support/registry-kit.ts";
 import { personPhase, type Review } from "../review-model.ts";
 import type { ReviewLoop } from "../review.ts";
@@ -458,19 +457,18 @@ test("an open question is a card with a button per option, disabled with the rea
   assert.ok(!answered.includes("<button"));
 });
 
-test("an archived thread's withdrawn failure question and its attention read the same on its page, in the API, in `nexus show` and in the event stream", async (t) => {
+test("an archived thread's withdrawn failure question and its attention read the same on its page, in the API and in the event stream", async (t) => {
   const s = await seeded(t, landingOptions());
   const fix = await s.start("acme", "Fix checkout");
   s.registry.savePylon({ ...s.registry.pylon(fix.pylonId)!, failed: "setup exited 128: fatal: 'origin/feat/gone' is not a commit" });
   s.registry.askQuestion({ kind: "judgment", id: "judgment:7", thread: fix.id, failure: 7, text: "The pylon failed on rj-firebat.", options: ["Retry", "Leave it failed"], reserved: null, answerer: "person", askedAt: Date.now() });
+  const archivedFrom = Date.now();
   assert.equal((await s.call("POST", `/v1/threads/${fix.id}/archive`)).status, 200);
 
   const detail = JSON.parse((await s.call("GET", `/v1/threads/${fix.id}`)).text) as ThreadDetail;
   assert.equal(detail.attention, null);
   assert.equal(detail.questions[0]?.withdrawn?.by, "archive");
-  const shown = detailText(detail).split("\n");
-  assert.ok(shown.includes("attention: none"));
-  assert.ok(shown.includes(`  withdrawn when the thread was archived at ${new Date(detail.questions[0]!.withdrawn!.at).toISOString()}`));
+  assert.ok(detail.questions[0]!.withdrawn!.at >= archivedFrom && detail.questions[0]!.withdrawn!.at <= Date.now(), "withdrawn at the archive");
   const card = questionsOf((await s.call("GET", `/threads/${fix.id}`)).text);
   assert.equal(textOf(card), "The pylon failed on rj-firebat. Withdrawn when the thread was archived, just now");
   assert.ok(!card.includes("<button"));

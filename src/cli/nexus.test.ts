@@ -325,10 +325,13 @@ test("show of a control plane older than 0.73.0, which serves no said, prints it
   const pending = "The pull request's GitHub checks are pending.";
   const review = testReview({ builder: id, phase: personPhase("policy", { code: "github-checks", text: pending }), waiver: { head: "1".repeat(40), holds: ["Changes to auth."], codes: ["reserved-path:auth"], by: laptop, at: 0, change: null } });
   const shown = detailText({ ...older, review }).split("\n");
+  assert.ok(shown.includes("attention: none"));
   assert.ok(shown.includes('session: claude-code "review" in pane w1:p1, paused'), "a paused session reads paused, without the wording of how it resumes");
   assert.deepEqual(shown.slice(shown.indexOf("review rv-1")), ["review rv-1", `needs you: ${pending}`, `waived by ${laptop} at ${"1".repeat(40)}, 1970-01-01T00:00:00.000Z:`, "  Changes to auth."], "the review shows as its ID, then its holds and waiver");
   assert.ok(!shown.some((line) => line.startsWith("PR watch:")), "and no PR watch line");
   assert.equal(reviewText(review, undefined).split("\n")[0], "review rv-1", "a review route's reply without said also shows as its ID");
+  const yolo = { ...review, waiver: { ...review.waiver!, yolo: "nexus" as ProjectId } };
+  assert.match(reviewText(yolo, undefined), new RegExp(`^waived by ${laptop}, by project nexus's yolo setting, at 1{40}, `, "m"), "a yolo waiver names the project whose setting gave it");
 });
 
 test("show says an archived thread's usage is unread when its pylon could not be read, before and after its disk goes", async (t) => {
@@ -1566,6 +1569,10 @@ test("show prints each question with its options, its reserved case, and who mus
   s.registry.answerQuestion(s.registry.question("qn-brief")!, { option: "Yes", by: laptop, at: Date.UTC(2026, 9, 28, 9) });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^question qn-brief: Start the next brief\?\n {2}options: "Yes", "No"\n {2}answered "Yes" by nLAPTOP at 2026-10-28T09:00:00.000Z$/m);
   assert.deepEqual((await s.json(["show", thread.id])).questions.map((q: { id: string }) => q.id), ["qn-image", "qn-brief"]);
+  s.registry.askQuestion({ kind: "judgment", id: "qn-failed", thread: thread.id, text: "The pylon failed.", options: ["Retry"], reserved: null, answerer: "person", askedAt: 3, failure: 1 });
+  await s.json(["archive", thread.id]);
+  const { at } = (await s.json(["show", thread.id])).questions.find((q: Question) => q.id === "qn-failed").withdrawn;
+  assert.ok((await s.nexus(["show", thread.id])).stdout.includes(`question qn-failed: The pylon failed.\n  options: "Retry"\n  withdrawn when the thread was archived at ${new Date(at).toISOString()}\n`), "archiving withdraws an open failure question, at the time the API records");
 });
 
 test("show prints a Claude worker's ask with a line per question it asks, and the choices that answered it in one line", async (t) => {

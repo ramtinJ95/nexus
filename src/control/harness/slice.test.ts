@@ -8,19 +8,19 @@
  */
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { ConversationId, DocumentReader, EntryRecord } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { createEnvConformance } from "@earendil-works/pi-durable/testing";
 import { packagedDaemon } from "@earendil-works/pi-env";
 import { createDockerBackend } from "../../backends/docker-backend.ts";
+import { docker, labelFilters } from "../../backends/docker-cli.ts";
 import { nodeSecrets } from "../../probe/config.ts";
 import { startProbe, type Probe } from "../../probe/server.ts";
 import { connectProbe } from "../../protocol/client.ts";
@@ -31,10 +31,8 @@ import { pylonEnvs, type PylonLocator } from "./pylon-env.ts";
 import { scriptedModel, scriptedModels, type ChildArgs } from "./test-fixture.ts";
 import { checkoutDir } from "../../../images/pylon/nexus-contract.ts";
 
-const execFileAsync = promisify(execFile);
-const docker = async (...args: string[]) => (await execFileAsync("docker", args, { maxBuffer: 64 << 20 })).stdout.trim();
-
 const run = randomUUID().slice(0, 8);
+const labels = { "nexus.test": `harness-${run}` };
 const testLabel = `nexus.test=harness-${run}`;
 const tag = `nexus-harness-test:${run}`;
 const image: ImageId = "img-harnesstest00";
@@ -43,7 +41,7 @@ const controlPlaneId = "nHARNESSCONTROL" as TailnetNodeId;
 const probeId = "nHARNESSPROBE" as TailnetNodeId;
 const threadId = `harness-${run}`;
 const pylonId = `pylon-${threadId}` as PylonId;
-const backend = createDockerBackend({ images: { [image]: tag }, labels: { "nexus.test": `harness-${run}` } });
+const backend = createDockerBackend({ images: { [image]: tag }, labels });
 
 let dir: string;
 let tailscaled: string;
@@ -55,7 +53,7 @@ const log = (message: string) => { logs.push(message); };
 
 before(async () => {
   dir = await mkdtemp(join(tmpdir(), "nexus-harness-"));
-  const arch = await docker("info", "--format", "{{.Architecture}}");
+  const arch = await docker(["info", "--format", "{{.Architecture}}"]);
   const daemonArch = arch === "aarch64" || arch === "arm64" ? "arm64" : arch === "x86_64" || arch === "amd64" ? "x64" : assert.fail(`no pi-env build for Docker architecture ${arch}`);
   const build = join(dir, "image");
   await mkdir(build);
@@ -65,7 +63,7 @@ before(async () => {
     "COPY pi-env /usr/local/libexec/nexus/pi-env",
     `RUN chmod 0755 /usr/local/libexec/nexus/pi-env && mkdir -p ${checkoutDir}`,
   ].join("\n") + "\n");
-  await docker("build", "--quiet", "--label", testLabel, "--tag", tag, build);
+  await docker(["build", "--quiet", "--label", testLabel, "--tag", tag, build]);
 
   tailscaled = join(dir, "tailscaled.sock");
   localApi = createServer((_req, res) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ Node: { StableID: probeId } })));
@@ -94,9 +92,9 @@ before(async () => {
 after(async () => {
   await probe?.close();
   localApi?.close();
-  const containers = (await docker("ps", "-a", "-q", "--filter", `label=${testLabel}`)).split("\n").filter(Boolean);
-  if (containers.length > 0) await docker("rm", "--force", ...containers);
-  if (await docker("images", "-q", tag) !== "") await docker("rmi", "--force", tag);
+  const containers = (await docker(["ps", "-a", "-q", ...labelFilters(labels)])).split("\n").filter(Boolean);
+  if (containers.length > 0) await docker(["rm", "--force", ...containers]);
+  if (await docker(["images", "-q", tag]) !== "") await docker(["rmi", "--force", tag]);
   if (dir) await rm(dir, { recursive: true, force: true });
 });
 
