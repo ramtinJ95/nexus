@@ -16,6 +16,10 @@ export interface EventReader {
    * paused reader notices neither until it resumes.
    */
   ended: Promise<"end" | "dropped">;
+  /** The last `id:` the server sent, with an event or alone as the watermark of a quiet filtered stream. */
+  cursor(): string | undefined;
+  /** How many events arrived that next() has not taken. */
+  queued(): number;
   /** Stops reading without closing, so the server's writes back up. */
   pause(): void;
   resume(): void;
@@ -27,6 +31,7 @@ export function readEvents(port: number, path: string): EventReader {
   let wake = () => {};
   const ended = Promise.withResolvers<"end" | "dropped">();
   let res: IncomingMessage | undefined;
+  let cursor: string | undefined;
   const req = request({ host: "127.0.0.1", port, path, headers: { host: `127.0.0.1:${port}`, accept: "text/event-stream" } });
   req.on("error", () => {});
   req.on("close", () => ended.resolve("dropped"));
@@ -44,7 +49,9 @@ export function readEvents(port: number, path: string): EventReader {
       const blocks = held.join("").split("\n\n");
       held = [blocks.pop()!];
       for (const block of blocks) {
-        const data = block.split("\n").filter((line) => line.startsWith("data: ")).map((line) => line.slice(6));
+        const lines = block.split("\n");
+        cursor = lines.findLast((line) => line.startsWith("id: "))?.slice(4) ?? cursor;
+        const data = lines.filter((line) => line.startsWith("data: ")).map((line) => line.slice(6));
         if (data.length > 0) queued.push(JSON.parse(data.join("\n")));
       }
       wake();
@@ -68,6 +75,8 @@ export function readEvents(port: number, path: string): EventReader {
       return queued.shift();
     },
     ended: ended.promise,
+    cursor: () => cursor,
+    queued: () => queued.length,
     pause() { res?.pause(); },
     resume() { res?.resume(); },
     close() { req.destroy(); },

@@ -303,25 +303,21 @@ test("event followers replay a disconnect gap with since and filter without losi
 });
 
 test("a quiet filtered stream scans past unrelated events and survives retention rollover", async (t) => {
-  const { follow } = await import("../cli/transport.ts");
   const s = await testApi(t);
-  const stop = new AbortController();
-  t.after(() => stop.abort());
-  let cursor = "0";
-  const endpoint = { url: new URL(`http://127.0.0.1:${s.port}`), socks: null };
-  const reading = follow(endpoint, "/v1/events?follow=true&kind=session.turn-ended", () => assert.fail("no matching events yet"), stop.signal, (id) => { cursor = id; });
+  const reading = s.events("/v1/events?follow=true&kind=session.turn-ended");
+  t.after(() => reading.close());
+  let last = "0";
   for (let batch = 0; batch < 3; batch++) {
-    let last = "0";
     for (let i = 0; i < 5000; i++) {
       last = s.registry.appendEvent("release.changed", null, {}).id;
       if (i % 100 === 0) await new Promise((resolve) => setImmediate(resolve));
     }
-    await until("the stream sent its scanned watermark", () => cursor === last);
+    await until("the stream sent its scanned watermark", () => reading.cursor() === last);
   }
-  stop.abort();
-  await reading;
+  assert.equal(reading.queued(), 0, "no matching events yet");
+  reading.close();
   const matching = s.registry.appendEvent("session.turn-ended", null, {});
-  const resumed = s.events(`/v1/events?follow=true&kind=session.turn-ended&since=${cursor}`);
+  const resumed = s.events(`/v1/events?follow=true&kind=session.turn-ended&since=${reading.cursor()}`);
   t.after(() => resumed.close());
   assert.equal((await resumed.next()).id, matching.id);
 });
