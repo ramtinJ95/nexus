@@ -40,7 +40,7 @@ import { holdOptions, landOption } from "../contract/reviews.ts";
 import { askingHolds, isOpen, type HeldQuestion, type HoldsQuestion, type Unanswered } from "./questions.ts";
 import {
   answered, approves, blocks, cancellable, cannotLand, changedPaths, changeOf, checkOutput, checkThread, descriptionDigest, ended, type EndedKind, findingsOf, gateFailure, gateRun, heldForGate, humanLabel,
-  inLanding, landable, landingVerb, liveOutput, maxRounds, personPhase, pushedHead, reviewerApproved, reviewersFindings, roundsSpent, secondReads, seatsFor, seatsOf, verdictAt, verdictsFor,
+  inLanding, landable, landingVerb, liveOutput, maxRounds, personPhase, pushedHead, reviewerApproved, reviewersFindings, roundsSpent, secondReads, seatsFor, settled, seatsOf, verdictAt, verdictsFor,
   type GateRun, type HoldCause, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type Seat, type SecondReviewer, type Talk, type Waiver,
 } from "./review-model.ts";
 import { landsOnItsOwn, type Project } from "./project.ts";
@@ -931,12 +931,21 @@ export function reviewLoop(deps: ReviewDeps) {
     const existing = registry.reviews.review(builder);
     if (existing !== null && !ended(existing)) throw new Refusal("conflict", `review ${existing.id} of ${builder} is ${existing.phase.kind}${cancellable(existing) ? `. Cancel it with nexus review --cancel ${builder} to start another` : ""}`);
   }
+  /**
+   * One review of a PR at a time, so the rounds its reviews spend stay within the one budget each later review reads.
+   * Another builder's review that ended may still take a new head back to its rounds, unless it settled.
+   */
+  function refuseIfReviewed(builder: ThreadId, repo: string, number: number): void {
+    const other = registry.reviews.reviews().find((r) => r.builder !== builder && r.pr.repo === repo && r.pr.number === number && !settled(r));
+    if (other !== undefined) throw new Refusal("conflict", `pull request #${number} is under review ${other.id} of ${other.builder}, which is ${other.phase.kind}. Cancel it with nexus review --cancel ${other.builder} to start another`);
+  }
 
   /**
    * Records a review of `pr`, a PR of the builder's, with its first request. The loop's next pass starts its reviewer
    * threads, whose starts read the remote and may take longer than the person's request waits.
    */
   async function begin(builder: Thread, { repo, number }: Pick<PullRequest, "repo" | "number">, request: { rounds?: number | undefined; land: Review["land"]; auto: boolean }): Promise<Review> {
+    refuseIfReviewed(builder.id, repo, number);
     // A later review of a PR spends what the earlier ones left, unless the person grants rounds.
     const earlierRounds = registry.reviews.roundsSpentOn(repo, number);
     const rounds = request.rounds ?? maxRounds - earlierRounds;
@@ -969,6 +978,9 @@ export function reviewLoop(deps: ReviewDeps) {
     };
     // A Claude reviewer's first request is its first prompt, which still takes the first message's number.
     const review = kind.claude ? { ...started, sent: 1 } : resend(started, "reviewer");
+    // Again, since another start of the PR may have recorded its review while this one read GitHub.
+    refuseIfReviewed(builder.id, repo, number);
+    refuseIfRunning(builder.id);
     registry.reviews.saveReview(review);
     void poll();
     return review;
