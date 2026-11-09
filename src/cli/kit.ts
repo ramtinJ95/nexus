@@ -1,4 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
+import type { Readable, Writable } from "node:stream";
 import type { ParseArgsOptionsConfig } from "node:util";
 import type { z } from "zod";
 import type { Project } from "../contract/projects.ts";
@@ -18,8 +19,16 @@ export async function request<R extends ApiRoute>(api: Api, route: R, args: Call
 }
 /** With `exit`, the command prints its result and then exits as that kind of failure. */
 export interface Result { json: unknown; text: string; exit?: ErrorKind }
+/** The process's streams and environment, or a test's, which runs the CLI in its own process. */
+export interface Io {
+  readonly stdin: Readable & { readonly isTTY?: boolean };
+  readonly stdout: Writable;
+  readonly stderr: Writable & { readonly isTTY?: boolean };
+  readonly env: Readonly<Record<string, string | undefined>>;
+}
 interface Local {
   connect(path: string): Promise<WebSocket>;
+  io: Io;
 }
 export interface Command {
   /** Commands that share an entry share the array. */
@@ -141,11 +150,11 @@ export const reconnectMs = (failed: number, maxMs = 30_000) => Math.min(maxMs, 1
  * the parent is checked every second. The pipe's handler stays, since a closed pipe fails the last write after the
  * stream ends.
  */
-export function untilConsumerGone(onEnd: () => void): () => void {
+export function untilConsumerGone(output: Writable, onEnd: () => void): () => void {
   const parent = process.ppid;
   const orphan = setInterval(() => { if (process.ppid !== parent) onEnd(); }, 1000);
   const outputError = (err: NodeJS.ErrnoException) => { if (err.code === "EPIPE") onEnd(); else throw err; };
-  process.stdout.on("error", outputError);
+  output.on("error", outputError);
   const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
   for (const signal of signals) process.once(signal, onEnd);
   return () => {

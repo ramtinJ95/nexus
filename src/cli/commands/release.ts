@@ -32,7 +32,7 @@ function imagesText(view: ImagesView): string {
  * Each change of a running step goes to stderr, so a build of minutes shows where it is and stdout stays one value
  * for --json.
  */
-async function imageWait(api: Api, started: ImageOperation): Promise<Result> {
+async function imageWait(api: Api, started: ImageOperation, progress: Writable): Promise<Result> {
   let operation = started;
   let view: ImagesView | null = null;
   const settled = async (): Promise<Result | undefined> => {
@@ -49,7 +49,7 @@ async function imageWait(api: Api, started: ImageOperation): Promise<Result> {
     if (now === null || now.kind !== started.kind || now.image !== started.image || now.requestedAt !== started.requestedAt) {
       throw new CliError("conflict", `another image operation replaced the ${started.kind} of ${started.image}${now === null ? "" : `\n${operationText(now)}`}`);
     }
-    if (now.state === "running" && operationText(now) !== operationText(operation)) process.stderr.write(`${operationText(now)}\n`);
+    if (now.state === "running" && operationText(now) !== operationText(operation)) progress.write(`${operationText(now)}\n`);
     operation = now;
     return settled();
   });
@@ -57,9 +57,9 @@ async function imageWait(api: Api, started: ImageOperation): Promise<Result> {
 
 const imageCommand = (help: Command["help"], args: Command["args"], start: (api: Api, positionals: readonly string[]) => Promise<ImageOperation>): Command => ({
   help, args, options: { wait: { type: "boolean" } },
-  async run(api, positionals, v) {
+  async run(api, positionals, v, _follow, { io }) {
     const operation = await start(api, positionals);
-    return v.wait === true ? imageWait(api, operation) : { json: operation, text: operationText(operation) };
+    return v.wait === true ? imageWait(api, operation, io.stderr) : { json: operation, text: operationText(operation) };
   },
 });
 
@@ -144,8 +144,8 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
       "    land an approved review under the merge policy, or try a held landing again; --waive answers Land to the review's question about the holds reserved for you",
     ],
     args: [1, 1], thread: true, options: { waive: { type: "boolean" } },
-    async run(api, [id], v) {
-      const { question, running, ...press } = v.waive === true ? await pressOf(api, id!, { input: process.stdin, output: process.stderr }) : {};
+    async run(api, [id], v, _follow, { io }) {
+      const { question, running, ...press } = v.waive === true ? await pressOf(api, id!, { input: io.stdin, output: io.stderr }) : {};
       if (question !== undefined) {
         await request(api, questionRoutes.answer, { question, body: { option: landOption } });
         const { reviewView: view, said } = await request(api, threadRoutes.show, { thread: id! });
