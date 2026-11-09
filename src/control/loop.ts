@@ -14,7 +14,8 @@
  *
  * A deleted or archived thread's pylon that is gone, with nothing left to settle, is skipped, so passes do not grow with
  * every thread ever archived or deleted (pylonIdsToTick). It is ticked again once its node lists or routes it again, or
- * once a job, preview, disk delete, retry, Claude launch, wake for reading or unarchive gives it something to settle.
+ * once a job, preview, disk delete, retry, Claude launch, wake for reading, failure to record or unarchive gives it
+ * something to settle.
  */
 import { setTimeout as delay } from "node:timers/promises";
 import { desiredPhase, type RegistryWrite } from "./reconcile.ts";

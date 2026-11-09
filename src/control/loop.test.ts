@@ -2025,6 +2025,25 @@ test("an archived thread's pylon that is gone is ticked again once its node list
   assert.deepEqual(registry.threads.pylonIdsToTick(node, []).map((id) => names.get(id)), [], "and none is ticked once settled");
 });
 
+test("an archived thread's pylon that is gone, whose last job failed for good, is ticked until the planner records the failure", async (t) => {
+  const { registry, shift } = shiftedRegistry();
+  seedRegistry(registry, { nodes: [node] });
+  const [final, exhausted, retried] = Array.from({ length: 3 }, () => addThread(registry, { node, boot: { image } }));
+  for (const thread of [final, exhausted, retried]) await archivedAgo(registry, shift, thread!, 60_000, false);
+  const failure = (code: JobErrorCode, count: number) => ({ count, last: { at: Date.now() - 60 * 60_000, code, message: "boom" } });
+  registry.threads.savePylon({ ...registry.threads.pylon(final!.pylonId)!, attempts: failure("invalid", 1) });
+  registry.threads.savePylon({ ...registry.threads.pylon(exhausted!.pylonId)!, attempts: failure("backend", 5) });
+  registry.threads.savePylon({ ...registry.threads.pylon(retried!.pylonId)!, attempts: failure("backend", 1) });
+  const fake = fakeNode({ autoFinish: true });
+  const loop = run(t, registry, fake.probe, { log: () => {} });
+  await until("the node is online", () => registry.nodes.node(node)?.state === "online");
+  await settled(fake, loop);
+  assert.deepEqual([final, exhausted, retried].map((th) => registry.threads.pylon(th!.pylonId)?.failed?.split(",")[0] ?? null),
+    ["last job failed with invalid", "gave up after 5 failed attempts", null], "a failure the planner retries fails nothing");
+  assert.deepEqual(registry.threads.pylonIdsToTick(node, []), [], "and once recorded, none is ticked");
+  assert.deepEqual(fake.submitted, []);
+});
+
 test("an archived thread's pylon that is gone boots for a wake for reading, and for an unarchive with the git identity its project took since", async (t) => {
   const { registry, shift } = shiftedRegistry();
   seedRegistry(registry, { nodes: [node] });

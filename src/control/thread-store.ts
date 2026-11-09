@@ -9,7 +9,7 @@ import type { StartKey } from "./start-request.ts";
 import { standingRulesSender, type StandingRulesStamp } from "./standing-rules.ts";
 import { Refusal } from "./refusal.ts";
 import { json, jsonOrNull, type Db, type Holding, type Row } from "./db.ts";
-import { desiredPhase, isOpenStatus, noAttempts, type ActivityFacts, type ArchiveFacts, type FailedAttempt, type RegistryWrite, type ThreadStatus } from "./reconcile.ts";
+import { desiredPhase, finalCodes, isOpenStatus, maxAttempts, noAttempts, type ActivityFacts, type ArchiveFacts, type FailedAttempt, type RegistryWrite, type ThreadStatus } from "./reconcile.ts";
 import { pylonIdOf, type NodeName, type PylonId, type ThreadId } from "../ids.ts";
 import type { JobStatus, Subject } from "../protocol/jobs.ts";
 import { pylonEventSchema, type HerdrStatus, type NodeObservation, type ReportedEvent } from "../protocol/observations.ts";
@@ -700,16 +700,19 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     /**
      * The node's pylons less those of deleted and archived threads that a tick would leave as they are: the node neither
      * has nor routes them, as `present` says, and no job, preview, disk delete, retry, Claude launch or wake for reading is
-     * left to settle. Such a pylon's desired phase is paused or deleted, and the planner is done with an absent one either
-     * way. A change to its project's live spec or git identity reaches it on the tick after any of these.
+     * left to settle, nor, for an archived thread, a failure the planner has yet to record. Such a pylon's desired phase is
+     * paused or deleted, and the planner is done with an absent one either way. A change to its project's live spec or git
+     * identity reaches it on the tick after any of these.
      */
     pylonIdsToTick: (node: NodeName, present: readonly PylonId[]) =>
       (sql(`SELECT p.id FROM pylons p JOIN threads t ON t.id = p.thread WHERE p.node = $node AND (t.status NOT IN ('deleted', 'archived')
         OR p.submitted IS NOT NULL OR p.retrying = 1 OR p.id IN (SELECT value FROM json_each($present))
         OR EXISTS (SELECT 1 FROM previews WHERE pylon = p.id) OR EXISTS (SELECT 1 FROM disk_cleanups WHERE pylon = p.id)
-        OR t.id IN (SELECT value FROM json_each($launching)) OR t.id IN (SELECT value FROM json_each($reading)))
+        OR t.id IN (SELECT value FROM json_each($launching)) OR t.id IN (SELECT value FROM json_each($reading))
+        OR (t.status = 'archived' AND p.failed IS NULL AND (json_extract(p.attempts, '$.last.code') IN (SELECT value FROM json_each($final))
+          OR json_extract(p.attempts, '$.count') >= $maxAttempts)))
         ORDER BY p.id`).all({ $node: node, $present: JSON.stringify(present), $launching: JSON.stringify(launching()),
-        $reading: JSON.stringify(participants.flatMap((p) => p.reading?.() ?? [])) }) as Row[]).map((r) => r.id as PylonId),
+        $reading: JSON.stringify(participants.flatMap((p) => p.reading?.() ?? [])), $final: JSON.stringify(finalCodes), $maxAttempts: maxAttempts }) as Row[]).map((r) => r.id as PylonId),
     /** Takes a whole PylonRecord, so the tick can save what it holds. The desired phase is dropped. */
     savePylon(saved: Omit<PylonRecord, "desired">) {
       transaction(() => {

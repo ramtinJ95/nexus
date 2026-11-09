@@ -158,7 +158,9 @@ export type PlanStep =
   | { kind: "submit"; job: Job; uncounted?: true }
   | { kind: "fail"; code: JobErrorCode; reason: string; uncounted?: true }; // the registry marks the pylon failed until a human retries
 
-const maxAttempts = 5;
+export const maxAttempts = 5;
+/** The job error codes the planner never retries, so a pylon whose last job failed with one fails on its next tick. */
+export const finalCodes = (Object.keys(retryable) as JobErrorCode[]).filter((code) => !retryable[code]);
 const backoffScheduleMs = [5_000, 15_000, 45_000, 120_000, 120_000] as const;
 /** Wait after the `attempt`th consecutive failure, counting from 1. */
 export function backoffMs(attempt: number): number {
