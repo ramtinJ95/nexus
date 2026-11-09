@@ -36,7 +36,7 @@ test("the node's cleanup is a card on its page and in Needs you, and Delete dele
       },
     }]]),
   });
-  for (const id of [older, "img-000000000002", current] as ImageId[]) { s.registry.saveImage(testImage({ id }), null); s.registry.setCurrentImage(id); }
+  for (const id of [older, "img-000000000002", current] as ImageId[]) { s.registry.images.saveImage(testImage({ id }), null); s.registry.images.setCurrentImage(id); }
   observeNode(s.registry, { node, artifacts: [older, current] });
   s.callAs("nFIREBAT" as TailnetNodeId);
   const html = async (path: string) => (await s.raw(path)).body.toString();
@@ -86,7 +86,7 @@ test("the Cluster page says in one line what each node's latest cleanup freed an
   const s = await testApi(t, { deployment });
   const testbench = "infra-testbench" as NodeName;
   observeNode(s.registry, { node });
-  s.registry.upsertNode({ name: testbench, tailnetHost: `${testbench}.tail.ts.net`, tailnetNodeId: "nINFRA" as TailnetNodeId });
+  s.registry.nodes.upsertNode({ name: testbench, tailnetHost: `${testbench}.tail.ts.net`, tailnetNodeId: "nINFRA" as TailnetNodeId });
   observeNode(s.registry, { node: testbench });
   const hour = 3_600_000;
   const now = Date.now();

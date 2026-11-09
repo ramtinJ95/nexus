@@ -25,7 +25,7 @@ test("the health routes serve the latest pass with each open problem, the change
   const s = await testApi(t, { health: () => latest });
   assert.deepEqual(await s.call("GET", "/v1/checks"), { status: 200, body: { at: null, checks: [], problems: [], unseen: 0 } });
   assert.deepEqual(await s.call("GET", "/v1/checks/changes"), { status: 200, body: [] });
-  const [backup, disk] = s.registry.recordHealthChanges([
+  const [backup, disk] = s.registry.health.recordHealthChanges([
     { at: ok.at, node: null, name: "backup", from: "ok", status: "fail", text: "the newest backup is 27 h old" },
     { at: ok.at, node: "rj-firebat" as never, name: "disk", from: "ok", status: "warn", text: "12.4 of 98.0 GiB free at /var/lib/nexus-control, low" },
   ], 0);

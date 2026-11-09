@@ -47,7 +47,7 @@ test("without deployment options the control node is unknown, so no one answers 
   const s = await testApi(t, { deployment: null });
   assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
-  s.registry.setCurrentImage(image.id as ImageId);
+  s.registry.images.setCurrentImage(image.id as ImageId);
   const thread = await s.startThread({ request: { project: "acme", title: "Fix checkout" }, caller: laptop, role: "builder" });
   for (const answerer of ["person", "deployer"] as const) {
     s.registry.questions.askQuestion({ kind: "judgment", id: `qn-${answerer}`, thread: thread.id, text: "Go?", options: ["Yes", "No"], reserved: null, answerer, askedAt: 1, failure: 0 });

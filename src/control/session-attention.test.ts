@@ -19,7 +19,7 @@ async function claudeThread(t: TestContext, failed?: string) {
     resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
   })).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
-  s.registry.setCurrentImage(image.id as ImageId);
+  s.registry.images.setCurrentImage(image.id as ImageId);
   const res = await s.call("POST", "/v1/threads", { project: "acme", title: "Fix checkout", claude: "Fix checkout" });
   assert.equal(res.status, 201, JSON.stringify(res.body));
   const thread = res.body as Thread;

@@ -53,8 +53,8 @@ async function fixture(t: import("node:test").TestContext, check: string | null,
 
   const registry = testRegistry(t);
   const project = { id: "p" as ProjectId, repoUrl: "https://github.com/acme/repo.git", defaultBranch: "main", defaultNode: node, resources: { cpus: 1, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null };
-  registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
-  registry.createProject(project);
+  registry.nodes.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
+  registry.projects.createProject(project);
   let count = 0;
   function add(caller: string): Thread {
     const id = `th-${++count}` as ThreadId;
@@ -119,7 +119,7 @@ test("a start the control plane refuses says why, with or without room asked for
 
 test("a check pylon keeps the CPUs of a project sized over 4", async (t) => {
   const f = await fixture(t, "echo tests ok");
-  f.registry.editProject(f.builder.project, (p) => ({ ...p, resources: { ...p.resources, cpus: 8 } }));
+  f.registry.projects.editProject(f.builder.project, (p) => ({ ...p, resources: { ...p.resources, cpus: 8 } }));
   await started(f.runs().start(f.builder, "feature", f.head));
   assert.deepEqual(f.started.map((s) => s.request.resources), [{ cpus: 8 }]);
 });

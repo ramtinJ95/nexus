@@ -16,7 +16,7 @@ test("an item is added to a project the pipeline runs for, becomes a queued thre
   assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
   assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "other", pipeline: { autoStart: true } })).status, 400, "only an edit turns the pipeline on");
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
-  s.registry.setCurrentImage(image.id as ImageId);
+  s.registry.images.setCurrentImage(image.id as ImageId);
   const off = await s.call("POST", "/v1/items", { project: "acme", title: "A", message: "Build A." });
   assert.deepEqual(off, { status: 409, body: { error: "the pipeline does not run for project acme. nexus project edit acme --pipeline start turns it on", code: null, retryable: false } });
 
@@ -162,7 +162,7 @@ test("a planning thread's proposals become cards only a person answers, an accep
   const s = await testApi(t, { pipeline: true, deployment });
   assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
-  s.registry.setCurrentImage(image.id as ImageId);
+  s.registry.images.setCurrentImage(image.id as ImageId);
   assert.equal((await s.call("PATCH", "/v1/projects/acme", { pipeline: { autoStart: true } })).status, 200);
   assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Plan", planning: true, claude: "Plan it" })).status, 400, "a Claude worker cannot plan");
   assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Plan", planning: true, after: ["th-000000000000"] })).status, 400, "a planning thread starts now");
@@ -187,7 +187,7 @@ test("a planning thread's proposals become cards only a person answers, an accep
   assert.deepEqual([a!.proposal.title, b!.proposal.title], ["A: archive what landed", "B: nudge a stalled builder"]);
   assert.ok(a!.text.includes("Archive the builder once its review lands."), "the card shows the brief in full");
   assert.equal((await detail()).attention, "decision");
-  assert.deepEqual([s.registry.items().length, s.registry.queue.queuedThreads().length], [0, 0], "nothing the thread wrote adds or starts work, though the project's items start on their own");
+  assert.deepEqual([s.registry.pipeline.items().length, s.registry.queue.queuedThreads().length], [0, 0], "nothing the thread wrote adds or starts work, though the project's items start on their own");
 
   const answer = (q: Question, option: string) => s.call("POST", `/v1/questions/${q.id}/answer`, { option });
   s.callAs("nFIREBAT" as TailnetNodeId);

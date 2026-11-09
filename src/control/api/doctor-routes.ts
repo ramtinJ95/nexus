@@ -11,11 +11,11 @@ export function doctorRoutes(kit: ApiKit, options: { features: Features; health(
     on(routes.doctor, anyAllowed, async () => {
       return ok(await feature(options.features, "doctor")());
     }),
-    on(routes.checks, anyAllowed, () => ok(healthView(options.health(), registry.healthStates()))),
-    on(routes.changes, anyAllowed, () => ok(registry.healthChanges())),
+    on(routes.checks, anyAllowed, () => ok(healthView(options.health(), registry.health.healthStates()))),
+    on(routes.changes, anyAllowed, () => ok(registry.health.healthChanges())),
     on(routes.seen, { role: "allowed", why: "what the person has seen changes no check" }, async (_, r) => {
       const { through } = parse(checksSeenSchema, await r.body({}));
-      registry.markHealthSeen(through, Date.now());
+      registry.health.markHealthSeen(through, Date.now());
       return noContent;
     }),
   ];

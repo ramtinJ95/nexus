@@ -12,7 +12,7 @@ import type { Registry } from "./registry.ts";
 import type { Thread, ThreadAgent } from "./thread-store.ts";
 import type { ThreadId } from "../ids.ts";
 
-type AgentConversationRegistry = Pick<Registry, "threads" | "node">;
+type AgentConversationRegistry = Pick<Registry, "threads" | "nodes">;
 
 /** In order: a reply of the agent's, or a message to it and whether the person wrote it. */
 export type Message = { role: "assistant"; text: string } | { role: "user"; person: boolean };

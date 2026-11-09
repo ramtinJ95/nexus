@@ -42,7 +42,7 @@ async function controlPlane(t: TestContext) {
   await writeFile(join(etc, "keys", "git_ed25519"), "a key\n");
   await chmod(join(etc, "keys", "git_ed25519"), 0o400);
   const registry = openRegistry(paths.db);
-  registry.createProject(project("before"));
+  registry.projects.createProject(project("before"));
   const storage = await openNodeSqliteStorage(paths.storage);
   let running = true;
   const stop = async () => {
@@ -81,7 +81,7 @@ test("a backup copies the live databases consistently and every file, private to
   assert.equal(manifest.entries.find((e: { name: string }) => e.name === "etc/secrets.env").mode, 0o640);
   // The registry is still open, and its project lives in the WAL, not yet in the database file.
   const copy = openRegistry(join(dir, "registry.db"));
-  assert.ok(copy.project("before" as ProjectId));
+  assert.ok(copy.projects.project("before" as ProjectId));
   copy.close();
   assert.deepEqual(tables(join(dir, "harness.sqlite")), tables(m.paths.storage));
   assert.equal(await readFile(join(dir, "etc/keys/git_ed25519"), "utf8"), "a key\n");
@@ -170,7 +170,7 @@ test("restore refuses while the control plane or the deployer runs, and refuses 
   await assert.rejects(restore({ root: m.root, name: "../backups", unitState: stopped }), /not a backup's name/);
   await rm(join(dir, "manifest.json"));
   await assert.rejects(restore({ root: m.root, name: nameOf(m.day(1)), unitState: stopped }), /does not verify/);
-  assert.ok(m.registry.project("before" as ProjectId), "nothing was restored");
+  assert.ok(m.registry.projects.project("before" as ProjectId), "nothing was restored");
 });
 
 test("restore refuses while the path unit that starts the deployer on a wake is active", async (t) => {
@@ -210,7 +210,7 @@ test("a backup root that is a link is neither written to nor restored from", asy
 test("restore on a stopped control plane puts back the backed-up state with its modes, over later changes and a stale WAL", async (t) => {
   const m = await controlPlane(t);
   await m.run(m.day(1));
-  m.registry.createProject(project("after"));
+  m.registry.projects.createProject(project("after"));
   await m.stop();
   // A crashed control plane leaves its WAL, which must not replay over the restored registry.
   const live = new DatabaseSync(m.paths.db);
@@ -227,8 +227,8 @@ test("restore on a stopped control plane puts back the backed-up state with its 
   await restore({ root: m.root, name: nameOf(m.day(1)), unitState: stopped });
 
   const registry = openRegistry(m.paths.db);
-  assert.ok(registry.project("before" as ProjectId));
-  assert.equal(registry.project("after" as ProjectId), undefined);
+  assert.ok(registry.projects.project("before" as ProjectId));
+  assert.equal(registry.projects.project("after" as ProjectId), undefined);
   registry.close();
   assert.equal(await readFile(m.paths.credentials, "utf8"), '{"deviceId":"d","credentials":{"openai":{}}}\n');
   assert.equal(await mode(m.paths.credentials), 0o600);
@@ -261,8 +261,8 @@ await backup({ config: ${JSON.stringify(m.config)}, root: ${JSON.stringify(m.roo
     assert.equal((await stat(join(m.dir, "var-lib-nexus-control", file))).uid, owner, file);
   }
   const registry = openRegistry(m.paths.db);
-  registry.createProject(project("after"));
-  assert.ok(registry.project("after" as ProjectId));
+  registry.projects.createProject(project("after"));
+  assert.ok(registry.projects.project("after" as ProjectId));
   registry.close();
   const storage = await openNodeSqliteStorage(m.paths.storage);
   await storage.close(context);

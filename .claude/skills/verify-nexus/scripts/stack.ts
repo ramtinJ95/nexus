@@ -160,8 +160,8 @@ const manifest: ImageManifest = {
   },
 };
 const seed = openRegistry(join(runDir, "registry.db"));
-seed.saveImage(manifest, null);
-seed.setCurrentImage(imageId);
+seed.images.saveImage(manifest, null);
+seed.images.setCurrentImage(imageId);
 seed.close();
 
 const controlPlane = await startControlPlane({

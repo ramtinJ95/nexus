@@ -82,7 +82,7 @@ test("thread detail derives the actual state from the node's last observation", 
 
   s.registry.threads.apply({ record: "job", status: { ...pause, state: "succeeded", finishedAt: "2027-01-01T00:01:30Z" } });
   assert.equal((await detail()).pylon.actualState, "running");
-  s.registry.markOffline(node);
+  s.registry.nodes.markOffline(node);
   assert.equal((await detail()).pylon.actualState, "unknown");
 });
 
@@ -487,8 +487,8 @@ test("thread detail lists the judgments of the thread's failed pylon, oldest fai
     failure, thread: s.thread.id, node, failed: "pylon is broken: the controller exited", startedAt: 5, request: failure === 900 ? null : { brief: "Is it the node?", token: "t" },
     conversation: null, reply: failure === 900 ? null : "No block.", phase,
   });
-  s.registry.saveJudgment(judgment(900, { kind: "acting", verdict: { answer: "person", why: "Nexus already retried this thread's pylon 2 times on its own", by: "control plane" } }), null);
-  s.registry.saveJudgment(judgment(812, { kind: "done", verdict: { answer: "retry-elsewhere", why: "The node is out of disk.", by: "judgment" }, outcome: { kind: "moved", from: node, to: "rj-other" as NodeName, on: "verdict" } }), null);
+  s.registry.judgments.saveJudgment(judgment(900, { kind: "acting", verdict: { answer: "person", why: "Nexus already retried this thread's pylon 2 times on its own", by: "control plane" } }), null);
+  s.registry.judgments.saveJudgment(judgment(812, { kind: "done", verdict: { answer: "retry-elsewhere", why: "The node is out of disk.", by: "judgment" }, outcome: { kind: "moved", from: node, to: "rj-other" as NodeName, on: "verdict" } }), null);
   const { judgments } = (await s.call("GET", `/v1/threads/${s.thread.id}`)).body as ThreadDetail;
   assert.deepEqual(judgments, [
     { failure: 812, node, failed: "pylon is broken: the controller exited", startedAt: 5, phase: "done", verdict: { answer: "retry-elsewhere", why: "The node is out of disk.", by: "judgment" },

@@ -37,7 +37,7 @@ test("a pylon is observed as its node last listed it, online or not, and its pro
   assert.equal(runningProbe(registry, probes, thread, "work"), probe, "a running pylon on an online node");
   assert.equal(runningProbe(registry, new Map(), thread, "work"), null, "a node with no probe client");
 
-  registry.markOffline(node);
+  registry.nodes.markOffline(node);
   assert.deepEqual(observedPylon(registry, pylon), running, "an offline node's last observation still lists it");
   assert.equal(runningProbe(registry, probes, thread, "work"), null, "an offline node");
 });

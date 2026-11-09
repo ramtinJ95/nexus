@@ -25,7 +25,7 @@ import type { ItemRecord } from "./pipeline-store.ts";
 import { brokenRule, itemRules } from "../contract/threads-parse.ts";
 import { isOpenStatus } from "./reconcile.ts";
 
-type PipelineRegistry = Pick<Registry, "threads" | "currentImage" | "reviews" | "item" | "items" | "latestHealthSample" | "node" | "nodes" | "now" | "planning" | "prWatches" | "project" | "queue" | "reserve" | "reserved" | "saveItem" | "saveTemplate" | "templates">;
+type PipelineRegistry = Pick<Registry, "threads" | "images" | "reviews" | "pipeline" | "nodeMetrics" | "nodes" | "now" | "planning" | "prWatches" | "projects" | "queue" | "placement">;
 
 /** `held` waits on the person, for an approval, a blocked queue, a review that ended for them or a thread that needs them. */
 export interface ItemPhase { kind: "planned" | "queued" | "building" | "reviewing" | "landing" | "landed" | "held" | "archived" | "cancelled"; why: string }
@@ -68,11 +68,11 @@ const phase = (kind: ItemPhase["kind"], why: string): ItemPhase => ({ kind, why 
 /** What an item with no thread waits for, or null once the pass may queue it. */
 function unqueued(registry: PipelineRegistry, item: ItemRecord): ItemPhase | null {
   if (item.cancelled !== null) return phase("cancelled", `cancelled by ${item.cancelled.by}`);
-  const setting = registry.project(item.project)?.pipeline;
+  const setting = registry.projects.project(item.project)?.pipeline;
   if (setting == null) return phase("planned", `the pipeline does not run for project ${item.project}`);
   for (const id of item.after) {
     if (itemThread(registry, id) !== null) continue;
-    const ahead = registry.item(id)!;
+    const ahead = registry.pipeline.item(id)!;
     return ahead.cancelled === null ? phase("planned", `waits for ${ahead.title} to be queued`) : phase("held", `${ahead.title} was cancelled, so this never starts. Cancel it, or add it again after other items`);
   }
   if (!setting.autoStart && item.approved === null) return phase("held", `project ${item.project} waits for the person to approve each item: nexus item approve ${item.id}`);
@@ -164,7 +164,7 @@ export function pipeline(options: { registry: PipelineRegistry; queue: Pick<Thre
   const { registry, queue, log = () => {} } = options;
 
   function find(id: string): ItemRecord {
-    const item = registry.item(id as ItemId);
+    const item = registry.pipeline.item(id as ItemId);
     if (item === undefined) throw new Refusal("missing", `no item ${id}`);
     return item;
   }
@@ -179,17 +179,17 @@ export function pipeline(options: { registry: PipelineRegistry; queue: Pick<Thre
   /** Each item is queued under its request ID, which the queued record's transaction stores, so it is queued once. */
   async function pass() {
     let queuedAny = false;
-    for (const item of registry.items()) {
+    for (const item of registry.pipeline.items()) {
       if (itemThread(registry, item.id) !== null || unqueued(registry, item) !== null) continue;
       const after = item.after.map((id) => itemThread(registry, id)!);
       try {
         queue.add(item.request, item.message, after, item.addedBy, startKey(requestIds.pipeline(item.id), { request: item.request, message: item.message, after }));
         queuedAny = true;
-        if (item.lastError !== null) registry.saveItem({ ...item, lastError: null });
+        if (item.lastError !== null) registry.pipeline.saveItem({ ...item, lastError: null });
       } catch (err) {
         const message = (err as Error).message;
         if (item.lastError !== message) log(`pipeline item ${item.id} was not queued: ${message}`);
-        registry.saveItem({ ...item, lastError: message });
+        registry.pipeline.saveItem({ ...item, lastError: message });
       }
     }
     if (queuedAny) void queue.poll();
@@ -208,7 +208,7 @@ export function pipeline(options: { registry: PipelineRegistry; queue: Pick<Thre
       if (project.pipeline == null) throw new Refusal("conflict", `the pipeline does not run for project ${project.id}. nexus project edit ${project.id} --pipeline start turns it on`);
       const ids = [...new Set(after)] as ItemId[];
       for (const id of ids) {
-        const ahead = registry.item(id);
+        const ahead = registry.pipeline.item(id);
         if (ahead === undefined) throw new Refusal("missing", `no item ${id}`);
         if (ahead.project !== project.id) throw new Refusal("invalid", `item ${id} is in project ${ahead.project}, not ${project.id}`);
       }
@@ -216,23 +216,23 @@ export function pipeline(options: { registry: PipelineRegistry; queue: Pick<Thre
         id, project: project.id, title: request.title, request, message, after: ids, addedBy: caller, addedAt: Date.now(),
         approved: null, cancelled: null, lastError: null,
       };
-      registry.saveItem(record);
+      registry.pipeline.saveItem(record);
       return record;
     },
     approve(id: string, caller: string): ItemRecord {
       const item = find(id);
       unstarted(item, "approved");
-      if (registry.project(item.project)?.pipeline?.autoStart !== false) throw new Refusal("conflict", `project ${item.project} ${registry.project(item.project)?.pipeline == null ? "has the pipeline off" : "starts its items on their own"}, so item ${item.id} needs no approval`);
+      if (registry.projects.project(item.project)?.pipeline?.autoStart !== false) throw new Refusal("conflict", `project ${item.project} ${registry.projects.project(item.project)?.pipeline == null ? "has the pipeline off" : "starts its items on their own"}, so item ${item.id} needs no approval`);
       if (item.approved !== null) return item;
       const next = { ...item, approved: { by: caller, at: Date.now() } };
-      registry.saveItem(next);
+      registry.pipeline.saveItem(next);
       return next;
     },
     cancel(id: string, caller: string): ItemRecord {
       const item = find(id);
       unstarted(item, "cancelled");
       const next = { ...item, cancelled: { by: caller, at: Date.now() } };
-      registry.saveItem(next);
+      registry.pipeline.saveItem(next);
       return next;
     },
     /** A pass, or one more after the pass in flight, so an item added during a pass is queued without waiting for the next. */

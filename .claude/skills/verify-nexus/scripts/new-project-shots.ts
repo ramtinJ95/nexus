@@ -23,8 +23,8 @@ const laptop = "nLAPTOP" as TailnetNodeId;
 
 const registry = openRegistry(join(mkdtempSync(join(tmpdir(), "nexus-shots-")), "registry.db"));
 const online = "rj-firebat" as NodeName;
-registry.upsertNode({ name: "infra-testbench" as NodeName, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
-registry.upsertNode({ name: online, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+registry.nodes.upsertNode({ name: "infra-testbench" as NodeName, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
+registry.nodes.upsertNode({ name: online, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
 registry.threads.apply({ record: "node", node: online, state: "online", capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 } });
 
 const api = await startApi({
@@ -47,7 +47,7 @@ await post("POST", "/v1/images", {
     neovim: "0.12.6", neovimSha256: "b".repeat(64),
   },
 });
-registry.setCurrentImage(image);
+registry.images.setCurrentImage(image);
 
 const session = "-s=nexus-new-project";
 const playwright = (args: string[]) => promisify(execFile)("playwright-cli", [session, ...args], { cwd: out, encoding: "utf8" });
@@ -139,8 +139,8 @@ try {
   await pw("click", "#project button[type=submit]");
   await expect("the start dialog open on the new project, listed in the sidebar",
     { projectOpen: false, startOpen: true, checked: "acme", sidebar: ["acme"] });
-  if (!isDeepStrictEqual(registry.project("acme" as ProjectId), { id: "acme", repoUrl, defaultNode: "auto", ...cliDefaults })) {
-    throw new Error(`the added project is not the CLI's: ${JSON.stringify(registry.project("acme" as ProjectId))}`);
+  if (!isDeepStrictEqual(registry.projects.project("acme" as ProjectId), { id: "acme", repoUrl, defaultNode: "auto", ...cliDefaults })) {
+    throw new Error(`the added project is not the CLI's: ${JSON.stringify(registry.projects.project("acme" as ProjectId))}`);
   }
   console.log("ok: the added project has the CLI's defaults");
   await shot("6-success-start-dialog");

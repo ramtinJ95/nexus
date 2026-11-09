@@ -29,7 +29,7 @@ test("thread detail lists the pylon's listening ports with the service and previ
   ]);
   observeRunning(s, { listening: null });
   assert.equal(await ports(), null, "ports the node could not read are unknown, not none");
-  s.registry.threads.ingested({ ...s.registry.node(node)!.observation!, pylons: [stoppedPylon(s.thread.pylonId, { sessions: null })] }, []);
+  s.registry.threads.ingested({ ...s.registry.nodes.node(node)!.observation!, pylons: [stoppedPylon(s.thread.pylonId, { sessions: null })] }, []);
   assert.deepEqual(await ports(), [], "nothing listens in a stopped pylon");
 });
 

@@ -51,7 +51,7 @@ test("a Claude worker's pasted image is served from its transcript while the pyl
   assert.equal(shot.headers["content-security-policy"], "default-src 'none'; sandbox");
   assert.equal((await s.raw(query({ ...place!, index: 1 }))).status, 404);
   assert.equal((await s.raw(query({ ...place!, bytes: 5 << 20 }))).status, 400, "no record is longer than one read");
-  s.registry.markOffline(node);
+  s.registry.nodes.markOffline(node);
   const paused = await s.call("GET", query(place));
   assert.equal(paused.status, 409);
   assert.deepEqual(s.woken, []);

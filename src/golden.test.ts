@@ -69,8 +69,8 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
   });
   // The demo seeds 31 days of five-minute samples, which cost most of this test's time. Every half hour of them still
   // fills each tier the metrics serve from.
-  const record = s.registry.recordHealthSample.bind(s.registry);
-  s.registry.recordHealthSample = (n, sample) => sample.at < Date.now() - 6 * hour && sample.at % (30 * 60_000) !== 0 ? false : record(n, sample);
+  const record = s.registry.nodeMetrics.recordHealthSample.bind(s.registry);
+  s.registry.nodeMetrics.recordHealthSample = (n, sample) => sample.at < Date.now() - 6 * hour && sample.at % (30 * 60_000) !== 0 ? false : record(n, sample);
   const demo = await seedDemo(s);
   demo.stop();
   report = demo.health;
@@ -78,9 +78,9 @@ test("the API, the CLI and the dashboard answer the demo world as their golden c
 
   const id = (key: string) => threads.find(([k]) => k === key)![1].id;
   const queued = s.registry.queue.queuedThreads().filter((q) => q.status === "queued");
-  const items = s.registry.items();
-  const nodes = s.registry.nodes().map((n) => n.name);
-  const projects = s.registry.projects().map((p) => p.id);
+  const items = s.registry.pipeline.items();
+  const nodes = s.registry.nodes.nodes().map((n) => n.name);
+  const projects = s.registry.projects.projects().map((p) => p.id);
   /** An answer of the last option to the thread's first open question. */
   const answerLast = (key: string) => {
     const q = s.registry.questions.questions(id(key)).find((q) => q.answer === null)!;

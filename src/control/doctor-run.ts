@@ -17,7 +17,7 @@ import type { Registry } from "./registry.ts";
 import type { NewHealthChange } from "./health-store.ts";
 
 export interface DoctorSources {
-  registry: Pick<Registry, "nodes" | "now" | "node" | "threads" | "reserved" | "desiredRelease" | "nodeByTailnetId" | "releaseReports">;
+  registry: Pick<Registry, "nodes" | "now" | "threads" | "placement" | "releases">;
   self: TailnetNodeId;
   backupStatus(): Promise<BackupStatusRead>;
   login(): Promise<LoginState>;
@@ -42,9 +42,9 @@ export async function runDoctor(s: DoctorSources): Promise<DoctorReport> {
   const now = (s.clock ?? Date.now)();
   return doctorReport({
     now, upSince: s.startedAt,
-    nodes: s.registry.nodes().map((record) => nodeSummary(s.registry, record)),
+    nodes: s.registry.nodes.nodes().map((record) => nodeSummary(s.registry, record)),
     release: releaseView(s.registry, s.self, now),
-    controlNode: s.registry.nodeByTailnetId(s.self)?.name ?? null,
+    controlNode: s.registry.nodes.nodeByTailnetId(s.self)?.name ?? null,
     backup, login, certificate,
     // A pylon its node does not list has no disk to keep, as one whose disk was deleted before disks waited for their usage.
     keptArchives: s.registry.threads.keptArchives().filter((t) => {
@@ -118,7 +118,7 @@ export function confirmedChanges(recorded: readonly HealthChange[], previous: Re
  * Runs the checks every 5 minutes once the control plane has settled, and records each change they confirm, keeping 30
  * days of changes. It holds the latest pass, which the Health page shows.
  */
-export function healthPasses(options: { registry: Pick<Registry, "healthStates" | "recordHealthChanges">; run(): Promise<DoctorReport>; startedAt: number; clock?: () => number; log?: (message: string) => void }) {
+export function healthPasses(options: { registry: { health: Pick<Registry["health"], "healthStates" | "recordHealthChanges"> }; run(): Promise<DoctorReport>; startedAt: number; clock?: () => number; log?: (message: string) => void }) {
   const { registry, run, startedAt, clock = Date.now, log = (message: string) => console.error(message) } = options;
   let latest: DoctorReport | null = null;
   let previous: Map<string, Check> | null = null;
@@ -127,7 +127,7 @@ export function healthPasses(options: { registry: Pick<Registry, "healthStates" 
     try {
       if (clock() - startedAt < settleMs) return;
       const report = await run();
-      const changes = registry.recordHealthChanges(confirmedChanges(registry.healthStates(), previous, report), clock() - changesKeptMs);
+      const changes = registry.health.recordHealthChanges(confirmedChanges(registry.health.healthStates(), previous, report), clock() - changesKeptMs);
       previous = new Map(report.checks.map((c) => [checkKey(c), c]));
       latest = report;
       for (const c of changes) log(`the ${c.node ?? "control plane"} ${c.name} check went from ${c.from} to ${c.status}: ${c.text}`);

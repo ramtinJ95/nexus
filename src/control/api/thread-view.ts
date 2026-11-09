@@ -36,8 +36,8 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
   /** The thread's pylon, its node, what that node last reported of it, and what it is doing, from one read of each. */
   function pylonState(t: Pick<Thread, "pylonId" | "status">) {
     const pylon = registry.threads.pylon(t.pylonId)!;
-    const node = registry.node(pylon.node)!;
-    const observed = observedPylon({ node: () => node }, pylon) ?? "absent";
+    const node = registry.nodes.node(pylon.node)!;
+    const observed = observedPylon({ nodes: { node: () => node } }, pylon) ?? "absent";
     // The planner deletes a failed pylon all the same, so a deleted thread's pylon shows the delete.
     const gaveUp = pylon.failed !== null && t.status !== "deleted";
     return { pylon, node, observed, actualState: actualState(observed, registry.threads.job(pylon.pylonId) ?? null, node.state === "online", gaveUp) };
@@ -83,7 +83,7 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
       desired: desiredPhase(t, now),
       // An absent pylon has no disk to keep.
       keptPastDay: state.actualState === "absent" ? null : keptPastDay(t, now),
-      pylon: pylonOf(state, registry.project(t.project)!),
+      pylon: pylonOf(state, registry.projects.project(t.project)!),
       sessions: registry.threads.sessions(t.pylonId),
       previews,
       ports: portsOf(state.observed, previews),
@@ -93,8 +93,8 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
       review,
       reviewView: review === null ? null : reviewView(review, questions),
       questions,
-      judgments: registry.judgments(t.id).map(judgmentView),
-      planning: registry.planning(t.id) !== null,
+      judgments: registry.judgments.judgments(t.id).map(judgmentView),
+      planning: registry.planning.planning(t.id) !== null,
       attach: herdrClient,
       agent,
     };

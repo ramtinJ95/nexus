@@ -51,7 +51,7 @@ import { servesReview, threadRole } from "./work-model.ts";
 import { builderFindings, builderNotes, fencedAnswers, nextRound, quoteRequest, reminder, reviewerRequest, type FencedAnswer } from "./prompts.ts";
 import { isOpenStatus, openStatuses } from "./reconcile.ts";
 
-type ReviewRegistry = Pick<Registry, "threads" | "questions" | "desiredRelease" | "drain" | "reviews" | "nodeByTailnetId" | "nodes" | "now" | "planning" | "prWatches" | "project" | "releaseReports" | "setDesiredRelease">;
+type ReviewRegistry = Pick<Registry, "threads" | "questions" | "releases" | "reviews" | "nodes" | "now" | "planning" | "prWatches" | "projects">;
 
 /** How long a turn's end may run ahead of its transcript before a reply without the block counts as missing it. */
 const replyGraceMs = 60_000;
@@ -299,7 +299,7 @@ export function reviewLoop(deps: ReviewDeps) {
     const { second } = r;
     if (second?.kind === "none" || second?.kind === "starting") return r;
     if (second?.kind === "claude") return registry.threads.thread(second.thread)?.status === "active" ? r : { ...r, second: starting(second.rule, second.model) };
-    const project = registry.project(registry.threads.thread(r.builder)!.project)!;
+    const project = registry.projects.project(registry.threads.thread(r.builder)!.project)!;
     const rule = project.secondReview == null ? null : secondReviewRule(project.secondReview, await github.files(r.pr.repo, r.pr.number), deploys(r));
     return rule === null ? r : { ...r, second: secondFor(rule, r.models, project.secrets) };
   };
@@ -457,7 +457,7 @@ export function reviewLoop(deps: ReviewDeps) {
    */
   function yolo(r: Review): void {
     const project = registry.threads.thread(r.builder)?.project;
-    const setting = project === undefined ? undefined : registry.project(project)?.autoReview;
+    const setting = project === undefined ? undefined : registry.projects.project(project)?.autoReview;
     // Only a review asked to land is landed: one the person started without --land stops at approval, as they asked.
     if (r.land === null || setting?.mode !== "yolo" || !deps.mayLand(setting.enabledBy) || !registry.reviews.isCurrentReview(r)) return;
     const question = askingHolds(registry.questions.questions(r.builder), r.id, r.rounds.at(-1));
@@ -941,7 +941,7 @@ export function reviewLoop(deps: ReviewDeps) {
     if (snapshot.pr.state !== "open") throw new Refusal("conflict", `pull request #${number} is ${snapshot.pr.state}`);
     const agent = registry.threads.agent(builder);
     const builderModel = agent.kind === "claude" ? agent.worker.model ?? defaultClaudeModel : deps.harnessModel;
-    const project = registry.project(builder.project)!;
+    const project = registry.projects.project(builder.project)!;
     const kind = reviewerFor({ claude: agent.kind === "claude", model: builderModel }, project.secrets, deps.harnessModel);
     if ("why" in kind) throw new Refusal("conflict", kind.why);
     const models = { builder: builderModel, reviewer: kind.model };
@@ -1042,7 +1042,7 @@ export function reviewLoop(deps: ReviewDeps) {
      * stays ended until the person starts one. A refusal, such as no reviewer on another model, is logged and final.
      */
     async auto(t: Thread, pr: Pick<PullRequest, "repo" | "number">): Promise<void> {
-      const setting = registry.project(t.project)?.autoReview;
+      const setting = registry.projects.project(t.project)?.autoReview;
       if (setting == null || servesReview(threadRole(registry, t))) return;
       // Another thread on the same branch links the same PR, which has had its review, even one its builder's next replaced.
       if (registry.reviews.prReviewed(pr.repo, pr.number)) return;

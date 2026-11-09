@@ -17,7 +17,7 @@ import type { Registry } from "./registry.ts";
 import type { ClaudeSent } from "./claude-worker.ts";
 import type { Thread } from "./thread-store.ts";
 
-type InboxRegistry = Pick<Registry, "threads" | "node">;
+type InboxRegistry = Pick<Registry, "threads" | "nodes">;
 
 /** `id` is the request ID: a resend under it is the same message, never a second one. */
 export interface AutomatedMessage { id: string; text: string; sender: Sender }

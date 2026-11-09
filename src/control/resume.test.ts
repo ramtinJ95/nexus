@@ -21,8 +21,8 @@ function fixture(t: import("node:test").TestContext) {
   let now = 1_800_000_000_000;
   const registry = testRegistry(t, ":memory:", () => now);
   const project = { id: "nexus" as ProjectId, repoUrl: "https://github.com/acme/repo.git", defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null };
-  registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
-  registry.createProject(project);
+  registry.nodes.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
+  registry.projects.createProject(project);
   registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
   const typed: Extract<PylonCommand, { kind: "send-claude" }>[] = [];
   let outcome: "sent" | "blocked" = "sent";

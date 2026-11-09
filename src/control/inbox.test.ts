@@ -12,8 +12,8 @@ const session = "c0ffee00-0000-4000-8000-000000000000";
 test("a message whose earlier send failed partway counts as delivered, is not typed again, and says so in the injected log", async (t) => {
   const registry = testRegistry(t);
   const project = { id: "project" as ProjectId, repoUrl: "https://github.com/acme/repo.git", defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null };
-  registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
-  registry.createProject(project);
+  registry.nodes.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
+  registry.projects.createProject(project);
   const thread = testThread({ id: "th-1" as ThreadId, title: "test", project: project.id, startedBy: "test", createdAt: 1, lastHumanActivityAt: 1 });
   registry.threads.createThread(thread, testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } } }), { claude: { prompt: "/poteto-mode fix it" } });
   claudeWorkerAt(registry, thread.id, "started", { session });

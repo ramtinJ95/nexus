@@ -15,7 +15,7 @@ export function threadRole(registry: Pick<Registry, "reviews" | "planning">, t: 
   const role = roleOf(t.startedBy);
   if (role === "reviewer" || role === "check" || role === "verify") return role;
   if (registry.reviews.isReviewer(t.id)) return "reviewer";
-  return registry.planning(t.id) === null ? "builder" : "planning";
+  return registry.planning.planning(t.id) === null ? "builder" : "planning";
 }
 
 /** A reviewer, check or verify thread serves a builder's review, and merges no pull request of its own. */

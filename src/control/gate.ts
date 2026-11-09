@@ -24,7 +24,7 @@ import type { Thread } from "./thread-store.ts";
 import type { Start, StartRequest } from "./start-request.ts";
 import { checkoutDir } from "../../images/pylon/nexus-contract.ts";
 
-type GateRegistry = Pick<Registry, "node" | "project" | "threads">;
+type GateRegistry = Pick<Registry, "nodes" | "projects" | "threads">;
 
 /** Nexus's live check runs dockerd, the verify-nexus stack and its Docker pylon in it, and has passed only at 4 CPUs and 8 GiB (nexus#388). */
 const verifySize = { cpus: 4, memoryGiB: 8 };
@@ -180,7 +180,7 @@ export function checkRuns(options: {
 
   return {
     async start(builder, branch, head, ifRoom) {
-      const projectCpus = registry.project(builder.project)?.resources.cpus ?? 0;
+      const projectCpus = registry.projects.project(builder.project)?.resources.cpus ?? 0;
       let t: Thread;
       try {
         t = await startThread({

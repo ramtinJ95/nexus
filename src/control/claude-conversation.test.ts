@@ -32,7 +32,7 @@ function openOnline(t: Pick<TestContext, "after">): Registry {
 function claudeThread(registry: Registry): Thread {
   const { id, pylonId } = addThread(registry, { node, boot: { image }, claudePrompt: "hello" });
   claudeWorkerAt(registry, id, "started", { session });
-  const pylons = [...registry.node(node)?.observation?.pylons ?? [], runningPylon(pylonId, { liveHash: "hash-1" as LiveHash, bootedAt: new Date().toISOString(), bootedFrom: { image, checkpoint: null } })];
+  const pylons = [...registry.nodes.node(node)?.observation?.pylons ?? [], runningPylon(pylonId, { liveHash: "hash-1" as LiveHash, bootedAt: new Date().toISOString(), bootedFrom: { image, checkpoint: null } })];
   observeNode(registry, { node, probeBootId: "boot-1", artifacts: [image], pylons });
   return registry.threads.thread(id)!;
 }

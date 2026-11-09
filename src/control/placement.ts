@@ -16,8 +16,12 @@ const crashed = (p: PylonObservation) => p.phase === "broken" && p.cause === "co
 /** The VM holds its CPUs and memory. */
 const isUp = (p: PylonObservation) => p.phase !== "stopped" && !crashed(p);
 
-type PlacementRegistry = Pick<Registry, "nodes" | "now" | "reserved"> & { threads: Pick<Registry["threads"], "pylonsWithStatusOn" | "pylonsWithThreadsOn"> };
-type WeighingRegistry = PlacementRegistry & Pick<Registry, "latestHealthSample">;
+type PlacementRegistry = Pick<Registry, "now"> & {
+  nodes: Pick<Registry["nodes"], "nodes">;
+  placement: Pick<Registry["placement"], "reserved">;
+  threads: Pick<Registry["threads"], "pylonsWithStatusOn" | "pylonsWithThreadsOn">;
+};
+type WeighingRegistry = PlacementRegistry & { nodeMetrics: Pick<Registry["nodeMetrics"], "latestHealthSample"> };
 
 type Need = Pick<BootInputs, "image" | "resources" | "network" | "repo" | "dotfiles">;
 
@@ -41,7 +45,7 @@ export function placeNear(registry: WeighingRegistry, need: Need, near: NodeName
 
 /** Every node but `except` weighed for the pylon, and the one with the most room left once it boots there, if any can run it. */
 export function weighNodes(registry: WeighingRegistry, need: Need, except?: NodeName): { best: NodeName | null; weighed: Weighed[] } {
-  const weighed = registry.nodes().filter((n) => n.name !== except).map((n) => weigh(registry, n, need));
+  const weighed = registry.nodes.nodes().filter((n) => n.name !== except).map((n) => weigh(registry, n, need));
   const fits = weighed.flatMap((w) => "left" in w ? [w] : [])
     .sort((a, b) => b.left.memoryGiB - a.left.memoryGiB || b.left.cpus - a.left.cpus || b.left.diskGiB - a.left.diskGiB);
   return { best: fits[0]?.node ?? null, weighed };
@@ -99,8 +103,8 @@ const heldRoom = (registry: PlacementRegistry, node: NodeName, now: number) => h
  * or with less free than the headroom a start keeps, so a held pylon pauses for a start or a wake that took its room.
  * The soonest to end goes first.
  */
-export function freeHeldRoom(registry: WeighingRegistry & Pick<Registry, "releaseHold">, node: NodeName): ThreadId[] {
-  const record = registry.nodes().find((n) => n.name === node);
+export function freeHeldRoom(registry: WeighingRegistry & { placement: Pick<Registry["placement"], "releaseHold"> }, node: NodeName): ThreadId[] {
+  const record = registry.nodes.nodes().find((n) => n.name === node);
   const o = record?.state === "online" ? record.observation : null;
   if (o == null) return [];
   const now = registry.now();
@@ -116,7 +120,7 @@ export function freeHeldRoom(registry: WeighingRegistry & Pick<Registry, "releas
   const released: ThreadId[] = [];
   for (const { pylon, thread } of held) {
     if (short <= 0) break;
-    registry.releaseHold(thread.id, thread.awaitedUntil!);
+    registry.placement.releaseHold(thread.id, thread.awaitedUntil!);
     released.push(thread.id);
     short -= pylon.boot.resources.memoryGiB;
   }
@@ -143,7 +147,7 @@ const freshReadMs = 2 * backgroundReadMs;
  * last `freshReadMs`, or from a host that reports no memory.
  */
 function freeMemory(registry: WeighingRegistry, node: NodeName, o: NodeObservation, c: NodeCapacity, now: number): { availableGiB: number; untouchedGiB: number } | null {
-  const read = registry.latestHealthSample(node);
+  const read = registry.nodeMetrics.latestHealthSample(node);
   const availableGiB = read?.values.memAvailable;
   if (read == null || now - read.at > freshReadMs || availableGiB === undefined) return null;
   const resident = new Map(Object.entries(read.values).flatMap(([key, value]) => {
@@ -182,7 +186,7 @@ function diskShort(c: NodeCapacity, left: Room, need: Room): string | null {
  * weigh, and for one that reports no pylons' filesystem, such as a Docker node or one with an older probe.
  */
 export function namedDiskShort(registry: PlacementRegistry, name: NodeName, need: Room): string | null {
-  const node = registry.nodes().find((n) => n.name === name);
+  const node = registry.nodes.nodes().find((n) => n.name === name);
   const o = node?.state === "online" ? node.observation : null;
   if (o == null || !o.capacity.disks?.some((d) => d.pylons === true)) return null;
   return diskShort(o.capacity, roomLeft(registry, name, o, o.capacity, need).left, need);
@@ -197,7 +201,7 @@ export function roomLeft(registry: PlacementRegistry, node: NodeName, o: NodeObs
   const seen = new Map(o.pylons.map((p) => [p.pylonId, p]));
   const pending = [...registry.threads.pylonsWithThreadsOn(node)
     .filter(({ pylon, thread }) => pylon.failed === null && wantsToRun(thread, now))
-    .map(({ pylon }) => uncounted(pylon, seen.get(pylon.pylonId))), ...registry.reserved(node)]
+    .map(({ pylon }) => uncounted(pylon, seen.get(pylon.pylonId))), ...registry.placement.reserved(node)]
     .reduce((total, r) => ({ cpus: total.cpus + r.cpus, memoryGiB: total.memoryGiB + r.memoryGiB, diskGiB: total.diskGiB + r.diskGiB }), { cpus: 0, memoryGiB: 0, diskGiB: 0 });
   const left: Room = {
     cpus: c.cpus - c.committedCpus - pending.cpus - need.cpus,

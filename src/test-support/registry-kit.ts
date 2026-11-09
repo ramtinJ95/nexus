@@ -34,8 +34,8 @@ export function testRegistry(t: Pick<TestContext, "after">, path = ":memory:", c
 
 /** Adds the nodes, and the project unless the registry has it, so a test may seed one registry more than once. */
 export function seedRegistry(registry: Registry, { nodes = [testNode], project = testProject({ defaultNode: nodes[0] ?? testNode }) }: { nodes?: readonly NodeName[]; project?: RemoteProject } = {}): Registry {
-  for (const name of nodes) registry.upsertNode({ name, tailnetHost: `${name}.tail.ts.net`, tailnetNodeId: (tailnetNodeIds[name] ?? `n${name}`) as TailnetNodeId });
-  if (registry.project(project.id) === undefined) registry.createProject(project);
+  for (const name of nodes) registry.nodes.upsertNode({ name, tailnetHost: `${name}.tail.ts.net`, tailnetNodeId: (tailnetNodeIds[name] ?? `n${name}`) as TailnetNodeId });
+  if (registry.projects.project(project.id) === undefined) registry.projects.createProject(project);
   return registry;
 }
 

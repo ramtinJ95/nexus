@@ -32,7 +32,7 @@ test("a project, an edit or a start that asks for less memory than a pylon VM bo
   await refusedWith("POST", "/v1/threads", { project: "acme", title: "Small", resources: { memoryGiB: 2 } });
   assert.equal(s.registry.threads.threads("acme" as Thread["project"]).length, 0, "no thread was created");
 
-  s.registry.createProject({ ...project, id: "older" as ProjectId, resources: { ...project.resources, memoryGiB: 2 } } as never);
+  s.registry.projects.createProject({ ...project, id: "older" as ProjectId, resources: { ...project.resources, memoryGiB: 2 } } as never);
   const inherited = await s.call("POST", "/v1/threads", { project: "older", title: "Inherits 2 GiB" });
   assert.equal(inherited.status, 400, "a project stored before the floor cannot start a pylon at its size");
   assert.match(inherited.body.error, /^the pylon would get 2 GiB, but pylon VMs need at least 3 GiB: a 2 GiB Gondolin 0\.13\.0 guest hangs at boot/);
@@ -46,7 +46,7 @@ test("a scratch project has no repository, and each of its threads starts an emp
   assert.deepEqual((await s.call("GET", "/v1/projects")).body, [scratch]);
   assert.equal((await s.call("POST", "/v1/projects", { ...scratch, id: "empty-url", repoUrl: "" })).status, 400, "only null makes a scratch project");
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
-  s.registry.setCurrentImage(image.id as ImageId);
+  s.registry.images.setCurrentImage(image.id as ImageId);
 
   const started = await s.call("POST", "/v1/threads", { project: "sketch", title: "Sketch" });
   assert.equal(started.status, 201, JSON.stringify(started.body));
@@ -90,7 +90,7 @@ test("project edits validate before saving, flag older grants, and leave checkpo
   assert.deepEqual(s.registry.threads.pylon(next.body.pylonId)!.boot.network.secrets, secrets);
   for (const patch of [{ id: "other" }, { repoUrl: "https://example.com/new" }, { defaultNode: "missing" }, { resources: { cpus: 0, memoryGiB: 4, diskGiB: 10 } }, { secrets: [{ name: "TOKEN", hosts: [] }] }, { secrets: [{ name: "TOKEN", hosts: ["*.example.com"] }] }]) {
     assert.equal((await s.call("PATCH", "/v1/projects/acme", patch)).status, 400);
-    assert.deepEqual(s.registry.project(project.id as ProjectId), edited.body);
+    assert.deepEqual(s.registry.projects.project(project.id as ProjectId), edited.body);
   }
   assert.equal((await s.call("PATCH", "/v1/projects/missing", {})).status, 404);
   s.callAs("nSTRANGER" as TailnetNodeId);
@@ -127,10 +127,10 @@ test("partial resource patches merge atomically without resetting another edit",
     s.call("PATCH", "/v1/projects/acme", { resources: { memoryGiB: 8 } }),
   ]);
   for (const result of edits) assert.equal(result.status, 200);
-  assert.deepEqual(s.registry.project(project.id as ProjectId)!.resources, { ...project.resources, cpus: 4, memoryGiB: 8 });
-  const before = s.registry.project(project.id as ProjectId);
+  assert.deepEqual(s.registry.projects.project(project.id as ProjectId)!.resources, { ...project.resources, cpus: 4, memoryGiB: 8 });
+  const before = s.registry.projects.project(project.id as ProjectId);
   assert.equal((await s.call("PATCH", "/v1/projects/acme", { resources: { cpus: 16 }, defaultNode: "missing" })).status, 400);
-  assert.deepEqual(s.registry.project(project.id as ProjectId), before, "a refused edit rolls back every field");
+  assert.deepEqual(s.registry.projects.project(project.id as ProjectId), before, "a refused edit rolls back every field");
 });
 
 test("grant comparison ignores order and duplicates but detects changed access", async (t) => {
@@ -174,30 +174,30 @@ test("grant comparison ignores order and duplicates but detects changed access",
 
 test("project add and edit refuse a grant of the ChatGPT token, which comes with the chatgpt login", async (t) => {
   const s = await withThread(t);
-  const before = s.registry.project(project.id as ProjectId);
+  const before = s.registry.projects.project(project.id as ProjectId);
   const secrets = [{ name: "NEXUS_CHATGPT_TOKEN", hosts: ["api.openai.com"] }];
   const added = await s.call("POST", "/v1/projects", { ...project, id: "granted", secrets });
   assert.equal(added.status, 400);
   assert.match(added.body.error, /NEXUS_CHATGPT_TOKEN comes with the chatgpt login: add the login instead/);
-  assert.equal(s.registry.project("granted" as ProjectId), undefined);
+  assert.equal(s.registry.projects.project("granted" as ProjectId), undefined);
   const edited = await s.call("PATCH", "/v1/projects/acme", { secrets });
   assert.equal(edited.status, 400);
-  assert.deepEqual(s.registry.project(project.id as ProjectId), before);
+  assert.deepEqual(s.registry.projects.project(project.id as ProjectId), before);
 });
 
 test("project add and edit refuse duplicate secret names instead of merging their grants", async (t) => {
   const s = await withThread(t);
-  const before = s.registry.project(project.id as ProjectId);
+  const before = s.registry.projects.project(project.id as ProjectId);
   for (const hosts of [["b.example"], ["a.example"]]) {
     const secrets = [{ name: "TOKEN", hosts: ["a.example"] }, { name: "TOKEN", hosts }];
     const added = await s.call("POST", "/v1/projects", { ...project, id: "duplicate", secrets });
     assert.equal(added.status, 400);
     assert.match(added.body.error, /duplicate secret names: list all of a secret's hosts in one grant/);
-    assert.equal(s.registry.project("duplicate" as ProjectId), undefined);
+    assert.equal(s.registry.projects.project("duplicate" as ProjectId), undefined);
     const edited = await s.call("PATCH", "/v1/projects/acme", { secrets, resources: { cpus: 16 } });
     assert.equal(edited.status, 400);
     assert.match(edited.body.error, /duplicate secret names: list all of a secret's hosts in one grant/);
-    assert.deepEqual(s.registry.project(project.id as ProjectId), before);
+    assert.deepEqual(s.registry.projects.project(project.id as ProjectId), before);
   }
   const secrets = [{ name: "TOKEN", hosts: ["a.example", "b.example"] }];
   const added = await s.call("POST", "/v1/projects", { ...project, id: "combined", secrets });

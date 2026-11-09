@@ -30,8 +30,8 @@ const inventory = (running: Record<string, number> = {}, names = [r1, r2, r3]): 
 
 function setUp(t: import("node:test").TestContext) {
   const registry = seedRegistry(testRegistry(t));
-  for (const id of [older, previous, current]) { registry.saveImage(testImage({ id }), null); registry.setCurrentImage(id); }
-  for (const t of [oldTemplate, newest]) registry.saveTemplate(t);
+  for (const id of [older, previous, current]) { registry.images.saveImage(testImage({ id }), null); registry.images.setCurrentImage(id); }
+  for (const t of [oldTemplate, newest]) registry.images.saveTemplate(t);
   let held: PortableArtifactId[] = [];
   const observe = (artifacts: PortableArtifactId[], disks: DiskFact[] = []) => { held = artifacts; observeNode(registry, { artifacts, capacity: testCapacity({ disks }) }); };
   observe([older, previous, current, oldTemplate.id, newest.id]);
@@ -96,8 +96,8 @@ test("a rejected set is not asked again until something new joins it, and nothin
   assert.deepEqual(asked(registry)[0]!.cleanup.outcomes, {});
   assert.deepEqual(registry.questions.openNodeQuestions(), []);
 
-  registry.saveImage(testImage({ id: "img-000000000004" }), null);
-  registry.setCurrentImage("img-000000000004");
+  registry.images.saveImage(testImage({ id: "img-000000000004" }), null);
+  registry.images.setCurrentImage("img-000000000004");
   later();
   await pass.poll();
   assert.deepEqual(keysOf(registry).at(-1), [oldTemplate.id, older, previous, "1"], "the image current was made previous, and previous joined, so the person is asked again");
@@ -163,8 +163,8 @@ test("an approved artifact the node no longer lists is not sent while a rule kee
   assert.deepEqual(keysOf(registry), [[oldTemplate.id, older]]);
   answer(registry, "Delete");
   observe([previous, current, newest.id]);
-  registry.saveImage(testImage({ id: "img-000000000004" }), null);
-  registry.setCurrentImage(older);
+  registry.images.saveImage(testImage({ id: "img-000000000004" }), null);
+  registry.images.setCurrentImage(older);
   await pass.poll();
   assert.deepEqual(dropped, [[oldTemplate.id]]);
   assert.deepEqual(asked(registry)[0]!.cleanup.outcomes[older], { state: "skipped", reason: "it is the current image" });
@@ -201,7 +201,7 @@ test("items the person kept are not asked again after a question about others ca
   await pass.poll();
   assert.deepEqual(keysOf(registry), [[oldTemplate.id, older]]);
   answer(registry, "Keep");
-  registry.threads.apply({ record: "node", node: testNode, state: "offline", capacity: registry.node(testNode)!.capacity! });
+  registry.threads.apply({ record: "node", node: testNode, state: "offline", capacity: registry.nodes.node(testNode)!.capacity! });
   pass.releases(testNode, inventory());
   later();
   await pass.poll();

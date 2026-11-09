@@ -13,14 +13,14 @@ export function pipelineRoutes(kit: ApiKit, features: Features): readonly RouteE
   const pipelineOrRefuse = () => feature(features, "pipeline");
 
   function item(id: string) {
-    const record = registry.item(id as ItemId);
+    const record = registry.pipeline.item(id as ItemId);
     if (record === undefined) throw new HttpError(404, `no item ${id}`);
     return itemView(registry, record, Date.now());
   }
 
   return [
     on(routes.list, anyAllowed, (_, { query: { project, cancelled } }) => {
-      const items = registry.items().filter((i) => project === undefined || i.project === project).map((i) => itemView(registry, i, Date.now()));
+      const items = registry.pipeline.items().filter((i) => project === undefined || i.project === project).map((i) => itemView(registry, i, Date.now()));
       return ok(cancelled === false ? items.filter((i) => i.phase.kind !== "cancelled") : items);
     }),
     on(routes.add, { role: "person", action: "add an item" }, async (_, r) => {

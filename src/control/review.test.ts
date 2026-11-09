@@ -51,9 +51,9 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   t.after(() => { try { registry.close(); } catch { /* closed by a restart */ } });
   const repo = options.repo ?? "ramtinJ95/nexus";
   const project = { id: "nexus" as ProjectId, repoUrl: `https://github.com/${repo}.git`, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: options.secrets ?? [], logins: [], preSetup: null, autoReview: options.autoReview ?? null, ...options.secondReview && { secondReview: options.secondReview } };
-  if (registry.project(project.id) === undefined) {
-    registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: self });
-    registry.createProject(project);
+  if (registry.projects.project(project.id) === undefined) {
+    registry.nodes.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: self });
+    registry.projects.createProject(project);
   }
   /** A Claude worker thread, a harness thread, or with `bare` one with neither agent. */
   function add(id: string, claude: boolean, startedBy = "test", bare = false): ThreadId {
@@ -758,11 +758,11 @@ test("a harness builder gets a Claude reviewer only where the project grants a C
 });
 
 const healthy = (f: ReturnType<typeof fixture>, commit: string) => {
-  for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit, target: commit, state: "healthy", reason: null, observedAt: Date.now() });
+  for (const role of ["control", "probe"] as const) f.registry.releases.reportRelease({ node, role, commit, target: commit, state: "healthy", reason: null, observedAt: Date.now() });
 };
 /** `commit` as the desired release, which every service reports healthy. */
 const released = (f: ReturnType<typeof fixture>, commit: string) => {
-  f.registry.setDesiredRelease({ commit, requestedBy: "person", requestedAt: 1 });
+  f.registry.releases.setDesiredRelease({ commit, requestedBy: "person", requestedAt: 1 });
   healthy(f, commit);
 };
 
@@ -783,8 +783,8 @@ test("a landing under the policy merges the approved head, deploys it and waits 
   await approved(f, "nLAPTOP");
   assert.deepEqual(f.merges, [head1]);
   assert.equal(f.review().phase.kind, "deploying");
-  assert.equal(f.registry.desiredRelease()?.commit, merged);
-  assert.match(f.registry.desiredRelease()!.requestedBy, /^nexus review rv-/);
+  assert.equal(f.registry.releases.desiredRelease()?.commit, merged);
+  assert.match(f.registry.releases.desiredRelease()!.requestedBy, /^nexus review rv-/);
 
   f.registry.close();
   const g = fixture(t, { path });
@@ -793,21 +793,21 @@ test("a landing under the policy merges the approved head, deploys it and waits 
   await restarted.poll();
   assert.equal(g.review().phase.kind, "deploying", "a restart, such as the deploy's own, waits on without merging or deploying again");
   assert.deepEqual(g.merges, []);
-  for (const role of ["control", "probe"] as const) g.registry.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: Date.now() });
+  for (const role of ["control", "probe"] as const) g.registry.releases.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: Date.now() });
   await restarted.poll();
   assert.deepEqual(g.review().phase, { kind: "landed", commit: merged });
-  assert.equal(g.registry.desiredRelease()?.commit, merged);
+  assert.equal(g.registry.releases.desiredRelease()?.commit, merged);
 });
 
 test("a deploy that fails rolls back to the previous release and tells the person what still needs reverting", async (t) => {
   const f = fixture(t);
   released(f, previous);
   const loop = await approved(f, "nLAPTOP");
-  f.registry.reportRelease({ node, role: "control", commit: previous, target: merged, state: "rolled-back", reason: "health check failed", observedAt: Date.now() });
+  f.registry.releases.reportRelease({ node, role: "control", commit: previous, target: merged, state: "rolled-back", reason: "health check failed", observedAt: Date.now() });
   await loop.poll();
-  assert.equal(f.registry.desiredRelease()?.commit, previous);
+  assert.equal(f.registry.releases.desiredRelease()?.commit, previous);
   assert.equal(f.review().phase.kind, "rolling-back", "a rollback is not claimed until the fleet reports it healthy");
-  for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit: previous, target: previous, state: "healthy", reason: null, observedAt: Date.now() });
+  for (const role of ["control", "probe"] as const) f.registry.releases.reportRelease({ node, role, commit: previous, target: previous, state: "healthy", reason: null, observedAt: Date.now() });
   await loop.poll();
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [
     `The deploy of ${merged} failed: node control rolled-back (health check failed).`,
@@ -821,7 +821,7 @@ test("another repository's PR merges without a deploy", async (t) => {
   const f = fixture(t, { repo: "acme/shop" });
   await approved(f, "nLAPTOP");
   assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
-  assert.equal(f.registry.desiredRelease(), null);
+  assert.equal(f.registry.releases.desiredRelease(), null);
 });
 
 /** A second builder in `f`'s project whose PR #8 at `head2` merges as `merged2`, and whose review `f`'s loop starts. */
@@ -882,7 +882,7 @@ test("landings deploy one at a time: the second merges once the first is healthy
   f.reply(f.registry.reviews.review(second)!.reviewer, verdict(f.registry.reviews.review(second)!, {}));
   await loop.poll();
   assert.deepEqual(f.merges, [head1], "the second waits before it merges, so main gains one undeployed commit at a time");
-  assert.equal(f.registry.desiredRelease()?.commit, merged);
+  assert.equal(f.registry.releases.desiredRelease()?.commit, merged);
   assert.equal(f.review().phase.kind, "deploying");
   assert.deepEqual(f.registry.reviews.review(second)!.phase, { kind: "merging", authorized: null, waiting: `${f.review().id} deploys` });
   assert.equal(phaseNote(f.registry.reviews.review(second)!), `, waiting while ${f.review().id} deploys`);
@@ -891,12 +891,12 @@ test("landings deploy one at a time: the second merges once the first is healthy
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
   assert.deepEqual(f.merges, [head1, head2]);
-  assert.equal(f.registry.desiredRelease()?.commit, merged2);
+  assert.equal(f.registry.releases.desiredRelease()?.commit, merged2);
   assert.deepEqual(f.registry.reviews.review(second)!.phase, { kind: "deploying", commit: merged2, previous: merged, requested: true, deadline: (f.registry.reviews.review(second)!.phase as { deadline: number }).deadline });
 
-  f.registry.reportRelease({ node, role: "control", commit: merged, target: merged2, state: "rolled-back", reason: "health check failed", observedAt: Date.now() });
+  f.registry.releases.reportRelease({ node, role: "control", commit: merged, target: merged2, state: "rolled-back", reason: "health check failed", observedAt: Date.now() });
   await loop.poll();
-  assert.equal(f.registry.desiredRelease()?.commit, merged, "the rollback goes to the first landing's commit, which was healthy");
+  assert.equal(f.registry.releases.desiredRelease()?.commit, merged, "the rollback goes to the first landing's commit, which was healthy");
   healthy(f, merged);
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
@@ -910,18 +910,18 @@ test("landings deploy one at a time: the second merges once the first is healthy
 test("a landing waits to merge while the control plane drains for a deploy, and while another landing rolls back", async (t) => {
   const f = fixture(t);
   released(f, previous);
-  f.registry.setDrain({ commit: previous, expiresAt: Date.now() + 60_000 });
+  f.registry.releases.setDrain({ commit: previous, expiresAt: Date.now() + 60_000 });
   const loop = await approved(f, "nLAPTOP");
   assert.deepEqual(f.merges, []);
   assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, waiting: "a deploy drains the control plane" });
-  f.registry.setDrain(null);
+  f.registry.releases.setDrain(null);
   const second = await secondBuilder(f, loop);
   await loop.poll();
   await loop.poll();
   f.reply(f.registry.reviews.review(second)!.reviewer, verdict(f.registry.reviews.review(second)!, {}));
   await loop.poll();
   assert.deepEqual(f.merges, [head1], "the second waits for the first, which merged once the drain ended");
-  f.registry.reportRelease({ node, role: "control", commit: previous, target: merged, state: "rolled-back", reason: "health check failed", observedAt: Date.now() });
+  f.registry.releases.reportRelease({ node, role: "control", commit: previous, target: merged, state: "rolled-back", reason: "health check failed", observedAt: Date.now() });
   await loop.poll();
   assert.equal(f.review().phase.kind, "rolling-back");
   assert.deepEqual(f.registry.reviews.review(second)!.phase, { kind: "merging", authorized: null, waiting: `${f.review().id} rolls back` });
@@ -942,7 +942,7 @@ test("a landing waits to merge while the desired release is not healthy everywhe
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   f.reply(f.registry.reviews.review(second)!.reviewer, verdict(f.registry.reviews.review(second)!, {}));
   await loop.poll();
-  f.registry.reportRelease({ node, role: "control", commit: null, target: merged, state: "failed", reason: "health check failed", observedAt: Date.now() });
+  f.registry.releases.reportRelease({ node, role: "control", commit: null, target: merged, state: "failed", reason: "health check failed", observedAt: Date.now() });
   await loop.poll();
   assert.equal(f.review().phase.kind, "needs-person");
   assert.deepEqual(f.merges, [head1], "the failed release is still desired, so it must not become the second's rollback target");
@@ -961,7 +961,7 @@ test("a review that lands archives its builder and reviewer, once, whether its P
     if (repo === "ramtinJ95/nexus") {
       assert.equal(f.review().phase.kind, "deploying");
       assert.deepEqual(f.statuses(), ["active", "active"], "a landing that still deploys archives nothing");
-      for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: Date.now() });
+      for (const role of ["control", "probe"] as const) f.registry.releases.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: Date.now() });
       await loop.poll();
     }
     assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
@@ -982,12 +982,12 @@ test("a landing whose save fails archives nothing, so a release that supersedes 
     if (review.phase.kind === "landed") throw new Error("disk I/O error");
     return save(review, archive, read);
   };
-  for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: Date.now() });
+  for (const role of ["control", "probe"] as const) f.registry.releases.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: Date.now() });
   await loop.poll();
   assert.equal(f.review().phase.kind, "deploying");
   assert.deepEqual(f.statuses(), ["active", "active"], "no thread is archived while the landing is unsaved");
   f.registry.reviews.saveReview = save;
-  f.registry.setDesiredRelease({ commit: "n".repeat(40), requestedBy: "person", requestedAt: 2 });
+  f.registry.releases.setDesiredRelease({ commit: "n".repeat(40), requestedBy: "person", requestedAt: 2 });
   await loop.poll();
   assert.equal(f.review().phase.kind, "needs-person");
   assert.deepEqual(f.statuses(), ["active", "active"]);
@@ -1005,9 +1005,9 @@ test("a review held for the person, or one that stops at approval, archives noth
   const rolledBack = fixture(t);
   released(rolledBack, previous);
   const loop = await approved(rolledBack, "nLAPTOP");
-  rolledBack.registry.reportRelease({ node, role: "control", commit: previous, target: merged, state: "failed", reason: "unit failed", observedAt: Date.now() });
+  rolledBack.registry.releases.reportRelease({ node, role: "control", commit: previous, target: merged, state: "failed", reason: "unit failed", observedAt: Date.now() });
   await loop.poll();
-  for (const role of ["control", "probe"] as const) rolledBack.registry.reportRelease({ node, role, commit: previous, target: previous, state: "healthy", reason: null, observedAt: Date.now() });
+  for (const role of ["control", "probe"] as const) rolledBack.registry.releases.reportRelease({ node, role, commit: previous, target: previous, state: "healthy", reason: null, observedAt: Date.now() });
   await loop.poll();
   assert.equal(rolledBack.review().phase.kind, "needs-person");
   assert.deepEqual(rolledBack.statuses(), ["active", "active"], "a merge whose deploy rolled back");
@@ -1096,7 +1096,7 @@ test("a merged review held for the person over its rolled-back deploy archives i
   const f = fixture(t);
   released(f, previous);
   const loop = await approved(f, "nLAPTOP");
-  f.registry.reportRelease({ node, role: "control", commit: previous, target: merged, state: "failed", reason: "unit failed", observedAt: Date.now() });
+  f.registry.releases.reportRelease({ node, role: "control", commit: previous, target: merged, state: "failed", reason: "unit failed", observedAt: Date.now() });
   await loop.poll();
   healthy(f, previous);
   await loop.poll();
@@ -1408,10 +1408,10 @@ test("a landing sees its deploy through, rolling back, though its threads are ar
   assert.equal(f.review().phase.kind, "deploying");
   archive(f.registry, f.builder);
   archive(f.registry, f.review().reviewer);
-  f.registry.reportRelease({ node, role: "control", commit: previous, target: merged, state: "failed", reason: "unit failed", observedAt: Date.now() });
+  f.registry.releases.reportRelease({ node, role: "control", commit: previous, target: merged, state: "failed", reason: "unit failed", observedAt: Date.now() });
   await loop.poll();
-  assert.equal(f.registry.desiredRelease()?.commit, previous);
-  f.registry.reportRelease({ node, role: "control", commit: merged, target: previous, state: "failed", reason: "unit failed again", observedAt: Date.now() });
+  assert.equal(f.registry.releases.desiredRelease()?.commit, previous);
+  f.registry.releases.reportRelease({ node, role: "control", commit: merged, target: previous, state: "failed", reason: "unit failed again", observedAt: Date.now() });
   await loop.poll();
   assert.match((f.review().phase as { reasons: string[] }).reasons[1]!, /^The rollback to p{40} failed too: node control failed \(unit failed again\)/, "a failed rollback says so");
 });
@@ -1426,7 +1426,7 @@ test("a PR that merged at another head than the approved one is not deployed", a
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, head: head2, mergeCommit: merged } };
   await loop.poll();
-  assert.equal(f.registry.desiredRelease()?.commit, previous);
+  assert.equal(f.registry.releases.desiredRelease()?.commit, previous);
   assert.equal(f.review().phase.kind, "needs-person");
 });
 
@@ -2043,7 +2043,7 @@ test("a PR merged outside the review is held by the policy like this review's ow
   f.check = { kind: "done", passed: true, output: "ok" };
   await loop.poll();
   assert.deepEqual(f.merges, []);
-  assert.equal(f.registry.desiredRelease()?.commit, previous, "nothing was deployed");
+  assert.equal(f.registry.releases.desiredRelease()?.commit, previous, "nothing was deployed");
   const reasons = (f.review().phase as { reasons: string[] }).reasons;
   assert.equal(reasons[0], "Pull request #7 was merged outside this review, so it is not deployed.");
   assert.ok(reasons.some((r) => r.startsWith("A Claude reviewer approved it")));
@@ -2064,7 +2064,7 @@ test("a PR merged outside the review that the policy would have merged deploys",
   await loop.poll();
   assert.deepEqual(f.merges, []);
   assert.equal(f.review().phase.kind, "deploying");
-  assert.equal(f.registry.desiredRelease()?.commit, merged);
+  assert.equal(f.registry.releases.desiredRelease()?.commit, merged);
 });
 
 test("this review's own merge, recorded before the merge call, deploys after a crash without being judged again", async (t) => {
@@ -2081,7 +2081,7 @@ test("this review's own merge, recorded before the merge call, deploys after a c
   await f.loop().poll();
   assert.deepEqual(f.merges, [head1]);
   assert.equal(f.review().phase.kind, "deploying");
-  assert.equal(f.registry.desiredRelease()?.commit, merged);
+  assert.equal(f.registry.releases.desiredRelease()?.commit, merged);
 });
 
 const labelStates = (f: ReturnType<typeof fixture>) => f.registry.threads.events("0", { kinds: ["review.changed"] }).map((e) => (e.payload.phase as { label?: { state: string } }).label?.state).filter((s) => s !== undefined);
@@ -2575,7 +2575,7 @@ test("a builder's PR in a project that lands on its own is reviewed with no comm
   await loop.poll();
   assert.deepEqual(f.merges, [head1]);
   assert.equal(f.review().phase.kind, "deploying");
-  assert.equal(f.registry.desiredRelease()?.commit, merged);
+  assert.equal(f.registry.releases.desiredRelease()?.commit, merged);
 });
 
 test("nothing starts on its own without the project's setting, for a thread the loop started, or twice for one PR", async (t) => {
@@ -2717,7 +2717,7 @@ test("each landing asks again whether its lander may deploy, and whether the pro
   const own = auto.loop();
   await own.auto(auto.registry.threads.thread(auto.builder)!, auto.pr);
   await own.poll();
-  auto.registry.editProject("nexus" as ProjectId, ({ autoReview: _, ...p }) => p);
+  auto.registry.projects.editProject("nexus" as ProjectId, ({ autoReview: _, ...p }) => p);
   auto.reply(auto.review().reviewer, verdict(auto.review(), {}));
   await own.poll();
   assert.deepEqual(auto.merges, []);
@@ -2817,7 +2817,7 @@ test("a held reserved path holds again when landed, and lands once the person wa
   assert.equal(change?.kind, "known", "and the change at that commit");
   assert.equal(typeof at, "number");
   assert.deepEqual(f.registry.threads.events("0", { kinds: ["review.waived"], thread: f.builder }).map((e) => e.payload), [{ review: f.review().id, repo: "ramtinJ95/nexus", pr: 7, ...waiver, at }]);
-  for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: Date.now() });
+  for (const role of ["control", "probe"] as const) f.registry.releases.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: Date.now() });
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
 });
@@ -3362,9 +3362,9 @@ test("a review that merged and is held over its deploy stays as it is whatever t
   const f = fixture(t);
   released(f, previous);
   const loop = await approved(f, "nLAPTOP");
-  f.registry.reportRelease({ node, role: "control", commit: previous, target: merged, state: "failed", reason: "unit failed", observedAt: Date.now() });
+  f.registry.releases.reportRelease({ node, role: "control", commit: previous, target: merged, state: "failed", reason: "unit failed", observedAt: Date.now() });
   await loop.poll();
-  for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit: previous, target: previous, state: "healthy", reason: null, observedAt: Date.now() });
+  for (const role of ["control", "probe"] as const) f.registry.releases.reportRelease({ node, role, commit: previous, target: previous, state: "healthy", reason: null, observedAt: Date.now() });
   await loop.poll();
   const held = f.review();
   assert.equal(held.phase.kind, "needs-person");
@@ -3955,7 +3955,7 @@ test("a pull request retargeted and merged outside the review during its checks 
   await loop.poll();
   assert.deepEqual(f.merges, [], "someone else merged it");
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [`Pull request #7 was merged outside this review into release, not main, the base its approval was of, so it is not deployed.`] });
-  assert.equal(f.registry.desiredRelease(), null);
+  assert.equal(f.registry.releases.desiredRelease(), null);
 });
 
 test("a pull request retargeted and merged after the review authorized its merge into the old base is not deployed", async (t) => {
@@ -3965,7 +3965,7 @@ test("a pull request retargeted and merged after the review authorized its merge
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, base: "release", mergeCommit: merged } };
   await loop.poll();
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [`Pull request #7 was merged outside this review into release, not main, the base its approval was of, so it is not deployed.`] });
-  assert.equal(f.registry.desiredRelease(), null);
+  assert.equal(f.registry.releases.desiredRelease(), null);
 });
 
 test("a pull request retargeted at its approved head has its path holds read again at the landing", async (t) => {
@@ -4129,11 +4129,11 @@ test("a fresh busy drain extends a landing past its deadline without rollback or
   released(f, previous);
   const loop = await approved(f, "nLAPTOP");
   f.tick(31 * 60_000);
-  f.registry.reportRelease({ node, role: "control", commit: previous, target: merged, state: "waiting-for-idle", reason: "Waiting for th-builder", observedAt: f.now });
+  f.registry.releases.reportRelease({ node, role: "control", commit: previous, target: merged, state: "waiting-for-idle", reason: "Waiting for th-builder", observedAt: f.now });
   await loop.poll();
   assert.equal(f.review().phase.kind, "deploying");
-  assert.equal(f.registry.desiredRelease()?.commit, merged);
-  for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: f.now });
+  assert.equal(f.registry.releases.desiredRelease()?.commit, merged);
+  for (const role of ["control", "probe"] as const) f.registry.releases.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: f.now });
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
 });
@@ -4266,7 +4266,7 @@ test("a project switched from yolo to land answers no more holds questions, and 
   await loop.poll();
   const [first] = holdQuestions(f);
   assert.equal(first!.answer?.option, "Land");
-  f.registry.editProject("nexus" as ProjectId, (p) => ({ ...p, autoReview: { mode: "land", enabledBy: "nLAPTOP" } }));
+  f.registry.projects.editProject("nexus" as ProjectId, (p) => ({ ...p, autoReview: { mode: "land", enabledBy: "nLAPTOP" } }));
   f.reply(f.review().reviewer, verdict(f.review(), { reserved: [{ case: "cli-breaking", why: "it renames a flag" }] }));
   await loop.poll();
   assert.deepEqual(f.merges, []);
@@ -4286,7 +4286,7 @@ test("a landing a yolo setting answered at approval holds again once the project
   await loop.poll();
   assert.equal(f.review().waiver?.yolo, "nexus", "answered once the reviewer named the case");
   assert.deepEqual(f.review().land, { requestedBy: "nLAPTOP", fromProject: true }, "still the project's landing");
-  f.registry.editProject("nexus" as ProjectId, (p) => ({ ...p, autoReview: { mode: "review", enabledBy: "nLAPTOP" } }));
+  f.registry.projects.editProject("nexus" as ProjectId, (p) => ({ ...p, autoReview: { mode: "review", enabledBy: "nLAPTOP" } }));
   f.check = { kind: "done", passed: true, output: "ok" };
   await loop.poll();
   await loop.poll();

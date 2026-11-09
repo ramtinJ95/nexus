@@ -90,7 +90,7 @@ test("each caller gets the allow, deny or 404 auth-matrix.txt records for every 
   const s = await testApi(t, {
     deployment: { self: firebat, deployers: new Set([laptop, firebat]), keys: { [firebat]: tokenDigest("firebat-token"), [bench]: tokenDigest("bench-token") } },
   });
-  s.registry.upsertNode({ name: "rj-bench" as NodeName, tailnetHost: "rj-bench.tail.ts.net", tailnetNodeId: bench });
+  s.registry.nodes.upsertNode({ name: "rj-bench" as NodeName, tailnetHost: "rj-bench.tail.ts.net", tailnetNodeId: bench });
   const lines: string[] = [];
   for (const { who, id, token } of callers) {
     s.callAs(id);

@@ -167,8 +167,8 @@ delete today.https;
 test("a registry and control.json from before join tokens come up with the same nodes, callers, deployers and probe peers", async (t) => {
   const plane = await controlPlaneOf(t, today, { before: (db) => {
     const registry = openRegistry(db);
-    registry.upsertNode({ name: "rj-firebat" as NodeName, tailnetHost: "rj-firebat.example.ts.net", tailnetNodeId: "nControlPlaneCNTRL" as TailnetNodeId });
-    registry.upsertNode({ name: "infra-testbench" as NodeName, tailnetHost: "infra-testbench.example.ts.net", tailnetNodeId: "nPeerProbeCNTRL" as TailnetNodeId });
+    registry.nodes.upsertNode({ name: "rj-firebat" as NodeName, tailnetHost: "rj-firebat.example.ts.net", tailnetNodeId: "nControlPlaneCNTRL" as TailnetNodeId });
+    registry.nodes.upsertNode({ name: "infra-testbench" as NodeName, tailnetHost: "infra-testbench.example.ts.net", tailnetNodeId: "nPeerProbeCNTRL" as TailnetNodeId });
     registry.close();
     rewindTo(db, versionBefore(/CREATE TABLE IF NOT EXISTS join_tokens\b/));
   } });
@@ -192,7 +192,7 @@ test("a registry and control.json from before join tokens come up with the same 
   assert.equal((await plane.call("nPeerProbeCNTRL", "POST", "/v1/deployer/report", report, { authorization: "Bearer bench-token" })).status, 200, "control.json's deploy key");
   assert.equal((await plane.call("nPeerProbeCNTRL", "POST", "/v1/deployer/report", report, { authorization: "Bearer firebat-token" })).status, 403);
   const registry = testRegistry(t, plane.db);
-  assert.deepEqual(registry.joinedNodes(), []);
+  assert.deepEqual(registry.nodes.joinedNodes(), []);
 });
 
 test("a new desired release wakes every node's deployer within seconds, and so does the control role healthy at it", async (t) => {
@@ -264,8 +264,8 @@ test("a machine that joins is followed without a restart, and every probe learns
     "infra-testbench": ["nControlPlaneCNTRL", "nJoinerCNTRL"],
     "infra-2": ["nControlPlaneCNTRL", "nPeerProbeCNTRL"],
   });
-  await until("the new node is online", () => registry.node("infra-2" as NodeName)?.state === "online");
-  assert.equal(registry.node("infra-testbench" as NodeName)?.state, "online");
+  await until("the new node is online", () => registry.nodes.node("infra-2" as NodeName)?.state === "online");
+  assert.equal(registry.nodes.node("infra-testbench" as NodeName)?.state, "online");
   const report = { role: "probe", commit: null, target: null, state: "pending", reason: null };
   assert.equal((await plane.call("nJoinerCNTRL", "POST", "/v1/deployer/report", report, { authorization: "Bearer joiner-token" })).status, 200);
 });
@@ -274,7 +274,7 @@ test("a node that joined is followed again after a restart, beside control.json'
   const plane = await controlPlaneOf(t, today, { before: (db) => {
     const registry = openRegistry(db);
     const { token } = mintJoinToken(registry);
-    registry.joinNode(tokenDigest(token), { name: "infra-2" as NodeName, tailnetHost: "infra-2.example.ts.net", tailnetNodeId: "nJoinerCNTRL" as TailnetNodeId, deployKey: tokenDigest("joiner-token") }, Date.now());
+    registry.nodes.joinNode(tokenDigest(token), { name: "infra-2" as NodeName, tailnetHost: "infra-2.example.ts.net", tailnetNodeId: "nJoinerCNTRL" as TailnetNodeId, deployKey: tokenDigest("joiner-token") }, Date.now());
     registry.close();
   } });
   assert.deepEqual(plane.followed.map(([name]) => name), ["rj-firebat", "infra-testbench", "infra-2"]);
@@ -290,9 +290,9 @@ test("the installer's join reaches only the control plane deployer.json names, a
   plane.as("nJoinerCNTRL");
   const deployer = { controlUrl: `http://127.0.0.1:${plane.port}/`, controlNodeId: "nControlPlaneCNTRL", token: "joiner-token" };
   await assert.rejects(joinControlPlane(deployer, token, async () => "nImpostorCNTRL" as TailnetNodeId), /did not take the join: deployment endpoint has the wrong tailnet identity/);
-  assert.deepEqual(registry.joinedNodes(), [], "the impostor got nothing");
+  assert.deepEqual(registry.nodes.joinedNodes(), [], "the impostor got nothing");
   assert.equal(await joinControlPlane(deployer, token, async () => "nControlPlaneCNTRL" as TailnetNodeId), "infra-2");
-  assert.equal(registry.joinedNodes()[0]?.deployKey, tokenDigest("joiner-token"));
+  assert.equal(registry.nodes.joinedNodes()[0]?.deployKey, tokenDigest("joiner-token"));
   await assert.rejects(joinControlPlane(deployer, token, async () => "nControlPlaneCNTRL" as TailnetNodeId), new RegExp(`^Error: the control plane at http://127\\.0\\.0\\.1:${plane.port}/ did not take the join: this join token was used at `));
 });
 
@@ -312,13 +312,13 @@ test("a node that joined and was then added to control.json never joins again, a
   const plane = await controlPlaneOf(t, { ...today, nodes: [...today.nodes, infra2], deployKeys: { ...today.deployKeys, nJoinerCNTRL: tokenDigest("config-token") } }, { before: (db) => {
     const registry = openRegistry(db);
     const { token } = mintJoinToken(registry);
-    registry.joinNode(tokenDigest(token), { ...infra2, name: "infra-2" as NodeName, tailnetNodeId: "nJoinerCNTRL" as TailnetNodeId, deployKey: tokenDigest("joiner-token") }, Date.now());
+    registry.nodes.joinNode(tokenDigest(token), { ...infra2, name: "infra-2" as NodeName, tailnetNodeId: "nJoinerCNTRL" as TailnetNodeId, deployKey: tokenDigest("joiner-token") }, Date.now());
     registry.close();
   } });
   const registry = testRegistry(t, plane.db);
   const { token } = mintJoinToken(registry);
   plane.hosts.set("nJoinerCNTRL", "infra-2.example.ts.net");
   assert.deepEqual(await plane.call("nJoinerCNTRL", "POST", "/v1/join", { token, deployKey: tokenDigest("another-token") }), { status: 409, body: { error: "infra-2.example.ts.net is a node in control.json, which sets its deploy key", code: null, retryable: false } });
-  assert.equal(registry.joinToken(tokenDigest(token))?.usedAt, null);
-  assert.equal(registry.joinedNodes()[0]?.deployKey, tokenDigest("joiner-token"), "the refused join replaced nothing");
+  assert.equal(registry.nodes.joinToken(tokenDigest(token))?.usedAt, null);
+  assert.equal(registry.nodes.joinedNodes()[0]?.deployKey, tokenDigest("joiner-token"), "the refused join replaced nothing");
 });

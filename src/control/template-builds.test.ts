@@ -69,17 +69,17 @@ function setup(t: TestContext) {
   const path = join(dir, `${randomUUID()}.db`);
   let registry = openRegistry(path);
   t.after(() => registry.close());
-  registry.saveTemplate(building);
+  registry.images.saveTemplate(building);
   const fake = fakeProbe();
   const logged: string[] = [];
   return {
     fake, logged,
     get registry(): Registry { return registry; },
-    stored: (): readonly TemplateRecord[] => registry.templates(project),
+    stored: (): readonly TemplateRecord[] => registry.images.templates(project),
     /** One pass of the node's loop: every building record on the node, as the registry holds it, with this observation. */
     async pass(over: Partial<NodeObservation> | null = {}) {
       const observation = over === null ? null : testObservation(node, { probeBootId: "boot-1", artifacts: [image], ...over });
-      for (const record of registry.buildingTemplates(node)) await tickTemplateBuild(record, { probe: fake.probe, observation, registry, log: (line) => logged.push(line) });
+      for (const record of registry.images.buildingTemplates(node)) await tickTemplateBuild(record, { probe: fake.probe, observation, registry, log: (line) => logged.push(line) });
     },
     /** A control plane that stops and starts again on the same file. */
     restart() {
@@ -159,11 +159,11 @@ test("a build the probe refuses as invalid fails, and one it is busy with is sen
 test("an envelope the probe does not know is waited on until it expires, then sent again", async (t) => {
   const s = setup(t);
   const lost: JobEnvelope = { jobId: "lost" as JobId, node, issuedAt: new Date().toISOString(), notAfter: new Date(Date.now() + 60_000).toISOString(), job: { kind: "build-template", template: building.id, inputs: building.inputs } };
-  s.registry.saveTemplate({ ...building, submitted: lost });
+  s.registry.images.saveTemplate({ ...building, submitted: lost });
   await s.pass();
   assert.deepEqual([s.fake.sent.length, s.stored()], [0, [{ ...building, submitted: lost }]], "a submit from before a restart may still land");
 
-  s.registry.saveTemplate({ ...building, submitted: { ...lost, notAfter: new Date(Date.now() - 1).toISOString() } });
+  s.registry.images.saveTemplate({ ...building, submitted: { ...lost, notAfter: new Date(Date.now() - 1).toISOString() } });
   await s.pass();
   assert.deepEqual(s.stored(), [building]);
   await s.pass();
@@ -196,16 +196,16 @@ test("builds of one setup chosen on two nodes in the same millisecond are two re
   const other: TemplateKey = { ...key, setupHash: "o".repeat(64) };
   const now = Date.now();
   const builds = [node, peer].map((on) => {
-    const choice = chooseTemplate(remote, other, { branch: "main", commit }, s.registry.templates(project), on, [], now);
+    const choice = chooseTemplate(remote, other, { branch: "main", commit }, s.registry.images.templates(project), on, [], now);
     assert.equal(choice.kind, "build", `a build is chosen on ${on}, which holds no template`);
     if (choice.kind !== "build") throw new Error("unreachable");
     const record: BuildingTemplate = { id: choice.template, key: other, state: "building", on: choice.on, inputs: choice.inputs, submitted: null };
-    s.registry.saveTemplate(record);
+    s.registry.images.saveTemplate(record);
     return record;
   });
   assert.notEqual(builds[0]!.id, builds[1]!.id);
-  assert.deepEqual(s.registry.buildingTemplates(node).filter((b) => b.key.setupHash === other.setupHash), [builds[0]]);
-  assert.deepEqual(s.registry.buildingTemplates(peer), [builds[1]]);
-  s.registry.deleteTemplate(builds[0]!.id);
-  assert.deepEqual(s.registry.buildingTemplates(peer), [builds[1]], "a retryable failure on one node forgets only that node's build");
+  assert.deepEqual(s.registry.images.buildingTemplates(node).filter((b) => b.key.setupHash === other.setupHash), [builds[0]]);
+  assert.deepEqual(s.registry.images.buildingTemplates(peer), [builds[1]]);
+  s.registry.images.deleteTemplate(builds[0]!.id);
+  assert.deepEqual(s.registry.images.buildingTemplates(peer), [builds[1]], "a retryable failure on one node forgets only that node's build");
 });

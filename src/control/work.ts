@@ -36,8 +36,8 @@ export function needsOf(w: Work, detail: (thread: Thread) => ServerDetail): Inbo
   const carded = new Set(cards.flatMap((n) => n.kind === "cleanup" || n.kind === "held" ? [] : [n.d.thread.id]));
   const holds = (id: ThreadId) => threadStage(w.registry, id, w.now).phase.kind === "held";
   const held = [
-    ...w.registry.items().map((i) => itemView(w.registry, i, w.now)).filter((item) => item.thread === null && item.phase.kind === "held").map((item): InboxNeed => ({ kind: "held", work: { kind: "item", item }, since: item.addedAt })),
-    ...w.registry.projects().flatMap((p) => w.queuedIn(p.id)).filter((q) => holds(q.id)).map((q): InboxNeed => ({ kind: "held", work: { kind: "queued", q }, since: q.createdAt })),
+    ...w.registry.pipeline.items().map((i) => itemView(w.registry, i, w.now)).filter((item) => item.thread === null && item.phase.kind === "held").map((item): InboxNeed => ({ kind: "held", work: { kind: "item", item }, since: item.addedAt })),
+    ...w.registry.projects.projects().flatMap((p) => w.queuedIn(p.id)).filter((q) => holds(q.id)).map((q): InboxNeed => ({ kind: "held", work: { kind: "queued", q }, since: q.createdAt })),
     ...w.threads().filter((t) => isOpenStatus(t.status) && !carded.has(t.id) && holds(t.id)).map((thread): InboxNeed => ({ kind: "held", work: { kind: "thread", thread, d: detail(thread) }, since: Math.max(thread.createdAt, thread.lastAgentActivityAt) })),
   ].sort((a, b) => a.since - b.since);
   return [...cards, ...held];

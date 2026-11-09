@@ -16,7 +16,7 @@ export interface BuildContext {
   probe: ProbeClient;
   /** The node's latest observation, or null while its probe is unreachable. */
   observation: NodeObservation | null;
-  registry: Pick<Registry, "saveTemplate" | "deleteTemplate">;
+  registry: Pick<Registry, "images">;
   log(message: string): void;
 }
 
@@ -35,23 +35,23 @@ export async function tickTemplateBuild(record: BuildingTemplate, ctx: BuildCont
   const { probe, observation, registry } = ctx;
   if (observation === null) return;
   if (record.submitted === null) {
-    const sent = await submitJob(probe, { kind: "build-template", template: record.id, inputs: record.inputs }, record.on, (submitted) => registry.saveTemplate({ ...record, submitted }));
+    const sent = await submitJob(probe, { kind: "build-template", template: record.id, inputs: record.inputs }, record.on, (submitted) => registry.images.saveTemplate({ ...record, submitted }));
     if (sent === "accepted") return;
     if (sent !== "retry") return failed(record, "invalid", failureMessage(sent.invalid, ""), ctx);
-    registry.saveTemplate({ ...record, submitted: null });
+    registry.images.saveTemplate({ ...record, submitted: null });
     return;
   }
   const { jobId, notAfter } = record.submitted;
   const status = await jobOutcome(probe, jobId, notAfter, observation.jobs.find((j) => j.jobId === jobId));
   if (status === "wait") return;
   if (status === "expired") {
-    registry.saveTemplate({ ...record, submitted: null });
+    registry.images.saveTemplate({ ...record, submitted: null });
     return;
   }
   switch (status.state) {
     case "running": return;
     case "succeeded":
-      if (observation.artifacts.includes(record.id)) registry.saveTemplate({ id: record.id, key: record.key, state: "ready", builtOn: record.on, builtAt: Date.now(), commit: record.inputs.repo.commit });
+      if (observation.artifacts.includes(record.id)) registry.images.saveTemplate({ id: record.id, key: record.key, state: "ready", builtOn: record.on, builtAt: Date.now(), commit: record.inputs.repo.commit });
       return;
     case "failed": return failed(record, status.code, failureMessage(status.message, status.logTail), ctx);
   }
@@ -59,10 +59,10 @@ export async function tickTemplateBuild(record: BuildingTemplate, ctx: BuildCont
 
 function failed(record: BuildingTemplate, code: JobErrorCode, message: string, { registry, log }: BuildContext) {
   if (retryable[code]) {
-    registry.deleteTemplate(record.id);
+    registry.images.deleteTemplate(record.id);
     log(`${record.id}: the template build on ${record.on} failed with ${code}, so the next thread of its setup builds it again: ${message}`);
     return;
   }
-  registry.saveTemplate({ id: record.id, key: record.key, state: "failed", on: record.on, failedAt: Date.now(), logTail: message });
+  registry.images.saveTemplate({ id: record.id, key: record.key, state: "failed", on: record.on, failedAt: Date.now(), logTail: message });
   log(`${record.id}: the template build on ${record.on} failed with ${code}, so threads of its setup there boot fresh: ${message}`);
 }

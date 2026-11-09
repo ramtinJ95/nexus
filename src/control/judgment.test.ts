@@ -30,15 +30,15 @@ const brokenWith = (judge: string) => `pylon is broken: the controller exited\nq
 
 function seed(registry: Registry) {
   for (const node of [nodeA, nodeB]) {
-    registry.upsertNode({ name: node, tailnetHost: `${node}.ts.net`, tailnetNodeId: `n${node.replace("-", "")}` as TailnetNodeId });
+    registry.nodes.upsertNode({ name: node, tailnetHost: `${node}.ts.net`, tailnetNodeId: `n${node.replace("-", "")}` as TailnetNodeId });
     observeNode(registry, { node, artifacts: [image] });
   }
   const project = (id: string, pipeline: { autoStart: boolean } | null) => ({
     id: id as ProjectId, repoUrl: "https://github.com/acme/repo.git", defaultBranch: "main", defaultNode: nodeA, resources, allowedHosts: [], secrets: [], logins: [],
     preSetup: "apt-get install -y jq", pipeline,
   });
-  registry.createProject(project("nexus", { autoStart: true }));
-  registry.createProject(project("plain", null));
+  registry.projects.createProject(project("nexus", { autoStart: true }));
+  registry.projects.createProject(project("plain", null));
 }
 
 interface World {
@@ -60,7 +60,7 @@ interface World {
 /** `pass` is the registry the judgment pass reads through. */
 async function open(t: TestContext, dir: string, options: { held?: () => Promise<void> | null; clock?: () => number; pass?: (registry: Registry) => Registry } = {}): Promise<World> {
   const registry = openRegistry(join(dir, "registry.db"));
-  if (registry.nodes().length === 0) seed(registry);
+  if (registry.nodes.nodes().length === 0) seed(registry);
   const seen: ScriptedRequest[] = [];
   let located = 0;
   const host = await openHarnessHost({
@@ -119,11 +119,11 @@ function fail(registry: Registry, id: ThreadId, reason: string, pauses = 0) {
 }
 
 const only = (registry: Registry, id: ThreadId): Judgment => {
-  const [j, ...rest] = registry.judgments(id);
+  const [j, ...rest] = registry.judgments.judgments(id);
   assert.equal(rest.length, 0, "one judgment of the failure");
   return j!;
 };
-const phaseOf = (w: World, id: ThreadId) => w.registry.judgments(id).at(-1)?.phase.kind;
+const phaseOf = (w: World, id: ThreadId) => w.registry.judgments.judgments(id).at(-1)?.phase.kind;
 
 test("a retry answer retries the pylon on its node, closes the judgment and counts what it used under the builder", async (t) => {
   const w = await world(t);
@@ -344,17 +344,17 @@ test("concurrent passes and a restart judge a failure once, a later failure gets
   };
   fail(w.registry, id, brokenWith("retry"));
   await both(() => phaseOf(w, id) === "done");
-  assert.equal(w.registry.judgments(id).length, 1);
+  assert.equal(w.registry.judgments.judgments(id).length, 1);
   assert.equal(w.seen.length, 1, "one brief reached a model");
 
   fail(w.registry, id, brokenWith("retry"));
-  await both(() => w.registry.judgments(id).length === 2 && phaseOf(w, id) === "done");
+  await both(() => w.registry.judgments.judgments(id).length === 2 && phaseOf(w, id) === "done");
   assert.equal(w.seen.length, 2);
-  assert.notEqual(w.registry.judgments(id)[1]!.failure, w.registry.judgments(id)[0]!.failure);
+  assert.notEqual(w.registry.judgments.judgments(id)[1]!.failure, w.registry.judgments.judgments(id)[0]!.failure);
 
   fail(w.registry, id, brokenWith("retry"));
-  await both(() => w.registry.judgments(id).length === 3 && phaseOf(w, id) === "asked");
-  const third = w.registry.judgments(id)[2]!;
+  await both(() => w.registry.judgments.judgments(id).length === 3 && phaseOf(w, id) === "asked");
+  const third = w.registry.judgments.judgments(id)[2]!;
   assert.deepEqual([third.request, third.conversation], [null, null], "no judgment ran");
   assert.deepEqual(third.phase, { kind: "asked", verdict: { answer: "person", why: "Nexus already retried this thread's pylon 2 times on its own, so this failure is the person's", by: "control plane" } });
   assert.equal(w.seen.length, 2, "no model was asked");
@@ -363,7 +363,7 @@ test("concurrent passes and a restart judge a failure once, a later failure gets
   await w.close();
   const reopened = await open(t, w.dir);
   for (let i = 0; i < 3; i++) await reopened.judge.poll();
-  assert.equal(reopened.registry.judgments(id).length, 3);
+  assert.equal(reopened.registry.judgments.judgments(id).length, 3);
   assert.equal(reopened.seen.length, 0);
 });
 
@@ -384,7 +384,7 @@ test("failures from before judgments, projects without the pipeline and threads 
   ];
   for (const id of ids) fail(w.registry, id, brokenWith("retry"));
   for (let i = 0; i < 3; i++) await w.judge.poll();
-  for (const id of [old, ...ids]) assert.deepEqual(w.registry.judgments(id), [], id);
+  for (const id of [old, ...ids]) assert.deepEqual(w.registry.judgments.judgments(id), [], id);
   assert.equal(w.seen.length, 0);
   assert.notEqual(w.registry.threads.pylon(`pylon-${old}` as PylonId)!.failed, null, "the person's failed pylon stays failed");
 
@@ -427,7 +427,7 @@ test("a judgment whose project turns its pipeline off before Nexus acts asks the
   const id = builder(w.registry, "th-off");
   fail(w.registry, id, brokenWith("retry"));
   await w.until(() => w.seen.length === 1);
-  w.registry.editProject("nexus" as ProjectId, (p) => ({ ...p, pipeline: null }));
+  w.registry.projects.editProject("nexus" as ProjectId, (p) => ({ ...p, pipeline: null }));
   release();
   await w.until(() => phaseOf(w, id) === "asked");
 

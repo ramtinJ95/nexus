@@ -158,7 +158,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   /** Nothing reached from here acts on the node. */
   async function nodeHealth(name: NodeName): Promise<NodeHealth> {
-    const probe = registry.node(name) === undefined ? undefined : probes.get(name);
+    const probe = registry.nodes.node(name) === undefined ? undefined : probes.get(name);
     if (probe === undefined) throw new Refusal("missing", `no node ${name}`);
     return probe.health();
   }
@@ -166,7 +166,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const sse = eventStreams(streamStallMs);
   const { open } = sse;
 
-  const draining = () => isDraining(registry.drain(), registry.now());
+  const draining = () => isDraining(registry.releases.drain(), registry.now());
   const { gate } = options;
   const kit: ApiKit = { ...access, ...pylon, ...views, ...sse, registry, harness, startThread, claude, agents, agentOf, draining, gate };
 

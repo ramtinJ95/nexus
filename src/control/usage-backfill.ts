@@ -25,7 +25,7 @@ import type { UsageCounter } from "./usage-counter.ts";
 import type { UsageHold } from "./usage-store.ts";
 import type { BackfillPlanRow, UsageBackfill } from "../contract/usage.ts";
 
-type UsageBackfillRegistry = Pick<Registry, "threads" | "usage" | "node" | "nodes" | "now" | "projects" | "reserved">;
+type UsageBackfillRegistry = Pick<Registry, "threads" | "usage" | "nodes" | "now" | "projects" | "placement">;
 
 export interface UsageBackfillJob {
   status(): UsageBackfill;
@@ -66,8 +66,8 @@ export function usageBackfill(options: {
     }
   }, () => shutdown.signal.aborted);
 
-  const seen = (p: StoredPylon): PylonObservation | "absent" | null => registry.node(p.node)?.state === "online" ? observedPylon(registry, p) : null;
-  const imageHeld = (p: StoredPylon) => registry.nodes().some((n) => n.state === "online" && n.observation?.artifacts.includes(p.boot.image) === true);
+  const seen = (p: StoredPylon): PylonObservation | "absent" | null => registry.nodes.node(p.node)?.state === "online" ? observedPylon(registry, p) : null;
+  const imageHeld = (p: StoredPylon) => registry.nodes.nodes().some((n) => n.state === "online" && n.observation?.artifacts.includes(p.boot.image) === true);
 
   function unreadable(t: Thread): string | null {
     if (t.status === "deleted") return "it was deleted, and its pylon with it";
@@ -87,13 +87,13 @@ export function usageBackfill(options: {
    * Only a stopped or running pylon is woken, since the planner fails a broken one it is asked to run.
    */
   function blocked(p: StoredPylon): string | null {
-    const node = registry.node(p.node);
+    const node = registry.nodes.node(p.node);
     const o = node?.state === "online" ? node.observation : null;
     if (o == null) return `${p.node} is offline`;
     if (o.jobs.some((j) => j.state === "running") || registry.threads.pylonsOn(p.node).some((other) => other.submitted !== null)) return `${p.node} is busy with a job`;
     const observed = o.pylons.find((seen) => seen.pylonId === p.pylonId);
     if (observed !== undefined && observed.phase !== "stopped" && observed.phase !== "running") return `its pylon is ${observed.phase}`;
-    const largest = Math.max(0, ...registry.projects().map((project) => project.resources.memoryGiB));
+    const largest = Math.max(0, ...registry.projects.projects().map((project) => project.resources.memoryGiB));
     const { left } = roomLeft(registry, p.node, o, o.capacity, uncounted(p, observed));
     if (left.memoryGiB < largest) return `${p.node} would have ${gib(left.memoryGiB)} GiB of memory left with it up, less than the ${largest} GiB of the largest project's pylon`;
     return null;

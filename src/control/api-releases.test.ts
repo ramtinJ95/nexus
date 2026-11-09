@@ -34,7 +34,7 @@ test("the release view shows a deployer report 90 s old as pending, so a wait on
   }
   s.callAs(laptop);
   assert.equal(releaseOutcome((await s.call("GET", "/v1/release")).body, deployCommit), "healthy");
-  for (const report of s.registry.releaseReports()) s.registry.reportRelease({ ...report, observedAt: Date.now() - 90_000 });
+  for (const report of s.registry.releases.releaseReports()) s.registry.releases.reportRelease({ ...report, observedAt: Date.now() - 90_000 });
   const view = (await s.call("GET", "/v1/release")).body;
   assert.deepEqual(view.nodes.map((r: ReleaseReport) => [r.role, r.state, r.reason]), [["control", "pending", "deployer report is stale"], ["probe", "pending", "deployer report is stale"]]);
   assert.equal(releaseOutcome(view, deployCommit), "pending");
@@ -53,7 +53,7 @@ test("anyone allowed reads the usage backfill and its dry run, only a deployer s
   });
   assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
-  s.registry.setCurrentImage(image.id as ImageId);
+  s.registry.images.setCurrentImage(image.id as ImageId);
   const thread = (await s.call("POST", "/v1/threads", { project: "acme", title: "Old work" })).body as Thread;
   assert.equal((await s.call("POST", `/v1/threads/${thread.id}/archive`)).status, 200);
   assert.deepEqual(await s.call("GET", "/v1/usage/backfill"), {
@@ -91,7 +91,7 @@ test("a root-authenticated drain blocks every turn-entry route and can be releas
   s.callAs("nFIREBAT" as TailnetNodeId);
   const released = await s.call("POST", "/v1/deployer/drain", { commit: deployCommit, release: true }, reporterHeaders);
   assert.deepEqual(released.body, { idle: false, expiresAt: null });
-  assert.equal(s.registry.drain(), null);
+  assert.equal(s.registry.releases.drain(), null);
 });
 
 test("drain reads committed live and queued work rather than a lagging activity flag", async (t) => {
@@ -136,7 +136,7 @@ test("drain waits for a turn entering through the gate it was given, which the A
 
 test("expired drain leases no longer block callers", async (t) => {
   const s = await withThread(t, { deployment });
-  s.registry.setDrain({ commit: deployCommit, expiresAt: Date.now() - 1 });
+  s.registry.releases.setDrain({ commit: deployCommit, expiresAt: Date.now() - 1 });
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/messages`, { text: "hello", requestId: "after-drain" })).status, 202);
 });
 
@@ -162,12 +162,12 @@ test("the final idle fence holds across lease expiry until rollback or success r
   await s.call("PUT", "/v1/release", { commit: deployCommit });
   s.callAs("nFIREBAT" as TailnetNodeId);
   assert.equal((await s.call("POST", "/v1/deployer/drain", { commit: deployCommit, hold: true }, reporterHeaders)).body.idle, true);
-  assert.equal(s.registry.drain()!.locked, true);
-  s.registry.setDrain({ ...s.registry.drain()!, expiresAt: 0 });
+  assert.equal(s.registry.releases.drain()!.locked, true);
+  s.registry.releases.setDrain({ ...s.registry.releases.drain()!, expiresAt: 0 });
   s.callAs(laptop);
   assert.equal((await s.call("POST", "/v1/threads", {})).status, 409);
   s.callAs("nFIREBAT" as TailnetNodeId);
   await s.call("POST", "/v1/deployer/drain", { commit: deployCommit, release: true }, reporterHeaders);
-  assert.equal(s.registry.drain(), null);
+  assert.equal(s.registry.releases.drain(), null);
 });
 

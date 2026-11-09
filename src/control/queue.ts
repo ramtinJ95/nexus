@@ -23,7 +23,7 @@ import { prLocationOf, servesReview, threadRole } from "./work-model.ts";
 import { brokenRule, startRules } from "../contract/threads-parse.ts";
 import { isOpenStatus } from "./reconcile.ts";
 
-type QueueRegistry = Pick<Registry, "threads" | "currentImage" | "reviews" | "latestHealthSample" | "node" | "nodes" | "now" | "planning" | "prWatches" | "project" | "queue" | "reserve" | "reserved" | "saveTemplate" | "templates">;
+type QueueRegistry = Pick<Registry, "threads" | "images" | "reviews" | "nodeMetrics" | "nodes" | "now" | "planning" | "prWatches" | "projects" | "queue" | "placement">;
 
 export interface ThreadQueue {
   /** Validates and records, with `key` if given; throws a Refusal. Does not start it; the caller calls poll() after. */
@@ -70,7 +70,7 @@ export function queuedView(registry: QueueRegistry, record: QueuedRecord): Queue
   const claude = request.claude !== undefined;
   return {
     id: record.id, title: record.title, project: record.project, startedBy: record.startedBy, createdAt: record.createdAt, status: record.status,
-    after: record.after, waits, blocked: record.refused !== undefined || waits.some((w) => w.state === "blocked"), node: request.node ?? registry.project(record.project)?.defaultNode ?? "auto",
+    after: record.after, waits, blocked: record.refused !== undefined || waits.some((w) => w.state === "blocked"), node: request.node ?? registry.projects.project(record.project)?.defaultNode ?? "auto",
     worker: claude ? "claude" : "harness", model: claude ? request.model ?? defaultClaudeModel : null,
     prompt: record.message ?? request.claude ?? null, branch: request.branch ?? null, commit: request.commit ?? null,
     resources: request.resources, startNow: record.startNow, lastError: record.lastError,

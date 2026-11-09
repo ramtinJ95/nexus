@@ -41,9 +41,9 @@ function fixture(t: import("node:test").TestContext) {
   const resources = { cpus: 2, memoryGiB: 4, diskGiB: 10 };
   const project = (id: string, autoReview: AutoReview | null) =>
     ({ id: id as ProjectId, repoUrl: `https://github.com/${repo}.git`, defaultBranch: "main", defaultNode: node, resources, allowedHosts: [], secrets: [], logins: [], preSetup: null, autoReview });
-  registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
-  registry.createProject(project("reviewed", { mode: "review", enabledBy: "nLAPTOP" }));
-  registry.createProject(project("plain", null));
+  registry.nodes.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
+  registry.projects.createProject(project("reviewed", { mode: "review", enabledBy: "nLAPTOP" }));
+  registry.projects.createProject(project("plain", null));
   const capacity = testCapacity();
   registry.threads.apply({ record: "node", node, state: "online", capacity });
   const fake = fakeHarness();
@@ -86,7 +86,7 @@ function fixture(t: import("node:test").TestContext) {
    * checkouts' git, which it reuses for up to a minute, so the snapshot holds only the branches pushed by then.
    */
   function observe(readAt = now, phase: "running" | "unread" | "stopped" = "running") {
-    const last = registry.node(node)!.observation;
+    const last = registry.nodes.node(node)!.observation;
     const pylons: PylonObservation[] = [...pushes].map(([pylonId, pushed]) => phase === "stopped" ? stoppedPylon(pylonId) : runningPylon(pylonId, {
       liveHash: "hash" as LiveHash,
       git: phase === "unread" ? null : { head: "a".repeat(40), branch: "main", dirty: false, branches: pushed.filter((p) => p.at <= readAt).map((p) => ({ name: p.ref.slice(p.ref.indexOf("/") + 1), head: "a".repeat(40), pushedAs: p.ref })) },
@@ -339,7 +339,7 @@ test("a reviewer, a check thread, a planning thread, a builder in a project with
     await f.add("th-working"),
   ];
   for (const id of ids) f.turn(id);
-  f.registry.savePlanning({ thread: "th-planning" as ThreadId, token: "t", read: 0, sent: [] });
+  f.registry.planning.savePlanning({ thread: "th-planning" as ThreadId, token: "t", read: 0, sent: [] });
   f.registry.threads.recordActivity("th-working" as ThreadId, { agentTurnRunning: true });
   f.tick(gitPollMs);
   await f.pass();

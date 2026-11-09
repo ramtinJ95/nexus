@@ -50,11 +50,11 @@ test("a plan block is read only with its thread's token, as an ordered list of i
 async function fixture(t: import("node:test").TestContext, path = ":memory:", fake = fakeHarness()) {
   const registry = openRegistry(path);
   t.after(() => { try { registry.close(); } catch { /* closed by a restart */ } });
-  if (registry.project("acme" as ProjectId) === undefined) {
-    registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
-    registry.createProject({ id: "acme" as ProjectId, repoUrl: null, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null, pipeline: { autoStart: true } });
-    registry.saveImage(image, null);
-    registry.setCurrentImage(image.id);
+  if (registry.projects.project("acme" as ProjectId) === undefined) {
+    registry.nodes.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+    registry.projects.createProject({ id: "acme" as ProjectId, repoUrl: null, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null, pipeline: { autoStart: true } });
+    registry.images.saveImage(image, null);
+    registry.images.setCurrentImage(image.id);
   }
   const services = threadServices({ registry, harness: fake.harness, mirror: { setupInputs: () => Promise.reject(new Error("a scratch project has no remote")) }, dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" }, wake: () => {}, gate: turnGate(() => false), queue: true, planning: null });
   const start = services.api.startThread;
@@ -81,29 +81,29 @@ test("a block makes each card once, read twice, by passes that overlap, or again
   const path = join(dir, "registry.db");
   const first = await fixture(t, path);
   const thread = await first.planner();
-  const token = first.registry.planning(thread.id)!.token;
+  const token = first.registry.planning.planning(thread.id)!.token;
   assert.match(token, new RegExp(`^${thread.id}:[0-9a-f]{12}$`), "the token is the thread's ID and random hex, as the review loop's are");
   first.plans.begin(thread);
-  assert.equal(first.registry.planning(thread.id)!.token, token, "a second begin keeps the token");
+  assert.equal(first.registry.planning.planning(thread.id)!.token, token, "a second begin keeps the token");
   first.reply(thread, `Plan:\n${block(token, [a, b])}`);
   await Promise.all([first.plans.poll(), first.plans.poll()]);
   const ids = first.registry.questions.questions(thread.id).map((q) => q.id);
   assert.equal(ids.length, 2);
   assert.equal(first.registry.threads.attention(thread.id), "decision");
-  assert.deepEqual([first.registry.items().length, first.registry.queue.queuedThreads().length], [0, 0], "cards, not items or threads, though the project's items start on their own");
+  assert.deepEqual([first.registry.pipeline.items().length, first.registry.queue.queuedThreads().length], [0, 0], "cards, not items or threads, though the project's items start on their own");
 
   first.reply(thread, "Nothing new.");
   await first.plans.poll();
   assert.deepEqual(first.registry.questions.questions(thread.id).map((q) => q.id), ids, "a later turn reads the block again and asks nothing new");
   // A restart before the read was saved reads every reply again.
-  first.registry.savePlanning({ ...first.registry.planning(thread.id)!, read: 0 });
+  first.registry.planning.savePlanning({ ...first.registry.planning.planning(thread.id)!, read: 0 });
   await first.plans.close();
   first.registry.close();
 
   const second = await fixture(t, path, first.fake);
   await second.plans.poll();
   assert.deepEqual(second.registry.questions.questions(thread.id).map((q) => q.id), ids, "the restart asks nothing again");
-  assert.equal(second.registry.planning(thread.id)!.read, second.registry.threads.thread(thread.id)!.lastReplyAt);
+  assert.equal(second.registry.planning.planning(thread.id)!.read, second.registry.threads.thread(thread.id)!.lastReplyAt);
 
   second.reply(thread, `Revised:\n${block(token, [a, { ...b, brief: "Build B later." }])}`);
   await second.plans.poll();
@@ -114,14 +114,14 @@ test("a message the harness did not take leaves the guide and the answers for th
   const f = await fixture(t);
   const thread = await f.planner();
   const failed = f.plans.compose(thread, "msg:1", "Plan it.");
-  assert.ok(failed.startsWith(planningPrefix) && failed.includes(f.registry.planning(thread.id)!.token));
+  assert.ok(failed.startsWith(planningPrefix) && failed.includes(f.registry.planning.planning(thread.id)!.token));
   const retried = f.plans.compose(thread, "msg:2", "Plan it, please.");
-  assert.ok(retried.includes(f.registry.planning(thread.id)!.token), "the guide goes again, since msg:1 was never taken");
+  assert.ok(retried.includes(f.registry.planning.planning(thread.id)!.token), "the guide goes again, since msg:1 was never taken");
   f.plans.sent(thread, "msg:2");
   assert.equal(f.plans.compose(thread, "msg:2", "Plan it, please."), retried);
   assert.equal(f.plans.compose(thread, "msg:3", "And then?"), "And then?");
 
-  f.reply(thread, block(f.registry.planning(thread.id)!.token, [a]));
+  f.reply(thread, block(f.registry.planning.planning(thread.id)!.token, [a]));
   await f.plans.poll();
   f.registry.questions.answerQuestion(f.registry.questions.questions(thread.id)[0] as ProposalQuestion, { option: "reject", by: laptop, at: 1 });
   assert.match(f.plans.compose(thread, "msg:4", "Why?"), /rejected "A" \(key a\)/);
@@ -133,7 +133,7 @@ test("a message the harness did not take leaves the guide and the answers for th
 test("an item waits on a pipeline item named by its ID even when a later proposal of the block has that ID as its key", async (t) => {
   const f = await fixture(t);
   const thread = await f.planner();
-  f.reply(thread, block(f.registry.planning(thread.id)!.token, [{ ...a, after: ["it-0123456789ab"] }, { key: "it-0123456789ab", title: "Later", brief: "Build later.", after: ["a"] }]));
+  f.reply(thread, block(f.registry.planning.planning(thread.id)!.token, [{ ...a, after: ["it-0123456789ab"] }, { key: "it-0123456789ab", title: "Later", brief: "Build later.", after: ["a"] }]));
   await f.plans.poll();
   const [qa] = f.registry.questions.questions(thread.id) as ProposalQuestion[];
   assert.match(qa!.text, /It waits on pipeline item it-0123456789ab\./);
@@ -143,7 +143,7 @@ test("an item waits on a pipeline item named by its ID even when a later proposa
 test("cards asked in one millisecond list block by block in the order the blocks were written, and each block's by index", async (t) => {
   const f = await fixture(t);
   const thread = await f.planner();
-  const token = f.registry.planning(thread.id)!.token;
+  const token = f.registry.planning.planning(thread.id)!.token;
   const plans = [1, 3, 8].map((n) => [{ ...a, title: `Plan ${n} A` }, { ...b, title: `Plan ${n} B` }]);
   const hashes = plans.map((items) => planBlocks([block(token, items)], token)[0]![0]!.block);
   assert.deepEqual(hashes, [...hashes].sort().reverse(), "each later block's hash sorts before the earlier ones'");
@@ -159,7 +159,7 @@ test("cards asked in one millisecond list block by block in the order the blocks
 test("an accepted proposal adds the item named from its question once, and one after a rejected proposal cannot be accepted", async (t) => {
   const f = await fixture(t);
   const thread = await f.planner();
-  f.reply(thread, block(f.registry.planning(thread.id)!.token, [a, b]));
+  f.reply(thread, block(f.registry.planning.planning(thread.id)!.token, [a, b]));
   await f.plans.poll();
   const [qa, qb] = f.registry.questions.questions(thread.id);
   const answer = (id: string, option: string) => f.registry.questions.answerQuestion(f.registry.questions.question(id) as ProposalQuestion, { option, by: laptop, at: 1 }, f.plans.answered);
@@ -167,15 +167,15 @@ test("an accepted proposal adds the item named from its question once, and one a
   assert.throws(() => answer(qb!.id, "accept"), (err: { kind?: string; message: string }) => err.kind === "conflict" && /which was rejected, so it cannot be added/.test(err.message));
   assert.equal(f.registry.questions.question(qb!.id)!.answer, null, "the refused answer is not recorded");
   answer(qb!.id, "reject");
-  assert.deepEqual(f.registry.items(), []);
+  assert.deepEqual(f.registry.pipeline.items(), []);
 
-  f.reply(thread, block(f.registry.planning(thread.id)!.token, [{ ...a, title: "A, smaller" }, b]));
+  f.reply(thread, block(f.registry.planning.planning(thread.id)!.token, [{ ...a, title: "A, smaller" }, b]));
   await f.plans.poll();
   const [, , qa2, qb2] = f.registry.questions.questions(thread.id);
   answer(qa2!.id, "accept");
   answer(qb2!.id, "accept");
   answer(qb2!.id, "accept");
-  assert.deepEqual(f.registry.items().map((i) => [i.id, i.title, i.after, i.addedBy]), [
+  assert.deepEqual(f.registry.pipeline.items().map((i) => [i.id, i.title, i.after, i.addedBy]), [
     [proposalItem(qa2!.id), "A, smaller", [], laptop],
     [proposalItem(qb2!.id), "B", [proposalItem(qa2!.id)], laptop],
   ], "each once, the second after the first");

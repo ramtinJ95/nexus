@@ -27,11 +27,11 @@ const laptop = "nLAPTOP";
 function fixture(t: import("node:test").TestContext, path = ":memory:") {
   const registry = openRegistry(path);
   t.after(() => { try { registry.close(); } catch { /* closed by a restart */ } });
-  registry.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
-  if (registry.project(project.id) === undefined) {
-    registry.createProject(project);
-    registry.saveImage(image, null);
-    registry.setCurrentImage(image.id);
+  registry.nodes.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  if (registry.projects.project(project.id) === undefined) {
+    registry.projects.createProject(project);
+    registry.images.saveImage(image, null);
+    registry.images.setCurrentImage(image.id);
   }
   const fake = fakeHarness();
   let draining = false;

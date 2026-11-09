@@ -17,7 +17,7 @@ import type { Registry } from "./registry.ts";
 import type { Start, StartKey, StartRequest } from "./start-request.ts";
 import { standingRulesFor, withStandingRules } from "./standing-rules.ts";
 
-type ThreadsRegistry = Pick<Registry, "threads" | "currentImage" | "latestHealthSample" | "node" | "nodes" | "now" | "project" | "reserve" | "reserved" | "saveTemplate" | "templates">;
+type ThreadsRegistry = Pick<Registry, "threads" | "images" | "nodeMetrics" | "nodes" | "now" | "projects" | "placement">;
 
 /** A start's request ID with a hash of what it asks for, so a repeat of the ID with another body is told apart. */
 export const startKey = (requestId: string, fields: unknown): StartKey => ({ requestId, body: createHash("sha256").update(JSON.stringify(fields)).digest("hex") });
@@ -36,7 +36,7 @@ export function checkStart(registry: ThreadsRegistry, start: Pick<Start, "reques
   const { request } = start;
   const claudePrompt = claudePromptOf(start);
   if (claudePrompt !== undefined && claudePrompt.length > maxPromptChars) throw new Refusal("invalid", `Claude prompt including ${claudeSkill} exceeds ${maxPromptChars} characters`);
-  const project = registry.project(request.project as ProjectId);
+  const project = registry.projects.project(request.project as ProjectId);
   if (project === undefined) throw new Refusal("missing", `no project ${request.project}`);
   const { memoryGiB } = resourcesOf(request.resources, project);
   if (memoryGiB < minPylonMemoryGiB) throw new Refusal("invalid", `the pylon would get ${memoryGiB} GiB, but ${minPylonMemoryReason}`);
@@ -44,7 +44,7 @@ export function checkStart(registry: ThreadsRegistry, start: Pick<Start, "reques
   if (claudePrompt !== undefined && withStandingRules(claudePrompt, rules).length > maxPromptChars) {
     throw new Refusal("invalid", `Claude prompt including ${claudeSkill} and project ${project.id}'s standing rules exceeds ${maxPromptChars} characters. Shorten the brief, or the rules that nexus project show ${project.id} prints`, "too-long");
   }
-  if (request.node !== undefined && request.node !== "auto" && registry.node(request.node as NodeName) === undefined) throw new Refusal("invalid", `no node ${request.node}`);
+  if (request.node !== undefined && request.node !== "auto" && registry.nodes.node(request.node as NodeName) === undefined) throw new Refusal("invalid", `no node ${request.node}`);
   if (!hasRemote(project) && request.commit !== undefined) throw new Refusal("invalid", `project ${project.id} is a scratch project, so it has no commit to check out`);
   return project;
 }
@@ -99,7 +99,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     if ("fresh" in read) return fresh(read.fresh);
     const { project: remote, inputs } = read;
     const key = { project: remote.id, image, setupHash: setupHashOf(remote, inputs) };
-    const choice = chooseTemplate(remote, key, { branch, commit: inputs.commit }, registry.templates(remote.id), node, registry.node(node)?.observation?.artifacts ?? [], now);
+    const choice = chooseTemplate(remote, key, { branch, commit: inputs.commit }, registry.images.templates(remote.id), node, registry.nodes.node(node)?.observation?.artifacts ?? [], now);
     switch (choice.kind) {
       case "reuse": return {
         setup: { how: "template", template: choice.template, builtAt: choice.builtAt, commit: inputs.commit },
@@ -107,7 +107,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
         repo: { kind: "clone", url: remote.repoUrl, checkout: { branch, commit: inputs.commit } },
       };
       case "build":
-        registry.saveTemplate({ id: choice.template, key, state: "building", on: choice.on, inputs: choice.inputs, submitted: null });
+        registry.images.saveTemplate({ id: choice.template, key, state: "building", on: choice.on, inputs: choice.inputs, submitted: null });
         return fresh(`no template of this setup is on ${node} yet`, choice.template);
       case "wait": return fresh(`template ${choice.template} of this setup is still building on ${node}`, choice.template);
       case "fresh": return fresh(choice.reason);
@@ -123,7 +123,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     const prompt = claudePromptOf(start);
     const claudePrompt = prompt === undefined ? undefined : withStandingRules(prompt, rules);
     const named = request.node !== undefined && request.node !== "auto";
-    const image = registry.currentImage();
+    const image = registry.images.currentImage();
     if (image === null) throw new Refusal("conflict", "no image is current yet, so a pylon has nothing to boot");
     const branch = request.branch ?? project.defaultBranch;
     // The repository as a fresh boot makes it. setUp pins a template boot's commit, and the pylon's boot freezes either.
@@ -144,7 +144,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     // `auto` passes such a node by, and a review's start beside its builder goes there all the same.
     const short = named || placement.how === "default" ? namedDiskShort(registry, node, resources) : null;
     if (short !== null) throw new Refusal("conflict", `${node} ${short}`);
-    const release = registry.reserve(pylonId, node, resources);
+    const release = registry.placement.reserve(pylonId, node, resources);
     try {
       // A template's disk is its project's size, and a pylon's disk size is fixed once it exists.
       const disk: SetupRead | null = resources.diskGiB === project.resources.diskGiB ? null

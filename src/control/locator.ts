@@ -22,19 +22,19 @@ export function listsRunning(registry: Pick<Registry, "threads">, observation: N
 }
 
 /** Whether the pylon's node lists it running on the boot a settle sealed. */
-export function runsSealed(registry: Pick<Registry, "node" | "threads">, pylon: Pick<StoredPylon, "node" | "pylonId">): boolean {
+export function runsSealed(registry: Pick<Registry, "nodes" | "threads">, pylon: Pick<StoredPylon, "node" | "pylonId">): boolean {
   const sealed = registry.threads.sealedBoot(pylon.pylonId);
   const o = observedPylon(registry, pylon);
   return sealed !== undefined && o !== null && o !== "absent" && o.phase === "running" && o.bootedAt === sealed;
 }
 
-export function runningNode(registry: Pick<Registry, "threads" | "node">, pylonId: PylonId, reach: Reach): NodeRecord | null {
+export function runningNode(registry: Pick<Registry, "threads" | "nodes">, pylonId: PylonId, reach: Reach): NodeRecord | null {
   const pylon = registry.threads.pylon(pylonId);
-  const node = pylon === undefined ? undefined : registry.node(pylon.node);
+  const node = pylon === undefined ? undefined : registry.nodes.node(pylon.node);
   return node?.state === "online" && listsRunning(registry, node.observation, pylonId, reach) ? node : null;
 }
 
-export function runningProbe<P>(registry: Pick<Registry, "threads" | "node">, probes: ReadonlyMap<NodeName, P>, t: { pylonId: PylonId }, reach: Reach): P | null {
+export function runningProbe<P>(registry: Pick<Registry, "threads" | "nodes">, probes: ReadonlyMap<NodeName, P>, t: { pylonId: PylonId }, reach: Reach): P | null {
   const node = runningNode(registry, t.pylonId, reach);
   return node === null ? null : probes.get(node.name) ?? null;
 }
@@ -44,7 +44,7 @@ export function runningProbe<P>(registry: Pick<Registry, "threads" | "node">, pr
  * each wake a thread change asks for, and every few seconds. It gives up `waitMs` after it was asked.
  */
 export function registryLocator<P>(options: {
-  registry: Pick<Registry, "node" | "threads">;
+  registry: Pick<Registry, "nodes" | "threads">;
   probes: ReadonlyMap<NodeName, P>;
   woken: () => Promise<void>;
   waitMs: number;

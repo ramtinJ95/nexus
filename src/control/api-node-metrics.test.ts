@@ -19,7 +19,7 @@ test("a node's metrics are labelled for a person: a plain series by name, a sens
     pylons: [{ pylonId: s.thread.pylonId, processes: 2, cpuPercent: 12.5, residentGiB: 6.2 }, { pylonId: "pylon-gone" as PylonId, processes: 1, cpuPercent: 3, residentGiB: 0.5 }],
   };
   const at = Date.now() - 1_000;
-  s.registry.recordHealthSample(node, sampleOf(health, at, (p) => s.registry.threads.pylon(p)?.thread ?? null));
+  s.registry.nodeMetrics.recordHealthSample(node, sampleOf(health, at, (p) => s.registry.threads.pylon(p)?.thread ?? null));
   const { status, body } = await s.call("GET", `/v1/nodes/${node}/metrics?from=${at - hour}&to=${at + 1}`);
   assert.equal(status, 200);
   const metrics = body as NodeMetrics;
@@ -36,8 +36,8 @@ test("a node's metrics are labelled for a person: a plain series by name, a sens
 test("a node's metrics never hold more than 1,000 points a series, whatever the range", async (t) => {
   const s = await testApi(t, { deployment });
   const now = Date.now();
-  for (let at = now - 25 * hour; at < now - 2 * hour; at += 60_000) s.registry.recordHealthSample(node, { at, values: { load1: 1 } });
-  for (let at = now - 2 * hour; at < now; at += 4_000) s.registry.recordHealthSample(node, { at, values: { load1: 1 } });
+  for (let at = now - 25 * hour; at < now - 2 * hour; at += 60_000) s.registry.nodeMetrics.recordHealthSample(node, { at, values: { load1: 1 } });
+  for (let at = now - 2 * hour; at < now; at += 4_000) s.registry.nodeMetrics.recordHealthSample(node, { at, values: { load1: 1 } });
   for (const span of [hour, 2 * hour, 6 * hour, day, 31 * day]) {
     const { body } = await s.call("GET", `/v1/nodes/${node}/metrics?from=${now - span}&to=${now}`);
     const points = (body as NodeMetrics).series[0]!.t.length;
@@ -72,7 +72,7 @@ test("a node's metrics name the newest sample their points hold, even from a buc
   const empty = (await s.call("GET", `/v1/nodes/${node}/metrics?from=${now - day}&to=${now}`)).body as NodeMetrics;
   assert.equal(empty.sampledAt, null);
   const health: NodeHealth = { node, readAt: "2027-01-01T00:00:00.000Z", cpus: 4, load: null, memory: null, disk: { path: "/", totalGiB: 20, freeGiB: 10 }, temperatures: null, pylons: null };
-  for (const ago of [70_000, 40_000, 10_000]) s.registry.recordHealthSample(node, sampleOf(health, now - ago, () => null));
+  for (const ago of [70_000, 40_000, 10_000]) s.registry.nodeMetrics.recordHealthSample(node, sampleOf(health, now - ago, () => null));
   const served = (await s.call("GET", `/v1/nodes/${node}/metrics?from=${now - day}&to=${now}`)).body as NodeMetrics;
   assert.equal(served.tier, "2m");
   assert.equal(served.sampledAt, now - 10_000, "a bucket's time is its first sample, so the newest sample is named apart");
@@ -83,7 +83,7 @@ test("a node's metrics give at most eight pylons a line of their own, and name t
   const s = await testApi(t, { deployment });
   const now = Date.now();
   const values = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [[`pylonCpu:pylon-th-${i}:`, i], [`pylonResident:pylon-th-${i}:`, 1]]).flat());
-  for (let at = now - 25 * hour + 30_000; at < now; at += 10 * 60_000) s.registry.recordHealthSample(node, { at, values });
+  for (let at = now - 25 * hour + 30_000; at < now; at += 10 * 60_000) s.registry.nodeMetrics.recordHealthSample(node, { at, values });
   for (const span of [hour, day, 30 * day]) {
     const m = (await s.call("GET", `/v1/nodes/${node}/metrics?from=${now - span}&to=${now}`)).body as NodeMetrics;
     assert.equal(m.series.filter((x) => x.series.kind === "pylonCpu").length, 8, `${span}`);

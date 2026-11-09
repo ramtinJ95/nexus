@@ -22,10 +22,10 @@ function fleet(t: Parameters<typeof testRegistry>[0], nodes: Record<string, "onl
   const logged: string[] = [];
   const probes = new Map(Object.entries(nodes).map(([name, state]) => {
     const node = name as NodeName;
-    registry.upsertNode({ name: node, tailnetHost: `${name}.tail.ts.net`, tailnetNodeId: `n${name}` as TailnetNodeId });
+    registry.nodes.upsertNode({ name: node, tailnetHost: `${name}.tail.ts.net`, tailnetNodeId: `n${name}` as TailnetNodeId });
     if (state === "online") registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
     const client = { health: () => { reads.set(node, (reads.get(node) ?? 0) + 1); return answers.get(node)?.() ?? Promise.resolve(healthOf(node)); } };
-    return [node, recordingHealth(client, (h) => registry.recordHealthSample(node, sampleOf(h, now, () => null)), (m) => logged.push(m))] as const;
+    return [node, recordingHealth(client, (h) => registry.nodeMetrics.recordHealthSample(node, sampleOf(h, now, () => null)), (m) => logged.push(m))] as const;
   }));
   const sampling = healthSampling({ registry, probes, log: (m) => logged.push(m) });
   t.after(() => sampling.close());
@@ -39,8 +39,8 @@ test("a pass reads and records each online node's health, and skips an offline o
   f.sampling.poll();
   await settled();
   assert.deepEqual(Object.fromEntries(f.reads), { a: 1, b: 1 }, "the offline node is not read");
-  for (const node of ["a", "b"] as NodeName[]) assert.equal(f.registry.latestHealthSample(node)?.values.load1, 1, `${node}'s read is recorded`);
-  assert.equal(f.registry.latestHealthSample("c" as NodeName), null);
+  for (const node of ["a", "b"] as NodeName[]) assert.equal(f.registry.nodeMetrics.latestHealthSample(node)?.values.load1, 1, `${node}'s read is recorded`);
+  assert.equal(f.registry.nodeMetrics.latestHealthSample("c" as NodeName), null);
   f.tick(60_000);
   f.sampling.poll();
   await settled();
@@ -53,7 +53,7 @@ test("a slow node's read is not overlapped by the next pass, nor does it hold up
   f.answers.set("slow" as NodeName, () => new Promise((resolve) => { answer = resolve; }));
   f.sampling.poll();
   await settled();
-  assert.equal(f.registry.latestHealthSample("fast" as NodeName) !== null, true, "the fast node is recorded while the slow one still reads");
+  assert.equal(f.registry.nodeMetrics.latestHealthSample("fast" as NodeName) !== null, true, "the fast node is recorded while the slow one still reads");
   for (const _ of [1, 2, 3]) {
     f.tick(60_000);
     f.sampling.poll();
@@ -63,7 +63,7 @@ test("a slow node's read is not overlapped by the next pass, nor does it hold up
   f.answers.delete("slow" as NodeName);
   answer(healthOf("slow" as NodeName));
   await settled();
-  assert.notEqual(f.registry.latestHealthSample("slow" as NodeName), null);
+  assert.notEqual(f.registry.nodeMetrics.latestHealthSample("slow" as NodeName), null);
   f.tick(60_000);
   f.sampling.poll();
   await settled();
@@ -78,6 +78,6 @@ test("an unreachable node's failed read records nothing, is logged once while it
     await settled();
   }
   assert.equal(f.reads.get("gone" as NodeName), 2);
-  assert.equal(f.registry.latestHealthSample("gone" as NodeName), null);
+  assert.equal(f.registry.nodeMetrics.latestHealthSample("gone" as NodeName), null);
   assert.deepEqual(f.logged, ["gone: reading its health for its history failed, and the next pass tries again: gone: unreachable"]);
 });

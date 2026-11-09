@@ -10,7 +10,7 @@ import { singleFlight, type SingleFlight } from "../single-flight.ts";
 import type { Log } from "./log-once.ts";
 import type { Registry } from "./registry.ts";
 
-type PeersRegistry = Pick<Registry, "nodeIds">;
+type PeersRegistry = Pick<Registry, "nodes">;
 
 export function peerHandoff(options: { registry: PeersRegistry; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "putPeers">>; log: Log }) {
   const { registry, probes, log } = options;
@@ -20,7 +20,7 @@ export function peerHandoff(options: { registry: PeersRegistry; probes: Readonly
   const flights = new Map<NodeName, SingleFlight>();
 
   async function put(node: NodeName) {
-    const ids = registry.nodeIds();
+    const ids = registry.nodes.nodeIds();
     const peers = [...probes.keys()].filter((n) => n !== node).map((n) => ids.get(n)!);
     const bootId = boots.get(node);
     const last = sent.get(node);

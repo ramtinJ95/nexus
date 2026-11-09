@@ -27,30 +27,30 @@ export function releaseRoutes(kit: ApiKit, options: { deployment?: DeploymentOpt
       const input = parse(deploySchema, await r.body());
       const commit = input.commit === "main" ? await (options.deployment?.resolveMain ?? resolveMain)() : input.commit;
       if (draining()) throw new HttpError(409, "control plane is draining; wait for this deployment to finish");
-      registry.setDesiredRelease({ commit: commitSchema.parse(commit), requestedBy: r.caller, requestedAt: Date.now() });
+      registry.releases.setDesiredRelease({ commit: commitSchema.parse(commit), requestedBy: r.caller, requestedAt: Date.now() });
       return ok(releaseView(registry, options.deployment?.self));
     }),
     on(routes.deployerRelease, { role: "reporter" }, () => ok(releaseView(registry, options.deployment?.self))),
     on(routes.report, { role: "reporter" }, async (_, r) => {
-      const node = registry.nodeByTailnetId(r.caller)!;
+      const node = registry.nodes.nodeByTailnetId(r.caller)!;
       const report = parse(reportSchema, await r.body());
       if (report.role === "control") demand(r.roles, { role: "control-node", action: "reports control health" });
-      registry.reportRelease({ ...report, node: node.name, observedAt: Date.now() });
+      registry.releases.reportRelease({ ...report, node: node.name, observedAt: Date.now() });
       return ok({ ok: true as const });
     }),
     on(routes.releases, { role: "reporter" }, async (_, r) => {
-      const node = registry.nodeByTailnetId(r.caller)!;
+      const node = registry.nodes.nodeByTailnetId(r.caller)!;
       const { inventory, outcomes } = parse(releasesSchema, await r.body());
       return ok({ delete: feature(options.features, "cleanup").releases(node.name, inventory, outcomes) });
     }),
     on(routes.drain, { role: "control-node", action: "drains" }, async (_, r) => {
       const body = parse(drainSchema, await r.body());
-      if (body.commit !== registry.desiredRelease()?.commit) throw new HttpError(409, "release was superseded");
-      registry.setDrain(body.release ? null : { commit: body.commit, expiresAt: Date.now() + 120_000, locked: registry.drain()?.locked ?? false });
+      if (body.commit !== registry.releases.desiredRelease()?.commit) throw new HttpError(409, "release was superseded");
+      registry.releases.setDrain(body.release ? null : { commit: body.commit, expiresAt: Date.now() + 120_000, locked: registry.releases.drain()?.locked ?? false });
       const busy = body.release ? { threads: [], entering: false } : await busyTurns();
       const idle = !body.release && !busy.entering && busy.threads.length === 0;
-      if (body.hold && idle) registry.setDrain({ commit: body.commit, expiresAt: Date.now() + 120_000, locked: true });
-      return ok({ idle, ...body.release ? {} : busy, expiresAt: registry.drain()?.expiresAt ?? null });
+      if (body.hold && idle) registry.releases.setDrain({ commit: body.commit, expiresAt: Date.now() + 120_000, locked: true });
+      return ok({ idle, ...body.release ? {} : busy, expiresAt: registry.releases.drain()?.expiresAt ?? null });
     }),
   ];
 }
