@@ -1,6 +1,0 @@
-404 application/json
-{
-  "error": "no route /v1/nosuch",
-  "code": "no-route",
-  "retryable": false
-}

@@ -1,6 +1,0 @@
-400 application/json
-{
-  "error": "✖ Invalid input: expected string, received number\n  → at title",
-  "code": null,
-  "retryable": false
-}

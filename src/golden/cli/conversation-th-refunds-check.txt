@@ -1,4 +1,0 @@
-exit 5
---- stdout
---- stderr
-nexus: thread th-refunds-check has no conversation

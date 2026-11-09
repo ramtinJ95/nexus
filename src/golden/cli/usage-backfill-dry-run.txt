@@ -1,4 +1,0 @@
-exit 5
---- stdout
---- stderr
-nexus: the usage backfill is not configured

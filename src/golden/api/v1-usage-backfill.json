@@ -1,6 +1,0 @@
-409 application/json
-{
-  "error": "the usage backfill is not configured",
-  "code": null,
-  "retryable": false
-}

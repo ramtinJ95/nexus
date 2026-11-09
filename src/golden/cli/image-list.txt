@@ -1,4 +1,0 @@
-exit 0
---- stdout
-img-0123456789ab  current  built 2027-01-01T00:00:00Z on rj-firebat  release unknown  on infra-testbench, rj-firebat
---- stderr

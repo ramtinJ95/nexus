@@ -1,4 +1,0 @@
-exit 0
---- stdout
-Queued th-new-56 on nexus: An untitled start, whose brief's first line runs past eighty characters, so its .... It starts once th-sync has merged its pull request.
---- stderr

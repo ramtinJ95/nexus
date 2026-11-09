@@ -1,4 +1,0 @@
-exit 0
---- stdout
-Added project golden (https://github.com/ramtinJ95/golden.git) on auto
---- stderr

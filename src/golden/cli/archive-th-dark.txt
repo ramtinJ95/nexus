@@ -1,4 +1,0 @@
-exit 0
---- stdout
-Archived th-dark.
---- stderr
