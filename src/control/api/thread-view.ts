@@ -15,6 +15,7 @@ import type { BootInputs } from "../../protocol/spawn.ts";
 import type { Project } from "../project.ts";
 import { observedPylon } from "../observed.ts";
 import { watchStopped } from "../pr-watch-model.ts";
+import { noChangeOf } from "../work-model.ts";
 import { herdrClient } from "../../guest-contract.ts";
 import { threadSaid } from "../wording.ts";
 
@@ -75,13 +76,12 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
     const { claudeWorker, agent } = agents[registry.threads.agent(t).kind].detail(t);
     const review = registry.reviews.review(t.id);
     const questions = registry.questions.questions(t.id);
-    const nudge = registry.nudges.nudge(t.id);
     const now = Date.now();
     const d: Omit<ServerDetail, "said"> = {
       thread: t,
       ...claudeWorker === undefined ? {} : { claudeWorker, resume: registry.threads.claudeResume(t.id) },
       attention: registry.threads.attention(t.id), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
-      noChange: nudge?.state === "no-change" ? nudge.reason : null,
+      noChange: noChangeOf(registry, t.id),
       desired: desiredPhase(t, now),
       // An absent pylon has no disk to keep.
       keptPastDay: state.actualState === "absent" ? null : keptPastDay(t, now),

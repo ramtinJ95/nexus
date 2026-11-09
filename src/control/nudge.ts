@@ -87,18 +87,22 @@ export function builderNudger(options: {
     return fresh === undefined || builderRepo(fresh) === null || hasPullRequest(fresh) || fresh.usageLimit !== undefined || fresh.turnDied !== undefined || fresh.working ? undefined : fresh;
   };
 
-  /** Archives a builder that declared no change, unless the person has been to it since, as by unarchiving it. */
-  function archive(id: ThreadId, { turn }: Extract<Nudge, { state: "no-change" }>) {
+  /** Archives a builder that declared no change, once, so a thread the person unarchives since stays open. */
+  function archive(id: ThreadId, record: Extract<Nudge, { state: "no-change" }>) {
     const t = registry.threads.thread(id);
-    if (t === undefined || !isOpenStatus(t.status) || t.working || t.lastHumanActivityAt > turn) return;
-    registry.threads.setThreadStatus(id, "archived");
-    wake(t);
+    if (t === undefined || record.archived) return;
+    if (isOpenStatus(t.status)) {
+      if (t.working) return;
+      registry.threads.setThreadStatus(id, "archived");
+      wake(t);
+    }
+    registry.nudges.saveNudge(id, { ...record, archived: true });
   }
 
   async function judge(t: Thread) {
     const record = registry.nudges.nudge(t.id);
     if (record?.state === "left-alone") return;
-    // A crash may have come between the record and the archive. A pull request opened since supersedes the declaration.
+    // A crash may have come between the record and the archive. A pull request linked since supersedes the declaration.
     if (record?.state === "no-change") return hasPullRequest(t) ? registry.nudges.saveNudge(t.id, null) : archive(t.id, record);
     const clear = () => { if (record !== null) registry.nudges.saveNudge(t.id, null); };
     const leaveAlone = () => registry.nudges.saveNudge(t.id, { state: "left-alone" });
@@ -136,7 +140,7 @@ export function builderNudger(options: {
     const fresh = idleBuilder(t.id);
     if (fresh === undefined || fresh.lastReplyAt !== turn) return;
     if (declared !== null) {
-      const done: Nudge = { state: "no-change", turn, reason: declared.reason };
+      const done: Nudge = { state: "no-change", turn, reason: declared.reason, archived: false };
       registry.nudges.saveNudge(t.id, done);
       return archive(t.id, done);
     }

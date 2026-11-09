@@ -214,7 +214,7 @@ test("a builder that declares its task needs no change is archived instead of nu
   await queue.poll();
   assert.deepEqual(f.nudges().map((n) => n.thread).sort(), [corrected, quoting, trailing], "only a final answer that ends with the builder's own token goes without a nudge");
   assert.equal(f.registry.threads.thread(builder)!.status, "archived");
-  assert.deepEqual(f.registry.nudges.nudge(builder), { state: "no-change", turn: turnEnd, reason });
+  assert.deepEqual(f.registry.nudges.nudge(builder), { state: "no-change", turn: turnEnd, reason, archived: true });
   assert.deepEqual(waitOf(f.registry, builder), { thread: builder, state: "landed", why: `needs no change: ${reason}` });
   assert.deepEqual(starts, ["th-u114"], "the queued thread starts as if the builder's pull request had merged");
   f.tick(gitPollMs);
@@ -223,6 +223,27 @@ test("a builder that declares its task needs no change is archived instead of nu
   assert.equal(f.typed.length, 0, "the builder is never nudged");
   f.link(builder, 546);
   assert.deepEqual(waitOf(f.registry, builder), { thread: builder, state: "blocked", why: "is archived and its pull request did not merge" }, "a pull request linked since decides instead");
+});
+
+test("a declared builder is archived after a visit to it, a pass after a crash before its archive archives it, and one the person unarchives stays open", async (t) => {
+  const f = fixture(t);
+  const visited = await f.add("th-visited");
+  const crashed = await f.add("th-crashed");
+  const reason = "main already has it";
+  f.turn(visited, `\`\`\`nexus-no-change\n${JSON.stringify({ token: visited, reason })}\n\`\`\``);
+  f.tick(1);
+  f.registry.threads.recordActivity(visited, { human: f.now });
+  f.registry.nudges.saveNudge(crashed, { state: "no-change", turn: 1, reason, archived: false });
+  f.tick(gitPollMs);
+  await f.pass();
+  assert.equal(f.registry.threads.thread(visited)!.status, "archived", "opening its page or terminal is no message, so it does not keep the thread open");
+  assert.equal(f.registry.threads.thread(crashed)!.status, "archived");
+  assert.deepEqual(f.registry.nudges.nudge(crashed), { state: "no-change", turn: 1, reason, archived: true });
+  f.registry.threads.setThreadStatus(visited, "active");
+  f.tick(gitPollMs);
+  await f.pass();
+  assert.equal(f.registry.threads.thread(visited)!.status, "active", "an unarchive is the person's, and the pass leaves it");
+  assert.deepEqual(f.nudges(), []);
 });
 
 test("a pull request opened before the turn ended, whose branch the probe reports after a minute, gets no nudge", async (t) => {

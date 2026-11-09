@@ -22,6 +22,14 @@ export function threadRole(registry: Pick<Registry, "reviews" | "planning">, t: 
 export const servesReview = (role: Role) => role === "reviewer" || role === "check" || role === "verify";
 
 export const prLocationOf = (registry: Pick<Registry, "reviews" | "prWatches">, id: ThreadId): PrLocation => prLocation(registry.reviews.review(id), watchedPrs(registry.prWatches.prWatch(id)));
+/**
+ * Why the builder declared that its task needs no change (nudge.ts), while it has no pull request, or null. A pull
+ * request linked since, even to an archived thread, decides instead.
+ */
+export function noChangeOf(registry: Pick<Registry, "reviews" | "prWatches" | "nudges">, id: ThreadId): string | null {
+  const nudge = registry.nudges.nudge(id);
+  return nudge?.state === "no-change" && prLocationOf(registry, id).kind === "none" ? nudge.reason : null;
+}
 
 /**
  * A thing of a thread's that waits on the person: one of an open thread's own needs, the open thread itself stopped

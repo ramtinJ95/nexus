@@ -20,7 +20,7 @@ import type { Start, StartKey, StartRequest } from "./start-request.ts";
 import type { QueuedRecord } from "./queue-store.ts";
 import type { QueuedThread, Wait } from "../contract/threads.ts";
 import { deliverDurable } from "./durable-message.ts";
-import { prLocationOf, servesReview, threadRole } from "./work-model.ts";
+import { noChangeOf, prLocationOf, servesReview, threadRole } from "./work-model.ts";
 import { brokenRule, startRules } from "../contract/threads-parse.ts";
 import { isOpenStatus } from "./reconcile.ts";
 
@@ -61,9 +61,8 @@ export function waitOf(registry: QueueRegistry, id: ThreadId): Wait {
   const review = registry.reviews.review(id);
   const where = prLocationOf(registry, id);
   if (where.kind === "merged") return landed(id, `PR #${where.number} merged`);
-  const nudge = registry.nudges.nudge(id);
-  // A pull request opened since the declaration, even an archived thread's, decides instead.
-  if (nudge?.state === "no-change" && where.kind === "none") return landed(id, `needs no change: ${nudge.reason}`);
+  const noChange = noChangeOf(registry, id);
+  if (noChange !== null) return landed(id, `needs no change: ${noChange}`);
   if (!isOpenStatus(t.status)) return blocked(id, `is ${t.status} and its pull request did not merge`);
   if (review?.phase.kind === "needs-person") return blocked(id, `its review ended for the person: ${review.phase.holds[0]?.text ?? "no reason given"}`);
   if (where.kind === "closed") return blocked(id, `PR #${where.number} closed without merging`);
