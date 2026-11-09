@@ -4,9 +4,10 @@
  *
  * Reading never wakes a pylon and is never human activity: a thread is read only while its node's last observation
  * reports its pylon running, and a read that fails, such as on a pylon that stopped meanwhile, keeps what is stored.
- * The session events say when to read, so an idle thread costs no pylon traffic. Each session event the log retains
- * for a Claude worker thread is followed by a read, a watched thread is read every `workingReadMs` while a turn of
- * its session runs, so its entries show during the turn, and a watch reads once when it starts.
+ * The session events say when to read, so an idle thread no loop waits on costs no pylon traffic. Each session event
+ * the log retains for a Claude worker thread is followed by a read, a watched thread is read every `workingReadMs`
+ * while a turn of its session runs, so its entries show during the turn, and a watch reads once when it starts. The
+ * review loop reads each Claude party it waits on at each pass, and the conversation route at each request.
  *
  * A read that reaches the transcript's end then asks the pylon's hook which AskUserQuestion dialogs wait, and the
  * registry opens and withdraws the worker's asks from that. The transcript cannot say: Claude may write the call to it
