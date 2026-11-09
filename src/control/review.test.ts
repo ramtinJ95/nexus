@@ -1209,6 +1209,11 @@ test("a PR runs one review at a time, whichever of its builders starts it, so it
   assert.equal(b.status, "rejected", "a start that raced the first is refused once it would record a second review");
   assert.match((b as PromiseRejectedResult).reason.message, new RegExp(`pull request #7 is under review ${f.review().id} of ${f.builder}`));
   await assert.rejects(loop.start(other, { land: null }), /pull request #7 is under review/);
+  f.registry.reviews.saveReview({ ...f.review(), phase: { kind: "approved" } });
+  await assert.rejects(loop.start(other, { land: null }), (err: Error) => err.message === `pull request #7 is under review ${f.review().id} of ${f.builder}, which is approved. Land it with nexus land ${f.builder}, or start the review again from ${f.builder}`);
+  f.registry.reviews.saveReview({ ...f.review(), phase: { kind: "deploying", commit: "m".repeat(40), previous: null, requested: false, deadline: 0 } });
+  await assert.rejects(loop.start(other, { land: null }), /which is deploying, and a merge or deploy that has begun is seen through/);
+  f.registry.reviews.saveReview({ ...f.review(), phase: { kind: "reviewing" } });
   loop.cancel(f.builder, "nLAPTOP");
   assert.equal((await loop.start(other, { land: null })).builder, other, "once that review ended, another builder's starts");
 });
