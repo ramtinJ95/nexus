@@ -273,7 +273,8 @@ test("a thread is named by a unique prefix of its ID, with or without th-, or by
   const both = await s.nexus(["show", "th-"]);
   assert.equal(both.code, 64);
   assert.equal(both.stderr, `nexus: th- is the start of 2 threads, ${first.id} (archived: first), ${second.id} (active: second). Give more of the ID. Run nexus --help for usage\n`);
-  assert.equal((await s.nexus(["show", "th-fff"])).stderr, "nexus: no thread th-fff\n", "a prefix of no thread goes to the API as typed");
+  const none = ["th-0", "th-1", "th-2"].find((p) => !first.id.startsWith(p) && !second.id.startsWith(p))!;
+  assert.equal((await s.nexus(["show", none])).stderr, `nexus: no thread ${none}\n`, "a prefix of no thread goes to the API as typed");
 
   assert.equal((await s.json(["show", "@last"])).thread.id, second.id, "@last is the newest thread");
   await s.json(["delete", "@last"]);
@@ -290,7 +291,7 @@ test("without --project, start takes the one project whose repository is the che
     if (origin !== null) await promisify(execFile)("git", ["-C", dir, "remote", "add", "origin", origin]);
     return dir;
   };
-  for (const origin of ["git@github.com:octocat/Spoon-Knife", "ssh://git@github.com/octocat/spoon-knife.git", "https://github.com/octocat/Spoon-Knife/"]) {
+  for (const origin of ["git@github.com:octocat/Spoon-Knife", "ssh://git@GitHub.com:22/octocat/Spoon-Knife.git", "https://github.com/octocat/Spoon-Knife/"]) {
     const res = await s.nexus(["start", "--title", "inferred", "--json"], undefined, await checkout(origin));
     assert.equal(res.code, 0, res.stderr);
     assert.equal(res.stderr, "nexus: project acme, from this checkout's origin\n", origin);

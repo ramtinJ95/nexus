@@ -35,10 +35,13 @@ export async function threadOf(api: Api, given: string): Promise<string> {
   throw new CliError("invalid", `${given} is the start of ${matches.length} threads, ${named.join(", ")}. Give more of the ID`);
 }
 
-/** `git@github.com:o/r.git`, `ssh://git@github.com/o/r` and `https://github.com/o/r` are all `github.com/o/r`. */
+/**
+ * `git@github.com:o/r.git`, `ssh://git@github.com/o/r` and `https://github.com/o/r` are all `github.com/o/r`. The
+ * port goes, since an ssh and an https spelling never share one, and the path keeps its case, as a server may.
+ */
 export function repoKey(url: string): string | null {
   const m = /^(?:[a-z][a-z0-9+.-]*:\/\/)?(?:[^@/]+@)?([^/:]+)(?::\d+)?[:/](.+?)(?:\.git)?\/*$/i.exec(url.trim());
-  return m === null ? null : `${m[1]}/${m[2]}`.toLowerCase();
+  return m === null ? null : `${m[1]!.toLowerCase()}/${m[2]}`;
 }
 
 async function origin(): Promise<string | null> {
