@@ -56,17 +56,17 @@ export interface ImageRecipe {
   files: readonly { path: string; mode: 0o644 | 0o755; content: string }[];
   pins: {
     debianDigest: string;
-    node: string; // "26.12.1"
+    node: string; // "26.13.0"
     nodeSha256: string; // of node-v<node>-linux-x64.tar.xz, from that release's SHASUMS256.txt
     claudeCode: string;
     pi: string;
     herdr: string;
-    piEnv: string; // the pi-env daemon, pinned to the harness's pi-env version
+    piEnv: string; // the pi-env daemon, which must speak the protocol of the harness's pi-env client (1)
     piEnvSha256: string; // of package/bin/pi-env-linux-x64/pi-env in that npm tarball
     gondolin: string; // "0.13.0". The module seed workaround is tied to it
     alpineKernel: string; // "6.18.58-0-virt". The seed must match exactly
     dotfilesCommon: string; // commit of the baked fallback layer
-    gh: string; // "2.103.2", the GitHub CLI release
+    gh: string; // "2.103.3", the GitHub CLI release
     ghSha256: string; // of gh_<gh>_linux_amd64.tar.gz, from that release's checksums file
     neovim: string; // "0.12.6". The review-pane Claude Code mod needs 0.10 or later, and bookworm ships 0.7
     neovimSha256: string; // of nvim-linux-x86_64.tar.gz, that release asset's digest on GitHub
