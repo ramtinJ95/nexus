@@ -155,6 +155,8 @@ export interface ThreadParticipant {
   outputs?(thread: ThreadId): Output[];
   /** A queued thread starts at `at`, in the transaction that creates it. Throws when it may not start. */
   startQueued?(thread: ThreadId, at: number): void;
+  /** The archived threads whose pylon the feature has the planner wake for reading now (ArchiveFacts.readingUsage). */
+  reading?(): readonly ThreadId[];
   /** What the usage module says of each of `threads`' archive beyond its row, which the planner reads. */
   facts?(threads: readonly Thread[]): ReadonlyMap<ThreadId, Pick<ArchiveFacts, "readingUsage" | "settleWaiting">>;
 }
@@ -686,14 +688,28 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       return pylonsOn(node).map((pylon) => ({ pylon, thread: threads.get(pylon.thread)! }));
     },
     /**
-     * The node's pylons less those of deleted threads with nothing left to tear down: the node neither has nor routes
-     * them, as `present` says, and no job, preview, retry or Claude launch is left to settle, so a tick would change nothing.
+     * The node's pylon of each thread a participant holds up now (`awaitedUntil`), with its thread as thread() reads it,
+     * reading only those threads. Only an open thread's pylon is up for a hold to keep.
+     */
+    pylonsWithHeldThreadsOn(node: NodeName): { pylon: StoredPylon; thread: Thread }[] {
+      const open = sql("SELECT t.* FROM threads t CROSS JOIN pylons p ON p.thread = t.id WHERE t.status IN ('active', 'idle') AND p.node = ?").all(node);
+      const now = clock();
+      const held = new Set(participants.flatMap((p) => [...p.awaited?.(open.map((r) => r.id as ThreadId)) ?? []].flatMap(([id, hold]) => hold.until > now ? [id] : [])));
+      return withSessions(open.filter((r) => held.has(r.id as ThreadId))).flatMap((thread) => thread.awaitedUntil === undefined ? [] : [{ pylon: pylon(thread.pylonId)!, thread }]);
+    },
+    /**
+     * The node's pylons less those of deleted and archived threads that a tick would leave as they are: the node neither
+     * has nor routes them, as `present` says, and no job, preview, disk delete, retry, Claude launch or wake for reading is
+     * left to settle. Such a pylon's desired phase is paused or deleted, and the planner is done with an absent one either
+     * way. A change to its project's live spec or git identity reaches it on the tick after any of these.
      */
     pylonIdsToTick: (node: NodeName, present: readonly PylonId[]) =>
-      (sql(`SELECT p.id FROM pylons p JOIN threads t ON t.id = p.thread WHERE p.node = $node AND (t.status != 'deleted'
+      (sql(`SELECT p.id FROM pylons p JOIN threads t ON t.id = p.thread WHERE p.node = $node AND (t.status NOT IN ('deleted', 'archived')
         OR p.submitted IS NOT NULL OR p.retrying = 1 OR p.id IN (SELECT value FROM json_each($present))
-        OR EXISTS (SELECT 1 FROM previews WHERE pylon = p.id) OR t.id IN (SELECT value FROM json_each($launching)))
-        ORDER BY p.id`).all({ $node: node, $present: JSON.stringify(present), $launching: JSON.stringify(launching()) }) as Row[]).map((r) => r.id as PylonId),
+        OR EXISTS (SELECT 1 FROM previews WHERE pylon = p.id) OR EXISTS (SELECT 1 FROM disk_cleanups WHERE pylon = p.id)
+        OR t.id IN (SELECT value FROM json_each($launching)) OR t.id IN (SELECT value FROM json_each($reading)))
+        ORDER BY p.id`).all({ $node: node, $present: JSON.stringify(present), $launching: JSON.stringify(launching()),
+        $reading: JSON.stringify(participants.flatMap((p) => p.reading?.() ?? [])) }) as Row[]).map((r) => r.id as PylonId),
     /** Takes a whole PylonRecord, so the tick can save what it holds. The desired phase is dropped. */
     savePylon(saved: Omit<PylonRecord, "desired">) {
       transaction(() => {
