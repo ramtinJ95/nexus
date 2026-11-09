@@ -58,6 +58,8 @@ const replyGraceMs = 60_000;
 /** How long an agent may take to answer, or the builder to push what it says it fixed, before the loop asks the person. */
 const answerMs = 3 * 60 * 60_000;
 const pushGraceMs = 10 * 60_000;
+/** How long GitHub may take to push the update of a branch it accepted before the loop asks for it again. */
+const updateGraceMs = 60_000;
 const maxNudges = 2;
 /** How long the loop waits before it sends a request again after each model failure in a row. The next failure goes to the person. */
 const retryMs = [2, 5, 10, 20].map((minutes) => minutes * 60_000);
@@ -733,6 +735,16 @@ export function reviewLoop(deps: ReviewDeps) {
         // A quote the description lost since the reviewer gave it is asked for again, once per description.
         if (remedy === "quote" && staleQuote(r.rounds.at(-1)!, snapshot.detail.body)) return { ...review, phase: { kind: "quoting", asked: null } };
         if (left.length) return toPerson(review, "policy", ...why, ...all);
+        // A squash merge lands `head` on the base as it is now, so a base that moved since `head`'s check lands a
+        // combination no check ran. GitHub pushes the updated head a little later, and it gets a round of its own,
+        // which runs the check. An update GitHub took but never pushed is asked for again after a minute. Until then
+        // nothing is authorized, so a merge of the stale head outside this review is judged as someone else's.
+        if (await github.behind(r.pr.repo, snapshot.detail.base, head)) {
+          if (phase.updated !== undefined && now() - phase.updated < updateGraceMs) return r;
+          if (!(await github.update(r.pr.repo, r.pr.number, head))) return rebase(review, snapshot.detail.base);
+          reads.delete(prKey(r));
+          return { ...review, phase: { kind: "merging", authorized: null, updated: now() } };
+        }
         if (phase.authorized !== head) return { ...review, phase: { kind: "merging", authorized: head } };
         const merged = await github.merge(r.pr.repo, r.pr.number, head);
         reads.delete(prKey(r));

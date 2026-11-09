@@ -87,6 +87,10 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   const read = (n: number) => n === pr.number ? snapshot : others.get(n)!;
   const merges: string[] = [];
   let mergeAnswer: (sha: string) => MergeResult = () => ({ kind: "merged", commit: merged });
+  /** The heads the base branch has moved past since, and each update of the branch the loop asked GitHub for, by head. */
+  const behind = new Set<string>();
+  const updates: string[] = [];
+  let updateAnswer: (sha: string) => boolean = () => true;
   const labels = new Set<string>();
   const labelCalls: string[] = [];
   let labelAnswer: (name: string) => LabelResult = (name) => { labels.add(name); return { kind: "labelled" }; };
@@ -132,6 +136,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       // Unless a test says otherwise, each head's change is its own, as a push of fixes makes it.
       change: async (_, __, head) => changes.has(head) ? changes.get(head)! : files.map((f) => ({ ...f, patch: f.patch && `${f.patch}\n+// ${head}` })),
       has: async (_, __, path) => path === ".nexus/verify" && verifies,
+      behind: async (_, __, head) => behind.has(head),
+      async update(_, __, sha) { updates.push(sha); return updateAnswer(sha); },
       async label(_, __, name) { labelCalls.push(name); return labelAnswer(name); },
       async merge(_, n, sha) {
         merges.push(sha);
@@ -220,6 +226,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     /** A harness thread's first message. A Claude worker's is its prompt. */
     briefs,
     set mergeAnswer(a: (sha: string) => MergeResult) { mergeAnswer = a; },
+    behind, updates, set updateAnswer(a: (sha: string) => boolean) { updateAnswer = a; },
     labels, labelCalls, set labelAnswer(a: (name: string) => LabelResult) { labelAnswer = a; },
     set check(c: CheckState) { check = c; },
     checkThreads, checkHeads, discarded,
@@ -2912,6 +2919,47 @@ test("a merge GitHub refuses for a conflict it only now reports goes to the buil
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
   assert.deepEqual(f.merges, [head1]);
+  assert.equal(f.review().phase.kind, "fixing");
+  assert.match(f.sent.at(-1)!.message.text, /git rebase origin\/main/);
+});
+
+test("a landing checked on a base that moved since brings the branch up to date and checks the new head before it merges", async (t) => {
+  const f = fixture(t);
+  released(f, previous);
+  const change = [{ path: "src/cache.ts", previous: null, patch: "@@ -0,0 +1 @@\n+export {};" }];
+  f.changes.set(head1, change);
+  f.changes.set(head2, change);
+  f.behind.add(head1);
+  f.updateAnswer = () => { f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } }; return true; };
+  const loop = await approved(f, "nLAPTOP");
+  await loop.poll();
+  assert.deepEqual(f.updates, [head1], "the branch checked on the old base is brought up to date");
+  assert.deepEqual(f.checkHeads, [head1, head2], "the check runs again at the updated head");
+  assert.deepEqual(f.merges, [head2], "only the head checked against the current base merges");
+  assert.deepEqual(f.review().rounds.map((r) => [r.head, r.carried?.from]), [[head1, undefined], [head2, head1]], "the approval carries, so the reviewer gets no round");
+  assert.equal(f.review().phase.kind, "deploying");
+});
+
+test("an update GitHub accepted but has not pushed yet is asked for once a minute, and nothing merges meanwhile", async (t) => {
+  const f = fixture(t);
+  f.behind.add(head1);
+  const loop = await approved(f, "nLAPTOP");
+  await loop.poll();
+  assert.deepEqual(f.updates, [head1], "one update while GitHub works on it");
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, updated: f.now }, "a merge of the stale head meanwhile is not this review's");
+  f.tick(60_000);
+  await loop.poll();
+  assert.deepEqual(f.updates, [head1, head1]);
+  assert.deepEqual(f.merges, []);
+  assert.equal(f.review().phase.kind, "merging");
+});
+
+test("a branch behind its base that GitHub cannot bring up to date goes to the builder to rebase", async (t) => {
+  const f = fixture(t);
+  f.behind.add(head1);
+  f.updateAnswer = () => false;
+  await approved(f, "nLAPTOP");
+  assert.deepEqual(f.merges, []);
   assert.equal(f.review().phase.kind, "fixing");
   assert.match(f.sent.at(-1)!.message.text, /git rebase origin\/main/);
 });

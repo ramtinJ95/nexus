@@ -46,6 +46,13 @@ export interface GitHub {
    * leaves modes out, and it has none for a commit it no longer has.
    */
   change(repo: string, base: string, head: string): Promise<ChangedFile[] | null>;
+  /** Whether branch `base` has commits that commit `head` lacks, so a merge of `head` would land a combination no check ran. */
+  behind(repo: string, base: string, head: string): Promise<boolean>;
+  /**
+   * Merges the PR's base into its branch while its head is still `head`, as GitHub's "Update branch" does. False when
+   * GitHub refuses, as for a conflict.
+   */
+  update(repo: string, number: number, head: string): Promise<boolean>;
   /** Squash-merges only while the PR's head is still `head`, so it never merges a commit nobody reviewed. */
   merge(repo: string, number: number, head: string): Promise<MergeResult>;
   /** Adds the label `name` to the PR, creating it in the repository first if it has none. Adding it twice is harmless. */
@@ -193,6 +200,16 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
       if (trees.some(({ value }) => value.truncated)) return null;
       const [before, after] = trees.map(({ value }) => new Map(value.tree.map((entry) => [entry.path, entry.mode])));
       return files.map((f) => ({ ...changedFile(f), modes: [before!.get(f.previous_filename ?? f.filename) ?? null, after!.get(f.filename) ?? null] }));
+    },
+    async behind(repo, base, head) {
+      const { value } = await get<{ behind_by: number }>(`/repos/${repo}/compare/${encodeURIComponent(base)}...${head}`);
+      return value.behind_by > 0;
+    },
+    async update(repo, number, head) {
+      const { response } = await write("PUT", `/repos/${repo}/pulls/${number}/update-branch`, { expected_head_sha: head }, "update");
+      if (response.ok) return true;
+      if (denies(response) || response.status === 422) return false;
+      throw new Error(`GitHub update: HTTP ${response.status}`);
     },
     async merge(repo, number, head) {
       const { response, reply, message } = await write("PUT", `/repos/${repo}/pulls/${number}/merge`, { sha: head, merge_method: "squash" }, "merge");
