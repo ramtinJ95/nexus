@@ -5,7 +5,7 @@
  */
 import { open, readFile } from "node:fs/promises";
 import { BlockList, isIPv6 } from "node:net";
-import { basename, dirname, isAbsolute, join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { z } from "zod";
 import type { SecretSource } from "../backends/backend.ts";
 import { parseJson } from "../parse.ts";
@@ -23,32 +23,14 @@ const tailnet = new BlockList();
 tailnet.addSubnet("100.64.0.0", 10, "ipv4");
 tailnet.addSubnet("fd7a:115c:a1e0::", 48, "ipv6");
 
-/**
- * Before the artifact store, a pylon-vm backend named each image's directory in `images`, and each was
- * <store>/<image ID>. A config in that form is read as `artifacts`, the store its images share, so a deployed
- * probe.json keeps working. One whose images are anywhere else is refused with what to write instead.
- */
-function imagesAsStore(backend: unknown, ctx: z.RefinementCtx): unknown {
-  if (typeof backend !== "object" || backend === null || !("images" in backend) || "artifacts" in backend || (backend as { kind?: unknown }).kind !== "pylon-vm") return backend;
-  const { images, ...rest } = backend as { images: unknown };
-  const dirs = typeof images === "object" && images !== null ? Object.entries(images) : [];
-  const stores = new Set(dirs.map(([id, dir]) => typeof dir === "string" && isAbsolute(dir) && basename(dir) === id ? dirname(dir) : ""));
-  if (stores.size !== 1 || stores.has("")) {
-    ctx.addIssue({ code: "custom", message: `backend.images is the form from before the artifact store. Replace it with "artifacts": the directory that holds each image as <artifacts>/<image ID>` });
-    return z.NEVER;
-  }
-  return { ...rest, artifacts: [...stores][0] };
-}
-
 const configSchema = z.strictObject({
   node: nodeNameSchema,
   listen: z.strictObject({
     host: z.union([z.ipv4(), z.ipv6()]).refine((h) => tailnet.check(h, isIPv6(h) ? "ipv6" : "ipv4"), "must be this node's tailnet address, in 100.64.0.0/10 or fd7a:115c:a1e0::/48"),
     port: z.int().min(1).max(65535).default(probePort),
   }),
-  // A probe.json from before control-plane.json still names its control plane here, for a rollback to a release that reads it.
-  auth: z.strictObject({ controlPlane: tailnetNodeIdSchema.optional(), peers: z.array(tailnetNodeIdSchema) }).transform(({ peers }) => ({ peers })),
-  backend: z.preprocess(imagesAsStore, z.discriminatedUnion("kind", [
+  auth: z.strictObject({ peers: z.array(tailnetNodeIdSchema) }),
+  backend: z.discriminatedUnion("kind", [
     z.strictObject({
       kind: z.literal("pylon-vm"),
       stateRoot: absolutePath,
@@ -59,7 +41,7 @@ const configSchema = z.strictObject({
     }),
     /** Local development only: Docker containers stand in for pylon VMs. Without `artifacts` it builds and holds no templates. */
     z.strictObject({ kind: z.literal("docker"), images: z.record(z.custom<ImageId>(isImageId, "must be an image ID, such as img-000000000000"), z.string()), labels: z.record(z.string(), z.string()).default({}), artifacts: absolutePath.optional() }),
-  ])),
+  ]),
   secretsFile: absolutePath,
   /** In the probe's state directory, so the next boot's probe reads what the node's shutdown paused. */
   shutdownFile: absolutePath.default(join(stateDirs.probe, "shutdown.json")),

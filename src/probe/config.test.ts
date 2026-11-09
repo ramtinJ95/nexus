@@ -12,7 +12,7 @@ const deploy = new URL("../../deploy/", import.meta.url);
 const valid = {
   node: "infra-testbench",
   listen: { host: "100.64.0.7" },
-  auth: { controlPlane: "nControl1CNTRL", peers: ["nPeer1CNTRL"] },
+  auth: { peers: ["nPeer1CNTRL"] },
   backend: { kind: "pylon-vm", stateRoot: "/var/lib/nexus/pylons", artifacts: "/var/lib/nexus/artifacts" },
   secretsFile: "/etc/nexus/secrets.env",
 };
@@ -66,25 +66,15 @@ test("the docker backend takes image tags and optional labels", () => {
   assert.deepEqual(config.backend, { kind: "docker", images: { "img-000000000000": "nexus-pylon-test:slice" }, labels: {} });
 });
 
-test("a pylon-vm config from before the artifact store is read as the store its images share, or refused with the fix", () => {
-  // /etc/nexus/probe.json on infra-testbench, as main's example installed it.
-  const deployed = withChange((c) => { c.backend = { kind: "pylon-vm", stateRoot: "/var/lib/nexus/pylons", images: { "img-000000000001": "/var/lib/nexus/artifacts/img-000000000001" } }; });
-  assert.deepEqual(parseProbeConfig(deployed).backend, { kind: "pylon-vm", stateRoot: "/var/lib/nexus/pylons", artifacts: "/var/lib/nexus/artifacts" });
-  const refused = [
-    { "img-000000000001": "/srv/images/img-000000000001", "img-000000000002": "/var/lib/nexus/artifacts/img-000000000002" },
-    { "img-000000000001": "/var/lib/nexus/artifacts/rootfs" },
-    {},
-  ];
-  for (const images of refused) {
-    assert.throws(() => parseProbeConfig(withChange((c) => { c.backend = { kind: "pylon-vm", stateRoot: "/var/lib/nexus/pylons", images }; })),
-      /backend\.images[\s\S]*Replace it with "artifacts"/, JSON.stringify(images));
-  }
+test("a pylon-vm config from before the artifact store is refused, naming its images", () => {
+  const old = withChange((c) => { c.backend = { kind: "pylon-vm", stateRoot: "/var/lib/nexus/pylons", images: { "img-000000000001": "/var/lib/nexus/artifacts/img-000000000001" } }; });
+  assert.throws(() => parseProbeConfig(old), /images/);
 });
 
 test("a config with a mistake is refused, naming the field", () => {
   const cases: [string, (c: any) => void, RegExp][] = [
     ["an unknown key", (c) => { c.secretFile = c.secretsFile; }, /secretFile/],
-    ["an address instead of a stable node ID", (c) => { c.auth.controlPlane = "100.64.0.1"; }, /auth\.controlPlane/],
+    ["a control plane, which control-plane.json names", (c) => { c.auth.controlPlane = "nControl1CNTRL"; }, /controlPlane/],
     ["a peer that is not a stable node ID", (c) => { c.auth.peers = ["rj-firebat"]; }, /auth\.peers\[0\]/],
     ...["0.0.0.0", "::", "0:0:0:0:0:0:0:0", "0::0", "127.0.0.1", "::1", "192.168.1.10", "::ffff:192.168.1.10", "fd7a:115c:a1e1::7"].map((host): [string, (c: any) => void, RegExp] =>
       [`${host} as the listen host`, (c) => { c.listen.host = host; }, /listen\.host/]),

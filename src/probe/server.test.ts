@@ -152,14 +152,14 @@ test("callers that are not the configured node get 403", async (t) => {
   assert.equal((await fetch(`${base}/v1/jobs/x`)).status, 404);
 });
 
-test("the probe trusts the control plane control-plane.json names, not the one an old probe.json still names", async (t) => {
+test("the probe trusts the control plane control-plane.json names, and no other", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "nexus-control-plane-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const moved = "nMOVED" as TailnetNodeId;
   const controlPlaneFile = join(dir, "control-plane.json");
   await writeFile(controlPlaneFile, JSON.stringify({ tailnetNodeId: moved, url: "http://100.64.0.9:7470/" }));
   const config = parseProbeConfig(JSON.stringify({
-    node, listen: { host: "100.64.0.7" }, auth: { controlPlane, peers: [peer] },
+    node, listen: { host: "100.64.0.7" }, auth: { peers: [peer] },
     backend: { kind: "pylon-vm", stateRoot: "/var/lib/nexus/pylons", artifacts: "/var/lib/nexus/artifacts" },
     secretsFile: "/etc/nexus/secrets.env",
   }));

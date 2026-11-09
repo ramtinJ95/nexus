@@ -1,7 +1,7 @@
 /**
  * The control plane this node trusts, in /etc/nexus/control-plane.json: its tailnet node ID and its URL. The probe and
  * the deployer both read it, so pointing a node at another control plane changes one file.
- * `node src/deploy/control-plane.ts adopt <etc dir>` writes it once from what probe.json and deployer.json named before it.
+ * `node src/deploy/control-plane.ts check <etc dir>` refuses a file the deployer would refuse, before an upgrade installs.
  * `node src/deploy/control-plane.ts set <etc dir> <tailnet node ID> <url>` changes it and restarts the probe.
  * The bootstrap deployer and deploy/release.sh run it without node_modules, so it imports only Node's builtins and modules
  * that do too.
@@ -26,7 +26,6 @@ export interface WorkerConfig {
   drainTimeoutMs: number;
   healthTimeoutMs: number;
 }
-/** The control plane comes from control-plane.json. The controlUrl and controlNodeId an older deployer.json holds are left for older code. */
 export function parseWorkerConfig(deployer: unknown, control: ControlPlane): WorkerConfig {
   const v = deployer as WorkerConfig;
   if (typeof v !== "object" || v === null || typeof v.token !== "string" || !digestPattern.test(v.token) ||
@@ -65,116 +64,39 @@ export async function readControlPlane(path = configFiles.controlPlane): Promise
   return control;
 }
 
-/** The control plane probe.json's auth.controlPlane and deployer.json's controlNodeId and controlUrl named before this file. */
-export function legacyControlPlane(probe: unknown, deployer: unknown): ControlPlane {
-  const trusted = (probe as { auth?: { controlPlane?: unknown } } | null | undefined)?.auth?.controlPlane;
-  const { controlNodeId, controlUrl } = (deployer ?? {}) as { controlNodeId?: unknown; controlUrl?: unknown };
-  if (trusted === undefined) throw new Error("probe.json names no control plane in auth.controlPlane");
-  if (controlNodeId === undefined) throw new Error("deployer.json names no control plane in controlNodeId");
-  if (trusted !== controlNodeId) {
-    throw new Error(`probe.json's auth.controlPlane ${JSON.stringify(trusted)} and deployer.json's controlNodeId ${JSON.stringify(controlNodeId)} name different control planes. Name the one to trust with deploy/set-control-plane.sh`);
-  }
-  try {
-    return parseControlPlane({ tailnetNodeId: trusted, url: controlUrl });
-  } catch (err) {
-    throw new Error(`probe.json and deployer.json name no usable control plane: ${(err as Error).message}`);
-  }
-}
-
 /**
  * Whoever can write the file picks whom the root deployer trusts, so it must belong to the user that reads it, root on a
- * node, and be writable by that user alone. The deployer refuses it otherwise, and so does the install that adopts it.
+ * node, and be writable by that user alone. The deployer refuses it otherwise, and so does the upgrade that checks it.
  */
 export async function checkControlPlaneFile(path = configFiles.controlPlane): Promise<void> {
   const { uid, mode } = await stat(path);
   if (uid !== process.getuid?.() || (mode & 0o022) !== 0) throw new Error(`${path} must belong to root and be writable by root alone. Run sudo chown root:root ${path} && sudo chmod 0644 ${path}`);
 }
 
-/**
- * The upgrade to this file. Once it exists, probe.json's and deployer.json's old keys are ignored, even when they
- * disagree with it. With neither of those either, this is a fresh machine, whose install writes it.
- */
-export async function adoptControlPlane(etc: string): Promise<"wrote" | "kept" | "none"> {
+/** Checks the file when it exists. A fresh machine has none until its install writes it. */
+export async function checkExistingControlPlane(etc: string): Promise<ControlPlane | undefined> {
   const path = join(etc, fileName);
-  if (await readAt(path) !== undefined) {
-    await checkControlPlaneFile(path);
-    return "kept";
-  }
-  const legacy = async (name: string) => {
-    try {
-      return await readJson(join(etc, name));
-    } catch (err) {
-      throw new Error(`${join(etc, name)}: ${(err as Error).message}`);
-    }
-  };
-  const [probe, deployer] = [await legacy("probe.json"), await legacy("deployer.json")];
-  if (probe === undefined && deployer === undefined) return "none";
-  await saveJson(path, legacyControlPlane(probe, deployer), { mode: 0o644 });
-  return "wrote";
+  const control = await readAt(path);
+  if (control !== undefined) await checkControlPlaneFile(path);
+  return control;
 }
 
-/**
- * Points this node at `value`, restarting the probe only when the file changed. A file that does not parse is replaced.
- * The old keys probe.json and deployer.json still hold follow it, because a rollback's probe and a bootstrap worker from
- * before the file read them, and must trust the same control plane as the file.
- */
+/** Points this node at `value`, restarting the probe only when the file changed. A file that does not parse is replaced. */
 export async function setControlPlane(etc: string, value: ControlPlane, restart: () => Promise<void>): Promise<"wrote" | "unchanged"> {
   const control = parseControlPlane(value);
   const path = join(etc, fileName);
-  const followed = await oldKeyWrites(etc, control);
   const before = await readJson(path).catch(() => undefined);
-  const changed = !isDeepStrictEqual(before, control);
-  const written: { path: string; old: unknown; mode: number }[] = [];
+  if (isDeepStrictEqual(before, control)) return "unchanged";
+  await saveJson(path, control, { mode: 0o644 });
   try {
-    for (const write of followed) {
-      await saveJson(write.path, write.value, { mode: write.mode });
-      written.push(write);
-    }
-    // Last, so a failure before it leaves the file as it was, and a retry still restarts the probe onto the new one.
-    if (changed) {
-      await saveJson(path, control, { mode: 0o644 });
-      written.push({ path, old: before, mode: 0o644 });
-      await restart();
-    }
+    await restart();
   } catch (err) {
-    // The running probe, a rollback's probe and the bootstrap worker still trust what the files said, so every file
-    // says it again, and a retry starts over.
-    for (const { path, old, mode } of written.reverse()) {
-      if (old === undefined) await rm(path, { force: true });
-      else await saveJson(path, old, { mode });
-    }
+    // The running probe still trusts what the file said, so the file says it again, and a retry starts over.
+    if (before === undefined) await rm(path, { force: true });
+    else await saveJson(path, before, { mode: 0o644 });
     throw err;
   }
-  return changed || followed.length > 0 ? "wrote" : "unchanged";
-}
-
-type Old = Record<string, unknown>;
-const oldKeys: readonly [string, (old: Old, control: ControlPlane) => Old][] = [
-  ["probe.json", (old, control) => typeof old.auth === "object" && old.auth !== null && "controlPlane" in old.auth
-    ? { ...old, auth: { ...old.auth, controlPlane: control.tailnetNodeId } } : old],
-  ["deployer.json", (old, control) => ({
-    ...old,
-    ..."controlNodeId" in old ? { controlNodeId: control.tailnetNodeId } : {},
-    ..."controlUrl" in old ? { controlUrl: control.url } : {},
-  })],
-];
-
-/** The rewrites of the old keys each file still has, keeping its mode. Every file is read before anything is written. */
-async function oldKeyWrites(etc: string, control: ControlPlane): Promise<{ path: string; old: Old; value: Old; mode: number }[]> {
-  const writes: { path: string; old: Old; value: Old; mode: number }[] = [];
-  for (const [name, follow] of oldKeys) {
-    const path = join(etc, name);
-    let old: unknown;
-    try {
-      old = await readJson(path);
-    } catch (err) {
-      throw new Error(`${path}: ${(err as Error).message}. Nothing was changed`);
-    }
-    if (typeof old !== "object" || old === null || Array.isArray(old)) continue;
-    const value = follow(old as Old, control);
-    if (!isDeepStrictEqual(old, value)) writes.push({ path, old: old as Old, value, mode: (await stat(path)).mode & 0o777 });
-  }
-  return writes;
+  return "wrote";
 }
 
 // restart, not try-restart: a restart that failed after its stop leaves the probe down, and the retry must start it.
@@ -186,13 +108,13 @@ async function restartProbe(): Promise<void> {
   try {
     loaded = await systemctl(["show", unitNames.probe, "--property=LoadState", "--value"]);
   } catch (err) {
-    throw new Error(`could not tell whether this machine has a probe, so ${fileName}, probe.json and deployer.json name the control plane they named before: ${(err as Error).message}`);
+    throw new Error(`could not tell whether this machine has a probe, so ${fileName} names the control plane it named before: ${(err as Error).message}`);
   }
   if (loaded === "not-found") return;
   try {
     await systemctl(["restart", unitNames.probe]);
   } catch (err) {
-    throw new Error(`the probe did not restart, so ${fileName}, probe.json and deployer.json name the control plane they named before: ${(err as Error).message}. Fix the restart and run this again, which restarts the probe whether it runs or not`);
+    throw new Error(`the probe did not restart, so ${fileName} names the control plane it named before: ${(err as Error).message}. Fix the restart and run this again, which restarts the probe whether it runs or not`);
   }
 }
 
@@ -200,11 +122,9 @@ const describe = (control: ControlPlane) => `control plane ${control.tailnetNode
 
 async function main(args: readonly string[]): Promise<number> {
   const [command, etc, ...rest] = args;
-  if (command === "adopt" && etc !== undefined && rest.length === 0) {
-    const path = join(etc, fileName);
-    const result = await adoptControlPlane(etc);
-    if (result === "none") console.log(`${etc} holds no probe.json or deployer.json to write ${fileName} from`);
-    else console.log(`${result === "wrote" ? `wrote ${path} from probe.json and deployer.json:` : `${path} names`} ${describe(await readControlPlane(path))}`);
+  if (command === "check" && etc !== undefined && rest.length === 0) {
+    const control = await checkExistingControlPlane(etc);
+    console.log(control === undefined ? `${etc} holds no ${fileName} yet` : `${join(etc, fileName)} names ${describe(control)}`);
     return 0;
   }
   if (command === "set" && etc !== undefined && rest.length === 2) {
@@ -215,7 +135,7 @@ async function main(args: readonly string[]): Promise<number> {
     console.log(result === "wrote" ? `wrote ${path}: ${describe(control)}, and restarted the probe` : `${path} already names ${describe(control)}`);
     return 0;
   }
-  console.error("usage: node src/deploy/control-plane.ts adopt <etc dir> | set <etc dir> <tailnet node ID> <url>");
+  console.error("usage: node src/deploy/control-plane.ts check <etc dir> | set <etc dir> <tailnet node ID> <url>");
   return 1;
 }
 

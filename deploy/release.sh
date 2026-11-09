@@ -70,15 +70,15 @@ take_deployer_lock() {
   flock -x 9
 }
 
-# Writes $etc/control-plane.json from probe.json and deployer.json on the first release that reads it, and checks it after.
-adopt_control_plane() { PATH=$service_path node "$1/src/deploy/control-plane.ts" adopt "$etc"; }
+# Fails the upgrade on a control-plane.json the deployer would refuse on every poll.
+check_control_plane() { PATH=$service_path node "$1/src/deploy/control-plane.ts" check "$etc"; }
 
 # The control plane's upgrade steps from the checkout at $1, which neither switch its link nor start it. The deployer
 # runs them alone, as `NEXUS_PREPARE=1 install-control.sh`.
 prepare_control() {
   make_state nexus-control /var/lib/nexus-control
   install -d -o root -g root -m 0755 "$etc"
-  adopt_control_plane "$1"
+  check_control_plane "$1"
   install_release "$1"
   install_unit "$1/deploy/nexus-control.service" nexus-control.service
   install_unit "$1/deploy/nexus-backup.service" nexus-backup.service
@@ -94,7 +94,7 @@ prepare_probe() {
   # operator, so this replaces any other user's operator rights.
   tailscale set --operator=nexus
   install -d -o root -g root -m 0755 "$etc"
-  adopt_control_plane "$1"
+  check_control_plane "$1"
   install_release "$1"
   [ -e "$etc/secrets.env" ] || install -o root -g nexus -m 0640 "$1/deploy/secrets.example.env" "$etc/secrets.env"
   install_unit "$1/deploy/nexus-probe.service" nexus-probe.service
