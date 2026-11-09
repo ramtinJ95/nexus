@@ -11,7 +11,7 @@ import { archivedDiskMs, keptPastDay } from "./reconcile.ts";
 import { maxNudges } from "./nudge.ts";
 import { commentCap, reviewedPr } from "./pr-watch-model.ts";
 import { changesKeptMs, checkEveryMs, settleMs } from "./doctor-run.ts";
-import { blocks, cannotLand, humanLabel, reviewerApproved, roundsSpent, type ModelFailure, type Review, type Verdict } from "./review-model.ts";
+import { blocks, cannotLand, humanLabel, prRounds, reviewerApproved, type ModelFailure, type Review, type Verdict } from "./review-model.ts";
 
 const spelled = (n: number) => ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"][n] ?? String(n);
 const counted = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
@@ -109,7 +109,7 @@ export function liveNote(r: Review): string | null {
   if (round.check?.passed !== true) return null;
   return (r.phase.kind === "reviewing" || r.phase.kind === "fixing") && !reviewerApproved(round) ? `no live check yet: it runs at ${head} once the reviewer approves it` : `no live check ran at ${head}`;
 }
-export const roundOf = (r: Pick<Review, "rounds" | "maxRounds">) => `round ${roundsSpent(r)} of ${r.maxRounds}`;
+export const roundOf = (r: Pick<Review, "rounds" | "maxRounds" | "earlierRounds">) => `round ${prRounds(r).spent} of ${prRounds(r).max}`;
 
 /**
  * A review's lines as `nexus` prints them: its line, its reviewers', round's and live check's notes, a failed live

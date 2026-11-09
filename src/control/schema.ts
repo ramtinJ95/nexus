@@ -307,4 +307,7 @@ export const migrations: readonly string[] = [
      WHEN json_extract(record, '$.ask') IS NOT NULL THEN 'ask' WHEN json_extract(record, '$.holds') IS NOT NULL THEN 'holds'
      WHEN json_extract(record, '$.proposal') IS NOT NULL THEN 'proposal' ELSE 'judgment' END)
      WHERE json_extract(record, '$.kind') IS NULL;`,
+  // The rounds each review spent, by its PR, so a later review of the PR counts them, whichever builder's record it
+  // replaced. The review store writes the row of a review stored before as it opens.
+  `CREATE TABLE IF NOT EXISTS review_rounds (review TEXT PRIMARY KEY, repo TEXT NOT NULL, number INTEGER NOT NULL, rounds INTEGER NOT NULL) STRICT;`,
 ];

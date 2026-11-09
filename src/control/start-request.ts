@@ -21,6 +21,6 @@ export interface StartKey { requestId: string; body: string }
  * A start: the request, who asks, and the role the thread takes. A reviewer's Claude prompt goes as written, where any
  * other gets `/poteto-mode` in front. A check or verify thread has no agent, since it needs only its pylon. Only a
  * builder gets the project's standing rules. `queued` is the queued record the start starts, which gives the thread its
- * ID, and `key` is stored with the thread.
+ * ID, `id` an ID the caller recorded the thread by before it started, and `key` is stored with the thread.
  */
-export interface Start { request: StartRequest; caller: string; role: Role; queued?: ThreadId | undefined; key?: StartKey | undefined }
+export interface Start { request: StartRequest; caller: string; role: Role; queued?: ThreadId | undefined; id?: ThreadId | undefined; key?: StartKey | undefined }
