@@ -5,7 +5,7 @@ import { cpSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { testPr, testPylon, testRegistry, testThread, claudeWorkerAt } from "../test-support/registry-kit.ts";
+import { testPr, testPylon, testRegistry, testThread, claudeWorkerAt, storedTranscripts } from "../test-support/registry-kit.ts";
 import { agentInbox, type Inbox } from "./inbox.ts";
 import { fakeHarness } from "../test-support/fake-harness.ts";
 import { builderNudger } from "./nudge.ts";
@@ -80,7 +80,7 @@ function fixture(t: import("node:test").TestContext) {
     },
   };
   const watch = prWatcher({ registry, github, inbox });
-  const nudger = builderNudger({ registry, inbox, ...reads(agentReader(registry, fake.harness)), watch, log: (message) => logs.push(message), github });
+  const nudger = builderNudger({ registry, inbox, ...reads(agentReader(registry, fake.harness, storedTranscripts)), watch, log: (message) => logs.push(message), github });
   const claudes = new Set<ThreadId>();
   const claudeSeq = new Map<ThreadId, number>();
   const pushes = new Map<PylonId, { at: number; ref: string }[]>();
@@ -279,7 +279,7 @@ test("a PR watch pass already running once the turn's pushes are known does not 
   const f = fixture(t);
   const id = await f.add("th-1");
   const passes = { started: 1, finished: 0 };
-  const nudger = builderNudger({ registry: f.registry, inbox: async () => "delivered", ...reads(agentReader(f.registry, f.fake.harness)), watch: { passes: () => passes }, log: () => {}, github: f.github });
+  const nudger = builderNudger({ registry: f.registry, inbox: async () => "delivered", ...reads(agentReader(f.registry, f.fake.harness, storedTranscripts)), watch: { passes: () => passes }, log: () => {}, github: f.github });
   f.turn(id);
   f.tick(gitPollMs);
   f.observe();
@@ -598,7 +598,7 @@ test("a harness builder's nudge refused by a deploy's drain is kept and goes out
   let draining = true;
   const gate = turnGate(() => draining);
   const gated = builderNudger({
-    registry: f.registry, ...reads(agentReader(f.registry, f.fake.harness)), watch: f.watch, log: () => {}, github: f.github,
+    registry: f.registry, ...reads(agentReader(f.registry, f.fake.harness, storedTranscripts)), watch: f.watch, log: () => {}, github: f.github,
     inbox: agentInbox({ log: assert.fail, registry: f.registry, harness: { send: (...args) => gate.run(() => f.fake.harness.send(...args)) }, probes: new Map(), wake() {} }),
   });
   f.turn(id);
@@ -617,7 +617,7 @@ test("a nudge delivered just before a crash still counts after the builder ended
   const id = await f.add("th-1");
   const inbox = agentInbox({ log: assert.fail, registry: f.registry, harness: f.fake.harness, probes: new Map(), wake() {} });
   const nudger = (crash: boolean) => builderNudger({
-    registry: f.registry, ...reads(agentReader(f.registry, f.fake.harness)), watch: f.watch, log: () => {}, github: f.github,
+    registry: f.registry, ...reads(agentReader(f.registry, f.fake.harness, storedTranscripts)), watch: f.watch, log: () => {}, github: f.github,
     inbox: async (th, message) => { const result = await inbox(th, message); if (crash) throw new Error("the control plane stopped"); return result; },
   });
   const sent = () => new Set(f.nudges().map((n) => n.requestId)).size;
@@ -648,7 +648,7 @@ test("a nudge the drain held goes to neither a running turn nor a thread the per
   let draining = true;
   const gate = turnGate(() => draining);
   const gated = builderNudger({
-    registry: f.registry, ...reads(agentReader(f.registry, f.fake.harness)), watch: f.watch, log: () => {}, github: f.github,
+    registry: f.registry, ...reads(agentReader(f.registry, f.fake.harness, storedTranscripts)), watch: f.watch, log: () => {}, github: f.github,
     inbox: agentInbox({ log: assert.fail, registry: f.registry, harness: { send: (...args) => gate.run(() => f.fake.harness.send(...args)) }, probes: new Map(), wake() {} }),
   });
   const running = await f.add("th-running");
@@ -684,7 +684,7 @@ test("a pass reads no archived or deleted thread, except to clear a nudge it lef
   f.registry.threads.setThreadStatus(deleted, "deleted");
   const read: ThreadId[] = [];
   const registry = { ...f.registry, threads: { ...f.registry.threads, thread: (id: ThreadId) => { read.push(id); return f.registry.threads.thread(id); } } };
-  const nudger = builderNudger({ registry, inbox: async () => "delivered", ...reads(agentReader(registry, f.fake.harness)), watch: f.watch, log: () => {}, github: f.github });
+  const nudger = builderNudger({ registry, inbox: async () => "delivered", ...reads(agentReader(registry, f.fake.harness, storedTranscripts)), watch: f.watch, log: () => {}, github: f.github });
   await nudger.poll();
   assert.deepEqual(read, [active, nudged]);
   assert.equal(f.registry.nudges.nudge(nudged), null, "an archived thread's nudge is cleared, so its count starts over if it comes back");

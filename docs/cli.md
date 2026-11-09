@@ -1222,8 +1222,9 @@ while the node reports the pylon running. A paused pylon's thread shows the tran
 as of its last read, which survives a control-plane restart. The session events say
 when to read: each `session.*` event for the thread is followed by a read, and while a
 turn runs and a dashboard watches the thread, it is read every 2 seconds, so new
-entries appear during the turn. An idle thread costs no reads. The conversation route
-reads once, for up to 5 seconds, before it answers. `nexus watch` follows the transcript
+entries appear during the turn. The conversation route reads once, for up to 5 seconds,
+before it answers, and so does the review loop at each pass, about every 15 seconds, for
+each Claude builder or reviewer it waits on. Any other idle thread costs no reads. `nexus watch` follows the transcript
 as [the watch stream](#the-watch-stream) describes.
 
 `send` to a Claude worker thread types the message into the worker's Claude session, as

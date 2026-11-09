@@ -12,14 +12,20 @@ import {
   type Answer, type Finding, type Review, type Round, type Seat,
 } from "./review-model.ts";
 
-/** A fenced block an agent ends its reply with, whose JSON `schema` parses and `example` shows the agent with its token. */
-export interface FencedAnswer<T extends { token: string }> { fence: string; schema: z.ZodType<T>; example(token: string): string }
-const fenced = <T extends { token: string }>(fence: string, schema: z.ZodType<T>, example: (token: string) => string): FencedAnswer<T> => ({ fence, schema, example });
+/**
+ * A fenced block an agent ends its reply with, whose JSON `schema` parses and `example` shows the agent with its token.
+ * `merge` makes one answer of the blocks that echo the token, given oldest first, and by default takes the newest.
+ */
+export interface FencedAnswer<T extends { token: string }> { fence: string; schema: z.ZodType<T>; example(token: string): string; merge(blocks: readonly T[]): T }
+const fenced = <T extends { token: string }>(fence: string, schema: z.ZodType<T>, example: (token: string) => string, merge = (blocks: readonly T[]) => blocks.at(-1)!): FencedAnswer<T> => ({ fence, schema, example, merge });
+
+/** A builder that sends its answers again may repeat only some, so each finding keeps its newest answer. */
+const newestPerFinding = (blocks: readonly z.infer<typeof answersSchema>[]) => ({ ...blocks.at(-1)!, answers: [...new Map(blocks.flatMap((b) => b.answers).map((a) => [a.id, a])).values()] });
 
 /** The block each phase that awaits an agent's answer asks for. */
 export const fencedAnswers = {
   reviewing: fenced("nexus-review", verdictSchema, (token) => `{"token": "${token}", "verdict": "approve" or "changes", "findings": [{"id": "F1", "priority": "P0", "P1", "P2" or "P3", "where": "path:line", "summary": "one line", "detail": "why, and what would fix it"}], "reserved": [{"case": one of ${reservedCases.map((c) => `"${c}"`).join(", ")}, "why": "..."}], "notCheckedLive": "the quote" or null}`),
-  fixing: fenced("nexus-review-answers", answersSchema, (token) => `{"token": "${token}", "answers": [{"id": "F1", "action": "fixed" or "rejected", "reason": "what you changed, or why not"}]}`),
+  fixing: fenced("nexus-review-answers", answersSchema, (token) => `{"token": "${token}", "answers": [{"id": "F1", "action": "fixed" or "rejected", "reason": "what you changed, or why not"}]}`, newestPerFinding),
   quoting: fenced("nexus-quote", quoteSchema, (token) => `{"token": "${token}", "notCheckedLive": "the quote" or null}`),
 };
 /**

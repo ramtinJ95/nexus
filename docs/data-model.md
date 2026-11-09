@@ -542,7 +542,8 @@ the pylon running. The read is one raw pipe through the probe, taking at most 4 
 and 20 seconds, and a refresh takes at most 16 reads. It never wakes the pylon and is
 not activity. A failed read keeps what is stored. Each retained `session.*` event for a
 Claude worker thread triggers a read. While a turn runs and a dashboard watches the
-thread, it is read every 2 seconds.
+thread, it is read every 2 seconds. The review loop reads a Claude builder or reviewer it
+waits on at each pass, for up to 5 seconds, before it looks for the answer.
 
 `claude_messages` records each send to a Claude worker by request ID: `sending` before
 the probe is asked, then `sent` with a `ClaudeSent` (`session`, `outcome` of `sent` or

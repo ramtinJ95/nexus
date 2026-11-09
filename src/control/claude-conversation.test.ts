@@ -70,6 +70,21 @@ test("a transcript read that ends after the service and its registry closed sett
   assert.deepEqual(logged, [`${t.pylonId}: reading Claude's transcript failed, so it shows the last read: the pipe was lost`]);
 });
 
+test("a read skipped because no node lists the pylon running is logged once the hook reported a reply the store lacks", async (t) => {
+  const registry = openOnline(t);
+  const { id, pylonId } = addThread(registry, { node, boot: { image }, claudePrompt: "hello" });
+  claudeWorkerAt(registry, id, "started", { session });
+  const logged: string[] = [];
+  const conversations = claudeConversations({ log: (message) => { logged.push(message); }, registry, probes: new Map([[node, heldProbe().probe]]) });
+  t.after(() => conversations.close());
+  await conversations.refresh(registry.threads.thread(id)!);
+  assert.deepEqual(logged, [], "no reply was reported, so the stored transcript lacks none");
+  registry.threads.recordReply(id, Date.now());
+  await conversations.refresh(registry.threads.thread(id)!);
+  await conversations.refresh(registry.threads.thread(id)!);
+  assert.deepEqual(logged, [`${pylonId}: Claude's transcript was not read, as no node lists the pylon running, so it shows the last read, which lacks the turn that ended since`]);
+});
+
 test("a deleted thread's reader stays while a read runs, so a refresh meanwhile waits for it rather than reading at once", async (t) => {
   const registry = openOnline(t);
   const thread = claudeThread(registry);

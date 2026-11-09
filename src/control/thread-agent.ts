@@ -7,7 +7,6 @@
  * The wire keeps each kind's own shapes: a harness conversation's view and its `/events` stream, and a Claude worker's
  * transcript and its `/claude/events` stream. Only the transcript carries a kind, which `agentView` reads.
  */
-import { setTimeout as sleep } from "node:timers/promises";
 import type { ConversationView } from "@earendil-works/pi-durable";
 import type { ClaudeConversation } from "./claude-transcript.ts";
 import type { PylonId } from "../ids.ts";
@@ -16,7 +15,7 @@ import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import type { HarnessHost } from "./harness/host.ts";
 import { claudeTextProblem } from "../protocol/agent-kinds.ts";
-import { agentReads, harnessView, type AgentRead } from "./agent-conversation.ts";
+import { agentReads, harnessView, refreshClaude, type AgentRead } from "./agent-conversation.ts";
 import type { ClaudeConversations } from "./claude-conversation.ts";
 import { viewFrames, type Frames, type Watch } from "./conversation-view.ts";
 import { claudeFrames } from "../contract/streams.ts";
@@ -58,9 +57,6 @@ export interface ThreadAgents { harness: Agent<ConversationView>; claude: Agent<
 
 export const noConversation = (t: Pick<Thread, "id">) => `thread ${t.id} has no conversation`;
 
-/** How long a read of a Claude worker's conversation waits for its transcript before answering what is stored. */
-const claudeReadMs = 5_000;
-
 /**
  * `inPylon` wakes the pylon as the person's activity and `whileRunning` only acts while it runs, and both refuse as
  * the API does. `wake` wakes the thread's pylon. Planning composes what a planning thread's messages start with.
@@ -74,7 +70,7 @@ export function threadAgents(options: {
   const worker = (t: Thread) => registry.threads.claudeWorker(t.id)!;
 
   const view = harnessView(harness);
-  const reads = agentReads(registry, harness);
+  const reads = agentReads(registry, harness, claude);
 
   return {
     harness: {
@@ -103,7 +99,7 @@ export function threadAgents(options: {
       ...reads.claude,
       view: async (t) => claude.view(t),
       async read(t) {
-        await Promise.race([claude.refresh(t), sleep(claudeReadMs, undefined, { ref: false })]);
+        await refreshClaude(claude, t);
         return claude.view(t);
       },
       watch: (t) => claude.watch(t),
