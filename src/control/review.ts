@@ -937,9 +937,8 @@ export function reviewLoop(deps: ReviewDeps) {
    * threads, whose starts read the remote and may take longer than the person's request waits.
    */
   async function begin(builder: Thread, { repo, number }: Pick<PullRequest, "repo" | "number">, request: { rounds?: number | undefined; land: Review["land"]; auto: boolean }): Promise<Review> {
-    // A review that replaces one of the same PR spends what the earlier ones left, unless the person grants rounds.
-    const previous = registry.reviews.review(builder.id);
-    const earlierRounds = previous?.pr.repo === repo && previous.pr.number === number ? previous.earlierRounds + roundsSpent(previous) : 0;
+    // A later review of a PR spends what the earlier ones left, unless the person grants rounds.
+    const earlierRounds = registry.reviews.roundsSpentOn(repo, number);
     const rounds = request.rounds ?? maxRounds - earlierRounds;
     if (rounds < 1) throw new Refusal("conflict", `pull request #${number} has had ${earlierRounds} rounds over its reviews, and Nexus gives one ${maxRounds} without the person's word. Run nexus review ${builder.id} --rounds N to grant it N more`);
     const snapshot = await github.poll(repo, number);

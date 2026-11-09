@@ -7,21 +7,26 @@ import type { ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "./reconcile.ts";
 import type { EventFilter, EventKind, NexusEvent } from "./events.ts";
 import { reviewerCaller } from "./agent-protocol.ts";
-import { builderAwaited, kindsWhere, waitsOnPerson, type Review, type Waiver } from "./review-model.ts";
+import { builderAwaited, kindsWhere, roundsSpent, waitsOnPerson, type Review, type Waiver } from "./review-model.ts";
 import { upgradeReview } from "./record-upgrade.ts";
 import type { Need } from "./attention.ts";
 
-export const holding = { tables: { reviews: { record: "builder" }, reviewed_prs: {} } } as const satisfies Holding;
+export const holding = { tables: { reviews: { record: "builder" }, reviewed_prs: {}, review_rounds: {} } } as const satisfies Holding;
 
 export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, status: ThreadStatus) => void; appendEvent: (kind: EventKind, thread: ThreadId, payload: Record<string, unknown>) => unknown; updateAttention: (thread: ThreadId) => void; events: (since: string, filter: EventFilter) => NexusEvent[] }) {
   const { transaction, sql } = db;
   const reviews = db.hold(holding).records<Review>("reviews");
   const { setThreadStatus, appendEvent, updateAttention, events } = core;
+  /** A review whose reviewer never started read nothing, so it spent no round. */
+  const spend = (review: Review) => sql("INSERT INTO review_rounds (review, repo, number, rounds) VALUES (?, ?, ?, ?) ON CONFLICT (review) DO UPDATE SET rounds = excluded.rounds")
+    .run(review.id, review.pr.repo, review.pr.number, review.reviewerStarted ? roundsSpent(review) : 0);
   // Each record an older control plane saved is upgraded once, with no event, so every read below gets this code's shape.
   transaction(() => {
     for (const row of sql("SELECT builder, record FROM reviews").all()) {
-      const upgraded = JSON.stringify(upgradeReview(json<Review>(row.record)));
+      const review = upgradeReview(json<Review>(row.record));
+      const upgraded = JSON.stringify(review);
       if (upgraded !== row.record) sql("UPDATE reviews SET record = ? WHERE builder = ?").run(upgraded, row.builder as string);
+      spend(review);
     }
   });
   const reviewOf = (builder: ThreadId): Review | null => reviews.get(builder);
@@ -58,6 +63,8 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
     isReviewer: (thread: ThreadId) => sql("SELECT 1 FROM threads WHERE id = ? AND started_by = ? UNION SELECT 1 FROM reviews WHERE reviewer = ?").get(thread, reviewerCaller, thread) !== undefined,
     /** Whether a review ever started for the pull request, including one a later review of its builder replaced. */
     prReviewed: (repo: string, number: number) => sql("SELECT 1 FROM reviewed_prs WHERE repo = ? AND number = ?").get(repo, number) !== undefined,
+    /** The rounds every review of the pull request spent, including ones a later review of its builder replaced. */
+    roundsSpentOn: (repo: string, number: number) => Number(sql("SELECT coalesce(sum(rounds), 0) AS n FROM review_rounds WHERE repo = ? AND number = ?").get(repo, number)!.n),
     /**
      * Replaces the builder's review, and tells the event log when its phase, round or label changed, the person waived
      * holds, or the reviewer's approval or the person's waiver carried to a later head with the same change. The
@@ -72,6 +79,7 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
         sql("INSERT INTO reviews (builder, reviewer, record) VALUES (?, ?, ?) ON CONFLICT (builder) DO UPDATE SET reviewer = excluded.reviewer, record = excluded.record")
           .run(review.builder, review.reviewer, JSON.stringify(review));
         sql("INSERT OR IGNORE INTO reviewed_prs (repo, number) VALUES (?, ?)").run(review.pr.repo, review.pr.number);
+        spend(review);
         const label = (r: Review | null) => r?.phase.kind === "needs-person" ? r.phase.label?.state : undefined;
         if (before?.id !== review.id || before.phase.kind !== review.phase.kind || before.rounds.length !== review.rounds.length || label(before) !== label(review)) {
           appendEvent("review.changed", review.builder, { review: review.id, reviewer: review.reviewer, ...review.second?.kind === "claude" && { second: review.second.thread }, phase: review.phase, round: review.rounds.length });

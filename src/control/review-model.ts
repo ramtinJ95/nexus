@@ -251,8 +251,8 @@ export interface Review extends Talk<Outbox & { to: "builder" | "reviewer" }> {
   /** 1 to 5, the rounds this review may spend. */
   maxRounds: number;
   /**
-   * The rounds the builder's earlier reviews of the same PR spent, which the person reads with this review's and which a
-   * restart's 5 by default count against, so restarting a review does not give its PR more rounds.
+   * The rounds the PR's earlier reviews spent, whoever's record they were, which the person reads with this review's and
+   * which a restart's 5 by default count against, so restarting a review does not give its PR more rounds.
    */
   earlierRounds: number;
   /** Who asked for the PR to land once approved, or null to stop at approval. */
