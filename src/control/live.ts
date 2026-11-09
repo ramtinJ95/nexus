@@ -23,6 +23,7 @@ export function pylonLive(pylon: Pick<StoredPylon, "pylonId" | "thread" | "node"
       repo: pylon.boot.repo,
       secrets: pylon.boot.network.secrets,
       gitIdentity: pylon.boot.gitIdentity,
+      reviewsBuilders: project.autoReview != null,
     }),
   };
 }

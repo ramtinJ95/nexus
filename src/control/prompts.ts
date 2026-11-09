@@ -1,8 +1,9 @@
 /**
  * What the review loop says to the agents (review.ts), and the fenced block each request asks for, declared once with
- * the schema that parses it and the example the request shows.
+ * the schema that parses it and the example the request shows, beside the block a builder ends with when its task
+ * needs no change.
  */
-import type { z } from "zod";
+import { z } from "zod";
 import { senders } from "./agent-protocol.ts";
 import type { PrSnapshot } from "./github.ts";
 import { reservedCases, reservedNames } from "../contract/reserved.ts";
@@ -21,7 +22,13 @@ export const fencedAnswers = {
   fixing: fenced("nexus-review-answers", answersSchema, (token) => `{"token": "${token}", "answers": [{"id": "F1", "action": "fixed" or "rejected", "reason": "what you changed, or why not"}]}`),
   quoting: fenced("nexus-quote", quoteSchema, (token) => `{"token": "${token}", "notCheckedLive": "the quote" or null}`),
 };
-const block = <T extends { token: string }>(answer: FencedAnswer<T>, token: string) => `\`\`\`${answer.fence}\n${answer.example(token)}\n\`\`\``;
+/**
+ * A builder that finds its task needs no change, such as one another thread already did, ends its final answer with
+ * this block instead of opening a pull request. Its token is the builder's thread ID, which its pylon guide names.
+ */
+export const noChangeAnswer = fenced("nexus-no-change", z.object({ token: z.string(), reason: z.string().trim().min(1).max(4_000) }),
+  (token) => `{"token": "${token}", "reason": "why no change is needed, and how you checked"}`);
+export const block = <T extends { token: string }>(answer: FencedAnswer<T>, token: string) => `\`\`\`${answer.fence}\n${answer.example(token)}\n\`\`\``;
 
 const findingLine = (f: Finding) => `${f.id} (${f.priority})${f.where ? ` ${f.where}` : ""}: ${f.summary}${f.detail ? `\n${f.detail.split("\n").map((l) => `    ${l}`).join("\n")}` : ""}`;
 

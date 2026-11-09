@@ -299,6 +299,23 @@ test("show says why an archived thread's disk is kept past its 24 hours, and not
   assert.equal(keptPastDay({ ...unfailed, usageSettledAt: 1, backedUpAt: 2 }, Date.now()), null);
 });
 
+test("show prints why a builder needs no change while it has no pull request, and nothing for a control plane that omits it", async (t) => {
+  const s = await setup(t);
+  const { id } = await s.json(["start", "--project", "acme", "--title", "Already done"]);
+  const outcome = (d: ThreadDetail) => detailText(d).split("\n").filter((line) => line.startsWith("outcome:"));
+  const reason = "U55 (#545) already made every change this task asks for";
+  s.registry.nudges.saveNudge(id, { state: "no-change", turn: 1, reason, archived: true });
+  const detail: ThreadDetail = await s.json(["show", id]);
+  assert.equal(detail.noChange, reason);
+  assert.deepEqual(outcome(detail), [`outcome: needs no change, so it opened no pull request: ${reason}`]);
+  const { noChange: _, ...older } = detail;
+  assert.deepEqual(outcome(older as ThreadDetail), [], "a 0.74.0 control plane sends no noChange");
+  s.registry.prWatches.savePrWatch(id, { links: [{ pr: testPr({ number: 546, title: "Do it after all" }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  const linked: ThreadDetail = await s.json(["show", id]);
+  assert.equal(linked.noChange, null, "a pull request linked since decides instead");
+  assert.deepEqual(outcome(linked), []);
+});
+
 test("show says a pylon's guest is not answering, since when and what to do, and nothing while it answers", async (t) => {
   const s = await setup(t);
   const { id } = await s.json(["start", "--project", "acme", "--title", "Mute guest"]);

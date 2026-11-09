@@ -929,6 +929,7 @@ Each thread in `after` is one `Wait`. The control plane reads it from the predec
 | Was queued and cancelled or deleted, or does not exist | `blocked` | `was cancelled while queued`, `was deleted while queued`, `does not exist` |
 | Its review merged its pull request, or saw it merged outside the review | `landed` | `PR #<n> merged` |
 | A linked pull request merged and none is open, even if the thread was archived or deleted since | `landed` | `PR #<n> merged` |
+| Its builder declared that its task needs no change, in a `nexus-no-change` block that [the nudge pass](design.md#nudging-a-builder-that-stopped-short) read, and has no linked pull request, even if the thread was archived since | `landed` | `needs no change: <its reason>` |
 | Is archived or deleted | `blocked` | `is archived and its pull request did not merge`, or `is deleted ...` |
 | Its review ended for the person | `blocked` | `its review ended for the person: <the first reason>` |
 | Every linked pull request closed without merging | `blocked` | `PR #<n> closed without merging` |

@@ -59,6 +59,7 @@ const overlay: PylonOverlay = {
   dotfiles: { repo: "git@github.com:ramtin/dotfiles.git", ref: "abc123" },
   repo: { kind: "clone", url: "git@github.com:ramtin/acme-web.git", checkout: { branch: "main", commit: "origin/main" } },
   secrets: [],
+  reviewsBuilders: false,
 };
 
 test("renderOverlay renders the profile script, pylon.json and PYLON.md", () => {
