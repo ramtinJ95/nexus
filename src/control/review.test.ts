@@ -1050,19 +1050,25 @@ test("a builder in a turn as its review lands, as one answering the approval's n
   assert.deepEqual(f.statuses(), ["active", "archived"], "a builder the person unarchives stays open");
 });
 
-test("a builder the person wrote to after its review landed stays open once its turn ends", async (t) => {
+test("a builder the person wrote to after its review landed stays open once its turn ends, though its transcript is read after that end", async (t) => {
   const f = fixture(t, { repo: "acme/shop" });
   f.registry.threads.recordActivity(f.builder, { agent: 1, agentTurnRunning: true });
   const loop = await approved(f, "nLAPTOP");
   assert.deepEqual(f.review().phase.kind, "landed");
   assert.deepEqual(f.statuses(), ["active", "archived"]);
   f.tick(1_000);
-  claudeRead(f, [{ kind: "reply", at: f.now, text: "Merged." }, { kind: "prompt", at: f.now + 1, text: "Now write the follow-up", from: "person" }], []);
+  const wrote = f.now;
   f.tick(1_000);
   f.registry.threads.recordActivity(f.builder, { agent: f.now, agentTurnRunning: false });
+  f.registry.threads.recordReply(f.builder, f.now);
+  await loop.poll();
+  assert.deepEqual(f.statuses(), ["active", "archived"], "a transcript not read since the turn ended cannot say the person did not write");
+  f.tick(1_000);
+  claudeRead(f, [{ kind: "reply", at: wrote - 1, text: "Merged." }, { kind: "prompt", at: wrote, text: "Now write the follow-up", from: "person" }], []);
   await loop.poll();
   await loop.poll();
   assert.deepEqual(f.statuses(), ["active", "archived"], "the person's message since the landing makes it theirs");
+  assert.deepEqual(f.review().phase, { kind: "landed", commit: merged }, "and the loop stops reading it");
   assert.deepEqual(f.woken, [f.review().reviewer]);
 });
 
