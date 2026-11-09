@@ -117,8 +117,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   let onStart = async () => {};
   /** Why the control plane refuses a reviewer thread's start, by the start's model, or null to start it. */
   let refuseStart: (request: StartRequest) => string | null = () => null;
-  /** Why a reviewer thread's start fails other than by a refusal, as when the harness is down, or null. */
-  let failStart: string | null = null;
+  /** Why a reviewer thread's start fails other than by a refusal, as when the harness is down, by the start's request, or null. */
+  let failStart: (request: StartRequest) => string | null = () => null;
   const briefs = new Map<ThreadId, string>();
   const deployers = new Set(["nLAPTOP"]);
   const woken: ThreadId[] = [];
@@ -182,7 +182,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     async startThread(start) {
       const refused = refuseStart(start.request);
       if (refused !== null) throw new Refusal("conflict", refused);
-      if (failStart !== null) throw new Error(failStart);
+      const failed = failStart(start.request);
+      if (failed !== null) throw new Error(failed);
       started.push(start);
       const id = add(start.id ?? `th-reviewer-${started.length}`, start.request.claude !== undefined, start.caller);
       await onStart();
@@ -215,7 +216,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     /** Runs once a reviewer thread exists, before startThread returns it. */
     set onStart(hook: () => Promise<void>) { onStart = hook; },
     set refuseStart(why: (request: StartRequest) => string | null) { refuseStart = why; },
-    set failStart(why: string | null) { failStart = why; },
+    set failStart(why: (request: StartRequest) => string | null) { failStart = why; },
     /** A harness thread's first message. A Claude worker's is its prompt. */
     briefs,
     set mergeAnswer(a: (sha: string) => MergeResult) { mergeAnswer = a; },
@@ -1294,7 +1295,7 @@ test("a PR runs one review at a time, whichever of its builders starts it, so it
 
 test("a reviewer whose start keeps failing is tried each pass for 30 minutes, then the review waits on the person", async (t) => {
   const f = fixture(t);
-  f.failStart = "the harness is unreachable";
+  f.failStart = () => "the harness is unreachable";
   const loop = f.loop();
   await loop.start(f.builder, { land: null });
   await loop.poll();
@@ -5214,6 +5215,18 @@ test("a pull request that grows into the second reviewer's rule in a fix round, 
   await pushed.poll();
   assert.equal(g.review().rounds.at(-1)!.head, head3);
   assert.equal(secondOf(g.review()).rule, "the change has 200 changed lines, at least the 150 the project sets");
+});
+
+test("a second reviewer whose start keeps failing other than by a refusal goes the way a refused one does", async (t) => {
+  const f = fixture(t, { secondReview: { always: true }, secrets: claudeToken });
+  f.failStart = (request) => request.model === "claude-fable-5-1" ? "the harness is unreachable" : null;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  assert.deepEqual({ ...f.review().second, since: 0, tried: 0 }, { kind: "starting", rule: "the project gives every pull request one", model: "claude-fable-5-1", since: 0, tried: 0, why: "the harness is unreachable" });
+  f.tick(31 * 60_000);
+  await loop.poll();
+  assert.deepEqual(f.review().second, { kind: "none", rule: "the project gives every pull request one", why: "its thread did not start within 30 minutes: the harness is unreachable" });
 });
 
 test("a second reviewer whose thread does not start yet is tried again each minute, and only after 30 minutes does the review go on without it", async (t) => {
