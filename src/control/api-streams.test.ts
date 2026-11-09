@@ -3,10 +3,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout as sleep } from "node:timers/promises";
 import { request } from "node:http";
-import { maxStreams } from "./api/sse.ts";
+import { maxStreams, maxStreamsPerCaller } from "./api/sse.ts";
 import { until } from "../test-support/kit.ts";
 import type { TailnetNodeId } from "../ids.ts";
-import { laptop, testApi, withThread, deployCommit, deployment, reporterHeaders } from "../test-support/api-kit.ts";
+import { laptop, phone, streamsAs, testApi, withThread, deployCommit, deployment, reporterHeaders } from "../test-support/api-kit.ts";
+
+/** An allowed caller that holds no stream of the test's. */
+const testbench = "nTESTBENCH" as TailnetNodeId;
 
 test("a follow from the latest event gets a reply's events and none from before it", async (t) => {
   const s = await withThread(t);
@@ -83,14 +86,15 @@ test("a thread's streams end when it is deleted, and a deleted thread, a strange
   s.callAs(laptop);
   assert.equal((await s.call("POST", `/v1/threads/${thread.id}/events`)).status, 405);
 
-  const open = Array.from({ length: maxStreams }, () => s.events(`/v1/threads/${thread.id}/events`));
-  for (const stream of open) await stream.next();
+  const open = await streamsAs(s, [laptop, phone], `/v1/threads/${thread.id}/events`);
   const extra = await s.events(`/v1/threads/${thread.id}/events`).response;
   assert.equal(extra.statusCode, 503, "past the most streams the control plane serves");
   open.pop()!.close();
   await until("a closed stream frees its place", () => fake.watching(thread.id) === maxStreams - 1);
+  s.callAs(phone);
   const page = s.events(`/threads/${thread.id}/stream`);
   assert.ok((await page.next()).convo !== undefined, "the dashboard's stream counts against the same limit");
+  s.callAs(laptop);
   open.push(page);
 
   assert.equal((await s.call("DELETE", `/v1/threads/${thread.id}`)).status, 200);
@@ -234,9 +238,11 @@ test("a slow event follower gets every event once and in order, and one that sto
   const stalled = s.events("/v1/events?follow=true");
   await stalled.response;
   stalled.pause();
-  const others = Array.from({ length: maxStreams - 2 }, () => s.events("/v1/events?follow=true&kind=release.changed"));
+  const others = [
+    ...await streamsAs(s, [laptop], "/v1/events?follow=true&kind=release.changed", maxStreamsPerCaller - 2),
+    ...await streamsAs(s, [phone], "/v1/events?follow=true&kind=release.changed"),
+  ];
   t.after(() => { for (const other of others) other.close(); });
-  await Promise.all(others.map((other) => other.response));
   assert.equal((await s.events("/v1/events?follow=true&kind=release.changed").response).statusCode, 503, "every place is taken");
   for (let n = 0; n < 24; n++) s.registry.threads.appendEvent("thread.failed", null, { n, pad: "x".repeat(1 << 20) });
   let freed = s.events("/v1/events?follow=true&kind=release.changed");
@@ -252,21 +258,37 @@ test("a slow event follower gets every event once and in order, and one that sto
 test("event followers share the streams' places with thread streams, past which each is refused with its own error, and a thread's delete leaves them open", async (t) => {
   const s = await withThread(t);
   const { thread } = s;
-  const followers = Array.from({ length: maxStreams - 1 }, () => s.events("/v1/events?follow=true"));
+  const followers = [...await streamsAs(s, [laptop], "/v1/events?follow=true"), ...await streamsAs(s, [phone], "/v1/events?follow=true", maxStreamsPerCaller - 1)];
   t.after(() => { for (const follower of followers) follower.close(); });
-  await Promise.all(followers.map((follower) => follower.response));
+  s.callAs(phone);
   const page = s.events(`/v1/threads/${thread.id}/events`);
   await page.next();
+  s.callAs(testbench);
   const follow = await s.call("GET", "/v1/events?follow=true");
   assert.deepEqual(follow, { status: 503, body: { error: "too many streams", code: null, retryable: false } });
   const threadStream = await s.call("GET", `/v1/threads/${thread.id}/events`);
   assert.deepEqual(threadStream, { status: 503, body: { error: `${maxStreams} streams are open, the most this control plane serves at once`, code: null, retryable: false } });
   assert.deepEqual(await s.call("GET", "/v1/events?since=-1&follow=true"), { status: 400, body: { error: "invalid event cursor", code: null, retryable: false } }, "a bad cursor is refused before the place is counted");
+  s.callAs(laptop);
   assert.equal((await s.call("DELETE", `/v1/threads/${thread.id}`)).status, 200);
   assert.equal(await page.ended, "end");
   const after = s.registry.threads.appendEvent("release.changed", null, {});
   for (const follower of followers) assert.equal((await follower.next()).id, after.id, "every follower is still open after the delete");
+  s.callAs(testbench);
   assert.equal((await s.events("/v1/events?follow=true").response).statusCode, 200, "the deleted thread's stream gave its place back, and the followers kept theirs");
+});
+
+test("one caller holds its share of the streams, past which its next is refused with its own error while another caller's opens", async (t) => {
+  const s = await withThread(t);
+  const held = await streamsAs(s, [laptop], "/v1/events?follow=true");
+  t.after(() => { for (const stream of held) stream.close(); });
+  const share = { status: 503, body: { error: `${maxStreamsPerCaller} streams of ${laptop} are open, the most one caller holds at once`, code: null, retryable: false } };
+  assert.deepEqual(await s.call("GET", "/v1/events?follow=true"), share, "an event follower past the caller's share");
+  assert.deepEqual(await s.call("GET", `/v1/threads/${s.thread.id}/events`), share, "a thread stream past the caller's share");
+  s.callAs(phone);
+  const other = s.events(`/threads/${s.thread.id}/stream`);
+  t.after(() => other.close());
+  assert.ok((await other.next()).convo !== undefined, "another caller's stream opens");
 });
 
 test("an event cursor older than what the log retains is refused with 409", async (t) => {
