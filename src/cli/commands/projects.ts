@@ -27,11 +27,10 @@ function autoReviewOf(v: Parameters<typeof str>[0]) {
 }
 const pipelines = { off: null, approve: { autoStart: false }, start: { autoStart: true } } as const;
 const pipelineText = (p: Project) => p.pipeline == null ? "pipeline off" : p.pipeline.autoStart ? "pipeline starts items" : "pipeline waits for approval";
-/** A control plane older than 0.67.0 sends `land` in place of the mode. */
 const autoReviewText = (project: Project) => {
-  const setting = project.autoReview as (NonNullable<Project["autoReview"]> & { land?: boolean }) | null | undefined;
+  const setting = project.autoReview;
   if (setting == null) return "auto review off";
-  const mode = setting.mode ?? (setting.land === true ? "land" : "review");
+  const { mode } = setting;
   return mode === "yolo" ? `auto review and land, waiving holds, for ${setting.enabledBy}` : mode === "land" ? `auto review and land, for ${setting.enabledBy}` : `auto review, set by ${setting.enabledBy}`;
 };
 

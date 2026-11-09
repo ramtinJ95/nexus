@@ -31,7 +31,7 @@ export interface Busy { working: boolean; queued: number }
 /**
  * One event of `GET /v1/threads/:id/events`. The first carries the whole view. Each later one carries what changed
  * since the one before, each part whole: the active context when any entry changed, each document that changed,
- * or null for one that is gone, and the run's `busy` when it changed. A control plane older than 0.71.0 sends no `busy`.
+ * or null for one that is gone, and the run's `busy` when it changed.
  */
 export interface ViewFrame {
   entries?: readonly EntryRecord[];
