@@ -37,10 +37,11 @@ const changes = (patch: string, words: RegExp) => patch === "" || patch.split("\
 
 /**
  * Whether a patch of package.json changes what `npm ci` installs or what `npm run` runs, which a release does as root
- * on every node. A changed line counts for nothing only when its hunk shows it outside those sections, on a top-level
- * key of another or below one, in its side of the change. A hunk that starts inside a section, a reindented file, or
- * no patch at all, holds.
+ * on every node. A changed line counts for nothing only when it is one plain key or value, with no escape that could
+ * spell another key, and its hunk shows it outside those sections, on a top-level key of another or below one, in its
+ * side of the change. A hunk that starts inside a section, a reindented file, or no patch at all, holds.
  */
+const plainJson = /^[-+ ] +(("[\w@./-]+": )?("[^"\\]*"|-?[\d.]+|true|false|null|\{ *\}?|\[ *\]?)|[}\]]),?$/;
 const installs = (patch: string) => {
   if (patch === "") return true;
   const runs = new Set(["scripts", "dependencies", "devDependencies", "optionalDependencies", "peerDependencies", "overrides", "workspaces"]);
@@ -48,10 +49,10 @@ const installs = (patch: string) => {
   const section: Record<"-" | "+", string | null> = { "-": null, "+": null };
   for (const line of patch.split("\n")) {
     if (line.startsWith("@@")) { section["-"] = section["+"] = null; continue; }
-    const key = /^[-+ ] {2}"([^"]+)":/.exec(line)?.[1];
+    const key = /^[-+ ] {2}"([\w@./-]+)":/.exec(line)?.[1];
     const sides = line[0] === "-" || line[0] === "+" ? [line[0]] as const : ["-", "+"] as const;
     for (const side of sides) section[side] = key ?? section[side];
-    if (sides.length === 1 && (section[sides[0]] === null || runs.has(section[sides[0]]!))) return true;
+    if (sides.length === 1 && (!plainJson.test(line) || section[sides[0]] === null || runs.has(section[sides[0]]!))) return true;
   }
   return false;
 };

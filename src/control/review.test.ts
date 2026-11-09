@@ -1475,6 +1475,8 @@ test("the code that enforces the policy, the dependency manifests and what the c
   assert.deepEqual(manifest("@@ -42,3 +42,3 @@", '   "overrides": {', '-    "undici": "7.30.1"', '+    "undici": "7.30.2"'), secrets);
   assert.deepEqual(manifest("@@ -5,4 +5,4 @@", '-  "engines": {', '+  "scripts": {', '+    "install": "sh evil.sh"', '-    "node": ">=26"'), secrets, "an added line is in the section the file after the change puts it in");
   assert.deepEqual(manifest("@@ -1,8 +1,8 @@", '   "name": "nexus",', '-  "version": "0.0.0",', '+  "version": "0.0.1",', '   "private": true,', '   "type": "module",', '   "engines": {', '-    "node": ">=26"', '+    "node": ">=26.1"', "   },", '   "scripts": {'), [], "the version and the engines change nothing a release runs");
+  assert.deepEqual(manifest("@@ -42,4 +42,5 @@", '   "overrides": {', '     "undici": "7.30.1"', "   },", '+  "description": "x", "scripts": { "postinstall": "sh evil.sh" },', " }"), secrets, "a second key on a line, whose later scripts npm reads");
+  assert.deepEqual(manifest("@@ -42,4 +42,5 @@", '   "overrides": {', '     "undici": "7.30.1"', "   },", '+  "scr\\u0069pts": {', '+    "postinstall": "sh evil.sh"', "+  },", " }"), secrets, "a key spelled with an escape");
   assert.deepEqual(changed("package.json", ""), [...secrets, "Always needs the person: anything irreversible, as it changes package.json."], "a manifest GitHub shows no patch for may change anything");
 
   const check = (paths: string) => [`The pull request changes ${paths}, the check this policy relies on or what it runs.`];
@@ -5291,7 +5293,7 @@ test("each pull request a second model caught on 2026-11-04 gets a second review
     assert.match(f.sent.at(-1)!.message.text, new RegExp(`From the second reviewer on claude-fable-5-1:\\n\\n2\\.F1 \\(P1\\) ${finding.where}: ${finding.summary}`));
   }
   assert.match(secondReviewRule(defaultSecondReview, missed[1]!.files, true)!, /^the change has 158 changed lines/);
-  assert.equal(secondReviewRule({ always: false, lines: null, reserved: true }, missed[2]!.files, true), null, "#445 touched no reserved path, so only its size names it");
+  assert.equal(secondReviewRule({ always: false, lines: null, reserved: true }, missed[2]!.files, true), "the change has holds for the person on its paths: reserved-path:auth", "#445 changed the review loop, which holds as the policy's own code");
 });
 
 test("both reviewers get the builder's brief, cut as the description is, so a change that leaves out what it asked for can be found", async (t) => {
