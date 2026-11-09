@@ -132,15 +132,15 @@ test("a registry opened over an older record rewrites it upgraded once, with no 
   const current = addThread(first);
   const legacy = { ...unasked, builder: older.id, reviewer: older.id, maxRounds: 10, waiver: { head, holds: [holdTexts[0]!], by: "nLAPTOP", at: 1 }, phase: { kind: "needs-person", reasons: [holdTexts[0]!] } };
   const kept = testReview({ builder: current.id, reviewer: current.id });
-  first.saveReview(legacy as never);
-  first.saveReview(kept);
-  const events = first.events("0", {}).length;
+  first.reviews.saveReview(legacy as never);
+  first.reviews.saveReview(kept);
+  const events = first.threads.events("0", {}).length;
   first.close();
 
   const registry = testRegistry(t, path);
-  assert.deepEqual(registry.review(older.id), upgradeReview(structuredClone(legacy) as never));
-  assert.deepEqual(registry.review(current.id), kept);
-  assert.equal(registry.events("0", {}).length, events, "the upgrade tells the event log nothing");
+  assert.deepEqual(registry.reviews.review(older.id), upgradeReview(structuredClone(legacy) as never));
+  assert.deepEqual(registry.reviews.review(current.id), kept);
+  assert.equal(registry.threads.events("0", {}).length, events, "the upgrade tells the event log nothing");
   const db = new DatabaseSync(path);
   t.after(() => db.close());
   const stored = (id: string) => JSON.parse((db.prepare("SELECT record FROM reviews WHERE builder = ?").get(id) as { record: string }).record);
@@ -192,15 +192,15 @@ test("a registry opened over a pylon's older attempts rewrites them upgraded onc
   const current = addThread(first);
   const legacy = attemptFixtures.at(-1)![1];
   const kept = attemptFixtures[1]![1];
-  first.savePylon({ ...first.pylon(older.pylonId)!, attempts: legacy });
-  first.savePylon({ ...first.pylon(current.pylonId)!, attempts: kept });
-  const events = first.events("0", {}).length;
+  first.threads.savePylon({ ...first.threads.pylon(older.pylonId)!, attempts: legacy });
+  first.threads.savePylon({ ...first.threads.pylon(current.pylonId)!, attempts: kept });
+  const events = first.threads.events("0", {}).length;
   first.close();
 
   const registry = testRegistry(t, path);
-  assert.deepEqual(registry.pylon(older.pylonId)!.attempts, droppingReadFailure(structuredClone(legacy)));
-  assert.deepEqual(registry.pylon(current.pylonId)!.attempts, kept);
-  assert.equal(registry.events("0", {}).length, events, "the upgrade tells the event log nothing");
+  assert.deepEqual(registry.threads.pylon(older.pylonId)!.attempts, droppingReadFailure(structuredClone(legacy)));
+  assert.deepEqual(registry.threads.pylon(current.pylonId)!.attempts, kept);
+  assert.equal(registry.threads.events("0", {}).length, events, "the upgrade tells the event log nothing");
   const db = new DatabaseSync(path);
   t.after(() => db.close());
   const stored = (id: string) => JSON.parse((db.prepare("SELECT attempts FROM pylons WHERE id = ?").get(id) as { attempts: string }).attempts);
@@ -212,19 +212,19 @@ test("a registry opened over a failed wake for reading an older control plane ke
   const path = join(await tempDir("record-upgrade", t), "registry.db");
   const first = seedRegistry(openRegistry(path));
   const held = addThread(first);
-  first.setThreadStatus(held.id, "archived");
-  first.startUsageBackfill([held.id], 1);
-  first.holdUsageBackfill(held.id, 1);
-  first.savePylon({ ...first.pylon(held.pylonId)!, attempts: { count: 0, last: null, readFailure: { at: 2, code: "setup-failed", message: "the disk is full" } } as Attempts });
+  first.threads.setThreadStatus(held.id, "archived");
+  first.usage.startUsageBackfill([held.id], 1);
+  first.usage.holdUsageBackfill(held.id, 1);
+  first.threads.savePylon({ ...first.threads.pylon(held.pylonId)!, attempts: { count: 0, last: null, readFailure: { at: 2, code: "setup-failed", message: "the disk is full" } } as Attempts });
   first.close();
 
   const opened = Date.now();
   const registry = testRegistry(t, path);
-  assert.deepEqual(registry.pylon(held.pylonId)!.attempts, noAttempts);
-  const hold = registry.usageHold();
+  assert.deepEqual(registry.threads.pylon(held.pylonId)!.attempts, noAttempts);
+  const hold = registry.usage.usageHold();
   assert.deepEqual([hold?.by, hold?.thread, hold?.phase], ["run", held.id, "pausing"], "the hold waits for the pause, so the planner wakes the pylon no more");
   assert.ok(hold!.since >= opened, "the hold waits from the open, not from the old failure");
-  const row = registry.usageBackfillThreads().find((r) => r.thread === held.id)!;
+  const row = registry.usage.usageBackfillThreads().find((r) => r.thread === held.id)!;
   assert.deepEqual([row.state, row.reason], ["skipped", "the pylon did not boot: setup-failed: the disk is full"]);
 });
 

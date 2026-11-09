@@ -50,12 +50,12 @@ test("an item is added to a project the pipeline runs for, becomes a queued thre
   assert.deepEqual((approved.body as PipelineItem).approved?.by, laptop);
   const thread = (approved.body as PipelineItem).thread!;
   assert.match(thread, /^th-/, "the approval queues it at once");
-  assert.equal(s.registry.queuedThread(thread)?.startedBy, laptop);
+  assert.equal(s.registry.queue.queuedThread(thread)?.startedBy, laptop);
   assert.equal((await s.call("POST", `/v1/items/${item.id}/cancel`, {})).status, 409, "a queued item is cancelled by archiving its thread");
   assert.equal((await s.call("POST", `/v1/items/${b.id}/approve`, {})).status, 200);
   const shown = (await s.call("GET", `/v1/items/${b.id}`)).body as PipelineItem;
   assert.notEqual(shown.thread, null);
-  assert.deepEqual(s.registry.queuedThread(shown.thread!)?.after, [thread], "the second item's thread waits for the first's");
+  assert.deepEqual(s.registry.queue.queuedThread(shown.thread!)?.after, [thread], "the second item's thread waits for the first's");
   assert.equal((await s.call("GET", "/v1/items")).body.length, 3);
   assert.deepEqual((await s.call("GET", "/v1/items?project=other")).body, []);
   assert.equal((await s.call("GET", "/v1/items/it-000000000000")).status, 404);
@@ -84,7 +84,7 @@ test("a start after other threads is queued with no row or pylon, until start-qu
   assert.equal(refused.status, 409);
   assert.match(refused.body.error, /is queued, so it has no pylon or conversation yet/);
   assert.equal((await s.call("POST", `/v1/threads/${queued.id}/messages`, { text: "hi", requestId: "msg:1" })).status, 409);
-  assert.equal(s.registry.pylon(`pylon-${queued.id}` as PylonId), undefined);
+  assert.equal(s.registry.threads.pylon(`pylon-${queued.id}` as PylonId), undefined);
   assert.equal(s.calls.length, 1, "only the first thread has a conversation");
 
   const archived = await s.call("POST", `/v1/threads/${queued.id}/archive`);
@@ -180,26 +180,26 @@ test("a planning thread's proposals become cards only a person answers, an accep
     { key: "b", title: "B: nudge a stalled builder", brief: "Nudge a builder that stopped short.", after: ["a"] },
   ] })}\n\`\`\`` }] } as never);
   s.fake.commit(id);
-  s.registry.recordReply(id, Date.now());
+  s.registry.threads.recordReply(id, Date.now());
   await s.plans!.poll();
   const detail = async () => (await s.call("GET", `/v1/threads/${id}`)).body as ThreadDetail;
   const [a, b] = (await detail()).questions as ProposalQuestion[];
   assert.deepEqual([a!.proposal.title, b!.proposal.title], ["A: archive what landed", "B: nudge a stalled builder"]);
   assert.ok(a!.text.includes("Archive the builder once its review lands."), "the card shows the brief in full");
   assert.equal((await detail()).attention, "decision");
-  assert.deepEqual([s.registry.items().length, s.registry.queuedThreads().length], [0, 0], "nothing the thread wrote adds or starts work, though the project's items start on their own");
+  assert.deepEqual([s.registry.items().length, s.registry.queue.queuedThreads().length], [0, 0], "nothing the thread wrote adds or starts work, though the project's items start on their own");
 
   const answer = (q: Question, option: string) => s.call("POST", `/v1/questions/${q.id}/answer`, { option });
   s.callAs("nFIREBAT" as TailnetNodeId);
   assert.deepEqual(await answer(a!, "accept"), { status: 403, body: { error: "caller may not answer this question: only a person's device may, never infrastructure nodes or pylons", code: null, retryable: false } });
   s.callAs(phone);
   assert.deepEqual(await answer(b!, "accept"), { status: 409, body: { error: `"B: nudge a stalled builder" waits on "A: archive what landed", which is not answered yet. Accept that one first`, code: null, retryable: false } });
-  assert.equal(s.registry.question(b!.id)!.answer, null, "a refused accept leaves the card open");
+  assert.equal(s.registry.questions.question(b!.id)!.answer, null, "a refused accept leaves the card open");
   assert.equal((await answer(a!, "accept")).status, 200);
   assert.equal((await answer(b!, "reject")).status, 200);
   const items = (await s.call("GET", "/v1/items")).body as PipelineItem[];
   assert.deepEqual(items.map((i) => [i.title, i.addedBy, i.brief]), [["A: archive what landed", phone, "Archive the builder once its review lands."]], "only the accepted proposal is an item, the person's");
-  assert.equal(s.registry.queuedThread(items[0]!.thread!)?.startedBy, phone, "and is queued as the person's at once");
+  assert.equal(s.registry.queue.queuedThread(items[0]!.thread!)?.startedBy, phone, "and is queued as the person's at once");
   assert.notEqual((await detail()).attention, "decision");
 
   s.callAs(laptop);

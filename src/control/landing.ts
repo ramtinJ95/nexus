@@ -56,7 +56,7 @@ export function landing({ registry, release, mayLand, now, toPerson }: LandingDe
     ahead(r: Review): string | null {
       if (!deploys(r)) return null;
       if (isDraining(registry.drain(), registry.now())) return "a deploy drains the control plane";
-      for (const other of registry.reviews()) {
+      for (const other of registry.reviews.reviews()) {
         const verb = other.id === r.id || !deploys(other) ? null : landingVerb(other);
         if (verb !== null) return `${other.id} ${verb}`;
       }

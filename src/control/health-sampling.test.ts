@@ -23,7 +23,7 @@ function fleet(t: Parameters<typeof testRegistry>[0], nodes: Record<string, "onl
   const probes = new Map(Object.entries(nodes).map(([name, state]) => {
     const node = name as NodeName;
     registry.upsertNode({ name: node, tailnetHost: `${name}.tail.ts.net`, tailnetNodeId: `n${name}` as TailnetNodeId });
-    if (state === "online") registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+    if (state === "online") registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
     const client = { health: () => { reads.set(node, (reads.get(node) ?? 0) + 1); return answers.get(node)?.() ?? Promise.resolve(healthOf(node)); } };
     return [node, recordingHealth(client, (h) => registry.recordHealthSample(node, sampleOf(h, now, () => null)), (m) => logged.push(m))] as const;
   }));

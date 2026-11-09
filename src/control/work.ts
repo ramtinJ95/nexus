@@ -23,7 +23,7 @@ interface Work {
  * the cards, oldest first too, comes the work its pipeline phase holds for the person that no card acts on.
  */
 export function needsOf(w: Work, detail: (thread: Thread) => ServerDetail): InboxNeed[] {
-  const cleanups = w.registry.openNodeQuestions().map((question): InboxNeed => ({ kind: "cleanup", question, since: question.askedAt }));
+  const cleanups = w.registry.questions.openNodeQuestions().map((question): InboxNeed => ({ kind: "cleanup", question, since: question.askedAt }));
   const cardsOf = (t: Thread): ThreadNeed[] => {
     const needs = personNeeds(w.registry, t, w.now);
     if (needs.length === 0) return [];

@@ -201,7 +201,7 @@ test("the CLI runs a thread's life through the SOCKS proxy, and --json prints th
   assert.equal(thread.title, "Fix the build", "a thread started with a message is titled by its first line");
   // The first message is human activity, so only the time of the last one moved since the start replied.
   const stable = ({ lastHumanActivityAt: _, ...rest }: Thread) => rest;
-  assert.deepEqual(stable(s.registry.thread(thread.id)!), stable(thread));
+  assert.deepEqual(stable(s.registry.threads.thread(thread.id)!), stable(thread));
   assert.deepEqual(s.fake.calls.at(-1), ["send", thread.id, "\n  Fix the build  \nand run the tests", `brief:${thread.id}`, "followUp"]);
   assert.deepEqual((await s.json(["threads"])).map(stable), [{ ...stable(thread), attention: null, desired: "running", pylon: { node, actualState: "unknown", failed: null } }],
     "a row carries what the planner wants of the pylon and what its node last reported");
@@ -285,7 +285,7 @@ test("show says why an archived thread's disk is kept past its 24 hours, and not
   const s = await setup(t);
   const { id } = await s.json(["start", "--project", "acme", "--title", "Old spike"]);
   await s.json(["archive", id]);
-  s.registry.finishSettle(id, "its pylon did not boot within 10 minutes", Date.now());
+  s.registry.usage.finishSettle(id, "its pylon did not boot within 10 minutes", Date.now());
   const detail: ThreadDetail = await s.json(["show", id]);
   assert.equal(detail.thread.settleFailure?.count, 1, "show --json carries the archive's settle");
   const disk = (d: ThreadDetail) => detailText(d).split("\n").filter((line) => line.startsWith("disk:"));
@@ -329,7 +329,7 @@ test("show says an archived thread's usage is unread when its pylon could not be
   const s = await setup(t);
   const { id } = await s.json(["start", "--project", "acme", "--title", "Failed spike"]);
   await s.json(["archive", id]);
-  s.registry.markUnread(id, "its pylon failed: gave up after 5 failed attempts");
+  s.registry.threads.markUnread(id, "its pylon failed: gave up after 5 failed attempts");
   const detail: ThreadDetail = await s.json(["show", id]);
   assert.equal(detail.thread.usageUnread, "its pylon failed: gave up after 5 failed attempts", "show --json carries it");
   const lines = (d: ThreadDetail) => detailText(d).split("\n").filter((line) => line.startsWith("usage:") || line.startsWith("disk:"));
@@ -511,16 +511,16 @@ function watchLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: 
 
 /** Reports the node online with the thread's pylon running these services and listening on these ports, and its guest not answering if given. */
 function observeRunning(s: Awaited<ReturnType<typeof setup>>, thread: Thread, services: ServiceFact[], ports: number[], notAnswering?: { since: string; timeouts: number }) {
-  s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
-  s.registry.ingested(testObservation(node, {
-    pylons: [runningPylon(thread.pylonId, { liveHash: s.registry.pylon(thread.pylonId)!.liveHash, bootedFrom: { image: image.id, checkpoint: null }, services, listening: ports.map((port) => ({ port })), ...notAnswering === undefined ? {} : { notAnswering } })],
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  s.registry.threads.ingested(testObservation(node, {
+    pylons: [runningPylon(thread.pylonId, { liveHash: s.registry.threads.pylon(thread.pylonId)!.liveHash, bootedFrom: { image: image.id, checkpoint: null }, services, listening: ports.map((port) => ({ port })), ...notAnswering === undefined ? {} : { notAnswering } })],
   }), []);
 }
 
 /** Reports the node online with no pylon on it, so each thread's pylon is absent. */
 function observeAbsent(s: Awaited<ReturnType<typeof setup>>) {
-  s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
-  s.registry.ingested(testObservation(node), []);
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  s.registry.threads.ingested(testObservation(node), []);
 }
 
 test("ports lists what the pylon listens on, and preview publishes one and waits until it is served", async (t) => {
@@ -537,7 +537,7 @@ test("ports lists what the pylon listens on, and preview publishes one and waits
   const waiting = s.json(["preview", thread.id, "3000", "--wait"]);
   await until("the wait polls a published preview that is not served yet", () => s.requests() >= asked + 2);
   observeRunning(s, thread, [{ name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true }], [3000]);
-  s.registry.apply({ record: "preview", pylonId: thread.pylonId, service: "port-3000", httpsPort: 10200, ready: true });
+  s.registry.threads.apply({ record: "preview", pylonId: thread.pylonId, service: "port-3000", httpsPort: 10200, ready: true });
   assert.deepEqual(await waiting, { ...preview, ready: true });
   assert.equal((await s.nexus(["preview", thread.id, "3000", "--wait"])).stdout, `${preview.url}\n`);
   assert.equal((await s.nexus(["ports", thread.id])).stdout, `3000  port-3000  ${preview.url}\n`);
@@ -549,8 +549,8 @@ test("show reports a published preview whose service is starting as not ready, a
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "failed web"]);
   const web = (state: ServiceFact["state"]): ServiceFact => ({ name: "web", state, port: 8003, declared: true, wantsPreview: true });
   observeRunning(s, thread, [web("ready")], [8003]);
-  s.registry.allocatePreviews(thread.pylonId, ["web"], { first: 10200, last: 10299 });
-  s.registry.apply({ record: "preview", pylonId: thread.pylonId, service: "web", httpsPort: 10200, ready: true });
+  s.registry.threads.allocatePreviews(thread.pylonId, ["web"], { first: 10200, last: 10299 });
+  s.registry.threads.apply({ record: "preview", pylonId: thread.pylonId, service: "web", httpsPort: 10200, ready: true });
   const preview = { pylon: thread.pylonId, service: "web", httpsPort: 10200, ready: true, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" };
   assert.deepEqual((await s.json(["show", thread.id])).previews, [preview]);
 
@@ -744,7 +744,7 @@ test("session open opens Claude Code by default, waits for a paused pylon, and s
   assert.match(stale.stderr, /no session is open in pane w1:p1 .* A wake may have moved it/);
 
   // A paused session is refused at once, and its pylon is not asked.
-  s.registry.apply({ record: "sessions", pylonId: thread.pylonId, sessions: [
+  s.registry.threads.apply({ record: "sessions", pylonId: thread.pylonId, sessions: [
     { id: "w1:p1", state: "paused", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: null, title: "review", status: null, message: null },
     { id: "failed-0123456789ab", state: "failed", herdrPane: null, harness: "pi", harnessSessionId: null, title: "plan", status: null, message: "pi exited 1" },
   ] });
@@ -817,7 +817,7 @@ test("attach gives this terminal to the pylon's Herdr session through the SOCKS 
   assert.equal(attached.code, 0, attached.screen);
   assert.match(attached.screen, /herdr screen/);
   assert.deepEqual(argvs[0]!.slice(5, 8), ["100", "30", "xterm-256color"], "the terminal's size and TERM reached the pylon");
-  assert.ok(s.registry.thread(thread.id)!.lastHumanActivityAt >= before, "attaching is human activity");
+  assert.ok(s.registry.threads.thread(thread.id)!.lastHumanActivityAt >= before, "attaching is human activity");
   assert.ok(s.proxy.connects.length > 0 && s.proxy.connects.every((c) => c === `${apiName}:${s.api.port}`), "through the proxy");
 });
 
@@ -1031,7 +1031,7 @@ async function claudeWatched(t: TestContext, s: Awaited<ReturnType<typeof setup>
   let sequence = 0;
   return {
     thread, transcript: join(projects, "-home-user-workspace-repo", "s1.jsonl"),
-    report: (kind: "session.turn-started" | "session.turn-ended") => s.registry.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1" } }),
+    report: (kind: "session.turn-started" | "session.turn-ended") => s.registry.threads.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1" } }),
   };
 }
 
@@ -1107,10 +1107,10 @@ test("watch prints one new entry past the kept 3,000 of a Claude transcript, acr
   const read = (entries: ClaudeEntry[]) => {
     const from = { ...transcriptStart, offset };
     offset += entries.length;
-    assert.ok(s.registry.appendClaudeRead(thread.id, { session: "s1", from, entries, cursor: { ...transcriptStart, offset }, reset: false, readAt: Date.now() }));
+    assert.ok(s.registry.threads.appendClaudeRead(thread.id, { session: "s1", from, entries, cursor: { ...transcriptStart, offset }, reset: false, readAt: Date.now() }));
   };
   let sequence = 0;
-  const report = (kind: "session.turn-started" | "session.turn-ended") => s.registry.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1" } });
+  const report = (kind: "session.turn-started" | "session.turn-ended") => s.registry.threads.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1" } });
   read(Array.from({ length: 3000 }, (_, i) => prompt(i)));
   const watch = watchLines(t, s, [thread.id]);
   const first = await watch.next();
@@ -1386,22 +1386,22 @@ test("seen and --unread share the API marker without waking an archived thread",
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "read me"]);
   await s.json(["archive", thread.id]);
-  s.registry.recordReply(thread.id, 1000);
-  const before = s.registry.thread(thread.id)!;
+  s.registry.threads.recordReply(thread.id, 1000);
+  const before = s.registry.threads.thread(thread.id)!;
   assert.equal(await s.json(["seen", thread.id]), null);
-  assert.ok(s.registry.thread(thread.id)!.seenAt! >= 1000);
+  assert.ok(s.registry.threads.thread(thread.id)!.seenAt! >= 1000);
   assert.equal(await s.json(["seen", thread.id, "--unread"]), null);
-  assert.deepEqual(s.registry.thread(thread.id), { ...before, seenAt: 999 });
+  assert.deepEqual(s.registry.threads.thread(thread.id), { ...before, seenAt: 999 });
 });
 
 test("seen --last-reply-at marks only up to the reply the client showed, and never lowers the mark", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "read me"]);
-  s.registry.recordReply(thread.id, 1000);
-  s.registry.recordReply(thread.id, 2000);
+  s.registry.threads.recordReply(thread.id, 1000);
+  s.registry.threads.recordReply(thread.id, 2000);
   const seen = async (...flags: string[]) => {
     assert.equal(await s.json(["seen", thread.id, ...flags]), null);
-    return s.registry.thread(thread.id)!.seenAt;
+    return s.registry.threads.thread(thread.id)!.seenAt;
   };
   assert.equal(await seen("--last-reply-at", "1000"), 1000, "a reply that landed after the one shown stays unread");
   assert.equal((await s.json(["show", thread.id])).attention, "reply");
@@ -1412,18 +1412,18 @@ test("seen --last-reply-at marks only up to the reply the client showed, and nev
     const refused = await s.nexus(["seen", thread.id, ...flags]);
     assert.equal(refused.code, 64, flags.join(" "));
   }
-  assert.equal(s.registry.thread(thread.id)!.seenAt, 2000);
+  assert.equal(s.registry.threads.thread(thread.id)!.seenAt, 2000);
 });
 
 test("seen encodes a thread ID so it cannot become an unarchive request", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Stay archived"]);
   await s.json(["archive", thread.id]);
-  const before = s.registry.thread(thread.id);
+  const before = s.registry.threads.thread(thread.id);
   for (const flags of [[], ["--unread"]]) {
     const result = await s.nexus(["seen", `${thread.id}/unarchive?`, ...flags, "--json"]);
     assert.equal(result.code, 4, result.stderr);
-    assert.deepEqual(s.registry.thread(thread.id), before);
+    assert.deepEqual(s.registry.threads.thread(thread.id), before);
   }
 });
 
@@ -1431,8 +1431,8 @@ test("start --node auto picks the node with room, show says why, and nodes print
   const s = await setup(t);
   s.registry.upsertNode({ name: "spare" as NodeName, tailnetHost: "spare.tail.ts.net", tailnetNodeId: "nSPARE" as TailnetNodeId });
   const capacity = testCapacity({ committedCpus: 6, memoryGiB: 62.75, committedMemoryGiB: 16, diskFreeGiB: 180.25, committedDiskGiB: 120 });
-  s.registry.apply({ record: "node", node, state: "online", capacity });
-  s.registry.ingested(testObservation(node, { capacity, artifacts: [image.id] }), []);
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity });
+  s.registry.threads.ingested(testObservation(node, { capacity, artifacts: [image.id] }), []);
   assert.match((await s.nexus(["nodes"])).stdout, /^rj-firebat +online +observed .+ {2}6\/16 CPUs, 16\/62\.8 GiB memory committed, 120 GiB disk committed, 180\.3 GiB disk free$/m);
 
   const plain: Thread = await s.json(["start", "--project", "acme", "--title", "default"]);
@@ -1463,21 +1463,21 @@ test("show says how the pylon got its setup: fresh and why, with the build it as
   assert.equal((await s.json(["show", failed.thread.id])).thread.setup.reason, `the build of template ${building!.id} failed on rj-firebat: ${log}`);
 
   s.registry.saveTemplate({ id: building!.id, key: building!.key, state: "ready", builtOn: node, builtAt: Date.now() - 3 * 60_000, commit: "2".repeat(40) });
-  s.registry.ingested(testObservation(node, { artifacts: [image.id, building!.id] }), []);
+  s.registry.threads.ingested(testObservation(node, { artifacts: [image.id, building!.id] }), []);
   assert.equal((await shown("reused")).line, `setup: from template ${building!.id}, built 3m ago, then checked out 222222222222`);
 });
 
 test("start --cpus, --memory and --disk size the thread over its project's, and show prints the size", async (t) => {
   const s = await setup(t);
   const sized: Thread = await s.json(["start", "--project", "acme", "--title", "sized", "--memory", "12", "--cpus", "4"]);
-  assert.deepEqual(s.registry.pylon(sized.pylonId)!.boot.resources, { cpus: 4, memoryGiB: 12, diskGiB: 10 }, "the disk it leaves out is the project's");
+  assert.deepEqual(s.registry.threads.pylon(sized.pylonId)!.boot.resources, { cpus: 4, memoryGiB: 12, diskGiB: 10 }, "the disk it leaves out is the project's");
   assert.match((await s.nexus(["show", sized.id])).stdout, /^size: 4 CPUs, 12 GiB memory, 10 GiB disk$/m);
   const disk: Thread = await s.json(["start", "--project", "acme", "--title", "disk", "--disk", "40"]);
-  assert.deepEqual(s.registry.pylon(disk.pylonId)!.boot.resources, { cpus: 2, memoryGiB: 4, diskGiB: 40 });
+  assert.deepEqual(s.registry.threads.pylon(disk.pylonId)!.boot.resources, { cpus: 2, memoryGiB: 4, diskGiB: 40 });
   const plain: Thread = await s.json(["start", "--project", "acme", "--title", "plain"]);
   assert.match((await s.nexus(["show", plain.id])).stdout, /^size: 2 CPUs, 4 GiB memory, 10 GiB disk$/m, "a thread started without them has its project's size");
-  const pylon = s.registry.pylon(plain.pylonId)!;
-  s.registry.savePylon({ ...pylon, boot: { ...pylon.boot, resources: { ...pylon.boot.resources, memoryGiB: 8, nestedVirtualization: true } } });
+  const pylon = s.registry.threads.pylon(plain.pylonId)!;
+  s.registry.threads.savePylon({ ...pylon, boot: { ...pylon.boot, resources: { ...pylon.boot.resources, memoryGiB: 8, nestedVirtualization: true } } });
   assert.match((await s.nexus(["show", plain.id])).stdout, /^size: 2 CPUs, 8 GiB memory, 10 GiB disk, nested virtualization$/m, "a verify pylon's size says it nests");
 
   for (const [flag, value, status] of [["--memory", "0", 400], ["--cpus", "-2", null], ["--disk", "1.5", null], ["--memory", "lots", null]] as const) {
@@ -1493,9 +1493,9 @@ test("nodes marks an overcommitted node and says what its pylons hold", async (t
   const [up, paused, archived, crashed] = await Promise.all(["up", "paused", "archived", "crashed"].map((title) => s.json(["start", "--project", "acme", "--title", title]))) as Thread[];
   await s.nexus(["archive", archived!.id]);
   const capacity = testCapacity({ cpus: 8, committedCpus: 2, memoryGiB: 22.8, committedMemoryGiB: 40, committedDiskGiB: 30 });
-  s.registry.apply({ record: "node", node, state: "online", capacity });
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity });
   const stopped = (t: Thread) => stoppedPylon(t.pylonId, { sessions: null });
-  s.registry.ingested(testObservation(node, {
+  s.registry.threads.ingested(testObservation(node, {
     capacity, artifacts: [image.id],
     pylons: [{ pylonId: up!.pylonId, phase: "booting" }, stopped(paused!), stopped(archived!), { pylonId: "pylon-x" as PylonId, phase: "booting" },
       { pylonId: crashed!.pylonId, phase: "broken", detail: "the controller exited", cause: "controller", logTail: "" }],
@@ -1508,7 +1508,7 @@ test("nodes marks an overcommitted node and says what its pylons hold", async (t
 test("nodes prints what an older probe does not count as unknown, never as 0, with --json or without", async (t) => {
   const s = await setup(t);
   const capacity = { memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100 } as never;
-  s.registry.apply({ record: "node", node, state: "online", capacity });
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity });
   const text = await s.nexus(["nodes"]);
   assert.equal(text.code, 0, text.stderr);
   assert.match(text.stdout, /^rj-firebat +online +.+ {2}unknown\/unknown CPUs, unknown\/64 GiB memory committed, unknown GiB disk committed, 100 GiB disk free$/m);
@@ -1521,7 +1521,7 @@ test("nodes says on a node's row which of its filesystems is low, and node print
     { paths: ["/var/lib/nexus/pylons", "/var/lib/nexus/artifacts"], totalGiB: 1000, freeGiB: 99, pylons: true as const },
     { paths: ["/opt/nexus/releases"], totalGiB: 50, freeGiB: 30 },
   ];
-  s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity({ diskFreeGiB: 99, disks }) });
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity({ diskFreeGiB: 99, disks }) });
   assert.match((await s.nexus(["nodes"])).stdout, /^rj-firebat +online +.+, 99 GiB disk free, disk low at \/var\/lib\/nexus\/pylons, \/var\/lib\/nexus\/artifacts$/m,
     "99 of 1000 GiB is under 10%, and 30 GiB of 50 is neither under 20 GiB nor under 10%");
   const health: NodeHealth = {
@@ -1536,8 +1536,8 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "PR"]);
   const pr = testPr({ number: 12, title: "Fix build", checks: "failed", review: "changes_requested" });
-  s.registry.savePrWatch(thread.id, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
-  const before = s.registry.thread(thread.id)!.lastHumanActivityAt;
+  s.registry.prWatches.savePrWatch(thread.id, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  const before = s.registry.threads.thread(thread.id)!.lastHumanActivityAt;
   const shown = await s.nexus(["show", thread.id]);
   assert.equal(shown.code, 0, shown.stderr);
   assert.match(shown.stdout, /PR #12: Fix build — open, checks failed, review changes_requested/);
@@ -1545,22 +1545,22 @@ test("show prints PR metadata and one disabled-watch notice without waking the p
   const detail = await s.json(["show", thread.id]);
   assert.deepEqual(detail.pullRequests, [pr]);
   assert.equal(detail.prWatch.enabled, false);
-  assert.equal(s.registry.thread(thread.id)!.lastHumanActivityAt, before);
+  assert.equal(s.registry.threads.thread(thread.id)!.lastHumanActivityAt, before);
 });
 
 test("show prints each question with its options, its reserved case, and who must answer it or how it was answered", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Image"]);
-  s.registry.askQuestion({ kind: "holds", id: "qn-image", thread: thread.id, text: "Rebuild the pylon image?\nIt changes the base layer.", options: ["Rebuild", "Not now"], reserved: "image-rebuild", answerer: "deployer", askedAt: 1, holds: { review: "rv-1", head: "h", base: null, holds: [] } });
-  s.registry.askQuestion({ kind: "judgment", id: "qn-brief", thread: thread.id, text: "Start the next brief?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: 2, failure: 0 });
+  s.registry.questions.askQuestion({ kind: "holds", id: "qn-image", thread: thread.id, text: "Rebuild the pylon image?\nIt changes the base layer.", options: ["Rebuild", "Not now"], reserved: "image-rebuild", answerer: "deployer", askedAt: 1, holds: { review: "rv-1", head: "h", base: null, holds: [] } });
+  s.registry.questions.askQuestion({ kind: "judgment", id: "qn-brief", thread: thread.id, text: "Start the next brief?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: 2, failure: 0 });
   const shown = await s.nexus(["show", thread.id]);
   assert.equal(shown.code, 0, shown.stderr);
   assert.match(shown.stdout, /^attention: decision$/m);
   assert.match(shown.stdout, /^question qn-image: Rebuild the pylon image\?\n {2}options: "Rebuild", "Not now"\n {2}reserved: pylon image rebuilds\n {2}needs a deployer\nquestion qn-brief: Start the next brief\?\n {2}options: "Yes", "No"\n {2}needs you$/m);
-  s.registry.answerQuestion(s.registry.question("qn-brief")!, { option: "Yes", by: laptop, at: Date.UTC(2026, 9, 28, 9) });
+  s.registry.questions.answerQuestion(s.registry.questions.question("qn-brief")!, { option: "Yes", by: laptop, at: Date.UTC(2026, 9, 28, 9) });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^question qn-brief: Start the next brief\?\n {2}options: "Yes", "No"\n {2}answered "Yes" by nLAPTOP at 2026-10-28T09:00:00.000Z$/m);
   assert.deepEqual((await s.json(["show", thread.id])).questions.map((q: { id: string }) => q.id), ["qn-image", "qn-brief"]);
-  s.registry.askQuestion({ kind: "judgment", id: "qn-failed", thread: thread.id, text: "The pylon failed.", options: ["Retry"], reserved: null, answerer: "person", askedAt: 3, failure: 1 });
+  s.registry.questions.askQuestion({ kind: "judgment", id: "qn-failed", thread: thread.id, text: "The pylon failed.", options: ["Retry"], reserved: null, answerer: "person", askedAt: 3, failure: 1 });
   await s.json(["archive", thread.id]);
   const { at } = (await s.json(["show", thread.id])).questions.find((q: Question) => q.id === "qn-failed").withdrawn;
   assert.ok((await s.nexus(["show", thread.id])).stdout.includes(`question qn-failed: The pylon failed.\n  options: "Retry"\n  withdrawn when the thread was archived at ${new Date(at).toISOString()}\n`), "archiving withdraws an open failure question, at the time the API records");
@@ -1574,9 +1574,9 @@ test("show prints a Claude worker's ask with a line per question it asks, and th
     { question: "Which drink?", header: "Drink", multiSelect: false, options: [option("Tea"), option("Coffee")] },
     { question: "What goes in it?", header: "Extras", multiSelect: true, options: [option("Milk"), option("Sugar")] },
   ];
-  s.registry.askQuestion({ kind: "ask", id: "ask-toolu_1", thread: thread.id, text: "Drink: Which drink?\nExtras: What goes in it?", options: [], reserved: null, answerer: "person", askedAt: 1, ask: { session: "s1", toolUseId: "toolu_1", questions } });
+  s.registry.questions.askQuestion({ kind: "ask", id: "ask-toolu_1", thread: thread.id, text: "Drink: Which drink?\nExtras: What goes in it?", options: [], reserved: null, answerer: "person", askedAt: 1, ask: { session: "s1", toolUseId: "toolu_1", questions } });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^question ask-toolu_1: Drink: Which drink\?\n {2}Extras: What goes in it\?\n {2}needs you$/m);
-  s.registry.answerQuestion(s.registry.question("ask-toolu_1")!, { option: "Drink: Tea; Extras: Milk, Oat cream", by: laptop, at: Date.UTC(2026, 9, 28, 9), choices: [{ picked: ["Tea"] }, { picked: ["Milk"], own: "Oat cream" }] });
+  s.registry.questions.answerQuestion(s.registry.questions.question("ask-toolu_1")!, { option: "Drink: Tea; Extras: Milk, Oat cream", by: laptop, at: Date.UTC(2026, 9, 28, 9), choices: [{ picked: ["Tea"] }, { picked: ["Milk"], own: "Oat cream" }] });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^question ask-toolu_1: Drink: Which drink\?\n {2}Extras: What goes in it\?\n {2}answered "Drink: Tea; Extras: Milk, Oat cream" by nLAPTOP at 2026-10-28T09:00:00.000Z$/m);
 });
 
@@ -1620,8 +1620,8 @@ test("image list and current print each image's role, build, release and nodes, 
   const s = await setup(t);
   const older: ImageManifest = { ...image, id: "img-00000000000a" as ImageId, builtAt: "2026-12-01T00:00:00Z" };
   s.registry.saveImage(older, "f".repeat(40));
-  s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
-  s.registry.ingested(testObservation(node, { artifacts: [image.id, older.id] }), []);
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  s.registry.threads.ingested(testObservation(node, { artifacts: [image.id, older.id] }), []);
   const entry = { ...image, release: null, nodes: [node] };
   const olderEntry = { ...older, release: "f".repeat(40), nodes: [node] };
 
@@ -1660,7 +1660,7 @@ test("review and land reach the review loop's routes, and show prints a review a
     models: { builder: "gpt-6-astra", reviewer: "claude-opus-5-5" },
     phase: { ...personPhase("rounds", "The reviewer still requests changes after 5 rounds, the most this review allows.", "Nexus could not add the label \"needs human review\" to pull request #7 (GitHub answered 403: Forbidden)."), label: { state: "failed", why: "GitHub answered 403: Forbidden" } },
   });
-  s.registry.saveReview(review);
+  s.registry.reviews.saveReview(review);
   const shown = await s.nexus(["show", thread.id]);
   assert.match(shown.stdout, /^attention: decision$/m);
   assert.match(shown.stdout, /^review rv-1 of PR #7: needs-person, round 1 of 5, reviewer th-reviewer on claude-opus-5-5, label "needs human review" not added$/m);
@@ -1670,32 +1670,32 @@ test("review and land reach the review loop's routes, and show prints a review a
   assert.ok(!("review" in json), "show --json sends no stored review, and so no token");
   assert.deepEqual(json.reviewView, reviewView(review, []));
 
-  s.registry.saveReview({ ...review, phase: { kind: "cancelled", who: "reviewer", status: "archived" } });
+  s.registry.reviews.saveReview({ ...review, phase: { kind: "cancelled", who: "reviewer", status: "archived" } });
   const cancelled = await s.nexus(["show", thread.id]);
   assert.match(cancelled.stdout, /^review rv-1 of PR #7: cancelled, round 1 of 5, reviewer th-reviewer on claude-opus-5-5, the reviewer thread th-reviewer was archived$/m);
   assert.doesNotMatch(cancelled.stdout, /^attention: decision$|^needs you:/m);
-  s.registry.saveReview({ ...review, phase: { kind: "merged" } });
+  s.registry.reviews.saveReview({ ...review, phase: { kind: "merged" } });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^review rv-1 of PR #7: merged, round 1 of 5, reviewer th-reviewer on claude-opus-5-5$/m);
 
   const head = "1".repeat(40);
   const checked = { ...review.rounds[0]!, check: { passed: true, output: "ok" } };
-  s.registry.saveReview({ ...review, rounds: [checked], phase: { kind: "verifying", startedAt: 0, thread: "th-0123456789ab" as ThreadId } });
+  s.registry.reviews.saveReview({ ...review, rounds: [checked], phase: { kind: "verifying", startedAt: 0, thread: "th-0123456789ab" as ThreadId } });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^review rv-1 of PR #7: verifying, .*\nlive check running \.nexus\/verify at 111111111111 in verify pylon th-0123456789ab$/m);
-  s.registry.saveReview({ ...review, rounds: [{ ...checked, live: { kind: "ran", thread: "th-0123456789ab" as ThreadId, passed: false, output: "booting the fleet\nthe thread never reported running" } }], phase: { kind: "fixing" } });
+  s.registry.reviews.saveReview({ ...review, rounds: [{ ...checked, live: { kind: "ran", thread: "th-0123456789ab" as ThreadId, passed: false, output: "booting the fleet\nthe thread never reported running" } }], phase: { kind: "fixing" } });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^live check failed at 111111111111\n {2}booting the fleet\n {2}the thread never reported running$/m);
-  s.registry.saveReview({ ...review, rounds: [{ ...checked, live: { kind: "ran", thread: "th-0123456789ab" as ThreadId, passed: true, output: "fleet ok" } }], phase: { kind: "approved" } });
+  s.registry.reviews.saveReview({ ...review, rounds: [{ ...checked, live: { kind: "ran", thread: "th-0123456789ab" as ThreadId, passed: true, output: "fleet ok" } }], phase: { kind: "approved" } });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^live check passed at 111111111111$/m);
-  s.registry.saveReview({ ...review, rounds: [checked], phase: personPhase("no-verdict", { code: "live-failed", text: `The live check could not run at ${head}.` }) });
+  s.registry.reviews.saveReview({ ...review, rounds: [checked], phase: personPhase("no-verdict", { code: "live-failed", text: `The live check could not run at ${head}.` }) });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^no live check ran at 111111111111$/m, "a live check that gave no verdict is not a missing script");
-  s.registry.saveReview({ ...review, rounds: [{ ...checked, live: { kind: "absent" } }], phase: { kind: "approved" } });
+  s.registry.reviews.saveReview({ ...review, rounds: [{ ...checked, live: { kind: "absent" } }], phase: { kind: "approved" } });
   assert.match((await s.nexus(["show", thread.id])).stdout, new RegExp(`^no live check: ${head.slice(0, 12)} has no \\.nexus/verify, so the landing reads the pull request's statement of what could not be checked live$`, "m"));
 
   const approval = { ...checked, verdict: { token: "a", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: null } };
-  s.registry.saveReview({ ...review, rounds: [approval, { head: "2".repeat(40), verdict: null, check: null, answers: null }], phase: { kind: "reviewing" } });
+  s.registry.reviews.saveReview({ ...review, rounds: [approval, { head: "2".repeat(40), verdict: null, check: null, answers: null }], phase: { kind: "reviewing" } });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^review rv-1 of PR #7: reviewing, round 2 of 5, .*\na new round reviews 222222222222, since the pull request's head moved from 111111111111 after its approval$/m);
 
   const hold = "Always needs the person: changes to login or auth, as it changes src/control/api.ts.";
-  s.registry.saveReview({ ...review, land: { requestedBy: "nLAPTOP" }, phase: { kind: "landed", commit: "4".repeat(40) }, waiver: { head: "1".repeat(40), holds: [hold], codes: ["reserved-path:auth"], by: "nLAPTOP", at: Date.UTC(2026, 9, 27, 9), change: null } });
+  s.registry.reviews.saveReview({ ...review, land: { requestedBy: "nLAPTOP" }, phase: { kind: "landed", commit: "4".repeat(40) }, waiver: { head: "1".repeat(40), holds: [hold], codes: ["reserved-path:auth"], by: "nLAPTOP", at: Date.UTC(2026, 9, 27, 9), change: null } });
   const waived = await s.nexus(["show", thread.id]);
   assert.match(waived.stdout, new RegExp(`^waived by nLAPTOP at ${"1".repeat(40)}, 2026-10-27T09:00:00.000Z:\n  ${hold.replace(/[.()]/g, "\\$&")}$`, "m"));
   const events = await s.nexus(["events", "--thread", thread.id, "--kind", "review.waived"]);
@@ -1714,13 +1714,13 @@ test("show says when a review's approval and the person's waiver carried to a re
     phase: { kind: "checking", startedAt: 0, thread: null },
     waiver: { head: b, from: a, holds: [hold], codes: ["reserved-path:auth"], by: "nLAPTOP", at: Date.UTC(2026, 10, 1, 9), change: { kind: "known", base: "main", files: [] } },
   });
-  s.registry.saveReview(review);
+  s.registry.reviews.saveReview(review);
   const shown = (await s.nexus(["show", thread.id])).stdout;
   assert.match(shown, /^review rv-1 of PR #7: checking, round 1 of 5, .*\napproval carried from 111111111111 to 222222222222: same change after a rebase$/m, "a carried approval spends no round");
   assert.match(shown, new RegExp(`^waived by nLAPTOP at ${b} \\(carried from ${a}\\), 2026-11-01T09:00:00.000Z:$`, "m"));
 
   const differs = "The change at 222222222222 differs from the one nLAPTOP pressed Land for at 111111111111, in src/control/api.ts, so that waiver does not carry over. Look at that file again, and press Land to waive the holds at 222222222222.";
-  s.registry.saveReview({ ...review, phase: personPhase("policy", { code: "waiver-not-carried", text: differs }, { code: "reserved-path:auth", text: hold }) });
+  s.registry.reviews.saveReview({ ...review, phase: personPhase("policy", { code: "waiver-not-carried", text: differs }, { code: "reserved-path:auth", text: hold }) });
   assert.match((await s.nexus(["show", thread.id])).stdout, new RegExp(`^needs you: ${differs.replace(/[.()]/g, "\\$&")}$`, "m"));
 });
 
@@ -1740,11 +1740,11 @@ test("review --cancel ends the thread's running review through its route, and pr
 
 test("land --waive without a terminal refuses before it reads or sends anything, and land alone sends no waiver", async (t) => {
   const asked: unknown[][] = [];
-  const reviews = { land(builder: ThreadId, by: string, head?: string, waive?: readonly string[]) { asked.push([builder, by, head, waive]); return s.registry.review(builder)!; } } as never as ReviewLoop;
+  const reviews = { land(builder: ThreadId, by: string, head?: string, waive?: readonly string[]) { asked.push([builder, by, head, waive]); return s.registry.reviews.review(builder)!; } } as never as ReviewLoop;
   const s = await setup(t, { reviews });
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Cache"]);
   const egress = { code: "reserved-path:egress" as const, text: "Always needs the person: changes to the egress allowlist, as it changes src/control/threads.ts." };
-  s.registry.saveReview(testReview({ builder: thread.id, phase: { kind: "approved" }, rounds: [{ ...approvedRound, heldAt: { base: "main", holds: [egress] } }] }));
+  s.registry.reviews.saveReview(testReview({ builder: thread.id, phase: { kind: "approved" }, rounds: [{ ...approvedRound, heldAt: { base: "main", holds: [egress] } }] }));
   const refused = await s.nexus(["land", thread.id, "--waive"]);
   assert.equal(refused.code, 64);
   assert.match(refused.stderr, /stdin or stderr is not a terminal/);
@@ -1957,8 +1957,8 @@ test("project add and edit exit 64 for duplicate secret names and explain how to
 
 test("events prints one JSON object per line and resumes after a cursor", async (t) => {
   const s = await setup(t);
-  const first = s.registry.appendEvent("release.changed", null, { state: "pending" });
-  const second = s.registry.appendEvent("release.changed", null, { state: "healthy" });
+  const first = s.registry.threads.appendEvent("release.changed", null, { state: "pending" });
+  const second = s.registry.threads.appendEvent("release.changed", null, { state: "healthy" });
   const reply = await s.nexus(["events", "--since", first.id, "--kind", "release.changed", "--json"]);
   assert.equal(reply.code, 0, reply.stderr);
   assert.deepEqual(reply.stdout.trim().split("\n").map((line) => JSON.parse(line)), [second]);
@@ -1968,7 +1968,7 @@ test("start --claude queues a poteto worker without sending a harness message", 
   const s = await setup(t);
   const thread = await s.json(["start", "--project", "acme", "--claude", "/poteto-mode fix it"]);
   assert.equal(thread.conversationId, null);
-  assert.deepEqual(s.registry.claudeWorker(thread.id), { model: "claude-opus-5-5", prompt: "/poteto-mode fix it", state: "pending", session: null });
+  assert.deepEqual(s.registry.threads.claudeWorker(thread.id), { model: "claude-opus-5-5", prompt: "/poteto-mode fix it", state: "pending", session: null });
   assert.equal((await s.nexus(["start", "--project", "acme", "--claude", "fix", "--message", "also fix"])).code, 64);
 });
 
@@ -2094,7 +2094,7 @@ test("show exposes the registry's failed worker and its selected model", async (
   const text = (await s.nexus(["show", thread.id])).stdout;
   assert.match(text, /Claude worker: failed, model claude-sonnet-5-5/);
   assert.ok(text.includes(message));
-  assert.equal(s.registry.events().filter((e) => e.kind === "thread.failed").at(-1)?.payload.message, detail.claudeWorker.message);
+  assert.equal(s.registry.threads.events().filter((e) => e.kind === "thread.failed").at(-1)?.payload.message, detail.claudeWorker.message);
   assert.equal((await s.nexus(["start", "--project", "acme", "--title", "no worker", "--model", "x"])).code, 64);
 });
 
@@ -2103,7 +2103,7 @@ test("threads and show say a Claude worker is working while its session's turn r
   const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
   claudeWorkerAt(s.registry, thread.id, "started", { session: "s1" });
   const report = (sequence: number, kind: "session.turn-started" | "session.turn-ended") =>
-    s.registry.reportSession(node, { sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1" } });
+    s.registry.threads.reportSession(node, { sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1" } });
   report(1, "session.turn-started");
   assert.match((await s.nexus(["threads"])).stdout, new RegExp(`${thread.id} +active +working +pylon`));
   assert.match((await s.nexus(["show", thread.id])).stdout, /^status: active, agent working$/m);
@@ -2119,7 +2119,7 @@ test("threads, show and conversation say a Claude worker stopped on its usage li
   const resetsAt = Date.now() + 3_600_000;
   const until = `${new Date(resetsAt).toISOString().slice(11, 16)} UTC`;
   const entries: ClaudeEntry[] = [{ kind: "notice", at: 1, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt } }];
-  s.registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt: Date.now() });
+  s.registry.threads.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt: Date.now() });
   assert.match((await s.nexus(["threads"])).stdout, new RegExp(`${thread.id} +active +stopped on its usage limit until ${until}`));
   const shown = (await s.nexus(["show", thread.id])).stdout;
   assert.ok(shown.includes("attention: limited"), shown);
@@ -2132,14 +2132,14 @@ test("show says a Claude worker's turn died, when Nexus resumes it, and why Nexu
   const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
   claudeWorkerAt(s.registry, thread.id, "started", { session: "s1" });
   const report = (sequence: number, kind: "session.turn-started" | "session.ended", at: number) =>
-    s.registry.reportSession(node, { sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1", at } });
+    s.registry.threads.reportSession(node, { sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1", at } });
   report(1, "session.turn-started", 1_000);
   report(2, "session.ended", 4_000);
   assert.match((await s.nexus(["show", thread.id])).stdout, /^turn died: its Claude session ended during the turn, at 1970-01-01T00:00:04\.000Z$/m);
-  s.registry.saveClaudeResume(thread.id, { state: "waiting", turn: 4_000, count: 1, due: 64_000 });
+  s.registry.threads.saveClaudeResume(thread.id, { state: "waiting", turn: 4_000, count: 1, due: 64_000 });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^turn died: its Claude session ended during the turn, at 1970-01-01T00:00:04\.000Z; Nexus resumes it at 1970-01-01T00:01:04\.000Z, 1 in a row$/m);
   const why = "Its turn died 4 times in a row (last: its Claude session ended during the turn), so Nexus stopped resuming it.";
-  s.registry.saveClaudeResume(thread.id, { state: "person", turn: 4_000, count: 3, why });
+  s.registry.threads.saveClaudeResume(thread.id, { state: "person", turn: 4_000, count: 3, why });
   const shown = (await s.nexus(["show", thread.id])).stdout;
   assert.ok(shown.includes("attention: decision"), shown);
   assert.ok(shown.includes(`resume: stopped. ${why} Write to it to resume it`), shown);
@@ -2167,7 +2167,7 @@ test("conversation prints a Claude worker's transcript, and send types into its 
     { kind: "tool", at: 12, id: "t3", name: "Read", input: { file_path: "hello.py" } },
   ];
   const readAt = Date.now();
-  s.registry.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt });
+  s.registry.threads.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt });
 
   assert.deepEqual(await s.json(["conversation", thread.id]), { kind: "claude", session: "s1", entries, dropped: 0, readAt, working: false, usageLimit: null }, "--json prints the API's reply");
   const transcript = [
@@ -2183,7 +2183,7 @@ test("conversation prints a Claude worker's transcript, and send types into its 
     "> [slash command] /compact",
   ];
   assert.equal((await s.nexus(["conversation", thread.id])).stdout, [...transcript, '[tool] Read {"file_path":"hello.py"} (no result)', "(queued) > and then deploy"].join("\n\n") + "\n");
-  s.registry.reportSession(node, { sequence: 1, pylon: thread.pylonId, time: Date.now(), event: { kind: "session.turn-started", session: "s1" } });
+  s.registry.threads.reportSession(node, { sequence: 1, pylon: thread.pylonId, time: Date.now(), event: { kind: "session.turn-started", session: "s1" } });
   assert.equal((await s.nexus(["conversation", thread.id])).stdout, [...transcript, '[tool] Read {"file_path":"hello.py"} (running)', "(queued) > and then deploy", "(Claude is working)"].join("\n\n") + "\n");
 
   let refusals = 2;
@@ -2293,7 +2293,7 @@ test("item add lines up items behind each other, project edit --pipeline decides
 
   const approved = await s.nexus(["item", "approve", a!.id]);
   assert.equal(approved.code, 0, approved.stderr);
-  const thread = s.registry.queuedThread(s.registry.queuedThreads()[0]!.id)!;
+  const thread = s.registry.queue.queuedThread(s.registry.queue.queuedThreads()[0]!.id)!;
   assert.match(approved.stdout, new RegExp(`^Approved ${a!.id}\\. It is (queued|building): `));
   assert.equal(thread.message, "Build A\nwith tests", "the brief is the queued thread's first message");
   const cancelled = await s.nexus(["item", "cancel", b.id]);
@@ -2322,7 +2322,7 @@ test("start --after queues a thread in one request, and threads, show, start-que
   const queuedText = await s.nexus(["start", "--project", "acme", "--message", "Fix the next bug\nthen push", "--after", `${first.id}, ${second.id}`]);
   assert.equal(queuedText.code, 0, queuedText.stderr);
   assert.equal(s.requests() - before, 1, "one request queues it with its first message");
-  const [record] = s.registry.queuedThreads();
+  const [record] = s.registry.queue.queuedThreads();
   const id = record!.id;
   assert.equal(queuedText.stdout, `Queued ${id} on acme: Fix the next bug. It starts once ${first.id} and ${second.id} have merged their pull requests.\n`);
   assert.equal(record!.message, "Fix the next bug\nthen push");
@@ -2335,8 +2335,8 @@ test("start --after queues a thread in one request, and threads, show, start-que
   assert.equal((await s.nexus(["start", "--project", "acme", "--title", "x", "--after", ","])).code, 64);
 
   const pr = (number: number, state: "open" | "closed") => ({ pr: { repo: "octocat/Spoon-Knife", number, title: "PR", url: "", state, checks: "none" as const, review: "none", conflict: null }, seen: [], failed: false });
-  s.registry.savePrWatch(first.id, { links: [pr(3, "open")], commentWakes: 0, pending: null, error: null });
-  s.registry.savePrWatch(second.id, { links: [pr(4, "closed")], commentWakes: 0, pending: null, error: null });
+  s.registry.prWatches.savePrWatch(first.id, { links: [pr(3, "open")], commentWakes: 0, pending: null, error: null });
+  s.registry.prWatches.savePrWatch(second.id, { links: [pr(4, "closed")], commentWakes: 0, pending: null, error: null });
   const rows = (await s.nexus(["threads"])).stdout;
   assert.match(rows, new RegExp(`^${id}\\s+blocked\\s+blocked by ${second.id}: PR #4 closed without merging\\s+node rj-firebat\\s+acme\\s+\\S+ ago\\s+Fix the next bug$`, "m"));
   assert.match(rows, new RegExp(`^${later.id}\\s+queued\\s+waits for ${id}: is queued\\s`, "m"));
@@ -2396,11 +2396,11 @@ test("usage backfill starts a run, --dry-run lists what it would read, --stop st
   assert.equal((await s.json(["usage", "backfill", "--stop"])).state, "stopped", "--json prints the API's state");
   assert.equal((await s.nexus(["usage", "backfill", "--dry-run", "--stop"])).code, 64);
 
-  s.registry.startUsageBackfill([old.id, gone.id], Date.parse("2026-10-28T09:00:00Z"));
-  s.registry.recordUsage(old.id, Array.from({ length: 1234 }, (_, i) => ({ id: `claude:msg_${i}`, agent: "claude" as const, model: "claude-opus-5-5", at: 1_000, input: i === 0 ? 5_600_000 - 1233 : 1, output: 0, cacheWrite: 0, cacheRead: 0 })), [], true);
-  s.registry.finishUsageBackfillThread(old.id, "done", null, Date.parse("2026-10-28T09:10:00Z"));
-  s.registry.finishUsageBackfillThread(gone.id, "skipped", "rj-firebat holds no disk for its pylon", Date.parse("2026-10-28T09:11:00Z"));
-  s.registry.finishUsageBackfill(Date.parse("2026-10-28T09:12:00Z"));
+  s.registry.usage.startUsageBackfill([old.id, gone.id], Date.parse("2026-10-28T09:00:00Z"));
+  s.registry.usage.recordUsage(old.id, Array.from({ length: 1234 }, (_, i) => ({ id: `claude:msg_${i}`, agent: "claude" as const, model: "claude-opus-5-5", at: 1_000, input: i === 0 ? 5_600_000 - 1233 : 1, output: 0, cacheWrite: 0, cacheRead: 0 })), [], true);
+  s.registry.usage.finishUsageBackfillThread(old.id, "done", null, Date.parse("2026-10-28T09:10:00Z"));
+  s.registry.usage.finishUsageBackfillThread(gone.id, "skipped", "rj-firebat holds no disk for its pylon", Date.parse("2026-10-28T09:11:00Z"));
+  s.registry.usage.finishUsageBackfill(Date.parse("2026-10-28T09:12:00Z"));
   assert.equal(await backfillLine(), `Backfill: done at 2026-10-28 09:12 UTC, 2 of 2 threads read, 1 skipped, recovered 1234 calls and 5.6M tokens.\nSkipped:\n${gone.id}  Gone  rj-firebat holds no disk for its pylon`);
   assert.equal((await s.nexus(["usage", "backfill", "--dry-run"])).stdout, `A start reads 1 archived thread, one pylon at a time:\n${gone.id}  acme  rj-firebat  Gone\n  skipped before: rj-firebat holds no disk for its pylon\n`);
 });
@@ -2411,7 +2411,7 @@ test("usage prints the tokens of the last 7 days in all and by each breakdown, -
   const hour = 3_600_000;
   const call = (id: string, agent: "claude" | "pi", model: string, ago: number, [input, output, cacheWrite, cacheRead]: number[]) =>
     ({ id, agent, model, at: Date.now() - ago, input: input!, output: output!, cacheWrite: cacheWrite!, cacheRead: cacheRead! });
-  s.registry.recordUsage(thread.id, [
+  s.registry.usage.recordUsage(thread.id, [
     call("claude:m1", "claude", "claude-opus-5-5", hour, [1_200, 300, 50_000, 1_250_000]),
     call("pi:r1", "pi", "gpt-6-astra", 72 * hour, [10_000, 2_000, 0, 30_000]),
     call("pi:r2", "pi", "gpt-6-astra", 20 * 24 * hour, [5_000_000, 0, 0, 0]),
@@ -2471,7 +2471,7 @@ test("show prints a failed pylon's log under its reason, indented, and --json ca
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "x"]);
   const failed = "pylon is broken: the controller failed to boot the VM\nqemu: booting\nError: Guest command got no answer within 13000 ms";
-  s.registry.savePylon({ ...s.registry.pylon(thread.pylonId)!, failed });
+  s.registry.threads.savePylon({ ...s.registry.threads.pylon(thread.pylonId)!, failed });
   assert.match((await s.nexus(["show", thread.id])).stdout, /^failed: pylon is broken: the controller failed to boot the VM\n {2}qemu: booting\n {2}Error: Guest command got no answer within 13000 ms$/m);
   assert.equal((await s.json(["show", thread.id])).pylon.failed, failed);
 });
@@ -2528,7 +2528,7 @@ test("preview --wait rides through a restart of the control plane and prints the
   await until("a poll met the stopped control plane", () => s.proxy.connects.length > tried);
   await restart();
   observeRunning(s, thread, [{ name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true }], [3000]);
-  s.registry.apply({ record: "preview", pylonId: thread.pylonId, service: "port-3000", httpsPort: 10200, ready: true });
+  s.registry.threads.apply({ record: "preview", pylonId: thread.pylonId, service: "port-3000", httpsPort: 10200, ready: true });
   const served = await waiting;
   assert.deepEqual([served.code, served.stdout], [0, `${url}\n`], served.stderr);
 });
@@ -2577,7 +2577,7 @@ test("a watch or events --follow whose parent is killed exits within about a sec
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "idle"]);
   // The bounds are well under the minute's interval, and loose for a loaded suite.
   assert.ok(await orphanLife(t, s, ["watch", thread.id, "--json", "--interval", "60000"], '"type":"state"') < 10_000, "the watch did not wait out its interval");
-  s.registry.appendEvent("release.changed", null, { state: "pending" });
+  s.registry.threads.appendEvent("release.changed", null, { state: "pending" });
   assert.ok(await orphanLife(t, s, ["events", "--follow"], "release.changed") < 10_000, "events --follow exited");
 });
 

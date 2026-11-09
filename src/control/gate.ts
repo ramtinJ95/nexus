@@ -24,7 +24,7 @@ import type { Thread } from "./thread-store.ts";
 import type { Start, StartRequest } from "./start-request.ts";
 import { checkoutDir } from "../../images/pylon/nexus-contract.ts";
 
-type GateRegistry = Pick<Registry, "node" | "project" | "pylon" | "recordActivity" | "sealedBoot" | "setThreadStatus" | "thread">;
+type GateRegistry = Pick<Registry, "node" | "project" | "threads">;
 
 /** Nexus's live check runs dockerd, the verify-nexus stack and its Docker pylon in it, and has passed only at 4 CPUs and 8 GiB (nexus#388). */
 const verifySize = { cpus: 4, memoryGiB: 8 };
@@ -172,9 +172,9 @@ export function checkRuns(options: {
   }
 
   function remove(id: ThreadId) {
-    const t = registry.thread(id);
+    const t = registry.threads.thread(id);
     if (t === undefined || t.status === "deleted" || t.status === gate.after) return;
-    registry.setThreadStatus(id, gate.after);
+    registry.threads.setThreadStatus(id, gate.after);
     wake(t);
   }
 
@@ -184,7 +184,7 @@ export function checkRuns(options: {
       let t: Thread;
       try {
         t = await startThread({
-          request: { near: registry.pylon(builder.pylonId)!.node, ...gate.request(builder, branch, head, projectCpus), ...ifRoom && { ifRoom } }, caller: gate.caller, role: gate.role,
+          request: { near: registry.threads.pylon(builder.pylonId)!.node, ...gate.request(builder, branch, head, projectCpus), ...ifRoom && { ifRoom } }, caller: gate.caller, role: gate.role,
         });
       } catch (err) {
         if (!(err instanceof Refusal)) throw err;
@@ -195,13 +195,13 @@ export function checkRuns(options: {
     },
     step(id, head) {
       const run = runs.get(id);
-      const t = registry.thread(id);
+      const t = registry.threads.thread(id);
       if (run === undefined || t === undefined || t.status !== "active") return { kind: "void" };
       if (run.kind === "done" || run.kind === "void" || run.kind === "unrunnable") return run;
-      const pylon = registry.pylon(t.pylonId)!;
+      const pylon = registry.threads.pylon(t.pylonId)!;
       if (pylon.failed !== null) return { kind: "unrunnable", output: `The ${gate.pylon} pylon did not boot: ${pylon.failed}` };
       // Agent activity keeps the pylon running while the check does.
-      registry.recordActivity(id, { agent: Date.now() });
+      registry.threads.recordActivity(id, { agent: Date.now() });
       wake(t);
       if (run.kind === "running") return { kind: "running" };
       const probe = runningProbe(registry, probes, t, "work");
@@ -210,7 +210,7 @@ export function checkRuns(options: {
     },
     result(id) {
       const run = runs.get(id);
-      return run?.kind === "done" && registry.thread(id)?.status === "active" ? run : null;
+      return run?.kind === "done" && registry.threads.thread(id)?.status === "active" ? run : null;
     },
     discard(id) {
       runs.delete(id);

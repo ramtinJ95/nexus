@@ -92,7 +92,7 @@ const pass = passLogger();
 function lastJob(dir: string, pylonId: PylonId): JobStatus | undefined {
   const registry = openRegistry(join(dir, "registry.db"));
   try {
-    return registry.job(pylonId);
+    return registry.threads.job(pylonId);
   } finally {
     registry.close();
   }

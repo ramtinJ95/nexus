@@ -54,9 +54,9 @@ function setUp(t: import("node:test").TestContext) {
   return { registry, pass, dropped, refuse, observe, onDrop: (next: () => void) => { dropping = next; }, later: (ms = day) => { clock += ms; } };
 }
 
-const asked = (registry: Registry) => registry.nodeQuestions(testNode);
+const asked = (registry: Registry) => registry.questions.nodeQuestions(testNode);
 const keysOf = (registry: Registry) => asked(registry).map((q) => q.cleanup.items.map((i) => i.kind === "release" ? i.name.slice(0, 1) : i.id));
-const answer = (registry: Registry, option: "Delete" | "Keep") => registry.answerQuestion(asked(registry).at(-1)!, { option, by: "nLAPTOP" as TailnetNodeId, at: now });
+const answer = (registry: Registry, option: "Delete" | "Keep") => registry.questions.answerQuestion(asked(registry).at(-1)!, { option, by: "nLAPTOP" as TailnetNodeId, at: now });
 
 test("one question per node, asked again only once a new candidate joins, with each item's space and the total", async (t) => {
   const { registry, pass, observe, later } = setUp(t);
@@ -67,7 +67,7 @@ test("one question per node, asked again only once a new candidate joins, with e
   const [q] = asked(registry);
   assert.deepEqual(q!.cleanup.items.map((i) => i.bytes), [4 * 1024 ** 3, 1024 ** 3, 1000]);
   assert.match(q!.text, /holds 3 things nothing needs any more, which take 5\.0 GiB\. Delete them\?/);
-  assert.deepEqual(registry.openNodeQuestions().map((o) => o.id), [q!.id]);
+  assert.deepEqual(registry.questions.openNodeQuestions().map((o) => o.id), [q!.id]);
 
   observe([older, previous, current, newest.id]);
   await pass.poll();
@@ -76,11 +76,11 @@ test("one question per node, asked again only once a new candidate joins, with e
   pass.releases(testNode, inventory({}, [r1, "4".repeat(40), r2, r3]));
   later();
   await pass.poll();
-  assert.deepEqual(registry.openNodeQuestions().map((o) => o.id), [q!.id], "a new release joined, but the open question stays as asked, even a day on");
+  assert.deepEqual(registry.questions.openNodeQuestions().map((o) => o.id), [q!.id], "a new release joined, but the open question stays as asked, even a day on");
   answer(registry, "Keep");
   await pass.poll();
   assert.deepEqual(keysOf(registry), [[oldTemplate.id, older, "1"], [older, "1", "4"]], "once answered and a day old, the person is asked about the new release");
-  assert.deepEqual(registry.openNodeQuestions().length, 1);
+  assert.deepEqual(registry.questions.openNodeQuestions().length, 1);
 });
 
 test("a rejected set is not asked again until something new joins it, and nothing is deleted", async (t) => {
@@ -94,7 +94,7 @@ test("a rejected set is not asked again until something new joins it, and nothin
   assert.deepEqual(pass.releases(testNode, inventory()), [], "the deployer deletes nothing");
   assert.equal(asked(registry).length, 1, "the same set is not asked again");
   assert.deepEqual(asked(registry)[0]!.cleanup.outcomes, {});
-  assert.deepEqual(registry.openNodeQuestions(), []);
+  assert.deepEqual(registry.questions.openNodeQuestions(), []);
 
   registry.saveImage(testImage({ id: "img-000000000004" }), null);
   registry.setCurrentImage("img-000000000004");
@@ -146,13 +146,13 @@ test("a cleanup of more artifacts than one request may name goes to the probe in
   const { registry, pass, dropped, observe, onDrop } = setUp(t);
   const many = Array.from({ length: 1001 }, (_, i) => `tpl-${i.toString(36).padStart(6, "0")}` as TemplateId);
   observe([current, ...many]);
-  const q = registry.askQuestion(cleanupQuestion(testNode, many.map((id) => ({ kind: "template", id, project: null, bytes: 1 })), now));
+  const q = registry.questions.askQuestion(cleanupQuestion(testNode, many.map((id) => ({ kind: "template", id, project: null, bytes: 1 })), now));
   answer(registry, "Delete");
   let started: ReturnType<typeof addThread> | undefined;
   onDrop(() => { started ??= addThread(registry, { firstBoot: { kind: "template", template: many.at(-1)! } }); });
   await pass.poll();
   assert.deepEqual(dropped.map((batch) => batch.length), [1000], "the last one, which a start took up while the first batch ran, is not sent");
-  const { outcomes } = registry.nodeQuestions(testNode).find((n) => n.id === q.id)!.cleanup;
+  const { outcomes } = registry.questions.nodeQuestions(testNode).find((n) => n.id === q.id)!.cleanup;
   assert.equal(Object.keys(outcomes).length, 1001);
   assert.deepEqual(outcomes[many.at(-1)!], { state: "skipped", reason: `pylon ${started!.pylonId} boots from it` });
 });
@@ -181,7 +181,7 @@ test("a kept set that recurs after another question is not asked again, the open
   later();
   await pass.poll();
   assert.deepEqual(keysOf(registry), [[older], [oldTemplate.id]], "the older image is in use, and the old template joined");
-  registry.setThreadStatus(thread.id, "deleted");
+  registry.threads.setThreadStatus(thread.id, "deleted");
   addThread(registry, { firstBoot: { kind: "template", template: oldTemplate.id } });
   await pass.poll();
   assert.deepEqual(keysOf(registry), [[older], [oldTemplate.id]], "the image was kept, so nothing is asked and the open question stays");
@@ -193,7 +193,7 @@ test("a kept set that recurs after another question is not asked again, the open
   const [kept, , again] = asked(registry);
   assert.notEqual(again!.id, kept!.id);
   assert.equal(kept!.answer!.option, "Keep", "the answered one keeps its answer");
-  assert.deepEqual(registry.openNodeQuestions().map((q) => q.id), [again!.id]);
+  assert.deepEqual(registry.questions.openNodeQuestions().map((q) => q.id), [again!.id]);
 });
 
 test("items the person kept are not asked again after a question about others came between, while the node was offline", async (t) => {
@@ -201,7 +201,7 @@ test("items the person kept are not asked again after a question about others ca
   await pass.poll();
   assert.deepEqual(keysOf(registry), [[oldTemplate.id, older]]);
   answer(registry, "Keep");
-  registry.apply({ record: "node", node: testNode, state: "offline", capacity: registry.node(testNode)!.capacity! });
+  registry.threads.apply({ record: "node", node: testNode, state: "offline", capacity: registry.node(testNode)!.capacity! });
   pass.releases(testNode, inventory());
   later();
   await pass.poll();
@@ -235,7 +235,7 @@ test("once an item is deleted, a set equal to an older question's asks nothing o
   later();
   for (let i = 0; i < 3; i++) await pass.poll();
   assert.equal(asked(registry).length, 2, "the candidates are the first question's set again, which asks nothing");
-  assert.deepEqual(registry.openNodeQuestions(), []);
+  assert.deepEqual(registry.questions.openNodeQuestions(), []);
 });
 
 const low: DiskFact[] = [{ paths: ["/var/lib/nexus"], totalGiB: 500, freeGiB: 19, pylons: true }];
@@ -279,7 +279,7 @@ test("an open question is neither withdrawn nor asked again when candidates join
   assert.deepEqual(asked(registry), [q], "even days on, with the disk low");
   answer(registry, "Delete");
   await pass.poll();
-  assert.deepEqual(registry.nodeQuestions(testNode)[0]!.cleanup.items.map((i) => i.kind === "release" ? i.name : i.id), [older], "the answer covers only what it listed");
+  assert.deepEqual(registry.questions.nodeQuestions(testNode)[0]!.cleanup.items.map((i) => i.kind === "release" ? i.name : i.id), [older], "the answer covers only what it listed");
 });
 
 test("a low filesystem asks within the day, but not while a question is open", async (t) => {

@@ -25,7 +25,7 @@ test("--node auto boots the pylon on the node with the most memory left after it
       { node: "small", left: { cpus: 10, memoryGiB: 4, diskGiB: 190 } },
     ],
   });
-  assert.equal(s.registry.pylon(thread.pylonId)!.node, "big");
+  assert.equal(s.registry.threads.pylon(thread.pylonId)!.node, "big");
   assert.deepEqual(s.woken, ["big"]);
   assert.deepEqual((await s.call("GET", `/v1/threads/${thread.id}`)).body.thread.placement, thread.placement, "show reads it back");
 
@@ -55,8 +55,8 @@ test("--node auto counts the memory of an archived thread's paused pylon the usa
   observeNode(s, "a", { total: 64, committed: 0 }, { pylons: [stoppedPylon(archived.pylonId, { sessions: null })] });
   assert.equal((await s.call("POST", `/v1/threads/${archived.id}/archive`)).status, 200);
   assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Placed", node: "auto" })).body.placement.node, "a");
-  s.registry.startUsageBackfill([archived.id], Date.now());
-  s.registry.holdUsageBackfill(archived.id, Date.now());
+  s.registry.usage.startUsageBackfill([archived.id], Date.now());
+  s.registry.usage.holdUsageBackfill(archived.id, Date.now());
   assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Placed again", node: "auto" })).body.placement.node, "b",
     "a has 52 GiB left once Placed and the woken Archived boot, and b 54");
 });
@@ -66,7 +66,7 @@ test("--node auto counts a crashed pylon a person retried, which boots again, an
   observeNode(s, "b", { total: 16, committed: 10 });
   observeNode(s, "a", { total: 16, committed: 0 });
   const t1 = (await s.call("POST", "/v1/threads", { project: "acme", title: "Crashed", node: "a" })).body as Thread;
-  s.registry.savePylon({ ...s.registry.pylon(t1.pylonId)!, boot: { ...s.registry.pylon(t1.pylonId)!.boot, resources: { cpus: 2, memoryGiB: 12, diskGiB: 10 } }, retrying: true });
+  s.registry.threads.savePylon({ ...s.registry.threads.pylon(t1.pylonId)!, boot: { ...s.registry.threads.pylon(t1.pylonId)!.boot, resources: { cpus: 2, memoryGiB: 12, diskGiB: 10 } }, retrying: true });
   const broken = (cause: "controller" | "services") => ({ pylonId: t1.pylonId, phase: "broken" as const, detail: "the controller exited", cause, logTail: "" });
   observeNode(s, "a", { total: 16, committed: 0 }, { pylons: [broken("controller")] });
   assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "x", node: "auto" })).body.placement.node, "b",
@@ -103,10 +103,10 @@ test("a pylon that asks for nested virtualization goes only to a node whose prob
   const placement = nested.placement?.how === "auto" ? nested.placement : assert.fail("placed auto");
   assert.equal(placement.node, "nests");
   assert.deepEqual(placement.weighed.find((w) => w.node === "flat"), { node: "flat", refused: "cannot give a pylon KVM of its own: its probe does not report nested virtualization" });
-  assert.deepEqual(s.registry.pylon(nested.pylonId)!.boot.resources, { cpus: 2, memoryGiB: 8, diskGiB: 10, nestedVirtualization: true });
+  assert.deepEqual(s.registry.threads.pylon(nested.pylonId)!.boot.resources, { cpus: 2, memoryGiB: 8, diskGiB: 10, nestedVirtualization: true });
   const plain = (await s.call("POST", "/v1/threads", { project: "acme", title: "Plain", node: "auto" })).body;
   assert.equal(plain.placement.node, "flat", "an ordinary pylon still goes where it fits best");
-  assert.deepEqual(s.registry.pylon(plain.pylonId)!.boot.resources, { cpus: 2, memoryGiB: 4, diskGiB: 10 });
+  assert.deepEqual(s.registry.threads.pylon(plain.pylonId)!.boot.resources, { cpus: 2, memoryGiB: 4, diskGiB: 10 });
 });
 
 test("--node auto places a thread that needs the ChatGPT token on a node whose probe takes it and has not got it yet", async (t) => {
@@ -125,7 +125,7 @@ test("without --node a thread still boots on its project's default node, and a n
   observeNode(s, "big", { total: 64, committed: 0 });
   const plain = await s.call("POST", "/v1/threads", { project: "acme", title: "Default" });
   assert.deepEqual(plain.body.placement, { how: "default", node }, "even while the default node is offline and another has room");
-  assert.equal(s.registry.pylon(plain.body.pylonId)!.node, node);
+  assert.equal(s.registry.threads.pylon(plain.body.pylonId)!.node, node);
   const named = await s.call("POST", "/v1/threads", { project: "acme", title: "Named", node: "big" });
   assert.deepEqual(named.body.placement, { how: "named", node: "big" });
   assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "x", node: "nowhere" })).status, 400);
@@ -161,8 +161,8 @@ test("the first start of a setup builds its template on the node, the next waits
   assert.ok(template?.state === "building");
   assert.deepEqual(building.setup, { how: "fresh", reason: `no template of this setup is on ${node} yet`, building: template.id });
   assert.deepEqual([template.on, template.inputs.repo, template.submitted], [node, { url: project.repoUrl, branch: "feature", commit: first }, null], "the build checks out the commit the setup was read at");
-  assert.deepEqual(s.registry.pylon(building.pylonId)!.firstBoot, { kind: "fresh", preSetup: null });
-  assert.deepEqual(s.registry.pylon(building.pylonId)!.boot.repo, { kind: "clone", url: project.repoUrl, checkout: { branch: "feature", commit: "origin/feature" } });
+  assert.deepEqual(s.registry.threads.pylon(building.pylonId)!.firstBoot, { kind: "fresh", preSetup: null });
+  assert.deepEqual(s.registry.threads.pylon(building.pylonId)!.boot.repo, { kind: "clone", url: project.repoUrl, checkout: { branch: "feature", commit: "origin/feature" } });
 
   const waiting = (await s.call("POST", "/v1/threads", { project: "acme", title: "Second", branch: "feature" })).body as Thread;
   assert.deepEqual(waiting.setup, { how: "fresh", reason: `template ${template.id} of this setup is still building on ${node}`, building: template.id });
@@ -174,7 +174,7 @@ test("the first start of a setup builds its template on the node, the next waits
   s.remoteReads(async () => ({ commit: moved, setupBlob: "b".repeat(40) }));
   const reused = (await s.call("POST", "/v1/threads", { project: "acme", title: "Third", branch: "feature" })).body as Thread;
   assert.deepEqual(reused.setup, { how: "template", template: template.id, builtAt, commit: moved });
-  const pylon = s.registry.pylon(reused.pylonId)!;
+  const pylon = s.registry.threads.pylon(reused.pylonId)!;
   assert.deepEqual(pylon.firstBoot, { kind: "template", template: template.id });
   assert.deepEqual(pylon.boot.repo, { kind: "clone", url: project.repoUrl, checkout: { branch: "feature", commit: moved } }, "the pylon checks out the commit its setup was read at, not the branch's tip at boot");
   assert.deepEqual((await s.call("GET", `/v1/threads/${reused.id}`)).body.thread.setup, reused.setup, "show reads it back");
@@ -186,11 +186,11 @@ test("a start whose setup cannot be read boots fresh and says why, and only a fu
   const unread = (await s.call("POST", "/v1/threads", { project: "acme", title: "Unread" })).body as Thread;
   assert.deepEqual(unread.setup, { how: "fresh", reason: "the control plane could not read .nexus/setup at main: this test has no remote" });
   assert.deepEqual(s.registry.templates(project.id as ProjectId), []);
-  assert.deepEqual(s.registry.pylon(unread.pylonId)!.firstBoot, { kind: "fresh", preSetup: null });
+  assert.deepEqual(s.registry.threads.pylon(unread.pylonId)!.firstBoot, { kind: "fresh", preSetup: null });
 
   const short = (await s.call("POST", "/v1/threads", { project: "acme", title: "Short", commit: "abc123" })).body as Thread;
   assert.deepEqual(short.setup, { how: "fresh", reason: "the start named commit abc123, and only a full commit ID or a branch tip can use a template" });
-  assert.deepEqual(s.registry.pylon(short.pylonId)!.boot.repo, { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "abc123" } });
+  assert.deepEqual(s.registry.threads.pylon(short.pylonId)!.boot.repo, { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "abc123" } });
 
   const full = "f".repeat(40);
   s.remoteReads(async () => ({ commit: full, setupBlob: null }));
@@ -208,14 +208,14 @@ test("a start that names a branch the remote does not have is refused before it 
   s.remoteReads(async () => null);
   const refused = await s.call("POST", "/v1/threads", { project: "acme", title: "Gone", branch: "feat/gone" });
   assert.deepEqual(refused, { status: 400, body: { error: gone, code: "no-branch", retryable: false } });
-  assert.deepEqual([s.registry.threads().length, s.fake.calls.filter(([kind]) => kind === "start").length, s.woken, s.registry.reserved(node)], [0, 0, [], []], "no thread, conversation, wake or room is left of it");
+  assert.deepEqual([s.registry.threads.threads().length, s.fake.calls.filter(([kind]) => kind === "start").length, s.woken, s.registry.reserved(node)], [0, 0, [], []], "no thread, conversation, wake or room is left of it");
 
   const unnamed = (await s.call("POST", "/v1/threads", { project: "acme", title: "Default" })).body as Thread;
   assert.deepEqual(unnamed.setup, { how: "fresh", reason: "the remote has no branch main" });
   assert.deepEqual(s.reads, [{ branch: "feat/gone" }, { branch: "main" }], "each start reads its branch once");
   const disk = await s.call("POST", "/v1/threads", { project: "acme", title: "Big", branch: "feat/gone", resources: { diskGiB: 40 } });
   assert.equal(disk.status, 400, "a start with another disk, which uses no template, still reads the branch it names");
-  assert.equal(s.registry.threads().length, 1);
+  assert.equal(s.registry.threads.threads().length, 1);
 });
 
 test("a pipeline item whose branch the remote does not have is held for the person, and the queue reads it again only after a wait or when the person starts it", async (t) => {
@@ -231,12 +231,12 @@ test("a pipeline item whose branch the remote does not have is held for the pers
   const gones = () => s.reads.filter((r) => "branch" in r && r.branch === "feat/gone").length;
   assert.deepEqual((await s.call("GET", `/v1/items/${item.id}`)).body.phase, { kind: "held", why: `did not start: ${gone}` });
   assert.equal(gones(), 1, "a pass does not read a refused branch again");
-  assert.deepEqual(s.registry.threads().map((th) => th.title), ["Next"], "the start queued after it is not held up");
+  assert.deepEqual(s.registry.threads.threads().map((th) => th.title), ["Next"], "the start queued after it is not held up");
   const queued = (await s.call("GET", "/v1/queued")).body as { id: string; blocked: boolean; lastError: string }[];
   assert.deepEqual(queued.map((q) => [q.blocked, q.lastError]), [[true, gone]]);
 
-  const record = s.registry.queuedThreads().find((q) => q.status === "queued")!;
-  s.registry.saveQueued({ ...record, refused: { at: Date.now() - refusedRetryMs } });
+  const record = s.registry.queue.queuedThreads().find((q) => q.status === "queued")!;
+  s.registry.queue.saveQueued({ ...record, refused: { at: Date.now() - refusedRetryMs } });
   await s.queue!.poll();
   assert.equal(gones(), 2, "once the wait is over, a pass reads it again");
   assert.equal((await s.call("POST", `/v1/threads/${record.id}/start`)).status, 400, "the person's start-queued reads it at once");
@@ -322,17 +322,17 @@ test("a template built before the project's disk size changed is not reused by a
   const sized = (await s.call("POST", "/v1/threads", { project: "acme", title: "Sized", resources: { diskGiB: 40 } })).body as Thread;
   assert.equal(sized.setup?.how, "fresh", "the 10 GiB template's disk cannot be a 40 GiB pylon's");
   assert.ok(sized.setup?.how === "fresh" && sized.setup.building !== undefined && sized.setup.building !== old.id, "a 40 GiB template is built for the next thread");
-  assert.deepEqual(s.registry.pylon(sized.pylonId)!.firstBoot, { kind: "fresh", preSetup: null });
+  assert.deepEqual(s.registry.threads.pylon(sized.pylonId)!.firstBoot, { kind: "fresh", preSetup: null });
 });
 
 test("a start's size overrides its project's field by field, its pylon boots that size, and thread detail reads it back", async (t) => {
   const s = await withImage(t);
   const bigger = await s.call("POST", "/v1/threads", { project: "acme", title: "Bigger", resources: { memoryGiB: 12 } });
   assert.equal(bigger.status, 201, JSON.stringify(bigger.body));
-  assert.deepEqual(s.registry.pylon(bigger.body.pylonId)!.boot.resources, { cpus: 2, memoryGiB: 12, diskGiB: 10 }, "the fields it leaves out are the project's");
+  assert.deepEqual(s.registry.threads.pylon(bigger.body.pylonId)!.boot.resources, { cpus: 2, memoryGiB: 12, diskGiB: 10 }, "the fields it leaves out are the project's");
   assert.deepEqual((await s.call("GET", `/v1/threads/${bigger.body.id}`)).body.pylon.resources, { cpus: 2, memoryGiB: 12, diskGiB: 10 });
   const sized = await s.call("POST", "/v1/threads", { project: "acme", title: "Sized", resources: { cpus: 4, memoryGiB: 8, diskGiB: 40 } });
-  assert.deepEqual(s.registry.pylon(sized.body.pylonId)!.boot.resources, { cpus: 4, memoryGiB: 8, diskGiB: 40 });
+  assert.deepEqual(s.registry.threads.pylon(sized.body.pylonId)!.boot.resources, { cpus: 4, memoryGiB: 8, diskGiB: 40 });
   const plain = await s.call("POST", "/v1/threads", { project: "acme", title: "Plain" });
   assert.deepEqual((await s.call("GET", `/v1/threads/${plain.body.id}`)).body.pylon.resources, project.resources);
 

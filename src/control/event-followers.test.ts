@@ -7,11 +7,11 @@ import { until } from "../test-support/kit.ts";
 
 test("a follower is handed the events of its kinds appended after it starts, and none from before", async (t) => {
   const registry = testRegistry(t);
-  registry.appendEvent("session.turn-ended", null, { before: true });
+  registry.threads.appendEvent("session.turn-ended", null, { before: true });
   const delivered: NexusEvent[] = [];
-  t.after(registry.followEvents(["session.turn-ended"], (events) => delivered.push(...events)));
-  registry.appendEvent("release.changed", null, {});
-  const after = registry.appendEvent("session.turn-ended", null, {});
+  t.after(registry.threads.followEvents(["session.turn-ended"], (events) => delivered.push(...events)));
+  registry.threads.appendEvent("release.changed", null, {});
+  const after = registry.threads.appendEvent("session.turn-ended", null, {});
   await until("the new event is delivered", () => delivered.length > 0);
   assert.deepEqual(delivered, [after]);
 });
@@ -19,21 +19,21 @@ test("a follower is handed the events of its kinds appended after it starts, and
 test("a follower is handed every event of its kinds however many events come between and retention drops", async (t) => {
   const registry = testRegistry(t);
   const delivered: NexusEvent[] = [];
-  t.after(registry.followEvents(["session.turn-ended"], (events) => delivered.push(...events)));
-  const first = registry.appendEvent("session.turn-ended", null, { first: true });
-  for (let i = 0; i < 10_002; i++) registry.appendEvent("release.changed", null, {});
-  registry.retainEvents();
-  const next = registry.appendEvent("session.turn-ended", null, {});
+  t.after(registry.threads.followEvents(["session.turn-ended"], (events) => delivered.push(...events)));
+  const first = registry.threads.appendEvent("session.turn-ended", null, { first: true });
+  for (let i = 0; i < 10_002; i++) registry.threads.appendEvent("release.changed", null, {});
+  registry.threads.retainEvents();
+  const next = registry.threads.appendEvent("session.turn-ended", null, {});
   await until("both events are delivered", () => delivered.length === 2);
   assert.deepEqual(delivered, [first, next]);
-  assert.throws(() => registry.eventBatch(first.id), /expired/, "retention dropped the first event from the log");
+  assert.throws(() => registry.threads.eventBatch(first.id), /expired/, "retention dropped the first event from the log");
 });
 
 test("a stopped follower is handed no more events", async (t) => {
   const registry = testRegistry(t);
   const delivered: NexusEvent[] = [];
-  const stop = registry.followEvents(["session.turn-ended"], (events) => delivered.push(...events));
-  registry.appendEvent("session.turn-ended", null, {});
+  const stop = registry.threads.followEvents(["session.turn-ended"], (events) => delivered.push(...events));
+  registry.threads.appendEvent("session.turn-ended", null, {});
   stop();
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.deepEqual(delivered, [], "an event appended before the stop but not yet handed over is dropped");
@@ -42,9 +42,9 @@ test("a stopped follower is handed no more events", async (t) => {
 test("the events appended in one turn of the event loop reach a follower in one batch, after the appends return", async (t) => {
   const registry = testRegistry(t);
   const batches: NexusEvent[][] = [];
-  t.after(registry.followEvents(["release.changed"], (events) => batches.push([...events])));
-  const a = registry.appendEvent("release.changed", null, { n: 1 });
-  const b = registry.appendEvent("release.changed", null, { n: 2 });
+  t.after(registry.threads.followEvents(["release.changed"], (events) => batches.push([...events])));
+  const a = registry.threads.appendEvent("release.changed", null, { n: 1 });
+  const b = registry.threads.appendEvent("release.changed", null, { n: 2 });
   assert.deepEqual(batches, []);
   await until("the batch is delivered", () => batches.length > 0);
   assert.deepEqual(batches, [[a, b]]);
@@ -71,11 +71,11 @@ test("work deferred to a commit runs once the outermost transaction commits, and
 test("an event a follower appends while handling a batch reaches it in the next batch", async (t) => {
   const registry = testRegistry(t);
   const batches: NexusEvent[][] = [];
-  t.after(registry.followEvents(["release.changed"], (events) => {
+  t.after(registry.threads.followEvents(["release.changed"], (events) => {
     batches.push([...events]);
-    if (batches.length === 1) registry.appendEvent("release.changed", null, { reply: true });
+    if (batches.length === 1) registry.threads.appendEvent("release.changed", null, { reply: true });
   }));
-  const first = registry.appendEvent("release.changed", null, {});
+  const first = registry.threads.appendEvent("release.changed", null, {});
   await until("the reply is delivered", () => batches.length === 2);
   assert.deepEqual(batches[0], [first]);
   assert.deepEqual(batches[1]!.map((e) => e.payload), [{ reply: true }]);

@@ -46,16 +46,18 @@ function fakeRegistry(nodes: FakeNode[]) {
     now: () => now,
     nodes: () => nodes.map(record),
     latestHealthSample: (name: string) => { const n = byName.get(name); return n === undefined ? null : sample(n); },
-    pylonsWithStatusOn: (name: NodeName) => (byName.get(name)?.pylons ?? []).map((p) => ({
-      pylon: { pylonId: `pylon-${p.id}` as PylonId, boot: { resources: { cpus: 2, memoryGiB: p.memoryGiB, diskGiB: 10 } } } as StoredPylon, status: "active" as const,
-    })),
-    // Each pylon's thread is active, so one its node has yet to report is about to boot there.
-    pylonsWithThreadsOn: (name: NodeName) => (byName.get(name)?.pylons ?? []).map((p) => ({
-      pylon: { pylonId: `pylon-${p.id}` as PylonId, failed: null, retrying: false, boot: { resources: { cpus: 2, memoryGiB: p.memoryGiB, diskGiB: 10 } } } as unknown as StoredPylon,
-      thread: { id: p.id, status: "active", agentTurnRunning: false, working: false, ...p.held
-        ? { lastAgentActivityAt: now - 3_600_000, lastHumanActivityAt: now - 3_600_000, ...!released.has(p.id) && { awaitedUntil: now + 600_000 } }
-        : { lastAgentActivityAt: now, lastHumanActivityAt: now } } as unknown as Thread,
-    })),
+    threads: {
+      pylonsWithStatusOn: (name: NodeName) => (byName.get(name)?.pylons ?? []).map((p) => ({
+        pylon: { pylonId: `pylon-${p.id}` as PylonId, boot: { resources: { cpus: 2, memoryGiB: p.memoryGiB, diskGiB: 10 } } } as StoredPylon, status: "active" as const,
+      })),
+      // Each pylon's thread is active, so one its node has yet to report is about to boot there.
+      pylonsWithThreadsOn: (name: NodeName) => (byName.get(name)?.pylons ?? []).map((p) => ({
+        pylon: { pylonId: `pylon-${p.id}` as PylonId, failed: null, retrying: false, boot: { resources: { cpus: 2, memoryGiB: p.memoryGiB, diskGiB: 10 } } } as unknown as StoredPylon,
+        thread: { id: p.id, status: "active", agentTurnRunning: false, working: false, ...p.held
+          ? { lastAgentActivityAt: now - 3_600_000, lastHumanActivityAt: now - 3_600_000, ...!released.has(p.id) && { awaitedUntil: now + 600_000 } }
+          : { lastAgentActivityAt: now, lastHumanActivityAt: now } } as unknown as Thread,
+      })),
+    },
     releaseHold: (thread: ThreadId) => { released.add(thread); },
     reserved: (name: NodeName): Room[] => { const r = byName.get(name)?.reserved; return r === undefined ? [] : [{ cpus: 0, memoryGiB: r, diskGiB: 0 }]; },
   };

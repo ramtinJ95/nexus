@@ -28,10 +28,10 @@ async function setup(t: TestContext) {
   const page = async (path: string) => (await s.raw(path)).body.toString("utf8");
   /** Reports the node online with these pylons, as an ingested probe snapshot would. */
   const observe = (running: readonly Thread[], paused: readonly Thread[] = []) => {
-    s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
-    s.registry.ingested(testObservation(node, {
+    s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+    s.registry.threads.ingested(testObservation(node, {
       pylons: [
-        ...running.map((th) => runningPylon(th.pylonId, { liveHash: s.registry.pylon(th.pylonId)!.liveHash, bootedFrom: { image: image.id, checkpoint: null } })),
+        ...running.map((th) => runningPylon(th.pylonId, { liveHash: s.registry.threads.pylon(th.pylonId)!.liveHash, bootedFrom: { image: image.id, checkpoint: null } })),
         ...paused.map((th) => stoppedPylon(th.pylonId, { checkpoint: `ck-${th.id}` as never })),
       ],
     }), []);
@@ -56,7 +56,7 @@ async function reviewed(t: TestContext) {
     builder: builder.id, reviewer: reviewer.id, rounds, phase: { kind: "checking", startedAt: Date.now(), thread: check.id },
     pr: { repo: "acme/repo", number: 7, url: "https://github.com/acme/repo/pull/7", title: "Cache", branch: "cache" },
   });
-  s.registry.saveReview(review);
+  s.registry.reviews.saveReview(review);
   return { s, builder, reviewer, check, verify, review };
 }
 
@@ -85,12 +85,12 @@ test("a reviewer, check or verify thread's page says in one line whose pull requ
     assert.doesNotMatch(page, /class="life"|Building/, "no builder track");
     assert.doesNotMatch(page, /id="timeline-view"|data-tab="timeline"/, "no timeline of builder steps");
   }
-  s.registry.saveReview({ ...review, phase: { kind: "reviewing" }, rounds: [...review.rounds, { head: "3".repeat(40), verdict: null, check: null, answers: null }] });
+  s.registry.reviews.saveReview({ ...review, phase: { kind: "reviewing" }, rounds: [...review.rounds, { head: "3".repeat(40), verdict: null, check: null, answers: null }] });
   assert.equal(textOf(underBar(await s.page(`/threads/${reviewer.id}`)).replace(/^[^>]*>/, "")), "Reviewer of PR #7 for Cache the totals reviewing round 3");
   const carried: Round = { head: "4".repeat(40), verdict: approve(), check: null, answers: null, carried: { from: "3".repeat(40) } };
-  s.registry.saveReview({ ...review, phase: { kind: "reviewing" }, rounds: [review.rounds[0]!, carried, { head: "5".repeat(40), verdict: null, check: null, answers: null }] });
+  s.registry.reviews.saveReview({ ...review, phase: { kind: "reviewing" }, rounds: [review.rounds[0]!, carried, { head: "5".repeat(40), verdict: null, check: null, answers: null }] });
   assert.equal(textOf(underBar(await s.page(`/threads/${reviewer.id}`)).replace(/^[^>]*>/, "")), "Reviewer of PR #7 for Cache the totals reviewing round 2", "a carried approval spends no round");
-  s.registry.saveReview({ ...review, phase: { kind: "landed", commit: "3".repeat(40) } } satisfies Review);
+  s.registry.reviews.saveReview({ ...review, phase: { kind: "landed", commit: "3".repeat(40) } } satisfies Review);
   assert.equal(textOf(underBar(await s.page(`/threads/${reviewer.id}`)).replace(/^[^>]*>/, "")), "Reviewer of PR #7 for Cache the totals landed");
 
   const own = await s.page(`/threads/${builder.id}`);
@@ -100,13 +100,13 @@ test("a reviewer, check or verify thread's page says in one line whose pull requ
 
 test("a reviewer waiting on the person has its role line on its Needs you card, with no builder track, and says when it quotes", async (t) => {
   const { s, builder, reviewer, review } = await reviewed(t);
-  s.registry.askQuestion({ kind: "judgment", id: "qn-review", thread: reviewer.id, text: "Run the migration?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now(), failure: 0 });
+  s.registry.questions.askQuestion({ kind: "judgment", id: "qn-review", thread: reviewer.id, text: "Run the migration?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: Date.now(), failure: 0 });
   const card = (await s.page(`/?peek=${reviewer.id}`)).split('id="needs-you"')[1]!.split(`data-thread="${reviewer.id}"`)[1]!.split("</article>")[0]!;
   assert.doesNotMatch(card, /class="life"/, "no builder track on its card");
   assert.match(textOf(card), /Reviewer of PR #7 for Cache the totals running the checks/);
   assert.match(card, new RegExp(`href="/threads/${builder.id}"`), "it links its builder");
 
-  s.registry.saveReview({ ...review, phase: { kind: "quoting", asked: null } });
+  s.registry.reviews.saveReview({ ...review, phase: { kind: "quoting", asked: null } });
   assert.equal(textOf(underBar(await s.page(`/threads/${reviewer.id}`)).replace(/^[^>]*>/, "")), "Reviewer of PR #7 for Cache the totals quoting what could not be checked live");
 });
 
@@ -152,7 +152,7 @@ test("the header reads agent working while the agent works on a running pylon, a
   const s = await setup(t);
   const fix = await s.start({ title: "Fix checkout" });
   s.observe([fix]);
-  s.registry.recordActivity(fix.id, { agent: Date.now(), agentTurnRunning: true });
+  s.registry.threads.recordActivity(fix.id, { agent: Date.now(), agentTurnRunning: true });
   s.fake.transcript(fix.id).docs["pi.live"] = { run: { taskId: 1, inputs: [1] } };
   const page = await s.page(`/threads/${fix.id}`);
   assert.equal(chipOf(page), "agent working");

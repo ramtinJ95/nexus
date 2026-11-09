@@ -29,9 +29,9 @@ function fixture(path = ":memory:") {
   function add(id = "th-1", claude = false, output: string | null = "origin/feature") {
     const thread = testThread({ id: id as ThreadId, title: "test", project: project.id, conversationId: claude ? null : "1", startedBy: "test", createdAt: 1, lastHumanActivityAt: 1 });
     const pylon = testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } } });
-    registry.createThread(thread, pylon, claude ? { claude: { prompt: "/poteto-mode fix it" } } : {});
+    registry.threads.createThread(thread, pylon, claude ? { claude: { prompt: "/poteto-mode fix it" } } : {});
     if (claude) claudeWorkerAt(registry, thread.id, "started", { session: "c0ffee00-0000-4000-8000-000000000000" });
-    if (output !== null) registry.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: output });
+    if (output !== null) registry.threads.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: output });
     return thread.id;
   }
   const id = add();
@@ -46,9 +46,9 @@ function fixture(path = ":memory:") {
   const options = { registry, github, inbox: inbox() };
   /** Reports the node online with the thread's pylon running, or with no pylons. */
   function observe(thread: ThreadId, running: boolean) {
-    registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+    registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
     const pylon = runningPylon(`pylon-${thread}` as PylonId, { liveHash: "hash" as LiveHash });
-    registry.ingested(testObservation(node, { pylons: running ? [pylon] : [] }), []);
+    registry.threads.ingested(testObservation(node, { pylons: running ? [pylon] : [] }), []);
   }
   return { registry, id, add, observe, node, calls, messages, github, harness, inbox, options, watcher: prWatcher(options), get snapshot() { return snapshot; }, set snapshot(s: PrSnapshot) { snapshot = s; }, reject(value: boolean) { reject = value; }, get wakes() { return wakes; } };
 }
@@ -56,13 +56,13 @@ function fixture(path = ":memory:") {
 test("links origin branches, shares reads, and only deliberate messages wake without human activity", async (t) => {
   const f = fixture(); t.after(() => f.registry.close());
   const second = f.add("th-2");
-  f.registry.recordReply(f.id, 1000);
-  f.registry.markSeen(f.id, false, 1000);
+  f.registry.threads.recordReply(f.id, 1000);
+  f.registry.threads.markSeen(f.id, false, 1000);
   await f.watcher.poll();
   assert.deepEqual(f.calls, ["find:acme/repo:feature", "poll"]);
   assert.equal(f.wakes, 0);
-  assert.equal(f.registry.prWatch(second)?.links[0]?.pr.number, 1);
-  assert.equal(f.registry.outputs(f.id).find((o) => o.kind === "pull-request")?.ref, f.snapshot.pr.url);
+  assert.equal(f.registry.prWatches.prWatch(second)?.links[0]?.pr.number, 1);
+  assert.equal(f.registry.threads.outputs(f.id).find((o) => o.kind === "pull-request")?.ref, f.snapshot.pr.url);
   f.snapshot.failures.push({ id: "failed:1", text: "Check failed: build — https://example.com/check" });
   f.snapshot.pr.checks = "failed";
   await f.watcher.poll();
@@ -70,7 +70,7 @@ test("links origin branches, shares reads, and only deliberate messages wake wit
   assert.match(f.messages[0]![1], /Check failed: build/);
   assert.equal(f.messages[0]![4], "pr-watch");
   assert.ok(f.messages[0]![1].startsWith(senders["pr-watch"].prefix));
-  const thread = f.registry.thread(f.id)!;
+  const thread = f.registry.threads.thread(f.id)!;
   assert.equal(thread.lastHumanActivityAt, 1);
   assert.equal(thread.seenAt, 1000);
   assert.equal(thread.lastReplyAt, 1000);
@@ -98,20 +98,20 @@ test("batches failures, reviews, inline and issue comments, and conflict; then r
 test("records the PR's head at each read, so a push shows without another call to GitHub", async (t) => {
   const f = fixture(); t.after(() => f.registry.close());
   await f.watcher.poll();
-  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.head, "1".repeat(40));
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.links[0]?.pr.head, "1".repeat(40));
   f.snapshot.detail.head = "2".repeat(40);
   await f.watcher.poll();
-  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.head, "2".repeat(40));
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.links[0]?.pr.head, "2".repeat(40));
 });
 
 test("keeps the opening of the PR's description at each read, for the dashboard's card of a held review", async (t) => {
   const f = fixture(); t.after(() => f.registry.close());
   f.snapshot.detail.body = "## What changes\nThe home page lists what waits on you,\nwith the action on each card.\n\n## Not checked live\n- a real phone";
   await f.watcher.poll();
-  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.summary, "The home page lists what waits on you, with the action on each card.");
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.links[0]?.pr.summary, "The home page lists what waits on you, with the action on each card.");
   f.snapshot.detail.body = "Reworded.";
   await f.watcher.poll();
-  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.summary, "Reworded.");
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.links[0]?.pr.summary, "Reworded.");
 });
 
 test("a description's summary is its first paragraph past headings, images and comments, cut at 400 characters", () => {
@@ -125,36 +125,36 @@ for (const state of ["merged", "closed"] as const) test(`${state} is recorded an
   const f = fixture(); t.after(() => f.registry.close()); await f.watcher.poll();
   f.snapshot.pr.state = state; await f.watcher.poll(); f.calls.length = 0;
   await f.watcher.poll(); assert.ok(!f.calls.includes("poll"));
-  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.state, state);
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.links[0]?.pr.state, state);
   assert.equal(f.messages.length, 0);
 });
 
 for (const status of ["archived", "deleted"] as const) test(`${status} threads neither discover nor poll or send`, async (t) => {
   const f = fixture(); t.after(() => f.registry.close()); await f.watcher.poll();
-  f.registry.setThreadStatus(f.id, status); f.calls.length = 0;
+  f.registry.threads.setThreadStatus(f.id, status); f.calls.length = 0;
   f.snapshot.comments.push({ id: "new", text: "new comment" });
   await f.watcher.poll(); assert.deepEqual(f.calls, []); assert.equal(f.messages.length, 0);
   if (status === "archived") {
-    f.registry.setThreadStatus(f.id, "active"); await f.watcher.poll(); assert.equal(f.messages.length, 1);
-    f.registry.setThreadStatus(f.id, "archived"); await f.watcher.poll();
-    f.registry.setThreadStatus(f.id, "active"); await f.watcher.poll(); assert.equal(f.messages.length, 1);
+    f.registry.threads.setThreadStatus(f.id, "active"); await f.watcher.poll(); assert.equal(f.messages.length, 1);
+    f.registry.threads.setThreadStatus(f.id, "archived"); await f.watcher.poll();
+    f.registry.threads.setThreadStatus(f.id, "active"); await f.watcher.poll(); assert.equal(f.messages.length, 1);
   }
 });
 
 test("ten consecutive comment wakes stop all watching, even after unarchive", async (t) => {
   const f = fixture(); t.after(() => f.registry.close()); await f.watcher.poll();
   for (let i = 0; i < 11; i++) { f.snapshot.comments.push({ id: `comment:${i}`, text: "reply" }); await f.watcher.poll(); }
-  assert.equal(f.messages.length, 10); assert.equal(f.registry.prWatch(f.id)?.commentWakes, 10);
+  assert.equal(f.messages.length, 10); assert.equal(f.registry.prWatches.prWatch(f.id)?.commentWakes, 10);
   assert.match(f.messages[9]![1], /watching stopped/);
-  f.registry.setThreadStatus(f.id, "archived"); await f.watcher.poll(); f.registry.setThreadStatus(f.id, "active");
+  f.registry.threads.setThreadStatus(f.id, "archived"); await f.watcher.poll(); f.registry.threads.setThreadStatus(f.id, "active");
   f.calls.length = 0; await f.watcher.poll(); assert.deepEqual(f.calls, []);
 });
 
 test("a non-comment wake resets the consecutive count", async (t) => {
   const f = fixture(); t.after(() => f.registry.close()); await f.watcher.poll();
   f.snapshot.comments.push({ id: "comment", text: "reply" }); await f.watcher.poll();
-  assert.equal(f.registry.prWatch(f.id)?.commentWakes, 1);
-  f.snapshot.pr.conflict = true; await f.watcher.poll(); assert.equal(f.registry.prWatch(f.id)?.commentWakes, 0);
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.commentWakes, 1);
+  f.snapshot.pr.conflict = true; await f.watcher.poll(); assert.equal(f.registry.prWatches.prWatch(f.id)?.commentWakes, 0);
 });
 
 test("durable pending delivery reuses its request id after restart, with no repeated news", async (t) => {
@@ -170,7 +170,7 @@ test("durable pending delivery reuses its request id after restart, with no repe
 test("without a token the watcher is off", async (t) => {
   const f = fixture(); t.after(() => f.registry.close());
   await prWatcher({ ...f.options, github: null }).poll();
-  assert.deepEqual(f.calls, []); assert.equal(f.wakes, 0); assert.equal(f.registry.prWatch(f.id), null);
+  assert.deepEqual(f.calls, []); assert.equal(f.wakes, 0); assert.equal(f.registry.prWatches.prWatch(f.id), null);
 });
 
 /** A watcher whose GitHub searches wait for `released`, and a reader of whether a promise has settled yet. */
@@ -245,10 +245,10 @@ test("repository parsing only accepts GitHub SSH and HTTPS project repositories"
 
 test("an archive during a GitHub read does not consume or deliver the new event", async (t) => {
   const f = fixture(); t.after(() => f.registry.close()); await f.watcher.poll();
-  const github = { ...f.github, async poll() { f.registry.setThreadStatus(f.id, "archived"); return { ...f.snapshot, comments: [{ id: "new", text: "review" }] }; } };
+  const github = { ...f.github, async poll() { f.registry.threads.setThreadStatus(f.id, "archived"); return { ...f.snapshot, comments: [{ id: "new", text: "review" }] }; } };
   await prWatcher({ ...f.options, github }).poll();
-  assert.equal(f.messages.length, 0); assert.deepEqual(f.registry.prWatch(f.id)?.links[0]?.seen, []);
-  f.registry.setThreadStatus(f.id, "active"); f.snapshot.comments.push({ id: "new", text: "review" });
+  assert.equal(f.messages.length, 0); assert.deepEqual(f.registry.prWatches.prWatch(f.id)?.links[0]?.seen, []);
+  f.registry.threads.setThreadStatus(f.id, "active"); f.snapshot.comments.push({ id: "new", text: "review" });
   await f.watcher.poll(); assert.equal(f.messages.length, 1);
 });
 
@@ -270,13 +270,13 @@ test("unknown mergeability does not turn a continuing conflict into new news", a
 test("GitHub failures retain the cursor and expose only a credential-free retry notice", async (t) => {
   const f = fixture(); t.after(() => f.registry.close()); await f.watcher.poll();
   await prWatcher({ ...f.options, github: { ...f.github, async poll() { throw new Error("secret-token"); } } }).poll();
-  assert.ok(f.registry.prWatch(f.id)?.error); assert.ok(!JSON.stringify(f.registry.prWatch(f.id)).includes("secret-token"));
-  await f.watcher.poll(); assert.equal(f.registry.prWatch(f.id)?.error, null);
+  assert.ok(f.registry.prWatches.prWatch(f.id)?.error); assert.ok(!JSON.stringify(f.registry.prWatches.prWatch(f.id)).includes("secret-token"));
+  await f.watcher.poll(); assert.equal(f.registry.prWatches.prWatch(f.id)?.error, null);
 });
 
 test("a failing read fires one pull-request.error with the retry notice, and the next good read fires pull-request.error-cleared", async (t) => {
   const f = fixture(); t.after(() => f.registry.close()); await f.watcher.poll();
-  const events = () => f.registry.events("0", { kinds: ["pull-request.error", "pull-request.error-cleared"] }).map((e) => [e.kind, e.thread, e.payload]);
+  const events = () => f.registry.threads.events("0", { kinds: ["pull-request.error", "pull-request.error-cleared"] }).map((e) => [e.kind, e.thread, e.payload]);
   const failing = prWatcher({ ...f.options, github: { ...f.github, async poll() { throw new Error("secret-token"); } } });
   await failing.poll(); await failing.poll();
   assert.deepEqual(events(), [["pull-request.error", f.id, { error: "PR watch could not read GitHub or deliver its message; it will retry." }]], "once, however many passes fail");
@@ -286,28 +286,28 @@ test("a failing read fires one pull-request.error with the retry notice, and the
 
 test("a failed read of a queued thread's predecessor is the predecessor's error, kept until a read of it succeeds, archived or capped", async (t) => {
   const f = fixture(); t.after(() => f.registry.close()); await f.watcher.poll();
-  f.registry.saveQueued({
+  f.registry.queue.saveQueued({
     id: "th-q" as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after: [f.id],
     request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
   });
-  const events = () => f.registry.events("0", { kinds: ["pull-request.error", "pull-request.error-cleared"] }).map((e) => e.kind);
+  const events = () => f.registry.threads.events("0", { kinds: ["pull-request.error", "pull-request.error-cleared"] }).map((e) => e.kind);
   const settling = prWatcher({ ...f.options, github: { ...f.github, async find(repo: string, branch: string, state?: string) { if (state === "all") throw new Error("secret-token"); return f.github.find(repo, branch, state); } } });
   await settling.poll();
-  assert.equal(f.registry.prWatch(f.id)?.error, "PR watch could not read the pull requests a queued thread waits for; it will retry.", "the watch's own good read does not hide it");
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.error, "PR watch could not read the pull requests a queued thread waits for; it will retry.", "the watch's own good read does not hide it");
   assert.deepEqual(events(), ["pull-request.error"]);
-  f.registry.setThreadStatus(f.id, "archived");
+  f.registry.threads.setThreadStatus(f.id, "archived");
   await settling.poll();
   assert.deepEqual(events(), ["pull-request.error"]);
   await f.watcher.poll();
-  assert.equal(f.registry.prWatch(f.id)?.error, null);
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.error, null);
   assert.deepEqual(events(), ["pull-request.error", "pull-request.error-cleared"]);
 
-  f.registry.setThreadStatus(f.id, "active");
-  f.registry.savePrWatch(f.id, { ...f.registry.prWatch(f.id)!, commentWakes: 10 });
+  f.registry.threads.setThreadStatus(f.id, "active");
+  f.registry.prWatches.savePrWatch(f.id, { ...f.registry.prWatches.prWatch(f.id)!, commentWakes: 10 });
   await settling.poll();
   assert.deepEqual(events().slice(2), ["pull-request.error"], "a capped watch's failed read");
   await f.watcher.poll();
-  assert.equal(f.registry.prWatch(f.id)?.error, null, "the cap stops the watch's own pass, so the read for the queued thread clears it");
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.error, null, "the cap stops the watch's own pass, so the read for the queued thread clears it");
   assert.deepEqual(events().slice(3), ["pull-request.error-cleared"]);
 });
 
@@ -364,9 +364,9 @@ test("the watch still reads a PR whose statuses GitHub could not read, and keeps
   const f = fixture(); t.after(() => f.registry.close());
   const { fake, state } = statusesDown(f.snapshot.pr.url);
   const watch = prWatcher({ ...f.options, github: githubClient("secret", fake) });
-  const link = () => f.registry.prWatch(f.id)!.links[0]!;
+  const link = () => f.registry.prWatches.prWatch(f.id)!.links[0]!;
   await watch.poll();
-  assert.equal(f.registry.prWatch(f.id)?.error, null);
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.error, null);
   assert.deepEqual([link().pr.title, link().pr.head, link().pr.conflict], ["Fix", "abc", false]);
   state.conclusion = "failure";
   state.comments.push("looks close");
@@ -379,7 +379,7 @@ test("the watch still reads a PR whose statuses GitHub could not read, and keeps
   await watch.poll();
   assert.equal(f.messages.length, 1, "no news of passing checks while the statuses are unread");
   assert.equal(link().pr.checks, checks);
-  assert.equal(f.registry.prWatch(f.id)?.error, null);
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.error, null);
   state.failing = false;
   await watch.poll();
   assert.equal(link().pr.checks, "passing");
@@ -408,8 +408,8 @@ test("only trusted reviews and comments wake, and untrusted feedback cannot exha
   await watch.poll();
   for (generation = 1; generation <= 11; generation++) await watch.poll();
   assert.equal(f.messages.length, 0);
-  assert.equal(f.registry.prWatch(f.id)?.commentWakes, 0);
-  assert.deepEqual(f.registry.prWatch(f.id)?.links[0]?.seen, []);
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.commentWakes, 0);
+  assert.deepEqual(f.registry.prWatches.prWatch(f.id)?.links[0]?.seen, []);
   trusted = true;
   await watch.poll();
   assert.equal(f.messages.length, 1);
@@ -417,7 +417,7 @@ test("only trusted reviews and comments wake, and untrusted feedback cannot exha
   for (const association of associations.slice(0, 3)) assert.ok(f.messages[0]![1].includes(`feedback-${association}`));
   for (const association of associations.slice(3)) assert.ok(!f.messages[0]![1].includes(`feedback-${association ?? "missing"}`));
   assert.ok(!f.messages[0]![1].includes("pr-author"));
-  assert.equal(f.registry.prWatch(f.id)?.commentWakes, 1);
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.commentWakes, 1);
   failed = true;
   await watch.poll();
   assert.equal(f.messages.length, 2);
@@ -501,10 +501,10 @@ test("rediscovery reactivates a reopened PR without replaying its consumed feedb
   f.snapshot.pr.checks = "failed";
   await f.watcher.poll();
   assert.equal(f.messages.length, 1);
-  const seen = f.registry.prWatch(f.id)!.links[0]!.seen;
+  const seen = f.registry.prWatches.prWatch(f.id)!.links[0]!.seen;
   f.snapshot.pr.state = "closed";
   await f.watcher.poll();
-  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.state, "closed");
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.links[0]?.pr.state, "closed");
   const restarted = prWatcher(f.options);
   f.calls.length = 0;
   await restarted.poll();
@@ -512,8 +512,8 @@ test("rediscovery reactivates a reopened PR without replaying its consumed feedb
   f.snapshot.pr.state = "open";
   await restarted.poll();
   assert.ok(f.calls.includes("poll"));
-  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.state, "open");
-  assert.deepEqual(f.registry.prWatch(f.id)?.links[0]?.seen, seen);
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.links[0]?.pr.state, "open");
+  assert.deepEqual(f.registry.prWatches.prWatch(f.id)?.links[0]?.seen, seen);
   assert.equal(f.messages.length, 1);
   f.snapshot.comments.push({ id: "comment:new", text: "new feedback" });
   await restarted.poll();
@@ -538,13 +538,13 @@ test("deployment drain retains PR-watch feedback for delivery after the barrier 
   f.snapshot.failures.push({ id: "failed:drain", text: "failed while draining" });
   await watcher.poll();
   assert.equal(f.messages.length, 0);
-  const pending = f.registry.prWatch(f.id)!.pending;
+  const pending = f.registry.prWatches.prWatch(f.id)!.pending;
   assert.ok(pending);
   draining = false;
   await watcher.poll();
   assert.equal(f.messages.length, 1);
   assert.equal(f.messages[0]![2], pending.id);
-  assert.equal(f.registry.prWatch(f.id)!.pending, null);
+  assert.equal(f.registry.prWatches.prWatch(f.id)!.pending, null);
 });
 
 test("feedback reaches a Claude worker thread typed into its session once its pylon runs, as agent activity only", async (t) => {
@@ -560,21 +560,21 @@ test("feedback reaches a Claude worker thread typed into its session once its py
   await watcher.poll();
   assert.equal(typed.length, 0, "a paused pylon is woken, not typed into");
   assert.deepEqual(woken.filter((id) => id === claude).length, 1);
-  const pending = f.registry.prWatch(claude)!.pending!;
+  const pending = f.registry.prWatches.prWatch(claude)!.pending!;
   assert.ok(pending);
   f.observe(claude, true);
   await watcher.poll();
   assert.equal(typed.length, 1);
-  assert.equal(f.registry.prWatch(claude)!.pending?.id, pending.id, "Claude at a dialog typed nothing, so the message waits");
+  assert.equal(f.registry.prWatches.prWatch(claude)!.pending?.id, pending.id, "Claude at a dialog typed nothing, so the message waits");
   outcome = "sent";
   await watcher.poll();
   assert.equal(typed.length, 2);
   const command = typed[1] as Extract<PylonCommand, { kind: "send-claude" }>;
   assert.ok(command.text.startsWith(senders["pr-watch"].prefix));
   assert.match(command.text, /CHANGES_REQUESTED\): https:\/\/example.com\n  Use the cache$/, "line ends and tabs made typeable");
-  assert.equal(f.registry.prWatch(claude)!.pending, null);
-  assert.deepEqual(f.registry.claudeMessage(claude, pending.id), { state: "sent", result: { session: "c0ffee00-0000-4000-8000-000000000000", outcome: "sent", resumed: false } });
-  assert.equal(f.registry.thread(claude)!.lastHumanActivityAt, 1, "automated feedback is never human activity");
+  assert.equal(f.registry.prWatches.prWatch(claude)!.pending, null);
+  assert.deepEqual(f.registry.threads.claudeMessage(claude, pending.id), { state: "sent", result: { session: "c0ffee00-0000-4000-8000-000000000000", outcome: "sent", resumed: false } });
+  assert.equal(f.registry.threads.thread(claude)!.lastHumanActivityAt, 1, "automated feedback is never human activity");
   assert.equal(f.messages.filter(([thread]) => thread === claude).length, 0, "nothing reaches the harness");
   await watcher.poll();
   assert.equal(typed.length, 2);
@@ -635,22 +635,22 @@ test("the review loop hears of each PR the watch links open, once, and again aft
   const watcher = prWatcher({ ...f.options, github: { ...f.github, find: async () => [1] }, async linked(thread, pr) { heard.push(`${thread.id} #${pr.number} ${pr.state}`); if (fail) throw new Error("GitHub read failed"); } });
   await watcher.poll();
   assert.deepEqual(heard, ["th-1 #1 open"]);
-  assert.equal(f.registry.prWatch(f.id)?.links.length ?? 0, 0, "the link waits until the review loop heard of it");
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.links.length ?? 0, 0, "the link waits until the review loop heard of it");
   fail = false;
   await watcher.poll();
   await watcher.poll();
   assert.deepEqual(heard, ["th-1 #1 open", "th-1 #1 open"], "a saved link is not news again");
-  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.number, 1);
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.links[0]?.pr.number, 1);
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "closed" } };
   f.add("th-2");
   await watcher.poll();
-  assert.equal(f.registry.prWatch("th-2" as ThreadId)?.links[0]?.pr.state, "closed");
+  assert.equal(f.registry.prWatches.prWatch("th-2" as ThreadId)?.links[0]?.pr.state, "closed");
   assert.equal(heard.length, 2, "a PR first read closed is not news");
 });
 
 test("the watch fires pull-request.linked once for each PR when it saves the link, and not for a link it could not save", async (t) => {
   const f = fixture(); t.after(() => f.registry.close());
-  const linked = () => f.registry.events("0", { kinds: ["pull-request.linked"] }).map((e) => `${e.thread} #${e.payload.number} ${e.payload.state}`);
+  const linked = () => f.registry.threads.events("0", { kinds: ["pull-request.linked"] }).map((e) => `${e.thread} #${e.payload.number} ${e.payload.state}`);
   let fail = true;
   const watcher = prWatcher({ ...f.options, async linked() { if (fail) throw new Error("GitHub read failed"); } });
   await watcher.poll();
@@ -660,18 +660,18 @@ test("the watch fires pull-request.linked once for each PR when it saves the lin
   f.snapshot.comments.push({ id: "comment:1", text: "Looks good" });
   await watcher.poll();
   assert.deepEqual(linked(), ["th-1 #1 open"]);
-  assert.equal(f.registry.events("0", { kinds: ["pull-request.feedback"] }).length, 1, "feedback on a linked PR is its own event");
+  assert.equal(f.registry.threads.events("0", { kinds: ["pull-request.feedback"] }).length, 1, "feedback on a linked PR is its own event");
 });
 
 test("a thread a queued thread waits for has its PR's merge seen when archived, capped or closed, and only then", async (t) => {
   const f = fixture(); t.after(() => f.registry.close());
-  const queued = (after: ThreadId[], status: "queued" | "archived" = "queued") => f.registry.saveQueued({
+  const queued = (after: ThreadId[], status: "queued" | "archived" = "queued") => f.registry.queue.saveQueued({
     id: `th-q${after.length}${status}` as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after,
     request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status, startNow: null, lastError: null, startedAt: null, firstMessage: null,
   });
-  const merged = (id: ThreadId) => f.registry.prWatch(id)?.links[0]?.pr.state;
+  const merged = (id: ThreadId) => f.registry.prWatches.prWatch(id)?.links[0]?.pr.state;
   await f.watcher.poll();
-  f.registry.setThreadStatus(f.id, "archived");
+  f.registry.threads.setThreadStatus(f.id, "archived");
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
   await f.watcher.poll();
   assert.equal(merged(f.id), "open", "an archived thread nothing waits for is not polled");
@@ -685,7 +685,7 @@ test("a thread a queued thread waits for has its PR's merge seen when archived, 
   const capped = f.add("th-capped");
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "open" } };
   await f.watcher.poll();
-  f.registry.savePrWatch(capped, { ...f.registry.prWatch(capped)!, commentWakes: 10 });
+  f.registry.prWatches.savePrWatch(capped, { ...f.registry.prWatches.prWatch(capped)!, commentWakes: 10 });
   queued([f.id, capped]);
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
   await f.watcher.poll();
@@ -693,7 +693,7 @@ test("a thread a queued thread waits for has its PR's merge seen when archived, 
 
   const reopened = f.add("th-reopened");
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "closed" } };
-  f.registry.savePrWatch(reopened, { links: [{ pr: { ...f.snapshot.pr }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  f.registry.prWatches.savePrWatch(reopened, { links: [{ pr: { ...f.snapshot.pr }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   queued([f.id, capped, reopened]);
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
   await f.watcher.poll();
@@ -702,51 +702,51 @@ test("a thread a queued thread waits for has its PR's merge seen when archived, 
 
 test("a predecessor's PR that opened and merged between two reads, or behind a message the watch cannot deliver, is seen merged", async (t) => {
   const f = fixture(); t.after(() => f.registry.close());
-  f.registry.saveQueued({
+  f.registry.queue.saveQueued({
     id: "th-queued" as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after: [f.id],
     request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
   });
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
   await f.watcher.poll();
-  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.state, "merged", "a PR first found after its merge is linked merged");
-  assert.deepEqual(f.registry.events("0", { kinds: ["pull-request.linked"] }).map((e) => e.payload.state), ["merged"], "and its event says so");
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.links[0]?.pr.state, "merged", "a PR first found after its merge is linked merged");
+  assert.deepEqual(f.registry.threads.events("0", { kinds: ["pull-request.linked"] }).map((e) => e.payload.state), ["merged"], "and its event says so");
   assert.ok(f.calls.includes("find:acme/repo:feature:all"));
 
   const held = f.add("th-held");
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, number: 2, state: "open" } };
   await f.watcher.poll();
-  f.registry.savePrWatch(held, { ...f.registry.prWatch(held)!, pending: { id: "pr-watch:held", text: "news" } });
-  f.registry.saveQueued({ ...f.registry.queuedThread("th-queued" as ThreadId)!, after: [f.id, held] });
+  f.registry.prWatches.savePrWatch(held, { ...f.registry.prWatches.prWatch(held)!, pending: { id: "pr-watch:held", text: "news" } });
+  f.registry.queue.saveQueued({ ...f.registry.queue.queuedThread("th-queued" as ThreadId)!, after: [f.id, held] });
   f.reject(true);
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
   await f.watcher.poll();
   await f.watcher.poll();
-  assert.equal(f.registry.prWatch(held)?.pending?.id, "pr-watch:held", "the message still waits");
-  assert.equal(f.registry.prWatch(held)?.links.find((l) => l.pr.number === 2)?.pr.state, "merged", "its PR's merge is seen all the same");
+  assert.equal(f.registry.prWatches.prWatch(held)?.pending?.id, "pr-watch:held", "the message still waits");
+  assert.equal(f.registry.prWatches.prWatch(held)?.links.find((l) => l.pr.number === 2)?.pr.state, "merged", "its PR's merge is seen all the same");
 });
 
 test("a predecessor with one PR merged and another open, neither linked yet, still waits", async (t) => {
   const f = fixture(); t.after(() => f.registry.close());
-  f.registry.saveQueued({
+  f.registry.queue.saveQueued({
     id: "th-queued" as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after: [f.id],
     request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
   });
-  f.registry.savePrWatch(f.id, { links: [], commentWakes: 10, pending: null, error: null });
+  f.registry.prWatches.savePrWatch(f.id, { links: [], commentWakes: 10, pending: null, error: null });
   const pr = (number: number, state: "open" | "merged") => ({ ...structuredClone(f.snapshot), pr: { ...f.snapshot.pr, number, state, url: `https://github.com/acme/repo/pull/${number}` } });
   const watcher = prWatcher({ ...f.options, github: { find: async (_repo: string, _branch: string, state = "open") => state === "all" ? [1, 2] : [2], poll: async (_repo: string, n: number) => pr(n, n === 1 ? "merged" : "open") } });
   await watcher.poll();
-  const links = f.registry.prWatch(f.id)!.links;
+  const links = f.registry.prWatches.prWatch(f.id)!.links;
   assert.deepEqual(links.map((l) => [l.pr.number, l.pr.state, l.pr.url === ""]), [[1, "merged", false], [2, "open", true]], "the open PR is linked unread, so the watch baselines it");
   assert.deepEqual(waitOf(f.registry, f.id), { thread: f.id, state: "waiting", why: "PR #2 is open" });
 });
 
 test("a predecessor's PRs are read before any is saved, and a known one that closes or reopens keeps its state current", async (t) => {
   const f = fixture(); t.after(() => f.registry.close());
-  f.registry.saveQueued({
+  f.registry.queue.saveQueued({
     id: "th-queued" as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after: [f.id],
     request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
   });
-  f.registry.savePrWatch(f.id, { links: [], commentWakes: 10, pending: null, error: null });
+  f.registry.prWatches.savePrWatch(f.id, { links: [], commentWakes: 10, pending: null, error: null });
   const pr = (number: number, state: "open" | "merged" | "closed") => ({ ...structuredClone(f.snapshot), pr: { ...f.snapshot.pr, number, state, url: `https://github.com/acme/repo/pull/${number}` } });
   const states = new Map<number, "open" | "merged" | "closed">([[1, "merged"], [2, "open"]]);
   let release = () => {};
@@ -768,13 +768,13 @@ test("a predecessor's PRs are read before any is saved, and a known one that clo
 
   states.set(2, "closed");
   await watcher.poll();
-  assert.deepEqual(f.registry.prWatch(f.id)!.links.map((l) => [l.pr.number, l.pr.state]), [[1, "merged"], [2, "closed"]]);
+  assert.deepEqual(f.registry.prWatches.prWatch(f.id)!.links.map((l) => [l.pr.number, l.pr.state]), [[1, "merged"], [2, "closed"]]);
   assert.equal(waitOf(f.registry, f.id).state, "landed", "once the open one closes, the merged one lands the thread");
 
   states.set(2, "open");
   await watcher.poll();
   assert.deepEqual(waitOf(f.registry, f.id), { thread: f.id, state: "waiting", why: "PR #2 is open" }, "a reopened PR holds it again");
-  assert.equal(f.registry.prWatch(f.id)!.links[1]!.pr.url, "", "a PR the watch never read stays unread, so its comments are baselined");
+  assert.equal(f.registry.prWatches.prWatch(f.id)!.links[1]!.pr.url, "", "a PR the watch never read stays unread, so its comments are baselined");
 });
 
 test("a branch a thread checks out links no PR, so a thread queued after it waits; the branch it pushes, force-pushed too, links its own", async (t) => {
@@ -796,13 +796,13 @@ test("a branch a thread checks out links no PR, so a thread queued after it wait
   await git(checkout, "checkout", "-q", "-B", "main", "origin/main");
 
   const builder = f.add("th-builder", true, null);
-  const pylonId = f.registry.thread(builder)!.pylonId;
+  const pylonId = f.registry.threads.thread(builder)!.pylonId;
   const guest = fakeGuest(() => { throw new Error("unused"); });
   guest.exec = async (argv) => ({ exitCode: 0, output: (await promisify(execFile)(argv[0]!, argv.slice(1), { cwd: checkout, env, encoding: "utf8" })).stdout, truncated: false });
   let previous: PylonObservation | "absent" = "absent";
   async function observe() {
     const pylon = runningPylon(pylonId, { liveHash: "hash" as LiveHash, git: await gitFacts(guest) });
-    f.registry.ingested(null, ingest({ type: "pylon", pylon }, f.node, new Map([[pylonId, previous]]), Date.now()));
+    f.registry.threads.ingested(null, ingest({ type: "pylon", pylon }, f.node, new Map([[pylonId, previous]]), Date.now()));
     previous = pylon;
   }
   const prs = new Map<string, PrSnapshot>();
@@ -814,7 +814,7 @@ test("a branch a thread checks out links no PR, so a thread queued after it wait
   const watcher = prWatcher({ registry: f.registry, github, inbox: f.inbox() });
   const starts: ThreadId[] = [];
   const queue = threadQueue({ registry: f.registry, gate: { run: (action) => action() }, send: async () => {}, async startThread({ queued }) { starts.push(queued!); throw new Error("not started in this test"); } });
-  f.registry.saveQueued({
+  f.registry.queue.saveQueued({
     id: "th-after" as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after: [builder],
     request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
   });
@@ -828,8 +828,8 @@ test("a branch a thread checks out links no PR, so a thread queued after it wait
   await queue.poll();
   assert.deepEqual(starts, [], "the queued thread stays queued");
   assert.deepEqual(waitOf(f.registry, builder), { thread: builder, state: "waiting", why: "has no pull request yet" });
-  assert.deepEqual(f.registry.prWatch(builder)?.links ?? [], []);
-  assert.deepEqual(f.registry.outputs(builder).filter((o) => o.kind === "branch"), [], "a branch read from origin is not the thread's output");
+  assert.deepEqual(f.registry.prWatches.prWatch(builder)?.links ?? [], []);
+  assert.deepEqual(f.registry.threads.outputs(builder).filter((o) => o.kind === "branch"), [], "a branch read from origin is not the thread's output");
 
   await git(checkout, "checkout", "-q", "-b", "fix/own-branches", "main");
   await git(checkout, "commit", "-q", "--allow-empty", "-m", "the builder's work");
@@ -845,8 +845,8 @@ test("a branch a thread checks out links no PR, so a thread queued after it wait
   pr(181, "fix/own-branches", "merged");
   await watcher.poll();
   await queue.poll();
-  assert.deepEqual(f.registry.outputs(builder).filter((o) => o.kind === "branch").map((o) => o.ref), ["origin/fix/own-branches"]);
-  assert.deepEqual(f.registry.prWatch(builder)?.links.map((l) => [l.pr.number, l.pr.state]), [[181, "merged"]]);
+  assert.deepEqual(f.registry.threads.outputs(builder).filter((o) => o.kind === "branch").map((o) => o.ref), ["origin/fix/own-branches"]);
+  assert.deepEqual(f.registry.prWatches.prWatch(builder)?.links.map((l) => [l.pr.number, l.pr.state]), [[181, "merged"]]);
   assert.deepEqual(starts, ["th-after"], "the queued thread starts once the builder's own PR merges");
 });
 
@@ -869,13 +869,13 @@ test("a PR whose branch another clone pushed links to the thread whose checkout 
     await git(dir, "clone", "-q", "remote.git", id);
     const checkout = join(dir, id);
     const thread = f.add(id, true, null);
-    const pylonId = f.registry.thread(thread)!.pylonId;
+    const pylonId = f.registry.threads.thread(thread)!.pylonId;
     const guest = fakeGuest(() => { throw new Error("unused"); });
     guest.exec = async (argv) => ({ exitCode: 0, output: (await promisify(execFile)(argv[0]!, argv.slice(1), { cwd: checkout, env, encoding: "utf8" })).stdout, truncated: false });
     let previous: PylonObservation | "absent" = "absent";
     async function observe() {
       const pylon = runningPylon(pylonId, { liveHash: "hash" as LiveHash, git: await gitFacts(guest) });
-      f.registry.ingested(null, ingest({ type: "pylon", pylon }, f.node, new Map([[pylonId, previous]]), Date.now()));
+      f.registry.threads.ingested(null, ingest({ type: "pylon", pylon }, f.node, new Map([[pylonId, previous]]), Date.now()));
       previous = pylon;
     }
     await observe();
@@ -894,26 +894,26 @@ test("a PR whose branch another clone pushed links to the thread whose checkout 
 
   await builder.observe();
   await watcher.poll();
-  assert.deepEqual(f.registry.prWatch(builder.thread)?.links ?? [], [], "before its checkout fetches, nothing shows the branch reached GitHub");
+  assert.deepEqual(f.registry.prWatches.prWatch(builder.thread)?.links ?? [], [], "before its checkout fetches, nothing shows the branch reached GitHub");
   for (const c of [builder, namesake]) { await git(c.checkout, "fetch", "-q", "origin"); await c.observe(); }
   await watcher.poll();
-  assert.deepEqual(f.registry.prWatch(builder.thread)?.links.map((l) => l.pr.number), [409]);
-  assert.deepEqual(f.registry.outputs(builder.thread).filter((o) => o.kind === "branch").map((o) => o.ref), ["origin/fix/cleanup-daily"]);
-  assert.deepEqual(f.registry.prWatch(namesake.thread)?.links ?? [], [], "a same-named branch that does not hold the PR's head links nothing");
-  assert.deepEqual(f.registry.outputs(namesake.thread).filter((o) => o.kind === "branch"), []);
+  assert.deepEqual(f.registry.prWatches.prWatch(builder.thread)?.links.map((l) => l.pr.number), [409]);
+  assert.deepEqual(f.registry.threads.outputs(builder.thread).filter((o) => o.kind === "branch").map((o) => o.ref), ["origin/fix/cleanup-daily"]);
+  assert.deepEqual(f.registry.prWatches.prWatch(namesake.thread)?.links ?? [], [], "a same-named branch that does not hold the PR's head links nothing");
+  assert.deepEqual(f.registry.threads.outputs(namesake.thread).filter((o) => o.kind === "branch"), []);
 });
 
 test("a pass reads no archived or deleted thread that no queued thread waits for", async (t) => {
   const f = fixture(); t.after(() => f.registry.close());
   const archived = f.add("th-archived");
   const deleted = f.add("th-deleted");
-  f.registry.setThreadStatus(archived, "archived");
-  f.registry.setThreadStatus(deleted, "deleted");
+  f.registry.threads.setThreadStatus(archived, "archived");
+  f.registry.threads.setThreadStatus(deleted, "deleted");
   const asked: ThreadId[] = [];
-  const registry = { ...f.registry, isReviewer: (id: ThreadId) => { asked.push(id); return f.registry.isReviewer(id); } };
+  const registry = { ...f.registry, reviews: { ...f.registry.reviews, isReviewer: (id: ThreadId) => { asked.push(id); return f.registry.reviews.isReviewer(id); } } };
   await prWatcher({ ...f.options, registry }).poll();
   assert.deepEqual(asked, [f.id]);
-  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.number, 1);
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.links[0]?.pr.number, 1);
 });
 
 test("a thread's linked open pull requests are read together, and their news comes in link order", async (t) => {
@@ -930,17 +930,17 @@ test("a thread's linked open pull requests are read together, and their news com
   assert.deepEqual(asked, [1, 2], "both polls are in flight before either answers");
   pending.reverse().forEach((answer) => answer());
   await pass;
-  const state = f.registry.prWatch(f.id)!;
+  const state = f.registry.prWatches.prWatch(f.id)!;
   assert.deepEqual(state.links.map((l) => l.pr.number), [1, 2]);
   assert.match(String(f.messages.at(-1)![1]), /Check failed on #1[\s\S]*Check failed on #2/);
 });
 
 test("the watch stops after its comment cap of comment-only wakes in a row, and says so", async (t) => {
   const f = fixture(); t.after(() => f.registry.close());
-  f.registry.savePrWatch(f.id, { links: [{ pr: f.snapshot.pr, seen: [], failed: false }], commentWakes: commentCap - 1, pending: null, error: null });
+  f.registry.prWatches.savePrWatch(f.id, { links: [{ pr: f.snapshot.pr, seen: [], failed: false }], commentWakes: commentCap - 1, pending: null, error: null });
   f.snapshot = { ...f.snapshot, comments: [{ id: "issue-comment:1", text: "issue-comment by owner: please rename it" }] };
   await f.watcher.poll();
-  assert.equal(f.registry.prWatch(f.id)!.commentWakes, commentCap);
+  assert.equal(f.registry.prWatches.prWatch(f.id)!.commentWakes, commentCap);
   assert.match(String(f.messages.at(-1)![1]), new RegExp(`PR watching stopped after ${commentCap} consecutive comment-only wakes\\.$`));
   const calls = f.calls.length;
   f.snapshot = { ...f.snapshot, comments: [...f.snapshot.comments, { id: "issue-comment:2", text: "issue-comment by owner: and test it" }] };
@@ -1040,14 +1040,14 @@ test("a turn end reads the thread's pushed branches again and links its pull req
     // The probe's read after the turn sees the branch the turn pushed.
     fresh: async (thread) => {
       freshened.push(thread.id);
-      f.registry.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: "origin/pushed" });
+      f.registry.threads.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: "origin/pushed" });
     },
   });
   await watcher.turnEnded(builder);
   assert.deepEqual(freshened, [builder]);
   assert.deepEqual(f.calls, ["find:acme/repo:pushed", "poll"], "only the thread whose turn ended is read");
   assert.deepEqual(linked, [[builder, 1]]);
-  assert.equal(f.registry.prWatch(f.id), null);
+  assert.equal(f.registry.prWatches.prWatch(f.id), null);
   assert.deepEqual(watcher.passes(), { started: 0, finished: 0 }, "a turn end's pass is not a pass over every thread");
 });
 
@@ -1056,7 +1056,7 @@ test("a turn end whose fresh read fails still reads the branches the registry ho
   const watcher = prWatcher({ ...f.options, fresh: async () => { throw new Error("pylon is stopped, not running"); } });
   await watcher.turnEnded(f.id);
   assert.deepEqual(f.calls, ["find:acme/repo:feature", "poll"]);
-  assert.equal(f.registry.prWatch(f.id)?.links[0]?.pr.number, 1);
+  assert.equal(f.registry.prWatches.prWatch(f.id)?.links[0]?.pr.number, 1);
 });
 
 test("close waits for a turn end's fresh read, and no pass reads GitHub after it", async (t) => {

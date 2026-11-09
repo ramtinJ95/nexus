@@ -21,7 +21,7 @@ test("thread detail lists the pylon's listening ports with the service and previ
   const web: ServiceFact = { name: "web", state: "ready", port: 5173, declared: true, wantsPreview: true };
   const api: ServiceFact = { name: "api", state: "ready", port: 8080, declared: true, wantsPreview: false };
   observeRunning(s, { services: [web, api], listening: [{ port: 3000 }, { port: 5173 }, { port: 8080 }] });
-  s.registry.allocatePreviews(s.thread.pylonId, ["web"], { first: 10200, last: 10299 });
+  s.registry.threads.allocatePreviews(s.thread.pylonId, ["web"], { first: 10200, last: 10299 });
   assert.deepEqual(await ports(), [
     { port: 3000, service: null, preview: null },
     { port: 5173, service: "web", preview: { pylon: s.thread.pylonId, service: "web", httpsPort: 10200, ready: false, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" } },
@@ -29,19 +29,19 @@ test("thread detail lists the pylon's listening ports with the service and previ
   ]);
   observeRunning(s, { listening: null });
   assert.equal(await ports(), null, "ports the node could not read are unknown, not none");
-  s.registry.ingested({ ...s.registry.node(node)!.observation!, pylons: [stoppedPylon(s.thread.pylonId, { sessions: null })] }, []);
+  s.registry.threads.ingested({ ...s.registry.node(node)!.observation!, pylons: [stoppedPylon(s.thread.pylonId, { sessions: null })] }, []);
   assert.deepEqual(await ports(), [], "nothing listens in a stopped pylon");
 });
 
 test("linking a port goes through the node's probe, gives it an https port at once, and counts as human activity", async (t) => {
   const s = await withThread(t);
-  s.registry.recordActivity(s.thread.id, { human: 1 });
+  s.registry.threads.recordActivity(s.thread.id, { human: 1 });
   s.woken.length = 0;
   const linked = await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 });
   const preview = { pylon: s.thread.pylonId, service: "port-3000", httpsPort: 10200, ready: false, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" };
   assert.deepEqual(linked, { status: 200, body: preview });
   assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "link-port", port: 3000 }]]);
-  assert.ok(s.registry.thread(s.thread.id)!.lastHumanActivityAt > 1);
+  assert.ok(s.registry.threads.thread(s.thread.id)!.lastHumanActivityAt > 1);
   assert.ok(s.woken.includes(node), "the loop publishes the new port at its next pass");
   assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 }), { status: 200, body: preview }, "linking again answers the same preview");
   observeRunning(s, { services: [], listening: [{ port: 3000 }] });
@@ -63,12 +63,12 @@ test("linking a port goes through the node's probe, gives it an https port at on
 
 test("a preview that finds no free port answers 503, and any other allocation fault 500", async (t) => {
   const s = await withThread(t);
-  const allocate = s.registry.allocatePreviews;
-  s.registry.allocatePreviews = (pylon, services) => allocate(pylon, services, { first: 10200, last: 10199 });
+  const allocate = s.registry.threads.allocatePreviews;
+  s.registry.threads.allocatePreviews = (pylon, services) => allocate(pylon, services, { first: 10200, last: 10199 });
   const full = await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 });
   assert.equal(full.status, 503);
   assert.match(full.body.error, /no https port is free for the preview of port-3000/);
-  s.registry.allocatePreviews = () => { throw new Error("database is locked"); };
+  s.registry.threads.allocatePreviews = () => { throw new Error("database is locked"); };
   assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 }), { status: 500, body: { error: "database is locked", code: null, retryable: false } });
 });
 
@@ -92,19 +92,19 @@ test("linking a port of a pylon that is not running, or of an archived or delete
   assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}`)).status, 200);
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 })).status, 409);
   assert.deepEqual(s.commands, [], "an archived or deleted thread's probe is never asked");
-  assert.deepEqual(s.registry.previews(s.thread.pylonId), []);
+  assert.deepEqual(s.registry.threads.previews(s.thread.pylonId), []);
 });
 
 test("a command for a pylon its node lists running on the boot a settle sealed is refused with 409 and never reaches the probe, until another boot runs", async (t) => {
   const s = await withThread(t);
   observeRunning(s, {});
-  s.registry.sealBoot(s.thread.pylonId, "2027-01-01T00:00:00Z");
+  s.registry.threads.sealBoot(s.thread.pylonId, "2027-01-01T00:00:00Z");
   s.commands.length = 0;
   const sealed = await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 });
   assert.equal(sealed.status, 409);
   assert.match(sealed.body.error, /is not running yet. This request wakes it/);
   assert.deepEqual(s.commands, [], "the sealed boot's probe is never asked");
-  s.registry.ingested(testObservation(node, { pylons: [runningPylon(s.thread.pylonId, { bootedAt: "2027-01-01T00:05:00Z", liveHash: s.registry.pylon(s.thread.pylonId)!.liveHash })] }), []);
+  s.registry.threads.ingested(testObservation(node, { pylons: [runningPylon(s.thread.pylonId, { bootedAt: "2027-01-01T00:05:00Z", liveHash: s.registry.threads.pylon(s.thread.pylonId)!.liveHash })] }), []);
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 })).status, 200);
   assert.equal(s.commands.length, 1);
 });
@@ -115,21 +115,21 @@ test("unpublishing a linked port goes through the node's probe, drops its previe
   const linked = (await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 })).body;
   // The node's last read still lists the port's service, as it does until its next read.
   observeRunning(s, { services: [{ name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true }], listening: [{ port: 3000 }] });
-  s.registry.recordActivity(s.thread.id, { human: 1 });
+  s.registry.threads.recordActivity(s.thread.id, { human: 1 });
   s.woken.length = 0;
   s.commands.length = 0;
   assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/previews/3000`, {}), { status: 204, body: null });
   assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "unlink-port", port: 3000 }]]);
   assert.deepEqual((await detail()).previews, []);
   assert.deepEqual((await detail()).ports, [{ port: 3000, service: "port-3000", preview: null }], "the port is listed again, without a preview");
-  assert.ok(s.registry.thread(s.thread.id)!.lastHumanActivityAt > 1);
+  assert.ok(s.registry.threads.thread(s.thread.id)!.lastHumanActivityAt > 1);
   assert.ok(s.woken.includes(node), "the loop publishes the previews without it at its next pass");
   assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/previews/3000`, {}), { status: 204, body: null }, "unpublishing again succeeds");
   assert.equal(s.commands.length, 2, "and asks the pylon again, which knows whether the port is linked");
   assert.deepEqual((await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 })).body, linked, "the port can be published again, on the port it freed");
 
   // The pylon refuses a port a service's preview owns, and its reason, which names the service, is the whole error.
-  s.registry.allocatePreviews(s.thread.pylonId, ["web"], { first: 10200, last: 10299 });
+  s.registry.threads.allocatePreviews(s.thread.pylonId, ["web"], { first: 10200, last: 10299 });
   const reason = "Port 5173 is the preview of service web, not a linked port. Remove the preview from /home/user/workspace/repo/.nexus/services.yaml to unpublish it";
   s.probeAnswers(async () => ({ kind: "unlink-port", refused: reason }));
   assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/previews/5173`, {}), { status: 422, body: { error: reason, code: null, retryable: false } });
@@ -149,7 +149,7 @@ test("unpublishing a port of a pylon that is not running, or of an archived or d
   assert.equal(paused.status, 409);
   assert.match(paused.body.error, /is not running yet. This request wakes it/);
   assert.ok(s.woken.includes(node), "the request wakes the pylon");
-  assert.deepEqual(s.registry.previews(s.thread.pylonId).map((p) => p.service), ["port-3000"], "the preview stays until the pylon unlinks the port");
+  assert.deepEqual(s.registry.threads.previews(s.thread.pylonId).map((p) => p.service), ["port-3000"], "the preview stays until the pylon unlinks the port");
   s.probeAnswers(async () => { throw Object.assign(new Error("rj-firebat: connect ECONNREFUSED"), { code: "unreachable" }); });
   assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}/previews/3000`, {})).status, 503);
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/archive`)).status, 200);
@@ -162,7 +162,7 @@ test("unpublishing a port of a pylon that is not running, or of an archived or d
 
 test("opening a session goes through the node's probe, defaults to Claude Code titled by its harness, and counts as human activity", async (t) => {
   const s = await withThread(t);
-  s.registry.recordActivity(s.thread.id, { human: 1 });
+  s.registry.threads.recordActivity(s.thread.id, { human: 1 });
   s.woken.length = 0;
   assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, {}), { status: 201, body: { herdrPane: "w1:p1", harness: "claude-code", title: "claude-code" } });
   assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, { harness: "pi", title: " plan " }), { status: 201, body: { herdrPane: "w1:p1", harness: "pi", title: "plan" } });
@@ -170,7 +170,7 @@ test("opening a session goes through the node's probe, defaults to Claude Code t
     [s.thread.pylonId, { kind: "open-session", harness: "claude-code", title: "claude-code" }],
     [s.thread.pylonId, { kind: "open-session", harness: "pi", title: "plan" }],
   ]);
-  assert.ok(s.registry.thread(s.thread.id)!.lastHumanActivityAt > 1);
+  assert.ok(s.registry.threads.thread(s.thread.id)!.lastHumanActivityAt > 1);
   assert.ok(s.woken.includes(node));
 
   s.commands.length = 0;
@@ -185,7 +185,7 @@ test("a thread's files and changes are read from its checkout through its node's
   const { repo, base } = await localCheckout(t, s);
   await writeFile(join(repo, "src", "app.ts"), "export const a = 2;\n");
   await writeFile(join(repo, "shot.png"), Buffer.from([0x89, 0x50, 0, 255]));
-  s.registry.recordActivity(s.thread.id, { human: 1 });
+  s.registry.threads.recordActivity(s.thread.id, { human: 1 });
   s.woken.length = 0;
   const id = s.thread.id;
 
@@ -219,7 +219,7 @@ test("a thread's files and changes are read from its checkout through its node's
   assert.match(diff.body.diff, /^diff --git a\/src\/app.ts b\/src\/app.ts\n[^]*-export const a = 1;\n\+export const a = 2;\n$/);
 
   assert.ok(s.streams.every(([pylon, argv]) => pylon === s.thread.pylonId && argv[0] === "python3"));
-  assert.ok(s.registry.thread(id)!.lastHumanActivityAt > 1);
+  assert.ok(s.registry.threads.thread(id)!.lastHumanActivityAt > 1);
   assert.ok(s.woken.includes(node));
 });
 const gifBytes = Buffer.from("GIF89a pixels");
@@ -232,7 +232,7 @@ test("a thread's checkout images are served while its pylon runs, sniffed, and t
   await run("add", "shot.png");
   await run("commit", "-q", "-m", "shot");
   await writeFile(join(repo, "shot.png"), gifBytes);
-  const active = s.registry.thread(s.thread.id)!.lastHumanActivityAt;
+  const active = s.registry.threads.thread(s.thread.id)!.lastHumanActivityAt;
   s.woken.length = 0;
   const image = (query: string) => s.raw(`/v1/threads/${s.thread.id}/image?${query}`);
 
@@ -257,14 +257,14 @@ test("a thread's checkout images are served while its pylon runs, sniffed, and t
   for (const query of ["source=file", "source=disk&path=shot.png", "source=file&path=shot.png&base=yesterday", "source=harness&entry=1&message=0&part=0&sha256=x"]) {
     assert.equal((await image(query)).status, 400, query);
   }
-  assert.equal(s.registry.thread(s.thread.id)!.lastHumanActivityAt, active, "an image's load is not the person's activity");
+  assert.equal(s.registry.threads.thread(s.thread.id)!.lastHumanActivityAt, active, "an image's load is not the person's activity");
   assert.deepEqual(s.woken, []);
 });
 
 test("an image is refused with a 409 while the pylon does not run, without waking it, and a caller who may not read files may not read images", async (t) => {
   const s = await withThread(t);
   await localCheckout(t, s);
-  const active = s.registry.thread(s.thread.id)!.lastHumanActivityAt;
+  const active = s.registry.threads.thread(s.thread.id)!.lastHumanActivityAt;
   s.woken.length = 0;
   const route = `/v1/threads/${s.thread.id}/image?source=file&path=src%2Fapp.ts`;
   const paused = await s.call("GET", route);
@@ -272,7 +272,7 @@ test("an image is refused with a 409 while the pylon does not run, without wakin
   assert.match(paused.body.error, /is not running, and this request does not wake it/);
   assert.deepEqual(s.streams, [], "the probe is never asked");
   assert.deepEqual(s.woken, []);
-  assert.equal(s.registry.thread(s.thread.id)!.lastHumanActivityAt, active);
+  assert.equal(s.registry.threads.thread(s.thread.id)!.lastHumanActivityAt, active);
 
   s.callAs("nSTRANGER" as TailnetNodeId);
   assert.equal((await s.call("GET", `/v1/threads/${s.thread.id}/files/content?path=src%2Fapp.ts`)).status, 403);
@@ -430,7 +430,7 @@ test("focusing a session runs Herdr's focus on its pane in the pylon as an argum
 
 test("closing a listed session names it, and a pane that runs another session now is a 404 that leaves it open", async (t) => {
   const s = await withThread(t);
-  s.registry.apply({ record: "sessions", pylonId: s.thread.pylonId, sessions: [
+  s.registry.threads.apply({ record: "sessions", pylonId: s.thread.pylonId, sessions: [
     { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", title: "review", status: "idle", message: null },
   ] });
   s.probeAnswers(async () => ({ kind: "close-session", outcome: "moved" }));
@@ -442,9 +442,9 @@ test("closing a listed session names it, and a pane that runs another session no
 
 /** Records the thread's pylon stopped with these sessions, as the loop would from the node's observation. */
 function observeStopped(s: Awaited<ReturnType<typeof withThread>>, sessions: readonly PausedSession[]) {
-  s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
   const stopped = stoppedPylon(s.thread.pylonId, { sessions });
-  s.registry.ingested(testObservation(node, { pylons: [stopped] }),
+  s.registry.threads.ingested(testObservation(node, { pylons: [stopped] }),
     ingest({ type: "pylon", pylon: stopped }, node, new Map([[s.thread.pylonId, "absent"]]), Date.now()));
 }
 
@@ -452,7 +452,7 @@ const pausedReview: PausedSession = { id: "w1:p1", herdrPane: "w1:p1", harness: 
 
 test("an idle-paused or archived thread lists the sessions its wake brings back, as paused", async (t) => {
   const s = await withThread(t);
-  s.registry.apply({ record: "sessions", pylonId: s.thread.pylonId, sessions: [{ ...pausedReview, herdrPane: "w1:p1", state: "running", status: "working", message: null }] });
+  s.registry.threads.apply({ record: "sessions", pylonId: s.thread.pylonId, sessions: [{ ...pausedReview, herdrPane: "w1:p1", state: "running", status: "working", message: null }] });
   observeStopped(s, [pausedReview]);
   const sessions = async () => ((await s.call("GET", `/v1/threads/${s.thread.id}`)).body as ThreadDetail).sessions;
   const paused = [{ pylon: s.thread.pylonId, ...pausedReview, state: "paused", status: "working", message: null }];
@@ -465,7 +465,7 @@ test("closing a paused session is refused with 409 without asking the probe or w
   const s = await withThread(t);
   observeStopped(s, [pausedReview]);
   // Timestamps only move forward, so this is the thread's start.
-  const human = s.registry.thread(s.thread.id)!.lastHumanActivityAt;
+  const human = s.registry.threads.thread(s.thread.id)!.lastHumanActivityAt;
   s.woken.length = 0;
   const idle = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {});
   assert.equal(idle.status, 409);
@@ -478,13 +478,13 @@ test("closing a paused session is refused with 409 without asking the probe or w
   assert.match(archived.body.error, /resumes when `nexus unarchive .*` wakes its pylon/);
   assert.deepEqual(s.commands, []);
   assert.deepEqual(s.woken, []);
-  assert.equal(s.registry.thread(s.thread.id)!.lastHumanActivityAt, human, "a refused close is not activity");
+  assert.equal(s.registry.threads.thread(s.thread.id)!.lastHumanActivityAt, human, "a refused close is not activity");
 });
 
 test("closing a failed session in no pane drops it from the pylon, by its ID", async (t) => {
   const s = await withThread(t);
   const id = "failed-0123456789ab";
-  s.registry.apply({ record: "sessions", pylonId: s.thread.pylonId, sessions: [
+  s.registry.threads.apply({ record: "sessions", pylonId: s.thread.pylonId, sessions: [
     { id, state: "failed", herdrPane: null, harness: "pi", harnessSessionId: null, title: "plan", status: null, message: "pi exited 1" },
   ] });
   assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${id}`, {}), { status: 204, body: null });

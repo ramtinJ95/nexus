@@ -88,7 +88,7 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
   /** What `POST /v1/join` recorded, and the MagicDNS name whois gives each caller that joins. */
   const joined: JoinedNode[] = [];
   const hosts = new Map<TailnetNodeId, string>();
-  const fake = fakeHarness({ onParked: (id, parked) => registry.recordParked(id as ThreadId, parked) });
+  const fake = fakeHarness({ onParked: (id, parked) => registry.threads.recordParked(id as ThreadId, parked) });
   const { harness, calls } = fake;
   const commands: [PylonId, PylonCommand][] = [];
   /** What the node's probe answers a guest command with. Tests replace it. */
@@ -218,8 +218,8 @@ export function observeNode(s: Awaited<ReturnType<typeof testApi>>, name: string
   const at = name as NodeName;
   s.registry.upsertNode({ name: at, tailnetHost: `${name}.tail.ts.net`, tailnetNodeId: `n${name.toUpperCase()}` as TailnetNodeId });
   const capacity = testCapacity({ committedCpus: 4, memoryGiB: memory.total, committedMemoryGiB: memory.committed, diskFreeGiB: 200, committedDiskGiB: 60 });
-  s.registry.apply({ record: "node", node: at, state: "online", capacity });
-  s.registry.ingested(testObservation(at, {
+  s.registry.threads.apply({ record: "node", node: at, state: "online", capacity });
+  s.registry.threads.ingested(testObservation(at, {
     observedAt: "2027-01-01T00:01:00Z", capacity, artifacts: [image.id], grants: { secrets: ["STRIPE_KEY", "NEXUS_CHATGPT_TOKEN"], gitSsh: true }, ...over,
   }), []);
 }
@@ -234,12 +234,12 @@ export async function withImage(t: import("node:test").TestContext) {
 
 /** Reports the node online with the thread's pylon running these services and listening on these ports. */
 export function observeRunning(s: Awaited<ReturnType<typeof withThread>>, facts: { services?: ServiceFact[]; listening?: { port: number }[] | null }) {
-  s.registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
   const running = runningPylon(s.thread.pylonId, {
-    liveHash: s.registry.pylon(s.thread.pylonId)!.liveHash, bootedFrom: { image: image.id, checkpoint: null },
+    liveHash: s.registry.threads.pylon(s.thread.pylonId)!.liveHash, bootedFrom: { image: image.id, checkpoint: null },
     services: facts.services ?? [], listening: facts.listening === undefined ? [] : facts.listening,
   });
-  s.registry.ingested(testObservation(node, { pylons: [running] }), []);
+  s.registry.threads.ingested(testObservation(node, { pylons: [running] }), []);
 }
 
 export const git = promisify(execFile);

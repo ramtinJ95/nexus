@@ -34,7 +34,7 @@ export function nodeRoutes(kit: ApiKit, nodeHealth: (name: NodeName) => Promise<
     if (to - from > maxSpanMs) throw new HttpError(400, "the range must span at most 31 days, as long as the registry keeps a node's metrics");
     const stored = registry.nodeMetrics(name, from, to, now);
     const { series, otherPylons } = foldPylons(stored.series, stored.bucketMs);
-    const label = (s: Series) => s.kind === "otherPylonsCpu" || s.kind === "otherPylonsResident" ? `${otherPylons.length} other pylons, summed` : seriesLabel(s, (t) => registry.thread(t)?.title);
+    const label = (s: Series) => s.kind === "otherPylonsCpu" || s.kind === "otherPylonsResident" ? `${otherPylons.length} other pylons, summed` : seriesLabel(s, (t) => registry.threads.thread(t)?.title);
     return { node: name, from, to, tier: stored.tier, bucketMs: stored.bucketMs, sampledAt: stored.sampledAt, series: series.map((s): MetricSeries => ({ ...s, label: label(s.series) })), otherPylons };
   }
 

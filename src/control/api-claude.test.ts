@@ -22,11 +22,11 @@ test("a Claude worker start stores its first prompt without starting a harness c
   const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "fix the bug" });
   assert.equal(started.status, 201);
   assert.equal(started.body.conversationId, null);
-  assert.deepEqual(s.registry.claudeWorker(started.body.id), { model: "claude-opus-5-5", prompt: "/poteto-mode fix the bug", state: "pending", session: null });
+  assert.deepEqual(s.registry.threads.claudeWorker(started.body.id), { model: "claude-opus-5-5", prompt: "/poteto-mode fix the bug", state: "pending", session: null });
   assert.equal((await s.call("GET", `/v1/threads/${started.body.id}`)).body.claudeWorker.state, "pending");
   const brief = "fix the bug:\n\t- keep \"quotes\", `ticks` and $HOME\n\nthen test";
   const multiLine = await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: brief });
-  assert.equal(s.registry.claudeWorker(multiLine.body.id)!.prompt, `/poteto-mode ${brief}`);
+  assert.equal(s.registry.threads.claudeWorker(multiLine.body.id)!.prompt, `/poteto-mode ${brief}`);
   assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "a\0b" })).status, 400);
 });
 
@@ -41,7 +41,7 @@ test("a Claude worker's pasted image is served from its transcript while the pyl
   const prompt = view.entries.find((e) => e.kind === "prompt" && e.text === "What is wrong here?") as Extract<ClaudeConversation["entries"][number], { kind: "prompt" }>;
   const [place] = prompt.images!;
   const query = (p: typeof place) => `/v1/threads/${s.thread.id}/image?source=transcript&offset=${p!.offset}&bytes=${p!.bytes}&sha256=${p!.sha256}&index=${p!.index}`;
-  const active = s.registry.thread(s.thread.id)!.lastHumanActivityAt;
+  const active = s.registry.threads.thread(s.thread.id)!.lastHumanActivityAt;
   s.woken.length = 0;
   const shot = await s.raw(query(place));
   assert.equal(shot.status, 200);
@@ -55,7 +55,7 @@ test("a Claude worker's pasted image is served from its transcript while the pyl
   const paused = await s.call("GET", query(place));
   assert.equal(paused.status, 409);
   assert.deepEqual(s.woken, []);
-  assert.equal(s.registry.thread(s.thread.id)!.lastHumanActivityAt, active);
+  assert.equal(s.registry.threads.thread(s.thread.id)!.lastHumanActivityAt, active);
 });
 
 test("a Claude worker thread's latest turn is the one its newest turn-started names, and a turn without a snapshot is refused", async (t) => {
@@ -64,7 +64,7 @@ test("a Claude worker thread's latest turn is the one its newest turn-started na
   const route = `/v1/threads/${s.thread.id}/changes?base=turn`;
   const helper = fileURLToPath(new URL("../../images/pylon/checkout-files.py", import.meta.url));
   let sequence = 0;
-  const started = (session: string, at: number) => s.registry.reportSession(node, { sequence: ++sequence, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-started", session, at } });
+  const started = (session: string, at: number) => s.registry.threads.reportSession(node, { sequence: ++sequence, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-started", session, at } });
   const turn = async (session: string, at: number) => {
     assert.ok(await snapshotTurn(repo, claudeTurn(session, at), 30_000, helper));
     started(session, at);
@@ -102,7 +102,7 @@ test("a Claude worker thread's message is typed into its session exactly, in eit
   const typed = (text: string, requestId: string) => [s.thread.pylonId, { kind: "send-claude", session: claudeSession, text, requestId, model: "claude-opus-5-5" }];
   assert.deepEqual(s.commands, [typed(text, "msg:1"), typed("now", "msg:2"), typed("later", "msg:3"), typed("one\ntwo\nthree", "msg:4")], "the text exactly, line ends made newlines, in both modes");
   assert.deepEqual(s.calls.filter(([call]) => call === "send"), [], "the harness is sent none of them");
-  assert.ok(s.registry.thread(s.thread.id)!.lastHumanActivityAt >= before, "a message is human activity");
+  assert.ok(s.registry.threads.thread(s.thread.id)!.lastHumanActivityAt >= before, "a message is human activity");
   assert.ok(s.woken.includes(node));
 
   s.commands.length = 0;
@@ -129,7 +129,7 @@ test("a Claude worker's message is typed once per request ID, a send that typed 
   const paused = await send("msg:2");
   assert.equal(paused.status, 409);
   assert.match(paused.body.error, /is not running yet. This request wakes it/);
-  assert.ok(s.registry.thread(s.thread.id)!.lastHumanActivityAt >= before, "the send is human activity, which wakes the pylon");
+  assert.ok(s.registry.threads.thread(s.thread.id)!.lastHumanActivityAt >= before, "the send is human activity, which wakes the pylon");
   answer = async () => sent("blocked" as never);
   const blocked = await send("msg:2");
   assert.equal(blocked.status, 409, "the paused send typed nothing, so its request ID is tried again");
@@ -262,7 +262,7 @@ test("a Claude worker thread's abort presses Esc in its session's pane through t
 
 /** Records the thread's pylon stopped, as the loop would from its node's observation. */
 function observePaused(s: Awaited<ReturnType<typeof withClaude>>) {
-  s.registry.ingested(testObservation(node, { pylons: [stoppedPylon(s.thread.pylonId)] }), []);
+  s.registry.threads.ingested(testObservation(node, { pylons: [stoppedPylon(s.thread.pylonId)] }), []);
 }
 
 test("a Claude worker stopped on its usage limit lists as limited, with the stop in its row and its conversation", async (t) => {
@@ -290,8 +290,8 @@ test("a Claude worker thread's conversation is its transcript, read from the run
 
   const reads = s.streams.length;
   await appendFile(s.transcript, fixture.slice(30, 43).join(""));
-  s.registry.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
-  await until("a session event is followed by a read, with no one watching", () => s.registry.claudeTranscript(s.thread.id)!.readAt > first.readAt!);
+  s.registry.threads.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
+  await until("a session event is followed by a read, with no one watching", () => s.registry.threads.claudeTranscript(s.thread.id)!.readAt > first.readAt!);
   assert.equal(s.streams.length, reads + 1);
 
   observePaused(s);
@@ -324,7 +324,7 @@ test("a Claude worker thread's page stream shows new entries during a turn, read
   assert.equal(s.streams.length, idle, "an idle thread is not read on a timer");
 
   let sequence = 0;
-  const report = (kind: "session.turn-started" | "session.turn-ended") => s.registry.reportSession(node, { sequence: ++sequence, pylon: s.thread.pylonId, time: Date.now(), event: { kind, session: claudeSession } });
+  const report = (kind: "session.turn-started" | "session.turn-ended") => s.registry.threads.reportSession(node, { sequence: ++sequence, pylon: s.thread.pylonId, time: Date.now(), event: { kind, session: claudeSession } });
   await appendFile(s.transcript, fixture.slice(22, 24).join(""));
   report("session.turn-started");
   t.mock.timers.tick(1_000);
@@ -369,10 +369,10 @@ test("a poll of a Claude worker's streaming page names the view its stream shows
   assert.match(unstreamed.inside, /Do these steps one at a time/, "a poll from a page that does not stream renders the conversation");
 
   await appendFile(s.transcript, fixture.slice(30, 43).join(""));
-  s.registry.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
-  const replyAt = String(s.registry.thread(s.thread.id)!.lastReplyAt);
+  s.registry.threads.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
+  const replyAt = String(s.registry.threads.thread(s.thread.id)!.lastReplyAt);
   t.mock.timers.tick(1_000);
-  await until("the read after the turn's end stores the reply", () => s.registry.claudeEntries(s.thread.id).some((e) => e.kind === "reply" && e.text.startsWith("The subagent reported 1 line")));
+  await until("the read after the turn's end stores the reply", () => s.registry.threads.claudeEntries(s.thread.id).some((e) => e.kind === "reply" && e.text.startsWith("The subagent reported 1 line")));
   const read = await convoRegion(s, "?streaming=1");
   assert.equal(read.replyAt, replyAt);
   assert.notEqual(read.named, shows, "the page has not shown the reply yet, so the poll names another view than it shows");
@@ -402,7 +402,7 @@ test("a Claude worker's page names no reply watermark until the transcript holds
   };
   await frame((next) => /Do these steps one at a time/.test(next.convo ?? ""));
   let sequence = 0;
-  const report = (kind: "session.turn-started" | "session.turn-ended") => s.registry.reportSession(node, { sequence: ++sequence, pylon: s.thread.pylonId, time: Date.now(), event: { kind, session: claudeSession } });
+  const report = (kind: "session.turn-started" | "session.turn-ended") => s.registry.threads.reportSession(node, { sequence: ++sequence, pylon: s.thread.pylonId, time: Date.now(), event: { kind, session: claudeSession } });
   report("session.turn-started");
   t.mock.timers.tick(1_000);
   const idle = shows;
@@ -422,7 +422,7 @@ test("a Claude worker's page names no reply watermark until the transcript holds
   assert.equal(ended.replyAt, "", "but the read that brings the reply has not been stored, so no watermark");
   read.resolve();
   await frame((next) => /The subagent reported 1 line/.test(next.convo ?? ""));
-  assert.deepEqual(await convoRegion(s, "?streaming=1"), { replyAt: String(s.registry.thread(s.thread.id)!.lastReplyAt), named: shows, inside: "" });
+  assert.deepEqual(await convoRegion(s, "?streaming=1"), { replyAt: String(s.registry.threads.thread(s.thread.id)!.lastReplyAt), named: shows, inside: "" });
 });
 
 test("a Claude worker's page names no reply watermark while the reads after the reply have not reached the transcript's end", async (t) => {
@@ -450,13 +450,13 @@ test("a Claude worker's page names no reply watermark while the reads after the 
   const long = (i: number) => `${JSON.stringify({ ...reply, uuid: `long-${i}`, message: { ...reply.message, id: `msg-long-${i}`, content: [{ type: "text", text: `Long ${i} ${"x".repeat(maxRecordBytes * 0.6)}` }] } })}\n`;
   await appendFile(s.transcript, long(0) + long(1) + fixture.slice(30, 43).join(""));
   held = reads + 2;
-  s.registry.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
+  s.registry.threads.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
   t.mock.timers.tick(1_000);
   await frame(/Long 0 x/);
   assert.equal((await convoRegion(s, "?streaming=1")).replyAt, "", "the first read stopped short of the reply, so no watermark");
   second.resolve();
   await frame(/The subagent reported 1 line/);
-  assert.equal((await convoRegion(s, "?streaming=1")).replyAt, String(s.registry.thread(s.thread.id)!.lastReplyAt));
+  assert.equal((await convoRegion(s, "?streaming=1")).replyAt, String(s.registry.threads.thread(s.thread.id)!.lastReplyAt));
 });
 
 test("a Claude worker's page stream sends nothing while its conversation is unchanged, its pings included, though an age in it changed", async (t) => {
@@ -471,7 +471,7 @@ test("a Claude worker's page stream sends nothing while its conversation is unch
 
   await appendFile(s.transcript, fixture.slice(22, 24).join(""));
   // No turn runs, so the event's read is the only change the stream can show.
-  s.registry.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
+  s.registry.threads.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
   t.mock.timers.tick(1_000);
   assert.match((await stream.next()).convo, /<span class="t-name">Write<\/span>/, "the first frame after the pings is the read's, not one for the age");
 });
@@ -489,12 +489,12 @@ test("two page streams of one Claude worker render each new view once between th
   };
   for (const stream of streams) await frame(stream, /Do these steps one at a time/);
   // Each render reads who sent the prompts it shows, and nothing else here does.
-  const senders = s.registry.claudeMessageSenders;
+  const senders = s.registry.threads.claudeMessageSenders;
   let renders = 0;
-  s.registry.claudeMessageSenders = (...args) => { renders++; return senders(...args); };
-  t.after(() => { s.registry.claudeMessageSenders = senders; });
+  s.registry.threads.claudeMessageSenders = (...args) => { renders++; return senders(...args); };
+  t.after(() => { s.registry.threads.claudeMessageSenders = senders; });
   await appendFile(s.transcript, fixture.slice(22, 24).join(""));
-  s.registry.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
+  s.registry.threads.reportSession(node, { sequence: 1, pylon: s.thread.pylonId, time: Date.now(), event: { kind: "session.turn-ended", session: claudeSession } });
   const [a, b] = await Promise.all(streams.map((stream) => frame(stream, /<span class="t-name">Write<\/span>/)));
   assert.deepEqual(a, b);
   assert.equal(renders, 1, "the second stream's frame reuses the first's render");
@@ -509,7 +509,7 @@ test("a Claude worker's transcript streams to the CLI as its entries whole, then
   assert.deepEqual(await stream.next(), { reset: true, session: claudeSession, entries: whole.entries, dropped: 0, working: false });
 
   let sequence = 0;
-  const report = (kind: "session.turn-started" | "session.turn-ended") => s.registry.reportSession(node, { sequence: ++sequence, pylon: s.thread.pylonId, time: Date.now(), event: { kind, session: claudeSession } });
+  const report = (kind: "session.turn-started" | "session.turn-ended") => s.registry.threads.reportSession(node, { sequence: ++sequence, pylon: s.thread.pylonId, time: Date.now(), event: { kind, session: claudeSession } });
   report("session.turn-started");
   assert.deepEqual(await stream.next(), { reset: false, session: claudeSession, entries: [], dropped: 0, working: true }, "the turn's start");
   await appendFile(s.transcript, fixture.slice(22, 25).join(""));

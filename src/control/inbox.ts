@@ -17,7 +17,7 @@ import type { Registry } from "./registry.ts";
 import type { ClaudeSent } from "./claude-worker.ts";
 import type { Thread } from "./thread-store.ts";
 
-type InboxRegistry = Pick<Registry, "agent" | "claudeMessage" | "claudeMessageSenders" | "node" | "pylon" | "recordActivity" | "sealedBoot" | "setClaudeMessage">;
+type InboxRegistry = Pick<Registry, "threads" | "node">;
 
 /** `id` is the request ID: a resend under it is the same message, never a second one. */
 export interface AutomatedMessage { id: string; text: string; sender: Sender }
@@ -58,7 +58,7 @@ export function typeIntoClaude(registry: InboxRegistry, thread: ThreadId, sessio
 const attempts = new WeakMap<InboxRegistry, Map<string, Promise<unknown>>>();
 
 async function typeOnce(registry: InboxRegistry, thread: ThreadId, session: string, model: string | null, requestId: string, text: string, ask: (command: PylonCommand) => Promise<CommandResult>, sender: Sender | "person"): Promise<ClaudeTyped> {
-  const stored = registry.claudeMessage(thread, requestId);
+  const stored = registry.threads.claudeMessage(thread, requestId);
   if (stored?.state === "sent") return { kind: "sent", sent: stored.result };
   let result: Omit<Extract<CommandResult, { kind: "send-claude" }>, "kind">;
   if (stored?.state === "sending") {
@@ -73,20 +73,20 @@ async function typeOnce(registry: InboxRegistry, thread: ThreadId, session: stri
     if (earlier.send === "failed" || earlier.send === "unknown") return { kind: "uncertain" };
     result = earlier.send;
   } else {
-    registry.setClaudeMessage(thread, requestId, { state: "sending" }, { sender, sha256: textHash(text) });
+    registry.threads.setClaudeMessage(thread, requestId, { state: "sending" }, { sender, sha256: textHash(text) });
     try {
       result = await ask({ kind: "send-claude", session, text, requestId, ...(model === null ? {} : { model }) }) as Extract<CommandResult, { kind: "send-claude" }>;
     } catch (err) {
-      if ((err as Partial<ProbeError>).code === "not-running") registry.setClaudeMessage(thread, requestId, null);
+      if ((err as Partial<ProbeError>).code === "not-running") registry.threads.setClaudeMessage(thread, requestId, null);
       throw err;
     }
   }
   if (result.outcome === "blocked" || result.outcome === "starting" || result.outcome === "moved") {
-    registry.setClaudeMessage(thread, requestId, null);
+    registry.threads.setClaudeMessage(thread, requestId, null);
     return { kind: "nothing", outcome: result.outcome, herdrPane: result.herdrPane };
   }
   const sent: ClaudeSent = { session, outcome: result.outcome, resumed: result.resumed };
-  registry.setClaudeMessage(thread, requestId, { state: "sent", result: sent });
+  registry.threads.setClaudeMessage(thread, requestId, { state: "sent", result: sent });
   return { kind: "sent", sent };
 }
 
@@ -104,7 +104,7 @@ export type PromptSenders = (text: string) => Sender | null;
 export function promptSenders(registry: InboxRegistry, thread: ThreadId): PromptSenders {
   const typed = new Map<string, Sender | "person">();
   let before = false;
-  for (const { sender, sha256 } of registry.claudeMessageSenders(thread)) {
+  for (const { sender, sha256 } of registry.threads.claudeMessageSenders(thread)) {
     if (sender === "unknown") before = true;
     // The person typing what Nexus once did is the person.
     else if (sha256 !== null && typed.get(sha256) !== "person") typed.set(sha256, sender);
@@ -127,10 +127,10 @@ export function typeable(text: string): string {
 export function agentInbox(options: { registry: InboxRegistry; harness: Pick<HarnessHost, "send">; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "command">>; wake(t: Thread): void; log: Log }): Inbox {
   const { registry, harness, probes, wake, log } = options;
   return async (t, message) => {
-    const agent = registry.agent(t);
+    const agent = registry.threads.agent(t);
     if (agent.kind === "none") throw new Error(`thread ${t.id} has no agent to take a message`);
     if (agent.kind === "harness") await harness.send(t.id, message.text, message.id, "followUp", message.sender);
-    registry.recordActivity(t.id, { agent: Date.now() });
+    registry.threads.recordActivity(t.id, { agent: Date.now() });
     wake(t);
     if (agent.kind === "harness") return "delivered";
     const { worker } = agent;

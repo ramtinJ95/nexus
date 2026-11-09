@@ -16,8 +16,7 @@ import type { CleanupQuestion } from "./questions.ts";
 import { artifactKept, bytesText, cleanupCandidates, cleanupDue, cleanupQuestion, grew, itemKey, undeleted, type CleanupItem, type NodeFacts } from "./cleanup-model.ts";
 import { isOpenStatus } from "./reconcile.ts";
 
-type CleanupRegistry = Pick<Registry, "askQuestion" | "currentImage" | "imageOperation" | "node" | "nodeQuestions" | "nodes" | "previousImage" | "projects" | "pylonsWithThreadsOn"
-  | "recordCleanup" | "releaseInventory" | "saveReleaseInventory" | "templates">;
+type CleanupRegistry = Pick<Registry, "questions" | "currentImage" | "imageOperation" | "node" | "nodes" | "previousImage" | "projects" | "threads" | "releaseInventory" | "saveReleaseInventory" | "templates">;
 
 export const cleanupEveryMs = 60_000;
 
@@ -32,7 +31,7 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
       current: registry.currentImage(),
       previous: registry.previousImage(),
       operated: registry.imageOperation()?.image ?? null,
-      boots: registry.pylonsWithThreadsOn(node).flatMap(({ pylon, thread }) => {
+      boots: registry.threads.pylonsWithThreadsOn(node).flatMap(({ pylon, thread }) => {
         const listed = record?.observation?.pylons.some((p) => p.pylonId === pylon.pylonId) ?? false;
         const starting = !listed && isOpenStatus(thread.status);
         if (!listed && !starting) return [];
@@ -51,7 +50,7 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
     const facts = factsOf(node);
     // An offline node's images and templates are unknown, and a question without them would be asked again with them.
     if (facts.held === null) return;
-    const asked = registry.nodeQuestions(node);
+    const asked = registry.questions.nodeQuestions(node);
     const low = registry.node(node)?.capacity?.disks?.some(lowDisk) ?? false;
     if (!cleanupDue(asked, low, now())) return;
     const deleting = new Set(asked.flatMap((q) => undeleted(q).map(itemKey)));
@@ -64,7 +63,7 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
       return bytes === undefined ? [] : [{ ...c, bytes }];
     });
     if (!grew(items, asked)) return;
-    const question = registry.askQuestion(cleanupQuestion(node, items, now()));
+    const question = registry.questions.askQuestion(cleanupQuestion(node, items, now()));
     log(`${node}: asked ${question.id}, whether to delete ${items.length} items that take ${bytesText(items.reduce((sum, i) => sum + i.bytes, 0))}`);
   }
 
@@ -87,10 +86,10 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
         if (kept !== null) settled[id] = { state: "skipped", reason: kept };
         else drop.push(id);
       }
-      if (Object.keys(settled).length > 0) registry.recordCleanup(q.id, settled);
+      if (Object.keys(settled).length > 0) registry.questions.recordCleanup(q.id, settled);
       if (drop.length === 0) continue;
       const { outcomes } = await probe.dropArtifacts(drop);
-      registry.recordCleanup(q.id, outcomes);
+      registry.questions.recordCleanup(q.id, outcomes);
       log(`${node}: ${q.id}: ${drop.map((id) => `${id} ${outcomes[id]?.state ?? "unreported"}`).join(", ")}`);
     }
   }
@@ -98,7 +97,7 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
   async function pass() {
     for (const { name } of registry.nodes()) {
       try {
-        for (const q of registry.nodeQuestions(name)) await deleteArtifacts(name, q);
+        for (const q of registry.questions.nodeQuestions(name)) await deleteArtifacts(name, q);
         await ask(name);
       } catch (err) {
         log(`${name}: cleanup: ${(err as Error).message}`);
@@ -119,7 +118,7 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
       registry.saveReleaseInventory(node, inventory);
       const keeps = releaseKeeps(inventory);
       const wanted = new Set<string>();
-      for (const q of registry.nodeQuestions(node)) {
+      for (const q of registry.questions.nodeQuestions(node)) {
         const settled: Record<string, DeleteOutcome> = {};
         for (const item of undeleted(q)) {
           if (item.kind !== "release") continue;
@@ -130,7 +129,7 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
           else if (kept !== undefined) settled[itemKey(item)] = { state: "skipped", reason: kept };
           else wanted.add(item.name);
         }
-        if (Object.keys(settled).length > 0) registry.recordCleanup(q.id, settled);
+        if (Object.keys(settled).length > 0) registry.questions.recordCleanup(q.id, settled);
       }
       return [...wanted];
     },

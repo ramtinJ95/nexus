@@ -15,10 +15,10 @@ test("a message whose earlier send failed partway counts as delivered, is not ty
   registry.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
   registry.createProject(project);
   const thread = testThread({ id: "th-1" as ThreadId, title: "test", project: project.id, startedBy: "test", createdAt: 1, lastHumanActivityAt: 1 });
-  registry.createThread(thread, testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } } }), { claude: { prompt: "/poteto-mode fix it" } });
+  registry.threads.createThread(thread, testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } } }), { claude: { prompt: "/poteto-mode fix it" } });
   claudeWorkerAt(registry, thread.id, "started", { session });
-  registry.apply({ record: "node", node, state: "online", capacity: testCapacity() });
-  registry.ingested(testObservation(node, { pylons: [runningPylon(thread.pylonId, { liveHash: "hash" as LiveHash })] }), []);
+  registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  registry.threads.ingested(testObservation(node, { pylons: [runningPylon(thread.pylonId, { liveHash: "hash" as LiveHash })] }), []);
   const asked: PylonCommand["kind"][] = [];
   const probe = {
     async command(_: PylonId, command: PylonCommand): Promise<CommandResult> {
@@ -31,8 +31,8 @@ test("a message whose earlier send failed partway counts as delivered, is not ty
   const inbox = agentInbox({ log: (message) => { logged.push(message); }, registry, harness: { async send() { throw new Error("a Claude worker's message never reaches the harness"); } }, probes: new Map([[node, probe]]), wake() {} });
   const message = { id: "msg-1", text: "Continue.", sender: "usage-limit" } as const;
 
-  await assert.rejects(inbox(registry.thread(thread.id)!, message), /the connection reset/);
-  assert.equal(await inbox(registry.thread(thread.id)!, message), "delivered");
+  await assert.rejects(inbox(registry.threads.thread(thread.id)!, message), /the connection reset/);
+  assert.equal(await inbox(registry.threads.thread(thread.id)!, message), "delivered");
   assert.deepEqual(asked, ["send-claude", "send-claude-outcome"]);
   assert.deepEqual(logged, ["th-1: an earlier send of msg-1 failed partway, so it is not typed again"]);
 });

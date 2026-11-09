@@ -24,7 +24,7 @@ import type { PhaseKind } from "./review-model.ts";
 import { threadRole } from "./work-model.ts";
 import { isOpenStatus, openStatuses } from "./reconcile.ts";
 
-type ResumeRegistry = Pick<Registry, "agent" | "appendEvent" | "claudeResume" | "claudeTranscript" | "isReviewer" | "planning" | "resumedThreads" | "review" | "saveClaudeResume" | "storedThreads" | "thread">;
+type ResumeRegistry = Pick<Registry, "threads" | "reviews" | "planning">;
 
 const text = `${senders.resume.prefix} Your turn stopped before it finished: its Claude session ended, or its model's API failed. Continue where you stopped.`;
 
@@ -51,8 +51,8 @@ export function deadTurnResumer(options: {
 
   function covered(t: Thread): boolean {
     if (!isOpenStatus(t.status)) return false;
-    if (registry.agent(t).kind !== "claude" || threadRole(registry, t) !== "builder") return false;
-    const phase = registry.review(t.id)?.phase.kind;
+    if (registry.threads.agent(t).kind !== "claude" || threadRole(registry, t) !== "builder") return false;
+    const phase = registry.reviews.review(t.id)?.phase.kind;
     if (phase === "needs-person") return false;
     return !(t.turnDied?.cause === "model-error" && phase !== undefined && !finished.has(phase));
   }
@@ -61,9 +61,9 @@ export function deadTurnResumer(options: {
   const stillDead = (t: Thread, turn: number) => covered(t) && !t.working && t.turnDied?.at === turn;
 
   async function judge(t: Thread) {
-    const record = registry.claudeResume(t.id);
+    const record = registry.threads.claudeResume(t.id);
     if (record?.state === "left-alone") return;
-    const save = (next: ClaudeResume | null) => registry.saveClaudeResume(t.id, next);
+    const save = (next: ClaudeResume | null) => registry.threads.saveClaudeResume(t.id, next);
     if (!covered(t)) return record === null ? undefined : save(null);
     // The turn the person's message starts may outlast the transcript's hold on that message, so look while it runs.
     if (t.working && t.lastHumanActivityAt > (t.lastReplyAt ?? 0) && await personWroteTo(t)) return save({ state: "left-alone" });
@@ -71,7 +71,7 @@ export function deadTurnResumer(options: {
     if (record?.state === "sending") {
       // It may never have gone out, so it goes only to a thread that still waits on that death and is not the person's.
       if (await personWroteTo(t)) return save({ state: "left-alone" });
-      const fresh = registry.thread(t.id);
+      const fresh = registry.threads.thread(t.id);
       if (fresh === undefined) return;
       if (stillDead(fresh, record.turn)) return deliver(fresh, record);
       // Only a turn that started since ends a death, so the resume went out before a crash lost its answer.
@@ -81,7 +81,7 @@ export function deadTurnResumer(options: {
     if (died === undefined) {
       // A turn started since the one that died. Once it ended and the transcript was read past its end without a death
       // in it, the deaths in a row are over: a read that lags the end would show no model error yet.
-      const readAt = registry.claudeTranscript(t.id)?.readAt ?? -Infinity;
+      const readAt = registry.threads.claudeTranscript(t.id)?.readAt ?? -Infinity;
       if (record !== null && !t.working && t.lastReplyAt !== null && readAt >= t.lastReplyAt) save(null);
       return;
     }
@@ -93,7 +93,7 @@ export function deadTurnResumer(options: {
       if (record.state !== "waiting" || clock() < record.due) return;
       if (await personWroteTo(t)) return save({ state: "left-alone" });
       // The await above may have let a turn start or an archive in.
-      const fresh = registry.thread(t.id);
+      const fresh = registry.threads.thread(t.id);
       if (fresh === undefined || !stillDead(fresh, record.turn)) return;
       const sending: ClaudeResume = { state: "sending", turn: record.turn, count: record.count, since: clock() };
       save(sending);
@@ -113,19 +113,19 @@ export function deadTurnResumer(options: {
   async function deliver(t: Thread, { turn, count, since }: Extract<ClaudeResume, { state: "sending" }>) {
     const requestId = requestIds.resume(t.id, turn);
     if (await inbox(t, { id: requestId, text, sender: "resume" }) !== "delivered") {
-      if (clock() - since >= startMs) registry.saveClaudeResume(t.id, { state: "person", turn, count, why: `Its turn died, and Nexus could not type its resume into the session for ${startMs / 60_000} minutes.` });
+      if (clock() - since >= startMs) registry.threads.saveClaudeResume(t.id, { state: "person", turn, count, why: `Its turn died, and Nexus could not type its resume into the session for ${startMs / 60_000} minutes.` });
       return;
     }
-    registry.saveClaudeResume(t.id, { state: "resumed", turn, count, at: clock() });
-    registry.appendEvent("thread.resumed", t.id, { turn, count, reason: t.turnDied?.reason ?? null, requestId });
+    registry.threads.saveClaudeResume(t.id, { state: "resumed", turn, count, at: clock() });
+    registry.threads.appendEvent("thread.resumed", t.id, { turn, count, reason: t.turnDied?.reason ?? null, requestId });
   }
 
   async function pass() {
     // A thread archived since its resume has its record cleared, so an unarchived one starts its count over.
-    const ids = new Set([...registry.storedThreads({ status: openStatuses }).map((t) => t.id), ...registry.resumedThreads()]);
+    const ids = new Set([...registry.threads.storedThreads({ status: openStatuses }).map((t) => t.id), ...registry.threads.resumedThreads()]);
     for (const id of ids) {
       // Read again after the passes before it, which another thread's sends may have outrun.
-      const t = registry.thread(id as ThreadId);
+      const t = registry.threads.thread(id as ThreadId);
       if (t === undefined) continue;
       try {
         await judge(t);

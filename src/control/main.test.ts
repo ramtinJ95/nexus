@@ -223,8 +223,8 @@ test("a builder's turn end, from its Claude session or from the harness, has its
     threads.push(addThread(registry, { thread: { title: "claude" } }), addThread(registry, { thread: { title: "harness" } }));
     registry.close();
   } });
-  plane.registry.appendEvent("session.turn-ended", threads[0]!.id, { at: Date.now() });
-  plane.registry.appendEvent("thread.turn-ended", threads[1]!.id, {});
+  plane.registry.threads.appendEvent("session.turn-ended", threads[0]!.id, { at: Date.now() });
+  plane.registry.threads.appendEvent("thread.turn-ended", threads[1]!.id, {});
   await until("both pylons' git is read again", () => plane.gitReads.length === 2, 10_000);
   assert.deepEqual(plane.gitReads.sort(), threads.map((th) => th.pylonId).sort());
 });
@@ -232,11 +232,11 @@ test("a builder's turn end, from its Claude session or from the harness, has its
 test("the control plane keeps the newest 10,000 events from its start", async (t) => {
   const plane = await controlPlaneOf(t, today, { before: (db) => {
     const registry = openRegistry(db);
-    for (let i = 0; i < 10_002; i++) registry.appendEvent("release.changed", null, {});
+    for (let i = 0; i < 10_002; i++) registry.threads.appendEvent("release.changed", null, {});
     registry.close();
   } });
-  await until("retention trims the log", () => plane.registry.events("0", { kinds: ["release.changed"] }).length === 10_000, 10_000);
-  assert.throws(() => plane.registry.events("1"), /expired/);
+  await until("retention trims the log", () => plane.registry.threads.events("0", { kinds: ["release.changed"] }).length === 10_000, 10_000);
+  assert.throws(() => plane.registry.threads.events("1"), /expired/);
 });
 
 test("each read of a node's health is recorded, and its history read back", async (t) => {

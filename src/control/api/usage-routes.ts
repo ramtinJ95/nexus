@@ -13,7 +13,7 @@ export function usageRoutes(kit: ApiKit, features: Features): readonly RouteEntr
   const usageBackfill = () => feature(features, "usageBackfill");
 
   return [
-    on(routes.report, anyAllowed, (_, r) => ok(registry.usageReport(usageFilter(r.query, Date.now())))),
+    on(routes.report, anyAllowed, (_, r) => ok(registry.usage.usageReport(usageFilter(r.query, Date.now())))),
     on(routes.backfill, anyAllowed, () => ok({ backfill: usageBackfill().status(), plan: usageBackfill().plan() })),
     on(routes.startBackfill, steer, () => ok(usageBackfill().start())),
     on(routes.stopBackfill, steer, () => ok(usageBackfill().stop())),

@@ -57,15 +57,15 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   }
   /** A Claude worker thread, a harness thread, or with `bare` one with neither agent. */
   function add(id: string, claude: boolean, startedBy = "test", bare = false): ThreadId {
-    if (registry.thread(id as ThreadId) !== undefined) return id as ThreadId;
+    if (registry.threads.thread(id as ThreadId) !== undefined) return id as ThreadId;
     const thread = testThread({ id: id as ThreadId, title: id, project: project.id, conversationId: claude || bare ? null : "1", startedBy, createdAt: 1, lastHumanActivityAt: 1 });
     const pylon = testPylon(thread, { node, boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "feature", commit: "origin/feature" } }, dotfiles: { repo: project.repoUrl, ref: "main" } }, liveHash: "hash" });
-    registry.createThread(thread, pylon, claude ? { claude: { prompt: "fix it", model: "claude-opus-5-5" } } : {});
+    registry.threads.createThread(thread, pylon, claude ? { claude: { prompt: "fix it", model: "claude-opus-5-5" } } : {});
     return thread.id;
   }
   const builder = add("th-builder", options.claudeBuilder ?? true);
   const pr = testPr({ repo, number: 7, title: "Add the cache" });
-  registry.savePrWatch(builder, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  registry.prWatches.savePrWatch(builder, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
 
   let clock = 1_000_000;
   const replies = new Map<ThreadId, string[]>();
@@ -138,7 +138,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     },
     inbox: async (target, message) => { delivering++; if (held !== null) { held.entered(); await held.released; } if (delivery === "delivered") sent.push({ to: target.id, message }); return delivery; },
     agentState: options.agentState?.(registry) ?? (async (target, since) => ({
-      ...heard(target, registry.agent(target).kind === "claude" ? registry.claudeEntries(target.id) : null, since),
+      ...heard(target, registry.threads.agent(target).kind === "claude" ? registry.threads.claudeEntries(target.id) : null, since),
       replies: replies.get(target.id) ?? [], failure: failures.get(target.id) ?? null,
     })),
     runs: () => ({
@@ -152,7 +152,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
         },
         step: (id) => { steps.push(id); return forgotten.has(id) ? { kind: "void" } : check; },
         result: (id) => forgotten.has(id) || check.kind !== "done" ? null : check,
-        discard(id) { discarded.push(id); registry.setThreadStatus(id, "deleted"); },
+        discard(id) { discarded.push(id); registry.threads.setThreadStatus(id, "deleted"); },
       },
       live: {
         async start() {
@@ -161,7 +161,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
         },
         step: () => live,
         result: () => live.kind === "done" ? live : null,
-        discard(id) { archived.push(id); registry.setThreadStatus(id, "archived"); },
+        discard(id) { archived.push(id); registry.threads.setThreadStatus(id, "archived"); },
       },
     }),
     release: { self, repo: "ramtinJ95/nexus" },
@@ -169,28 +169,28 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     wake: (target) => { woken.push(target.id); },
     log: (message) => { logged.push(message); },
     now: () => clock,
-    brief: async (target) => { const agent = registry.agent(target); return agent.kind === "claude" ? agent.worker.prompt : briefs.get(target.id) ?? null; },
+    brief: async (target) => { const agent = registry.threads.agent(target); return agent.kind === "claude" ? agent.worker.prompt : briefs.get(target.id) ?? null; },
     async startThread(start) {
       const refused = refuseStart(start.request);
       if (refused !== null) throw new Refusal("conflict", refused);
       started.push(start);
       const id = add(`th-reviewer-${started.length}`, start.request.claude !== undefined, start.caller);
       await onStart();
-      return registry.thread(id)!;
+      return registry.threads.thread(id)!;
     },
   });
   const reply = (id: ThreadId, text: string) => {
     failures.delete(id);
     replies.set(id, [...replies.get(id) ?? [], text]);
     clock += 1_000;
-    registry.recordReply(id, clock);
+    registry.threads.recordReply(id, clock);
     clock += 61_000;
   };
   /** A turn that ended because the agent's model failed with `error`, with no reply. */
   const failedTurn = (id: ThreadId, error: string) => {
     failures.set(id, error);
     clock += 1_000;
-    registry.recordReply(id, clock);
+    registry.threads.recordReply(id, clock);
     clock += 61_000;
   };
   return {
@@ -241,11 +241,11 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     },
     tick(ms: number) { clock += ms; },
     get now() { return clock; },
-    review: () => registry.review(builder)!,
-    watched(state: "open" | "merged" | "closed") { registry.savePrWatch(builder, { links: [{ pr: { ...pr, state }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null }); },
-    attention: () => registry.events("0", { kinds: ["attention.changed"], thread: builder }).map((e) => e.payload.attention),
+    review: () => registry.reviews.review(builder)!,
+    watched(state: "open" | "merged" | "closed") { registry.prWatches.savePrWatch(builder, { links: [{ pr: { ...pr, state }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null }); },
+    attention: () => registry.threads.events("0", { kinds: ["attention.changed"], thread: builder }).map((e) => e.payload.attention),
     /** The statuses of the builder and of the review's reviewer. */
-    statuses: () => [builder, registry.review(builder)!.reviewer].map((id) => registry.thread(id)!.status),
+    statuses: () => [builder, registry.reviews.review(builder)!.reviewer].map((id) => registry.threads.thread(id)!.status),
   };
 }
 
@@ -262,10 +262,10 @@ function shown(phase: Review["phase"]) {
 
 /** A read of the Claude builder's transcript that finds `entries`, and the pylon's reports of `kinds` for its session. */
 function claudeRead(f: ReturnType<typeof fixture>, entries: ClaudeEntry[], kinds: readonly ("session.turn-started" | "session.heartbeat")[]) {
-  const from = f.registry.claudeTranscript(f.builder)?.cursor ?? transcriptStart;
-  f.registry.appendClaudeRead(f.builder, { session: "s1", from, entries, cursor: { ...from, offset: from.offset + 1 }, reset: false, readAt: f.now });
+  const from = f.registry.threads.claudeTranscript(f.builder)?.cursor ?? transcriptStart;
+  f.registry.threads.appendClaudeRead(f.builder, { session: "s1", from, entries, cursor: { ...from, offset: from.offset + 1 }, reset: false, readAt: f.now });
   for (const kind of kinds) {
-    f.registry.reportSession(node, { sequence: (f.registry.eventReceipt(node) ?? 0) + 1, time: f.now, pylon: "pylon-th-builder" as PylonId, event: { kind, session: "s1", at: f.now } });
+    f.registry.threads.reportSession(node, { sequence: (f.registry.threads.eventReceipt(node) ?? 0) + 1, time: f.now, pylon: "pylon-th-builder" as PylonId, event: { kind, session: "s1", at: f.now } });
   }
 }
 
@@ -280,9 +280,9 @@ function heldTurn(f: ReturnType<typeof fixture>, text: string) {
   f.tick(1_000);
 }
 
-const archive = (registry: ReturnType<typeof openRegistry>, id: ThreadId) => registry.setThreadStatus(id, "archived");
+const archive = (registry: ReturnType<typeof openRegistry>, id: ThreadId) => registry.threads.setThreadStatus(id, "archived");
 /** Saves a record in a shape an older control plane wrote, as the registry's upgrade when it opens leaves it. */
-const saveOlder = (f: { registry: Registry }, record: unknown) => f.registry.saveReview(upgradeReview(record as Review));
+const saveOlder = (f: { registry: Registry }, record: unknown) => f.registry.reviews.saveReview(upgradeReview(record as Review));
 const verdict = (r: Review, fields: Record<string, unknown>) => `Done.\n\`\`\`nexus-review\n${JSON.stringify({ token: r.expect, verdict: "approve", findings: [], reserved: [], notCheckedLive: "the cache under real traffic", ...fields })}\n\`\`\``;
 const answers = (r: Review, list: unknown[]) => `Fixed.\n\`\`\`nexus-review-answers\n${JSON.stringify({ token: r.expect, answers: list })}\n\`\`\``;
 const serious = { id: "F1", priority: "P1", where: "src/cache.ts:1", summary: "The cache never expires", detail: "Add a TTL." };
@@ -304,7 +304,7 @@ test("a Claude builder's PR gets a harness reviewer, and findings, fixes and new
   for (const name of Object.values(reservedNames)) assert.ok(f.sent[0]!.message.text.includes(name), `the reviewer is told that ${name} need the person`);
   assert.match(f.sent[0]!.message.text, /Not checked live: the cache under real traffic/, "the description reaches the reviewer");
   assert.equal(f.sent[0]!.message.sender, "review");
-  assert.equal(f.registry.isReviewer(reviewer), true);
+  assert.equal(f.registry.reviews.isReviewer(reviewer), true);
 
   f.reply(reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
   await loop.poll();
@@ -328,9 +328,9 @@ test("a Claude builder's PR gets a harness reviewer, and findings, fixes and new
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "approved" }, "approval runs the check, then stops when no landing was asked for");
   assert.deepEqual(f.review().rounds[1]!.check, { passed: true, output: "ok" });
-  assert.deepEqual(f.registry.events("0", { kinds: ["review.changed"] }).map((e) => [(e.payload.phase as { kind: string }).kind, e.payload.round]),
+  assert.deepEqual(f.registry.threads.events("0", { kinds: ["review.changed"] }).map((e) => [(e.payload.phase as { kind: string }).kind, e.payload.round]),
     [["reviewing", 1], ["fixing", 1], ["reviewing", 2], ["checking", 2], ["approved", 2]]);
-  assert.equal(f.registry.thread(f.builder)!.lastHumanActivityAt, 1, "nothing in the loop is human activity");
+  assert.equal(f.registry.threads.thread(f.builder)!.lastHumanActivityAt, 1, "nothing in the loop is human activity");
 });
 
 test("a builder's pylon stays up while its reviewer reads a round, so its findings need no wake, and never while the review waits on the person", async (t) => {
@@ -338,8 +338,8 @@ test("a builder's pylon stays up while its reviewer reads a round, so its findin
   const setUp = (idle = false) => {
     const f = fixture(t);
     f.tick(Date.now() - f.now);
-    if (!idle) f.registry.recordActivity(f.builder, { agent: f.now - 60_000 });
-    return { f, loop: f.loop(), builder: () => desiredPhase(f.registry.thread(f.builder)!, f.now) };
+    if (!idle) f.registry.threads.recordActivity(f.builder, { agent: f.now - 60_000 });
+    return { f, loop: f.loop(), builder: () => desiredPhase(f.registry.threads.thread(f.builder)!, f.now) };
   };
   const { f, loop, builder } = setUp();
   await loop.start(f.builder, { land: null });
@@ -356,10 +356,10 @@ test("a builder's pylon stays up while its reviewer reads a round, so its findin
   read.release();
   await pass;
   assert.equal(f.sent.at(-1)!.to, f.builder);
-  assert.equal(f.registry.thread(f.builder)!.awaitedUntil, undefined, "the findings went, so the review awaits the builder no more");
+  assert.equal(f.registry.threads.thread(f.builder)!.awaitedUntil, undefined, "the findings went, so the review awaits the builder no more");
 
   f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
-  f.registry.recordActivity(f.builder, { agent: f.now });
+  f.registry.threads.recordActivity(f.builder, { agent: f.now });
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
   await loop.poll();
   await loop.poll();
@@ -395,12 +395,12 @@ test("a builder's pylon stays up while its reviewer reads a round, so its findin
   assert.equal(late.builder(), "paused", "a builder already paused when its review starts is not woken to be held");
 
   const ended = fixture(t);
-  ended.registry.recordActivity(ended.builder, { agent: ended.now });
+  ended.registry.threads.recordActivity(ended.builder, { agent: ended.now });
   const endedLoop = ended.loop();
   await endedLoop.start(ended.builder, { land: null });
   await endedLoop.poll();
   assert.equal(ended.review().phase.kind, "reviewing");
-  assert.equal(ended.registry.thread(ended.builder)!.awaitedUntil, undefined, "a hold that ended by the registry's clock is not shown");
+  assert.equal(ended.registry.threads.thread(ended.builder)!.awaitedUntil, undefined, "a hold that ended by the registry's clock is not shown");
 });
 
 test("rounds that run out, and agents that never answer in the block, end with the person's attention", async (t) => {
@@ -412,7 +412,7 @@ test("rounds that run out, and agents that never answer in the block, end with t
   f.reply(reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
   await loop.poll();
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The reviewer still requests changes after 1 rounds, the most this review allows."], label: { state: "added" } });
-  assert.equal(f.registry.threads().find((th) => th.id === f.builder) && (f.registry.events("0", { kinds: ["attention.changed"], thread: f.builder }).at(-1)?.payload.attention), "decision");
+  assert.equal(f.registry.threads.threads().find((th) => th.id === f.builder) && (f.registry.threads.events("0", { kinds: ["attention.changed"], thread: f.builder }).at(-1)?.payload.attention), "decision");
 
   const g = fixture(t);
   const silent = g.loop();
@@ -538,7 +538,7 @@ test("a failed turn whose end is reported twice, by a Claude worker's transcript
   const findings = f.sent.at(-1)!;
   f.failedTurn(f.builder, "API Error: Request timed out.");
   await loop.poll();
-  f.registry.recordReply(f.builder, f.now);
+  f.registry.threads.recordReply(f.builder, f.now);
   f.tick(61_000);
   await loop.poll();
   assert.match(phaseNote(f.review()), /\(1 in a row,/);
@@ -598,8 +598,8 @@ test("a Claude builder whose turn ends with a background shell running is read f
   assert.equal(f.review().phase.kind, "fixing");
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
   heldTurn(f, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a 5-minute TTL." }]));
-  assert.equal(f.registry.thread(f.builder)!.working, true, "heartbeats keep the builder working");
-  assert.equal(f.registry.thread(f.builder)!.lastReplyAt, null, "no turn end was reported");
+  assert.equal(f.registry.threads.thread(f.builder)!.working, true, "heartbeats keep the builder working");
+  assert.equal(f.registry.threads.thread(f.builder)!.lastReplyAt, null, "no turn end was reported");
   await loop.poll();
   assert.equal(f.review().phase.kind, "reviewing");
   assert.deepEqual(f.review().rounds[0]!.answers, [{ id: "F1", action: "fixed", reason: "Added a 5-minute TTL." }]);
@@ -623,7 +623,7 @@ test("a Claude builder whose turn ends with a background shell running and no an
   assert.equal(f.sent.at(-1)!.to, f.builder);
   assert.match(f.sent.at(-1)!.message.text, /no nexus-review-answers block/);
   assert.equal(f.review().nudges, 1);
-  assert.equal(f.registry.thread(f.builder)!.working, true);
+  assert.equal(f.registry.threads.thread(f.builder)!.working, true);
 
   f.tick(3 * 60 * 60_000 + 1);
   await loop.poll();
@@ -829,7 +829,7 @@ const merged2 = "n".repeat(40);
 async function secondBuilder(f: ReturnType<typeof fixture>, loop: ReturnType<ReturnType<typeof fixture>["loop"]>) {
   const builder = f.add("th-builder-2", true);
   const pr = { ...f.pr, number: 8, url: "https://github.com/ramtinJ95/nexus/pull/8" };
-  f.registry.savePrWatch(builder, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  f.registry.prWatches.savePrWatch(builder, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   f.others.set(8, { ...f.snapshot, pr: { ...pr }, detail: { ...f.snapshot.detail, head: head2, branch: "second" } });
   f.mergeAnswer = (sha) => ({ kind: "merged", commit: sha === head1 ? merged : merged2 });
   await loop.start(builder, { land: "nLAPTOP" });
@@ -845,18 +845,18 @@ test("a wake steps only the reviews its thread takes part in, at once", async (t
   await loop.poll();
   await loop.poll();
   const first = f.review();
-  const other = f.registry.review(second)!;
+  const other = f.registry.reviews.review(second)!;
   f.reply(first.reviewer, verdict(first, { verdict: "changes", findings: [serious] }));
   f.reply(other.reviewer, verdict(other, { verdict: "changes", findings: [serious] }));
   const polls = f.polls;
   await loop.wake(first.reviewer);
   assert.equal(f.review().phase.kind, "fixing", "the woken reviewer's verdict moves its review on");
-  assert.equal(f.registry.review(second)!.phase.kind, "reviewing", "the other review waits for its poll");
+  assert.equal(f.registry.reviews.review(second)!.phase.kind, "reviewing", "the other review waits for its poll");
   assert.equal(f.polls, polls + 1, "only the woken review's PR is read");
   await loop.wake("th-none" as ThreadId);
   assert.equal(f.polls, polls + 1, "a thread no review holds steps nothing");
   await loop.poll();
-  assert.equal(f.registry.review(second)!.phase.kind, "fixing");
+  assert.equal(f.registry.reviews.review(second)!.phase.kind, "fixing");
 });
 
 test("a wake after close steps nothing, as from a check whose stream ends while the control plane stops", async (t) => {
@@ -879,20 +879,20 @@ test("landings deploy one at a time: the second merges once the first is healthy
   await loop.poll();
   await loop.poll();
   f.reply(f.review().reviewer, verdict(f.review(), {}));
-  f.reply(f.registry.review(second)!.reviewer, verdict(f.registry.review(second)!, {}));
+  f.reply(f.registry.reviews.review(second)!.reviewer, verdict(f.registry.reviews.review(second)!, {}));
   await loop.poll();
   assert.deepEqual(f.merges, [head1], "the second waits before it merges, so main gains one undeployed commit at a time");
   assert.equal(f.registry.desiredRelease()?.commit, merged);
   assert.equal(f.review().phase.kind, "deploying");
-  assert.deepEqual(f.registry.review(second)!.phase, { kind: "merging", authorized: null, waiting: `${f.review().id} deploys` });
-  assert.equal(phaseNote(f.registry.review(second)!), `, waiting while ${f.review().id} deploys`);
+  assert.deepEqual(f.registry.reviews.review(second)!.phase, { kind: "merging", authorized: null, waiting: `${f.review().id} deploys` });
+  assert.equal(phaseNote(f.registry.reviews.review(second)!), `, waiting while ${f.review().id} deploys`);
 
   healthy(f, merged);
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
   assert.deepEqual(f.merges, [head1, head2]);
   assert.equal(f.registry.desiredRelease()?.commit, merged2);
-  assert.deepEqual(f.registry.review(second)!.phase, { kind: "deploying", commit: merged2, previous: merged, requested: true, deadline: (f.registry.review(second)!.phase as { deadline: number }).deadline });
+  assert.deepEqual(f.registry.reviews.review(second)!.phase, { kind: "deploying", commit: merged2, previous: merged, requested: true, deadline: (f.registry.reviews.review(second)!.phase as { deadline: number }).deadline });
 
   f.registry.reportRelease({ node, role: "control", commit: merged, target: merged2, state: "rolled-back", reason: "health check failed", observedAt: Date.now() });
   await loop.poll();
@@ -900,7 +900,7 @@ test("landings deploy one at a time: the second merges once the first is healthy
   healthy(f, merged);
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
-  assert.deepEqual((f.registry.review(second)!.phase as { reasons: string[] }).reasons, [
+  assert.deepEqual((f.registry.reviews.review(second)!.phase as { reasons: string[] }).reasons, [
     `The deploy of ${merged2} failed: node control rolled-back (health check failed).`,
     `Rolled back to the previous release, ${merged}, which every service reports healthy.`,
     `${merged2} is still on the default branch, so revert it before the next deploy.`,
@@ -918,18 +918,18 @@ test("a landing waits to merge while the control plane drains for a deploy, and 
   const second = await secondBuilder(f, loop);
   await loop.poll();
   await loop.poll();
-  f.reply(f.registry.review(second)!.reviewer, verdict(f.registry.review(second)!, {}));
+  f.reply(f.registry.reviews.review(second)!.reviewer, verdict(f.registry.reviews.review(second)!, {}));
   await loop.poll();
   assert.deepEqual(f.merges, [head1], "the second waits for the first, which merged once the drain ended");
   f.registry.reportRelease({ node, role: "control", commit: previous, target: merged, state: "rolled-back", reason: "health check failed", observedAt: Date.now() });
   await loop.poll();
   assert.equal(f.review().phase.kind, "rolling-back");
-  assert.deepEqual(f.registry.review(second)!.phase, { kind: "merging", authorized: null, waiting: `${f.review().id} rolls back` });
+  assert.deepEqual(f.registry.reviews.review(second)!.phase, { kind: "merging", authorized: null, waiting: `${f.review().id} rolls back` });
   healthy(f, previous);
   await loop.poll();
   assert.equal(f.review().phase.kind, "needs-person");
   assert.deepEqual(f.merges, [head1, head2]);
-  assert.equal((f.registry.review(second)!.phase as { previous: string }).previous, previous);
+  assert.equal((f.registry.reviews.review(second)!.phase as { previous: string }).previous, previous);
 });
 
 test("a landing waits to merge while the desired release is not healthy everywhere, as after a failed deploy with nothing to roll back to", async (t) => {
@@ -940,17 +940,17 @@ test("a landing waits to merge while the desired release is not healthy everywhe
   await loop.poll();
   await loop.poll();
   f.reply(f.review().reviewer, verdict(f.review(), {}));
-  f.reply(f.registry.review(second)!.reviewer, verdict(f.registry.review(second)!, {}));
+  f.reply(f.registry.reviews.review(second)!.reviewer, verdict(f.registry.reviews.review(second)!, {}));
   await loop.poll();
   f.registry.reportRelease({ node, role: "control", commit: null, target: merged, state: "failed", reason: "health check failed", observedAt: Date.now() });
   await loop.poll();
   assert.equal(f.review().phase.kind, "needs-person");
   assert.deepEqual(f.merges, [head1], "the failed release is still desired, so it must not become the second's rollback target");
-  assert.deepEqual(f.registry.review(second)!.phase, { kind: "merging", authorized: null, waiting: `not every service reports ${merged.slice(0, 12)} healthy` });
+  assert.deepEqual(f.registry.reviews.review(second)!.phase, { kind: "merging", authorized: null, waiting: `not every service reports ${merged.slice(0, 12)} healthy` });
   released(f, previous);
   await loop.poll();
   assert.deepEqual(f.merges, [head1, head2]);
-  assert.equal((f.registry.review(second)!.phase as { previous: string }).previous, previous);
+  assert.equal((f.registry.reviews.review(second)!.phase as { previous: string }).previous, previous);
 });
 
 test("a review that lands archives its builder and reviewer, once, whether its PR deploys or not", async (t) => {
@@ -967,7 +967,7 @@ test("a review that lands archives its builder and reviewer, once, whether its P
     assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
     assert.deepEqual(f.statuses(), ["archived", "archived"], `${repo}: both threads are archived once the review lands`);
     assert.deepEqual(f.woken, [f.builder, f.review().reviewer], "the planner hears of each archive, so their pylons pause");
-    f.registry.setThreadStatus(f.builder, "active");
+    f.registry.threads.setThreadStatus(f.builder, "active");
     await loop.poll();
     assert.deepEqual(f.statuses(), ["active", "archived"], "a landed builder the person unarchives stays open");
   }
@@ -977,8 +977,8 @@ test("a landing whose save fails archives nothing, so a release that supersedes 
   const f = fixture(t);
   released(f, previous);
   const loop = await approved(f, "nLAPTOP");
-  const save = f.registry.saveReview;
-  f.registry.saveReview = (review, archive, read) => {
+  const save = f.registry.reviews.saveReview;
+  f.registry.reviews.saveReview = (review, archive, read) => {
     if (review.phase.kind === "landed") throw new Error("disk I/O error");
     return save(review, archive, read);
   };
@@ -986,7 +986,7 @@ test("a landing whose save fails archives nothing, so a release that supersedes 
   await loop.poll();
   assert.equal(f.review().phase.kind, "deploying");
   assert.deepEqual(f.statuses(), ["active", "active"], "no thread is archived while the landing is unsaved");
-  f.registry.saveReview = save;
+  f.registry.reviews.saveReview = save;
   f.registry.setDesiredRelease({ commit: "n".repeat(40), requestedBy: "person", requestedAt: 2 });
   await loop.poll();
   assert.equal(f.review().phase.kind, "needs-person");
@@ -1021,11 +1021,11 @@ test("a review held for the person, or one that stops at approval, archives noth
 
 test("a thread in a turn as its review lands stays open, and the other is archived", async (t) => {
   const f = fixture(t, { repo: "acme/shop" });
-  f.registry.recordActivity(f.builder, { agent: 1, agentTurnRunning: true });
+  f.registry.threads.recordActivity(f.builder, { agent: 1, agentTurnRunning: true });
   const loop = await approved(f, "nLAPTOP");
   assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
   assert.deepEqual(f.statuses(), ["active", "archived"]);
-  f.registry.recordActivity(f.builder, { agent: 2, agentTurnRunning: false });
+  f.registry.threads.recordActivity(f.builder, { agent: 2, agentTurnRunning: false });
   await loop.poll();
   assert.deepEqual(f.statuses(), ["active", "archived"], "the person archives a builder that was busy as it landed");
 });
@@ -1047,7 +1047,7 @@ test("a review that ends merged, closed, cancelled by its builder's archive, or 
     await loop.poll();
     await loop.poll();
     assert.equal(f.review().phase.kind, kind);
-    assert.equal(f.registry.thread(reviewer)!.status, "archived", `${kind}: no round can go to the reviewer`);
+    assert.equal(f.registry.threads.thread(reviewer)!.status, "archived", `${kind}: no round can go to the reviewer`);
     assert.deepEqual(f.woken, [reviewer], `${kind}: the planner hears of the archive, so its pylon pauses`);
   }
 });
@@ -1057,11 +1057,11 @@ test("a review a new review replaces leaves its reviewer archived, and the new r
   const loop = await approved(f, null);
   const first = f.review().reviewer;
   await loop.poll();
-  assert.equal(f.registry.thread(first)!.status, "active", "a review at approval may still land, which needs its reviewer");
+  assert.equal(f.registry.threads.thread(first)!.status, "active", "a review at approval may still land, which needs its reviewer");
   await loop.start(f.builder, { land: null });
   await loop.poll();
-  assert.equal(f.registry.thread(first)!.status, "archived");
-  assert.equal(f.registry.thread(f.review().reviewer)!.status, "active");
+  assert.equal(f.registry.threads.thread(first)!.status, "archived");
+  assert.equal(f.registry.threads.thread(f.review().reviewer)!.status, "active");
 });
 
 test("a reviewer in a turn as its review lands is archived on a later pass, once the turn ends", async (t) => {
@@ -1070,14 +1070,14 @@ test("a reviewer in a turn as its review lands is archived on a later pass, once
   await loop.start(f.builder, { land: "nLAPTOP" });
   await loop.poll();
   const reviewer = f.review().reviewer;
-  f.registry.recordActivity(reviewer, { agent: 1, agentTurnRunning: true });
+  f.registry.threads.recordActivity(reviewer, { agent: 1, agentTurnRunning: true });
   f.reply(reviewer, verdict(f.review(), {}));
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
   assert.deepEqual(f.statuses(), ["archived", "active"]);
   await loop.poll();
-  assert.equal(f.registry.thread(reviewer)!.status, "active", "a turn keeps it open");
-  f.registry.recordActivity(reviewer, { agent: 2, agentTurnRunning: false });
+  assert.equal(f.registry.threads.thread(reviewer)!.status, "active", "a turn keeps it open");
+  f.registry.threads.recordActivity(reviewer, { agent: 2, agentTurnRunning: false });
   await loop.poll();
   assert.deepEqual(f.statuses(), ["archived", "archived"]);
 });
@@ -1111,12 +1111,12 @@ test("a reviewer the person has been to since it started stays open after its re
   await loop.start(f.builder, { land: null });
   await loop.poll();
   const reviewer = f.review().reviewer;
-  f.registry.recordActivity(reviewer, { human: 2 });
+  f.registry.threads.recordActivity(reviewer, { human: 2 });
   f.watched("closed");
   await loop.poll();
   await loop.poll();
   assert.equal(f.review().phase.kind, "closed");
-  assert.equal(f.registry.thread(reviewer)!.status, "active");
+  assert.equal(f.registry.threads.thread(reviewer)!.status, "active");
 });
 
 test("reviewers left behind before the loop archived them, by a replaced review or a crash before its review saved, are archived on the first pass", async (t) => {
@@ -1126,9 +1126,9 @@ test("reviewers left behind before the loop archived them, by a replaced review 
   const later = f.add("th-reviewer-later", false, reviewerCaller);
   archive(f.registry, later);
   archive(f.registry, f.builder);
-  f.registry.saveReview(testReview({ builder: f.builder, reviewer: later, merged, phase: { kind: "landed", commit: merged } }));
+  f.registry.reviews.saveReview(testReview({ builder: f.builder, reviewer: later, merged, phase: { kind: "landed", commit: merged } }));
   await f.loop().poll();
-  assert.deepEqual([earlier, crashed].map((id) => f.registry.thread(id)!.status), ["archived", "archived"]);
+  assert.deepEqual([earlier, crashed].map((id) => f.registry.threads.thread(id)!.status), ["archived", "archived"]);
   assert.deepEqual(f.woken.toSorted(), [crashed, earlier]);
 });
 
@@ -1382,7 +1382,7 @@ test("in a review stored before priorities, a reviewer's repeat approval of an u
   await loop.poll();
   // Before priorities, an approval with a serious finding was stored as an approval.
   const stored = f.review();
-  f.registry.saveReview({ ...stored, rounds: [{ ...stored.rounds[0]!, verdict: { ...stored.rounds[0]!.verdict!, verdict: "approve" } }] });
+  f.registry.reviews.saveReview({ ...stored, rounds: [{ ...stored.rounds[0]!, verdict: { ...stored.rounds[0]!.verdict!, verdict: "approve" } }] });
   f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "rejected", reason: "The cache is rebuilt on every deploy." }]));
   await loop.poll();
   assert.equal(f.review().rounds[1]!.head, head1);
@@ -1440,7 +1440,7 @@ test("a reviewer a later review replaced is still a reviewer, and an archived bu
   await loop.poll();
   await loop.start(f.builder, { land: null });
   assert.notEqual(f.review().reviewer, first);
-  assert.equal(f.registry.isReviewer(first), true);
+  assert.equal(f.registry.reviews.isReviewer(first), true);
   archive(f.registry, f.builder);
   assert.throws(() => loop.land(f.builder, "nLAPTOP"), /archived/);
 });
@@ -1470,7 +1470,7 @@ test("a head with a .nexus/verify lands once its live check passes in a verify p
   assert.deepEqual(f.review().rounds.at(-1)!.live, { kind: "ran", thread: f.liveThreads[0], passed: true, output: "fleet ok" });
   assert.equal(f.liveThreads.length, 1);
   assert.deepEqual(f.archived, f.liveThreads, "the verify pylon is archived once it gave its verdict");
-  assert.deepEqual(f.registry.events("0", { kinds: ["review.changed"] }).map((e) => (e.payload.phase as { kind: string }).kind).slice(0, 4), ["reviewing", "checking", "verifying", "merging"]);
+  assert.deepEqual(f.registry.threads.events("0", { kinds: ["review.changed"] }).map((e) => (e.payload.phase as { kind: string }).kind).slice(0, 4), ["reviewing", "checking", "verifying", "merging"]);
 
   const g = fixture(t, { path: ":memory:" });
   g.snapshot = { ...g.snapshot, detail: { ...g.snapshot.detail, body: "Adds a cache." } };
@@ -1489,7 +1489,7 @@ test("a landing stored before live checks, whose head has a .nexus/verify, is he
   const f = fixture(t);
   const loop = await approved(f, null);
   const { live: _, ...unverified } = f.review().rounds[0]!;
-  f.registry.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, rounds: [unverified], phase: { kind: "merging", authorized: null } });
+  f.registry.reviews.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, rounds: [unverified], phase: { kind: "merging", authorized: null } });
   f.verifies = true;
   await loop.poll();
   assert.deepEqual(f.merges, []);
@@ -1501,16 +1501,16 @@ test("a landing stored before live checks, whose head has a .nexus/verify, is he
 });
 
 test("a verify pylon the person unarchives stays open, after its verdict, after its review is replaced, or after it timed out", async (t) => {
-  const unarchive = (f: ReturnType<typeof fixture>, id: ThreadId) => { f.registry.setThreadStatus(id, "active"); f.registry.recordActivity(id, { human: 2 }); };
+  const unarchive = (f: ReturnType<typeof fixture>, id: ThreadId) => { f.registry.threads.setThreadStatus(id, "active"); f.registry.threads.recordActivity(id, { human: 2 }); };
   const f = fixture(t);
   f.verifies = true;
   const loop = await approved(f, null);
   assert.deepEqual(f.archived, f.liveThreads);
   unarchive(f, f.liveThreads[0]!);
   await loop.poll();
-  f.registry.saveReview({ ...f.review(), id: "rv-next", rounds: [{ head: head2, verdict: null, check: null, answers: null }], phase: { kind: "approved" } });
+  f.registry.reviews.saveReview({ ...f.review(), id: "rv-next", rounds: [{ head: head2, verdict: null, check: null, answers: null }], phase: { kind: "approved" } });
   await loop.poll();
-  assert.equal(f.registry.thread(f.liveThreads[0]!)!.status, "active", "the review that recorded it is gone");
+  assert.equal(f.registry.threads.thread(f.liveThreads[0]!)!.status, "active", "the review that recorded it is gone");
   assert.equal(f.archived.length, 1);
 
   const g = fixture(t, { path: ":memory:" });
@@ -1523,7 +1523,7 @@ test("a verify pylon the person unarchives stays open, after its verdict, after 
   assert.deepEqual(g.archived, g.liveThreads, "the timed-out verify pylon was archived as its review ended");
   unarchive(g, g.liveThreads[0]!);
   await gLoop.poll();
-  assert.equal(g.registry.thread(g.liveThreads[0]!)!.status, "active");
+  assert.equal(g.registry.threads.thread(g.liveThreads[0]!)!.status, "active");
 });
 
 test("a live check that fails holds the landing like a failed check: the builder answers it as a P0, and a failure it does not push for goes to the person", async (t) => {
@@ -1699,7 +1699,7 @@ test("a reviewer that asks for changes while the check runs stops the check, and
   await loop.poll();
   assert.equal(f.review().phase.kind, "fixing");
   assert.deepEqual(f.discarded, [first], "the check of a head the builder will move is stopped");
-  assert.equal(f.registry.thread(first)!.status, "deleted");
+  assert.equal(f.registry.threads.thread(first)!.status, "deleted");
   assert.doesNotMatch(f.sent.at(-1)!.message.text, /CHECK/);
   f.check = { kind: "done", passed: false, output: "1 test failed" };
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
@@ -2084,7 +2084,7 @@ test("this review's own merge, recorded before the merge call, deploys after a c
   assert.equal(f.registry.desiredRelease()?.commit, merged);
 });
 
-const labelStates = (f: ReturnType<typeof fixture>) => f.registry.events("0", { kinds: ["review.changed"] }).map((e) => (e.payload.phase as { label?: { state: string } }).label?.state).filter((s) => s !== undefined);
+const labelStates = (f: ReturnType<typeof fixture>) => f.registry.threads.events("0", { kinds: ["review.changed"] }).map((e) => (e.payload.phase as { label?: { state: string } }).label?.state).filter((s) => s !== undefined);
 
 async function labelsOnceAcrossRetries(f: ReturnType<typeof fixture>, loop: ReturnType<ReturnType<typeof fixture>["loop"]>, exhaust: () => void, ...reasons: string[]) {
   f.labelAnswer = (name) => { f.labels.add(name); throw new Error("connection reset"); };
@@ -2167,7 +2167,7 @@ test("a token that cannot label tells the person why, and the loop does not try 
     `Nexus could not add the label "needs human review" to pull request #7 (GitHub answered 403: Resource not accessible by personal access token). Labelling needs a token that may write issues or pull requests, which only the person can grant.`,
   ], label: { state: "failed", why: "GitHub answered 403: Resource not accessible by personal access token" } };
   assert.deepEqual(shown(f.review().phase), phase);
-  assert.deepEqual(shown(f.registry.events("0", { kinds: ["review.changed"] }).at(-1)!.payload.phase as Review["phase"]), phase, "the event log says the label could not be added");
+  assert.deepEqual(shown(f.registry.threads.events("0", { kinds: ["review.changed"] }).at(-1)!.payload.phase as Review["phase"]), phase, "the event log says the label could not be added");
   await loop.poll();
   await loop.poll();
   assert.equal(f.labelCalls.length, 1);
@@ -2190,7 +2190,7 @@ test("an approval with only P3 findings goes straight to the check, sending the 
   assert.match(toBuilder[0]!, /N1 \(P3\) src\/cache\.ts:1: Name the constant/);
   assert.match(toBuilder[0]!, /Do not push to this pull request's branch/);
   assert.doesNotMatch(toBuilder[0]!, /nexus-review-answers/);
-  assert.deepEqual(f.registry.events("0", { kinds: ["review.changed"] }).map((e) => (e.payload.phase as { kind: string }).kind), ["reviewing", "checking", "approved"], "no fixing round");
+  assert.deepEqual(f.registry.threads.events("0", { kinds: ["review.changed"] }).map((e) => (e.payload.phase as { kind: string }).kind), ["reviewing", "checking", "approved"], "no fixing round");
 });
 
 test("the findings decide the verdict: changes with only P3 findings is an approval, and an approval with a P2 finding requests changes", async (t) => {
@@ -2358,7 +2358,7 @@ test("a builder or reviewer thread the person archives or deletes cancels the re
   await fixing.poll();
   g.reply(g.review().reviewer, verdict(g.review(), { verdict: "changes", findings: [serious] }));
   await fixing.poll();
-  g.registry.setThreadStatus(g.builder, "deleted");
+  g.registry.threads.setThreadStatus(g.builder, "deleted");
   await fixing.poll();
   assert.deepEqual(g.review().phase, { kind: "cancelled", who: "builder", status: "deleted" });
 
@@ -2422,11 +2422,11 @@ test("a review that authorized its merge, is deploying or rolling back, or has e
   assert.throws(() => loop.cancel(f.builder, "nPHONE"), seenThrough);
   const deploying = f.review();
   for (const phase of [{ kind: "merging", authorized: head1 }, { kind: "rolling-back", commit: merged, previous, why: "failed", requested: true, deadline: 0 }] as const) {
-    f.registry.saveReview({ ...deploying, phase });
+    f.registry.reviews.saveReview({ ...deploying, phase });
     assert.throws(() => loop.cancel(f.builder, "nPHONE"), seenThrough, phase.kind);
   }
   assert.deepEqual(f.statuses(), ["active", "active"], "a refused cancel archives nothing");
-  f.registry.saveReview({ ...deploying, merged: null, phase: { kind: "merging", authorized: null } });
+  f.registry.reviews.saveReview({ ...deploying, merged: null, phase: { kind: "merging", authorized: null } });
   assert.equal(loop.cancel(f.builder, "nPHONE").phase.kind, "cancelled", "a landing that has not authorized its merge is cancelled");
 
   const g = fixture(t);
@@ -2444,11 +2444,11 @@ test("the person cancels a review that ended for them, which ends its decision, 
   f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
   await loop.poll();
   assert.equal(f.review().phase.kind, "needs-person");
-  assert.equal(f.registry.attention(f.builder), "decision");
+  assert.equal(f.registry.threads.attention(f.builder), "decision");
   const sent = f.sent.length;
 
   assert.deepEqual(loop.cancel(f.builder, "nPHONE").phase, { kind: "cancelled", who: "person", by: "nPHONE" });
-  assert.notEqual(f.registry.attention(f.builder), "decision");
+  assert.notEqual(f.registry.threads.attention(f.builder), "decision");
   assert.deepEqual(f.statuses(), ["active", "archived"]);
   await loop.poll();
   assert.equal(f.sent.length, sent, "a cancelled review sends nothing more");
@@ -2468,7 +2468,7 @@ test("a pass that was stepping a review when the person cancelled it does not sa
   assert.equal(f.review().outbox, null);
   await loop.poll();
   assert.equal(f.review().phase.kind, "cancelled", "the next pass steps from the cancel");
-  assert.deepEqual(f.registry.events("0", { kinds: ["review.changed"] }).map((e) => (e.payload.phase as { kind: string }).kind), ["reviewing", "cancelled"]);
+  assert.deepEqual(f.registry.threads.events("0", { kinds: ["review.changed"] }).map((e) => (e.payload.phase as { kind: string }).kind), ["reviewing", "cancelled"]);
 });
 
 test("a check thread or verify pylon a pass starts as the person cancels the review is thrown away at once", async (t) => {
@@ -2567,7 +2567,7 @@ test("a builder's PR in a project that lands on its own is reviewed with no comm
   const f = fixture(t, { autoReview: { mode: "land", enabledBy: "nLAPTOP" } });
   released(f, previous);
   const loop = f.loop();
-  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
   assert.equal(f.review().auto, true);
   assert.deepEqual(f.review().land, { requestedBy: "nLAPTOP", fromProject: true });
   await loop.poll();
@@ -2580,23 +2580,23 @@ test("a builder's PR in a project that lands on its own is reviewed with no comm
 
 test("nothing starts on its own without the project's setting, for a thread the loop started, or twice for one PR", async (t) => {
   const off = fixture(t);
-  await off.loop().auto(off.registry.thread(off.builder)!, off.pr);
-  assert.equal(off.registry.review(off.builder), null, "a project without the setting");
+  await off.loop().auto(off.registry.threads.thread(off.builder)!, off.pr);
+  assert.equal(off.registry.reviews.review(off.builder), null, "a project without the setting");
 
   const f = fixture(t, { path: tempDb(), autoReview: { mode: "review", enabledBy: "nPHONE" } });
   const loop = f.loop();
   for (const [id, by] of [["th-reviewing", reviewerCaller], ["th-checking", checkCaller]] as const) {
-    await loop.auto(f.registry.thread(f.add(id, true, by))!, f.pr);
-    assert.equal(f.registry.review(id as ThreadId), null, `a thread started by ${by}`);
+    await loop.auto(f.registry.threads.thread(f.add(id, true, by))!, f.pr);
+    assert.equal(f.registry.reviews.review(id as ThreadId), null, `a thread started by ${by}`);
   }
-  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
   assert.equal(f.review().land, null, "a project that only reviews stops at approval");
   const first = f.review().id;
   await loop.poll();
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
   assert.equal(f.review().phase.kind, "approved");
-  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
   assert.equal(f.review().id, first, "a review that ended stays ended");
   assert.equal(f.started.length, 1);
   const again = await loop.start(f.builder, { land: null });
@@ -2715,7 +2715,7 @@ test("each landing asks again whether its lander may deploy, and whether the pro
 
   const auto = fixture(t, { path: tempDb(), autoReview: { mode: "land", enabledBy: "nLAPTOP" } });
   const own = auto.loop();
-  await own.auto(auto.registry.thread(auto.builder)!, auto.pr);
+  await own.auto(auto.registry.threads.thread(auto.builder)!, auto.pr);
   await own.poll();
   auto.registry.editProject("nexus" as ProjectId, ({ autoReview: _, ...p }) => p);
   auto.reply(auto.review().reviewer, verdict(auto.review(), {}));
@@ -2739,7 +2739,7 @@ test("a review held for the person ends once the person closes its PR or archive
     assert.equal(f.review().phase.kind, "needs-person");
     assert.equal(f.attention().at(-1), "decision");
     if (how === "closed") f.watched("closed");
-    else f.registry.setThreadStatus(f.builder, how);
+    else f.registry.threads.setThreadStatus(f.builder, how);
     await loop.poll();
     assert.deepEqual(f.review().phase, ending, `a held review whose ${how === "closed" ? "PR was closed" : `builder was ${how}`}`);
     assert.notEqual(f.attention().at(-1), "decision", "the builder no longer needs a decision");
@@ -2765,7 +2765,7 @@ test("a held review ends before its label is retried, and one whose PR watch sto
   await held.poll();
   g.reply(g.review().reviewer, verdict(g.review(), { verdict: "changes", findings: [serious] }));
   await held.poll();
-  g.registry.savePrWatch(g.builder, { ...g.registry.prWatch(g.builder)!, commentWakes: 10 });
+  g.registry.prWatches.savePrWatch(g.builder, { ...g.registry.prWatches.prWatch(g.builder)!, commentWakes: 10 });
   g.snapshot = { ...g.snapshot, pr: { ...g.snapshot.pr, state: "closed" } };
   await held.poll();
   assert.deepEqual(g.review().phase, { kind: "closed" });
@@ -2774,23 +2774,23 @@ test("a held review ends before its label is retried, and one whose PR watch sto
 test("a PR that another thread on its branch has a review of gets none on its own", async (t) => {
   const f = fixture(t, { autoReview: { mode: "review", enabledBy: "nLAPTOP" } });
   const loop = f.loop();
-  await loop.auto(f.registry.thread(f.builder)!, f.pr);
-  await loop.auto(f.registry.thread(f.add("th-twin", true))!, f.pr);
-  assert.equal(f.registry.review("th-twin" as ThreadId), null);
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
+  await loop.auto(f.registry.threads.thread(f.add("th-twin", true))!, f.pr);
+  assert.equal(f.registry.reviews.review("th-twin" as ThreadId), null);
   assert.equal(f.started.length, 1);
 });
 
 test("a PR stays reviewed once its builder's record moves on to a review of another PR", async (t) => {
   const f = fixture(t, { autoReview: { mode: "review", enabledBy: "nLAPTOP" } });
   const loop = f.loop();
-  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
   await loop.poll();
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
   assert.equal(f.review().phase.kind, "approved");
-  f.registry.saveReview({ ...f.review(), id: "rv-next", pr: { ...f.review().pr, number: f.pr.number + 1 }, phase: { kind: "reviewing" } });
-  await loop.auto(f.registry.thread(f.add("th-twin", true))!, f.pr);
-  assert.equal(f.registry.review("th-twin" as ThreadId), null, "the twin's link of the first PR starts nothing");
+  f.registry.reviews.saveReview({ ...f.review(), id: "rv-next", pr: { ...f.review().pr, number: f.pr.number + 1 }, phase: { kind: "reviewing" } });
+  await loop.auto(f.registry.threads.thread(f.add("th-twin", true))!, f.pr);
+  assert.equal(f.registry.reviews.review("th-twin" as ThreadId), null, "the twin's link of the first PR starts nothing");
   assert.equal(f.started.length, 1);
 });
 
@@ -2816,7 +2816,7 @@ test("a held reserved path holds again when landed, and lands once the person wa
   assert.deepEqual(waiver, { head: head1, holds: reservedHolds, codes: ["reserved-path:irreversible"], by: "nLAPTOP" }, "the review records who waived which holds, at which commit");
   assert.equal(change?.kind, "known", "and the change at that commit");
   assert.equal(typeof at, "number");
-  assert.deepEqual(f.registry.events("0", { kinds: ["review.waived"], thread: f.builder }).map((e) => e.payload), [{ review: f.review().id, repo: "ramtinJ95/nexus", pr: 7, ...waiver, at }]);
+  assert.deepEqual(f.registry.threads.events("0", { kinds: ["review.waived"], thread: f.builder }).map((e) => e.payload), [{ review: f.review().id, repo: "ramtinJ95/nexus", pr: 7, ...waiver, at }]);
   for (const role of ["control", "probe"] as const) f.registry.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: Date.now() });
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
@@ -2919,14 +2919,14 @@ test("a review stored before hold codes reads its holds and its waiver with code
   await loop.poll();
   await loop.poll();
   assert.deepEqual(f.merges, [head1]);
-  assert.equal(f.registry.events("0", { kinds: ["review.waived"], thread: f.builder }).length, 1, "the codes it gains on its next save are no new waiver");
+  assert.equal(f.registry.threads.events("0", { kinds: ["review.waived"], thread: f.builder }).length, 1, "the codes it gains on its next save are no new waiver");
 });
 
 test("a waiver covers its hold by code, whatever the hold's text, and the reviewer's reading of a case never covers the paths that hit it", async (t) => {
   const f = fixture(t);
   f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
   const loop = await approved(f, "nLAPTOP");
-  f.registry.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, phase: { kind: "merging", authorized: null },
+  f.registry.reviews.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, phase: { kind: "merging", authorized: null },
     waiver: { head: head1, holds: ["Always needs the person: anything irreversible, in words an older control plane used."], codes: ["reserved-path:irreversible"], by: "nLAPTOP", at: 1, change: null } });
   await loop.poll();
   await loop.poll();
@@ -2950,16 +2950,16 @@ test("a waiver covers its hold by code, whatever the hold's text, and the review
 test("a harness, a Claude worker and a bare thread each give the replies and take the messages of their kind", async (t) => {
   const f = fixture(t, { claudeBuilder: false });
   const fake = fakeHarness();
-  const harness = f.registry.thread(f.builder)!;
+  const harness = f.registry.threads.thread(f.builder)!;
   await fake.harness.startThread({ threadId: harness.id, pylonId: harness.pylonId });
   fake.transcript(harness.id).messages.push(
     { role: "user", content: "fix it", timestamp: 1 },
     { role: "assistant", content: [{ type: "text", text: "Fixed" }, { type: "thinking", thinking: "no" }, { type: "text", text: " it." }], timestamp: 2 } as never,
   );
-  const claude = f.registry.thread(f.add("th-claude", true))!;
+  const claude = f.registry.threads.thread(f.add("th-claude", true))!;
   claudeWorkerAt(f.registry, claude.id, "started", { session: "s1" });
-  f.registry.appendClaudeRead(claude.id, { session: "s1", from: transcriptStart, entries: [{ kind: "prompt", at: 1, text: "fix it", from: "person" }, { kind: "reply", at: 2, text: "Done." }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 3 });
-  const bare = f.registry.thread(f.add("th-check-bare", false, checkCaller, true))!;
+  f.registry.threads.appendClaudeRead(claude.id, { session: "s1", from: transcriptStart, entries: [{ kind: "prompt", at: 1, text: "fix it", from: "person" }, { kind: "reply", at: 2, text: "Done." }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 3 });
+  const bare = f.registry.threads.thread(f.add("th-check-bare", false, checkCaller, true))!;
 
   const replies = agentReader(f.registry, fake.harness).replies;
   assert.deepEqual(await replies(harness), ["Fixed it."]);
@@ -2975,13 +2975,13 @@ test("a harness, a Claude worker and a bare thread each give the replies and tak
   assert.equal(await inbox(claude, message), "later", "a Claude worker whose pylon does not run takes it later");
   await assert.rejects(inbox(bare, message), "a bare thread takes no message");
   assert.deepEqual(woken, [harness.id, claude.id], "a message a bare thread refused wakes nothing");
-  assert.ok(f.registry.thread(claude.id)!.lastAgentActivityAt > 0);
+  assert.ok(f.registry.threads.thread(claude.id)!.lastAgentActivityAt > 0);
 });
 
 test("a model failure is a harness turn's last message that stopped on an error, or a Claude worker's API error with nothing after it", async (t) => {
   const f = fixture(t, { claudeBuilder: false });
   const fake = fakeHarness();
-  const harness = f.registry.thread(f.builder)!;
+  const harness = f.registry.threads.thread(f.builder)!;
   await fake.harness.startThread({ threadId: harness.id, pylonId: harness.pylonId });
   const read = agentReader(f.registry, fake.harness).conversation;
   const failure = async (th: Thread) => (await read(th)).failure;
@@ -2993,10 +2993,10 @@ test("a model failure is a harness turn's last message that stopped on an error,
   fake.commit(harness.id);
   assert.equal(await failure(harness), null, "a turn the model finished did not fail");
 
-  const claude = f.registry.thread(f.add("th-claude", true))!;
+  const claude = f.registry.threads.thread(f.add("th-claude", true))!;
   claudeWorkerAt(f.registry, claude.id, "started", { session: "s1" });
   const [overloaded] = (await readFile(new URL("../fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").slice(3).map(parseRecord);
-  const append = (entries: ClaudeEntry[], offset: number) => f.registry.appendClaudeRead(claude.id, { session: "s1", from: { ...transcriptStart, offset: offset - 1 }, entries, cursor: { ...transcriptStart, offset }, reset: false, readAt: 3 });
+  const append = (entries: ClaudeEntry[], offset: number) => f.registry.threads.appendClaudeRead(claude.id, { session: "s1", from: { ...transcriptStart, offset: offset - 1 }, entries, cursor: { ...transcriptStart, offset }, reset: false, readAt: 3 });
   append([{ kind: "prompt", at: 1, text: "fix it", from: "person" }, ...overloaded!, { kind: "turn", at: 5, durationMs: 100 }], 1);
   assert.match((await failure(claude))!, /^API Error: 529 Overloaded\./);
   append([{ kind: "prompt", at: 6, text: "fix it", from: "other" }, { kind: "reply", at: 7, text: "Done." }], 2);
@@ -3006,7 +3006,7 @@ test("a model failure is a harness turn's last message that stopped on an error,
 test("a conversation's harness watch is stopped when its projection throws", async (t) => {
   const f = fixture(t, { claudeBuilder: false });
   const fake = fakeHarness();
-  const harness = f.registry.thread(f.builder)!;
+  const harness = f.registry.threads.thread(f.builder)!;
   await fake.harness.startThread({ threadId: harness.id, pylonId: harness.pylonId });
   fake.transcript(harness.id).messages.push({ role: "assistant", content: "not a list of parts", timestamp: 1 } as never);
   fake.commit(harness.id);
@@ -3018,7 +3018,7 @@ test("a conversation's harness watch is stopped when its projection throws", asy
 function realReads(t: import("node:test").TestContext) {
   const fake = fakeHarness();
   const counted = { entries: 0 };
-  const f = fixture(t, { agentState: (registry) => agentReader({ ...registry, claudeEntries: (...args) => { counted.entries++; return registry.claudeEntries(...args); } }, fake.harness).state });
+  const f = fixture(t, { agentState: (registry) => agentReader({ ...registry, threads: { ...registry.threads, claudeEntries: (...args) => { counted.entries++; return registry.threads.claudeEntries(...args); } } }, fake.harness).state });
   /** A harness thread's turn that ended with `text`. */
   const say = (id: ThreadId, text: string) => {
     fake.transcript(id).messages.push({ role: "assistant", content: [{ type: "text", text }], stopReason: "stop", timestamp: 1 } as never);
@@ -3088,7 +3088,7 @@ test("a held review whose PR watch hit its comment cap reads the PR once per PR 
   f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
   await loop.poll();
   assert.equal(f.review().phase.kind, "needs-person");
-  f.registry.savePrWatch(f.builder, { ...f.registry.prWatch(f.builder)!, commentWakes: 10 });
+  f.registry.prWatches.savePrWatch(f.builder, { ...f.registry.prWatches.prWatch(f.builder)!, commentWakes: 10 });
   const before = f.polls;
   for (let i = 0; i < 7; i++) {
     await loop.poll();
@@ -3105,7 +3105,7 @@ test("a held review whose PR watch hit its comment cap reads the PR once per PR 
 /** A push of `head` to the PR's branch, as GitHub and then the PR watch's next read see it. */
 const pushed = (f: ReturnType<typeof fixture>, head: string) => {
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, conflict: false }, detail: { ...f.snapshot.detail, head } };
-  f.registry.savePrWatch(f.builder, { ...f.registry.prWatch(f.builder)!, links: [{ pr: { ...f.pr, head }, seen: [], failed: false }] });
+  f.registry.prWatches.savePrWatch(f.builder, { ...f.registry.prWatches.prWatch(f.builder)!, links: [{ pr: { ...f.pr, head }, seen: [], failed: false }] });
 };
 
 test("a landing held for the person reviews a head pushed after the hold in a new round, and holds again there without the old head's waiver", async (t) => {
@@ -3285,17 +3285,17 @@ const holds: { kind: string; hold(f: ReturnType<typeof fixture>): Promise<void>;
   { kind: "thread while reviewing", cause: "thread", reasons: ["The reviewer thread th-reviewer-1 is idle, so the review stopped."], landable: false, round: false, async hold(f) {
     await f.loop().start(f.builder, { land: null });
     await f.loop().poll();
-    f.registry.setThreadStatus(f.review().reviewer, "idle");
+    f.registry.threads.setThreadStatus(f.review().reviewer, "idle");
     await f.loop().poll();
-    f.registry.setThreadStatus(f.review().reviewer, "active");
+    f.registry.threads.setThreadStatus(f.review().reviewer, "active");
   } },
   { kind: "thread while verifying", cause: "thread", reasons: ["The reviewer thread th-reviewer-1 is idle, so the review stopped."], landable: true, round: true, async hold(f) {
     f.verifies = true;
     f.refuse = "every node is offline";
     await approved(f, null);
-    f.registry.setThreadStatus(f.review().reviewer, "idle");
+    f.registry.threads.setThreadStatus(f.review().reviewer, "idle");
     await f.loop().poll();
-    f.registry.setThreadStatus(f.review().reviewer, "active");
+    f.registry.threads.setThreadStatus(f.review().reviewer, "active");
   } },
 ];
 
@@ -3397,7 +3397,7 @@ test("a review that stopped at approval under a stopped PR watch waits for its l
   const f = fixture(t);
   const loop = await approved(f, null);
   pushed(f, head2);
-  f.registry.savePrWatch(f.builder, { ...f.registry.prWatch(f.builder)!, commentWakes: 10 });
+  f.registry.prWatches.savePrWatch(f.builder, { ...f.registry.prWatches.prWatch(f.builder)!, commentWakes: 10 });
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "approved" }, "a stopped watch's head is not current, so nothing reads it");
   loop.land(f.builder, "nLAPTOP", head1);
@@ -3424,7 +3424,7 @@ test("a force-push back to a head an earlier round reviewed gets a new round", a
 
 /** The registry migration the reserved-path rule holds, whose hunk starts at `line`. */
 const migration = (line: number, table = "x"): ChangedFile[] => [{ path: "src/control/schema.ts", previous: null, patch: `@@ -${line},3 +${line},4 @@ export const migrations: readonly string[] = [\n   \`CREATE TABLE a (b TEXT) STRICT;\`,\n+  \`CREATE TABLE ${table} (a TEXT) STRICT;\`,` }, { path: "src/cache.ts", previous: null, patch: "@@ -0,0 +1 @@\n+export {};" }];
-const carriedEvents = (f: ReturnType<typeof fixture>) => f.registry.events("0", { kinds: ["review.approval-carried", "review.waiver-carried", "review.waived"], thread: f.builder }).map((e) => [e.kind, e.payload.from, e.payload.to]);
+const carriedEvents = (f: ReturnType<typeof fixture>) => f.registry.threads.events("0", { kinds: ["review.approval-carried", "review.waiver-carried", "review.waived"], thread: f.builder }).map((e) => [e.kind, e.payload.from, e.payload.to]);
 
 /** A landing the person waived at head1, whose branch then conflicts, so the builder rebases it to head2 with `change`. */
 async function waivedThenRebased(t: import("node:test").TestContext, change: ChangedFile[] | null, rounds?: number, check?: CheckState) {
@@ -3548,7 +3548,7 @@ test("an approval never carries to a head on another base, nor from a round save
     f.changes.set(head2, migration(250));
     const loop = await approved(f, null);
     if (retarget) f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "release/1" } };
-    else f.registry.saveReview({ ...f.review(), rounds: f.review().rounds.map(({ base: _, ...round }) => round) });
+    else f.registry.reviews.saveReview({ ...f.review(), rounds: f.review().rounds.map(({ base: _, ...round }) => round) });
     pushed(f, head2);
     await loop.poll();
     assert.equal(f.review().phase.kind, "reviewing", retarget ? "a new base adds its own commits to the change" : "an old round's base is unknown");
@@ -3591,7 +3591,7 @@ test("a review whose rounds ran out, rebased with the same change, stays held at
         assert.equal(r.rounds.at(-1)!.check, null, `${kind}: a check result belongs to the head it ran at`);
         assert.equal(roundNote(r), `hold carried from ${head1.slice(0, 12)} to ${head2.slice(0, 12)}: same change after a rebase`, kind);
         assert.deepEqual(carriedEvents(f), [], `${kind}: no approval carried to a review that stays held`);
-        assert.doesNotMatch(cannotLand(r, f.registry.thread(f.builder)!, { state: "open" })!, /moved to/, `${kind}: Land refuses for the reasons, not a stale head`);
+        assert.doesNotMatch(cannotLand(r, f.registry.threads.thread(f.builder)!, { state: "open" })!, /moved to/, `${kind}: Land refuses for the reasons, not a stale head`);
       } else {
         assert.equal(r.rounds.at(-1)!.head, head1, kind);
         assert.deepEqual((r.phase as { unreviewed?: string }).unreviewed, head2, `${kind}: a changed line is unreviewed`);
@@ -3628,7 +3628,7 @@ test("an approved review in a project that leaves landing to the person waits on
   const reviewOnly = { autoReview: { mode: "review" as const, enabledBy: "nLAPTOP" }, repo: "acme/app" };
   const approve = async (f: ReturnType<typeof fixture>) => {
     const loop = f.loop();
-    await loop.auto(f.registry.thread(f.builder)!, f.pr);
+    await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
     await loop.poll();
     f.reply(f.review().reviewer, verdict(f.review(), {}));
     await loop.poll();
@@ -3734,8 +3734,8 @@ test("for every hold, and for an approval, the land route takes a press exactly 
   const c = { deploys: () => false, landRefusal: null, caller: "nLAPTOP" } as never;
   const unescape = (attr: string) => attr.replace(/&(quot|#39|lt|gt|amp);/g, (_, e: string) => ({ quot: '"', "#39": "'", lt: "<", gt: ">", amp: "&" })[e]!);
   for (const [name, review] of reviews) {
-    f.registry.saveReview(review);
-    const card = landing(c, { thread: f.registry.thread(f.builder)!, review, pullRequests: [f.pr], questions: [], prWatch: { enabled: true, stopped: false, error: null } } as never, false)?.text ?? "";
+    f.registry.reviews.saveReview(review);
+    const card = landing(c, { thread: f.registry.threads.thread(f.builder)!, review, pullRequests: [f.pr], questions: [], prWatch: { enabled: true, stopped: false, error: null } } as never, false)?.text ?? "";
     const offered = card.includes('data-action="land"');
     const waive = /data-holds="([^"]*)"/.exec(card)?.[1];
     let took = true;
@@ -3749,7 +3749,7 @@ test("for every hold, and for an approval, the land route takes a press exactly 
 test("an approval under a stopped PR watch still learns its pull request merged outside it, and stops waiting on the person", async (t) => {
   const f = fixture(t, { repo: "acme/app" });
   const loop = await approved(f, null);
-  f.registry.savePrWatch(f.builder, { ...f.registry.prWatch(f.builder)!, commentWakes: 10 });
+  f.registry.prWatches.savePrWatch(f.builder, { ...f.registry.prWatches.prWatch(f.builder)!, commentWakes: 10 });
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, mergeCommit: merged } };
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "merged" });
@@ -3788,7 +3788,7 @@ test("a review approved before Nexus recorded what holds its head reads them on 
   f.files = [{ path: "src/control/threads.ts", previous: null, patch: "@@ -1 +1 @@\n-type Hosts = 1;\n+type Hosts = 2;" }];
   const loop = await approved(f, null);
   const { heldAt, ...round } = f.review().rounds[0]!;
-  f.registry.saveReview({ ...f.review(), rounds: [round] });
+  f.registry.reviews.saveReview({ ...f.review(), rounds: [round] });
   assert.deepEqual(holdsAt(f.review()), [], "until then it shows what its record alone decides");
   await loop.poll();
   assert.deepEqual(holdsAt(f.review()), [egress], "the card shows the path hold");
@@ -3800,9 +3800,9 @@ test("a review approved before Nexus recorded its holds, under a stopped PR watc
   const f = fixture(t);
   const loop = await approved(f, null);
   const { heldAt, ...round } = f.review().rounds[0]!;
-  f.registry.saveReview({ ...f.review(), rounds: [round] });
+  f.registry.reviews.saveReview({ ...f.review(), rounds: [round] });
   pushed(f, head2);
-  f.registry.savePrWatch(f.builder, { ...f.registry.prWatch(f.builder)!, commentWakes: 10 });
+  f.registry.prWatches.savePrWatch(f.builder, { ...f.registry.prWatches.prWatch(f.builder)!, commentWakes: 10 });
   let files = 0;
   f.onFiles = () => { files++; };
   const polls = f.polls;
@@ -3819,7 +3819,7 @@ test("a review approved before Nexus recorded its holds reads them at most once 
   const f = fixture(t);
   const loop = await approved(f, null);
   const { heldAt, ...round } = f.review().rounds[0]!;
-  f.registry.saveReview({ ...f.review(), rounds: [round] });
+  f.registry.reviews.saveReview({ ...f.review(), rounds: [round] });
   let files = 0;
   f.onFiles = () => { files++; throw new Error("GitHub is down"); };
   for (let i = 0; i < 8; i++) {
@@ -3921,7 +3921,7 @@ test("a waived landing retargeted with a push, then reset to the waived head, ne
 });
 
 test("a round saved before rounds recorded their base never detects a retarget, and its new round drops the person's waiver", async (t) => {
-  const legacy = (f: ReturnType<typeof fixture>) => f.registry.saveReview({ ...f.review(), rounds: f.review().rounds.map(({ base: _, ...round }) => round) });
+  const legacy = (f: ReturnType<typeof fixture>) => f.registry.reviews.saveReview({ ...f.review(), rounds: f.review().rounds.map(({ base: _, ...round }) => round) });
   const f = fixture(t);
   const loop = await approved(f, null);
   legacy(f);
@@ -3961,7 +3961,7 @@ test("a pull request retargeted and merged outside the review during its checks 
 test("a pull request retargeted and merged after the review authorized its merge into the old base is not deployed", async (t) => {
   const f = fixture(t);
   const loop = await approved(f, null);
-  f.registry.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, phase: { kind: "merging", authorized: head1 } });
+  f.registry.reviews.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, phase: { kind: "merging", authorized: head1 } });
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" }, detail: { ...f.snapshot.detail, base: "release", mergeCommit: merged } };
   await loop.poll();
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [`Pull request #7 was merged outside this review into release, not main, the base its approval was of, so it is not deployed.`] });
@@ -3989,7 +3989,7 @@ test("a retargeted landing held for the person shows the holds read at the new b
   f.files = [{ path: "src/control/threads.ts", previous: null, patch: "@@ -1 +1 @@\n-type Hosts = 1;\n+type Hosts = 2;" }];
   const loop = await approved(f, null);
   assert.deepEqual(holdsAt(f.review()), [egress]);
-  f.registry.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, phase: { kind: "merging", authorized: null } });
+  f.registry.reviews.saveReview({ ...f.review(), land: { requestedBy: "nLAPTOP" }, phase: { kind: "merging", authorized: null } });
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "release" } };
   f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
   await loop.poll();
@@ -4059,7 +4059,7 @@ test("a landing held for checks that later pass lands on the next press at the s
 test("a Land press on a round with no check runs it before merging", async (t) => {
   const f = fixture(t);
   const loop = await approved(f, null);
-  f.registry.saveReview({ ...f.review(), rounds: [{ ...f.review().rounds[0]!, check: null }] });
+  f.registry.reviews.saveReview({ ...f.review(), rounds: [{ ...f.review().rounds[0]!, check: null }] });
   loop.land(f.builder, "nLAPTOP", head1);
   await loop.poll();
   assert.equal(f.checkThreads.length, 2, "the press ran the check");
@@ -4070,7 +4070,7 @@ test("an approval by a reviewer on the builder's own model offers no Land press,
   const f = fixture(t);
   const loop = await approved(f, null);
   const review = { ...f.review(), models: { builder: "gpt-6-astra", reviewer: "gpt-6-astra" } };
-  f.registry.saveReview({ ...review, rounds: [{ ...review.rounds[0]!, heldAt: { base: "main", holds: headHolds({ review, files: [], deploys: true }) } }] });
+  f.registry.reviews.saveReview({ ...review, rounds: [{ ...review.rounds[0]!, heldAt: { base: "main", holds: headHolds({ review, files: [], deploys: true }) } }] });
   assert.equal(landPress(f.review()).kind, "stuck");
   assert.throws(() => loop.land(f.builder, "nLAPTOP", head1), { kind: "conflict", message: /builder's own model/ });
   assert.deepEqual(f.review().phase, { kind: "approved" });
@@ -4141,7 +4141,7 @@ test("a fresh busy drain extends a landing past its deadline without rollback or
 const imageHold = "Always needs the person: pylon image rebuilds, as it changes images/pylon/Dockerfile.";
 const dockerfile: ChangedFile[] = [{ path: "images/pylon/Dockerfile", previous: null, patch: "@@ -1 +1 @@\n-FROM a\n+FROM b" }];
 /** The builder's questions about its review's holds, oldest first. */
-const holdQuestions = (f: ReturnType<typeof fixture>) => f.registry.questions(f.builder).filter((q) => q.kind === "holds");
+const holdQuestions = (f: ReturnType<typeof fixture>) => f.registry.questions.questions(f.builder).filter((q) => q.kind === "holds");
 const openHolds = (f: ReturnType<typeof fixture>) => holdQuestions(f).filter((q) => q.answer === null);
 
 test("a round asks the person about the holds its head's paths decide as it starts, and Land then lands it once the reviewer approves and the check passes", async (t) => {
@@ -4159,7 +4159,7 @@ test("a round asks the person about the holds its head's paths decide as it star
     text: `Land pull request #7, "Add the cache", at ${head1.slice(0, 12)}, waiving pylon image rebuilds?\n- ${imageHold}\nLand waives these at ${head1.slice(0, 12)}, and at a rebase of it that leaves the change as it is. Nexus still lands it only once the reviewer approves it and its checks pass, then deploys it. Leave it, and nothing is waived.`,
     holds: { review: f.review().id, head: head1, base: "main", holds: [{ code: "reserved-path:image-rebuild", text: imageHold }] },
   }, "one question names the hold by its case, while the reviewer reads and the check runs");
-  assert.equal(f.registry.attention(f.builder), "decision");
+  assert.equal(f.registry.threads.attention(f.builder), "decision");
   await loop.poll();
   assert.equal(holdQuestions(f).length, 1, "a pass that finds the same holds asks nothing new");
 
@@ -4167,8 +4167,8 @@ test("a round asks the person about the holds its head's paths decide as it star
   assert.equal(f.review().phase.kind, "reviewing", "an early Land waits for the reviewer and the check");
   assert.deepEqual({ ...f.review().waiver!, at: 0 }, { head: head1, holds: [imageHold], codes: ["reserved-path:image-rebuild"], by: "nLAPTOP", at: 0, change: null }, "the waiver a Land press at that head gives");
   assert.deepEqual(f.review().land, { requestedBy: "nLAPTOP", head: head1, base: "main" }, "for the head and base the person saw");
-  assert.equal(f.registry.question(question!.id)!.answer?.option, "Land");
-  assert.notEqual(f.registry.attention(f.builder), "decision");
+  assert.equal(f.registry.questions.question(question!.id)!.answer?.option, "Land");
+  assert.notEqual(f.registry.threads.attention(f.builder), "decision");
   await loop.poll();
   assert.deepEqual(f.merges, []);
   f.reply(f.review().reviewer, verdict(f.review(), {}));
@@ -4192,7 +4192,7 @@ test("holds known only later ask again: the reviewer's reserved case replaces th
   await loop.poll();
   assert.deepEqual(f.merges, []);
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [cli.text, imageHold] });
-  assert.equal(f.registry.question(first!.id), null, "the question the person never answered is gone, so an answer to it finds nothing");
+  assert.equal(f.registry.questions.question(first!.id), null, "the question the person never answered is gone, so an answer to it finds nothing");
   const [second, ...more] = openHolds(f);
   assert.deepEqual(more, []);
   assert.deepEqual(second!.holds.holds, [cli, { code: "reserved-path:image-rebuild", text: imageHold }]);
@@ -4229,15 +4229,15 @@ test("a yolo project's review answers its own holds question with Land for whoev
   const f = fixture(t, { autoReview: yolo });
   f.files = dockerfile;
   const loop = f.loop();
-  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
   await loop.poll();
   const [question, ...more] = holdQuestions(f);
   assert.deepEqual(more, []);
   assert.deepEqual({ option: question!.answer?.option, by: question!.answer?.by }, { option: "Land", by: "nLAPTOP" }, "answered in the pass that asked it");
   const { at, ...waiver } = f.review().waiver!;
   assert.deepEqual(waiver, { head: head1, holds: [imageHold], codes: ["reserved-path:image-rebuild"], by: "nLAPTOP", change: null, yolo: "nexus" });
-  assert.equal(f.registry.events("0", { kinds: ["review.waived"], thread: f.builder }).at(-1)?.payload.yolo, "nexus");
-  assert.notEqual(f.registry.attention(f.builder), "decision");
+  assert.equal(f.registry.threads.events("0", { kinds: ["review.waived"], thread: f.builder }).at(-1)?.payload.yolo, "nexus");
+  assert.notEqual(f.registry.threads.attention(f.builder), "decision");
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
   assert.deepEqual(f.merges, [head1]);
@@ -4248,7 +4248,7 @@ test("a yolo project's waiver never covers what the policy lets no one waive: a 
   f.files = dockerfile;
   f.check = { kind: "done", passed: false, output: "boom" };
   const loop = f.loop();
-  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
   await loop.poll();
   assert.deepEqual(f.review().waiver?.yolo, "nexus");
   f.reply(f.review().reviewer, verdict(f.review(), {}));
@@ -4262,7 +4262,7 @@ test("a project switched from yolo to land answers no more holds questions, and 
   const f = fixture(t, { autoReview: yolo });
   f.files = dockerfile;
   const loop = f.loop();
-  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
   await loop.poll();
   const [first] = holdQuestions(f);
   assert.equal(first!.answer?.option, "Land");
@@ -4273,13 +4273,13 @@ test("a project switched from yolo to land answers no more holds questions, and 
   const [open, ...more] = openHolds(f);
   assert.deepEqual(more, []);
   assert.deepEqual(open!.holds.holds.map((h) => h.code), ["reserved:cli-breaking", "reserved-path:image-rebuild"], "the new holds wait on the person");
-  assert.equal(f.registry.question(first!.id)?.answer?.option, "Land");
+  assert.equal(f.registry.questions.question(first!.id)?.answer?.option, "Land");
 });
 
 test("a landing a yolo setting answered at approval holds again once the project stops landing on its own", async (t) => {
   const f = fixture(t, { autoReview: yolo });
   const loop = f.loop();
-  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
   await loop.poll();
   f.reply(f.review().reviewer, verdict(f.review(), { reserved: [{ case: "cli-breaking", why: "it renames a flag" }] }));
   f.check = { kind: "running" };
@@ -4301,7 +4301,7 @@ test("a yolo setting turned on by someone who is not a deployer answers nothing"
   const f = fixture(t, { autoReview: { mode: "yolo", enabledBy: "nPHONE" } });
   f.files = dockerfile;
   const loop = f.loop();
-  await loop.auto(f.registry.thread(f.builder)!, f.pr);
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
   await loop.poll();
   assert.equal(openHolds(f).length, 1);
   assert.equal(f.review().waiver, null);
@@ -4329,14 +4329,14 @@ test("a review held for the person before it asked about its holds asks on the n
   f.files = dockerfile;
   const loop = await approved(f, "nLAPTOP");
   assert.equal(f.review().phase.kind, "needs-person");
-  f.registry.replaceQuestions(f.builder, "holds-", null);
+  f.registry.questions.replaceQuestions(f.builder, "holds-", null);
   assert.deepEqual(holdQuestions(f), [], "as a review held before this change has no question");
   const restarted = f.loop();
   await restarted.poll();
   const [question] = openHolds(f);
   assert.deepEqual(question!.holds.holds.map((h) => h.text), [imageHold]);
   restarted.land(f.builder, "nLAPTOP", head1, [imageHold]);
-  assert.deepEqual({ option: f.registry.question(question!.id)!.answer?.option, by: f.registry.question(question!.id)!.answer?.by }, { option: "Land", by: "nLAPTOP" });
+  assert.deepEqual({ option: f.registry.questions.question(question!.id)!.answer?.option, by: f.registry.questions.question(question!.id)!.answer?.by }, { option: "Land", by: "nLAPTOP" });
   await restarted.poll();
   assert.deepEqual(f.merges, [head1]);
 });
@@ -4376,7 +4376,7 @@ test("a review that cannot land, or ended, asks nothing, and a cancel drops its 
   assert.equal(openHolds(g).length, 1);
   gLoop.cancel(g.builder, "nLAPTOP");
   assert.deepEqual(openHolds(g), []);
-  assert.notEqual(g.registry.attention(g.builder), "decision");
+  assert.notEqual(g.registry.threads.attention(g.builder), "decision");
 });
 
 test("a waiver given while the reviewer reads carries to a rebase that keeps the change, without asking again", async (t) => {
@@ -4411,7 +4411,7 @@ test("an answer to a question asked against another base waives nothing, as a re
   const [question] = openHolds(f);
   assert.equal(question!.holds.base, "main");
   const round = f.review().rounds.at(-1)!;
-  f.registry.saveReview({ ...f.review(), rounds: [...f.review().rounds, { head: round.head, base: "release", verdict: null, check: null, answers: null }], phase: { kind: "reviewing" }, waiver: null });
+  f.registry.reviews.saveReview({ ...f.review(), rounds: [...f.review().rounds, { head: round.head, base: "release", verdict: null, check: null, answers: null }], phase: { kind: "reviewing" }, waiver: null });
   assert.throws(() => loop.answerHolds(question!, "Land", "nLAPTOP" as TailnetNodeId), { kind: "conflict", message: /moved on/ });
   assert.equal(f.review().waiver, null);
   assert.throws(() => loop.land(f.builder, "nLAPTOP", head1, [imageHold]), { kind: "conflict" });
@@ -4431,7 +4431,7 @@ test("a cancel while the loop reads the head's change leaves no question open", 
   assert.ok(cancelled);
   assert.equal(f.review().phase.kind, "cancelled");
   assert.deepEqual(openHolds(f), [], "the step that read the change before the cancel asks nothing");
-  assert.notEqual(f.registry.attention(f.builder), "decision");
+  assert.notEqual(f.registry.threads.attention(f.builder), "decision");
 });
 
 test("a Land answer to an early question lands a review the live check left with the person before its holds were recorded", async (t) => {
@@ -4540,7 +4540,7 @@ test("the same holds in another order are the same question, so a Leave it is no
   const [question] = openHolds(f);
   loop.answerHolds(question!, "Leave it", "nLAPTOP" as TailnetNodeId);
   const phase = f.review().phase as Extract<Review["phase"], { kind: "needs-person" }>;
-  f.registry.saveReview({ ...f.review(), phase: { ...phase, ...personPhase("policy", ...[...phase.holds].reverse()) } });
+  f.registry.reviews.saveReview({ ...f.review(), phase: { ...phase, ...personPhase("policy", ...[...phase.holds].reverse()) } });
   await f.loop().poll();
   assert.deepEqual(openHolds(f), []);
 });
@@ -4552,10 +4552,10 @@ test("a review saved settled while its question was open leaves no question open
   await loop.start(f.builder, { land: null });
   await loop.poll();
   assert.equal(openHolds(f).length, 1);
-  f.registry.saveReview({ ...f.review(), merged, phase: { kind: "landed", commit: merged }, outbox: null });
+  f.registry.reviews.saveReview({ ...f.review(), merged, phase: { kind: "landed", commit: merged }, outbox: null });
   await loop.poll();
   assert.deepEqual(openHolds(f), []);
-  assert.notEqual(f.registry.attention(f.builder), "decision");
+  assert.notEqual(f.registry.threads.attention(f.builder), "decision");
 });
 
 test("an early Land is for the base it was asked against too: a retarget at the same head stops at approval for the person", async (t) => {
@@ -4653,7 +4653,7 @@ test("a second reviewer reads the same change beside the first, unaware of it, a
   assert.equal(second.model, "claude-fable-5-1");
   assert.equal(second.rule, "the change has 160 changed lines, at least the 150 the project sets");
   assert.deepEqual([f.started[1]!.request.claude !== undefined, f.started[1]!.request.model, f.started[1]!.role], [true, "claude-fable-5-1", "reviewer"]);
-  assert.equal(f.registry.isReviewer(second.thread), true);
+  assert.equal(f.registry.reviews.isReviewer(second.thread), true);
   await loop.poll();
   const reviewer = f.review().reviewer;
   const first = f.sent.find((s) => s.to === reviewer)!.message.text;
@@ -4700,7 +4700,7 @@ test("a second reviewer reads the same change beside the first, unaware of it, a
   assert.deepEqual(f.review().phase, { kind: "approved" });
   assert.equal(roundsSpent(f.review()), 2, "one round runs both reviewers");
   assert.match(reviewSaidText(f.review()), /round 2: the reviewer th-reviewer-1 on gpt-6-astra approves, and the second reviewer th-reviewer-2 on claude-fable-5-1 approves/);
-  assert.deepEqual(f.registry.events("0", { kinds: ["review.changed"] }).map((e) => e.payload.second), Array(5).fill(second.thread), "the review's events name the second reviewer");
+  assert.deepEqual(f.registry.threads.events("0", { kinds: ["review.changed"] }).map((e) => e.payload.second), Array(5).fill(second.thread), "the review's events name the second reviewer");
 });
 
 test("a second reviewer that never answers, answers without the block or whose model keeps failing holds the review for the person, never approving it", async (t) => {
@@ -4751,7 +4751,7 @@ test("a second reviewer whose thread the person archives stops the review for th
   const loop = f.loop();
   await loop.start(f.builder, { land: null });
   await loop.poll();
-  f.registry.setThreadStatus(secondOf(f.review()).thread, "archived");
+  f.registry.threads.setThreadStatus(secondOf(f.review()).thread, "archived");
   await loop.poll();
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [`The second reviewer thread ${secondOf(f.review()).thread} is archived, so the review stopped.`] });
 
@@ -4760,7 +4760,7 @@ test("a second reviewer whose thread the person archives stops the review for th
   await cancelling.start(g.builder, { land: null });
   await cancelling.poll();
   cancelling.cancel(g.builder, "nLAPTOP");
-  assert.deepEqual([g.review().reviewer, secondOf(g.review()).thread].map((id) => g.registry.thread(id)!.status), ["archived", "archived"]);
+  assert.deepEqual([g.review().reviewer, secondOf(g.review()).thread].map((id) => g.registry.threads.thread(id)!.status), ["archived", "archived"]);
   assert.equal(secondOf(g.review()).outbox, null);
 
   const h = fixture(t, { secondReview: { always: true }, secrets: claudeToken });
@@ -4774,7 +4774,7 @@ test("a second reviewer whose thread the person archives stops the review for th
   released(h, merged);
   await landing.poll();
   assert.deepEqual(h.review().phase, { kind: "landed", commit: merged });
-  assert.deepEqual([h.builder, h.review().reviewer, secondOf(h.review()).thread].map((id) => h.registry.thread(id)!.status), ["archived", "archived", "archived"]);
+  assert.deepEqual([h.builder, h.review().reviewer, secondOf(h.review()).thread].map((id) => h.registry.threads.thread(id)!.status), ["archived", "archived", "archived"]);
 });
 
 test("a review whose rule asks for a second reviewer that no other model can run says so, and holds its landing for the person to waive", async (t) => {
@@ -4907,13 +4907,13 @@ test("both reviewers get the builder's brief, cut as the description is, so a ch
 test("a builder's brief is its Claude worker's prompt or its harness conversation's first message, and a bare thread has none", async (t) => {
   const f = fixture(t, { claudeBuilder: false });
   const fake = fakeHarness();
-  const harness = f.registry.thread(f.builder)!;
+  const harness = f.registry.threads.thread(f.builder)!;
   await fake.harness.startThread({ threadId: harness.id, pylonId: harness.pylonId });
   fake.transcript(harness.id).messages.push({ role: "user", content: "Add the cache", timestamp: 1 }, { role: "user", content: "and a TTL", timestamp: 2 });
   const brief = agentReader(f.registry, fake.harness).brief;
   assert.equal(await brief(harness), "Add the cache");
-  assert.equal(await brief(f.registry.thread(f.add("th-claude", true))!), "fix it");
-  assert.equal(await brief(f.registry.thread(f.add("th-check-bare", false, checkCaller, true))!), null);
+  assert.equal(await brief(f.registry.threads.thread(f.add("th-claude", true))!), "fix it");
+  assert.equal(await brief(f.registry.threads.thread(f.add("th-check-bare", false, checkCaller, true))!), null);
 });
 
 test("a pull request that grows into the second reviewer's rule in a fix round, or in a push after approval, gets one from that round on", async (t) => {
@@ -4954,7 +4954,7 @@ test("a pull request that grows into the second reviewer's rule in a fix round, 
   const head3 = "3".repeat(40);
   g.snapshot = { ...g.snapshot, detail: { ...g.snapshot.detail, head: head3 } };
   g.watched("open");
-  g.registry.savePrWatch(g.builder, { links: [{ pr: { ...g.pr, head: head3 }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  g.registry.prWatches.savePrWatch(g.builder, { links: [{ pr: { ...g.pr, head: head3 }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   await pushed.poll();
   assert.equal(g.review().rounds.at(-1)!.head, head3);
   assert.equal(secondOf(g.review()).rule, "the change has 200 changed lines, at least the 150 the project sets");
@@ -5011,10 +5011,10 @@ test("a second reviewer is archived once both approve and the review waits on th
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "approved" });
   await loop.poll();
-  assert.equal(f.registry.thread(first)!.status, "archived", "its pylon can pause");
-  assert.equal(f.registry.thread(f.review().reviewer)!.status, "active", "the first reviewer may be asked to quote");
+  assert.equal(f.registry.threads.thread(first)!.status, "archived", "its pylon can pause");
+  assert.equal(f.registry.threads.thread(f.review().reviewer)!.status, "active", "the first reviewer may be asked to quote");
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
-  f.registry.savePrWatch(f.builder, { links: [{ pr: { ...f.pr, head: head2 }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  f.registry.prWatches.savePrWatch(f.builder, { links: [{ pr: { ...f.pr, head: head2 }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   await loop.poll();
   assert.equal(f.review().phase.kind, "reviewing");
   const again = secondOf(f.review());

@@ -51,7 +51,7 @@ import { servesReview, threadRole } from "./work-model.ts";
 import { builderFindings, builderNotes, fencedAnswers, nextRound, quoteRequest, reminder, reviewerRequest, type FencedAnswer } from "./prompts.ts";
 import { isOpenStatus, openStatuses } from "./reconcile.ts";
 
-type ReviewRegistry = Pick<Registry, "agent" | "answerQuestion" | "desiredRelease" | "drain" | "isCurrentReview" | "isReviewer" | "nodeByTailnetId" | "nodes" | "now" | "planning" | "prReviewed" | "prWatch" | "project" | "pylon" | "question" | "questions" | "releaseReports" | "replaceQuestions" | "review" | "reviews" | "reviewsToStep" | "saveReview" | "setDesiredRelease" | "setThreadStatus" | "storedThreads" | "thread" | "threadsAsking">;
+type ReviewRegistry = Pick<Registry, "threads" | "questions" | "desiredRelease" | "drain" | "reviews" | "nodeByTailnetId" | "nodes" | "now" | "planning" | "prWatches" | "project" | "releaseReports" | "setDesiredRelease">;
 
 /** How long a turn's end may run ahead of its transcript before a reply without the block counts as missing it. */
 const replyGraceMs = 60_000;
@@ -281,7 +281,7 @@ export function reviewLoop(deps: ReviewDeps) {
   /** What `party` did since the loop's last message to it, and its `answer` block with its token, or null. */
   const hear = async <T extends { token: string }>(r: Review, party: Party, answer: FencedAnswer<T>) => {
     const c = conversation(r, party);
-    const state = await agentState(registry.thread(c.thread)!, c.talk.since);
+    const state = await agentState(registry.threads.thread(c.thread)!, c.talk.since);
     return { state, answer: state.mayAnswer ? latest(state.replies, answer.fence, answer.schema, c.talk.expect) : null };
   };
   /**
@@ -298,8 +298,8 @@ export function reviewLoop(deps: ReviewDeps) {
   const joinSecond = async (r: Review): Promise<Review> => {
     const { second } = r;
     if (second?.kind === "none" || second?.kind === "starting") return r;
-    if (second?.kind === "claude") return registry.thread(second.thread)?.status === "active" ? r : { ...r, second: starting(second.rule, second.model) };
-    const project = registry.project(registry.thread(r.builder)!.project)!;
+    if (second?.kind === "claude") return registry.threads.thread(second.thread)?.status === "active" ? r : { ...r, second: starting(second.rule, second.model) };
+    const project = registry.project(registry.threads.thread(r.builder)!.project)!;
     const rule = project.secondReview == null ? null : secondReviewRule(project.secondReview, await github.files(r.pr.repo, r.pr.number), deploys(r));
     return rule === null ? r : { ...r, second: secondFor(rule, r.models, project.secrets) };
   };
@@ -398,7 +398,7 @@ export function reviewLoop(deps: ReviewDeps) {
   const asked = new Map<ThreadId, string | null>();
   const ask = (builder: ThreadId, question: Unanswered<HoldsQuestion> | null) => {
     if (asked.get(builder) === (question?.id ?? null)) return;
-    registry.replaceQuestions(builder, holdsPrefix, question);
+    registry.questions.replaceQuestions(builder, holdsPrefix, question);
     asked.set(builder, question?.id ?? null);
   };
   /**
@@ -417,7 +417,7 @@ export function reviewLoop(deps: ReviewDeps) {
     }
     // A save since `r` was read, such as the person's cancel while GitHub answered, decides the question instead.
     const askFor = (question: Unanswered<HoldsQuestion> | null) => {
-      if (registry.isCurrentReview(r)) ask(r.builder, question);
+      if (registry.reviews.isCurrentReview(r)) ask(r.builder, question);
     };
     const askable = r.merged === null && (ended(r) ? landable(r) : landingVerb(r) === null);
     if (!askable) {
@@ -441,7 +441,7 @@ export function reviewLoop(deps: ReviewDeps) {
       return r;
     }
     let question = holdsQuestion(r, holds, null, deploys(r), now());
-    if (registry.question(question.id) === null && r.waiver !== null && r.waiver.head !== round.head) {
+    if (registry.questions.question(question.id) === null && r.waiver !== null && r.waiver.head !== round.head) {
       const { review, why } = carryWaiver(r, await changeAt(r, await base(), round.head), holds);
       if (review !== r) return review;
       question = holdsQuestion(r, holds, why, deploys(r), now());
@@ -456,11 +456,11 @@ export function reviewLoop(deps: ReviewDeps) {
    * its save never races theirs.
    */
   function yolo(r: Review): void {
-    const project = registry.thread(r.builder)?.project;
+    const project = registry.threads.thread(r.builder)?.project;
     const setting = project === undefined ? undefined : registry.project(project)?.autoReview;
     // Only a review asked to land is landed: one the person started without --land stops at approval, as they asked.
-    if (r.land === null || setting?.mode !== "yolo" || !deps.mayLand(setting.enabledBy) || !registry.isCurrentReview(r)) return;
-    const question = askingHolds(registry.questions(r.builder), r.id, r.rounds.at(-1));
+    if (r.land === null || setting?.mode !== "yolo" || !deps.mayLand(setting.enabledBy) || !registry.reviews.isCurrentReview(r)) return;
+    const question = askingHolds(registry.questions.questions(r.builder), r.id, r.rounds.at(-1));
     if (question === undefined) return;
     try {
       landHolds(question, setting.enabledBy as TailnetNodeId, project);
@@ -495,7 +495,7 @@ export function reviewLoop(deps: ReviewDeps) {
   };
   /** The holds question of `r` that is open at its latest head and names exactly the holds `texts` name. */
   const openQuestion = (r: Review, texts: readonly string[]): HoldsQuestion | undefined => {
-    const q = askingHolds(registry.questions(r.builder), r.id, r.rounds.at(-1));
+    const q = askingHolds(registry.questions.questions(r.builder), r.id, r.rounds.at(-1));
     return q !== undefined && JSON.stringify(q.holds.holds.map((h) => h.text).sort()) === JSON.stringify([...texts].sort()) ? q : undefined;
   };
   /**
@@ -504,11 +504,11 @@ export function reviewLoop(deps: ReviewDeps) {
    */
   function savePress(r: Review, next: Review, by: string, question: HoldsQuestion | undefined, moved: Refusal): HoldsQuestion | undefined {
     const save = () => {
-      if (!registry.saveReview(next, [], r)) throw moved;
+      if (!registry.reviews.saveReview(next, [], r)) throw moved;
     };
     let answered: HoldsQuestion | undefined;
     if (question === undefined) save();
-    else answered = registry.answerQuestion(question, { option: landOption, by: by as TailnetNodeId, at: now() }, save);
+    else answered = registry.questions.answerQuestion(question, { option: landOption, by: by as TailnetNodeId, at: now() }, save);
     void poll();
     return answered;
   }
@@ -734,7 +734,7 @@ export function reviewLoop(deps: ReviewDeps) {
   };
 
   const watchedPr = (r: Review) => {
-    const watch = registry.prWatch(r.builder);
+    const watch = registry.prWatches.prWatch(r.builder);
     return reviewedPr(r, watchedPrs(watch), watchStopped(watch));
   };
 
@@ -771,12 +771,12 @@ export function reviewLoop(deps: ReviewDeps) {
     // outside it too. One that merged is held over its deploy, which neither settles.
     const held = r.phase.kind === "needs-person" && r.merged === null;
     if (held || r.phase.kind === "approved") {
-      const status = registry.thread(r.builder)?.status;
+      const status = registry.threads.thread(r.builder)?.status;
       if (status !== undefined && !isOpenStatus(status)) return end(r, { kind: "cancelled", who: "builder", status });
       // A watch stopped by its comment cap reads GitHub no more, so the loop asks GitHub itself whether the PR is still
       // open, as often as the watch would, and about a held review's head. One that stopped at approval leaves its head
       // to the landing, which reads GitHub before it merges.
-      const capped = watchStopped(registry.prWatch(r.builder));
+      const capped = watchStopped(registry.prWatches.prWatch(r.builder));
       const fresh = capped && due(cappedReads, r) ? await read(r) : null;
       if (fresh !== null) cappedReads.set(r.id, now());
       const watched = watchedPr(r);
@@ -806,8 +806,8 @@ export function reviewLoop(deps: ReviewDeps) {
         `Nexus could not add the label "${humanLabel}" to pull request #${r.pr.number} (${result.message}). Labelling needs a token that may write issues or pull requests, which only the person can grant.`) } };
     }
     if (ended(r) && r.outbox === null) return r;
-    const builder = registry.thread(r.builder);
-    const reviewer = registry.thread(r.reviewer);
+    const builder = registry.threads.thread(r.builder);
+    const reviewer = registry.threads.thread(r.reviewer);
     // Once merging, the landing must see its deploy through, rollback included, whatever happens to the threads.
     const landing = inLanding(r);
     const live = !landing && !ended(r);
@@ -823,7 +823,7 @@ export function reviewLoop(deps: ReviewDeps) {
     }
     // A second reviewer gone is no approval, so the review waits on the person, who can start it again.
     const second = r.second?.kind === "claude" ? r.second : null;
-    const secondThread = second === null ? undefined : registry.thread(second.thread);
+    const secondThread = second === null ? undefined : registry.threads.thread(second.thread);
     // The loop archives a second reviewer once a round of both approved, and a new round starts it again.
     if (second !== null && r.phase.kind === "reviewing" && secondThread?.status !== "active") {
       return toPerson(r, "thread", `The second reviewer thread ${second.thread} is ${secondThread?.status ?? "gone"}, so the review stopped.`);
@@ -840,8 +840,8 @@ export function reviewLoop(deps: ReviewDeps) {
       const gone = live ? await endedOnGitHub(r) : null;
       if (gone !== null) return gone;
       // The save would refuse a step over a land or cancel made while GitHub answered, but the message would be gone.
-      if (!registry.isCurrentReview(r)) return r;
-      return await deliverDurable({ id, text }, (m) => inbox(registry.thread(c.thread)!, { ...m, sender: "review" }), () => c.with({ ...c.talk, outbox: null, since: attempted })) ?? r;
+      if (!registry.reviews.isCurrentReview(r)) return r;
+      return await deliverDurable({ id, text }, (m) => inbox(registry.threads.thread(c.thread)!, { ...m, sender: "review" }), () => c.with({ ...c.talk, outbox: null, since: attempted })) ?? r;
     }
     const phase = r.phase;
     if (ended(r)) return r;
@@ -854,7 +854,7 @@ export function reviewLoop(deps: ReviewDeps) {
    * archived in the transaction that saves it. A thread in a turn, such as one the person is talking to, stays open: a
    * builder for the person, a reviewer for a later pass.
    */
-  const finished = (...ids: ThreadId[]): Thread[] => ids.map((id) => registry.thread(id))
+  const finished = (...ids: ThreadId[]): Thread[] => ids.map((id) => registry.threads.thread(id))
     .filter((t): t is Thread => t !== undefined && !t.working && isOpenStatus(t.status));
 
   /**
@@ -869,22 +869,22 @@ export function reviewLoop(deps: ReviewDeps) {
   /** A pass over the reviews whose builder, reviewer or gate thread `only` names, or over every review and the sweeps. */
   async function pass(only: ReadonlySet<ThreadId> | null) {
     reads = new Map();
-    const reviews = registry.reviewsToStep();
+    const reviews = registry.reviews.reviewsToStep();
     if (only !== null) return await stepEach(reviews.filter((r) => [r.builder, ...reviewersOf(r), gateThread(r.phase)?.thread].some((id) => id !== undefined && only.has(id))));
     // A check thread no review holds, such as one started just before a crash, has nothing left to give. So has such a
     // verify pylon, unless the person has been to it since it started, as by unarchiving it to look at what it left.
     const held = new Set(reviews.flatMap((r) => gateThread(r.phase)?.thread ?? []));
-    for (const t of registry.storedThreads({ status: ["active", "idle", "archived"], startedBy: checkCaller })) if (!held.has(t.id)) checks.discard(t.id);
-    for (const t of registry.storedThreads({ status: ["active"], startedBy: verifyCaller })) if (t.lastHumanActivityAt === t.createdAt && !held.has(t.id)) live.discard(t.id);
+    for (const t of registry.threads.storedThreads({ status: ["active", "idle", "archived"], startedBy: checkCaller })) if (!held.has(t.id)) checks.discard(t.id);
+    for (const t of registry.threads.storedThreads({ status: ["active"], startedBy: verifyCaller })) if (t.lastHumanActivityAt === t.createdAt && !held.has(t.id)) live.discard(t.id);
     // So has a reviewer its builder's current review can no longer use, as one whose review ended other than by landing
     // or was replaced, one in a turn as its review landed, or one a crash left before its review saved. A reviewer the
     // person has been to since it started is theirs.
     if (beginning === 0) {
       // A second reviewer is never asked to quote, so a review that waits at an approval does not use it.
       const using = new Set(reviews.filter(usesReviewer).flatMap((r) => ended(r) ? [r.reviewer] : reviewersOf(r)));
-      const left = registry.storedThreads({ status: openStatuses, startedBy: reviewerCaller }).filter((t) => !using.has(t.id) && t.lastHumanActivityAt === t.createdAt);
+      const left = registry.threads.storedThreads({ status: openStatuses, startedBy: reviewerCaller }).filter((t) => !using.has(t.id) && t.lastHumanActivityAt === t.createdAt);
       for (const t of finished(...left.map((t) => t.id))) {
-        registry.setThreadStatus(t.id, "archived");
+        registry.threads.setThreadStatus(t.id, "archived");
         deps.wake(t);
       }
     }
@@ -892,9 +892,9 @@ export function reviewLoop(deps: ReviewDeps) {
     // A review no pass steps any more, such as one saved settled outside the loop's steps, asks nothing.
     const stepped = new Set(reviews.map((r) => r.builder));
     try {
-      for (const builder of registry.threadsAsking(holdsPrefix)) {
+      for (const builder of registry.questions.threadsAsking(holdsPrefix)) {
         if (stepped.has(builder)) continue;
-        registry.replaceQuestions(builder, holdsPrefix, null);
+        registry.questions.replaceQuestions(builder, holdsPrefix, null);
         asked.set(builder, null);
       }
       retried.ok("drop questions");
@@ -914,7 +914,7 @@ export function reviewLoop(deps: ReviewDeps) {
           const archive = next.phase.kind === "landed" && r.phase.kind !== "landed" ? finished(next.builder, ...reviewersOf(next)) : [];
           // A save made while this step ran, such as the person's land or cancel, wins, and the next pass steps from it.
           // A gate thread the step started is then no review's, so it goes now rather than at the next pass's sweep.
-          if (!registry.saveReview(next, archive.map((t) => t.id), r)) {
+          if (!registry.reviews.saveReview(next, archive.map((t) => t.id), r)) {
             const started = gateThread(next.phase);
             if (started !== null && started.thread !== gateThread(r.phase)?.thread) started.runs.discard(started.thread);
             break;
@@ -931,7 +931,7 @@ export function reviewLoop(deps: ReviewDeps) {
   }
 
   function refuseIfRunning(builder: ThreadId): void {
-    const existing = registry.review(builder);
+    const existing = registry.reviews.review(builder);
     if (existing !== null && !ended(existing)) throw new Refusal("conflict", `review ${existing.id} of ${builder} is ${existing.phase.kind}${cancellable(existing) ? `. Cancel it with nexus review --cancel ${builder} to start another` : ""}`);
   }
 
@@ -939,7 +939,7 @@ export function reviewLoop(deps: ReviewDeps) {
   async function begin(builder: Thread, { repo, number }: Pick<PullRequest, "repo" | "number">, request: { rounds?: number | undefined; land: Review["land"]; auto: boolean }): Promise<Review> {
     const snapshot = await github.poll(repo, number);
     if (snapshot.pr.state !== "open") throw new Refusal("conflict", `pull request #${number} is ${snapshot.pr.state}`);
-    const agent = registry.agent(builder);
+    const agent = registry.threads.agent(builder);
     const builderModel = agent.kind === "claude" ? agent.worker.model ?? defaultClaudeModel : deps.harnessModel;
     const project = registry.project(builder.project)!;
     const kind = reviewerFor({ claude: agent.kind === "claude", model: builderModel }, project.secrets, deps.harnessModel);
@@ -970,7 +970,7 @@ export function reviewLoop(deps: ReviewDeps) {
       // A Claude reviewer's first request is its first prompt, which still takes the first message's number.
       review = kind.claude ? { ...started, sent: 1 } : resend(started, "reviewer");
       if (secondReads(review)) review = await startSecond(review, snapshot.detail);
-      registry.saveReview(review);
+      registry.reviews.saveReview(review);
     } finally {
       beginning--;
     }
@@ -983,7 +983,7 @@ export function reviewLoop(deps: ReviewDeps) {
    * or else the harness reviewer's first message, which its review sends.
    */
   const startReviewer = (builder: Thread, title: string, branch: string, model: string, claude: boolean, request: string) => deps.startThread({
-    request: { project: builder.project, title: title.slice(0, 200), near: registry.pylon(builder.pylonId)!.node, branch, ...(claude ? { claude: request, model } : {}) },
+    request: { project: builder.project, title: title.slice(0, 200), near: registry.threads.pylon(builder.pylonId)!.node, branch, ...(claude ? { claude: request, model } : {}) },
     caller: reviewerCaller, role: "reviewer",
   });
   /** A second reviewer for `rule` on a model neither the builder nor the first reviewer runs, to start, or why none can run. */
@@ -1002,7 +1002,7 @@ export function reviewLoop(deps: ReviewDeps) {
     const round = r.rounds.at(-1)!;
     const expect = mint(r.id);
     const asked = reviewerRequest(r, { ...detail, head: round.head, base: round.base ?? detail.base }, expect, second.model);
-    const builder = registry.thread(r.builder)!;
+    const builder = registry.threads.thread(r.builder)!;
     try {
       const thread = await startReviewer(builder, `Second review of #${r.pr.number}: ${r.pr.title}`, r.pr.branch, second.model, true, asked);
       return { ...r, second: { kind: "claude", rule: second.rule, thread: thread.id, model: second.model, expect, asked, since: now(), nudges: 0, outbox: null } };
@@ -1025,12 +1025,12 @@ export function reviewLoop(deps: ReviewDeps) {
     },
 
     async start(builderId: ThreadId, request: { pr?: number | undefined; rounds?: number | undefined; land: string | null }): Promise<Review> {
-      const builder = registry.thread(builderId);
+      const builder = registry.threads.thread(builderId);
       if (builder === undefined) throw new Refusal("missing", `no thread ${builderId}`);
       if (builder.status !== "active") throw new Refusal("conflict", `thread ${builder.id} is ${builder.status}`);
-      if (registry.isReviewer(builder.id)) throw new Refusal("conflict", `thread ${builder.id} is a reviewer`);
+      if (registry.reviews.isReviewer(builder.id)) throw new Refusal("conflict", `thread ${builder.id} is a reviewer`);
       refuseIfRunning(builder.id);
-      const open = (registry.prWatch(builder.id)?.links ?? []).filter((l) => l.pr.state === "open" && (request.pr === undefined || l.pr.number === request.pr));
+      const open = (registry.prWatches.prWatch(builder.id)?.links ?? []).filter((l) => l.pr.state === "open" && (request.pr === undefined || l.pr.number === request.pr));
       if (open.length === 0) throw new Refusal("conflict", `thread ${builder.id} has no open pull request${request.pr === undefined ? "" : ` #${request.pr}`} that the PR watch linked`);
       if (open.length > 1) throw new Refusal("conflict", `thread ${builder.id} has ${open.length} open pull requests, so name one: ${open.map((l) => `#${l.pr.number}`).join(", ")}`);
       return await begin(builder, open[0]!.pr, { rounds: request.rounds, land: request.land === null ? null : { requestedBy: request.land }, auto: false });
@@ -1045,7 +1045,7 @@ export function reviewLoop(deps: ReviewDeps) {
       const setting = registry.project(t.project)?.autoReview;
       if (setting == null || servesReview(threadRole(registry, t))) return;
       // Another thread on the same branch links the same PR, which has had its review, even one its builder's next replaced.
-      if (registry.prReviewed(pr.repo, pr.number)) return;
+      if (registry.reviews.prReviewed(pr.repo, pr.number)) return;
       try {
         refuseIfRunning(t.id);
         await begin(t, pr, { land: landsOnItsOwn(setting) ? { requestedBy: setting.enabledBy, fromProject: true } : null, auto: true });
@@ -1079,7 +1079,7 @@ export function reviewLoop(deps: ReviewDeps) {
      * question names, so the review lands once the reviewer approves and its checks pass. Leave it waives nothing.
      */
     answerHolds(question: HoldsQuestion, option: string, by: TailnetNodeId): HoldsQuestion {
-      if (!isOpen(question) || option !== landOption) return registry.answerQuestion(question, { option, by, at: now() });
+      if (!isOpen(question) || option !== landOption) return registry.questions.answerQuestion(question, { option, by, at: now() });
       return landHolds(question, by);
     },
 
@@ -1088,13 +1088,13 @@ export function reviewLoop(deps: ReviewDeps) {
      * the person's, and stays as it is.
      */
     cancel(builderId: ThreadId, by: string): Review {
-      const r = registry.review(builderId);
+      const r = registry.reviews.review(builderId);
       if (r === null) throw new Refusal("conflict", `thread ${builderId} has no review`);
       if (ended(r) && r.phase.kind !== "needs-person") throw new Refusal("conflict", `review ${r.id} of ${builderId} already ended ${r.phase.kind}, so there is nothing to cancel`);
       if (!cancellable(r)) throw new Refusal("conflict", `review ${r.id} of ${builderId} is ${r.phase.kind}, and a merge or deploy that has begun is seen through, so it cannot be cancelled. It ends landed or with the person`);
       const next = end(r, { kind: "cancelled", who: "person", by });
       const archive = finished(...reviewersOf(r));
-      registry.saveReview(next, archive.map((t) => t.id));
+      registry.reviews.saveReview(next, archive.map((t) => t.id));
       ask(r.builder, null);
       for (const t of archive) deps.wake(t);
       return next;
@@ -1108,7 +1108,7 @@ export function reviewLoop(deps: ReviewDeps) {
    */
   function landHolds(question: HoldsQuestion, by: TailnetNodeId, yolo?: ProjectId): HoldsQuestion {
     const { holds } = question;
-    const r = registry.review(question.thread);
+    const r = registry.reviews.review(question.thread);
     const moved = new Refusal("conflict", `the review of ${question.thread} moved on since question ${question.id} asked about its holds at ${holds.head}, so nothing was waived. Look at it again`);
     if (r === null || askingHolds([question], r.id, r.rounds.at(-1)) === undefined) throw moved;
     // The loop asked about these holds at this head and base, which may come from the change before the round
@@ -1118,7 +1118,7 @@ export function reviewLoop(deps: ReviewDeps) {
     // A landing the project asked for stays the project's when its setting answers, so switching the setting off holds it again.
     if (landable(r)) next = { ...pressWith(landableAt(question.thread), by, waiver), ...yolo !== undefined && r.land?.fromProject && { land: r.land } };
     else {
-      const builder = registry.thread(r.builder)!;
+      const builder = registry.threads.thread(r.builder)!;
       if (builder.status !== "active") throw new Refusal("conflict", `thread ${r.builder} is ${builder.status}`);
       if (ended(r) || landingVerb(r) !== null) throw new Refusal("conflict", cannotLand(r, builder, watchedPr(r))!);
       pressOn(r);
@@ -1128,9 +1128,9 @@ export function reviewLoop(deps: ReviewDeps) {
   }
 
   function landableAt(builderId: ThreadId): Review {
-    const r = registry.review(builderId);
+    const r = registry.reviews.review(builderId);
     if (r === null) throw new Refusal("conflict", `thread ${builderId} has no review. Start one with \`nexus review ${builderId} --land\``);
-    const refusal = cannotLand(r, registry.thread(builderId)!, watchedPr(r));
+    const refusal = cannotLand(r, registry.threads.thread(builderId)!, watchedPr(r));
     if (refusal !== null) throw new Refusal("conflict", refusal);
     return r;
   }

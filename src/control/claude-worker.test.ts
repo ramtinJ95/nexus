@@ -28,7 +28,7 @@ function workerThread(t: Parameters<typeof testRegistry>[0], from: ClaudeWorkerS
 }
 
 const moveTo = (to: ClaudeWorkerState): ClaudeMove => to === "starting" ? { to, session: "s2" } : to === "started" ? { to } : { to: to as "stalled" | "failed", message: `went ${to}` };
-const failedEvents = (registry: Registry) => registry.events("0", { kinds: ["thread.failed"] }).map((e) => e.payload.message);
+const failedEvents = (registry: Registry) => registry.threads.events("0", { kinds: ["thread.failed"] }).map((e) => e.payload.message);
 
 test("the worker's moves are the state changes it made before they were a table", () => {
   const table = states.flatMap((from) => claudeMoves[from].map((to) => `${from} -> ${to}`)).sort();
@@ -40,10 +40,10 @@ for (const from of states) {
     const allowed = oldChanges.some(([f, t]) => f === from && t === to);
     test(`a ${from} worker ${allowed ? "moves" : "does not move"} to ${to}`, (t) => {
       const { registry, id } = workerThread(t, from);
-      const before = registry.claudeWorker(id)!;
+      const before = registry.threads.claudeWorker(id)!;
       const failed = failedEvents(registry);
-      assert.equal(registry.moveClaudeWorker(id, moveTo(to)), allowed);
-      const after = registry.claudeWorker(id)!;
+      assert.equal(registry.threads.moveClaudeWorker(id, moveTo(to)), allowed);
+      const after = registry.threads.claudeWorker(id)!;
       if (!allowed) {
         assert.deepEqual(after, before, "a refused move changes nothing");
         assert.deepEqual(failedEvents(registry), failed, "a refused move appends no event");
@@ -60,20 +60,20 @@ for (const from of states) {
 test("a move of a thread with no worker changes nothing", (t) => {
   const registry = seedRegistry(testRegistry(t));
   const { id } = addThread(registry);
-  assert.equal(registry.moveClaudeWorker(id, { to: "starting", session: "s1" }), false);
-  assert.equal(registry.claudeWorker(id), undefined);
+  assert.equal(registry.threads.moveClaudeWorker(id, { to: "starting", session: "s1" }), false);
+  assert.equal(registry.threads.claudeWorker(id), undefined);
 });
 
 for (const from of states) {
   test(`a turn of the launch's session ${from === "pending" || from === "started" ? "leaves" : "starts"} a ${from} worker`, (t) => {
     const { registry, id } = workerThread(t, from);
-    const pylon = registry.thread(id)!.pylonId;
+    const pylon = registry.threads.thread(id)!.pylonId;
     let sequence = 0;
-    const turn = (session: string) => registry.reportSession(testNode, { sequence: ++sequence, pylon, time: Date.now(), event: { kind: "session.turn-started", session, at: Date.now() + sequence } });
+    const turn = (session: string) => registry.threads.reportSession(testNode, { sequence: ++sequence, pylon, time: Date.now(), event: { kind: "session.turn-started", session, at: Date.now() + sequence } });
     turn("another");
-    assert.equal(registry.claudeWorker(id)!.state, from, "another session's turn leaves the worker");
+    assert.equal(registry.threads.claudeWorker(id)!.state, from, "another session's turn leaves the worker");
     turn("s1");
-    const worker = registry.claudeWorker(id)!;
+    const worker = registry.threads.claudeWorker(id)!;
     assert.equal(worker.state, from === "pending" ? "pending" : "started");
     if (from !== "pending") assert.equal(worker.message, undefined);
   });

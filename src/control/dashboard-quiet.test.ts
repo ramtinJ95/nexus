@@ -46,9 +46,9 @@ async function seeded(t: TestContext) {
   }
   /** Reports the node online with these pylons running and every other pylon absent. */
   function observe(...threads: Thread[]) {
-    registry.apply({ record: "node", node, state: "online", capacity });
-    const pylons = threads.map((th) => runningPylon(th.pylonId, { liveHash: registry.pylon(th.pylonId)!.liveHash, bootedFrom: { image: image.id, checkpoint: null } }));
-    registry.ingested(testObservation(node, { pylons }), []);
+    registry.threads.apply({ record: "node", node, state: "online", capacity });
+    const pylons = threads.map((th) => runningPylon(th.pylonId, { liveHash: registry.threads.pylon(th.pylonId)!.liveHash, bootedFrom: { image: image.id, checkpoint: null } }));
+    registry.threads.ingested(testObservation(node, { pylons }), []);
   }
   const page = async (path = "/") => (await call("GET", path)).text;
   return { registry, start, observe, page, tick: (ms: number) => t.mock.timers.tick(ms) };
@@ -83,7 +83,7 @@ test("a thread quiet for over 8 hours folds away in the overview and the sidebar
   const fresh = await s.start("Fresh");
   await s.start("Old");
   s.tick(2 * hour);
-  s.registry.recordActivity(fresh.id, { human: Date.now() });
+  s.registry.threads.recordActivity(fresh.id, { human: Date.now() });
   s.tick(7 * hour);
   s.observe();
 
@@ -98,9 +98,9 @@ test("a quiet thread with an unread reply still folds away, and a reply 7 hours 
   const s = await seeded(t);
   const replied = await s.start("Replied");
   const answered = await s.start("Answered");
-  s.registry.recordReply(replied.id, Date.now());
+  s.registry.threads.recordReply(replied.id, Date.now());
   s.tick(2 * hour);
-  s.registry.recordReply(answered.id, Date.now());
+  s.registry.threads.recordReply(answered.id, Date.now());
   s.tick(7 * hour);
   s.observe();
 
@@ -116,7 +116,7 @@ test("a running pylon or a working agent keeps a thread listed however old its a
   const running = await s.start("Running");
   const working = await s.start("Working");
   await s.start("Idle");
-  s.registry.recordActivity(working.id, { agent: Date.now(), agentTurnRunning: true });
+  s.registry.threads.recordActivity(working.id, { agent: Date.now(), agentTurnRunning: true });
   s.tick(30 * hour);
   s.observe(running);
 
@@ -169,7 +169,7 @@ test("a thread moves into the fold on the render after it turns quiet, and out o
   s.tick(1);
   assert.deepEqual(overviewOf(await s.page()).folded, ["Old spike"]);
 
-  s.registry.recordActivity(old.id, { human: Date.now() });
+  s.registry.threads.recordActivity(old.id, { human: Date.now() });
   const html = await s.page();
   assert.deepEqual(overviewOf(html).listed, ["Old spike"]);
   assert.equal(overviewOf(html).tag, undefined);

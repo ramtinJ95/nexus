@@ -171,11 +171,12 @@ export const holding = {
   settings: ["backed-up-at"],
 } as const satisfies Holding;
 
-export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, "node" | "saveObservation" | "saveNodeState">, participants: readonly ThreadParticipant[],
+export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, "node" | "saveObservation" | "saveNodeState">,
   holdReleased: (thread: ThreadId, until: number) => boolean) {
   const { transaction, afterCommit, sql, deleteThreadRows } = db;
   const { setting, setSetting } = db.hold(holding);
   const { node } = nodes;
+  let participants: readonly ThreadParticipant[] = [];
   const reconcile = (thread: ThreadId) => { for (const p of participants) p.reconcile?.(thread); };
   const { addWorker, claudeStops, workerFailed, launching, turnStarted, sessionEnded, rewindTranscript, ...claude } = claudeWorkerStore(db, {
     reconcile, updateAttention, appendEvent,
@@ -429,16 +430,15 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
 
   return {
     ...claude,
-    /** The registry's clock, the one time source for decisions over its records. */
-    now: clock,
     updateAttention,
     threadRecord,
     saveStartKey,
     /**
-     * The registry runs it once the participants are registered, since the recompute asks them. `readFailed` is handed
-     * each failed wake for reading the upgrade takes off a pylon's attempts, for the usage hold to give up on.
+     * Registers the participants, which the recompute already asks. `readFailed` is handed each failed wake for reading
+     * the upgrade takes off a pylon's attempts, for the usage hold to give up on.
      */
-    start(readFailed: (thread: ThreadId, failure: FailedAttempt) => void) {
+    start(registered: readonly ThreadParticipant[], readFailed: (thread: ThreadId, failure: FailedAttempt) => void) {
+      participants = registered;
       upgradePylons(readFailed);
       pruneSessions();
       // A release that computes attention differently, or a thread from before attention was stored, is right from the start.

@@ -12,15 +12,15 @@ const node = "rj-firebat" as NodeName;
 test("a pylon is observed as its node last listed it, online or not, and its probe is handed out only while it runs on an online node", (t) => {
   const registry = seedRegistry(testRegistry(t), { nodes: [node] });
   const thread = addThread(registry, { node });
-  const pylon = registry.pylon(thread.pylonId)!;
+  const pylon = registry.threads.pylon(thread.pylonId)!;
   const probe = { name: "the probe" };
   const probes = new Map([[node, probe]]);
   const capacity = testCapacity();
-  const observe = (pylons: PylonObservation[]) => registry.ingested(testObservation(node, { observedAt: "2027-01-01T00:00:00Z", pylons }), []);
+  const observe = (pylons: PylonObservation[]) => registry.threads.ingested(testObservation(node, { observedAt: "2027-01-01T00:00:00Z", pylons }), []);
   const stopped = stoppedPylon(thread.pylonId, { sessions: null });
   const running = runningPylon(thread.pylonId, { bootedFrom: { image: pylon.boot.image, checkpoint: null }, services: null });
 
-  registry.apply({ record: "node", node, state: "online", capacity });
+  registry.threads.apply({ record: "node", node, state: "online", capacity });
   assert.equal(observedPylon(registry, pylon), null, "a node that sent no observation");
   assert.equal(runningProbe(registry, probes, thread, "work"), null);
 

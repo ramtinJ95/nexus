@@ -33,7 +33,7 @@ import type { Registry } from "./registry.ts";
 import type { PortRange, StoredPylon, Thread } from "./thread-store.ts";
 import { tickTemplateBuild } from "./template-builds.ts";
 
-type LoopRegistry = Pick<Registry, "allocatePreviews" | "appendEvent" | "buildingTemplates" | "claudeWorker" | "deleteTemplate" | "eventReceipt" | "image" | "ingested" | "latestHealthSample" | "markOffline" | "node" | "nodes" | "previews" | "project" | "pruneSessions" | "pylon" | "pylonIdsToTick" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "releaseHold" | "releasePreview" | "releasePreviews" | "reserved" | "diskDeleteRequestedAt" | "dropDiskDelete" | "failUsageRead" | "finishDiskDelete" | "reportSession" | "requestDiskDelete" | "savePylon" | "sealedBoot" | "saveTemplate" | "moveClaudeWorker" | "now" | "thread" | "threadStatus">;
+type LoopRegistry = Pick<Registry, "threads" | "buildingTemplates" | "deleteTemplate" | "image" | "latestHealthSample" | "markOffline" | "node" | "nodes" | "project" | "releaseHold" | "reserved" | "usage" | "saveTemplate" | "now">;
 
 /**
  * reconcile.ts's ingest. `known` maps each registry pylon on the node that the pass would tick, given what the event and
@@ -143,15 +143,15 @@ export function startLoop(options: LoopOptions): Loop {
   function reconcilePreviews(node: NodeName, observation: NodeObservation, pylons: readonly PylonObservation[]) {
     for (const observed of pylons) {
       if (observed.phase !== "running" || observed.services === null) continue;
-      const pylon = registry.pylon(observed.pylonId);
+      const pylon = registry.threads.pylon(observed.pylonId);
       // A pylon reported by a node the registry does not place it on is an orphan there.
-      if (pylon?.node !== node || registry.threadStatus(pylon.thread) === "deleted") continue;
+      if (pylon?.node !== node || registry.threads.threadStatus(pylon.thread) === "deleted") continue;
       const services = observed.services;
-      for (const { service } of registry.previews(pylon.pylonId, observation)) {
-        if (linkedPort(service) !== null && !services.some((s) => s.name === service)) registry.releasePreview(pylon.pylonId, service);
+      for (const { service } of registry.threads.previews(pylon.pylonId, observation)) {
+        if (linkedPort(service) !== null && !services.some((s) => s.name === service)) registry.threads.releasePreview(pylon.pylonId, service);
       }
       try {
-        registry.allocatePreviews(pylon.pylonId, services.filter((s) => s.wantsPreview).map((s) => s.name), previewPorts, observation);
+        registry.threads.allocatePreviews(pylon.pylonId, services.filter((s) => s.wantsPreview).map((s) => s.name), previewPorts, observation);
       } catch (err) {
         log(`${pylon.pylonId}: ${(err as Error).message}`);
       }
@@ -166,20 +166,20 @@ export function startLoop(options: LoopOptions): Loop {
       const gitIdentity = gitIdentityOf(registry.project(thread.project)!, options.gitIdentity);
       if (JSON.stringify(gitIdentity) !== JSON.stringify(stored.boot.gitIdentity)) {
         stored = { ...stored, boot: { ...stored.boot, gitIdentity } };
-        registry.savePylon(stored);
+        registry.threads.savePylon(stored);
       }
     }
     // Not observation(node), which is null while the link is down: a preview's state stays as the node last reported it.
-    const live = pylonLive(stored, registry.project(thread.project)!, registry.previews(stored.pylonId, link.last));
+    const live = pylonLive(stored, registry.project(thread.project)!, registry.threads.previews(stored.pylonId, link.last));
     const liveHash = liveHashOf(live);
     if (liveHash === stored.liveHash) return stored;
     const updated = { ...stored, live, liveHash };
-    registry.savePylon(updated);
+    registry.threads.savePylon(updated);
     return updated;
   }
 
   async function pass(node: NodeName, link: Link) {
-    registry.pruneSessions();
+    registry.threads.pruneSessions();
     for (const template of registry.buildingTemplates(node)) {
       try {
         await tickTemplateBuild(template, { probe: link.probe, observation: observation(node), registry, log });
@@ -192,24 +192,24 @@ export function startLoop(options: LoopOptions): Loop {
     const present = [...seen?.pylons.map((p) => p.pylonId) ?? [], ...seen?.previewRoutes.map((r) => r.pylonId) ?? []];
     // Each record is read just before its tick, because an API retry may change it while earlier ticks wait on
     // the probe, and saving an older copy would undo it.
-    for (const pylonId of registry.pylonIdsToTick(node, present)) {
-      const found = registry.pylon(pylonId)!;
+    for (const pylonId of registry.threads.pylonIdsToTick(node, present)) {
+      const found = registry.threads.pylon(pylonId)!;
       // A failed pylon a judgment moved meanwhile is its new node's to tick.
       if (found.node !== node) continue;
-      const thread = registry.thread(found.thread)!;
+      const thread = registry.threads.thread(found.thread)!;
       let stored = withLive(found, thread, link);
       const nodeObservation = observation(node);
       const seen = nodeObservation?.pylons.find((p) => p.pylonId === pylonId);
       const present = seen !== undefined;
-      const deleteAt = registry.diskDeleteRequestedAt(pylonId);
+      const deleteAt = registry.threads.diskDeleteRequestedAt(pylonId);
       if (nodeObservation !== null && deleteAt !== undefined) {
         if (seen === undefined) {
-          registry.finishDiskDelete(pylonId);
-          stored = withLive(registry.pylon(pylonId)!, thread, link);
+          registry.threads.finishDiskDelete(pylonId);
+          stored = withLive(registry.threads.pylon(pylonId)!, thread, link);
         }
         // A listing may predate a delete the probe has since forgotten, so only a boot after the request proves the disk stayed.
         else if (seen.phase === "running" && Date.parse(seen.bootedAt) > deleteAt && stored.submitted?.job.kind !== "delete" && desiredPhase(thread, registry.now()) !== "deleted") {
-          registry.dropDiskDelete(pylonId);
+          registry.threads.dropDiskDelete(pylonId);
         }
       }
       const pylon = { ...stored, desired: desiredPhase(thread, registry.now()) };
@@ -221,15 +221,15 @@ export function startLoop(options: LoopOptions): Loop {
         save: (p) => {
           // Only an archive's settle deletes the pylon of a thread that is not deleted, once its disk may go. Recorded before
           // its delete goes out, so the delete ends on the node's report of the disk, whatever the probe forgets of the job.
-          if (p.submitted?.job.kind === "delete" && p.desired === "deleted" && present && registry.threadStatus(thread.id) !== "deleted") {
-            registry.requestDiskDelete(pylonId, thread.id);
+          if (p.submitted?.job.kind === "delete" && p.desired === "deleted" && present && registry.threads.threadStatus(thread.id) !== "deleted") {
+            registry.threads.requestDiskDelete(pylonId, thread.id);
           }
-          registry.savePylon(p);
+          registry.threads.savePylon(p);
         },
-        desired: () => desiredPhase(registry.thread(found.thread)!, registry.now()),
-        sealedBoot: () => registry.sealedBoot(pylonId),
+        desired: () => desiredPhase(registry.threads.thread(found.thread)!, registry.now()),
+        sealedBoot: () => registry.threads.sealedBoot(pylonId),
         uncountedFailed: (failure) => {
-          registry.failUsageRead(thread.id, failure);
+          registry.usage.failUsageRead(thread.id, failure);
           void wake(node);
         },
       };
@@ -239,7 +239,7 @@ export function startLoop(options: LoopOptions): Loop {
         const step = await tick(pylon, ctx);
         if (step.kind === "fail" && stored.failed === null) log(`${pylon.pylonId}: the planner gave up: ${step.reason}`);
         // Done for a deleted thread means its node neither has the pylon nor routes a port to it, so nothing serves the ports.
-        if (pylon.desired === "deleted" && step.kind === "done") registry.releasePreviews(pylon.pylonId);
+        if (pylon.desired === "deleted" && step.kind === "done") registry.threads.releasePreviews(pylon.pylonId);
       } catch (err) {
         log(`${pylon.pylonId}: tick failed: ${(err as Error).message}`);
       }
@@ -302,18 +302,18 @@ export function startLoop(options: LoopOptions): Loop {
           // A pylon the last observation lists stays present for this event, so ingest clears its sessions when its node drops it.
           const present = [...last?.pylons ?? [], ...current.pylons, ...current.previewRoutes, ...event.type === "preview-hit" ? [event] : []].map((p) => p.pylonId);
           const known = readsKnown[event.type]
-            ? new Map(registry.pylonIdsToTick(node, present).map((id) => [id, last?.pylons.find((o) => o.pylonId === id) ?? "absent" as const]))
+            ? new Map(registry.threads.pylonIdsToTick(node, present).map((id) => [id, last?.pylons.find((o) => o.pylonId === id) ?? "absent" as const]))
             : new Map<PylonId, PylonObservation | "absent">();
           if (readsKnown[event.type]) for (const id of listed) if (!known.has(id)) listed.delete(id);
           if (event.type === "snapshot") {
             // The journal replays reports the node already sent, and the receipt only grows, so reportSession would drop these.
-            const receipt = registry.eventReceipt(node);
-            for (const report of event.observation.events) if (receipt === null || report.sequence > receipt) registry.reportSession(node, report);
+            const receipt = registry.threads.eventReceipt(node);
+            for (const report of event.observation.events) if (receipt === null || report.sequence > receipt) registry.threads.reportSession(node, report);
             options.onSnapshot?.(node, event.observation);
           }
-          if (event.type === "session-event") registry.reportSession(node, event.report);
+          if (event.type === "session-event") registry.threads.reportSession(node, event.report);
           const writes = ingest(event, node, known, registry.now(), new Set([...known.keys()].filter((id) => !listed.has(id))));
-          registry.ingested(current === last ? null : current, writes);
+          registry.threads.ingested(current === last ? null : current, writes);
           link.last = current;
           for (const w of writes) if (w.record === "sessions" || w.record === "sessions-paused") listed.add(w.pylonId);
           reconcilePreviews(node, current, event.type === "snapshot" ? event.observation.pylons : event.type === "pylon" ? [event.pylon] : []);

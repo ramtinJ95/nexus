@@ -151,7 +151,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const { pylonState } = views;
 
   function agentOf(t: Thread): ThreadAgents["harness" | "claude"] {
-    const { kind } = registry.agent(t);
+    const { kind } = registry.threads.agent(t);
     if (kind === "none") throw new Refusal("conflict", noConversation(t));
     return agents[kind];
   }
@@ -252,9 +252,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   /** The pane a terminal attached to the thread lands in: its Claude worker's, while the node reports it. */
   function agentPane(t: Thread): string | null {
-    const session = registry.claudeWorker(t.id)?.session ?? null;
+    const session = registry.threads.claudeWorker(t.id)?.session ?? null;
     if (session === null) return null;
-    return registry.sessions(t.pylonId).find((s) => s.state === "running" && s.harness === "claude-code" && s.harnessSessionId === session)?.herdrPane ?? null;
+    return registry.threads.sessions(t.pylonId).find((s) => s.state === "running" && s.harness === "claude-code" && s.harnessSessionId === session)?.herdrPane ?? null;
   }
 
   function door(t: Thread, { pylonId, node }: StoredPylon, probe: Pick<ProbeClient, "stream">): PylonDoor {
@@ -269,7 +269,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         return { kind: "pylon", state: actualState };
       },
       open({ size, term, pane }) {
-        registry.recordActivity(t.id, { human: Date.now() });
+        registry.threads.recordActivity(t.id, { human: Date.now() });
         wake(node);
         // A sealed boot runs no work, so the attach waits for the boot after its pause.
         if (runsSealed(registry, { node, pylonId })) return Promise.reject(probeError("not-running", `pylon ${pylonId} is pausing a boot that ran no work, and opens on the next`));
@@ -308,7 +308,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       throw new Refusal("invalid", (err as Error).message);
     }
     guard(t, { status: "active" });
-    const pylon = registry.pylon(t.pylonId)!;
+    const pylon = registry.threads.pylon(t.pylonId)!;
     const probe = probes.get(pylon.node);
     if (probe === undefined) throw new Refusal("unavailable", `no probe is configured for ${pylon.node}`);
     if (open.size >= maxStreams) throw new Refusal("unavailable", `${maxStreams} streams are open, the most this control plane serves at once`);

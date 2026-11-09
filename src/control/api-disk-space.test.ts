@@ -11,7 +11,7 @@ const pylonsAt = (totalGiB: number, freeGiB: number): DiskFact => ({ paths: ["/v
 function observeDisks(s: Awaited<ReturnType<typeof withImage>>, name: string, disks: DiskFact[]) {
   const capacity = testCapacity({ diskFreeGiB: disks[0]!.freeGiB, disks });
   observeNode(s, name, { total: 64, committed: 0 }, { capacity });
-  s.registry.apply({ record: "node", node: name as NodeName, state: "online", capacity });
+  s.registry.threads.apply({ record: "node", node: name as NodeName, state: "online", capacity });
 }
 
 test("--node auto passes over a node whose pylons' filesystem would keep less than max(10 GiB, 5%) free, though it has the most memory", async (t) => {

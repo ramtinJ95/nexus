@@ -1,6 +1,7 @@
 /**
- * The registry: every Nexus record, in one SQLite file. The control plane process is its only writer, and
- * it holds one connection, so every write is a synchronous statement and no two writes interleave.
+ * The registry: every Nexus record, in one SQLite file. The control plane process holds one connection to it, so its
+ * writes are synchronous statements that never interleave with each other. Another process may open the file too, such
+ * as the join-token command, and SQLite's busy timeout makes the two take turns.
  *
  * Nested values (a project's hosts, a pylon's boot inputs, an observation) are stored as JSON columns. Only
  * the control plane reads them, always whole, so they need no columns of their own.
@@ -21,45 +22,45 @@ import { nodeMetricsStore } from "./node-metrics-store.ts";
 import { projectStore } from "./project-store.ts";
 import { imageStore } from "./image-store.ts";
 import { openDb } from "./db.ts";
-import { threadStore, type ThreadParticipant } from "./thread-store.ts";
+import { threadStore } from "./thread-store.ts";
 import { placementMemory } from "./placement-model.ts";
 
 export type Registry = ReturnType<typeof openRegistry>;
 
 export function openRegistry(path: string, clock = Date.now, log = (message: string) => console.error(message)) {
   const kernel = openDb(path);
-  const participants: ThreadParticipant[] = [];
   const { saveObservation, saveNodeState, ...nodes } = nodeStore(kernel);
   const { holdReleased, ...placement } = placementMemory(clock);
-  const { updateAttention, threadRecord, saveStartKey, start, archivedAt, recordSettle, ...core } = threadStore(kernel, clock, { node: nodes.node, saveObservation, saveNodeState }, participants, holdReleased);
-  const { appendEvent, setThreadStatus, threadStatus, events } = core;
+  const { updateAttention, threadRecord, saveStartKey, start, archivedAt, recordSettle, ...threads } = threadStore(kernel, clock, { node: nodes.node, saveObservation, saveNodeState }, holdReleased);
+  const { appendEvent, setThreadStatus, threadStatus, events } = threads;
   const { participant: reviewing, ...reviews } = reviewStore(kernel, { setThreadStatus, appendEvent, updateAttention, events });
   const { participant: asking, ...questions } = questionStore(kernel, clock, threadStatus, updateAttention);
   const { participant: nudging, ...nudges } = nudgeStore(kernel, updateAttention);
   const { participant: watching, ...prWatches } = prWatchStore(kernel, appendEvent);
   const { participant: queueing, ...queue } = queueStore(kernel, saveStartKey);
   const { participant: usageHolding, ...usage } = usageStore(kernel, { threadRecord, archivedAt, recordSettle });
-  participants.push(reviewing, asking, nudging, watching, queueing, usageHolding);
-  start(usage.failUsageRead);
+  start([reviewing, asking, nudging, watching, queueing, usageHolding], usage.failUsageRead);
 
   return {
     close() { kernel.db.close(); },
-    ...core,
+    /** The registry's clock, the one time source for decisions over its records. */
+    now: clock,
+    threads,
+    reviews,
+    questions,
+    nudges,
+    prWatches,
+    queue,
+    usage,
     ...placement,
-    ...usage,
-    ...reviews,
-    ...questions,
     ...planningStore(kernel),
-    ...prWatches,
     ...judgmentStore(kernel),
-    ...nudges,
     ...releaseStore(kernel, appendEvent),
     ...healthStore(kernel, appendEvent, log),
     ...nodes,
     ...nodeMetricsStore(kernel),
     ...projectStore(kernel),
     ...pipelineStore(kernel),
-    ...queue,
     ...imageStore(kernel),
   };
 }

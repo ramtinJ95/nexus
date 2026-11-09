@@ -45,15 +45,15 @@ export function questionRoutes(kit: ApiKit, features: Features): readonly RouteE
       if (same(question)) return question;
       throw answeredConflict(question);
     }
-    const t = registry.thread(question.thread)!;
+    const t = registry.threads.thread(question.thread)!;
     const { exitCode, output } = await execInPylon(t, [claudeHook, "answer", JSON.stringify(askAnswer(question.ask, choices))]);
     void claude.refresh(t);
     if (exitCode === answerExits.nobodyWaits) {
-      registry.withdrawAsk(question.id);
+      registry.questions.withdrawAsk(question.id);
       throw new HttpError(409, "Claude no longer waits for this answer: it was answered in the terminal, its turn ended, or its pylon paused since. Send it to Claude as a message instead");
     }
     if (exitCode === answerExits.answeredOtherwise) {
-      const now = registry.question(question.id);
+      const now = registry.questions.question(question.id);
       throw now?.answer != null ? answeredConflict(now) : new HttpError(409, `another answer to question ${question.id} reached Claude first`);
     }
     if (exitCode === 127 || (exitCode === answerExits.delivered && !new RegExp(`^${answerDelivered}$`, "m").test(output))) {
@@ -66,14 +66,14 @@ export function questionRoutes(kit: ApiKit, features: Features): readonly RouteE
     // A pull since the delivery, which finds the hook that took the answer gone, may have withdrawn the unanswered
     // question, and the answer is still its.
     const { answer: _, ...asked } = question;
-    registry.askQuestion(asked);
-    const answered = registry.answerQuestion(question, { option: choicesSummary(question.ask, choices), by: caller, at: Date.now(), choices });
+    registry.questions.askQuestion(asked);
+    const answered = registry.questions.answerQuestion(question, { option: choicesSummary(question.ask, choices), by: caller, at: Date.now(), choices });
     if (!same(answered)) throw answeredConflict(answered);
     return answered;
   }
 
   const record = <Q extends Question>(question: Q, option: string, caller: TailnetNodeId, then?: (answered: Q) => void) =>
-    answeredWith(registry.answerQuestion(question, { option, by: caller, at: Date.now() }, then), option);
+    answeredWith(registry.questions.answerQuestion(question, { option, by: caller, at: Date.now() }, then), option);
   const answering: Answering = {
     ask: (question, body, caller) => {
       if (!("choices" in body)) throw new HttpError(400, `question ${question.id} is a Claude worker's AskUserQuestion, answered with {"choices": [...]}, a choice for each question it asks`);
@@ -100,7 +100,7 @@ export function questionRoutes(kit: ApiKit, features: Features): readonly RouteE
   return [
     on(routes.answer, { role: "allowed", why: "each question says who may answer it, which refusalOf checks" }, async ({ question: id }, r) => {
       const body = parse(answerSchema, await r.body());
-      const question = registry.question(id);
+      const question = registry.questions.question(id);
       if (question === null) throw new HttpError(404, `no question ${id}`);
       if (question.withdrawn !== undefined) throw new HttpError(409, `question ${question.id} was withdrawn when its thread was archived`);
       const refused = refusalOf(r.roles, question);

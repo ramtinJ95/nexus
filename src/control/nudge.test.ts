@@ -45,7 +45,7 @@ function fixture(t: import("node:test").TestContext) {
   registry.createProject(project("reviewed", { mode: "review", enabledBy: "nLAPTOP" }));
   registry.createProject(project("plain", null));
   const capacity = testCapacity();
-  registry.apply({ record: "node", node, state: "online", capacity });
+  registry.threads.apply({ record: "node", node, state: "online", capacity });
   const fake = fakeHarness();
   const typed: Extract<PylonCommand, { kind: "send-claude" }>[] = [];
   let outcome: "sent" | "blocked" = "sent";
@@ -92,21 +92,21 @@ function fixture(t: import("node:test").TestContext) {
       git: phase === "unread" ? null : { head: "a".repeat(40), branch: "main", dirty: false, branches: pushed.filter((p) => p.at <= readAt).map((p) => ({ name: p.ref.slice(p.ref.indexOf("/") + 1), head: "a".repeat(40), pushedAs: p.ref })) },
     }));
     const observation = testObservation(node, { observedAt: new Date(now).toISOString(), capacity, pylons });
-    const known = new Map(registry.pylonIdsToTick(node, [...last?.pylons ?? [], ...pylons].map((p) => p.pylonId)).map((id) => [id, last?.pylons.find((o) => o.pylonId === id) ?? "absent" as const]));
-    registry.ingested(observation, ingest({ type: "snapshot", observation }, node, known, now).filter((w) => w.record === "output"));
+    const known = new Map(registry.threads.pylonIdsToTick(node, [...last?.pylons ?? [], ...pylons].map((p) => p.pylonId)).map((id) => [id, last?.pylons.find((o) => o.pylonId === id) ?? "absent" as const]));
+    registry.threads.ingested(observation, ingest({ type: "snapshot", observation }, node, known, now).filter((w) => w.record === "output"));
   }
 
   async function add(id: string, options: { claude?: boolean; startedBy?: string; project?: string } = {}): Promise<ThreadId> {
     const thread = testThread({ id: id as ThreadId, title: id, project: (options.project ?? "reviewed") as ProjectId, conversationId: options.claude ? null : "1", startedBy: options.startedBy ?? "nLAPTOP", createdAt: 1, lastHumanActivityAt: 1 });
     const pylon = testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: `https://github.com/${repo}.git`, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: `https://github.com/${repo}.git`, ref: "main" } } });
     if (options.claude) {
-      registry.createThread(thread, pylon, { claude: { prompt: "build the cache", model: "claude-opus-5-5" } });
+      registry.threads.createThread(thread, pylon, { claude: { prompt: "build the cache", model: "claude-opus-5-5" } });
       claudeWorkerAt(registry, thread.id, "started", { session });
       claudes.add(thread.id);
       claudeSeq.set(thread.id, 0);
       transcript(thread.id, [{ kind: "prompt", at: 1, text: "build the cache", from: "person" }]);
     } else {
-      registry.createThread(thread, pylon);
+      registry.threads.createThread(thread, pylon);
       await fake.harness.startThread({ threadId: thread.id, pylonId: thread.pylonId });
       await fake.harness.send(thread.id, "build the cache", `brief:${id}`, "followUp");
     }
@@ -117,20 +117,20 @@ function fixture(t: import("node:test").TestContext) {
   /** A read of the worker's transcript. `reset` replaces every entry kept so far, as a read of a new session does. */
   function transcript(id: ThreadId, entries: ClaudeEntry[], reset = false) {
     const from = claudeSeq.get(id)!;
-    registry.appendClaudeRead(id, { session, from: { ...transcriptStart, offset: from }, entries, cursor: { ...transcriptStart, offset: from + 1 }, reset, readAt: now });
+    registry.threads.appendClaudeRead(id, { session, from: { ...transcriptStart, offset: from }, entries, cursor: { ...transcriptStart, offset: from + 1 }, reset, readAt: now });
     claudeSeq.set(id, from + 1);
   }
   /** The agent answers and its turn ends now. */
   function turn(id: ThreadId, text = "Done for now.") {
     if (claudes.has(id)) transcript(id, [{ kind: "reply", at: now, text }]);
     else { fake.transcript(id).messages.push(assistant(text)); fake.commit(id); }
-    registry.recordReply(id, now);
+    registry.threads.recordReply(id, now);
   }
   /** The person writes to the thread, which starts a turn. */
   async function personWrites(id: ThreadId, text: string) {
     if (claudes.has(id)) transcript(id, [{ kind: "prompt", at: now, text, from: "person" }]);
     else await fake.harness.send(id, text, `person:${now}`, "followUp");
-    registry.recordActivity(id, { human: now, agentTurnRunning: true });
+    registry.threads.recordActivity(id, { human: now, agentTurnRunning: true });
   }
   /** Every nudge either path delivered, in order: harness sends with their sender, and messages typed into a Claude worker. */
   const nudges = () => [
@@ -145,7 +145,7 @@ function fixture(t: import("node:test").TestContext) {
     set findFails(v: boolean) { findFails = v; },
     set searching(v: () => void) { searching = v; },
     /** Pushes the branch `ref` names now, which reaches the outputs with the next snapshot that reads git. */
-    push(id: ThreadId, ref: string) { pushes.get(registry.thread(id)!.pylonId)!.push({ at: now, ref }); },
+    push(id: ThreadId, ref: string) { pushes.get(registry.threads.thread(id)!.pylonId)!.push({ at: now, ref }); },
     /** A snapshot, then a nudge pass, a PR watch pass and another nudge pass, as their timers would run them. */
     async pass(nudges = nudger) {
       observe();
@@ -154,7 +154,7 @@ function fixture(t: import("node:test").TestContext) {
       await nudges.poll();
     },
     link(id: ThreadId, number: number) {
-      registry.savePrWatch(id, { links: [{ pr: testPr({ repo, number, title: "Add the cache" }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+      registry.prWatches.savePrWatch(id, { links: [{ pr: testPr({ repo, number, title: "Add the cache" }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
     },
   };
 }
@@ -163,7 +163,7 @@ test("a builder whose turn ended without a pull request gets one nudge once its 
   const f = fixture(t);
   const id = await f.add("th-1");
   f.turn(id);
-  const turnEnd = f.registry.thread(id)!.lastReplyAt!;
+  const turnEnd = f.registry.threads.thread(id)!.lastReplyAt!;
   f.tick(gitPollMs - 1);
   await f.pass();
   assert.deepEqual(f.nudges(), [], "nothing is sent before a snapshot holds the branches pushed before the turn ended");
@@ -175,11 +175,11 @@ test("a builder whose turn ended without a pull request gets one nudge once its 
   assert.ok(!sent[0]!.text.includes("\t"), "the text is typeable");
   assert.equal(sent[0]!.sender, "nudge");
   assert.equal(sent[0]!.requestId, `nudge:${id}:${turnEnd}`);
-  assert.deepEqual(f.registry.nudge(id), { state: "nudged", turn: turnEnd, count: 1 });
+  assert.deepEqual(f.registry.nudges.nudge(id), { state: "nudged", turn: turnEnd, count: 1 });
   f.tick(gitPollMs);
   await f.pass();
   assert.equal(f.nudges().length, 1, "a turn is nudged once");
-  assert.notEqual(f.registry.attention(id), "decision");
+  assert.notEqual(f.registry.threads.attention(id), "decision");
 });
 
 test("a pull request opened before the turn ended, whose branch the probe reports after a minute, gets no nudge", async (t) => {
@@ -207,8 +207,8 @@ test("a pull request opened before the turn ended, whose branch the probe report
     await step();
   }
   assert.deepEqual(f.typed, [], "no nudge goes to a builder whose pull request exists");
-  assert.deepEqual(f.registry.prWatch(id)?.links.map((l) => l.pr.number), [174]);
-  assert.equal(f.registry.nudge(id), null);
+  assert.deepEqual(f.registry.prWatches.prWatch(id)?.links.map((l) => l.pr.number), [174]);
+  assert.equal(f.registry.nudges.nudge(id), null);
 });
 
 test("a PR watch pass already running once the turn's pushes are known does not count", async (t) => {
@@ -222,13 +222,13 @@ test("a PR watch pass already running once the turn's pushes are known does not 
   await nudger.poll();
   passes.finished = 1;
   await nudger.poll();
-  assert.equal(f.registry.nudge(id), null, "the pass that was running may have read the outputs before the snapshot");
+  assert.equal(f.registry.nudges.nudge(id), null, "the pass that was running may have read the outputs before the snapshot");
   passes.started = 2;
   await nudger.poll();
-  assert.equal(f.registry.nudge(id), null);
+  assert.equal(f.registry.nudges.nudge(id), null);
   passes.finished = 2;
   await nudger.poll();
-  assert.equal(f.registry.nudge(id)?.state, "nudged");
+  assert.equal(f.registry.nudges.nudge(id)?.state, "nudged");
 });
 
 test("a pylon that paused before a git read after the turn waits for a wake, and one paused after it is still nudged", async (t) => {
@@ -245,7 +245,7 @@ test("a pylon that paused before a git read after the turn waits for a wake, and
   await f.watch.poll();
   await f.nudger.poll();
   assert.deepEqual(f.nudges(), [], "the paused pylon's outputs may lack the branch");
-  assert.equal(f.registry.nudge(id), null);
+  assert.equal(f.registry.nudges.nudge(id), null);
 
   const paused = await f.add("th-paused");
   f.turn(paused);
@@ -270,7 +270,7 @@ test("a pull request that merged before the PR watch could link it gets no nudge
     await f.pass();
   }
   assert.deepEqual(f.nudges(), []);
-  assert.deepEqual(f.registry.nudge(id), { state: "opened", turn: f.registry.thread(id)!.lastReplyAt });
+  assert.deepEqual(f.registry.nudges.nudge(id), { state: "opened", turn: f.registry.threads.thread(id)!.lastReplyAt });
   assert.deepEqual(f.finds, [`${repo} nexus/cache all`], "only the branch pushed to origin is searched, in every state, once per turn");
 });
 
@@ -313,20 +313,20 @@ test("after two nudges a third stalled turn goes to the person, until the PR wat
     await f.pass();
   }
   assert.equal(f.nudges().length, 2);
-  assert.notEqual(f.registry.attention(id), "decision");
+  assert.notEqual(f.registry.threads.attention(id), "decision");
   f.turn(id, "I could not finish.");
   f.tick(gitPollMs);
   await f.pass();
   assert.equal(f.nudges().length, 2, "no third nudge");
-  assert.equal(f.registry.attention(id), "decision");
-  assert.equal(f.registry.nudge(id)?.state, "person");
+  assert.equal(f.registry.threads.attention(id), "decision");
+  assert.equal(f.registry.nudges.nudge(id)?.state, "person");
   f.tick(gitPollMs);
   await f.pass();
-  assert.equal(f.registry.attention(id), "decision", "the hold stays");
+  assert.equal(f.registry.threads.attention(id), "decision", "the hold stays");
   f.link(id, 12);
   await f.nudger.poll();
-  assert.equal(f.registry.nudge(id), null);
-  assert.notEqual(f.registry.attention(id), "decision");
+  assert.equal(f.registry.nudges.nudge(id), null);
+  assert.notEqual(f.registry.threads.attention(id), "decision");
 });
 
 test("a reviewer, a check thread, a planning thread, a builder in a project without auto-review, and a running turn are never nudged", async (t) => {
@@ -340,11 +340,11 @@ test("a reviewer, a check thread, a planning thread, a builder in a project with
   ];
   for (const id of ids) f.turn(id);
   f.registry.savePlanning({ thread: "th-planning" as ThreadId, token: "t", read: 0, sent: [] });
-  f.registry.recordActivity("th-working" as ThreadId, { agentTurnRunning: true });
+  f.registry.threads.recordActivity("th-working" as ThreadId, { agentTurnRunning: true });
   f.tick(gitPollMs);
   await f.pass();
   assert.deepEqual(f.nudges(), []);
-  for (const id of ids) assert.equal(f.registry.nudge(id), null);
+  for (const id of ids) assert.equal(f.registry.nudges.nudge(id), null);
 });
 
 test("the person writing after the first reply leaves a builder alone, and takes back one held for them", async (t) => {
@@ -364,12 +364,12 @@ test("the person writing after the first reply leaves a builder alone, and takes
     f.tick(gitPollMs);
     await f.pass();
   }
-  assert.equal(f.registry.attention(held), "decision");
+  assert.equal(f.registry.threads.attention(held), "decision");
   await f.personWrites(held, "I'll take it from here.");
   await f.nudger.poll();
-  assert.deepEqual(f.registry.nudge(held), { state: "left-alone" });
-  assert.notEqual(f.registry.attention(held), "decision", "the person's message ends the hold while the turn it started runs");
-  f.registry.recordActivity(held, { agentTurnRunning: false });
+  assert.deepEqual(f.registry.nudges.nudge(held), { state: "left-alone" });
+  assert.notEqual(f.registry.threads.attention(held), "decision", "the person's message ends the hold while the turn it started runs");
+  f.registry.threads.recordActivity(held, { agentTurnRunning: false });
   f.turn(held);
   f.tick(gitPollMs);
   await f.pass();
@@ -385,7 +385,7 @@ test("a Claude worker builder is nudged by typing into its session, and a person
   assert.equal(f.typed.length, 1);
   assert.equal(f.typed[0]!.session, session);
   assert.ok(f.typed[0]!.text.startsWith(`${senders.nudge.prefix}\n`));
-  assert.equal(f.typed[0]!.requestId, `nudge:${id}:${f.registry.thread(id)!.lastReplyAt}`);
+  assert.equal(f.typed[0]!.requestId, `nudge:${id}:${f.registry.threads.thread(id)!.lastReplyAt}`);
   // The nudge shows in the transcript as a prompt, which is not the person's.
   f.transcript(id, [{ kind: "prompt", at: f.now, text: f.typed[0]!.text, from: "person" }]);
   f.turn(id);
@@ -396,15 +396,15 @@ test("a Claude worker builder is nudged by typing into its session, and a person
   const theirs = await f.add("th-claude-theirs", { claude: true });
   f.turn(theirs);
   await f.personWrites(theirs, "Wait for me before opening it.");
-  f.registry.recordActivity(theirs, { agentTurnRunning: false });
+  f.registry.threads.recordActivity(theirs, { agentTurnRunning: false });
   f.tick(1_000);
   f.turn(theirs);
   f.tick(gitPollMs);
   await f.pass();
   assert.equal(f.typed.length, 2);
-  assert.deepEqual(f.registry.nudge(theirs), { state: "left-alone" });
+  assert.deepEqual(f.registry.nudges.nudge(theirs), { state: "left-alone" });
   f.transcript(theirs, [{ kind: "prompt", at: f.now, text: "build the cache", from: "person" }], true);
-  assert.ok(!f.registry.claudeEntries(theirs).some((e) => e.kind === "prompt" && e.text.startsWith("Wait for me")));
+  assert.ok(!f.registry.threads.claudeEntries(theirs).some((e) => e.kind === "prompt" && e.text.startsWith("Wait for me")));
   f.tick(1_000);
   f.turn(theirs);
   f.tick(gitPollMs);
@@ -417,13 +417,13 @@ test("a person's prompt that starts like a Nexus message, after a Claude worker'
   const id = await f.add("th-claude", { claude: true });
   f.turn(id);
   await f.personWrites(id, "[Nexus review] says the cache is wrong. Wait for me before opening a pull request.");
-  f.registry.recordActivity(id, { agentTurnRunning: false });
+  f.registry.threads.recordActivity(id, { agentTurnRunning: false });
   f.tick(1_000);
   f.turn(id);
   f.tick(gitPollMs);
   await f.pass();
   assert.deepEqual(f.typed, []);
-  assert.deepEqual(f.registry.nudge(id), { state: "left-alone" });
+  assert.deepEqual(f.registry.nudges.nudge(id), { state: "left-alone" });
 });
 
 test("a person's message seen while the turn it started runs keeps the thread theirs after the transcript drops it", async (t) => {
@@ -433,9 +433,9 @@ test("a person's message seen while the turn it started runs keeps the thread th
   f.tick(1_000);
   await f.personWrites(id, "Wait for me before you push.");
   await f.nudger.poll();
-  assert.deepEqual(f.registry.nudge(id), { state: "left-alone" });
+  assert.deepEqual(f.registry.nudges.nudge(id), { state: "left-alone" });
   f.transcript(id, [{ kind: "prompt", at: f.now, text: "build the cache", from: "person" }], true);
-  f.registry.recordActivity(id, { agentTurnRunning: false });
+  f.registry.threads.recordActivity(id, { agentTurnRunning: false });
   f.tick(1_000);
   f.turn(id);
   f.tick(gitPollMs);
@@ -449,7 +449,7 @@ test("a thread the person took over is never searched on GitHub again", async (t
   f.push(id, "origin/nexus/cache");
   f.turn(id);
   await f.personWrites(id, "Let me look at it first.");
-  f.registry.recordActivity(id, { agentTurnRunning: false });
+  f.registry.threads.recordActivity(id, { agentTurnRunning: false });
   f.tick(1_000);
   f.turn(id);
   for (let i = 0; i < 3; i++) {
@@ -475,24 +475,24 @@ test("a Claude worker stopped on its usage limit is not nudged", async (t) => {
   const f = fixture(t);
   const id = await f.add("th-claude", { claude: true });
   f.transcript(id, [{ kind: "notice", at: f.now, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt: null } }]);
-  f.registry.recordReply(id, f.now);
-  assert.notEqual(f.registry.thread(id)!.usageLimit, undefined);
+  f.registry.threads.recordReply(id, f.now);
+  assert.notEqual(f.registry.threads.thread(id)!.usageLimit, undefined);
   f.tick(gitPollMs);
   await f.pass();
   assert.deepEqual(f.typed, []);
-  assert.equal(f.registry.attention(id), "limited");
+  assert.equal(f.registry.threads.attention(id), "limited");
 });
 
 test("a Claude worker whose turn ended on a model error is not nudged, as the resumer resumes it", async (t) => {
   const f = fixture(t);
   const id = await f.add("th-claude", { claude: true });
   f.transcript(id, [{ kind: "notice", at: f.now, tone: "error", text: "API Error: Request timed out." }]);
-  f.registry.recordReply(id, f.now);
-  assert.equal(f.registry.thread(id)!.turnDied?.cause, "model-error");
+  f.registry.threads.recordReply(id, f.now);
+  assert.equal(f.registry.threads.thread(id)!.turnDied?.cause, "model-error");
   f.tick(gitPollMs);
   await f.pass();
   assert.deepEqual(f.typed, []);
-  assert.equal(f.registry.nudge(id), null);
+  assert.equal(f.registry.nudges.nudge(id), null);
 });
 
 test("a nudge the session could not take yet is kept and sent again under the same request ID", async (t) => {
@@ -503,12 +503,12 @@ test("a nudge the session could not take yet is kept and sent again under the sa
   f.outcome = "blocked";
   await f.pass();
   assert.equal(f.typed.length, 1);
-  assert.equal(f.registry.nudge(id)?.state, "sending", "the send is kept for the next pass");
+  assert.equal(f.registry.nudges.nudge(id)?.state, "sending", "the send is kept for the next pass");
   f.outcome = "sent";
   await f.nudger.poll();
   assert.equal(f.typed.length, 2);
   assert.equal(f.typed[1]!.requestId, f.typed[0]!.requestId);
-  assert.equal(f.registry.nudge(id)?.state, "nudged");
+  assert.equal(f.registry.nudges.nudge(id)?.state, "nudged");
   await f.nudger.poll();
   assert.equal(f.typed.length, 2);
 });
@@ -521,11 +521,11 @@ test("archiving a thread held for the person clears the hold", async (t) => {
     f.tick(gitPollMs);
     await f.pass();
   }
-  assert.equal(f.registry.nudge(id)?.state, "person");
-  f.registry.setThreadStatus(id, "archived");
+  assert.equal(f.registry.nudges.nudge(id)?.state, "person");
+  f.registry.threads.setThreadStatus(id, "archived");
   await f.nudger.poll();
-  assert.equal(f.registry.nudge(id), null);
-  assert.notEqual(f.registry.attention(id), "decision");
+  assert.equal(f.registry.nudges.nudge(id), null);
+  assert.notEqual(f.registry.threads.attention(id), "decision");
 });
 
 test("a harness builder's nudge refused by a deploy's drain is kept and goes out once the drain ends", async (t) => {
@@ -541,11 +541,11 @@ test("a harness builder's nudge refused by a deploy's drain is kept and goes out
   f.tick(gitPollMs);
   await f.pass(gated);
   assert.deepEqual(f.nudges(), []);
-  assert.equal(f.registry.nudge(id)?.state, "sending", "the send is kept for the next pass");
+  assert.equal(f.registry.nudges.nudge(id)?.state, "sending", "the send is kept for the next pass");
   draining = false;
   await gated.poll();
   assert.equal(f.nudges().length, 1);
-  assert.equal(f.registry.nudge(id)?.state, "nudged");
+  assert.equal(f.registry.nudges.nudge(id)?.state, "nudged");
 });
 
 test("a nudge delivered just before a crash still counts after the builder ended another turn", async (t) => {
@@ -558,7 +558,7 @@ test("a nudge delivered just before a crash still counts after the builder ended
   });
   const sent = () => new Set(f.nudges().map((n) => n.requestId)).size;
   f.turn(id);
-  const first = f.registry.thread(id)!.lastReplyAt!;
+  const first = f.registry.threads.thread(id)!.lastReplyAt!;
   f.tick(gitPollMs);
   await f.pass(nudger(true));
   assert.equal(sent(), 1);
@@ -568,7 +568,7 @@ test("a nudge delivered just before a crash still counts after the builder ended
   const restarted = nudger(false);
   await f.pass(restarted);
   assert.equal(sent(), 1, "the earlier send is finished under its own request ID, which delivers nothing new");
-  assert.deepEqual(f.registry.nudge(id), { state: "nudged", turn: first, count: 1 });
+  assert.deepEqual(f.registry.nudges.nudge(id), { state: "nudged", turn: first, count: 1 });
   for (let i = 0; i < 2; i++) {
     await f.pass(restarted);
     f.turn(id);
@@ -576,7 +576,7 @@ test("a nudge delivered just before a crash still counts after the builder ended
   }
   await f.pass(restarted);
   assert.equal(sent(), 2, "two nudges in all");
-  assert.equal(f.registry.attention(id), "decision");
+  assert.equal(f.registry.threads.attention(id), "decision");
 });
 
 test("a nudge the drain held goes to neither a running turn nor a thread the person wrote to meanwhile", async (t) => {
@@ -592,18 +592,18 @@ test("a nudge the drain held goes to neither a running turn nor a thread the per
   for (const id of [running, theirs]) f.turn(id);
   f.tick(gitPollMs);
   await f.pass(gated);
-  for (const id of [running, theirs]) assert.equal(f.registry.nudge(id)?.state, "sending");
-  f.registry.recordActivity(running, { agentTurnRunning: true });
+  for (const id of [running, theirs]) assert.equal(f.registry.nudges.nudge(id)?.state, "sending");
+  f.registry.threads.recordActivity(running, { agentTurnRunning: true });
   await f.personWrites(theirs, "Hold off, I will look at it.");
-  f.registry.recordActivity(theirs, { agentTurnRunning: false });
+  f.registry.threads.recordActivity(theirs, { agentTurnRunning: false });
   f.tick(1_000);
   f.turn(theirs);
   draining = false;
   await gated.poll();
   assert.deepEqual(f.nudges(), [], "nothing reaches the running turn or the person's thread");
-  assert.equal(f.registry.nudge(running)?.state, "sending", "the send waits for the turn to end");
-  assert.deepEqual(f.registry.nudge(theirs), { state: "left-alone" });
-  f.registry.recordActivity(running, { agentTurnRunning: false });
+  assert.equal(f.registry.nudges.nudge(running)?.state, "sending", "the send waits for the turn to end");
+  assert.deepEqual(f.registry.nudges.nudge(theirs), { state: "left-alone" });
+  f.registry.threads.recordActivity(running, { agentTurnRunning: false });
   f.turn(running);
   await gated.poll();
   assert.deepEqual(f.nudges().map((n) => n.thread), [running], "it goes out once the turn ended");
@@ -615,15 +615,15 @@ test("a pass reads no archived or deleted thread, except to clear a nudge it lef
   const archived = await f.add("th-archived");
   const deleted = await f.add("th-deleted");
   const nudged = await f.add("th-nudged");
-  f.registry.saveNudge(nudged, { state: "nudged", turn: 1, count: 1 });
-  for (const id of [archived, nudged]) f.registry.setThreadStatus(id, "archived");
-  f.registry.setThreadStatus(deleted, "deleted");
+  f.registry.nudges.saveNudge(nudged, { state: "nudged", turn: 1, count: 1 });
+  for (const id of [archived, nudged]) f.registry.threads.setThreadStatus(id, "archived");
+  f.registry.threads.setThreadStatus(deleted, "deleted");
   const read: ThreadId[] = [];
-  const registry = { ...f.registry, thread: (id: ThreadId) => { read.push(id); return f.registry.thread(id); } };
+  const registry = { ...f.registry, threads: { ...f.registry.threads, thread: (id: ThreadId) => { read.push(id); return f.registry.threads.thread(id); } } };
   const nudger = builderNudger({ registry, inbox: async () => "delivered", personWroteTo: agentReader(registry, f.fake.harness).personWrote, watch: f.watch, log: () => {}, github: f.github });
   await nudger.poll();
   assert.deepEqual(read, [active, nudged]);
-  assert.equal(f.registry.nudge(nudged), null, "an archived thread's nudge is cleared, so its count starts over if it comes back");
+  assert.equal(f.registry.nudges.nudge(nudged), null, "an archived thread's nudge is cleared, so its count starts over if it comes back");
   read.length = 0;
   await nudger.poll();
   assert.deepEqual(read, [active]);

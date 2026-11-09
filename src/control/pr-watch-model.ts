@@ -17,8 +17,8 @@ export const watchStopped = (state: Pick<PrWatchState, "commentWakes"> | null | 
  * The branches thread `id` pushed to origin. pushedAs is a remote-tracking name, not a URL, and only origin belongs to
  * the project's repository.
  */
-export const pushedBranches = (registry: Pick<Registry, "outputs">, id: ThreadId): string[] =>
-  registry.outputs(id).flatMap((o) => o.kind === "branch" && o.ref.startsWith("origin/") ? [o.ref.slice(7)] : []);
+export const pushedBranches = (registry: Pick<Registry, "threads">, id: ThreadId): string[] =>
+  registry.threads.outputs(id).flatMap((o) => o.kind === "branch" && o.ref.startsWith("origin/") ? [o.ref.slice(7)] : []);
 export const watchedPrs = (state: Pick<PrWatchState, "links"> | null | undefined): WatchedPr[] => state?.links.map((l) => l.pr) ?? [];
 
 /**

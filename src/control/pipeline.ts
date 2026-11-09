@@ -25,7 +25,7 @@ import type { ItemRecord } from "./pipeline-store.ts";
 import { brokenRule, itemRules } from "../contract/threads-parse.ts";
 import { isOpenStatus } from "./reconcile.ts";
 
-type PipelineRegistry = Pick<Registry, "attention" | "createThread" | "currentImage" | "isReviewer" | "item" | "items" | "latestHealthSample" | "needs" | "node" | "nodes" | "now" | "planning" | "prWatch" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "queuedThread" | "queuedThreads" | "reserve" | "reserved" | "review" | "saveItem" | "saveQueued" | "saveTemplate" | "startRequest" | "templates" | "thread">;
+type PipelineRegistry = Pick<Registry, "threads" | "currentImage" | "reviews" | "item" | "items" | "latestHealthSample" | "node" | "nodes" | "now" | "planning" | "prWatches" | "project" | "queue" | "reserve" | "reserved" | "saveItem" | "saveTemplate" | "templates">;
 
 /** `held` waits on the person, for an approval, a blocked queue, a review that ended for them or a thread that needs them. */
 export interface ItemPhase { kind: "planned" | "queued" | "building" | "reviewing" | "landing" | "landed" | "held" | "archived" | "cancelled"; why: string }
@@ -61,7 +61,7 @@ export interface PipelineItem {
   approved: { by: string; at: number } | null;
 }
 
-export const itemThread = (registry: PipelineRegistry, id: ItemId): ThreadId | null => registry.startRequest(requestIds.pipeline(id))?.thread ?? null;
+export const itemThread = (registry: PipelineRegistry, id: ItemId): ThreadId | null => registry.threads.startRequest(requestIds.pipeline(id))?.thread ?? null;
 
 const phase = (kind: ItemPhase["kind"], why: string): ItemPhase => ({ kind, why });
 
@@ -80,10 +80,10 @@ function unqueued(registry: PipelineRegistry, item: ItemRecord): ItemPhase | nul
 }
 
 function queuedPhase(registry: PipelineRegistry, id: ThreadId): ItemPhase {
-  const queued = registry.queuedThread(id)!;
+  const queued = registry.queue.queuedThread(id)!;
   if (queued.status !== "queued") return phase("cancelled", `its queued thread was ${queued.status === "archived" ? "cancelled" : "deleted"}`);
   const view = queuedView(registry, queued);
-  const name = (thread: ThreadId) => registry.thread(thread)?.title ?? registry.queuedThread(thread)?.title ?? thread;
+  const name = (thread: ThreadId) => registry.threads.thread(thread)?.title ?? registry.queue.queuedThread(thread)?.title ?? thread;
   const blocked = view.waits.find((w) => w.state === "blocked");
   if (blocked !== undefined) return phase("held", `blocked by ${name(blocked.thread)}: ${blocked.why}`);
   if (queued.refused !== undefined) return phase("held", `did not start: ${view.lastError}`);
@@ -113,7 +113,7 @@ function startedPhase(registry: PipelineRegistry, t: Thread, review: Review | nu
   const wait = waitOf(registry, id);
   if (wait.state === "landed") return phase("landed", wait.why);
   if (!isOpenStatus(t.status)) return phase("archived", `its thread is ${t.status}`);
-  const attention = registry.attention(id);
+  const attention = registry.threads.attention(id);
   if (attention === "failed" || attention === "decision") return phase("held", attention === "failed" ? "its thread failed" : "its thread needs the person's decision");
   if (wait.state === "blocked") return phase("held", wait.why);
   const where = prLocationOf(registry, id);
@@ -129,12 +129,12 @@ const heldFor = (n: PersonNeed): ItemPhase => phase("held", n.kind === "disk" ? 
  * the person is held, at the step its work is at.
  */
 export function threadStage(registry: PipelineRegistry, id: ThreadId, now: number): { phase: ItemPhase; at: Step } {
-  const t = registry.thread(id);
+  const t = registry.threads.thread(id);
   if (t === undefined) {
     const queued = queuedPhase(registry, id);
     return { phase: queued, at: phaseStep[queued.kind] ?? "queued" };
   }
-  const review = registry.review(id);
+  const review = registry.reviews.review(id);
   const own = startedPhase(registry, t, review);
   const needs = personNeeds(registry, t, now);
   const track = review === null ? null : trackStep(review);

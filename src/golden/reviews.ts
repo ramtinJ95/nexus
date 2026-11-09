@@ -176,7 +176,7 @@ const specs: Spec[] = [
       const text = `Land pull request #${r.pr.number}, "${r.pr.title}", at ${short}, waiving ${[...new Set(holds.map((h) => waivedName(h.code)))].join(" and ")}?
 ${holds.map((h) => `- ${h.text}`).join("\n")}
 Land waives these at ${short}, and at a rebase of it that leaves the change as it is. Nexus still lands it only once the reviewer approves it and its checks pass. Leave it, and nothing is waived.`;
-      d.registry.askQuestion({
+      d.registry.questions.askQuestion({
         kind: "holds", id, thread: t.id, text, options: holdOptions, reserved: holds.map((h) => caseOf(h.code)).find((c) => c !== null) ?? null,
         answerer: "deployer", askedAt: Date.now() - 8 * minute, holds: asked,
       });
@@ -226,7 +226,7 @@ export async function seedReviews(d: Demo): Promise<[key: string, thread: Thread
     const t = res.body as Thread;
     const repo = repos[spec.project]!;
     const pr: PullRequest = { repo, number: spec.number, title: spec.title, url: `https://github.com/${repo}/pull/${spec.number}`, state: "open", checks: "passing", review: "none", conflict: false };
-    d.registry.savePrWatch(t.id, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+    d.registry.prWatches.savePrWatch(t.id, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
     // A review whose reviewer thread the person deletes needs that thread to exist.
     const reviewer = spec.key === "rv-cancelled-reviewer"
       ? (await d.startThread({ request: { project: spec.project, title: `Review of #${spec.number}: ${spec.title}` }, caller: reviewerCaller, role: "reviewer" })).id
@@ -237,9 +237,9 @@ export async function seedReviews(d: Demo): Promise<[key: string, thread: Thread
       expect: `rv-${spec.number}:t`, sent: 2, outbox: null, asked: "", since: Date.now() - 10 * minute, nudges: 0, startedAt: Date.now() - 2 * hour,
       rounds: [], phase: { kind: "reviewing" }, ...spec.review(t),
     };
-    d.registry.saveReview(r);
+    d.registry.reviews.saveReview(r);
     await spec.after?.(d, t, r);
-    out.push([spec.key, d.registry.thread(t.id)!]);
+    out.push([spec.key, d.registry.threads.thread(t.id)!]);
   }
   return out;
 }

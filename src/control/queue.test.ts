@@ -56,15 +56,15 @@ function fixture(t: import("node:test").TestContext, path = ":memory:") {
   function thread(id: string, startedBy = laptop): ThreadId {
     const t = testThread({ id: id as ThreadId, title: `Thread ${id}`, project: project.id, startedBy, createdAt: 1, lastHumanActivityAt: 1 });
     const pylon = testPylon(t, { node, liveHash: "hash", boot: { repo: { kind: "empty", branch: "main" } } });
-    registry.createThread(t, pylon);
+    registry.threads.createThread(t, pylon);
     return t.id;
   }
   const pr = (number: number, state: PullRequest["state"]): PullRequest => testPr({ repo: "acme/acme", number, title: `PR ${number}`, state });
   function links(id: ThreadId, ...prs: PullRequest[]) {
-    registry.savePrWatch(id, { links: prs.map((p) => ({ pr: p, seen: [], failed: false })), commentWakes: 0, pending: null, error: null });
+    registry.prWatches.savePrWatch(id, { links: prs.map((p) => ({ pr: p, seen: [], failed: false })), commentWakes: 0, pending: null, error: null });
   }
   function review(id: ThreadId, phase: Phase, merged: string | null = null) {
-    registry.saveReview(testReview({
+    registry.reviews.saveReview(testReview({
       id: `r-${id}`, expect: "", sent: 0, builder: id, reviewer: `${id}-reviewer` as ThreadId, pr: { repo: "acme/acme", number: 9, url: "", title: "", branch: "feature" },
       models: { builder: "a", reviewer: "b" }, rounds: [], merged, phase,
     }));
@@ -119,12 +119,12 @@ test("a predecessor is waiting, landed or blocked by what its thread, review and
 
   const c = f.thread("th-c");
   f.links(c, f.pr(6, "open"));
-  f.registry.setThreadStatus(c, "archived");
+  f.registry.threads.setThreadStatus(c, "archived");
   assert.equal(wait(f.registry, c), "blocked: is archived and its pull request did not merge");
   f.links(c, f.pr(6, "merged"));
   assert.equal(wait(f.registry, c), "landed: PR #6 merged", "a merge wins over an archive");
   const d = f.thread("th-d");
-  f.registry.setThreadStatus(d, "deleted");
+  f.registry.threads.setThreadStatus(d, "deleted");
   assert.equal(wait(f.registry, d), "blocked: is deleted and its pull request did not merge");
 });
 
@@ -141,7 +141,7 @@ test("a queue record is checked as a start is, and freezes the size the project 
   refused(() => q.add(f.request(), null, [f.thread("th-review", reviewerCaller)], laptop), "invalid", /reviewer, check or verify thread/);
   refused(() => q.add(f.request(), null, [f.thread("th-check", checkCaller)], laptop), "invalid", /reviewer, check or verify thread/);
   refused(() => q.add(f.request(), null, [f.thread("th-verify", verifyCaller)], laptop), "invalid", /reviewer, check or verify thread/);
-  assert.deepEqual(f.registry.queuedThreads(), [], "a refused start records nothing");
+  assert.deepEqual(f.registry.queue.queuedThreads(), [], "a refused start records nothing");
 
   const record = q.add(f.request({ resources: { cpus: 4 } }), "Fix it.", [a, a], laptop);
   assert.deepEqual(record.after, [a]);
@@ -149,12 +149,12 @@ test("a queue record is checked as a start is, and freezes the size the project 
   const nested = q.add(f.request({ resources: { nestedVirtualization: true } }), null, [a], laptop);
   assert.deepEqual(nested.request.resources, { ...project.resources, nestedVirtualization: true }, "the queue fills a size as a start does");
   assert.match(record.id, /^th-[0-9a-f]{12}$/);
-  assert.deepEqual(f.registry.queuedThread(record.id), record);
+  assert.deepEqual(f.registry.queue.queuedThread(record.id), record);
   assert.equal(queuedView(f.registry, record).node, node, "a start that names no node shows the project's default");
-  assert.equal(f.registry.thread(record.id), undefined, "a queued thread has no row");
-  assert.deepEqual(f.registry.threads().map((x) => x.id).sort(), ["th-a", "th-check", "th-review", "th-verify"]);
+  assert.equal(f.registry.threads.thread(record.id), undefined, "a queued thread has no row");
+  assert.deepEqual(f.registry.threads.threads().map((x) => x.id).sort(), ["th-a", "th-check", "th-review", "th-verify"]);
   const claude = q.add(f.request({ claude: "Fix it", node: "auto" }), null, [record.id], laptop);
-  assert.deepEqual(queuedView(f.registry, f.registry.queuedThread(claude.id)!), {
+  assert.deepEqual(queuedView(f.registry, f.registry.queue.queuedThread(claude.id)!), {
     id: claude.id, title: "After", project: project.id, startedBy: laptop, createdAt: claude.createdAt, status: "queued", after: [record.id],
     waits: [{ thread: record.id, state: "waiting", why: "is queued" }], blocked: false, node: "auto", worker: "claude", model: "claude-opus-5-5",
     prompt: "Fix it", branch: null, commit: null, resources: project.resources, startNow: null, lastError: null,
@@ -176,19 +176,19 @@ test("a queued thread starts once its predecessor's PR merged, as the PR watch o
   f.links(a, f.pr(3, "merged"));
   await q.poll();
   assert.deepEqual(f.starts, [first.id]);
-  const started = f.registry.thread(first.id)!;
+  const started = f.registry.threads.thread(first.id)!;
   assert.equal(started.title, "After A");
   assert.equal(started.startedBy, laptop, "the person who queued it started it");
   assert.equal(started.pylonId, `pylon-${first.id}`);
   assert.deepEqual(started.placement, { how: "default", node }, "a start that named no node is placed as one on the project's default");
-  assert.deepEqual(f.registry.pylon(started.pylonId)!.boot.resources, project.resources);
-  assert.equal(f.registry.queuedThread(first.id)!.status, "started");
+  assert.deepEqual(f.registry.threads.pylon(started.pylonId)!.boot.resources, project.resources);
+  assert.equal(f.registry.queue.queuedThread(first.id)!.status, "started");
   assert.deepEqual(f.fake.calls[0], ["start", { threadId: first.id, pylonId: started.pylonId }]);
 
   f.review(b, { kind: "landed", commit: "m" }, "m");
   await q.poll();
   assert.deepEqual(f.starts, [first.id, second.id]);
-  assert.equal(f.registry.claudeWorker(second.id)?.prompt, "/poteto-mode Fix it", "a Claude worker starts with its recorded prompt");
+  assert.equal(f.registry.threads.claudeWorker(second.id)?.prompt, "/poteto-mode Fix it", "a Claude worker starts with its recorded prompt");
   await q.poll();
   assert.deepEqual(f.starts, [first.id, second.id], "a started thread never starts again");
 });
@@ -199,7 +199,7 @@ test("a closed PR blocks the queued thread and a reopened one unblocks it, and s
   const a = f.thread("th-a");
   const b = f.thread("th-b");
   const record = q.add(f.request(), null, [a, b], laptop);
-  const view = () => queuedView(f.registry, f.registry.queuedThread(record.id)!);
+  const view = () => queuedView(f.registry, f.registry.queue.queuedThread(record.id)!);
   f.links(a, f.pr(3, "closed"));
   f.links(b, f.pr(4, "merged"));
   await q.poll();
@@ -208,7 +208,7 @@ test("a closed PR blocks the queued thread and a reopened one unblocks it, and s
   assert.equal(view().status, "queued", "a blocked thread stays queued");
   f.links(a, f.pr(3, "open"));
   assert.equal(view().blocked, false, "a reopened PR unblocks it");
-  f.registry.setThreadStatus(a, "archived");
+  f.registry.threads.setThreadStatus(a, "archived");
   await q.poll();
   assert.equal(view().blocked, true);
   assert.deepEqual(f.starts, []);
@@ -223,7 +223,7 @@ test("a chain starts in order: C after B, which is queued after A", async (t) =>
   const a = f.thread("th-a");
   const b = q.add(f.request({ title: "B" }), null, [a], laptop);
   const c = q.add(f.request({ title: "C" }), null, [b.id], laptop);
-  assert.deepEqual(queuedView(f.registry, f.registry.queuedThread(c.id)!).waits, [{ thread: b.id, state: "waiting", why: "is queued" }]);
+  assert.deepEqual(queuedView(f.registry, f.registry.queue.queuedThread(c.id)!).waits, [{ thread: b.id, state: "waiting", why: "is queued" }]);
   f.links(a, f.pr(3, "merged"));
   await q.poll();
   assert.deepEqual(f.starts, [b.id]);
@@ -250,8 +250,8 @@ test("two passes and a start-queued at once start the thread once", async (t) =>
   await Promise.all(passes);
   assert.equal((await now).id, record.id);
   await assert.rejects(late, /no longer queued/, "another queue's start loses to the transaction that marked it started");
-  assert.equal(f.registry.threads().filter((x) => x.id === record.id).length, 1);
-  assert.deepEqual(f.registry.queuedThread(record.id)!.startNow, { by: "nPHONE", at: f.registry.queuedThread(record.id)!.startNow!.at });
+  assert.equal(f.registry.threads.threads().filter((x) => x.id === record.id).length, 1);
+  assert.deepEqual(f.registry.queue.queuedThread(record.id)!.startNow, { by: "nPHONE", at: f.registry.queue.queuedThread(record.id)!.startNow!.at });
   await assert.rejects(one.startNow(record.id, "nPHONE"), (err: { kind?: string; message: string }) => err.kind === "conflict" && /has started/.test(err.message), "a started thread is no longer queued");
 });
 
@@ -265,14 +265,14 @@ test("archiving a queued thread while its start is in flight leaves no thread ro
   q.setStatus(record.id, "archived");
   release();
   await assert.rejects(started, /no longer queued/);
-  assert.equal(f.registry.thread(record.id), undefined);
-  assert.equal(f.registry.pylon(`pylon-${record.id}` as PylonId), undefined);
-  assert.equal(f.registry.queuedThread(record.id)!.status, "archived");
+  assert.equal(f.registry.threads.thread(record.id), undefined);
+  assert.equal(f.registry.threads.pylon(`pylon-${record.id}` as PylonId), undefined);
+  assert.equal(f.registry.queue.queuedThread(record.id)!.status, "archived");
   assert.throws(() => q.setStatus(record.id, "archived"), /is cancelled/);
   q.setStatus(record.id, "queued");
-  assert.equal(f.registry.queuedThread(record.id)!.status, "queued", "unarchive queues it again");
+  assert.equal(f.registry.queue.queuedThread(record.id)!.status, "queued", "unarchive queues it again");
   await q.startNow(record.id, laptop);
-  assert.equal(f.registry.thread(record.id)?.id, record.id, "the conversation made by the start that lost is reused");
+  assert.equal(f.registry.threads.thread(record.id)?.id, record.id, "the conversation made by the start that lost is reused");
 });
 
 test("a start refused while a deploy drains stays queued with why, and the next pass starts it", async (t) => {
@@ -283,13 +283,13 @@ test("a start refused while a deploy drains stays queued with why, and the next 
   f.links(a, f.pr(3, "merged"));
   f.draining = true;
   await q.poll();
-  assert.equal(f.registry.thread(record.id), undefined);
-  assert.match(f.registry.queuedThread(record.id)!.lastError!, /draining for deployment/);
-  assert.equal(f.registry.queuedThread(record.id)!.status, "queued");
+  assert.equal(f.registry.threads.thread(record.id), undefined);
+  assert.match(f.registry.queue.queuedThread(record.id)!.lastError!, /draining for deployment/);
+  assert.equal(f.registry.queue.queuedThread(record.id)!.status, "queued");
   f.draining = false;
   await q.poll();
-  assert.equal(f.registry.thread(record.id)?.id, record.id);
-  assert.equal(f.registry.queuedThread(record.id)!.lastError, null, "the start clears why the last attempt failed");
+  assert.equal(f.registry.threads.thread(record.id)?.id, record.id);
+  assert.equal(f.registry.queue.queuedThread(record.id)!.lastError, null, "the start clears why the last attempt failed");
 });
 
 test("an auto start with no node that has room stays queued, then starts once room appears", async (t) => {
@@ -299,14 +299,14 @@ test("an auto start with no node that has room stays queued, then starts once ro
   const record = q.add(f.request({ node: "auto" }), null, [a], laptop);
   f.links(a, f.pr(3, "merged"));
   await q.poll();
-  assert.match(f.registry.queuedThread(record.id)!.lastError!, /no node can run this pylon: rj-firebat is offline/);
+  assert.match(f.registry.queue.queuedThread(record.id)!.lastError!, /no node can run this pylon: rj-firebat is offline/);
   await assert.rejects(q.startNow(record.id, laptop), /no node can run this pylon/);
-  assert.equal(f.registry.queuedThread(record.id)!.status, "queued");
+  assert.equal(f.registry.queue.queuedThread(record.id)!.status, "queued");
   const capacity = testCapacity({ diskFreeGiB: 200 });
-  f.registry.apply({ record: "node", node, state: "online", capacity });
-  f.registry.ingested(testObservation(node, { observedAt: "2027-01-01T00:01:00Z", capacity, artifacts: [image.id] }), []);
+  f.registry.threads.apply({ record: "node", node, state: "online", capacity });
+  f.registry.threads.ingested(testObservation(node, { observedAt: "2027-01-01T00:01:00Z", capacity, artifacts: [image.id] }), []);
   await q.poll();
-  assert.equal(f.registry.thread(record.id)?.placement?.how, "auto");
+  assert.equal(f.registry.threads.thread(record.id)?.placement?.how, "auto");
 });
 
 test("a Nexus agent thread's first message is sent once under its queued request ID, and again under it after a crash", async (t) => {
@@ -316,14 +316,14 @@ test("a Nexus agent thread's first message is sent once under its queued request
   f.links(a, f.pr(3, "merged"));
   await f.queue().poll();
   assert.deepEqual(f.sent, [[record.id, "Fix the checkout.\nThen push.", `queued:${record.id}`]]);
-  assert.equal(f.registry.queuedThread(record.id)!.firstMessage, "sent");
+  assert.equal(f.registry.queue.queuedThread(record.id)!.firstMessage, "sent");
   await f.queue().poll();
   assert.equal(f.sent.length, 1);
 
-  f.registry.saveQueued({ ...f.registry.queuedThread(record.id)!, firstMessage: "pending" });
+  f.registry.queue.saveQueued({ ...f.registry.queue.queuedThread(record.id)!, firstMessage: "pending" });
   await f.queue().poll();
   assert.deepEqual(f.sent[1], [record.id, "Fix the checkout.\nThen push.", `queued:${record.id}`], "a send the crash may have cut off goes again under the same ID");
-  assert.equal(f.registry.queuedThread(record.id)!.firstMessage, "sent");
+  assert.equal(f.registry.queue.queuedThread(record.id)!.firstMessage, "sent");
 });
 
 test("a queued thread survives a restart, and a pass after it starts the thread", async (t) => {
@@ -334,11 +334,11 @@ test("a queued thread survives a restart, and a pass after it starts the thread"
   const record = before.queue().add(before.request(), null, [a], laptop);
   before.registry.close();
   const after = fixture(t, path);
-  assert.deepEqual(after.registry.queuedThread(record.id), record);
+  assert.deepEqual(after.registry.queue.queuedThread(record.id), record);
   after.links(a, after.pr(3, "merged"));
   await after.queue().poll();
-  assert.equal(after.registry.thread(record.id)?.id, record.id);
-  assert.equal(after.registry.queuedThread(record.id)!.status, "started");
+  assert.equal(after.registry.threads.thread(record.id)?.id, record.id);
+  assert.equal(after.registry.queue.queuedThread(record.id)!.status, "started");
 });
 
 test("a queue record's status moves only as archive, unarchive and delete allow", (t) => {

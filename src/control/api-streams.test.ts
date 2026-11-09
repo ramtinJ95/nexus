@@ -10,13 +10,13 @@ import { laptop, testApi, withThread, deployCommit, deployment, reporterHeaders 
 
 test("a follow from the latest event gets a reply's events and none from before it", async (t) => {
   const s = await withThread(t);
-  s.registry.recordReply(s.thread.id, Date.now());
+  s.registry.threads.recordReply(s.thread.id, Date.now());
   const kinds = ["attention.changed", "thread.turn-ended", "session.turn-started", "session.turn-ended", "session.waiting", "session.ended"];
   const stream = s.events(`/v1/events?follow=true&since=latest&${kinds.map((k) => `kind=${k}`).join("&")}`);
   t.after(() => stream.close());
   await stream.response;
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/seen`, {})).status, 204);
-  s.registry.recordReply(s.thread.id, Date.now());
+  s.registry.threads.recordReply(s.thread.id, Date.now());
   assert.deepEqual([(await stream.next()).payload, (await stream.next()).kind, (await stream.next()).payload], [{ attention: null }, "thread.turn-ended", { attention: "reply" }]);
   assert.deepEqual((await s.call("GET", "/v1/events?since=latest")).body, [], "nothing comes after the latest event");
 });
@@ -161,8 +161,8 @@ test("a stream whose thread is deleted while its watch opens stops that watch", 
 
 test("an event follower gets each event as an id and its data, then the watermark as a ping, every second, and a plain read gets them as JSON", async (t) => {
   const s = await testApi(t);
-  const first = s.registry.appendEvent("release.changed", null, { state: "pending" });
-  const unrelated = s.registry.appendEvent("thread.failed", null, {});
+  const first = s.registry.threads.appendEvent("release.changed", null, { state: "pending" });
+  const unrelated = s.registry.threads.appendEvent("thread.failed", null, {});
   const plain = await s.raw("/v1/events?kind=release.changed");
   assert.equal(plain.status, 200);
   assert.deepEqual([plain.headers["content-type"], plain.headers["cache-control"]], ["application/json", "no-store"]);
@@ -182,7 +182,7 @@ test("an event follower gets each event as an id and its data, then the watermar
   await until("the first batch arrived", () => chunks.join("").length >= (frame(first) + ping(unrelated.id)).length);
   assert.equal(chunks.join(""), frame(first) + ping(unrelated.id), "the watermark passes the unrelated event the filter left out");
   await until("a second passed", () => chunks.join("").length > (frame(first) + ping(unrelated.id)).length);
-  const second = s.registry.appendEvent("release.changed", null, { state: "installing" });
+  const second = s.registry.threads.appendEvent("release.changed", null, { state: "installing" });
   const expected = frame(first) + ping(unrelated.id) + ping(unrelated.id) + frame(second) + ping(second.id);
   await until("the next event arrived", () => chunks.join("").length >= expected.length);
   assert.equal(chunks.join("").slice(0, expected.length), expected);
@@ -219,12 +219,12 @@ test("a slow event follower gets every event once and in order, and one that sto
   const s = await testApi(t, { streamStallMs: 1000 });
   const slow = s.events("/v1/events?follow=true&kind=release.changed");
   t.after(() => slow.close());
-  const firstId = s.registry.appendEvent("release.changed", null, { n: 0 }).id;
+  const firstId = s.registry.threads.appendEvent("release.changed", null, { n: 0 }).id;
   assert.equal((await slow.next()).id, firstId);
   slow.pause();
   // A megabyte each, so the paused client's socket fills in a few events and the follower stops partway through a batch.
   const ids = [firstId];
-  for (let n = 1; n <= 12; n++) ids.push(s.registry.appendEvent("release.changed", null, { n, pad: "x".repeat(1 << 20) }).id);
+  for (let n = 1; n <= 12; n++) ids.push(s.registry.threads.appendEvent("release.changed", null, { n, pad: "x".repeat(1 << 20) }).id);
   await sleep(1_500);
   slow.resume();
   const seen = [firstId];
@@ -238,7 +238,7 @@ test("a slow event follower gets every event once and in order, and one that sto
   t.after(() => { for (const other of others) other.close(); });
   await Promise.all(others.map((other) => other.response));
   assert.equal((await s.events("/v1/events?follow=true&kind=release.changed").response).statusCode, 503, "every place is taken");
-  for (let n = 0; n < 24; n++) s.registry.appendEvent("thread.failed", null, { n, pad: "x".repeat(1 << 20) });
+  for (let n = 0; n < 24; n++) s.registry.threads.appendEvent("thread.failed", null, { n, pad: "x".repeat(1 << 20) });
   let freed = s.events("/v1/events?follow=true&kind=release.changed");
   while ((await freed.response).statusCode === 503) {
     await sleep(100);
@@ -264,15 +264,15 @@ test("event followers share the streams' places with thread streams, past which 
   assert.deepEqual(await s.call("GET", "/v1/events?since=-1&follow=true"), { status: 400, body: { error: "invalid event cursor", code: null, retryable: false } }, "a bad cursor is refused before the place is counted");
   assert.equal((await s.call("DELETE", `/v1/threads/${thread.id}`)).status, 200);
   assert.equal(await page.ended, "end");
-  const after = s.registry.appendEvent("release.changed", null, {});
+  const after = s.registry.threads.appendEvent("release.changed", null, {});
   for (const follower of followers) assert.equal((await follower.next()).id, after.id, "every follower is still open after the delete");
   assert.equal((await s.events("/v1/events?follow=true").response).statusCode, 200, "the deleted thread's stream gave its place back, and the followers kept theirs");
 });
 
 test("an event cursor older than what the log retains is refused with 409", async (t) => {
   const s = await testApi(t);
-  for (let i = 0; i < 10_002; i++) s.registry.appendEvent("release.changed", null, {});
-  s.registry.retainEvents();
+  for (let i = 0; i < 10_002; i++) s.registry.threads.appendEvent("release.changed", null, {});
+  s.registry.threads.retainEvents();
   for (const path of ["/v1/events?since=1", "/v1/events?since=1&follow=true"]) {
     assert.deepEqual(await s.call("GET", path), { status: 409, body: { error: "event cursor expired; retained events cannot fill the gap", code: null, retryable: false } });
   }
@@ -280,23 +280,23 @@ test("an event cursor older than what the log retains is refused with 409", asyn
 
 test("an event read that fails for any other reason answers 500, not the expired cursor's 409", async (t) => {
   const s = await testApi(t);
-  s.registry.eventBatch = () => { throw new Error("database disk image is malformed"); };
+  s.registry.threads.eventBatch = () => { throw new Error("database disk image is malformed"); };
   assert.deepEqual(await s.call("GET", "/v1/events?since=0"), { status: 500, body: { error: "database disk image is malformed", code: null, retryable: false } });
 });
 
 test("event followers replay a disconnect gap with since and filter without losing order", async (t) => {
   const s = await testApi(t);
-  const first = s.registry.appendEvent("release.changed", null, { state: "pending" });
+  const first = s.registry.threads.appendEvent("release.changed", null, { state: "pending" });
   const stream = s.events("/v1/events?follow=true&kind=release.changed");
   assert.equal((await stream.next()).id, first.id);
   stream.close();
-  const second = s.registry.appendEvent("release.changed", null, { state: "installing" });
-  s.registry.appendEvent("thread.failed", null, {});
-  const third = s.registry.appendEvent("release.changed", null, { state: "healthy" });
+  const second = s.registry.threads.appendEvent("release.changed", null, { state: "installing" });
+  s.registry.threads.appendEvent("thread.failed", null, {});
+  const third = s.registry.threads.appendEvent("release.changed", null, { state: "healthy" });
   const resumed = s.events(`/v1/events?follow=true&kind=release.changed&since=${first.id}`);
   t.after(() => resumed.close());
   assert.deepEqual([await resumed.next(), await resumed.next()].map((e) => e.id), [second.id, third.id]);
-  const fourth = s.registry.appendEvent("release.changed", null, { state: "pending" });
+  const fourth = s.registry.threads.appendEvent("release.changed", null, { state: "pending" });
   assert.equal((await resumed.next()).id, fourth.id);
   assert.equal((await s.call("GET", "/v1/events?since=-1")).status, 400);
   assert.equal((await s.call("GET", "/v1/events?kind=unknown")).status, 400);
@@ -309,14 +309,14 @@ test("a quiet filtered stream scans past unrelated events and survives retention
   let last = "0";
   for (let batch = 0; batch < 3; batch++) {
     for (let i = 0; i < 5000; i++) {
-      last = s.registry.appendEvent("release.changed", null, {}).id;
+      last = s.registry.threads.appendEvent("release.changed", null, {}).id;
       if (i % 100 === 0) await new Promise((resolve) => setImmediate(resolve));
     }
     await until("the stream sent its scanned watermark", () => reading.cursor() === last);
   }
   assert.equal(reading.queued(), 0, "no matching events yet");
   reading.close();
-  const matching = s.registry.appendEvent("session.turn-ended", null, {});
+  const matching = s.registry.threads.appendEvent("session.turn-ended", null, {});
   const resumed = s.events(`/v1/events?follow=true&kind=session.turn-ended&since=${reading.cursor()}`);
   t.after(() => resumed.close());
   assert.equal((await resumed.next()).id, matching.id);

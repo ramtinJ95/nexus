@@ -17,7 +17,7 @@ import type { Registry } from "./registry.ts";
 import type { Start, StartKey, StartRequest } from "./start-request.ts";
 import { standingRulesFor, withStandingRules } from "./standing-rules.ts";
 
-type ThreadsRegistry = Pick<Registry, "createThread" | "currentImage" | "latestHealthSample" | "node" | "nodes" | "now" | "project" | "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "reserve" | "reserved" | "saveTemplate" | "templates">;
+type ThreadsRegistry = Pick<Registry, "threads" | "currentImage" | "latestHealthSample" | "node" | "nodes" | "now" | "project" | "reserve" | "reserved" | "saveTemplate" | "templates">;
 
 /** A start's request ID with a hash of what it asks for, so a repeat of the ID with another body is told apart. */
 export const startKey = (requestId: string, fields: unknown): StartKey => ({ requestId, body: createHash("sha256").update(JSON.stringify(fields)).digest("hex") });
@@ -173,7 +173,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
         live,
         liveHash: liveHashOf(live),
       });
-      registry.createThread({ ...t, ...rules === null ? {} : { standingRules: rules } }, pylon, { ...claudePrompt === undefined ? {} : { claude: { prompt: claudePrompt, model: request.model } }, queued: queued !== undefined, key });
+      registry.threads.createThread({ ...t, ...rules === null ? {} : { standingRules: rules } }, pylon, { ...claudePrompt === undefined ? {} : { claude: { prompt: claudePrompt, model: request.model } }, queued: queued !== undefined, key });
       wake(node);
       return t;
     } finally {

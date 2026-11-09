@@ -26,7 +26,7 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { Watch } from "./conversation-view.ts";
 
-type ClaudeConversationRegistry = Pick<Registry, "appendClaudeRead" | "claudeEntries" | "claudeTranscript" | "claudeWorker" | "followEvents" | "node" | "pylon" | "questions" | "sealedBoot" | "setWaitingAsks" | "thread">;
+type ClaudeConversationRegistry = Pick<Registry, "threads" | "node" | "questions">;
 
 export interface ClaudeConversations {
   /** From the registry alone, so it never reaches the pylon. */
@@ -87,9 +87,9 @@ export function claudeConversations(options: { registry: ClaudeConversationRegis
   };
 
   function view(t: Thread): ClaudeConversation {
-    const now = registry.thread(t.id) ?? t;
-    const session = registry.claudeWorker(t.id)?.session ?? null;
-    const stored = registry.claudeTranscript(t.id);
+    const now = registry.threads.thread(t.id) ?? t;
+    const session = registry.threads.claudeWorker(t.id)?.session ?? null;
+    const stored = registry.threads.claudeTranscript(t.id);
     // A transcript of another session than the worker's is one its launch replaced, and the next read replaces it.
     const current = stored !== undefined && stored.session === session ? stored : undefined;
     const r = readers.get(t.id);
@@ -105,8 +105,8 @@ export function claudeConversations(options: { registry: ClaudeConversationRegis
 
   /** The stored entries, reading only those after `kept`'s, and `kept`'s own while nothing was added or dropped. */
   function entriesOf(id: ThreadId, dropped: number, kept: ClaudeConversation | null): readonly ClaudeEntry[] {
-    if (kept === null) return registry.claudeEntries(id);
-    const after = registry.claudeEntries(id, kept.dropped + kept.entries.length);
+    if (kept === null) return registry.threads.claudeEntries(id);
+    const after = registry.threads.claudeEntries(id, kept.dropped + kept.entries.length);
     return after.length === 0 && dropped === kept.dropped ? kept.entries : [...kept.entries.slice(dropped - kept.dropped), ...after];
   }
 
@@ -115,7 +115,7 @@ export function claudeConversations(options: { registry: ClaudeConversationRegis
    * when a turn starts or ends.
    */
   function update(id: ThreadId, r: Reader, read: boolean) {
-    const t = registry.thread(id);
+    const t = registry.threads.thread(id);
     const working = t?.sessionTurnRunning === true;
     if (working && r.watchers.size > 0 && !closed) {
       r.timer ??= setInterval(() => void refreshOf(id), workingReadMs);
@@ -133,12 +133,12 @@ export function claudeConversations(options: { registry: ClaudeConversationRegis
 
   async function catchUp(id: ThreadId, r: Reader) {
     for (let reads = 0; reads < maxReadsPerRefresh && !closed; reads++) {
-      const t = registry.thread(id);
-      const session = registry.claudeWorker(id)?.session ?? null;
+      const t = registry.threads.thread(id);
+      const session = registry.threads.claudeWorker(id)?.session ?? null;
       if (t === undefined || t.status === "deleted" || session === null) return;
       const probe = runningProbe(registry, probes, t, "usage");
       if (probe === null) return;
-      const stored = registry.claudeTranscript(id);
+      const stored = registry.threads.claudeTranscript(id);
       const startedAt = Date.now();
       const from = stored?.session === session ? stored.cursor : transcriptStart;
       let found: TranscriptRead | null;
@@ -150,12 +150,12 @@ export function claudeConversations(options: { registry: ClaudeConversationRegis
       }
       r.failures.ok("transcript");
       // A delete meanwhile removed the transcript, which this read must not bring back.
-      if (closed || registry.thread(id)?.status === "deleted") return;
+      if (closed || registry.threads.thread(id)?.status === "deleted") return;
       // A read that reaches the transcript's end dates it by its start, so every reply recorded before then is stored.
       // One that stops short keeps the date of the last that reached the end. Null is a session that has written no
       // transcript yet, which the read still dates.
       const readAt = found === null || !found.more ? startedAt : stored?.session === session && !found.reset ? stored.readAt : 0;
-      const appended = registry.appendClaudeRead(id, {
+      const appended = registry.threads.appendClaudeRead(id, {
         session, from, entries: found?.entries ?? [], cursor: found?.cursor ?? from, reset: found?.reset ?? false, readAt,
       });
       if (appended && found?.reset === true) r.kept = null;
@@ -174,9 +174,9 @@ export function claudeConversations(options: { registry: ClaudeConversationRegis
    * again. A report with asks is, since withdrawing an ask or archiving the thread drops what is stored.
    */
   async function pullAsks(id: ThreadId, r: Reader, pylonId: PylonId, probe: Pick<ProbeClient, "stream">) {
-    const t = registry.thread(id);
+    const t = registry.threads.thread(id);
     if (t === undefined) return;
-    const open = registry.questions(id).some((q) => q.kind === "ask" && q.answer === null);
+    const open = registry.questions.questions(id).some((q) => q.kind === "ask" && q.answer === null);
     if (!open && !((r.asksDue || !r.storedNone) && (t.sessionTurnRunning === true || t.sessionWaiting === true))) return;
     r.asksDue = false;
     let asks: WaitingAsk[];
@@ -188,15 +188,15 @@ export function claudeConversations(options: { registry: ClaudeConversationRegis
       return;
     }
     r.failures.ok("asks");
-    if (closed || registry.thread(id)?.status === "deleted") return;
+    if (closed || registry.threads.thread(id)?.status === "deleted") return;
     if (asks.length === 0 && r.storedNone) return;
     r.storedNone = asks.length === 0;
-    update(id, r, registry.setWaitingAsks(id, asks));
+    update(id, r, registry.questions.setWaitingAsks(id, asks));
   }
 
   /** A deleted thread's reader goes once nothing reads or watches it. */
   function release(id: ThreadId, r: Reader) {
-    if (!closed && r.reading === null && r.next === null && r.watchers.size === 0 && registry.thread(id)?.status === "deleted") readers.delete(id);
+    if (!closed && r.reading === null && r.next === null && r.watchers.size === 0 && registry.threads.thread(id)?.status === "deleted") readers.delete(id);
   }
 
   function refreshOf(id: ThreadId): Promise<void> {
@@ -216,9 +216,9 @@ export function claudeConversations(options: { registry: ClaudeConversationRegis
   }
 
   // From the newest event, so a restart reads each thread at its next event or watch rather than every thread at once.
-  const stopFollowing = registry.followEvents(sessionKinds, (events) => {
+  const stopFollowing = registry.threads.followEvents(sessionKinds, (events) => {
     for (const id of new Set(events.flatMap((e) => e.thread === null ? [] : [e.thread as ThreadId]))) {
-      if (registry.claudeWorker(id) === undefined) continue;
+      if (registry.threads.claudeWorker(id) === undefined) continue;
       const r = readerOf(id);
       r.asksDue = true;
       update(id, r, false);
