@@ -1,4 +1,4 @@
-/** The request schemas of the release and image routes in release.ts. They need zod, so they stay out of release.ts, which a browser can bundle. */
+/** These schemas need zod, so they stay out of release.ts, which a browser can bundle. */
 import { z } from "zod";
 import { fullCommit, reportStates, type ReportBody, type Role } from "../protocol/deploy.ts";
 import type { ReleaseInventory } from "../deploy/release-cleanup.ts";
@@ -17,7 +17,6 @@ export const reportSchema = z.strictObject({
 
 const name = z.string().regex(releaseName);
 const pid = z.int().positive();
-/** A deployer's report of the releases its node holds, and what its last deletes did, by release. */
 export const releasesSchema = z.strictObject({
   inventory: z.strictObject({
     releases: z.array(z.strictObject({ name, commit: commitSchema.nullable(), bytes: z.int().nonnegative().max(Number.MAX_SAFE_INTEGER), installedAt: z.number().nonnegative() })).max(10_000),

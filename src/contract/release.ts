@@ -1,8 +1,4 @@
-/**
- * The routes of releases and pylon images: the release a deployer asks for, the deployer's reports and drain, and
- * the images built, rolled out and rolled back. The server registers its handlers against them and the CLI calls
- * them. It imports nothing at run time, so a browser can bundle it. release-parse.ts holds the request schemas.
- */
+/** It imports nothing at run time, so a browser can bundle it. */
 import type { z } from "zod";
 import type { DrainReply, ReleaseView } from "../protocol/deploy.ts";
 import type { ImageManifest } from "../protocol/images.ts";
@@ -17,7 +13,6 @@ export type { ImageOperation } from "../control/image-store.ts";
 /** How long a deploy has to report every service healthy: `nexus deploy --wait` waits so long, and a landing then rolls back. */
 export const deployWaitMs = 30 * 60_000;
 
-/** The current and previous images, each null when none is. */
 export interface ImagesCurrent { current: ImageEntry | null; previous: ImageEntry | null }
 
 export const releaseRoutes = {

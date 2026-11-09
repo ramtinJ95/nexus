@@ -1,4 +1,4 @@
-/** The request schemas of the project and item routes in projects.ts. They need zod, so they stay out of projects.ts, which a browser can bundle. */
+/** These schemas need zod, so they stay out of projects.ts, which a browser can bundle. */
 import { z } from "zod";
 import type { NodeName, ProjectId } from "../ids.ts";
 import { chatgptTokenGrant, secretHostPattern, secretNamePattern } from "../protocol/secret-grants.ts";
@@ -24,7 +24,7 @@ export const projectSchema = z.strictObject({
   gitIdentity: gitIdentitySchema.nullable().optional(),
 });
 const rulesText = z.string().trim().min(1).max(standingRulesLimit).refine((text) => !text.includes("\0"), "standing rules cannot hold a NUL character, which no Claude prompt can");
-/** A caller gives standing rules as their text, and Nexus counts their revisions. What it leaves out takes the defaults. */
+/** A caller gives standing rules as their text, and Nexus counts their revisions. */
 export const projectAddSchema = projectSchema.extend({
   defaultBranch: projectSchema.shape.defaultBranch.default("main"),
   defaultNode: projectSchema.shape.defaultNode.default("auto"),

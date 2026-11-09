@@ -1,7 +1,5 @@
 /**
- * The attach route's WebSocket protocol, one definition for both ends: the control plane serves it, the CLI and the
- * dashboard's terminal speak it, and docs/cli.md describes the same thing. It imports nothing at run time, so a
- * browser can bundle it. attach-parse.ts parses it.
+ * docs/cli.md describes the same protocol. It imports nothing at run time, so a browser can bundle it.
  *
  * GET /v1/threads/<thread>/attach?cols=C&rows=R&term=T[&pane=P] upgrades to a plain RFC 6455 WebSocket, with no subprotocol
  * and no extensions. After the 101, binary messages carry terminal bytes both ways, and text messages carry one JSON
@@ -33,7 +31,7 @@ export type AttachErrorKind = "conflict" | "failed" | "unreachable";
 export type ServerMessage =
   | { type: "waiting"; pylon: ActualState }
   | { type: "attached" }
-  /** The program exited. 0 is Herdr's own detach. */
+  /** 0 is Herdr's own detach. */
   | { type: "exit"; code: number }
   | { type: "error"; kind: AttachErrorKind; message: string };
 

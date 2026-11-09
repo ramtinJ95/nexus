@@ -1,8 +1,4 @@
-/**
- * The event log and each thread's conversation, as routes of server-sent events, with the frames they send and what
- * a client reads of them. The server registers its handlers against them, and the CLI and dashboard follow them. It
- * imports nothing at run time, so a browser can bundle it.
- */
+/** It imports nothing at run time, so a browser can bundle it. */
 import type { EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { NexusEvent } from "../control/events.ts";
 import type { ClaudeEntry } from "../control/claude-transcript.ts";
@@ -78,7 +74,7 @@ export function claudeFrames(): (view: Omit<ClaudeFrame, "reset">) => ClaudeFram
   let sent: { session: string | null; total: number; last: string | undefined; working: boolean } | null = null;
   return (view) => {
     const total = view.dropped + view.entries.length;
-    // Where the entries not sent yet start. The registry keeps no generation, so a replaced transcript shows as a
+    // The registry keeps no generation, so a replaced transcript shows as a
     // different entry where the last one sent stood.
     const start = sent === null ? -1 : sent.total - view.dropped;
     const appended = sent !== null && sent.session === view.session && start >= 0 && start <= view.entries.length

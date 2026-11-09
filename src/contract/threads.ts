@@ -1,8 +1,4 @@
-/**
- * The thread and queued-thread routes of the control plane's API: each route's method, path, query and the types of
- * its body and reply, and what a client reads of a reply. The server registers its handlers against them and the CLI
- * calls them. It imports nothing at run time, so a browser can bundle it. threads-parse.ts holds the request schemas.
- */
+/** It imports nothing at run time, so a browser can bundle it. */
 import type { z } from "zod";
 import type { ConversationView } from "@earendil-works/pi-durable";
 import type { ProjectId, ThreadId } from "../ids.ts";
@@ -20,7 +16,6 @@ export type { Placement, Room } from "../control/placement-model.ts";
 export type { ThreadSetup } from "../control/templates.ts";
 export type { ClaudeConversation, ClaudeEntry, PromptSource } from "../control/claude-transcript.ts";
 
-/** A thread's conversation, tagged with the kind of agent it is from. */
 export type AgentView = { kind: "harness"; view: ConversationView } | { kind: "claude"; view: ClaudeConversation };
 
 /** Tags a view as served, so the dashboard and the CLI tell the two apart without asking the thread again. */
@@ -28,7 +23,6 @@ export function agentView(view: ConversationView | ClaudeConversation): AgentVie
   return "kind" in view ? { kind: "claude", view } : { kind: "harness", view };
 }
 
-/** "stopped on its usage limit until 06:30 UTC", or "…, which reset at 06:30 UTC" once the reset passed. A reset more than a day away also names its date, as in "Oct 29, 05:30 UTC". */
 export function usageLimitText(limit: { resetsAt: number | null }, now: number): string {
   if (limit.resetsAt === null) return "stopped on its usage limit";
   const at = new Date(limit.resetsAt);
