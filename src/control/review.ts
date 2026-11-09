@@ -937,7 +937,11 @@ export function reviewLoop(deps: ReviewDeps) {
    */
   function refuseIfReviewed(builder: ThreadId, repo: string, number: number): void {
     const other = registry.reviews.reviews().find((r) => r.builder !== builder && r.pr.repo === repo && r.pr.number === number && !settled(r));
-    if (other !== undefined) throw new Refusal("conflict", `pull request #${number} is under review ${other.id} of ${other.builder}, which is ${other.phase.kind}. Cancel it with nexus review --cancel ${other.builder} to start another`);
+    if (other === undefined) return;
+    const next = cancellable(other) ? `. Cancel it with nexus review --cancel ${other.builder} to start another`
+      : other.phase.kind === "approved" ? `. Land it with nexus land ${other.builder}, or start the review again from ${other.builder}`
+      : ", and a merge or deploy that has begun is seen through. It ends landed or with the person";
+    throw new Refusal("conflict", `pull request #${number} is under review ${other.id} of ${other.builder}, which is ${other.phase.kind}${next}`);
   }
 
   /**
