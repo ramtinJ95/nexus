@@ -105,7 +105,7 @@ export function testPr(over: Partial<WatchedPr> = {}): WatchedPr {
 export function testReview(over: Partial<Review> = {}): Review {
   return {
     id: "rv-1", builder: "th-builder" as ThreadId, reviewer: "th-reviewer" as ThreadId, pr: { repo: "acme/repo", number: 7, url: "https://github.com/acme/repo/pull/7", title: "Cache", branch: "cache" },
-    reviewerKind: "harness", models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1,
+    reviewerKind: "harness", models: { builder: "claude-opus-5-5", reviewer: "gpt-6-astra" }, maxRounds: 5, earlierRounds: 0, land: null, auto: false, merged: null, waiver: null, expect: "rv-1:t", sent: 1,
     outbox: null, asked: "", since: 0, nudges: 0, startedAt: 0, rounds: [{ head: "1".repeat(40), verdict: null, check: null, answers: null }], phase: { kind: "reviewing" }, ...over,
   };
 }

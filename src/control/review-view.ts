@@ -7,7 +7,7 @@ import type { ThreadId } from "../ids.ts";
 import { holdRule, type Hold, type HoldRule } from "./holds.ts";
 import { holdsAt, landPress, type LandPress } from "./policy.ts";
 import { askingHolds, type Question } from "./questions.ts";
-import { ended, roundsSpent, type PhaseKind, type Review } from "./review-model.ts";
+import { ended, prRounds, type PhaseKind, type Review } from "./review-model.ts";
 
 export interface ReviewView {
   id: string;
@@ -18,7 +18,10 @@ export interface ReviewView {
   ended: boolean;
   /** The review's phase, and while it waits on the person, why. */
   phase: { kind: Exclude<PhaseKind, "needs-person"> } | { kind: "needs-person"; reasons: readonly string[] };
-  /** The rounds that count against `maxRounds`, as `nexus show` counts them, so a carried or repeated approval is not one. */
+  /**
+   * The rounds the PR's reviews spent against `maxRounds`, as `nexus show` counts them, so a carried or repeated approval
+   * is not one, and a review that replaced an earlier one of the PR counts that one's.
+   */
   round: number;
   maxRounds: number;
   reviewer: { thread: ThreadId; model: string };
@@ -43,8 +46,8 @@ export function reviewView(review: Review, questions: readonly Question[]): Revi
     head: review.rounds.at(-1)!.head,
     ended: ended(review),
     phase: phase.kind === "needs-person" ? { kind: phase.kind, reasons: phase.reasons } : { kind: phase.kind },
-    round: roundsSpent(review),
-    maxRounds: review.maxRounds,
+    round: prRounds(review).spent,
+    maxRounds: prRounds(review).max,
     reviewer: { thread: review.reviewer, model: review.models.reviewer },
     landsWhenApproved: review.land !== null,
     holds: holdsAt(review).map((h) => ({ ...h, ...holdRule(h.code) })),

@@ -246,8 +246,13 @@ export interface Review extends Talk<Outbox & { to: "builder" | "reviewer" }> {
   second?: SecondReviewer;
   /** The builder's brief, its first message, cut as the description is, which each reviewer's first request carries. */
   brief?: string | null;
-  /** 1 to 5. */
+  /** 1 to 5, the rounds this review may spend. */
   maxRounds: number;
+  /**
+   * The rounds the builder's earlier reviews of the same PR spent, which the person reads with this review's and which a
+   * restart's 5 by default count against, so restarting a review does not give its PR more rounds.
+   */
+  earlierRounds: number;
   /** Who asked for the PR to land once approved, or null to stop at approval. */
   land: LandRequest | null;
   /** Started on its own when the PR watch first linked the PR, as the project asks. */
@@ -427,6 +432,8 @@ export const roundsSpent = (r: Pick<Review, "rounds">) => r.rounds.filter((round
   const previous = r.rounds[i - 1];
   return round.carried === undefined && !(previous !== undefined && previous.head === round.head && previous.base === round.base && reviewerApproved(previous) && reviewerApproved(round));
 }).length;
+/** The rounds the PR's reviews spent and may spend, the earlier reviews' included, as the person reads them. */
+export const prRounds = (r: Pick<Review, "rounds" | "maxRounds" | "earlierRounds">) => ({ spent: r.earlierRounds + roundsSpent(r), max: r.earlierRounds + r.maxRounds });
 /**
  * The head `pr` was read at, when it is open there at another head than the latest round's and than the one its hold
  * named. A PR watch's read may be older than the round, so the loop confirms it with GitHub before it acts.

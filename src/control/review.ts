@@ -937,6 +937,11 @@ export function reviewLoop(deps: ReviewDeps) {
 
   /** Starts a review of `pr`, a PR of the builder's: the reviewer thread, its first request, and the record. */
   async function begin(builder: Thread, { repo, number }: Pick<PullRequest, "repo" | "number">, request: { rounds?: number | undefined; land: Review["land"]; auto: boolean }): Promise<Review> {
+    // A review that replaces one of the same PR spends what the earlier ones left, unless the person grants rounds.
+    const previous = registry.reviews.review(builder.id);
+    const earlierRounds = previous?.pr.repo === repo && previous.pr.number === number ? previous.earlierRounds + roundsSpent(previous) : 0;
+    const rounds = request.rounds ?? maxRounds - earlierRounds;
+    if (rounds < 1) throw new Refusal("conflict", `pull request #${number} has had ${earlierRounds} rounds over its reviews, and Nexus gives one ${maxRounds} without the person's word. Run nexus review ${builder.id} --rounds N to grant it N more`);
     const snapshot = await github.poll(repo, number);
     if (snapshot.pr.state !== "open") throw new Refusal("conflict", `pull request #${number} is ${snapshot.pr.state}`);
     const agent = registry.threads.agent(builder);
@@ -963,7 +968,7 @@ export function reviewLoop(deps: ReviewDeps) {
       const reviewer = await startReviewer(builder, `Review of #${number}: ${snapshot.pr.title}`, pr.branch, kind.model, kind.claude, asked);
       const started: Review = {
         id, expect, sent: 0, builder: builder.id, reviewer: reviewer.id, pr, models, reviewerKind: kind.claude ? "claude" : "harness",
-        maxRounds: request.rounds ?? maxRounds, land: request.land, auto: request.auto, brief, ...second,
+        maxRounds: rounds, earlierRounds, land: request.land, auto: request.auto, brief, ...second,
         rounds: [{ head: snapshot.detail.head, base: snapshot.detail.base, ...verdictsFor(seatsFor(second)), check: null, answers: null }], merged: null, waiver: null, phase: { kind: "reviewing" }, outbox: null,
         since: at, nudges: 0, startedAt: at, asked,
       };
