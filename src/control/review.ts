@@ -897,11 +897,11 @@ export function reviewLoop(deps: ReviewDeps) {
         if (r.phase.kind !== "landed" || r.phase.inTurn === undefined) continue;
         const builder = registry.threads.thread(r.builder);
         if (builder?.working === true && isOpenStatus(builder.status)) continue;
-        // A Claude worker's transcript is read apart from its turn's end, so it holds what the person wrote in that turn
-        // only once a read since then ended.
-        const transcript = registry.threads.claudeWorker(r.builder) === undefined ? null : registry.threads.claudeTranscript(r.builder);
-        if (builder !== undefined && isOpenStatus(builder.status) && transcript !== null && (transcript?.readAt ?? -Infinity) < (builder.lastReplyAt ?? -Infinity)) continue;
         const { inTurn, ...phase } = r.phase;
+        // A Claude worker's transcript is read apart from its turn's end, so it holds what the person wrote in that turn
+        // only once a read since then ended, and since the landing for a turn whose end was never reported.
+        const transcript = registry.threads.claudeWorker(r.builder) === undefined ? null : registry.threads.claudeTranscript(r.builder);
+        if (builder !== undefined && isOpenStatus(builder.status) && transcript !== null && (transcript?.readAt ?? -Infinity) < Math.max(inTurn, builder.lastReplyAt ?? -Infinity)) continue;
         const theirs = builder === undefined || !isOpenStatus(builder.status) || await deps.personWrote(builder, inTurn);
         // The read yields, so a turn, an archive or a delete meanwhile decides instead.
         const fresh = registry.threads.thread(r.builder);

@@ -1043,6 +1043,10 @@ test("a builder in a turn as its review lands, as one answering the approval's n
   f.tick(60_000);
   f.registry.threads.recordActivity(f.builder, { agent: f.now, agentTurnRunning: false });
   await loop.poll();
+  assert.deepEqual(f.statuses(), ["active", "archived"], "its transcript is not read since the landing");
+  f.tick(1_000);
+  claudeRead(f, [{ kind: "reply", at: f.now, text: "Named the constant." }], []);
+  await loop.poll();
   assert.deepEqual(f.statuses(), ["archived", "archived"], "the person's message before the landing does not keep it");
   assert.deepEqual(f.woken.at(-1), f.builder, "the planner hears of the archive, so its pylon pauses");
   f.registry.threads.setThreadStatus(f.builder, "active");
@@ -1064,7 +1068,7 @@ test("a builder the person wrote to after its review landed stays open once its 
   await loop.poll();
   assert.deepEqual(f.statuses(), ["active", "archived"], "a transcript not read since the turn ended cannot say the person did not write");
   f.tick(1_000);
-  claudeRead(f, [{ kind: "reply", at: wrote - 1, text: "Merged." }, { kind: "prompt", at: wrote, text: "Now write the follow-up", from: "person" }], []);
+  claudeRead(f, [{ kind: "prompt", at: wrote, text: "Now write the follow-up", from: "person" }, { kind: "reply", at: wrote + 1, text: "On it." }], []);
   await loop.poll();
   await loop.poll();
   assert.deepEqual(f.statuses(), ["active", "archived"], "the person's message since the landing makes it theirs");
@@ -1085,6 +1089,8 @@ test("a builder that starts a turn or is deleted while the loop reads whether th
     f.registry.threads.recordActivity(f.builder, { agent: 1, agentTurnRunning: true });
     const loop = await approved(f, "nLAPTOP");
     f.registry.threads.recordActivity(f.builder, { agent: 2, agentTurnRunning: false });
+    f.tick(1_000);
+    claudeRead(f, [], []);
     await loop.poll();
     assert.deepEqual(f.statuses(), [meanwhile === "turn" ? "active" : "deleted", "archived"], meanwhile);
   }

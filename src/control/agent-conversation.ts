@@ -55,10 +55,11 @@ function claudeConversation(registry: AgentConversationRegistry, thread: ThreadI
 }
 
 export const repliesOf = (c: Conversation): string[] => c.messages.flatMap((m) => m.role === "assistant" ? [m.text] : []);
-/** Whether the person wrote to the thread after its first reply, and after `since` when given. */
-export function personWrote(c: Conversation, since = -Infinity): boolean {
+/** Whether the person wrote to the thread after `since`, or with none after its first reply. */
+export function personWrote(c: Conversation, since?: number): boolean {
+  if (since !== undefined) return c.messages.some((m) => m.role === "user" && m.person && m.at > since);
   const first = c.messages.findIndex((m) => m.role === "assistant");
-  return first !== -1 && c.messages.slice(first).some((m) => m.role === "user" && m.person && m.at > since);
+  return first !== -1 && c.messages.slice(first).some((m) => m.role === "user" && m.person);
 }
 
 /**
