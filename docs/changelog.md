@@ -2,6 +2,10 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.75.0
+
+Adds `ThreadDetail.noChange`: why the builder found that its task needs no change, as it declared in a `nexus-no-change` block instead of opening a pull request, or null. `show` prints it as an `outcome:` line. A queued thread's `Wait` on such a builder reads `landed`, with `why` set to `needs no change: <the reason>`.
+
 ## 0.74.0
 
 Removes `review`, the stored review record, from `ThreadDetail`, so `GET /v1/threads/<thread>` and `show --json` no longer send the reviewer's token, the loop's asks or its outbox. `reviewView` carries the review's public facts in its place: `pr`, the pull request's number, `phase`, its kind and while it is `needs-person` its `reasons`, `round` and `maxRounds`, `reviewer`, the reviewer thread and its model, and `landsWhenApproved`, as [Reviews and landing](cli.md#reviews-and-landing) describes. `said.review`, and the `said` of the review routes, now also hold a failed live check's last 20 lines of output, what the review needs from the person and its waiver, which the CLI printed from the record. `land --waive` that answered the review's question prints `reviewView` with `--json`, in place of the record. The review routes still answer with the record. The CLI now needs a control plane of 0.74.0 or later.

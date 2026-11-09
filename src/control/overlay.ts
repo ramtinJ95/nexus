@@ -8,6 +8,7 @@ import { shellQuote } from "../shell.ts";
 import { chatgptTokenGrant, githubTokenGrant, type SecretGrant } from "../protocol/secret-grants.ts";
 import type { GitIdentity, OverlayFile, RepoInit } from "../protocol/spawn.ts";
 import type { LoginKind } from "./project.ts";
+import { block, noChangeAnswer } from "./prompts.ts";
 import { checkoutDir, nexusApi, pylonGuideFile, pylonInfoFile, type PylonInfo } from "../../images/pylon/nexus-contract.ts";
 
 export interface PylonOverlay {
@@ -25,6 +26,8 @@ export interface PylonOverlay {
   repo: RepoInit;
   /** Names and hosts, never values, so the guide can say what each token is for. From BootInputs.network.secrets. */
   secrets: readonly SecretGrant[];
+  /** The project reviews its builders' pull requests on its own, so a builder whose task needs no change says so in a block Nexus reads. */
+  reviewsBuilders: boolean;
 }
 
 /**
@@ -38,7 +41,9 @@ export interface PylonOverlay {
  *   outputs, that pi is signed in to ChatGPT when the pylon was granted the ChatGPT token, that other logins use
  *   the device-code flow (S5: the browser callback listens inside the guest), and that Claude Code has a shepherdr
  *   reviewer check its diff before a pull request, which runs only when pi is signed in, and the shell pitfalls
- *   (`pkill -f` matching its own command, Claude Code refusing a leading `sleep`) that agents otherwise repeat.
+ *   (`pkill -f` matching its own command, Claude Code refusing a leading `sleep`) that agents otherwise repeat. In a
+ *   project that reviews its builders' pull requests on its own, it also shows the block a builder ends with when its
+ *   task needs no change.
  *   The image imports this file from ~/.claude/CLAUDE.md and links it as ~/.pi/agent/AGENTS.md, so the
  *   overlay never edits dotfiles.
  */
@@ -83,6 +88,13 @@ function pylonGuide(o: PylonOverlay): string {
   const reviewLogin = chatgpt
     ? "The reviewer runs on pi's `openai` provider, which is signed in here. If it stops on a login or model error anyway, say the review was skipped and why, and go on with the work."
     : "This pylon was not granted the ChatGPT token, so pi is not signed in and the reviewer stops with `Provider is not configured: openai`. Say in your reply and in the pull request that the review was skipped and why, and go on with the work. The human can add the `chatgpt` login to the project, which reaches threads started after that.";
+  const noChange = !o.reviewsBuilders ? "" : `## When the task needs no change
+
+This project reviews its builders' pull requests on its own. If you check and find that your task needs no change, as when another thread already did it, open no pull request and end your final answer with this block. Nexus then archives this thread and starts the threads queued after it.
+
+${block(noChangeAnswer, o.threadId)}
+
+`;
   const secrets = o.secrets.length === 0 ? "" : `## Secrets
 
 Login shells have these variables. Each holds a placeholder that is swapped for the real value only in requests to the hosts listed, and the placeholder changes on every boot, so never write one into a file, a git config or a remote URL.
@@ -134,7 +146,7 @@ This is for Claude Code, whose shepherdr mod gives it the \`mcp__shepherdr__agen
 
 ${reviewLogin}
 
-## Shell
+${noChange}## Shell
 
 \`pkill -f\` and \`pgrep -f\` also match the shell that runs them, so \`pkill -f\` kills the command it is in. Stop a process by a PID you saved, or with a bracket pattern such as \`pkill -f '[s]tack.ts'\`, which cannot match its own text, in a command that names \`stack.ts\` nowhere else. Claude Code alone refuses a command that starts with a long \`sleep\`, so to wait there, loop on the condition (\`until <check>; do sleep 2; done\`) or run the command in the background.
 

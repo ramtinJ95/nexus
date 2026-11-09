@@ -22,7 +22,12 @@ export type Nudge =
    * The person wrote to the thread after its first reply, which makes it theirs for good. It is kept, since the
    * transcript that showed the message may drop it.
    */
-  | { state: "left-alone" };
+  | { state: "left-alone" }
+  /**
+   * The turn that ended at `turn` declared that the task needs no change, for `reason`, so the thread was archived
+   * rather than nudged, and a thread queued after it starts as if its pull request had merged.
+   */
+  | { state: "no-change"; turn: number; reason: string };
 
 export const holding = { tables: { nudges: { record: "thread" } } } as const satisfies Holding;
 
@@ -37,8 +42,8 @@ export function nudgeStore(db: Db, updateAttention: (thread: ThreadId) => void) 
       },
     },
     nudge: (thread: ThreadId): Nudge | null => nudges.get(thread),
-    /** The threads with a nudge record that a later pass may still change or clear, which is every one but left-alone. */
-    nudgedThreads: (): ThreadId[] => sql("SELECT thread FROM nudges WHERE json_extract(record, '$.state') != 'left-alone' ORDER BY thread").all().map((r) => r.thread as ThreadId),
+    /** The threads with a nudge record that a later pass may still change or clear, which is every one but left-alone and no-change. */
+    nudgedThreads: (): ThreadId[] => sql("SELECT thread FROM nudges WHERE json_extract(record, '$.state') NOT IN ('left-alone', 'no-change') ORDER BY thread").all().map((r) => r.thread as ThreadId),
     /** Replaces the builder's nudge record, or with null deletes it. */
     saveNudge(thread: ThreadId, nudge: Nudge | null) {
       transaction(() => {

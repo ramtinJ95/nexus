@@ -51,7 +51,7 @@ function deathLines(t: ThreadDetail["thread"], resume: ThreadDetail["resume"]): 
   return [`turn died: ${t.turnDied.reason}, at ${new Date(t.turnDied.at).toISOString()}${then}`];
 }
 
-export function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, resume, attention, questions, judgments, planning, said }: ThreadDetail): string {
+export function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, resume, noChange, attention, questions, judgments, planning, said }: ThreadDetail): string {
   const observed = p.observedAt === null ? "" : `, observed ${ago(Date.parse(p.observedAt))}`;
   return [
     `${t.id}  ${t.title}`,
@@ -61,6 +61,7 @@ export function detailText({ thread: t, pylon: p, agent, sessions, previews, por
     ...(claudeWorker === undefined ? [] : [`Claude worker: ${claudeWorker.state}, model ${claudeWorker.model ?? "unknown"}`, ...(claudeWorker.message === undefined ? [] : [`failed: ${claudeWorker.message}`])]),
     `attention: ${attention ?? "none"}`,
     ...deathLines(t, resume),
+    ...noChange === null ? [] : [`outcome: needs no change, so it opened no pull request: ${noChange}`],
     ...t.usageLimit === undefined ? [] : [`usage limit: ${usageLimitText(t.usageLimit, Date.now())}. \`nexus send ${t.id} continue\` resumes it once the limit resets`],
     `status: ${t.status}${t.working ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,

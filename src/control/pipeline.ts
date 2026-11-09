@@ -25,7 +25,7 @@ import type { ItemRecord } from "./pipeline-store.ts";
 import { brokenRule, itemRules } from "../contract/threads-parse.ts";
 import { isOpenStatus } from "./reconcile.ts";
 
-type PipelineRegistry = Pick<Registry, "threads" | "images" | "reviews" | "pipeline" | "nodeMetrics" | "nodes" | "now" | "planning" | "prWatches" | "projects" | "queue" | "placement">;
+type PipelineRegistry = Pick<Registry, "threads" | "images" | "reviews" | "pipeline" | "nodeMetrics" | "nodes" | "now" | "nudges" | "planning" | "prWatches" | "projects" | "queue" | "placement">;
 
 /** `held` waits on the person, for an approval, a blocked queue, a review that ended for them or a thread that needs them. */
 export interface ItemPhase { kind: "planned" | "queued" | "building" | "reviewing" | "landing" | "landed" | "held" | "archived" | "cancelled"; why: string }

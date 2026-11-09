@@ -5,9 +5,10 @@
  * one fixed message under a request ID of the thread and the turn's end, which the inbox never delivers twice, so a
  * pass after a crash between the send and its record sends nothing new. A third stalled turn after two nudges hands the
  * thread to the person through its `decision` attention. A pull request ends it, and the person writing to the thread
- * leaves the thread alone for good.
+ * leaves the thread alone for good. A stalled turn whose replies end with the builder's no-change block gets no nudge:
+ * the thread is archived with the block's reason, and a thread queued after it starts (queue.ts).
  */
-import { senders } from "./agent-protocol.ts";
+import { latest, senders } from "./agent-protocol.ts";
 import { gitPollMs } from "../protocol/observations.ts";
 import { singleFlight } from "../single-flight.ts";
 import { githubRepo, type GitHub } from "./github.ts";
@@ -20,11 +21,14 @@ import type { Nudge } from "./nudge-store.ts";
 import { deliverDurable } from "./durable-message.ts";
 import { prLocationOf, threadRole } from "./work-model.ts";
 import { isOpenStatus, openStatuses } from "./reconcile.ts";
+import { block, noChangeAnswer } from "./prompts.ts";
 
 type NudgeRegistry = Pick<Registry, "reviews" | "nodes" | "nudges" | "threads" | "planning" | "prWatches" | "projects">;
 
-const text = `${senders.nudge.prefix}
-Your turn ended, and Nexus finds no pull request from this thread. This project reviews its builders' pull requests on its own, so the work moves on only once one is open. If the task is not done, go on with it. When it is, commit, push the branch and open a pull request. If you are blocked or the task needs no pull request, say why in one line: after two nudges without a pull request, Nexus hands this thread to the person.`;
+const text = (id: ThreadId) => `${senders.nudge.prefix}
+Your turn ended, and Nexus finds no pull request from this thread. This project reviews its builders' pull requests on its own, so the work moves on only once one is open. If the task is not done, go on with it. When it is, commit, push the branch and open a pull request. If you checked that the task needs no change, as when another thread already did it, end your reply with this block, and Nexus archives this thread:
+${block(noChangeAnswer, id)}
+If you are blocked, say why in one line: after two nudges without a pull request, Nexus hands this thread to the person.`;
 
 export const maxNudges = 2;
 
@@ -32,9 +36,13 @@ export function builderNudger(options: {
   registry: NudgeRegistry; github: Pick<GitHub, "find">; inbox: Inbox;
   /** The person talking to a thread after its first reply makes it theirs, so it is left alone. */
   personWroteTo(t: Thread): Promise<boolean>;
+  /** The agent's replies, oldest first, where a builder declares that its task needs no change. */
+  replies(t: Thread): Promise<string[]>;
+  /** Tells the planner a thread's status changed, so an archived thread's pylon pauses at once. */
+  wake(t: Thread): void;
   watch: { passes(): { started: number; finished: number } }; log?: (message: string) => void;
 }) {
-  const { registry, github, inbox, personWroteTo, watch, log = (message: string) => console.error(message) } = options;
+  const { registry, github, inbox, personWroteTo, replies, wake, watch, log = (message: string) => console.error(message) } = options;
   /** The PR watch pass each thread's latest ended turn waits for. A restart only makes a turn wait for another. */
   const awaited = new Map<ThreadId, { turn: number; pass: number }>();
 
@@ -79,9 +87,19 @@ export function builderNudger(options: {
     return fresh === undefined || builderRepo(fresh) === null || hasPullRequest(fresh) || fresh.usageLimit !== undefined || fresh.turnDied !== undefined || fresh.working ? undefined : fresh;
   };
 
+  /** Archives a builder that declared no change, unless the person has been to it since, as by unarchiving it. */
+  function archive(id: ThreadId, { turn }: Extract<Nudge, { state: "no-change" }>) {
+    const t = registry.threads.thread(id);
+    if (t === undefined || !isOpenStatus(t.status) || t.working || t.lastHumanActivityAt > turn) return;
+    registry.threads.setThreadStatus(id, "archived");
+    wake(t);
+  }
+
   async function judge(t: Thread) {
     const record = registry.nudges.nudge(t.id);
     if (record?.state === "left-alone") return;
+    // A crash may have come between the record and the archive. A pull request opened since supersedes the declaration.
+    if (record?.state === "no-change") return hasPullRequest(t) ? registry.nudges.saveNudge(t.id, null) : archive(t.id, record);
     const clear = () => { if (record !== null) registry.nudges.saveNudge(t.id, null); };
     const leaveAlone = () => registry.nudges.saveNudge(t.id, { state: "left-alone" });
     const repo = builderRepo(t);
@@ -113,8 +131,14 @@ export function builderNudger(options: {
       log(`${t.id}: nudge could not search GitHub for its pull request and will retry (${(err as Error).name})`);
       return;
     }
+    const declared = latest(await replies(t), noChangeAnswer.fence, noChangeAnswer.schema, t.id);
     const fresh = idleBuilder(t.id);
     if (fresh === undefined || fresh.lastReplyAt !== turn) return;
+    if (declared !== null) {
+      const done: Nudge = { state: "no-change", turn, reason: declared.reason };
+      registry.nudges.saveNudge(t.id, done);
+      return archive(t.id, done);
+    }
     const count = record?.state === "nudged" ? record.count : 0;
     if (count >= maxNudges) return registry.nudges.saveNudge(t.id, { state: "person", turn });
     const sending: Nudge = { state: "sending", turn, count: count + 1 };
@@ -123,7 +147,7 @@ export function builderNudger(options: {
   }
 
   async function deliver(t: Thread, { turn, count }: Extract<Nudge, { state: "sending" }>) {
-    await deliverDurable({ id: requestIds.nudge(t.id, turn), text }, (m) => inbox(t, { ...m, sender: "nudge" }), () => registry.nudges.saveNudge(t.id, { state: "nudged", turn, count }));
+    await deliverDurable({ id: requestIds.nudge(t.id, turn), text: text(t.id) }, (m) => inbox(t, { ...m, sender: "nudge" }), () => registry.nudges.saveNudge(t.id, { state: "nudged", turn, count }));
   }
 
   async function pass() {
