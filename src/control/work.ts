@@ -5,11 +5,11 @@ import type { CleanupQuestion } from "./questions.ts";
 import type { QueuedThread } from "../contract/threads.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
-import type { ThreadDetail, ThreadNeed } from "./wire.ts";
+import type { ServerDetail, ThreadDetail, ThreadNeed } from "./wire.ts";
 import { personNeeds } from "./work-model.ts";
 import { isOpenStatus } from "./reconcile.ts";
 
-export type HeldWork = { kind: "item"; item: PipelineItem } | { kind: "queued"; q: QueuedThread } | { kind: "thread"; thread: Thread; d: ThreadDetail };
+export type HeldWork = { kind: "item"; item: PipelineItem } | { kind: "queued"; q: QueuedThread } | { kind: "thread"; thread: Thread; d: ServerDetail };
 /** A thread's card, a node's cleanup question with its Cluster card, or work its pipeline phase holds for the person that no card acts on. */
 export type InboxNeed = ThreadNeed | { kind: "cleanup"; question: CleanupQuestion; since: number } | { kind: "held"; work: HeldWork; since: number };
 
@@ -22,7 +22,7 @@ interface Work {
  * person works down the list and the one that has waited longest is first. Each need of a thread gets its card. After
  * the cards, oldest first too, comes the work its pipeline phase holds for the person that no card acts on.
  */
-export function needsOf(w: Work, detail: (thread: Thread) => ThreadDetail): InboxNeed[] {
+export function needsOf(w: Work, detail: (thread: Thread) => ServerDetail): InboxNeed[] {
   const cleanups = w.registry.openNodeQuestions().map((question): InboxNeed => ({ kind: "cleanup", question, since: question.askedAt }));
   const cardsOf = (t: Thread): ThreadNeed[] => {
     const needs = personNeeds(w.registry, t, w.now);

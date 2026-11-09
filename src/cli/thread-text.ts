@@ -1,5 +1,5 @@
 import { usageLimitText, type Placement, type QueuedThread, type Room, type ThreadDetail, type ThreadRow, type ThreadSetup, type Wait } from "../contract/threads.ts";
-import type { Question, Review } from "../contract/reviews.ts";
+import type { Question } from "../contract/reviews.ts";
 import { reservedNames } from "../contract/reserved.ts";
 import type { Changes, Listing } from "../contract/pylon.ts";
 import { ago, table, clip } from "./kit.ts";
@@ -21,17 +21,6 @@ function setupText(s: ThreadSetup): string {
     case "template": return `from template ${s.template}, built ${ago(s.builtAt)}, then checked out ${s.commit.slice(0, 12)}`;
     case "fresh": return `fresh boot runs .nexus/setup, because ${s.reason.split("\n")[0]}${s.building === undefined ? "" : `; ${s.building} builds for the next thread`}`;
   }
-}
-
-/** A control plane older than 0.73.0 words none of a review's lines, so its review shows as its ID. */
-export function reviewText(r: Review, said: readonly string[] | null | undefined): string {
-  const { live } = r.rounds.at(-1)!;
-  return [
-    ...said ?? [`review ${r.id}`],
-    ...live?.kind === "ran" && !live.passed ? live.output.split("\n").slice(-20).map((line) => `  ${line}`) : [],
-    ...r.phase.kind === "needs-person" ? r.phase.holds.map((h) => `needs you: ${h.text}`) : [],
-    ...r.waiver === null ? [] : [`waived by ${r.waiver.by}${r.waiver.yolo === undefined ? "" : `, by project ${r.waiver.yolo}'s yolo setting,`} at ${r.waiver.head}${r.waiver.from === undefined ? "" : ` (carried from ${r.waiver.from})`}, ${new Date(r.waiver.at).toISOString()}:`, ...r.waiver.holds.map((hold) => `  ${hold}`)],
-  ].join("\n");
 }
 
 /** A Claude worker's ask has a line per question it asks, and no options of its own. */
@@ -62,7 +51,7 @@ function deathLines(t: ThreadDetail["thread"], resume: ThreadDetail["resume"]): 
   return [`turn died: ${t.turnDied.reason}, at ${new Date(t.turnDied.at).toISOString()}${then}`];
 }
 
-export function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, resume, attention, review, questions, judgments, planning, said }: ThreadDetail): string {
+export function detailText({ thread: t, pylon: p, agent, sessions, previews, ports, outputs, prWatch, pullRequests, claudeWorker, resume, attention, questions, judgments, planning, said }: ThreadDetail): string {
   const observed = p.observedAt === null ? "" : `, observed ${ago(Date.parse(p.observedAt))}`;
   return [
     `${t.id}  ${t.title}`,
@@ -75,9 +64,9 @@ export function detailText({ thread: t, pylon: p, agent, sessions, previews, por
     ...t.usageLimit === undefined ? [] : [`usage limit: ${usageLimitText(t.usageLimit, Date.now())}. \`nexus send ${t.id} continue\` resumes it once the limit resets`],
     `status: ${t.status}${t.working ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,
-    ...p.notAnswering === undefined || !said?.guest ? [] : [`guest: not answering since ${ago(Date.parse(p.notAnswering.since))}, ${said.guest}`],
-    ...!said?.disk ? [] : [`disk: ${said.disk}`],
-    ...!said?.usage ? [] : [`usage: ${said.usage}`],
+    ...p.notAnswering === undefined || !said.guest ? [] : [`guest: not answering since ${ago(Date.parse(p.notAnswering.since))}, ${said.guest}`],
+    ...!said.disk ? [] : [`disk: ${said.disk}`],
+    ...!said.usage ? [] : [`usage: ${said.usage}`],
     ...t.status === "archived" || t.status === "deleted" ? [] : [`attach: nexus attach ${t.id}`],
     `size: ${p.resources.cpus} CPUs, ${p.resources.memoryGiB} GiB memory, ${p.resources.diskGiB} GiB disk${p.resources.nestedVirtualization === true ? ", nested virtualization" : ""}`,
     ...t.placement === undefined ? [] : [`placement: ${placementText(t.placement)}`],
@@ -87,14 +76,14 @@ export function detailText({ thread: t, pylon: p, agent, sessions, previews, por
     ...p.retryRefused === null ? [] : [`retry refused: ${p.retryRefused}`],
     ...(agent?.parkedTasks ?? 0) === 0 ? [] : [`parked tasks: ${agent!.parkedTasks}. \`nexus retry ${t.id}\` runs them again`],
     // A session in no pane is closed by its ID.
-    ...sessions.map((s) => `session: ${s.harness}${s.title === null ? "" : ` ${JSON.stringify(s.title)}`} ${s.herdrPane === null ? `as ${s.id}` : `in pane ${s.herdrPane}`}, ${s.state === "paused" ? said?.paused ?? "paused"
+    ...sessions.map((s) => `session: ${s.harness}${s.title === null ? "" : ` ${JSON.stringify(s.title)}`} ${s.herdrPane === null ? `as ${s.id}` : `in pane ${s.herdrPane}`}, ${s.state === "paused" ? said.paused
       : s.state === "failed" ? `failed: ${s.message}` : s.status}`),
     ...previews.map((v) => `preview: ${v.service} at ${v.url}${v.failed !== null ? `, not ready: ${v.failed}` : v.ready ? "" : ", not ready"}`),
     ...(ports ?? []).map((l) => `port: ${l.port}${l.service === null ? "" : `, service ${l.service}`}${l.preview === null ? "" : `, previewed at ${l.preview.url}`}`),
-    ...said === undefined ? [] : [said.prWatch],
+    said.prWatch,
     ...prWatch.enabled && prWatch.error ? [prWatch.error] : [],
     ...pullRequests.map((pr) => `PR #${pr.number}: ${pr.title} — ${pr.state}, checks ${pr.checks}, review ${pr.review} ${pr.url}`),
-    ...review == null ? [] : [reviewText(review, said?.review)],
+    ...said.review ?? [],
     ...questions.map(questionText),
     ...judgments.map(judgmentText),
     ...outputs.map((o) => `output: ${o.kind} ${o.ref}`),

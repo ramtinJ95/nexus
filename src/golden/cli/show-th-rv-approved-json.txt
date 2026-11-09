@@ -71,59 +71,6 @@ exit 0
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-96",
-    "builder": "th-rv-approved",
-    "reviewer": "th-rv-approved-review",
-    "pr": {
-      "repo": "ramtinJ95/storefront",
-      "number": 96,
-      "url": "https://github.com/ramtinJ95/storefront/pull/96",
-      "title": "chore(deps): bump stripe-js to 5.2",
-      "branch": "nexus/96"
-    },
-    "reviewerKind": "claude",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "claude-sonnet-5-5"
-    },
-    "maxRounds": 5,
-    "land": null,
-    "auto": true,
-    "merged": null,
-    "waiver": null,
-    "expect": "rv-96:t",
-    "sent": 2,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013800000,
-    "nudges": 0,
-    "startedAt": 1800007200000,
-    "rounds": [
-      {
-        "head": "8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "approve",
-          "findings": [],
-          "reserved": [],
-          "notCheckedLive": null
-        },
-        "check": {
-          "passed": true,
-          "output": "ℹ tests 412\nℹ pass 412\nℹ fail 0"
-        },
-        "answers": null,
-        "live": {
-          "kind": "absent"
-        }
-      }
-    ],
-    "phase": {
-      "kind": "approved"
-    }
-  },
   "reviewView": {
     "id": "rv-96",
     "pr": 96,

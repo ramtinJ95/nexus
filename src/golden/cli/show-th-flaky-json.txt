@@ -83,150 +83,6 @@ exit 0
       "summary": "The probe client now retries a connection reset with jittered backoff, up to a 30 s deadline."
     }
   ],
-  "review": {
-    "id": "rv-398",
-    "builder": "th-flaky",
-    "reviewer": "th-flaky-review",
-    "pr": {
-      "repo": "ramtinJ95/nexus",
-      "number": 398,
-      "url": "https://github.com/ramtinJ95/nexus/pull/398",
-      "title": "fix: the probe client retries a reset with backoff",
-      "branch": "nexus/398"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": null,
-    "auto": true,
-    "merged": null,
-    "waiver": null,
-    "expect": "rv-398:t",
-    "sent": 3,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013200000,
-    "nudges": 0,
-    "startedAt": 1800003600000,
-    "rounds": [
-      {
-        "head": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "changes",
-          "findings": [
-            {
-              "id": "F1",
-              "priority": "P1",
-              "where": "src/protocol/client.ts:212",
-              "summary": "The deadline restarts on each retry, so a node that flaps never gives up.",
-              "detail": null
-            },
-            {
-              "id": "F2",
-              "priority": "P3",
-              "where": "src/protocol/client.ts:190",
-              "summary": "Name the magic 500 ms.",
-              "detail": null
-            }
-          ],
-          "reserved": [],
-          "notCheckedLive": null
-        },
-        "check": null,
-        "answers": [
-          {
-            "id": "F1",
-            "action": "fixed",
-            "reason": "The deadline is set once per call now."
-          },
-          {
-            "id": "F2",
-            "action": "fixed",
-            "reason": "Named it baseDelayMs."
-          }
-        ]
-      },
-      {
-        "head": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "changes",
-          "findings": [
-            {
-              "id": "F3",
-              "priority": "P2",
-              "where": "src/protocol/client.test.ts",
-              "summary": "No test covers a reset after the deadline.",
-              "detail": null
-            }
-          ],
-          "reserved": [],
-          "notCheckedLive": null
-        },
-        "check": null,
-        "answers": [
-          {
-            "id": "F3",
-            "action": "rejected",
-            "reason": "probe client gives up after the deadline covers it, at line 140."
-          }
-        ]
-      },
-      {
-        "head": "a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "changes",
-          "findings": [
-            {
-              "id": "F3",
-              "priority": "P2",
-              "where": "src/protocol/client.test.ts",
-              "summary": "No test covers a reset after the deadline.",
-              "detail": "The cited test resets before the deadline, not after."
-            }
-          ],
-          "reserved": [],
-          "notCheckedLive": null
-        },
-        "check": null,
-        "answers": null
-      }
-    ],
-    "phase": {
-      "kind": "needs-person",
-      "cause": "rounds",
-      "reasons": [
-        "Finding F3 (P2) is still open after the last round.",
-        "The builder has not answered F3 in round 3.",
-        "The pull request's GitHub checks are pending."
-      ],
-      "holds": [
-        {
-          "code": "open-findings",
-          "text": "Finding F3 (P2) is still open after the last round."
-        },
-        {
-          "code": "unanswered",
-          "text": "The builder has not answered F3 in round 3."
-        },
-        {
-          "code": "github-checks",
-          "text": "The pull request's GitHub checks are pending."
-        }
-      ],
-      "label": {
-        "state": "added"
-      }
-    }
-  },
   "reviewView": {
     "id": "rv-398",
     "pr": 398,
@@ -291,7 +147,10 @@ exit 0
     "paused": "paused, resumes on wake",
     "prWatch": "PR watch: off (no control-plane GitHub token configured)",
     "review": [
-      "review rv-398 of PR #398, started on its own: needs-person, round 3 of 5, reviewer th-flaky-review on gpt-6-astra, labelled \"needs human review\""
+      "review rv-398 of PR #398, started on its own: needs-person, round 3 of 5, reviewer th-flaky-review on gpt-6-astra, labelled \"needs human review\"",
+      "needs you: Finding F3 (P2) is still open after the last round.",
+      "needs you: The builder has not answered F3 in round 3.",
+      "needs you: The pull request's GitHub checks are pending."
     ]
   }
 }

@@ -6,14 +6,15 @@ import type { answerSchema, landSchema, reviewSchema } from "./reviews-parse.ts"
 import { route } from "./route.ts";
 
 export type { Review } from "../control/review-model.ts";
+export type { ReviewView } from "../control/review-view.ts";
 export type { Question } from "../control/questions.ts";
 
 /** A holds question's options. Land on it is a Land press waiving the holds it names. */
 export const landOption = "Land";
 export const holdOptions = [landOption, "Leave it"] as const;
 
-/** A review as its routes reply: the record, and its lines as `nexus` prints them. A control plane older than 0.73.0 sends no `said`. */
-export type SaidReview = Review & { said?: readonly string[] };
+/** A review as its routes reply: the record, and its lines as `nexus` prints them. */
+export type SaidReview = Review & { said: readonly string[] };
 
 export const reviewRoutes = {
   start: route<SaidReview, z.input<typeof reviewSchema>>()("POST", "/v1/threads/{thread}/review"),

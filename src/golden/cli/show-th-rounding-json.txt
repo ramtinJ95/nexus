@@ -88,68 +88,6 @@ exit 0
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-91",
-    "builder": "th-rounding",
-    "reviewer": "th-rounding-review",
-    "pr": {
-      "repo": "ramtinJ95/storefront",
-      "number": 91,
-      "url": "https://github.com/ramtinJ95/storefront/pull/91",
-      "title": "fix(cart): keep totals in integer cents",
-      "branch": "nexus/91"
-    },
-    "reviewerKind": "claude",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "claude-sonnet-5-5"
-    },
-    "maxRounds": 5,
-    "land": null,
-    "auto": true,
-    "merged": null,
-    "waiver": null,
-    "expect": "rv-91:t",
-    "sent": 3,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013200000,
-    "nudges": 0,
-    "startedAt": 1800003600000,
-    "rounds": [
-      {
-        "head": "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "changes",
-          "findings": [
-            {
-              "id": "F1",
-              "priority": "P0",
-              "where": "src/cart/totals.ts:40",
-              "summary": "Refunds still use floats, so a partial refund can be off by a cent.",
-              "detail": "refundLine() divides by 100 before summing."
-            },
-            {
-              "id": "F2",
-              "priority": "P2",
-              "where": "src/cart/format.ts",
-              "summary": "Use Intl.NumberFormat for the currency.",
-              "detail": null
-            }
-          ],
-          "reserved": [],
-          "notCheckedLive": null
-        },
-        "check": null,
-        "answers": null
-      }
-    ],
-    "phase": {
-      "kind": "fixing"
-    }
-  },
   "reviewView": {
     "id": "rv-91",
     "pr": 91,

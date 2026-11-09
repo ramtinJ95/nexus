@@ -71,79 +71,6 @@ exit 0
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-97",
-    "builder": "th-rv-needs-person-holds",
-    "reviewer": "th-rv-needs-person-holds-review",
-    "pr": {
-      "repo": "ramtinJ95/storefront",
-      "number": 97,
-      "url": "https://github.com/ramtinJ95/storefront/pull/97",
-      "title": "feat(db): drop the legacy carts table",
-      "branch": "nexus/97"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": null,
-    "auto": true,
-    "merged": null,
-    "waiver": null,
-    "expect": "rv-97:t",
-    "sent": 2,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013800000,
-    "nudges": 0,
-    "startedAt": 1800007200000,
-    "rounds": [
-      {
-        "head": "e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "approve",
-          "findings": [],
-          "reserved": [],
-          "notCheckedLive": "## Not checked live\n\nThe drop against production's 2 million rows."
-        },
-        "check": {
-          "passed": true,
-          "output": "ℹ tests 412\nℹ pass 412\nℹ fail 0"
-        },
-        "answers": null,
-        "live": {
-          "kind": "absent"
-        }
-      }
-    ],
-    "phase": {
-      "kind": "needs-person",
-      "cause": "policy",
-      "reasons": [
-        "Always needs the person: database migrations that delete or rewrite existing data, as it changes migrations/0042_drop_legacy_carts.sql.",
-        "The project asks for a second reviewer here, but none ran: no Claude model other than the builder's and the reviewer's could run."
-      ],
-      "holds": [
-        {
-          "code": "reserved-path:destructive-migration",
-          "text": "Always needs the person: database migrations that delete or rewrite existing data, as it changes migrations/0042_drop_legacy_carts.sql."
-        },
-        {
-          "code": "no-second-reviewer",
-          "text": "The project asks for a second reviewer here, but none ran: no Claude model other than the builder's and the reviewer's could run."
-        }
-      ]
-    },
-    "second": {
-      "kind": "none",
-      "rule": "the change touches migrations/",
-      "why": "no Claude model other than the builder's and the reviewer's could run"
-    }
-  },
   "reviewView": {
     "id": "rv-97",
     "pr": 97,
@@ -254,7 +181,9 @@ exit 0
     "review": [
       "review rv-97 of PR #97, started on its own: needs-person, round 1 of 5, reviewer th-rv-needs-person-holds-review on gpt-6-astra",
       "round 1: the reviewer th-rv-needs-person-holds-review on gpt-6-astra approves. No second reviewer runs, though the change touches migrations/: no Claude model other than the builder's and the reviewer's could run",
-      "no live check: e0e0e0e0e0e0 has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live"
+      "no live check: e0e0e0e0e0e0 has no .nexus/verify, so the landing reads the pull request's statement of what could not be checked live",
+      "needs you: Always needs the person: database migrations that delete or rewrite existing data, as it changes migrations/0042_drop_legacy_carts.sql.",
+      "needs you: The project asks for a second reviewer here, but none ran: no Claude model other than the builder's and the reviewer's could run."
     ]
   }
 }

@@ -71,60 +71,6 @@
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-410",
-    "builder": "th-rv-reviewing-starting",
-    "reviewer": "th-rv-reviewing-starting-review",
-    "pr": {
-      "repo": "ramtinJ95/nexus",
-      "number": 410,
-      "url": "https://github.com/ramtinJ95/nexus/pull/410",
-      "title": "feat(cli): nexus threads --watch",
-      "branch": "nexus/410"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": null,
-    "auto": true,
-    "merged": null,
-    "waiver": null,
-    "expect": "rv-410:t",
-    "sent": 2,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013800000,
-    "nudges": 0,
-    "startedAt": 1800007200000,
-    "rounds": [
-      {
-        "head": "1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a",
-        "base": "main",
-        "verdict": null,
-        "check": null,
-        "answers": null,
-        "secondVerdict": null
-      }
-    ],
-    "phase": {
-      "kind": "reviewing",
-      "check": {
-        "startedAt": 1800014340000,
-        "thread": null
-      }
-    },
-    "second": {
-      "kind": "starting",
-      "rule": "the change touches src/cli/",
-      "model": "claude-sonnet-5-5",
-      "since": 1800014280000,
-      "tried": null,
-      "why": null
-    }
-  },
   "reviewView": {
     "id": "rv-410",
     "pr": 410,

@@ -71,63 +71,6 @@ exit 0
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-414",
-    "builder": "th-rv-merging-waiting",
-    "reviewer": "th-rv-merging-waiting-review",
-    "pr": {
-      "repo": "ramtinJ95/nexus",
-      "number": 414,
-      "url": "https://github.com/ramtinJ95/nexus/pull/414",
-      "title": "feat(dashboard): show each node's release",
-      "branch": "nexus/414"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": {
-      "requestedBy": "laptop"
-    },
-    "auto": true,
-    "merged": null,
-    "waiver": null,
-    "expect": "rv-414:t",
-    "sent": 2,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013800000,
-    "nudges": 0,
-    "startedAt": 1800007200000,
-    "rounds": [
-      {
-        "head": "aeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeae",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "approve",
-          "findings": [],
-          "reserved": [],
-          "notCheckedLive": null
-        },
-        "check": {
-          "passed": true,
-          "output": "ℹ tests 412\nℹ pass 412\nℹ fail 0"
-        },
-        "answers": null,
-        "live": {
-          "kind": "absent"
-        }
-      }
-    ],
-    "phase": {
-      "kind": "merging",
-      "authorized": null,
-      "waiting": "another landing that deploys is under way, #413"
-    }
-  },
   "reviewView": {
     "id": "rv-414",
     "pr": 414,

@@ -70,49 +70,6 @@
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-418",
-    "builder": "th-rv-cancelled-person",
-    "reviewer": "th-rv-cancelled-person-review",
-    "pr": {
-      "repo": "ramtinJ95/nexus",
-      "number": 418,
-      "url": "https://github.com/ramtinJ95/nexus/pull/418",
-      "title": "feat(cli): nexus logs --follow",
-      "branch": "nexus/418"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": null,
-    "auto": true,
-    "merged": null,
-    "waiver": null,
-    "expect": "rv-418:t",
-    "sent": 2,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013800000,
-    "nudges": 0,
-    "startedAt": 1800007200000,
-    "rounds": [
-      {
-        "head": "f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2",
-        "base": "main",
-        "verdict": null,
-        "check": null,
-        "answers": null
-      }
-    ],
-    "phase": {
-      "kind": "cancelled",
-      "who": "person",
-      "by": "laptop"
-    }
-  },
   "reviewView": {
     "id": "rv-418",
     "pr": 418,

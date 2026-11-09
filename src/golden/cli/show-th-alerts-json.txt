@@ -72,62 +72,6 @@ exit 0
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-403",
-    "builder": "th-alerts",
-    "reviewer": "th-alerts-review",
-    "pr": {
-      "repo": "ramtinJ95/nexus",
-      "number": 403,
-      "url": "https://github.com/ramtinJ95/nexus/pull/403",
-      "title": "feat: turn the control plane's daily report into health alerts",
-      "branch": "nexus/403"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": {
-      "requestedBy": "nLAPTOP"
-    },
-    "auto": true,
-    "merged": "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4",
-    "waiver": null,
-    "expect": "rv-403:t",
-    "sent": 3,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013200000,
-    "nudges": 0,
-    "startedAt": 1800003600000,
-    "rounds": [
-      {
-        "head": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "approve",
-          "findings": [],
-          "reserved": [],
-          "notCheckedLive": null
-        },
-        "check": {
-          "passed": true,
-          "output": "> nexus@0.0.0 test\n> node --test 'src/**/*.test.ts'\n\n✔ probe client reconnects after a reset (412ms)\n✔ probe client gives up after the deadline (1.2s)\n✔ backoff stays under its cap (3ms)\nℹ tests 1342\nℹ suites 0\nℹ pass 1342\nℹ fail 0\nℹ duration_ms 84213"
-        },
-        "answers": null,
-        "live": {
-          "kind": "absent"
-        }
-      }
-    ],
-    "phase": {
-      "kind": "landed",
-      "commit": "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4"
-    }
-  },
   "reviewView": {
     "id": "rv-403",
     "pr": 403,

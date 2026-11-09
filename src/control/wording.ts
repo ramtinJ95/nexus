@@ -3,7 +3,7 @@
  * so a state reads one way wherever it shows. A sentence that names a limit or a period reads it from the constant
  * that enforces it.
  */
-import type { ThreadDetail, ThreadNeed, ThreadSaid } from "./wire.ts";
+import type { ServerDetail, ThreadDetail, ThreadNeed, ThreadSaid } from "./wire.ts";
 import type { Thread } from "./thread-store.ts";
 import type { Action } from "./dashboard/contract.ts";
 import { usageLimitText } from "../contract/threads.ts";
@@ -111,13 +111,23 @@ export function liveNote(r: Review): string | null {
 }
 export const roundOf = (r: Pick<Review, "rounds" | "maxRounds">) => `round ${roundsSpent(r)} of ${r.maxRounds}`;
 
-/** A review's lines as `nexus` prints them: its line, then its reviewers', round's and live check's notes. */
+/**
+ * A review's lines as `nexus` prints them: its line, its reviewers', round's and live check's notes, a failed live
+ * check's last 20 lines of output, what it needs from the person, and its waiver.
+ */
 export const reviewSaid = (r: Review): string[] => {
   const { lead, tail } = reviewLine(r);
-  return [`${lead}${r.reviewer}${tail}`, ...[reviewersNote(r), roundNote(r), liveNote(r)].filter((line) => line !== null)];
+  const { live } = r.rounds.at(-1)!;
+  return [
+    `${lead}${r.reviewer}${tail}`,
+    ...[reviewersNote(r), roundNote(r), liveNote(r)].filter((line) => line !== null),
+    ...live?.kind === "ran" && !live.passed ? live.output.split("\n").slice(-20).map((line) => `  ${line}`) : [],
+    ...r.phase.kind === "needs-person" ? r.phase.holds.map((h) => `needs you: ${h.text}`) : [],
+    ...r.waiver === null ? [] : [`waived by ${r.waiver.by}${r.waiver.yolo === undefined ? "" : `, by project ${r.waiver.yolo}'s yolo setting,`} at ${r.waiver.head}${r.waiver.from === undefined ? "" : ` (carried from ${r.waiver.from})`}, ${new Date(r.waiver.at).toISOString()}:`, ...r.waiver.holds.map((hold) => `  ${hold}`)],
+  ];
 };
 
-export function threadSaid(d: Omit<ThreadDetail, "said">): ThreadSaid {
+export function threadSaid(d: Omit<ServerDetail, "said">): ThreadSaid {
   const { thread: t, pylon: p } = d;
   return {
     guest: p.notAnswering === undefined ? null : `as its last ${p.notAnswering.timeouts} guest commands got no answer, so messages, files and diffs fail. ${freshVm(t.id)}`,
@@ -197,7 +207,7 @@ const needRows: { [K in NeedKind]: NeedRow<K> } = {
 };
 
 /** The pull request a review is of, as the PR watch last read it. */
-export const reviewPr = (d: Pick<ThreadDetail, "pullRequests" | "review" | "prWatch">) => d.review === null ? undefined : reviewedPr(d.review, d.pullRequests, d.prWatch.stopped);
+export const reviewPr = (d: Pick<ServerDetail, "pullRequests" | "review" | "prWatch">) => d.review === null ? undefined : reviewedPr(d.review, d.pullRequests, d.prWatch.stopped);
 
 /** A review waits on the person to land it once approved, and for anything else once it is held or cannot land. */
 export function needKind(n: ThreadNeed): NeedKind {

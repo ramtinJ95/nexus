@@ -4,7 +4,7 @@
 import type { Registry } from "../registry.ts";
 import type { Preview, Thread } from "../thread-store.ts";
 import type { ThreadAgents } from "../thread-agent.ts";
-import type { ThreadDetail, ThreadRow } from "../wire.ts";
+import type { ServerDetail, ThreadDetail, ThreadRow } from "../wire.ts";
 import { actualState, desiredPhase, keptPastDay, retryRefusal } from "../reconcile.ts";
 import { agentView, type AgentView } from "../../contract/threads.ts";
 import { bootNetwork } from "../threads.ts";
@@ -68,7 +68,7 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
     return { ...t, attention: registry.attention(t.id), desired: desiredPhase(t, Date.now()), pylon: { node: pylon.node, actualState, failed: pylon.failed } };
   }
 
-  function detail(t: Thread): ThreadDetail {
+  function detail(t: Thread): ServerDetail {
     const state = pylonState(t);
     const previews = registry.previews(t.pylonId);
     const watch = registry.prWatch(t.id);
@@ -76,7 +76,7 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
     const review = registry.review(t.id);
     const questions = registry.questions(t.id);
     const now = Date.now();
-    const d: Omit<ThreadDetail, "said"> = {
+    const d: Omit<ServerDetail, "said"> = {
       thread: t,
       ...claudeWorker === undefined ? {} : { claudeWorker, resume: registry.claudeResume(t.id) },
       attention: registry.attention(t.id), seenAt: t.seenAt, lastReplyAt: t.lastReplyAt,
@@ -101,11 +101,17 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
     return { ...d, said: threadSaid(d) };
   }
 
+  /** The detail the API serves, without the stored review, whose token only the review loop may send. */
+  function shown(t: Thread): ThreadDetail {
+    const { review: _, ...served } = detail(t);
+    return served;
+  }
+
   async function conversation(t: Thread): Promise<AgentView | null> {
     const view = await agents[registry.agent(t).kind].view(t);
     return view === null ? null : agentView(view);
   }
 
-  return { pylonState, row, detail, conversation };
+  return { pylonState, row, detail, shown, conversation };
 }
 export type ThreadViews = ReturnType<typeof threadViews>;

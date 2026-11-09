@@ -1,6 +1,7 @@
 /**
- * What the API serves of a thread's review beside the stored record: its public facts, what the person's Land press
- * does now and the holds it reads, so a client renders the merge policy's answer instead of running the policy itself.
+ * What the API serves of a thread's review in place of the stored record: its public facts, what the person's Land
+ * press does now and the holds it reads, so a client renders the merge policy's answer instead of running the policy
+ * itself. The record's token, its asks and its outbox stay on the control plane.
  */
 import type { ThreadId } from "../ids.ts";
 import { holdRule, type Hold, type HoldRule } from "./holds.ts";

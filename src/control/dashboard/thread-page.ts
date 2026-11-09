@@ -5,7 +5,7 @@
 import { desiredPhase, isOpenStatus } from "../reconcile.ts";
 import { linkedPort } from "../../services-file.ts";
 import { harnessNamed, type SessionHarness } from "../../protocol/agent-kinds.ts";
-import type { ThreadDetail, ThreadRow } from "../wire.ts";
+import type { ServerDetail, ThreadDetail, ThreadRow } from "../wire.ts";
 import type { NodeRecord } from "../node-store.ts";
 import type { Preview, Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
@@ -203,7 +203,7 @@ const panes = [["changes", "Changes", "changes"], ["previews", "Previews", "glob
  * The inspector's tabs are radios, so the one picked stays picked while the regions under it are swapped, and
  * shows its pane without a script. The Changes pane is filled by client.js, so it is outside every live region.
  */
-function inspector(d: ThreadDetail, node: NodeRecord, now: number, usage: UsageTotals, worker: string | null): Html {
+function inspector(d: ServerDetail, node: NodeRecord, now: number, usage: UsageTotals, worker: string | null): Html {
   // The Previews tab counts what its pane lists: the previews and the ports without one.
   const listed = d.previews.length + (d.ports?.filter((l) => l.preview === null).length ?? 0);
   return html`<aside class="inspect" aria-label="Thread details">
@@ -219,7 +219,7 @@ function inspector(d: ThreadDetail, node: NodeRecord, now: number, usage: UsageT
 </aside>`;
 }
 
-function inspectorPanes(d: ThreadDetail, node: NodeRecord, now: number, usage: UsageTotals, worker: string | null): Html {
+function inspectorPanes(d: ServerDetail, node: NodeRecord, now: number, usage: UsageTotals, worker: string | null): Html {
   const { thread: t, pylon } = d;
   const count = (n: number) => html`<span class="count">${n}</span>`;
   const desired = desiredPhase(t, now);

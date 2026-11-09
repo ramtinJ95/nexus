@@ -19,10 +19,12 @@ import type { Review } from "./review-model.ts";
 import type { ReviewView } from "./review-view.ts";
 
 /** One card of the inbox for a thread. */
-export type ThreadNeed = PersonNeed & { d: ThreadDetail };
+export type ThreadNeed = PersonNeed & { d: ServerDetail };
+/** A thread's detail as the control plane's dashboard and inbox read it: what the API serves, and the stored review, which it does not serve. */
+export type ServerDetail = ThreadDetail & { review: Review | null };
 export interface ThreadDetail {
   claudeWorker?: { model: string | null; state: ClaudeWorkerState; message?: string };
-  /** Nexus resuming the Claude worker after its turns died, or null. A control plane older than 0.64.0 sends none. */
+  /** Nexus resuming the Claude worker after its turns died, or null. */
   resume?: ClaudeResume | null;
   attention: Attention;
   seenAt: number | null;
@@ -52,11 +54,10 @@ export interface ThreadDetail {
   outputs: readonly Output[];
   prWatch: { enabled: boolean; stopped: boolean; error: string | null };
   pullRequests: readonly WatchedPr[];
-  review: Review | null;
-  /** What the person's Land press does to `review` now, and the holds it reads, or null without a review. A control plane older than 0.71.0 sends none. */
-  reviewView?: ReviewView | null;
-  /** Why the archived thread's disk is kept past its 24 hours, or null. A control plane older than 0.71.0 sends none. */
-  keptPastDay?: string | null;
+  /** The thread's review, what the person's Land press does to it now and the holds it reads, or null without a review. */
+  reviewView: ReviewView | null;
+  /** Why the archived thread's disk is kept past its 24 hours, or null. */
+  keptPastDay: string | null;
   /** Every question the thread asked, answered or not, in the order they were asked. */
   questions: readonly ThreadQuestion[];
   /** Every judgment of the thread's failed pylon, oldest failure first. */
@@ -67,8 +68,7 @@ export interface ThreadDetail {
   attach: string;
   /** Null for a thread that has no conversation. A parked task holds the run until it is retried. */
   agent: { parkedTasks: number } | null;
-  /** A control plane older than 0.73.0 sends none. */
-  said?: ThreadSaid;
+  said: ThreadSaid;
 }
 
 /** The sentences `nexus show` prints of a thread's state, as control/wording.ts words them, null where the state is not. */

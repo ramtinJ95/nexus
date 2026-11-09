@@ -70,65 +70,6 @@
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-415",
-    "builder": "th-rv-deploying",
-    "reviewer": "th-rv-deploying-review",
-    "pr": {
-      "repo": "ramtinJ95/nexus",
-      "number": 415,
-      "url": "https://github.com/ramtinJ95/nexus/pull/415",
-      "title": "fix(control): close idle SSE streams after 10 minutes",
-      "branch": "nexus/415"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": {
-      "requestedBy": "laptop"
-    },
-    "auto": true,
-    "merged": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
-    "waiver": null,
-    "expect": "rv-415:t",
-    "sent": 2,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013800000,
-    "nudges": 0,
-    "startedAt": 1800007200000,
-    "rounds": [
-      {
-        "head": "bfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfbf",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "approve",
-          "findings": [],
-          "reserved": [],
-          "notCheckedLive": null
-        },
-        "check": {
-          "passed": true,
-          "output": "ℹ tests 412\nℹ pass 412\nℹ fail 0"
-        },
-        "answers": null,
-        "live": {
-          "kind": "absent"
-        }
-      }
-    ],
-    "phase": {
-      "kind": "deploying",
-      "commit": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1",
-      "previous": null,
-      "requested": false,
-      "deadline": 1800015000000
-    }
-  },
   "reviewView": {
     "id": "rv-415",
     "pr": 415,

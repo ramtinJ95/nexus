@@ -71,62 +71,6 @@ exit 0
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-417",
-    "builder": "th-rv-landed",
-    "reviewer": "th-rv-landed-review",
-    "pr": {
-      "repo": "ramtinJ95/nexus",
-      "number": 417,
-      "url": "https://github.com/ramtinJ95/nexus/pull/417",
-      "title": "docs: the review loop's phases",
-      "branch": "nexus/417"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": {
-      "requestedBy": "laptop"
-    },
-    "auto": true,
-    "merged": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3",
-    "waiver": null,
-    "expect": "rv-417:t",
-    "sent": 2,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013800000,
-    "nudges": 0,
-    "startedAt": 1800007200000,
-    "rounds": [
-      {
-        "head": "d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "approve",
-          "findings": [],
-          "reserved": [],
-          "notCheckedLive": null
-        },
-        "check": {
-          "passed": true,
-          "output": "ℹ tests 412\nℹ pass 412\nℹ fail 0"
-        },
-        "answers": null,
-        "live": {
-          "kind": "absent"
-        }
-      }
-    ],
-    "phase": {
-      "kind": "landed",
-      "commit": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
-    }
-  },
   "reviewView": {
     "id": "rv-417",
     "pr": 417,

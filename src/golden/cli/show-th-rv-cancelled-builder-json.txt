@@ -72,55 +72,6 @@ exit 0
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-419",
-    "builder": "th-rv-cancelled-builder",
-    "reviewer": "th-rv-cancelled-builder-review",
-    "pr": {
-      "repo": "ramtinJ95/nexus",
-      "number": 419,
-      "url": "https://github.com/ramtinJ95/nexus/pull/419",
-      "title": "chore: drop the v1 attach route",
-      "branch": "nexus/419"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": null,
-    "auto": true,
-    "merged": null,
-    "waiver": null,
-    "expect": "rv-419:t",
-    "sent": 2,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013800000,
-    "nudges": 0,
-    "startedAt": 1800007200000,
-    "rounds": [
-      {
-        "head": "f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "approve",
-          "findings": [],
-          "reserved": [],
-          "notCheckedLive": null
-        },
-        "check": null,
-        "answers": null
-      }
-    ],
-    "phase": {
-      "kind": "cancelled",
-      "who": "builder",
-      "status": "archived"
-    }
-  },
   "reviewView": {
     "id": "rv-419",
     "pr": 419,

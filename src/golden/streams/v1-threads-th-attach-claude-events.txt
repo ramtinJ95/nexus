@@ -37,7 +37,7 @@ data: {
       "id": "toolu_0002",
       "name": "Read",
       "input": {
-        "file_path": "/home/user/workspace/repo/src/control/attach.ts"
+        "file_path": "<repo>/src/control/attach.ts"
       }
     },
     {
@@ -58,7 +58,7 @@ data: {
       "id": "toolu_0003",
       "name": "Edit",
       "input": {
-        "file_path": "/home/user/workspace/repo/src/control/dashboard/terminal.js",
+        "file_path": "<repo>/src/control/dashboard/terminal.js",
         "old_string": "ws.onclose = () => done();",
         "new_string": "ws.onclose = (e) => retryable(e.code) ? reconnect() : done();"
       }

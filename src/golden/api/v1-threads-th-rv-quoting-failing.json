@@ -70,67 +70,6 @@
       "conflict": false
     }
   ],
-  "review": {
-    "id": "rv-95",
-    "builder": "th-rv-quoting-failing",
-    "reviewer": "th-rv-quoting-failing-review",
-    "pr": {
-      "repo": "ramtinJ95/storefront",
-      "number": 95,
-      "url": "https://github.com/ramtinJ95/storefront/pull/95",
-      "title": "fix(orders): show refunds on the order page",
-      "branch": "nexus/95"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": {
-      "requestedBy": "laptop"
-    },
-    "auto": true,
-    "merged": null,
-    "waiver": null,
-    "expect": "rv-95:t",
-    "sent": 2,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013800000,
-    "nudges": 0,
-    "startedAt": 1800007200000,
-    "rounds": [
-      {
-        "head": "7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "approve",
-          "findings": [],
-          "reserved": [],
-          "notCheckedLive": null
-        },
-        "check": {
-          "passed": true,
-          "output": "ℹ tests 412\nℹ pass 412\nℹ fail 0"
-        },
-        "answers": null,
-        "live": {
-          "kind": "absent"
-        }
-      }
-    ],
-    "phase": {
-      "kind": "quoting",
-      "asked": null,
-      "failing": {
-        "count": 4,
-        "last": "429 Too Many Requests: rate limit reached for gpt-6-astra",
-        "retryAt": 1800014580000
-      }
-    }
-  },
   "reviewView": {
     "id": "rv-95",
     "pr": 95,

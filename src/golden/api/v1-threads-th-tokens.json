@@ -82,112 +82,6 @@
       "summary": "A waking pylon asks the broker for a fresh GitHub token before its agent resumes, so pushes after a long sleep stop failing with 401."
     }
   ],
-  "review": {
-    "id": "rv-408",
-    "builder": "th-tokens",
-    "reviewer": "th-tokens-review",
-    "pr": {
-      "repo": "ramtinJ95/nexus",
-      "number": 408,
-      "url": "https://github.com/ramtinJ95/nexus/pull/408",
-      "title": "fix: a pylon gets a fresh GitHub token on wake",
-      "branch": "nexus/408"
-    },
-    "reviewerKind": "harness",
-    "models": {
-      "builder": "claude-opus-5-5",
-      "reviewer": "gpt-6-astra"
-    },
-    "maxRounds": 5,
-    "land": null,
-    "auto": true,
-    "merged": null,
-    "waiver": null,
-    "expect": "rv-408:t",
-    "sent": 3,
-    "outbox": null,
-    "asked": "",
-    "since": 1800013200000,
-    "nudges": 0,
-    "startedAt": 1800003600000,
-    "rounds": [
-      {
-        "head": "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "changes",
-          "findings": [
-            {
-              "id": "F1",
-              "priority": "P1",
-              "where": "src/control/secrets.ts:88",
-              "summary": "The old token stays valid until it expires, so a leaked one outlives the rotation.",
-              "detail": null
-            }
-          ],
-          "reserved": [],
-          "notCheckedLive": null
-        },
-        "check": null,
-        "answers": [
-          {
-            "id": "F1",
-            "action": "fixed",
-            "reason": "The broker revokes the old token once the new one is in place."
-          }
-        ]
-      },
-      {
-        "head": "282d29de282d29de282d29de282d29de282d29de",
-        "base": "main",
-        "verdict": {
-          "token": "t",
-          "verdict": "approve",
-          "findings": [
-            {
-              "id": "N1",
-              "priority": "P3",
-              "where": "src/control/secrets.ts:120",
-              "summary": "The retry count could be a named constant.",
-              "detail": null
-            }
-          ],
-          "reserved": [],
-          "notCheckedLive": "## Not checked live\n\nA real wake after the token expired: the demo pylons never sleep a day."
-        },
-        "check": {
-          "passed": true,
-          "output": "> nexus@0.0.0 test\n> node --test 'src/**/*.test.ts'\n\n✔ probe client reconnects after a reset (412ms)\n✔ probe client gives up after the deadline (1.2s)\n✔ backoff stays under its cap (3ms)\nℹ tests 1342\nℹ suites 0\nℹ pass 1342\nℹ fail 0\nℹ duration_ms 84213"
-        },
-        "answers": null,
-        "live": {
-          "kind": "ran",
-          "thread": "th-tokens-verify",
-          "passed": true,
-          "output": "ok wake: fresh token in 1.4 s"
-        }
-      }
-    ],
-    "phase": {
-      "kind": "needs-person",
-      "cause": "policy",
-      "reasons": [
-        "Always needs the person: changes to secrets, as it changes src/control/secrets.ts.",
-        "The change at 282d29de282d differs from the one you waived at d1d1d1d1d1d1."
-      ],
-      "holds": [
-        {
-          "code": "reserved-path:secrets",
-          "text": "Always needs the person: changes to secrets, as it changes src/control/secrets.ts."
-        },
-        {
-          "code": "waiver-not-carried",
-          "text": "The change at 282d29de282d differs from the one you waived at d1d1d1d1d1d1."
-        }
-      ]
-    }
-  },
   "reviewView": {
     "id": "rv-408",
     "pr": 408,
@@ -250,7 +144,9 @@
     "prWatch": "PR watch: off (no control-plane GitHub token configured)",
     "review": [
       "review rv-408 of PR #408, started on its own: needs-person, round 2 of 5, reviewer th-tokens-review on gpt-6-astra",
-      "live check passed at 282d29de282d"
+      "live check passed at 282d29de282d",
+      "needs you: Always needs the person: changes to secrets, as it changes src/control/secrets.ts.",
+      "needs you: The change at 282d29de282d differs from the one you waived at d1d1d1d1d1d1."
     ]
   }
 }

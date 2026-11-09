@@ -11,7 +11,7 @@ import { ports } from "../node-base/node-layout.ts";
  * The oldest control plane this CLI reads, raised when the CLI starts relying on something newer. 0.53.0 is the first
  * that reports its version, so one that reports none is older.
  */
-export const minControlVersion = "0.53.0";
+export const minControlVersion = "0.74.0";
 /** No retry fixes a control plane older than `minControlVersion`. */
 class OutdatedControl extends CliError {}
 export const transient = (err: CliError): err is CliError & { kind: "unreachable" | "failed" } => (err.kind === "unreachable" || err.kind === "failed") && !(err instanceof OutdatedControl);

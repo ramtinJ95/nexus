@@ -1,7 +1,7 @@
 /** Renders the home page: what waits on the person beside the work in flight, and the preview of a thread picked from either. */
 import { desiredPhase } from "../reconcile.ts";
 import type { NodeName } from "../../ids.ts";
-import type { ThreadDetail, ThreadNeed } from "../wire.ts";
+import type { ServerDetail, ThreadNeed } from "../wire.ts";
 import type { Thread } from "../thread-store.ts";
 import { landsOnItsOwn, type Project } from "../project.ts";
 import { cannotLand, settled, type Review } from "../review-model.ts";
@@ -193,7 +193,7 @@ ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</s
  * person at, and for any other thread its role line, then its pull request and round, its pylon, and the latest reply
  * once the person picked it, as reading it costs a read of the conversation.
  */
-function whereNow(c: Context, h: HomeView, d: ThreadDetail, life: Life, reply: Latest["reply"]): Html {
+function whereNow(c: Context, h: HomeView, d: ServerDetail, life: Life, reply: Latest["reply"]): Html {
   // A review still under way names the pull request Land merges. One that ended may be of an older one.
   const r = d.review !== null && !settled(d.review) ? d.review : null;
   const pr = r?.pr ?? d.pullRequests.find((x) => x.state === "open") ?? d.pullRequests.at(-1);
