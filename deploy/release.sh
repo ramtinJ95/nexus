@@ -98,9 +98,6 @@ prepare_probe() {
   install_release "$1"
   [ -e "$etc/secrets.env" ] || install -o root -g nexus -m 0640 "$1/deploy/secrets.example.env" "$etc/secrets.env"
   install_unit "$1/deploy/nexus-probe.service" nexus-probe.service
-  # `nexus attach` goes through the control plane now. A sudo grant for the old node-side helper would outlive it.
-  rm -f /usr/local/bin/nexus-attach /etc/sudoers.d/nexus-attach
-  if getent group nexus-attach >/dev/null; then groupdel nexus-attach; fi
 }
 
 install_unit() {
