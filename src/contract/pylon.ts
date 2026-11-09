@@ -1,4 +1,4 @@
-/** It imports nothing at run time, so a browser can bundle it. */
+/** It imports only route.ts at run time, so a browser can bundle it. */
 import type { Preview } from "../control/thread-store.ts";
 import type { SessionHarness } from "../protocol/agent-kinds.ts";
 import { pylonWaitMs, queryOf, route, type FileBytes, type QueryCodec } from "./route.ts";

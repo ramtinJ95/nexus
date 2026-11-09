@@ -1,4 +1,4 @@
-/** It imports nothing at run time, so a browser can bundle it. */
+/** It imports only route.ts at run time, so a browser can bundle it. */
 import type { z } from "zod";
 import type { ConversationView } from "@earendil-works/pi-durable";
 import type { ProjectId, ThreadId } from "../ids.ts";

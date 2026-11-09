@@ -1,4 +1,4 @@
-/** It imports nothing at run time, so a browser can bundle it. */
+/** It imports only route.ts at run time, so a browser can bundle it. */
 import type { z } from "zod";
 import type { DrainReply, ReleaseView } from "../protocol/deploy.ts";
 import type { ImageManifest } from "../protocol/images.ts";

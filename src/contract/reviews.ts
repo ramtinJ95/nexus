@@ -1,4 +1,4 @@
-/** It imports nothing at run time, so a browser can bundle it. */
+/** It imports only route.ts at run time, so a browser can bundle it. */
 import type { z } from "zod";
 import type { Review } from "../control/review-model.ts";
 import type { Question } from "../control/questions.ts";

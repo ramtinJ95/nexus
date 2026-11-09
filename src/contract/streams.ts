@@ -1,4 +1,4 @@
-/** It imports nothing at run time, so a browser can bundle it. */
+/** It imports only route.ts at run time, so a browser can bundle it. */
 import type { EntryRecord, JsonObject } from "@earendil-works/pi-durable";
 import type { NexusEvent } from "../control/events.ts";
 import type { ClaudeEntry } from "../control/claude-transcript.ts";

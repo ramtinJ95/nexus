@@ -92,7 +92,6 @@ const statusNeeds: Readonly<Record<"kept" | "open" | "pylon" | "active", { refus
   pylon: { refuses: ["archived", "deleted"], paused: true },
   active: { refuses: ["idle", "archived", "deleted"], paused: true },
 };
-/** What a route needs of a thread: a status, and an agent of one kind. */
 interface Need { status?: keyof typeof statusNeeds; agent?: "harness" | "claude" }
 
 export const threadWaker = (registry: Pick<Registry, "pylon">, wake: (node: NodeName) => void) => (t: Pick<Thread, "pylonId">) => wake(registry.pylon(t.pylonId)!.node);

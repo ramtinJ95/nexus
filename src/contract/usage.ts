@@ -1,4 +1,4 @@
-/** The dashboard and the CLI both print the usage report with these. It imports nothing at run time. */
+/** The dashboard and the CLI both print the usage report with these formatters, so the two read alike. It imports nothing at run time. */
 import type { Tokens } from "../control/agent-usage.ts";
 import type { NodeName, ProjectId, ThreadId } from "../ids.ts";
 
