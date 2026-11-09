@@ -14,8 +14,8 @@ import type { ThreadId } from "../ids.ts";
 
 type AgentConversationRegistry = Pick<Registry, "threads" | "nodes">;
 
-/** In order: a reply of the agent's, or a message to it and whether the person wrote it. */
-export type Message = { role: "assistant"; text: string } | { role: "user"; person: boolean };
+/** In order: a reply of the agent's, or a message to it, whether the person wrote it, and when. */
+export type Message = { role: "assistant"; text: string } | { role: "user"; person: boolean; at: number };
 export interface Conversation {
   messages: Message[];
   /** The error the latest turn ended on because its model failed, or null when it did not. */
@@ -39,7 +39,7 @@ function harnessConversation(view: ConversationView): Conversation {
   const last = models.findLast(({ message }) => message.role === "assistant")?.message;
   return {
     messages: models.flatMap(({ entry, message }): Message[] => message.role === "assistant" ? [{ role: "assistant", text: message.content.flatMap((c) => c.type === "text" ? [c.text] : []).join("") }]
-      : message.role === "user" ? [{ role: "user", person: !entry.kind.startsWith("nexus.") }] : []),
+      : message.role === "user" ? [{ role: "user", person: !entry.kind.startsWith("nexus."), at: message.timestamp }] : []),
     failure: last?.role === "assistant" && last.stopReason === "error" ? last.errorMessage ?? "no reason given" : null,
   };
 }
@@ -49,16 +49,16 @@ function claudeConversation(registry: AgentConversationRegistry, thread: ThreadI
   let sender: PromptSenders | undefined;
   return {
     messages: entries.flatMap((e): Message[] => e.kind === "reply" ? [{ role: "assistant", text: e.text }]
-      : e.kind === "prompt" ? [{ role: "user", person: e.from === "person" && (sender ??= promptSenders(registry, thread))(e.text) === null }] : []),
+      : e.kind === "prompt" ? [{ role: "user", person: e.from === "person" && (sender ??= promptSenders(registry, thread))(e.text) === null, at: e.at }] : []),
     failure: errorStop(entries)?.text ?? null,
   };
 }
 
 export const repliesOf = (c: Conversation): string[] => c.messages.flatMap((m) => m.role === "assistant" ? [m.text] : []);
-/** Whether the person wrote to the thread after its first reply. */
-export function personWrote(c: Conversation): boolean {
+/** Whether the person wrote to the thread after its first reply, and after `since` when given. */
+export function personWrote(c: Conversation, since = -Infinity): boolean {
   const first = c.messages.findIndex((m) => m.role === "assistant");
-  return first !== -1 && c.messages.slice(first).some((m) => m.role === "user" && m.person);
+  return first !== -1 && c.messages.slice(first).some((m) => m.role === "user" && m.person && m.at > since);
 }
 
 /**
@@ -141,6 +141,6 @@ export function agentReader(registry: AgentConversationRegistry, harness: Pick<H
     state: (t: Thread, since: number) => of(t).state(t, since),
     brief: (t: Thread) => of(t).brief(t),
     replies: async (t: Thread): Promise<string[]> => repliesOf(await of(t).conversation(t)),
-    personWrote: async (t: Thread): Promise<boolean> => personWrote(await of(t).conversation(t)),
+    personWrote: async (t: Thread, since?: number): Promise<boolean> => personWrote(await of(t).conversation(t), since),
   };
 }

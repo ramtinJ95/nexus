@@ -768,8 +768,11 @@ type Phase =
   | { kind: "deploying"; commit: string; previous: string | null; requested: boolean; deadline: number }
   /** The deploy of `commit` failed for `why`, and the fleet goes back to `previous`, the desired release once `requested`. */
   | { kind: "rolling-back"; commit: string; previous: string; why: string; requested: boolean; deadline: number }
-  /** `commit` is the merge commit, deployed when the PR is Nexus's own. */
-  | { kind: "landed"; commit: string }
+  /**
+   * `commit` is the merge commit, deployed when the PR is Nexus's own. `inTurn` is when it landed while its builder was
+   * in a turn, as one answering the approval's notes, which leaves the builder open until that turn ends.
+   */
+  | { kind: "landed"; commit: string; inTurn?: number }
   /**
    * Ended, for the person to decide. `cause` is which part of the loop held it. `holds` say exactly which condition
    * failed or which reserved case applies, each with the code that decides its rule. `reasons` are their texts, which
