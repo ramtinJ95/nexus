@@ -1101,6 +1101,12 @@ test("an ordinary resume reuses a healthy controller and its boot time", async (
 
 
 /**
+ * Retry deadlines that expire at once. A stuck controller never answers a silent stop and ignores SIGTERM, so waiting
+ * out the production 30 s and 10 s changes nothing a test can observe.
+ */
+const quickRetry = { retryStop: { stopMs: 0, termGraceMs: 0 } };
+
+/**
  * A detached controller and a child in its group. Neither cooperates with SIGTERM or shutdown, and a hung one answers no
  * inspect either. With `exec`, it answers an exec of Herdr's snapshot and any other exec with those, and write-files.
  */
@@ -1157,7 +1163,7 @@ async function stuckController(t: TestContext, dir: string, id: PylonId, stop: "
 }
 
 for (const stop of ["silent", "error"] as const) test(`retry kills the controller group when stop is ${stop}, preserves the completed disk and starts another controller`, async (t) => {
-  const { backend, instances } = await backendWith();
+  const { backend, instances } = await backendWith(quickRetry);
   const id = `pylon-${stop}` as PylonId;
   const dir = await leftInstance(instances, id, "running");
   await writeFile(join(dir, "disk.qcow2"), "last completed disk");
@@ -1167,7 +1173,7 @@ for (const stop of ["silent", "error"] as const) test(`retry kills the controlle
   assert.deepEqual((await groupMembers(controller.pid)).sort((a, b) => a - b), [controller.pid, qemu].sort((a, b) => a - b));
   const started = Date.now();
   await backend.ensurePaused(id, "ckpt-forced-1", AbortSignal.timeout(60_000), true);
-  assert.ok(Date.now() - started < 55_000, "30 s stop deadline plus at most 20 s for group termination");
+  assert.ok(Date.now() - started < 55_000, "the stop deadline and SIGTERM grace bound the wait, plus at most 10 s after SIGKILL");
   await controller.exited;
   assert.deepEqual(await groupMembers(controller.pid), [], "neither controller nor QEMU stand-in can still run");
   assert.equal(await readFile(join(dir, "disk.qcow2"), "utf8"), "last completed disk");
@@ -1183,7 +1189,7 @@ for (const stop of ["silent", "error"] as const) test(`retry kills the controlle
 });
 
 test("a retry whose controller answers no inspect pauses on what the instance's files say, and ends its process group", async (t) => {
-  const { backend, instances } = await backendWith();
+  const { backend, instances } = await backendWith(quickRetry);
   const id = "pylon-hung" as PylonId;
   const dir = await leftInstance(instances, id, "running");
   const controller = await stuckController(t, dir, id, "silent", "hang");
@@ -1208,7 +1214,7 @@ test("a retry refuses to pause a controller that answers no inspect when its rec
 });
 
 test("a retry stops a controller that answers no inspect and recorded stopping, whatever its recorded setup failure", async (t) => {
-  const { backend, instances } = await backendWith();
+  const { backend, instances } = await backendWith(quickRetry);
   const id = "pylon-hungstop" as PylonId;
   const dir = await leftInstance(instances, id, "running");
   await writeFile(join(dir, "disk.qcow2"), "last completed disk");
@@ -1221,7 +1227,7 @@ test("a retry stops a controller that answers no inspect and recorded stopping, 
 });
 
 test("a retry records the sessions of a guest whose controller answers everything but inspect", async (t) => {
-  const { backend, instances } = await backendWith();
+  const { backend, instances } = await backendWith(quickRetry);
   const id = "pylon-slowinspect" as PylonId;
   const dir = await leftInstance(instances, id, "running");
   await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-slowinspect-1", sessions: [] }));
@@ -1279,7 +1285,7 @@ test("a replayed retry pause finishes the journal a crash left after its instanc
 });
 
 for (const controllerDied of [false, true]) test(`a retry whose probe died while stop hung recovers its journal and launch lock (controller died: ${controllerDied})`, async (t) => {
-  const { backend, instances, stateRoot } = await backendWith();
+  const { backend, instances, stateRoot } = await backendWith(quickRetry);
   const id = "pylon-stopcrash" as PylonId;
   const dir = await leftInstance(instances, id, "running");
   const controller = await stuckController(t, dir, id, "silent");

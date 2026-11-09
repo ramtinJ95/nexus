@@ -26,7 +26,7 @@ import { imageIdOf, type TemplateManifest } from "../../protocol/images.ts";
 import * as templates from "./pylon-vm-templates.ts";
 import { publicUrls } from "../../public-urls.ts";
 import { finishRelaunch, pauseSessions, type RelaunchMark } from "../../probe/guest/session-wake.ts";
-import { run, socketPathLimit, sweepScratch } from "../../pylon-vm/client.ts";
+import { run, type RetryStopDeadlines, socketPathLimit, sweepScratch } from "../../pylon-vm/client.ts";
 import { imageLabel, settled, setupExitCode, type BootSpec, type Inspection, type SandboxConfig } from "../../pylon-vm/contracts.ts";
 import { bridgePylonHeader } from "../../pylon-vm/host-bridge.ts";
 import { directory, instanceFiles, stateFiles } from "../../pylon-vm/instance-layout.ts";
@@ -67,6 +67,8 @@ export interface PylonVmBackendOptions {
   gitSsh?: { privateKeyFile: string; knownHostsFile: string };
   /** The node's tailnet DNS name, which previews are published on. Each previewed service's PUBLIC_URL is on it. */
   previewHost?: string;
+  /** A retry's stop deadline and SIGTERM grace for a stuck controller, 30 s and 10 s unless a test shortens them. */
+  retryStop?: RetryStopDeadlines;
 }
 
 /** Each controller's limit, so a stuck one cannot hold the update past the control plane's 10 s wait for the probe. */
@@ -173,7 +175,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       },
       (error: unknown) => console.error("scratch sweep failed:", error),
     ));
-    return run(stateRoot, action, signal);
+    return run(stateRoot, action, signal, options.retryStop);
   };
   const store = artifactDirectory(options.artifacts, tarCodec);
   const statuses: StatusCache = new Map();
