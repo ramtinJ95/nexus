@@ -3,7 +3,9 @@
  * worker's transcript as last read, or its harness conversation now. The review loop, the planner and the nudge each
  * take what they need from one read of it.
  */
+import { setTimeout as sleep } from "node:timers/promises";
 import type { ConversationView } from "@earendil-works/pi-durable";
+import type { ClaudeConversations } from "./claude-conversation.ts";
 import { errorStop, type ClaudeEntry } from "./claude-transcript.ts";
 import type { HarnessHost } from "./harness/host.ts";
 import { busyOf } from "./conversation-view.ts";
@@ -14,8 +16,8 @@ import type { ThreadId } from "../ids.ts";
 
 type AgentConversationRegistry = Pick<Registry, "threads" | "nodes">;
 
-/** In order: a reply of the agent's, or a message to it and whether the person wrote it. */
-export type Message = { role: "assistant"; text: string } | { role: "user"; person: boolean };
+/** In order: a reply of the agent's, or a message to it, whether the person wrote it, and when. */
+export type Message = { role: "assistant"; text: string } | { role: "user"; person: boolean; at: number };
 export interface Conversation {
   messages: Message[];
   /** The error the latest turn ended on because its model failed, or null when it did not. */
@@ -34,12 +36,17 @@ export function harnessView(harness: Pick<HarnessHost, "watch">): (t: Pick<Threa
   };
 }
 
+const claudeReadMs = 5_000;
+/** Reads what the transcript of `t`'s Claude worker gained, or stops waiting after `claudeReadMs`. */
+export const refreshClaude = (claude: Pick<ClaudeConversations, "refresh">, t: Thread) =>
+  Promise.race([claude.refresh(t), sleep(claudeReadMs, undefined, { ref: false })]);
+
 function harnessConversation(view: ConversationView): Conversation {
   const models = view.entries.flatMap((entry) => (entry.model ?? []).map((message) => ({ entry, message })));
   const last = models.findLast(({ message }) => message.role === "assistant")?.message;
   return {
     messages: models.flatMap(({ entry, message }): Message[] => message.role === "assistant" ? [{ role: "assistant", text: message.content.flatMap((c) => c.type === "text" ? [c.text] : []).join("") }]
-      : message.role === "user" ? [{ role: "user", person: !entry.kind.startsWith("nexus.") }] : []),
+      : message.role === "user" ? [{ role: "user", person: !entry.kind.startsWith("nexus."), at: message.timestamp }] : []),
     failure: last?.role === "assistant" && last.stopReason === "error" ? last.errorMessage ?? "no reason given" : null,
   };
 }
@@ -49,14 +56,15 @@ function claudeConversation(registry: AgentConversationRegistry, thread: ThreadI
   let sender: PromptSenders | undefined;
   return {
     messages: entries.flatMap((e): Message[] => e.kind === "reply" ? [{ role: "assistant", text: e.text }]
-      : e.kind === "prompt" ? [{ role: "user", person: e.from === "person" && (sender ??= promptSenders(registry, thread))(e.text) === null }] : []),
+      : e.kind === "prompt" ? [{ role: "user", person: e.from === "person" && (sender ??= promptSenders(registry, thread))(e.text) === null, at: e.at }] : []),
     failure: errorStop(entries)?.text ?? null,
   };
 }
 
 export const repliesOf = (c: Conversation): string[] => c.messages.flatMap((m) => m.role === "assistant" ? [m.text] : []);
-/** Whether the person wrote to the thread after its first reply. */
-export function personWrote(c: Conversation): boolean {
+/** Whether the person wrote to the thread after `since`, or with none after its first reply. */
+export function personWrote(c: Conversation, since?: number): boolean {
+  if (since !== undefined) return c.messages.some((m) => m.role === "user" && m.person && m.at > since);
   const first = c.messages.findIndex((m) => m.role === "assistant");
   return first !== -1 && c.messages.slice(first).some((m) => m.role === "user" && m.person);
 }
@@ -90,7 +98,7 @@ export interface AgentRead {
   busy(t: Pick<Thread, "id">): Promise<boolean>;
 }
 
-export function agentReads(registry: AgentConversationRegistry, harness: Pick<HarnessHost, "watch">): Record<ThreadAgent["kind"], AgentRead> {
+export function agentReads(registry: AgentConversationRegistry, harness: Pick<HarnessHost, "watch">, claude: Pick<ClaudeConversations, "refresh">): Record<ThreadAgent["kind"], AgentRead> {
   const view = harnessView(harness);
   /**
    * A conversation in the control plane is opened only once a turn ended after `since`. Until then it can hold no
@@ -120,7 +128,10 @@ export function agentReads(registry: AgentConversationRegistry, harness: Pick<Ha
     },
     claude: {
       conversation: async (t) => claudeConversation(registry, t.id, registry.threads.claudeEntries(t.id)),
+      // The session events that read the transcript can miss a reply the hook reported, so a turn that ended would
+      // otherwise be heard without its answer.
       async state(t, since) {
+        await refreshClaude(claude, t);
         const entries = registry.threads.claudeEntries(t.id);
         const c = claudeConversation(registry, t.id, entries);
         return { ...heard(t, entries, since), replies: repliesOf(c), failure: c.failure };
@@ -133,14 +144,14 @@ export function agentReads(registry: AgentConversationRegistry, harness: Pick<Ha
   };
 }
 
-export function agentReader(registry: AgentConversationRegistry, harness: Pick<HarnessHost, "watch">) {
-  const reads = agentReads(registry, harness);
+export function agentReader(registry: AgentConversationRegistry, harness: Pick<HarnessHost, "watch">, claude: Pick<ClaudeConversations, "refresh">) {
+  const reads = agentReads(registry, harness, claude);
   const of = (t: Thread) => reads[registry.threads.agent(t).kind];
   return {
     conversation: (t: Thread) => of(t).conversation(t),
     state: (t: Thread, since: number) => of(t).state(t, since),
     brief: (t: Thread) => of(t).brief(t),
     replies: async (t: Thread): Promise<string[]> => repliesOf(await of(t).conversation(t)),
-    personWrote: async (t: Thread): Promise<boolean> => personWrote(await of(t).conversation(t)),
+    personWrote: async (t: Thread, since?: number): Promise<boolean> => personWrote(await of(t).conversation(t), since),
   };
 }

@@ -59,6 +59,8 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
     /** The reviews but those settled with no message left to send. */
     reviewsToStep: (): Review[] => sql(`SELECT record FROM reviews WHERE json_extract(record, '$.phase.kind') NOT IN (SELECT value FROM json_each(?))
       OR json_extract(record, '$.outbox') IS NOT NULL ORDER BY builder`).all(settledKinds).map((r) => json<Review>(r.record)),
+    /** The landed reviews whose builder was in a turn as they landed. */
+    landedInTurn: (): Review[] => sql("SELECT record FROM reviews WHERE json_extract(record, '$.phase.inTurn') IS NOT NULL ORDER BY builder").all().map((r) => json<Review>(r.record)),
     /** A thread a review started, whether or not a later review replaced the record that names it. */
     isReviewer: (thread: ThreadId) => sql("SELECT 1 FROM threads WHERE id = ? AND started_by = ? UNION SELECT 1 FROM reviews WHERE reviewer = ?").get(thread, reviewerCaller, thread) !== undefined,
     /** Whether a review ever started for the pull request, including one a later review of its builder replaced. */

@@ -39,7 +39,7 @@ import { joinNode, joinRequestSchema } from "../join.ts";
 import type { Registry } from "../registry.ts";
 import type { JoinedNode } from "../node-store.ts";
 import type { PortRange, StoredPylon, Thread } from "../thread-store.ts";
-import { claudeConversations } from "../claude-conversation.ts";
+import type { ClaudeConversations } from "../claude-conversation.ts";
 import { noConversation, threadAgents, type ThreadAgents, type ThreadHarness } from "../thread-agent.ts";
 import type { Whoami } from "../wire.ts";
 import { attachRoute, parseAttachQuery } from "../../contract/attach-parse.ts";
@@ -92,6 +92,8 @@ export interface ApiOptions {
   /** Names the API answers to in the Host header. Any other name is a DNS rebinding page on an allowed machine. */
   hostnames: Pick<ReadonlySet<string>, "has">;
   harness: ThreadHarness;
+  /** The Claude workers' conversations, which the review loop's reads share. Whoever starts the API closes it. */
+  claude: ClaudeConversations;
   startThread(start: Start): Promise<Thread>;
   /** Asks the loop for a pass over the node's pylons. */
   wake(node: NodeName): void;
@@ -138,13 +140,12 @@ export function featureRoutes(kit: ApiKit, options: ApiOptions, nodeHealth: (nam
 export async function startApi(options: ApiOptions): Promise<Api> {
   // The control plane does not start without the dashboard's client, which importing the routes does not read.
   asset(entry);
-  const { registry, whois, allowed, hostnames, harness, startThread, wake, probes, streamStallMs = 30_000, attachTiming: timing = attachTiming, closeWaitMs = 5_000 } = options;
+  const { registry, whois, allowed, hostnames, harness, claude, startThread, wake, probes, streamStallMs = 30_000, attachTiming: timing = attachTiming, closeWaitMs = 5_000 } = options;
   const access = apiAccess(registry, wake, options);
   const { thread, threadRefusal, guard, current, roleOf } = access;
   const pylon = pylonAccess({ registry, probes, wake, guard, current });
   const { inPylon, whileRunning } = pylon;
   const wakeThread = access.wakeThread;
-  const claude = claudeConversations({ registry, probes, log: options.log });
   const agents: ThreadAgents = threadAgents({ registry, harness, claude, inPylon, whileRunning, wake: wakeThread, planning: options.features.planning });
 
   const views = threadViews(registry, agents, options);
@@ -409,7 +410,6 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     get httpsPort() { return secure?.listening ? (secure.address() as import("node:net").AddressInfo).port : undefined; },
     async close() {
       stopping = true;
-      claude.close();
       if (renewal) clearTimeout(renewal);
       const closed = Promise.all([server, ...(secure ? [secure] : [])].map((listener) => {
         const done = new Promise<void>((resolve) => listener.close(() => resolve()));

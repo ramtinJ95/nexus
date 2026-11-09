@@ -18,6 +18,7 @@ import { noFeatures, type Features } from "../control/features.ts";
 import type { AttachTiming } from "../control/attach.ts";
 import type { ReviewLoop } from "../control/review.ts";
 import { agentReader } from "../control/agent-conversation.ts";
+import { claudeConversations } from "../control/claude-conversation.ts";
 import { readEvents } from "./event-reader.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Registry } from "../control/registry.ts";
@@ -110,9 +111,15 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
   const reads: Parameters<ProjectMirror["setupInputs"]>[1][] = [];
   const wake = (n: NodeName) => { woken.push(n); };
   const mirror: ProjectMirror = { setupInputs(p, ref) { reads.push(ref); return read(p, ref); } };
+  const probes = new Map([[node, {
+    command: (pylonId: PylonId, command: PylonCommand) => { commands.push([pylonId, command]); return answer(command); },
+    stream: (pylonId: PylonId, argv: readonly string[]) => { streams.push([pylonId, argv]); return pipe(argv); },
+    health: () => health(),
+  }]]);
+  const claude = claudeConversations({ registry, probes: apiOptions.probes ?? probes, log: (message) => { logged.push(message); } });
   const services = threadServices({
     registry, harness, mirror, dotfiles: dots ?? dotfiles, gitIdentity, wake, gate: turnGate(() => false),
-    queue: queued === true || piped === true, planning: planned === true ? { replies: agentReader(registry, harness).replies } : null,
+    queue: queued === true || piped === true, planning: planned === true ? { replies: agentReader(registry, harness, claude).replies } : null,
   });
   const { startThread, queue, pipeline, planning: plans } = services.api;
   /** The options of an API on `port`, so a restart serves the same registry and services. */
@@ -136,12 +143,9 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
     health: () => null,
     hostnames: new Set(["127.0.0.1"]),
     harness,
+    claude,
     wake,
-    probes: new Map([[node, {
-      command: (pylonId: PylonId, command: PylonCommand) => { commands.push([pylonId, command]); return answer(command); },
-      stream: (pylonId: PylonId, argv: readonly string[]) => { streams.push([pylonId, argv]); return pipe(argv); },
-      health: () => health(),
-    }]]),
+    probes,
     previewPorts: { first: 10200, last: 10299 },
     log: (message) => { logged.push(message); },
     ...apiOptions,
@@ -150,6 +154,7 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
   t.after(async () => {
     await services.close();
     await api.close();
+    claude.close();
     await images?.close();
     await backfill?.close();
     registry.close();

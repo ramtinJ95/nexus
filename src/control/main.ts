@@ -28,6 +28,7 @@ import { peerHandoff } from "./peers.ts";
 import { githubClient, githubRepo } from "./github.ts";
 import { reviewLoop } from "./review.ts";
 import { agentReader } from "./agent-conversation.ts";
+import { claudeConversations } from "./claude-conversation.ts";
 import { threadServices } from "./thread-services.ts";
 import { projectMirror } from "./mirror.ts";
 import { checkRuns, verifyGate } from "./gate.ts";
@@ -208,7 +209,8 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     registry, probes: probeMap, buildNode: config.imageBuildNode, recipe: () => loadImageRecipe(), release: runningCommit,
   }));
   const inbox = agentInbox({ registry, harness, probes: probeMap, wake: wakeThread, log });
-  const agents = agentReader(registry, harness);
+  const claude = services.start(claudeConversations({ registry, probes: probeMap, log }));
+  const agents = agentReader(registry, harness, claude);
   const usage = services.start(usageCounter({ registry, probes: probeMap, harness }));
   const github = token === null ? null : githubClient(token);
   services.start(config.resumeAfterUsageLimit ? { everyMs: 30_000, ...usageLimitResumer({ registry, inbox, log }) } : null);
@@ -225,6 +227,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     registry, github, inbox, harnessModel: config.harness.model.modelId, startThread,
     agentState: agents.state,
     brief: agents.brief,
+    personWrote: agents.personWrote,
     runs: (ended) => ({ checks: checkRuns({ ...checkRunDeps, ended }), live: checkRuns({ ...checkRunDeps, gate: verifyGate, ended }) }),
     release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)! },
     mayLand: (caller) => isDeployer(registry, deployment, caller as TailnetNodeId),
@@ -284,6 +287,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     },
     hostnames: new Set(config.listen.hostnames),
     harness,
+    claude,
     wake,
     probes: probeMap,
     previewPorts: config.previewPorts,

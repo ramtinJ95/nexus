@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { setTimeout } from "node:timers/promises";
 import { join } from "node:path";
 import { openRegistry, type Registry } from "./registry.ts";
@@ -24,10 +24,14 @@ import { reviewView } from "./review-view.ts";
 import { defaultSecondReview } from "../contract/projects.ts";
 import { agentReader, heard } from "./agent-conversation.ts";
 import { agentInbox } from "./inbox.ts";
+import { claudeConversations } from "./claude-conversation.ts";
+import { processStream } from "../process-stream.ts";
+import { claudeHook, claudeProjects } from "../../images/pylon/nexus-contract.ts";
+import type { ProbeClient } from "../protocol/client.ts";
 import { fakeHarness } from "../test-support/fake-harness.ts";
 import { parseRecord, transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
-import { tempDir, watch } from "../test-support/kit.ts";
-import { testPr, testPylon, testReview, testThread, claudeWorkerAt } from "../test-support/registry-kit.ts";
+import { runningPylon, tempDir, until, watch } from "../test-support/kit.ts";
+import { testPr, testPylon, testReview, testThread, claudeWorkerAt, observeNode, storedTranscripts } from "../test-support/registry-kit.ts";
 import { checkCaller, reviewerCaller, senders, verifyCaller } from "./agent-protocol.ts";
 import { desiredPhase, idlePolicy } from "./reconcile.ts";
 import type { CheckState } from "./gate.ts";
@@ -48,7 +52,7 @@ const tempDb = () => join(registries, `${randomUUID()}.db`);
 const previous = "p".repeat(40);
 
 /** `agentState` replaces the fake that reads replies and model failures from the fixture's maps. */
-function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview; secondReview?: SecondReview; agentState?: (registry: Registry) => ReviewDeps["agentState"] } = {}) {
+function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview; secondReview?: SecondReview; agentState?: (registry: Registry) => ReviewDeps["agentState"]; personWrote?: (registry: Registry) => ReviewDeps["personWrote"] } = {}) {
   const registry = openRegistry(options.path ?? ":memory:");
   t.after(() => { try { registry.close(); } catch { /* closed by a restart */ } });
   const repo = options.repo ?? "ramtinJ95/nexus";
@@ -171,6 +175,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     wake: (target) => { woken.push(target.id); },
     log: (message) => { logged.push(message); },
     now: () => clock,
+    personWrote: options.personWrote?.(registry) ?? agentReader(registry, { async watch() { throw new Error("no harness thread here"); } }, storedTranscripts).personWrote,
     brief: async (target) => { const agent = registry.threads.agent(target); return agent.kind === "claude" ? agent.worker.prompt : briefs.get(target.id) ?? null; },
     async startThread(start) {
       const refused = refuseStart(start.request);
@@ -1023,15 +1028,80 @@ test("a review held for the person, or one that stops at approval, archives noth
   assert.deepEqual([...held.woken, ...rolledBack.woken, ...approval.woken], []);
 });
 
-test("a thread in a turn as its review lands stays open, and the other is archived", async (t) => {
+test("a builder in a turn as its review lands, as one answering the approval's notes, is archived once that turn ends, and no holds question stays open", async (t) => {
+  const f = fixture(t, { autoReview: { mode: "yolo", enabledBy: "nLAPTOP" } });
+  released(f, previous);
+  f.files = [{ path: "images/pylon/Dockerfile", previous: null, patch: "@@ -1 +1 @@\n-FROM a\n+FROM b" }];
+  const loop = f.loop();
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
+  await loop.poll();
+  claudeRead(f, [{ kind: "reply", at: f.now, text: "Opened #7." }, { kind: "prompt", at: f.now + 1, text: "Keep the cache small", from: "person" }], []);
+  f.tick(1_000);
+  f.reply(f.review().reviewer, verdict(f.review(), { findings: [{ id: "N1", priority: "P3", where: "src/cache.ts:1", summary: "Name the constant" }] }));
+  await loop.poll();
+  assert.match(f.sent.findLast((s) => s.to === f.builder)!.message.text, /N1 \(P3\)/, "the builder gets the approval's notes");
+  f.registry.threads.recordActivity(f.builder, { agent: f.now, agentTurnRunning: true });
+  for (const role of ["control", "probe"] as const) f.registry.releases.reportRelease({ node, role, commit: merged, target: merged, state: "healthy", reason: null, observedAt: Date.now() });
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "landed");
+  assert.deepEqual(f.statuses(), ["active", "archived"], "a builder in a turn stays open as its review lands");
+  assert.deepEqual(holdQuestions(f).filter((q) => q.answer === null && q.withdrawn === undefined), [], "no holds question is open once the review landed");
+  await loop.poll();
+  assert.deepEqual(f.statuses(), ["active", "archived"], "its turn keeps it open");
+  f.tick(60_000);
+  f.registry.threads.recordActivity(f.builder, { agent: f.now, agentTurnRunning: false });
+  await loop.poll();
+  assert.deepEqual(f.statuses(), ["active", "archived"], "its transcript is not read since the landing");
+  f.tick(1_000);
+  claudeRead(f, [{ kind: "reply", at: f.now, text: "Named the constant." }], []);
+  await loop.poll();
+  assert.deepEqual(f.statuses(), ["archived", "archived"], "the person's message before the landing does not keep it");
+  assert.deepEqual(f.woken.at(-1), f.builder, "the planner hears of the archive, so its pylon pauses");
+  f.registry.threads.setThreadStatus(f.builder, "active");
+  await loop.poll();
+  assert.deepEqual(f.statuses(), ["active", "archived"], "a builder the person unarchives stays open");
+});
+
+test("a builder the person wrote to after its review landed stays open once its turn ends, though its transcript is read after that end", async (t) => {
   const f = fixture(t, { repo: "acme/shop" });
   f.registry.threads.recordActivity(f.builder, { agent: 1, agentTurnRunning: true });
   const loop = await approved(f, "nLAPTOP");
-  assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
+  assert.deepEqual(f.review().phase.kind, "landed");
   assert.deepEqual(f.statuses(), ["active", "archived"]);
-  f.registry.threads.recordActivity(f.builder, { agent: 2, agentTurnRunning: false });
+  f.tick(1_000);
+  const wrote = f.now;
+  f.tick(1_000);
+  f.registry.threads.recordActivity(f.builder, { agent: f.now, agentTurnRunning: false });
+  f.registry.threads.recordReply(f.builder, f.now);
   await loop.poll();
-  assert.deepEqual(f.statuses(), ["active", "archived"], "the person archives a builder that was busy as it landed");
+  assert.deepEqual(f.statuses(), ["active", "archived"], "a transcript not read since the turn ended cannot say the person did not write");
+  f.tick(1_000);
+  claudeRead(f, [{ kind: "prompt", at: wrote, text: "Now write the follow-up", from: "person" }, { kind: "reply", at: wrote + 1, text: "On it." }], []);
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual(f.statuses(), ["active", "archived"], "the person's message since the landing makes it theirs");
+  assert.deepEqual(f.review().phase, { kind: "landed", commit: merged }, "and the loop stops reading it");
+  assert.deepEqual(f.woken, [f.review().reviewer]);
+});
+
+test("a builder that starts a turn or is deleted while the loop reads whether the person wrote to it is not archived", async (t) => {
+  for (const meanwhile of ["turn", "deleted"] as const) {
+    const f = fixture(t, {
+      repo: "acme/shop",
+      personWrote: (registry) => async (target) => {
+        if (meanwhile === "turn") registry.threads.recordActivity(target.id, { agent: 3, agentTurnRunning: true });
+        else registry.threads.setThreadStatus(target.id, "deleted");
+        return false;
+      },
+    });
+    f.registry.threads.recordActivity(f.builder, { agent: 1, agentTurnRunning: true });
+    const loop = await approved(f, "nLAPTOP");
+    f.registry.threads.recordActivity(f.builder, { agent: 2, agentTurnRunning: false });
+    f.tick(1_000);
+    claudeRead(f, [], []);
+    await loop.poll();
+    assert.deepEqual(f.statuses(), [meanwhile === "turn" ? "active" : "deleted", "archived"], meanwhile);
+  }
 });
 
 test("a review that ends merged, closed, cancelled by its builder's archive, or out of rounds archives its reviewer by the next pass", async (t) => {
@@ -3063,7 +3133,7 @@ test("a harness, a Claude worker and a bare thread each give the replies and tak
   f.registry.threads.appendClaudeRead(claude.id, { session: "s1", from: transcriptStart, entries: [{ kind: "prompt", at: 1, text: "fix it", from: "person" }, { kind: "reply", at: 2, text: "Done." }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 3 });
   const bare = f.registry.threads.thread(f.add("th-check-bare", false, checkCaller, true))!;
 
-  const replies = agentReader(f.registry, fake.harness).replies;
+  const replies = agentReader(f.registry, fake.harness, storedTranscripts).replies;
   assert.deepEqual(await replies(harness), ["Fixed it."]);
   assert.deepEqual(await replies(claude), ["Done."], "a Claude worker's replies are its transcript's, and never reach the harness");
   await assert.rejects(replies(bare), "a bare thread has no replies to read");
@@ -3085,7 +3155,7 @@ test("a model failure is a harness turn's last message that stopped on an error,
   const fake = fakeHarness();
   const harness = f.registry.threads.thread(f.builder)!;
   await fake.harness.startThread({ threadId: harness.id, pylonId: harness.pylonId });
-  const read = agentReader(f.registry, fake.harness).conversation;
+  const read = agentReader(f.registry, fake.harness, storedTranscripts).conversation;
   const failure = async (th: Thread) => (await read(th)).failure;
   fake.transcript(harness.id).messages.push({ role: "user", content: "review it", timestamp: 1 });
   for (let i = 0; i < 4; i++) fake.transcript(harness.id).messages.push({ role: "assistant", content: [], stopReason: "error", errorMessage: "Request timed out.", timestamp: 2 + i } as never);
@@ -3112,7 +3182,7 @@ test("a conversation's harness watch is stopped when its projection throws", asy
   await fake.harness.startThread({ threadId: harness.id, pylonId: harness.pylonId });
   fake.transcript(harness.id).messages.push({ role: "assistant", content: "not a list of parts", timestamp: 1 } as never);
   fake.commit(harness.id);
-  await assert.rejects(agentReader(f.registry, fake.harness).replies(harness));
+  await assert.rejects(agentReader(f.registry, fake.harness, storedTranscripts).replies(harness));
   assert.equal(fake.watching(harness.id), 0);
 });
 
@@ -3120,7 +3190,7 @@ test("a conversation's harness watch is stopped when its projection throws", asy
 function realReads(t: import("node:test").TestContext) {
   const fake = fakeHarness();
   const counted = { entries: 0 };
-  const f = fixture(t, { agentState: (registry) => agentReader({ ...registry, threads: { ...registry.threads, claudeEntries: (...args) => { counted.entries++; return registry.threads.claudeEntries(...args); } } }, fake.harness).state });
+  const f = fixture(t, { agentState: (registry) => agentReader({ ...registry, threads: { ...registry.threads, claudeEntries: (...args) => { counted.entries++; return registry.threads.claudeEntries(...args); } } }, fake.harness, storedTranscripts).state });
   /** A harness thread's turn that ended with `text`. */
   const say = (id: ThreadId, text: string) => {
     fake.transcript(id).messages.push({ role: "assistant", content: [{ type: "text", text }], stopReason: "stop", timestamp: 1 } as never);
@@ -3148,10 +3218,70 @@ test("a step reads a waiting Claude builder's transcript once", async (t) => {
   assert.equal(counted.entries, 1);
 });
 
+test("a Claude builder's answer that only its transcript holds is heard, though the read its session's event started came before it", async (t) => {
+  const fake = fakeHarness();
+  const projects = await tempDir("nexus-review-projects-");
+  const file = join(projects, "-home-user-workspace-repo", "s1.jsonl");
+  await mkdir(join(projects, "-home-user-workspace-repo"));
+  const record = JSON.parse((await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8")).split("\n")[40]!);
+  const line = (text: string) => `${JSON.stringify({ ...record, uuid: randomUUID(), message: { ...record.message, id: randomUUID(), content: [{ type: "text", text }] } })}\n`;
+  const probe: Pick<ProbeClient, "stream"> = {
+    stream: async (_, argv) => argv[0] === claudeHook ? processStream("printf", ["[]\n"], () => {})
+      : processStream(argv[0]!, argv.slice(1).map((arg) => arg === claudeProjects ? projects : arg), () => {}),
+  };
+  const f = fixture(t, {
+    agentState(registry) {
+      const claude = claudeConversations({ registry, probes: new Map([[node, probe]]), log: assert.fail });
+      t.after(() => claude.close());
+      return agentReader(registry, fake.harness, claude).state;
+    },
+  });
+  claudeWorkerAt(f.registry, f.builder, "started", { session: "s1" });
+  observeNode(f.registry, { node, pylons: [runningPylon("pylon-th-builder" as PylonId)] });
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const reviewer = f.review().reviewer;
+  await fake.harness.startThread({ threadId: reviewer, pylonId: `pylon-${reviewer}` as PylonId });
+  fake.transcript(reviewer).messages.push({ role: "assistant", content: [{ type: "text", text: verdict(f.review(), { verdict: "changes", findings: [serious] }) }], stopReason: "stop", timestamp: 1 } as never);
+  fake.commit(reviewer);
+  f.reply(reviewer, "");
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+
+  await writeFile(file, line("Looking at the finding."));
+  f.registry.threads.reportSession(node, { sequence: (f.registry.threads.eventReceipt(node) ?? 0) + 1, time: f.now, pylon: "pylon-th-builder" as PylonId, event: { kind: "session.turn-started", session: "s1", at: f.now } });
+  await until("the session's event read the transcript", () => f.registry.threads.claudeEntries(f.builder).length === 1);
+  await appendFile(file, line(answers(f.review(), [{ id: "F1", action: "rejected", reason: "The cache lives for one request." }])));
+  const sent = f.sent.length;
+  f.reply(f.builder, "");
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing", "the answer went to the reviewer");
+  assert.equal(f.sent.length, sent + 1);
+  assert.equal(f.sent.at(-1)!.to, reviewer, "the builder got no reminder");
+});
+
+test("a builder that sends its answers again with only some of them keeps the others it sent", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const reviewer = f.review().reviewer;
+  f.reply(reviewer, verdict(f.review(), { verdict: "changes", findings: [serious, { ...serious, id: "F2", summary: "The cache has no bound" }] }));
+  await loop.poll();
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }, { id: "F2", action: "rejected", reason: "It holds one key." }]));
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a 5-minute TTL." }]));
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.deepEqual(f.review().rounds[0]!.answers, [{ id: "F1", action: "fixed", reason: "Added a 5-minute TTL." }, { id: "F2", action: "rejected", reason: "It holds one key." }]);
+});
+
 test("a harness reviewer that ended no turn since the request is not read", async (t) => {
   const { f, fake, say } = realReads(t);
   const loop = f.loop();
   await loop.start(f.builder, { land: null });
+  await loop.poll();
   const reviewer = f.review().reviewer;
   await fake.harness.startThread({ threadId: reviewer, pylonId: `pylon-${reviewer}` as PylonId });
   for (let i = 0; i < 3; i++) {
@@ -5017,7 +5147,7 @@ test("a builder's brief is its Claude worker's prompt or its harness conversatio
   const harness = f.registry.threads.thread(f.builder)!;
   await fake.harness.startThread({ threadId: harness.id, pylonId: harness.pylonId });
   fake.transcript(harness.id).messages.push({ role: "user", content: "Add the cache", timestamp: 1 }, { role: "user", content: "and a TTL", timestamp: 2 });
-  const brief = agentReader(f.registry, fake.harness).brief;
+  const brief = agentReader(f.registry, fake.harness, storedTranscripts).brief;
   assert.equal(await brief(harness), "Add the cache");
   assert.equal(await brief(f.registry.threads.thread(f.add("th-claude", true))!), "fix it");
   assert.equal(await brief(f.registry.threads.thread(f.add("th-check-bare", false, checkCaller, true))!), null);

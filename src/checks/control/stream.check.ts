@@ -23,6 +23,7 @@ import { scriptedModel, scriptedModels, streamedAnswer, streamedWordMs } from ".
 import type { ImageId, NodeName, ProjectId, TailnetNodeId } from "../../ids.ts";
 import { testImage } from "../../test-support/kit.ts";
 import { startApi } from "../../control/api/server.ts";
+import { claudeConversations } from "../../control/claude-conversation.ts";
 import { noFeatures } from "../../control/features.ts";
 import { isDraining, turnGate } from "../../control/drain.ts";
 import type { ThreadHarness } from "../../control/thread-agent.ts";
@@ -68,10 +69,11 @@ const image = "img-0123456789ab" as ImageId;
 registry.images.saveImage(testImage({ id: image }), null);
 
 registry.images.setCurrentImage(image);
+const claude = claudeConversations({ registry, probes: new Map(), log: (message) => console.error(message) });
 const api = await startApi({
   registry, host: "127.0.0.1", port: 0, whois: async () => laptop, allowed: new Set([laptop]), hostnames: new Set(["127.0.0.1"]),
   deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} },
-  harness: threads, wake: () => {}, log: (message) => console.error(message), features: noFeatures, gate: turnGate(() => isDraining(registry.releases.drain(), registry.now())), health: () => null,
+  harness: threads, claude, wake: () => {}, log: (message) => console.error(message), features: noFeatures, gate: turnGate(() => isDraining(registry.releases.drain(), registry.now())), health: () => null,
   startThread: threadStarter({
     registry, harness: threads, wake: () => {}, dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
     mirror: { setupInputs: () => Promise.reject(new Error("the stream check reads no remote")) },
@@ -149,6 +151,7 @@ try {
   console.log("STREAM_CHECK_PASS");
 } finally {
   await api.close();
+  claude.close();
   await harness.close(context);
   registry.close();
   await rm(dir, { recursive: true });

@@ -19,7 +19,7 @@
  * ended because the agent's model failed gets the same request again, after a wait that grows with each failure in a row.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { checkCaller, latest, mint, reviewerCaller, verifyCaller } from "./agent-protocol.ts";
+import { checkCaller, mint, reviewerCaller, tokenBlocks, verifyCaller } from "./agent-protocol.ts";
 import { scopedFlight } from "../single-flight.ts";
 import type { SecretGrant } from "../protocol/secret-grants.ts";
 import { agentKinds } from "../protocol/agent-kinds.ts";
@@ -74,6 +74,8 @@ export interface ReviewDeps {
   agentState(t: Thread, since: number): Promise<AgentState>;
   /** The builder's brief, its first message, or null when it has none (agent-conversation.ts). */
   brief(t: Thread): Promise<string | null>;
+  /** Whether the person wrote to the thread after `since` (agent-conversation.ts). */
+  personWrote(t: Thread, since: number): Promise<boolean>;
   /** The check runs, and the live check's in verify pylons. Each tells `ended` of a run that ended, so the review waiting on it steps at once. */
   runs(ended: (thread: ThreadId) => void): { checks: CheckRuns; live: CheckRuns };
   startThread(start: Start): Promise<Thread>;
@@ -278,11 +280,12 @@ export function reviewLoop(deps: ReviewDeps) {
   };
   /** The round's findings go to the builder, who owes an answer to each. */
   const toBuilder = (r: Review): Review => send({ ...r, phase: { kind: "fixing" } }, "builder", (token) => builderFindings(r, token));
-  /** What `party` did since the loop's last message to it, and its `answer` block with its token, or null. */
+  /** What `party` did since the loop's last message to it, and its `answer` blocks with its token merged, or null. */
   const hear = async <T extends { token: string }>(r: Review, party: Party, answer: FencedAnswer<T>) => {
     const c = conversation(r, party);
     const state = await agentState(registry.threads.thread(c.thread)!, c.talk.since);
-    return { state, answer: state.mayAnswer ? latest(state.replies, answer.fence, answer.schema, c.talk.expect) : null };
+    const blocks = state.mayAnswer ? tokenBlocks(state.replies, answer.fence, answer.schema, c.talk.expect) : [];
+    return { state, answer: blocks.length === 0 ? null : answer.merge(blocks) };
   };
   /**
    * The next round's request to each reviewer, which hears only of its own findings' answers. A second reviewer that
@@ -593,10 +596,12 @@ export function reviewLoop(deps: ReviewDeps) {
       // A turn after the request went again that did not fail ends the model's failures in a row, though the loop may
       // still wait for the push its answer promises. An answer from before, or from the failed turn itself, does not.
       if (phase.failing !== undefined && r.since >= phase.failing.retryAt && state.ended !== null && state.failure === null) return { ...r, phase: { kind: "fixing" } };
-      const unanswered = findingsOf(round).filter(blocks).filter((f) => !answered(f, found.answers));
-      if (unanswered.length) return wait(r, phase, "builder", state, `Your answers leave ${unanswered.map((f) => f.id).join(", ")} without a fix or a reason to reject.`);
-      const withAnswers = withRound(r, { answers: found.answers });
-      const fixed = found.answers.some((a) => a.action === "fixed");
+      // Merged blocks keep an answer to an ID the builder corrected since, which answers no finding of the round.
+      const answers = found.answers.filter((a) => findingsOf(round).some((f) => f.id === a.id));
+      const unanswered = findingsOf(round).filter(blocks).filter((f) => !answered(f, answers));
+      if (unanswered.length) return wait(r, phase, "builder", state, `Your answers leave ${unanswered.map((f) => f.id).join(", ")} without a fix or a reason to reject. Every finding needs an answer.`);
+      const withAnswers = withRound(r, { answers });
+      const fixed = answers.some((a) => a.action === "fixed");
       const snapshot = await read(r);
       if (snapshot.pr.state !== "open") return outside(withAnswers, snapshot.pr.state) ?? toPerson(withAnswers, "outside", `Pull request #${r.pr.number} was ${snapshot.pr.state} during the review.`);
       if (fixed && snapshot.detail.head === round.head) {
@@ -607,7 +612,7 @@ export function reviewLoop(deps: ReviewDeps) {
       }
       // The reviewer cannot change a gate's result, so a failed gate at an unmoved head is the person's.
       if (gate !== null && snapshot.detail.head === round.head) {
-        const answer = found.answers.find((a) => a.id === gate.finding.id);
+        const answer = answers.find((a) => a.id === gate.finding.id);
         return toPerson(withAnswers, "gate", { code: gate.code, text: `${gate.pushedNothing}${answer === undefined ? "." : `: ${answer.reason}`}` }, ...gate.output === null ? [] : [gate.output]);
       }
       // Commits pushed with answers that fixed nothing are still unreviewed, so only an unmoved head skips a round.
@@ -852,8 +857,8 @@ export function reviewLoop(deps: ReviewDeps) {
 
   /**
    * A landed PR leaves its builder and reviewer nothing to do, and a cancelled review its reviewer, so they are
-   * archived in the transaction that saves it. A thread in a turn, such as one the person is talking to, stays open: a
-   * builder for the person, a reviewer for a later pass.
+   * archived in the transaction that saves it. A thread in a turn, such as a builder answering the approval's notes,
+   * stays open for a later pass.
    */
   const finished = (...ids: ThreadId[]): Thread[] => ids.map((id) => registry.threads.thread(id))
     .filter((t): t is Thread => t !== undefined && !t.working && isOpenStatus(t.status));
@@ -885,6 +890,29 @@ export function reviewLoop(deps: ReviewDeps) {
       registry.threads.setThreadStatus(t.id, "archived");
       deps.wake(t);
     }
+    // So has a builder whose turn ran on past its review's landing, once the turn ends, unless the person wrote to it
+    // since the landing, which makes it theirs.
+    for (const r of registry.reviews.landedInTurn()) {
+      try {
+        if (r.phase.kind !== "landed" || r.phase.inTurn === undefined) continue;
+        const builder = registry.threads.thread(r.builder);
+        if (builder?.working === true && isOpenStatus(builder.status)) continue;
+        const { inTurn, ...phase } = r.phase;
+        // A Claude worker's transcript is read apart from its turn's end, so it holds what the person wrote in that turn
+        // only once a read since then ended, and since the landing for a turn whose end was never reported.
+        const transcript = registry.threads.claudeWorker(r.builder) === undefined ? null : registry.threads.claudeTranscript(r.builder);
+        if (builder !== undefined && isOpenStatus(builder.status) && transcript !== null && (transcript?.readAt ?? -Infinity) < Math.max(inTurn, builder.lastReplyAt ?? -Infinity)) continue;
+        const theirs = builder === undefined || !isOpenStatus(builder.status) || await deps.personWrote(builder, inTurn);
+        // The read yields, so a turn, an archive or a delete meanwhile decides instead.
+        const fresh = registry.threads.thread(r.builder);
+        if (fresh?.working === true && isOpenStatus(fresh.status)) continue;
+        const archive = !theirs && fresh !== undefined && isOpenStatus(fresh.status) ? [fresh] : [];
+        if (registry.reviews.saveReview({ ...r, phase }, archive.map((t) => t.id), r)) for (const t of archive) deps.wake(t);
+        retried.ok(`${r.id} builder`);
+      } catch (err) {
+        retried.failed(`${r.id} builder`, `review ${r.id} of ${r.builder}: its landed builder was not archived and will be tried again (${(err as Error).name})`);
+      }
+    }
     await stepEach(reviews);
     // A review no pass steps any more, such as one saved settled outside the loop's steps, asks nothing.
     const stepped = new Set(reviews.map((r) => r.builder));
@@ -906,9 +934,14 @@ export function reviewLoop(deps: ReviewDeps) {
       try {
         // A step that sent a message or changed phase saves before the next one acts on it.
         for (let i = 0; i < 8; i++) {
-          const next = await step(r);
+          let next = await step(r);
           if (next === r) break;
-          const archive = next.phase.kind === "landed" && r.phase.kind !== "landed" ? finished(next.builder, ...reviewersOf(next)) : [];
+          let archive: Thread[] = [];
+          if (next.phase.kind === "landed" && r.phase.kind !== "landed") {
+            archive = finished(next.builder, ...reviewersOf(next));
+            const builder = registry.threads.thread(next.builder);
+            if (builder?.working === true && isOpenStatus(builder.status)) next = { ...next, phase: { ...next.phase, inTurn: now() } };
+          }
           // A save made while this step ran, such as the person's land or cancel, wins, and the next pass steps from it.
           // A gate thread the step started is then no review's, so it goes now rather than at the next pass's sweep.
           if (!registry.reviews.saveReview(next, archive.map((t) => t.id), r)) {
