@@ -4,7 +4,7 @@ import { answerFinal } from "../plain-wording.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { questionRoutes } from "../../contract/reviews.ts";
 import { end, onSwap, refreshAfter, showError, whenRunning } from "./page.js";
-import { review, reviewSent } from "./checkout.js";
+import { review, reviewSent } from "./review-notes.js";
 
 // crypto.randomUUID needs a secure context, and the dashboard is plain HTTP on the tailnet.
 const newRequestId = () => `msg:${[...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
