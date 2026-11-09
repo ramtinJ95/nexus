@@ -86,16 +86,21 @@ export interface ModelFailure { count: number; last: string; retryAt: number }
 
 /** A run of a gate at a round's head, in `thread` once it started, the check thread or verify pylon. */
 export interface GateRun { startedAt: number; thread: ThreadId | null }
+/**
+ * Why no node took the run's pylon at its last start, with `room` when a node refused it for room alone. Such a run
+ * waits for room with no deadline, and its deadline counts from the start that room let through.
+ */
+export interface Refused { refused?: string; room?: true }
 
 export type Phase =
   /**
    * The reviewer has the round's request and owes its verdict. `check` is the repository's checks at the round's head,
    * run beside it unless the round has their result already, as `checking`'s are. `unrunnable` is the output of a check
    * the pylon could not run, which goes to the person once the reviewer approves while the PR is still at the round's
-   * head. A PR at another head by then gets a round of its own. `refused` is why no node had room for the check, which
-   * then runs in `checking` once the reviewer approves.
+   * head. A PR at another head by then gets a round of its own. `refused` is why no node had room for the check. One
+   * room frees for starts while the reviewer reads, and any other runs in `checking` once it approves.
    */
-  | { kind: "reviewing"; failing?: ModelFailure; check?: GateRun & { unrunnable?: string; refused?: string } }
+  | { kind: "reviewing"; failing?: ModelFailure; check?: GateRun & { unrunnable?: string } & Refused }
   /** The builder has the round's findings and owes an answer to each, and a push for what it fixed. */
   | { kind: "fixing"; failing?: ModelFailure }
   /** The repository's checks run at the approved head, in a check thread thrown away afterwards. */
@@ -104,7 +109,7 @@ export type Phase =
    * The live check runs at the approved head, in a verify pylon archived afterwards. `refused` is why no node could take
    * the verify pylon yet, which the loop tries again.
    */
-  | { kind: "verifying"; refused?: string } & GateRun
+  | { kind: "verifying" } & GateRun & Refused
   /**
    * A landing at an approved head with no live check needs the reviewer's quote, from the description as it is now,
    * of what could not be checked live, as after the person's Land press. `asked` is the digest of the description the
@@ -446,6 +451,11 @@ export const prRounds = (r: Pick<Review, "rounds" | "maxRounds" | "earlierRounds
  */
 export const pushedHead = (r: Review, pr: Pick<PullRequest, "state"> & { head?: string } | undefined): string | null =>
   pr?.state !== "open" || pr.head === undefined || r.rounds.at(-1)!.head === pr.head || (r.phase.kind === "needs-person" && r.phase.unreviewed === pr.head) ? null : pr.head;
+/** Whether the review's gate pylon waits for a node to have room for it, which no queued builder thread takes first. */
+export function waitsForRoom(phase: Phase): boolean {
+  const run = phase.kind === "verifying" ? phase : phase.kind === "reviewing" ? phase.check : undefined;
+  return run?.thread === null && run.room === true;
+}
 /** The gate run `phase` steps: a reviewing round's check beside the reviewer, the check, or the live check. */
 export const gateRun = (phase: Phase): GateRun | null => phase.kind === "checking" || phase.kind === "verifying" ? phase : phase.kind === "reviewing" ? phase.check ?? null : null;
 /** The check thread `phase` holds: a checking round's, or a reviewing round's, which runs beside the reviewer. */

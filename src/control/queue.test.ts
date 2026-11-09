@@ -309,6 +309,24 @@ test("an auto start with no node that has room stays queued, then starts once ro
   assert.equal(f.registry.threads.thread(record.id)?.placement?.how, "auto");
 });
 
+test("a queued builder does not start while a review's gate pylon waits for room, and starts once it took it", async (t) => {
+  const f = fixture(t);
+  const q = f.queue();
+  const a = f.thread("th-a");
+  f.links(a, f.pr(3, "merged"));
+  const record = q.add(f.request(), null, [a], laptop);
+  const gated = f.thread("th-gated");
+  f.review(gated, { kind: "verifying", startedAt: 1, thread: null, refused: "no node can run this pylon: rj-firebat is overcommitted", room: true });
+  await q.poll();
+  assert.deepEqual(f.starts, [], "the verify pylon gets the room first");
+  const now = q.add(f.request({ title: "Now" }), null, [a], laptop);
+  await q.startNow(now.id, laptop);
+  assert.deepEqual(f.starts, [now.id], "the person's start now does not wait");
+  f.review(gated, { kind: "verifying", startedAt: 2, thread: "th-verify-1" as ThreadId });
+  await q.poll();
+  assert.deepEqual(f.starts, [now.id, record.id]);
+});
+
 test("a Nexus agent thread's first message is sent once under its queued request ID, and again under it after a crash", async (t) => {
   const f = fixture(t);
   const a = f.thread("th-a");

@@ -106,6 +106,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   let verifies = false;
   let live: CheckState = { kind: "done", passed: true, output: "fleet ok" };
   let refuse: string | null = null;
+  let liveRoom = true;
   const liveThreads: ThreadId[] = [];
   const archived: ThreadId[] = [];
   let delivery: "delivered" | "later" = "delivered";
@@ -153,8 +154,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       checks: {
         async start(_, __, head, ifRoom) {
           if (checkStartFails) throw new Error("no node took the check pylon");
-          if (checkRefused !== null) return { refused: checkRefused };
-          if (ifRoom && !checkRoom) return { refused: "no node has room for this pylon: node is overcommitted" };
+          if (checkRefused !== null) return { refused: checkRefused, room: false };
+          if (ifRoom && !checkRoom) return { refused: "no node has room for this pylon: node is overcommitted", room: true };
           checkIfRoom.push(ifRoom === true);
           const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); checkHeads.push(head); return { thread: id };
         },
@@ -164,7 +165,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       },
       live: {
         async start() {
-          if (refuse !== null) return { refused: refuse };
+          if (refuse !== null) return { refused: refuse, room: false };
+          if (!liveRoom) return { refused: "no node can run this pylon: node is overcommitted", room: true };
           const id = add(`th-verify-${liveThreads.length + 1}`, false, verifyCaller); liveThreads.push(id); return { thread: id };
         },
         step: () => live,
@@ -233,6 +235,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     set verifies(v: boolean) { verifies = v; },
     set live(c: CheckState) { live = c; },
     set refuse(why: string | null) { refuse = why; },
+    /** Whether a node has room for a verify pylon. */
+    set liveRoom(room: boolean) { liveRoom = room; },
     liveThreads, archived,
     set delivery(d: "delivered" | "later") { delivery = d; },
     /** How many deliveries the loop has begun, including one still held. */
@@ -1817,6 +1821,29 @@ test("a verify pylon no node can take yet is tried again, and the person hears w
   ] });
 });
 
+test("a verify pylon no node has room for waits past the live check's hour, starts once room frees, and its hour counts from that start", async (t) => {
+  const f = fixture(t);
+  f.verifies = true;
+  f.liveRoom = false;
+  f.live = { kind: "running" };
+  const loop = await approved(f, "nLAPTOP");
+  f.tick(90 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "verifying", "a wait for room is no stop for the person");
+  const { startedAt: _, ...waiting } = f.review().phase as Extract<Review["phase"], { kind: "verifying" }>;
+  assert.deepEqual(waiting, { kind: "verifying", thread: null, refused: "no node can run this pylon: node is overcommitted", room: true });
+  assert.deepEqual(f.liveThreads, []);
+  f.liveRoom = true;
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "verifying", startedAt: f.now, thread: f.liveThreads[0] }, "room that frees starts the live check");
+  f.tick(59 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "verifying", "the live check's hour counts from its pylon's start");
+  f.live = { kind: "done", passed: true, output: "fleet ok" };
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1]);
+});
+
 test("a live check its pylon cannot run goes to the person, and a verify pylon no review holds is archived", async (t) => {
   const f = fixture(t);
   f.verifies = true;
@@ -2032,22 +2059,27 @@ test("a head the branch returns to keeps the check an earlier round ran there", 
   assert.deepEqual(f.checkHeads, [head1, head2], "head1 was checked in the first round");
 });
 
-test("a check beside the reviewer starts only where a node has room, and otherwise runs once the reviewer approves", async (t) => {
+test("a check beside the reviewer starts only where a node has room, and otherwise once room frees or the reviewer approves", async (t) => {
   const f = fixture(t);
   f.checkRoom = false;
   const loop = f.loop();
   await loop.start(f.builder, { land: null });
   await loop.poll();
   assert.deepEqual(f.checkThreads, [], "no check pylon the node cannot hold");
-  assert.equal(checkBeside(f.review()), ", .nexus/check runs once the reviewer approves, since no node had room for it: no node has room for this pylon: node is overcommitted");
+  assert.equal(checkBeside(f.review()), ", .nexus/check waits for a node to have room for it: no node has room for this pylon: node is overcommitted");
   f.checkRoom = true;
   await loop.poll();
-  assert.deepEqual(f.checkThreads, [], "the refused check waits for the verdict");
+  assert.deepEqual(f.checkIfRoom, [true], "room that frees while the reviewer reads starts the check beside it");
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "approved" });
-  assert.deepEqual(f.checkIfRoom, [false], "the check after the verdict starts as it always did");
   assert.deepEqual(f.checkHeads, [head1]);
+
+  const h = fixture(t);
+  h.checkRoom = false;
+  await approved(h, null);
+  assert.deepEqual(h.review().phase, { kind: "approved" });
+  assert.deepEqual(h.checkIfRoom, [false], "a check still refused at the verdict starts as it always did");
 
   const g = fixture(t);
   await approved(g, null);

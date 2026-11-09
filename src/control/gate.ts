@@ -18,7 +18,7 @@ import type { ByteStream } from "../protocol/streams.ts";
 import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { runningProbe } from "./locator.ts";
-import { Refusal } from "./refusal.ts";
+import { NoRoom, Refusal } from "./refusal.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { Start, StartRequest } from "./start-request.ts";
@@ -97,9 +97,10 @@ export type CheckState =
 export interface CheckRuns {
   /**
    * Starts a fresh check thread at `head` on the PR's branch, in the builder's project and node, or a verify pylon on a
-   * node that nests KVM, or says why the start was refused. With `ifRoom` it is refused when no node has room for it.
+   * node that nests KVM, or says why the start was refused, and `room` when a node could take it once room frees.
+   * With `ifRoom` it is refused when no node has room for it.
    */
-  start(builder: Thread, branch: string, head: string, ifRoom?: true): Promise<{ thread: ThreadId } | { refused: string }>;
+  start(builder: Thread, branch: string, head: string, ifRoom?: true): Promise<{ thread: ThreadId } | { refused: string; room: boolean }>;
   /** The run's state. A run whose pylon is up keeps it awake, and one whose pylon just came up opens its pipe. */
   step(thread: ThreadId, head: string): CheckState;
   /** The verdict the run gave, if it gave one, with no step. */
@@ -188,7 +189,7 @@ export function checkRuns(options: {
         });
       } catch (err) {
         if (!(err instanceof Refusal)) throw err;
-        return { refused: err.message };
+        return { refused: err.message, room: err instanceof NoRoom };
       }
       runs.set(t.id, { kind: "waiting", output: Buffer.alloc(0) });
       return { thread: t.id };

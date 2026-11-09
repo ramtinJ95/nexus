@@ -93,7 +93,8 @@ export function checkBeside(r: Review): string {
   if (check !== null) return `, .nexus/check ${check.passed ? "passed" : "failed"} at ${head.slice(0, 12)}`;
   if (r.phase.check === undefined) return "";
   if (r.phase.check.unrunnable !== undefined) return `, .nexus/check could not run at ${head.slice(0, 12)}`;
-  if (r.phase.check.refused !== undefined) return `, .nexus/check runs once the reviewer approves, since no node had room for it: ${r.phase.check.refused}`;
+  if (r.phase.check.room !== undefined) return `, .nexus/check waits for a node to have room for it: ${r.phase.check.refused}`;
+  if (r.phase.check.refused !== undefined) return `, .nexus/check runs once the reviewer approves, since no node could take it: ${r.phase.check.refused}`;
   return r.phase.check.thread === null ? `, .nexus/check starting at ${head.slice(0, 12)}` : `, .nexus/check running at ${head.slice(0, 12)} in check thread ${r.phase.check.thread}`;
 }
 /** The latest round's live check, as `nexus show` and the dashboard say it, or null before its checks passed. */

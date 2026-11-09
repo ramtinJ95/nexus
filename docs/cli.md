@@ -633,7 +633,7 @@ Since 0.45.0 `review --cancel` ends the thread's running review, and prints it. 
 
 `Review` is a builder's latest review as the control plane stores it, and as the review routes answer it. `GET /v1/threads/<thread>` sends none of it, and serves its public facts as `ThreadDetail.reviewView`, described below:
 
-<!-- types: src/control/review-model.ts Review Talk Outbox SecondReviewer LandRequest Round LiveCheck HeldAt Waiver Phase GateRun HoldCause ModelFailure -->
+<!-- types: src/control/review-model.ts Review Talk Outbox SecondReviewer LandRequest Round LiveCheck HeldAt Waiver Phase GateRun Refused HoldCause ModelFailure -->
 ```ts
 // src/control/review-model.ts
 /**
@@ -745,10 +745,10 @@ type Phase =
    * The reviewer has the round's request and owes its verdict. `check` is the repository's checks at the round's head,
    * run beside it unless the round has their result already, as `checking`'s are. `unrunnable` is the output of a check
    * the pylon could not run, which goes to the person once the reviewer approves while the PR is still at the round's
-   * head. A PR at another head by then gets a round of its own. `refused` is why no node had room for the check, which
-   * then runs in `checking` once the reviewer approves.
+   * head. A PR at another head by then gets a round of its own. `refused` is why no node had room for the check. One
+   * room frees for starts while the reviewer reads, and any other runs in `checking` once it approves.
    */
-  | { kind: "reviewing"; failing?: ModelFailure; check?: GateRun & { unrunnable?: string; refused?: string } }
+  | { kind: "reviewing"; failing?: ModelFailure; check?: GateRun & { unrunnable?: string } & Refused }
   /** The builder has the round's findings and owes an answer to each, and a push for what it fixed. */
   | { kind: "fixing"; failing?: ModelFailure }
   /** The repository's checks run at the approved head, in a check thread thrown away afterwards. */
@@ -757,7 +757,7 @@ type Phase =
    * The live check runs at the approved head, in a verify pylon archived afterwards. `refused` is why no node could take
    * the verify pylon yet, which the loop tries again.
    */
-  | { kind: "verifying"; refused?: string } & GateRun
+  | { kind: "verifying" } & GateRun & Refused
   /**
    * A landing at an approved head with no live check needs the reviewer's quote, from the description as it is now,
    * of what could not be checked live, as after the person's Land press. `asked` is the digest of the description the
@@ -796,6 +796,11 @@ type Phase =
   | { kind: "cancelled"; who: "person"; by: string };
 /** A run of a gate at a round's head, in `thread` once it started, the check thread or verify pylon. */
 interface GateRun { startedAt: number; thread: ThreadId | null }
+/**
+ * Why no node took the run's pylon at its last start, with `room` when a node refused it for room alone. Such a run
+ * waits for room with no deadline, and its deadline counts from the start that room let through.
+ */
+interface Refused { refused?: string; room?: true }
 /**
  * Why a review is held: its `rounds` ran out; a `gate` failed where it failed before, or the builder answered it
  * without a push; the check or live check gave `no-verdict`; an `agent` gave no answer the loop could read; the merge
@@ -911,11 +916,11 @@ type Change = { kind: "known"; base: string; files: { path: string; id: string }
 
 `waiting` is why a landing that deploys waits before it merges, since landings that deploy go one at a time: `<review> deploys`, `<review> rolls back` or `<review> merges` for another review's landing, `a deploy drains the control plane`, or `not every service reports <commit> healthy` for a desired release the fleet does not report healthy, such as one whose deploy failed with nothing to roll back to. `show` ends the review line with `, waiting while ` and that reason, such as `, waiting while rv-1a2b3c4d deploys`.
 
-`show` prints one `review` line with the phase, the round and the reviewer, and one `needs you:` line per reason when the review ended for the person, whose attention is then `decision`. A `reviewing` line also says what the round's check does beside the reviewer, so it says whether the round waits on the reviewer alone or on both: `, .nexus/check running at <commit> in check thread <thread>`, `, .nexus/check starting at <commit>`, `, .nexus/check passed at <commit>` or `failed` once its result is in, `, .nexus/check could not run at <commit>`, or `, .nexus/check runs once the reviewer approves, since no node had room for it: <why>`. The dashboard's review lines and the pipeline's `reviewing` line say the same. A review the person cancelled ends its line with `cancelled by <caller>`. The review line ends with `adding the label "needs human review"`, `labelled "needs human review"` or `label "needs human review" not added`, as the label's state says. A label GitHub refused also adds a `needs you:` line that says why, such as a token that may not write issues or pull requests. The review loop's messages start with `[Nexus review — automated, not a message from the person]`; in a harness conversation they are entries of kind `nexus.review` with `data: { sender: "Nexus review" }`, and a Claude worker gets them typed as prompts. `events --kind review.changed` follows reviews as they start and change phase, round or label state. Since 0.28.0 a review the person landed past holds they waived also prints `waived by <node> at <commit>, <time>:` and one indented line per hold it waived, and `events --kind review.waived` follows each waiver with the review, the pull request and the waiver's fields.
+`show` prints one `review` line with the phase, the round and the reviewer, and one `needs you:` line per reason when the review ended for the person, whose attention is then `decision`. A `reviewing` line also says what the round's check does beside the reviewer, so it says whether the round waits on the reviewer alone or on both: `, .nexus/check running at <commit> in check thread <thread>`, `, .nexus/check starting at <commit>`, `, .nexus/check passed at <commit>` or `failed` once its result is in, `, .nexus/check could not run at <commit>`, or `, .nexus/check waits for a node to have room for it: <why>` while a node refuses it for room alone, and it starts once one has room, or `, .nexus/check runs once the reviewer approves, since no node could take it: <why>` for any other refusal. The dashboard's review lines and the pipeline's `reviewing` line say the same. A review the person cancelled ends its line with `cancelled by <caller>`. The review line ends with `adding the label "needs human review"`, `labelled "needs human review"` or `label "needs human review" not added`, as the label's state says. A label GitHub refused also adds a `needs you:` line that says why, such as a token that may not write issues or pull requests. The review loop's messages start with `[Nexus review — automated, not a message from the person]`; in a harness conversation they are entries of kind `nexus.review` with `data: { sender: "Nexus review" }`, and a Claude worker gets them typed as prompts. `events --kind review.changed` follows reviews as they start and change phase, round or label state. Since 0.28.0 a review the person landed past holds they waived also prints `waived by <node> at <commit>, <time>:` and one indented line per hold it waived, and `events --kind review.waived` follows each waiver with the review, the pull request and the waiver's fields.
 
 ### Live checks
 
-Once `.nexus/check` passes at the approved head, a head with an executable `.nexus/verify` gets the [merge policy's](merge-policy.md) live check, in phase `verifying`. The control plane runs that script in a fresh verify pylon, a thread with no agent started by `nexus-verify` at the approved commit, which `threads` lists like a check thread. Its `ThreadDetail.pylon.resources` has `cpus: 4` and `memoryGiB: 8`, the one pylon whose CPUs and memory are not its project's, its disk being its project's, and `nestedVirtualization: true`, which `show`'s size line ends with as `, nested virtualization`, and which boots its guest with the KVM modules loaded, so the script can boot the change as a small Nexus fleet. It goes only to a node whose probe reports nested virtualization: a pylon-vm node whose host's `kvm_amd` or `kvm_intel` module has `nested` set. A start no node can take is tried again until the live check's hour is up, and `refused` says why meanwhile. The verify pylon is archived once the script exits, so `unarchive` brings it back to look at what it left.
+Once `.nexus/check` passes at the approved head, a head with an executable `.nexus/verify` gets the [merge policy's](merge-policy.md) live check, in phase `verifying`. The control plane runs that script in a fresh verify pylon, a thread with no agent started by `nexus-verify` at the approved commit, which `threads` lists like a check thread. Its `ThreadDetail.pylon.resources` has `cpus: 4` and `memoryGiB: 8`, the one pylon whose CPUs and memory are not its project's, its disk being its project's, and `nestedVirtualization: true`, which `show`'s size line ends with as `, nested virtualization`, and which boots its guest with the KVM modules loaded, so the script can boot the change as a small Nexus fleet. It goes only to a node whose probe reports nested virtualization: a pylon-vm node whose host's `kvm_amd` or `kvm_intel` module has `nested` set. A start no node can take is tried again on each pass, and `refused` says why meanwhile. While a node that nests KVM refuses it for room alone, `room` is true and the review waits for that room with no deadline, and the live check's hour counts from the start that room let through. Any other refusal, such as no node that nests KVM, goes to the person once the hour is up. The verify pylon is archived once the script exits, so `unarchive` brings it back to look at what it left.
 
 `Round.live` is the result once the checks passed: `ran`, with the verify pylon's `thread`, `passed` for exit status 0, and the output's tail, or `absent` for a head with no `.nexus/verify`. A live check that passed stands in for the pull request's statement of what it could not check live. One that failed goes back to the builder as a `LIVE` finding (P0), as a failed check does, and holds the landing. A head with no `.nexus/verify` goes from `checking` to `approved` or `merging` as before, and lands on the statement. A round with no `live`, such as one a control plane older than 0.37.0 approved, holds the landing until a landing runs its live check, so a landing in flight across the upgrade cannot skip it. A change to `.nexus/verify` holds the landing for the person, who may waive it on the dashboard.
 
@@ -954,7 +959,7 @@ The PR watch reads a pull request every two minutes, so a queued thread starts u
 
 ### When it starts
 
-The control plane looks at the queue every 15 seconds, and right after a start is queued. A queued thread whose every wait is `landed`, or one `start-queued` asked for, starts exactly as `nexus start` would start it with the recorded request, under its recorded ID. Placement and capacity apply as for any start. An `auto` thread goes to the node with the most room then, and when no node has room the start fails with `no node can run this pylon: ...`, so the thread stays queued and the next pass tries again, until a node has room. A thread on a named node starts there, as any start does, which never waits for room. Any other refusal, such as no current image or a deploy's drain, also leaves it queued. Each failure is the record's `lastError` until a start clears it.
+The control plane looks at the queue every 15 seconds, and right after a start is queued. A queued thread whose every wait is `landed`, or one `start-queued` asked for, starts exactly as `nexus start` would start it with the recorded request, under its recorded ID. Placement and capacity apply as for any start. An `auto` thread goes to the node with the most room then, and when no node has room the start fails with `no node can run this pylon: ...`, so the thread stays queued and the next pass tries again, until a node has room. A thread on a named node starts there, as any start does, which never waits for room. While a review's check or verify pylon waits for room, no queued thread starts on a pass, so the gate takes the room that frees first, and the threads queued after its pull request are not held up by a builder that took it. A `start-queued` starts the thread all the same. Any other refusal, such as no current image or a deploy's drain, also leaves it queued. Each failure is the record's `lastError` until a start clears it.
 
 A Nexus agent thread queued with `--message` gets it once it has started, as the person's message, under the request ID `queued:<id>`. The harness answers a repeated request ID with its first submission, so a send repeated after a crash is the same message. A Claude worker's prompt is its `--claude`, which starts it with `/poteto-mode` in front as any start does. `--message` with `--claude` is refused.
 
