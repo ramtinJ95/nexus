@@ -205,7 +205,7 @@ Templates mirror a remote, so only a `RemoteProject` (a project whose `repoUrl` 
 ```ts
 const inputs = await mirror.setupInputs(project, commit === undefined ? { branch } : { commit }); // src/control/mirror.ts, no pylon booted
 const key = { project: project.id, image: settings.current, setupHash: setupHashOf(project, inputs) };
-const choice = chooseTemplate(project, key, { branch, commit: inputs.commit }, registry.templates(project.id), node, registry.node(node)?.observation?.artifacts ?? [], clock.now());
+const choice = chooseTemplate(project, key, { branch, commit: inputs.commit }, registry.images.templates(project.id), node, registry.nodes.node(node)?.observation?.artifacts ?? [], clock.now());
 // reuse a template the node holds, booting at inputs.commit | build on node and boot fresh | fresh while one builds | fresh after a failed build
 ```
 
