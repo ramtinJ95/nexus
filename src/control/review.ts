@@ -1033,15 +1033,17 @@ export function reviewLoop(deps: ReviewDeps) {
   });
   /**
    * The first reviewer's thread, under the ID its review was recorded with, unless a start that went through before a
-   * crash made it. A refused start, such as of a branch the remote no longer has, holds the review for the person.
+   * crash made it. A refused start, such as of a branch the remote no longer has, holds the review for the person, and
+   * one that fails otherwise, as while the harness is down, is tried each pass until `secondStartMs` after the start.
    */
   async function startFirst(r: Review, builder: Thread): Promise<Review> {
     if (registry.threads.thread(r.reviewer) === undefined) {
       try {
         await startReviewer(builder, `Review of #${r.pr.number}: ${r.pr.title}`, r.pr.branch, r.models.reviewer, r.reviewerKind === "claude", r.asked, r.reviewer);
       } catch (err) {
-        if (!(err instanceof Refusal)) throw err;
-        return toPerson(r, "thread", `The reviewer thread ${r.reviewer} did not start: ${err.message}.`);
+        if (err instanceof Refusal) return toPerson(r, "thread", `The reviewer thread ${r.reviewer} did not start: ${err.message}.`);
+        if (now() - r.startedAt < secondStartMs) throw err;
+        return toPerson(r, "thread", `The reviewer thread ${r.reviewer} did not start within ${secondStartMs / 60_000} minutes: ${(err as Error).message}.`);
       }
     }
     return { ...r, reviewerStarted: true };
