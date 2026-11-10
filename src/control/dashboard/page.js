@@ -150,9 +150,10 @@ const client = clientOf(document);
 const holds = [];
 /** `held()` says whether a reload now would lose what the reader is doing, so a new client waits until it would not. */
 export function holdReload(held) { holds.push(held); }
-// A draft is text typed in a field. The page sets which radios and boxes are checked by itself, so those are no draft.
+// A draft is text typed in a field. The page checks radios and boxes by itself, and a box with no value reads "on",
+// so those are no draft.
 const reloadLoses = () => document.querySelector("dialog[open]") !== null
-  || [...document.querySelectorAll("textarea, input")].some((f) => f.value !== f.defaultValue)
+  || [...document.querySelectorAll("textarea, input")].some((f) => f.type !== "checkbox" && f.type !== "radio" && f.value !== f.defaultValue)
   || holds.some((held) => held());
 let outdated = false;
 /** Says the page runs an older client than the control plane serves, as when a chunk it asked for did not load. */

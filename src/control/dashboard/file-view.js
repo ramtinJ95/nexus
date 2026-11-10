@@ -49,7 +49,7 @@ void chunk(import("./theme.js")).then(({ onThemeChange, startThemes }) => {
 async function drawDiff({ read, head, shown, truncated }) {
   try {
     const { diffView, imagePair } = await chunk(import("./diff.js"));
-    const view = shown.kind === "lines" ? await diffView(shown.files, phone.matches ? "unified" : diffLayout) : null;
+    const view = shown.kind === "lines" ? await chunk(diffView(shown.files, phone.matches ? "unified" : diffLayout)) : null;
     if (read !== diffRead) return;
     const typing = document.activeElement?.matches?.(".note-text") ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
     head.querySelector(".fv-layout").hidden = view === null;

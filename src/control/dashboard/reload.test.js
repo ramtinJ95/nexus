@@ -8,7 +8,7 @@ const page = (client) => ({
   getElementById: () => null,
 });
 const state = { textContent: "", children: [], replaceChildren(...children) { this.children = children; this.textContent = children.map((c) => typeof c === "string" ? c : c.textContent).join(""); } };
-const fields = [];
+const fields = [{ type: "checkbox", value: "on", defaultValue: "" }];
 let reloads = 0;
 let served = "/assets/client.js?v=000000000000";
 Object.assign(globalThis, {
@@ -33,7 +33,7 @@ test("a refresh that finds another client offers the reload, holds it over a dra
   assert.equal(state.textContent, "");
 
   served = "/assets/client.js?v=111111111111";
-  const draft = { value: "half a message", defaultValue: "" };
+  const draft = { type: "textarea", value: "half a message", defaultValue: "" };
   fields.push(draft);
   await refreshNow();
   assert.equal(reloads, 0, "a draft holds the reload");
