@@ -2,9 +2,10 @@ import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Whoami } from "../../contract/threads.ts";
 import { saveJson } from "../../node-base/json-file.ts";
+import { version } from "../../version.ts";
 import { call, CliError, UsageError } from "../transport.ts";
-import { type Command, type Io, str } from "../kit.ts";
-import { controlPorts, configFile, readConfig, checkVersion, socksOf, controlUrl } from "../config.ts";
+import { type Command, type Io, type Versions, noteTo, str } from "../kit.ts";
+import { controlPorts, configFile, readConfig, socksOf, controlUrl, skewNote, versionsOf, versionsText } from "../config.ts";
 
 function candidatesOf(host: string): URL[] {
   if (host.includes("://")) return [controlUrl(host)];
@@ -12,13 +13,15 @@ function candidatesOf(host: string): URL[] {
   return controlPorts.map((url) => controlUrl(url.replace("{host}", host)));
 }
 
-function connectText(url: string, file: string, caller: Whoami, env: Io["env"]): string {
+/** `versions` is null when the control plane refuses this device its health. */
+function connectText(url: string, file: string, caller: Whoami, versions: Versions | null, env: Io["env"]): string {
   const head = `Connected to ${url}, saved in ${file}.`;
   const overridden = env.NEXUS_URL ? [`NEXUS_URL is set, so it overrides ${file} until you unset it.`] : [];
   const may = (yes: boolean, what: string) => `  ${yes ? "may" : "may not"} ${what}`;
   const admit = (why: string) => `To let it ${why}, run this on the control plane's machine, in its nexus checkout after git pull. It changes the config and keeps the release that runs: sudo deploy/install.sh --admit ${caller.node}`;
   return [
     head,
+    versions === null ? `This CLI runs Nexus ${version}. The control plane does not tell this device its version until it admits it.` : versionsText(versions),
     `This device is tailnet node ${caller.node}. It`,
     may(caller.allowed, "read threads, projects and nodes"),
     may(caller.person, "start and message threads"),
@@ -47,13 +50,13 @@ export const connectCommands: Readonly<Record<string, Command>> = {
         } catch (err) {
           if (!(err instanceof CliError)) throw err;
           // A control plane refuses health to a caller it does not allow, which whoami then names. The first command it
-          // admits checks its version.
+          // admits reads its version.
           if (err.status !== 403) {
             tried.push(`${url.origin}: ${(err as Error).message}`);
             continue;
           }
         }
-        if (health !== undefined) checkVersion(url, health);
+        const versions = health === undefined ? null : versionsOf(health);
         let caller: Whoami;
         try {
           caller = await call(endpoint, "GET", "/v1/whoami") as Whoami;
@@ -64,11 +67,13 @@ export const connectCommands: Readonly<Record<string, Command>> = {
         const saved = { ...config, url: url.origin, ...str(v, "socks") === undefined ? {} : { socks: str(v, "socks") } };
         await mkdir(dirname(file), { recursive: true });
         await saveJson(file, saved);
-        return { json: { url: url.origin, socks: saved.socks ?? null, config: file, caller }, text: connectText(url.origin, file, caller, io.env) };
+        const skew = versions === null ? undefined : skewNote(url, versions);
+        if (skew !== undefined) noteTo(io.stderr)(skew);
+        return { json: { url: url.origin, socks: saved.socks ?? null, config: file, caller, versions: versions ?? { cli: version, control: null } }, text: connectText(url.origin, file, caller, versions, io.env) };
       }
       throw new CliError("unreachable", [`no Nexus control plane answers at ${host}${socks === null ? "" : ` through the SOCKS proxy at ${socks.host}:${socks.port}`}:`,
         ...tried.map((line) => `  ${line}`),
-        socks === null ? "If this device reaches the tailnet only through a SOCKS5 proxy, such as ts-home's userspace tailscaled, give it with --socks HOST:PORT" : ""].join("\n").trimEnd());
+        socks === null ? "If this device reaches the tailnet only through a SOCKS5 proxy, such as a userspace tailscaled, give it with --socks HOST:PORT" : ""].join("\n").trimEnd());
     },
   },
 };

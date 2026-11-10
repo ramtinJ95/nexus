@@ -45,7 +45,8 @@ test("doctor prints each check under the control plane or its node, and exits 1 
   const res = await run([]);
   assert.equal(res.code, 1, res.stderr);
   assert.equal(res.stderr, "");
-  assert.equal(res.stdout, `control plane
+  assert.equal(res.stdout, `This CLI runs Nexus ${version}, and the control plane ${version}.
+control plane
   ok    backup       the newest backup, 2026-11-01T00-23-41Z, is 3 h old and verified
   warn  certificate  the dashboard's certificate for rj-firebat.example.ts.net expires in 5 days
 rj-firebat
