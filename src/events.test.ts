@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openRegistry } from "./control/registry.ts";
 import { eventCursor } from "./control/events.ts";
-import { pylonEventSchema } from "./protocol/observations.ts";
+import { maxSnapshotEvents, parseProbeEvent, probeContract, pylonEventSchema } from "./protocol/observations.ts";
 
 test("a follower reconnects across a registry restart without missing events", () => {
   const dir = mkdtempSync(join(tmpdir(), "nexus-events-"));
@@ -68,18 +68,23 @@ test("the probe journal survives restart and preserves bounded ordered replay", 
 });
 
 test("a pylon reporting in a loop keeps only its own share, and leaves other pylons' unread reports in the journal", async () => {
-  const { eventJournal, journalPerNode, journalPerPylon } = await import("./probe/event-journal.ts");
+  const { eventJournal, journalPerPylon } = await import("./probe/event-journal.ts");
+  const { testObservation } = await import("./test-support/kit.ts");
   const journal = eventJournal(":memory:");
+  const replayed = () => {
+    const parsed = parseProbeEvent(JSON.stringify({ type: "snapshot", contract: probeContract, observation: testObservation("node-a" as import("./ids.ts").NodeName, { events: journal.recent() }) }));
+    assert.equal(parsed.type, "snapshot");
+    return parsed.observation.events;
+  };
   try {
     const pylon = (n: number) => `pylon-t${n}` as import("./ids.ts").PylonId;
     const quiet = journal.append(pylon(2), { kind: "session.turn-ended", session: "c2" });
-    for (let i = 0; i < 10 * journalPerNode; i++) journal.append(pylon(1), { kind: "session.heartbeat", session: "c1" });
-    const kept = journal.recent();
-    assert.deepEqual(kept.filter((r) => r.pylon === pylon(2)), [quiet]);
-    assert.equal(kept.filter((r) => r.pylon === pylon(1)).length, journalPerPylon);
-    for (let n = 3; n < 3 + journalPerNode; n++) journal.append(pylon(n), { kind: "session.turn-ended", session: `c${n}` });
-    assert.equal(journal.recent().length, journalPerNode, "the node cap still bounds the journal across many pylons");
-    assert.equal(journal.recent().some((r) => r.pylon === pylon(2)), false, "past the node cap the oldest report goes first");
+    for (let i = 0; i < 10 * maxSnapshotEvents; i++) journal.append(pylon(1), { kind: "session.heartbeat", session: "c1" });
+    assert.deepEqual(replayed().filter((r) => r.pylon === pylon(2)), [quiet]);
+    assert.equal(replayed().filter((r) => r.pylon === pylon(1)).length, journalPerPylon);
+    for (let n = 3; n < 3 + maxSnapshotEvents; n++) journal.append(pylon(n), { kind: "session.turn-ended", session: `c${n}` });
+    assert.equal(replayed().length, maxSnapshotEvents, "the node cap keeps the journal within what a snapshot carries");
+    assert.equal(replayed().some((r) => r.pylon === pylon(2)), false, "past the node cap the oldest report goes first");
   } finally { journal.close(); }
 });
 
