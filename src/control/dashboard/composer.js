@@ -3,7 +3,7 @@ import { request } from "./request.js";
 import { answerFinal } from "../plain-wording.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { questionRoutes } from "../../contract/reviews.ts";
-import { end, onSwap, refreshAfter, showError, whenRunning } from "./page.js";
+import { chunk, end, onSwap, refreshAfter, showError, whenRunning } from "./page.js";
 import { review, reviewSent } from "./review-notes.js";
 import { kept } from "./contract.ts";
 import { composerDraft } from "./draft.js";
@@ -44,7 +44,7 @@ document.addEventListener("submit", async (event) => {
   const { requestId } = outgoing;
   const post = () => request(threadRoutes.message, { thread, body: { text, requestId, mode } });
   try {
-    const terminalOnly = form.dataset.claude === undefined || !text.trimStart().startsWith("/") ? null : (await import("./slash.js")).terminalOnlyReason(text, thread);
+    const terminalOnly = form.dataset.claude === undefined || !text.trimStart().startsWith("/") ? null : (await chunk(import("./slash.js"))).terminalOnlyReason(text, thread);
     if (terminalOnly !== null) {
       outgoing = null;
       return showError("action-error", new Error(terminalOnly));
