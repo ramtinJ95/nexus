@@ -143,15 +143,15 @@ test("project edit turns reviews of its own on and off, and projects shows who t
   assert.match(refused.stderr, /^nexus: Added project phoned, but its auto review was not set: .*only deployers may.*\. Set it with nexus project edit phoned --auto-review/m);
 });
 
-test("project edit sets which pull requests get a second reviewer on another model, and project show says it", async (t) => {
+test("project edit sets which pull requests get an independent second reviewer on Claude Opus 5.5, and project show says it", async (t) => {
   const s = await setup(t);
   await s.nexus(["project", "add", "second", "--scratch", "--node", node]);
   for (const bad of ["yes", "lines=0", "reserved,reserved", "lines=1,lines=2", "lines"]) assert.equal((await s.nexus(["project", "edit", "second", "--second-reviewer", bad])).code, 64, bad);
   const on = await s.nexus(["project", "edit", "second", "--second-reviewer", "on"]);
-  assert.equal(on.stdout, "Updated project second, auto review off, pipeline off, a second reviewer on another model for a pull request with a reserved path hold or at least 150 changed lines. Existing threads keep their boot settings and grants; start a new thread to apply them.\n");
+  assert.equal(on.stdout, "Updated project second, auto review off, pipeline off, an independent second reviewer on Claude Opus 5.5 for a pull request with a reserved path hold or at least 150 changed lines. Existing threads keep their boot settings and grants; start a new thread to apply them.\n");
   assert.deepEqual((await s.json(["project", "edit", "second", "--second-reviewer", "lines=400"])).secondReview, { always: false, lines: 400, reserved: false });
   assert.deepEqual((await s.json(["project", "edit", "second", "--second-reviewer", "always"])).secondReview, { always: true });
-  assert.match((await s.nexus(["project", "show", "second"])).stdout, /^a second reviewer on another model for every pull request$/m);
+  assert.match((await s.nexus(["project", "show", "second"])).stdout, /^an independent second reviewer on Claude Opus 5.5 for every pull request$/m);
   assert.deepEqual((await s.json(["project", "edit", "second", "--node", node])).secondReview, { always: true }, "an edit that does not name it keeps it");
   assert.equal((await s.json(["project", "edit", "second", "--second-reviewer", "off"])).secondReview, undefined);
   assert.doesNotMatch((await s.nexus(["project", "show", "second"])).stdout, /second reviewer/);
