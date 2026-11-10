@@ -55,6 +55,8 @@ export interface Transaction {
   target: string;
   state: "installing" | "healthy" | "rolled-back" | "failed";
   reason: string | null;
+  /** The requestedAt of the desired release it installed. Absent from a journal from before the field. */
+  requestedAt?: number;
   /** The backup taken before the switch, which a restore needs once the target has changed stored data. */
   backup?: string;
 }
@@ -108,14 +110,14 @@ export class ReleaseInstaller {
     return value;
   }
 
-  async install(commit: string): Promise<Transaction> {
+  async install(commit: string, requestedAt?: number): Promise<Transaction> {
     if ((await this.observed())?.state === "installing") throw new Error("an unfinished install must be recovered first");
     // Automatic deployment needs a bootstrapped, recoverable release.
     const previous = await readlink(this.link);
     const target = await this.boundary.prepare(commit);
     await this.boundary.beforeSwitch?.();
     const backup = await this.boundary.readyData?.(target) ?? null;
-    const transaction = await this.record({ commit, previous, target, state: "installing", reason: null, ...backup === null ? {} : { backup } });
+    const transaction = await this.record({ commit, previous, target, state: "installing", reason: null, ...requestedAt === undefined ? {} : { requestedAt }, ...backup === null ? {} : { backup } });
     try {
       await pointLink(this.link, target);
       await this.boundary.activate?.();

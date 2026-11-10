@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { command, ReleaseInstaller } from "./install.ts";
 import { parseWorkerConfig } from "./control-plane.ts";
+import { prepareTries, retryBaseMs } from "./plan.ts";
 import { releaseOutcome } from "../protocol/deploy.ts";
 
 const commit = "a".repeat(40);
@@ -25,6 +26,8 @@ test("wait outcome trusts the view's health from every role, whatever the caller
   assert.equal(releaseOutcome({ desired, nodes: [report, { ...report, role: "probe", state: "pending", reason: "deployer report is stale" }] }, commit), "pending");
   assert.equal(releaseOutcome({ desired, nodes: [{ ...report, state: "rolled-back" }] }, commit), "failed");
   assert.equal(releaseOutcome({ desired: null, nodes: [report] }, commit), "superseded");
+  const again = { ...desired, requestedAt: report.observedAt + 1 };
+  assert.equal(releaseOutcome({ desired: again, nodes: [{ ...report, state: "rolled-back" }] }, commit), "pending", "a deploy of the same commit again waits for a report of its own");
 });
 
 test("the bootstrap that install-deployer.sh copies loads without the repo's node_modules", async (t) => {
@@ -139,7 +142,7 @@ test("a report says which worker sent it, and goes again without that to a contr
   await reconcileRole("probe", config, controlApi(config), boundary);
   assert.deepEqual(received, [{ ...healthy, worker: "bootstrap" }, healthy]);
   const { observedAt: _, ...saved } = JSON.parse(await readFile(join(dir, "probe-deploy-report.json"), "utf8"));
-  assert.deepEqual(saved, { ...healthy, worker: "bootstrap" });
+  assert.deepEqual(saved, { ...healthy, worker: "bootstrap", requestedAt: 0 });
 });
 
 test("a worker loaded through deployer-current names the release it was promoted from, and the bootstrap names itself", async (t) => {
@@ -276,8 +279,9 @@ test("a rolled-back install stays quarantined by its journal after its report is
   const reports: any[] = [];
   const drains: any[] = [];
   const calls: string[] = [];
+  let requestedAt = 0;
   const api = async (path: string, body?: any) => {
-    if (path === "release") return { desired: { commit, requestedBy: "nMac", requestedAt: 0 }, nodes: [] };
+    if (path === "release") return { desired: { commit, requestedBy: "nMac", requestedAt }, nodes: [] };
     if (path === "drain") { drains.push(body); return { idle: true, expiresAt: 0 }; }
     if (path === "report") { reports.push(body); return { ok: true }; }
     assert.fail(path);
@@ -291,7 +295,11 @@ test("a rolled-back install stays quarantined by its journal after its report is
   await reconcileRole("control", config, api, boundary);
   assert.deepEqual(drains, [{ commit, release: true }]);
   assert.deepEqual(reports.map((r) => [r.state, r.target, r.reason]), [["rolled-back", commit, "candidate API failed"]]);
-  assert.deepEqual(calls, []);
+  assert.equal(calls.length, 0);
+  assert.equal(JSON.parse(await readFile(join(dir, "control-deploy-report.json"), "utf8")).requestedAt, 0, "a journal from before requestedAt is held for the request desired when it was read");
+  requestedAt = 1;
+  await reconcileRole("control", config, api, boundary);
+  assert.ok(calls.includes("checkout"), "a new request for the commit tries it again");
 });
 
 test("a poll leaves its report as JSON private to its owner, with no temporary file beside it, and a role without its local config is refused", async (t) => {
@@ -323,7 +331,7 @@ test("a poll leaves its report as JSON private to its owner, with no temporary f
   const start = Date.now();
   await reconcileRole("probe", config, api, boundary);
   const { observedAt, ...report } = JSON.parse(await readFile(join(dir, "probe-deploy-report.json"), "utf8"));
-  assert.deepEqual(report, { role: "probe", commit, target: commit, state: "healthy", reason: null });
+  assert.deepEqual(report, { role: "probe", commit, target: commit, state: "healthy", reason: null, requestedAt: 0 });
   assert.ok(observedAt >= start && observedAt <= Date.now());
   assert.equal((await stat(join(dir, "probe-deploy-report.json"))).mode & 0o777, 0o600);
   assert.deepEqual((await readdir(dir)).filter((name) => !before.has(name)), ["probe-deploy-report.json"]);
@@ -481,7 +489,7 @@ test("a probe a release behind reads the view again when control's unchanged rep
   await symlink(`releases/${commit}`, join(m.dir, "control-current"));
   m.running.control = commit;
   const report = { role: "control", commit, target: commit, state: "healthy", reason: null };
-  await writeFile(join(m.dir, "control-deploy-report.json"), JSON.stringify({ ...report, observedAt: 0 }));
+  await writeFile(join(m.dir, "control-deploy-report.json"), JSON.stringify({ ...report, requestedAt: 0, observedAt: 0 }));
   m.control.reports.set("control", { ...report, observedAt: Date.now() - 90_001 });
   await reconcileRoles(["control", "probe"], m.config, m.api, m.boundary);
   assert.deepEqual(m.control.posted, ["control healthy", "probe installing", "probe healthy"]);
@@ -510,8 +518,9 @@ test("busy turns outlast the old timeout across polls without quarantine, then a
   const calls: string[] = [];
   const drains: { commit: string; release?: boolean; hold?: boolean }[] = [];
   let busy = true;
+  let requestedAt = 0;
   const api = async (path: string, body?: any) => {
-    if (path === "release") return { desired: { commit, requestedBy: "nMac", requestedAt: 0 }, nodes: [] };
+    if (path === "release") return { desired: { commit, requestedBy: "nMac", requestedAt }, nodes: [] };
     if (path === "drain") { drains.push(body); return { idle: !busy, threads: busy ? ["th-builder"] : [] }; }
     if (path === "report") { reports.push(body); return { ok: true }; }
     assert.fail(path);
@@ -553,6 +562,69 @@ test("busy turns outlast the old timeout across polls without quarantine, then a
   calls.length = 0;
   await reconcileRole("control", config, api, boundary);
   assert.equal(calls.length, 0, "bad commits remain quarantined, including across polling cycles");
+  requestedAt = 1;
+  reports.length = 0;
+  await reconcileRole("control", config, api, boundary);
+  assert.ok(calls.includes("checkout"), "running nexus deploy for the commit again tries it again");
+  assert.deepEqual(reports.map((r) => r.state), ["installing", "rolled-back"]);
+  calls.length = 0;
+  await reconcileRole("control", config, api, boundary);
+  assert.equal(calls.length, 0, "the rollback at the new request is quarantined too");
+});
+
+test("a failure before the link switch is tried again after a doubling wait and then installs, and the last allowed try quarantines until the commit is requested again", async (t) => {
+  const { reconcileRole } = await import("./worker.ts");
+  const old = "b".repeat(40);
+  const m = await bothRoles(t, old);
+  let clock = 1_000;
+  let fetches = 0;
+  let offline = true;
+  const boundary = { ...m.boundary, now: () => clock, async checkout() { fetches++; if (offline) throw new Error("git fetch: Could not resolve host: github.com"); } };
+  const saved = async () => JSON.parse(await readFile(join(m.dir, "control-deploy-report.json"), "utf8"));
+  const poll = async () => { m.control.posted.length = 0; await reconcileRole("control", m.config, m.api, boundary); return m.control.reports.get("control"); };
+
+  let report = await poll();
+  assert.deepEqual(m.control.posted, ["control installing", "control pending"]);
+  assert.equal(report.reason, `try 1 of ${prepareTries} failed before the link switch, so it runs again after ${new Date(clock + retryBaseMs).toISOString()}: Error: git fetch: Could not resolve host: github.com`);
+  assert.equal(await readlink(join(m.dir, "control-current")), `releases/${old}`, "the running release is left as it was");
+  clock += retryBaseMs - 1;
+  report = await poll();
+  assert.equal(fetches, 1, "a poll inside the wait does not try again");
+  assert.deepEqual(m.control.posted, ["control pending"]);
+  assert.match(report.reason, /^try 1 of/);
+  clock += 1;
+  report = await poll();
+  assert.equal(fetches, 2);
+  assert.match(report.reason, /^try 2 of/);
+  assert.equal((await saved()).retryAt, clock + 2 * retryBaseMs, "the wait doubles");
+  clock = (await saved()).retryAt;
+  offline = false;
+  await poll();
+  assert.deepEqual(m.control.posted, ["control installing", "control healthy"]);
+  assert.equal(await readlink(join(m.dir, "control-current")), `releases/${commit}`);
+
+  await rm(join(m.dir, "control-current"));
+  await symlink(`releases/${old}`, join(m.dir, "control-current"));
+  m.running.control = old;
+  m.control.desired = { commit, requestedBy: "nMac", requestedAt: 1 };
+  offline = true;
+  fetches = 0;
+  for (let tries = 1; tries <= prepareTries; tries++) {
+    report = await poll();
+    clock = (await saved()).retryAt ?? clock;
+  }
+  assert.equal(fetches, prepareTries);
+  assert.equal(report.state, "failed");
+  assert.match(report.reason, new RegExp(`^${prepareTries} tries failed before the link switch, so this request is quarantined until the commit is requested again\\. The last: Error: git fetch`));
+  clock += 24 * 60 * 60_000;
+  offline = false;
+  await poll();
+  assert.equal(fetches, prepareTries, "the quarantined request is not tried again");
+  assert.deepEqual(m.control.posted, ["control failed"]);
+  m.control.desired = { commit, requestedBy: "nMac", requestedAt: 2 };
+  await poll();
+  assert.deepEqual(m.control.posted, ["control installing", "control healthy"], "a new request for the commit clears the quarantine");
+  assert.equal((await saved()).failed, undefined, "the new request starts its count again");
 });
 
 test("the node's registry reads give the registry's version and a release's migrations, and null only for what does not exist yet", async (t) => {
@@ -609,7 +681,7 @@ test("a backup before a migration counts only a successful run that began after 
   assert.ok(starts[0]! <= 50, "each start is bounded by what is left of the budget");
 });
 
-test("a target whose schema.ts fails to load fails its install with that error, rather than reading as a release from before schema.ts", async (t) => {
+test("a target whose schema.ts fails to load fails its try with that error before the link switch, rather than reading as a release from before schema.ts", async (t) => {
   const { reconcileRole, nodeRegistry } = await import("./worker.ts");
   const dir = await mkdtemp(join(tmpdir(), "nexus-broken-schema-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -643,8 +715,8 @@ test("a target whose schema.ts fails to load fails its install with that error, 
     registry: nodeRegistry({ config: join(dir, "etc/control.json"), home: join(dir, "home"), prefix: dir, status: join(dir, "status.json") }),
   };
   await reconcileRole("control", config, api, boundary);
-  assert.deepEqual(reports.map((r) => r.state), ["installing", "failed"]);
-  assert.match(reports.at(-1).reason, /SyntaxError/);
+  assert.deepEqual(reports.map((r) => r.state), ["installing", "pending"], "a failure before the link switch is tried again");
+  assert.match(reports.at(-1).reason, /^try 1 of 5 failed before the link switch, .*SyntaxError/s);
   assert.doesNotMatch(reports.at(-1).reason, /has no src\/control\/schema\.ts/);
   assert.deepEqual(calls, [], "the target never activates or restarts");
   assert.equal(await readlink(join(dir, "control-current")), `releases/${old}`);

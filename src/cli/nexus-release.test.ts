@@ -50,10 +50,15 @@ test("deploy and release use the shared release view and wait for both roles", a
   s.registry.releases.reportRelease({ node, role: "probe", commit: requested.desired.commit, target: requested.desired.commit, state: "healthy", reason: null, worker: "bootstrap", observedAt: Date.now() });
   assert.match((await s.nexus(["release"])).stdout, new RegExp(`^${node} probe: ${requested.desired.commit} healthy \\(worker bootstrap\\)$`, "m"));
   assert.equal((await s.json(["release"])).nodes.find((r: { role: string }) => r.role === "probe").worker, "bootstrap");
-  s.registry.releases.reportRelease({ node, role: "control", commit: "b".repeat(40), target: requested.desired.commit, state: "rolled-back", reason: "failed to bind", observedAt: Date.now() });
-  const failed = await s.nexus(["deploy", "main", "--wait", "--json"]);
+  const rollback = { node, role: "control" as const, commit: "b".repeat(40), target: requested.desired.commit, state: "rolled-back" as const, reason: "failed to bind", observedAt: Date.now() };
+  s.registry.releases.reportRelease(rollback);
+  const asked = s.requests();
+  const failing = s.nexus(["deploy", "main", "--wait", "--json"]);
+  await until("the wait polled past the rollback of the earlier request", () => s.requests() >= asked + 4);
+  s.registry.releases.reportRelease({ ...rollback, reason: "failed to bind again", observedAt: Date.now() });
+  const failed = await failing;
   assert.equal(failed.code, 1);
-  assert.match(failed.stderr, /failed to bind/);
+  assert.match(failed.stderr, /failed to bind again/);
 });
 
 test("image list and current print each image's role, build, release and nodes, and rollout --wait follows the rollout until it is done", async (t) => {
