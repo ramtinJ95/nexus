@@ -4,6 +4,7 @@ import { threadRoutes as routes, type Preview } from "../../contract/threads.ts"
 import { pylonRoutes, type ChangesBase } from "../../contract/pylon.ts";
 import { projectOf, threadOf } from "../refs.ts";
 import { attachTerminal, processTty } from "../attach.ts";
+import { execLine } from "../exec.ts";
 import { CliError, UsageError } from "../transport.ts";
 import { startRules } from "../../contract/threads-parse.ts";
 import { type Values, type Api, type Command, type Io, type Result, str, request, fileOf, int, briefOptions, briefOf, textFrom, colourOf, waitMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
@@ -247,6 +248,14 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     args: [1, 1],
     async run(_api, [id], _values, _follow, local) {
       await attachTerminal(local.connect, id!, processTty());
+    },
+  },
+  exec: {
+    help: ["  nexus exec <thread> <line>                   runs a shell line in the running pylon with stdin and stdout piped, as ssh does"],
+    thread: true,
+    args: [2, 2],
+    async run(_api, [id, line], _values, _follow, local) {
+      return await execLine(local.connect, id!, line!);
     },
   },
   start: {
