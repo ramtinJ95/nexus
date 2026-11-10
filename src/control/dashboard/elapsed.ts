@@ -25,3 +25,15 @@ export function agoText(at: number, now: number): string {
   const label = span(at, now);
   return label === null ? "just now" : `${label} ago`;
 }
+
+/** The names and the clock a moment reads in, which node-graphs.js's axis ticks read too. */
+export const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+export const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const two = (n: number) => String(n).padStart(2, "0");
+export const clockOf = (d: Date, seconds: boolean) => `${two(d.getHours())}:${two(d.getMinutes())}${seconds ? `:${two(d.getSeconds())}` : ""}`;
+
+/** A moment in the reader's own zone, such as Sun 1 Nov 14:05, as every absolute time on the dashboard reads. */
+export function localTime(at: number, seconds = false): string {
+  const d = new Date(at);
+  return `${dayNames[d.getDay()]} ${d.getDate()} ${monthNames[d.getMonth()]} ${clockOf(d, seconds)}`;
+}

@@ -10,6 +10,8 @@ export const attentionLabels: Record<NonNullable<Attention>, string> = {
   failed: "failed", decision: "needs your decision", parked: "parked", limited: "stopped on its usage limit",
   reply: "new reply", working: "agent working", waiting: "waiting for input",
 };
+/** A thread with no attention whose pylon runs: the agent is up and ready for a message. */
+export const agentIdle = "agent idle";
 
 /** A check's name with the node it runs on, as the Health page lists a change and a notice titles it. */
 export const checkName = (c: { node: string | null; name: string }) => `${c.node ?? "Control plane"} ${c.name}`;
