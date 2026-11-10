@@ -59,25 +59,30 @@ const admittedAs: Readonly<Record<Role, Role>> = {
   tailnet: "tailnet", joiner: "joiner", allowed: "allowed", person: "allowed", deployer: "allowed", reporter: "reporter", "control-node": "reporter",
 };
 
-const unknown = (role: Role) => new Refusal("forbidden", role === "tailnet" || role === "joiner" ? "caller is not a tailnet node" : "caller is not a tailnet node this control plane allows");
+/** The step that lets `caller` do what it asked, which only the control plane's machine takes. */
+const admitting = (caller: TailnetNodeId, what: string) => `. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it ${what}: sudo deploy/install.sh --admit ${caller}`;
+
+const unknown = (role: Role, caller: TailnetNodeId | null) => new Refusal("forbidden", role === "tailnet" || role === "joiner" ? "caller is not a tailnet node"
+  : `caller is not a tailnet node this control plane allows${role === "allowed" && caller !== null ? admitting(caller, "use Nexus and deploy") : ""}`);
 
 /**
  * Refuses a caller holding `roles` that may not reach `policy`'s route, or, without one, any route: an unknown caller,
  * whom the route's own refusal would tell more than that.
  */
-export function admit(roles: ReadonlySet<Role>, policy: Policy | undefined) {
+export function admit(roles: ReadonlySet<Role>, policy: Policy | undefined, caller: TailnetNodeId | null) {
   const role = policy === undefined ? null : admittedAs[policy.role];
   if (role === null ? roles.has("allowed") || roles.has("reporter") : roles.has(role)) return;
-  throw unknown(role ?? "allowed");
+  throw unknown(role ?? "allowed", caller);
 }
 
-export function refusal(roles: ReadonlySet<Role>, policy: Policy): Refusal | null {
+/** A person who is no deployer is told how to become one. A node never may, so it is not. */
+export function refusal(roles: ReadonlySet<Role>, policy: Policy, caller: TailnetNodeId | null = null): Refusal | null {
   if (roles.has(policy.role)) return null;
   switch (policy.role) {
     case "person": return new Refusal("forbidden", `caller may not ${policy.action}: only a person may, never the control plane, infrastructure nodes or pylons`);
-    case "deployer": return new Refusal("forbidden", `caller may not ${policy.action}: only deployers may, never infrastructure nodes or pylons`);
+    case "deployer": return new Refusal("forbidden", `caller may not ${policy.action}: only deployers may, never infrastructure nodes or pylons${roles.has("person") && caller !== null ? admitting(caller, "deploy") : ""}`);
     case "control-node": return new Refusal("forbidden", `only the control node ${policy.action}`);
-    default: return unknown(policy.role);
+    default: return unknown(policy.role, caller);
   }
 }
 
@@ -135,7 +140,7 @@ export function apiAccess(registry: Registry, wake: (node: NodeName) => void, op
 
   function threadRefusal(t: Thread, need: Need): string | null {
     const status = need.status === undefined ? undefined : statusNeeds[need.status];
-    if (status?.refuses.includes(t.status)) return `thread ${t.id} is ${t.status}${status.paused ? ", so its pylon stays paused" : ""}`;
+    if (status?.refuses.includes(t.status)) return `thread ${t.id} is ${t.status}${status.paused ? ", so its pylon stays paused" : ""}${t.status === "archived" ? `. \`nexus unarchive ${t.id}\` opens it again` : ""}`;
     if (need.agent === undefined || registry.threads.agent(t).kind === need.agent) return null;
     return need.agent === "claude" ? `thread ${t.id} has no Claude worker` : noConversation(t);
   }
@@ -149,7 +154,10 @@ export function apiAccess(registry: Registry, wake: (node: NodeName) => void, op
   /** The thread with its status now, which a request that waited may have seen change. */
   const current = (t: Thread): Thread => ({ ...t, status: registry.threads.threadStatus(t.id)! });
 
-  return { lookup, thread, threadRefusal, guard, current, wakeThread: threadWaker(registry, wake), roleOf };
+  /** A caller the installer's --admit may admit: neither the control node nor one of its nodes. */
+  const admittable = (caller: TailnetNodeId) => options.deployment === undefined ? registry.nodes.nodeByTailnetId(caller) === undefined : isPerson(registry, options.deployment, caller);
+
+  return { lookup, thread, threadRefusal, guard, current, wakeThread: threadWaker(registry, wake), roleOf, admittable };
 }
 export type Access = ReturnType<typeof apiAccess>;
 
@@ -157,8 +165,8 @@ export type Access = ReturnType<typeof apiAccess>;
 export const landing = { role: "deployer", action: "land a pull request, which deploys" } satisfies Policy;
 
 /** Refuses a caller holding `roles` that does not hold `policy`'s role: a route's, or one its body asks for, such as a landing. */
-export function demand(roles: ReadonlySet<Role>, policy: Policy) {
-  const refused = refusal(roles, policy);
+export function demand(roles: ReadonlySet<Role>, policy: Policy, caller: TailnetNodeId | null = null) {
+  const refused = refusal(roles, policy, caller);
   if (refused !== null) throw refused;
 }
 

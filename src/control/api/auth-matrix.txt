@@ -171,21 +171,21 @@ person GET /v1/deployer/report -> 403 caller is not a tailnet node this control 
 person POST /v1/deployer/releases -> 403 caller is not a tailnet node this control plane allows
 person POST /v1/deployer/drain -> 403 caller is not a tailnet node this control plane allows
 person GET /v1/release -> 200
-person PUT /v1/release -> 403 caller may not deploy: only deployers may, never infrastructure nodes or pylons
+person PUT /v1/release -> 403 caller may not deploy: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nPHONE
 person DELETE /v1/release -> 405 DELETE is not allowed on /v1/release
 person GET /v1/usage -> 200
 person GET /v1/usage?since=7d -> 200
 person GET /v1/usage/backfill -> 409 the usage backfill is not configured
-person POST /v1/usage/backfill -> 403 caller may not start or stop the usage backfill: only deployers may, never infrastructure nodes or pylons
-person DELETE /v1/usage/backfill -> 403 caller may not start or stop the usage backfill: only deployers may, never infrastructure nodes or pylons
+person POST /v1/usage/backfill -> 403 caller may not start or stop the usage backfill: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nPHONE
+person DELETE /v1/usage/backfill -> 403 caller may not start or stop the usage backfill: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nPHONE
 person GET /v1/events -> 200
 person GET /v1/events?kind=thread.failed -> 200
 person GET /v1/threads/th-000000000000/events -> 404 no thread th-000000000000
 person GET /v1/threads/th-000000000000/claude/events -> 404 no thread th-000000000000
 person POST /v1/threads/th-000000000000/review -> 404 no thread th-000000000000
 person POST /v1/threads/th-000000000000/review/cancel -> 409 the review loop needs the control plane's GitHub token (github.tokenFile), which is not configured
-person POST /v1/threads/th-000000000000/land -> 403 caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons
-person POST /v1/threads/th-000000000000/land -> 403 caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons
+person POST /v1/threads/th-000000000000/land -> 403 caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nPHONE
+person POST /v1/threads/th-000000000000/land -> 403 caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nPHONE
 person POST /v1/questions/q-nosuch/answer -> 404 no question q-nosuch
 person POST /v1/threads/th-000000000000/previews -> 404 no thread th-000000000000
 person DELETE /v1/threads/th-000000000000/previews/3000 -> 404 no thread th-000000000000
@@ -234,9 +234,9 @@ person GET /v1/items/it-nosuch -> 404 no item it-nosuch
 person POST /v1/items/it-nosuch/cancel -> 409 pipeline items need the control plane's GitHub token (github.tokenFile), which is not configured
 person POST /v1/items/it-nosuch/approve -> 409 pipeline items need the control plane's GitHub token (github.tokenFile), which is not configured
 person GET /v1/nodes -> 200
-person GET /v1/nodes/nosuch/health -> 403 caller may not read a node's health: only deployers may, never infrastructure nodes or pylons
-person GET /v1/nodes/nosuch/metrics?from=0 -> 403 caller may not read a node's metrics: only deployers may, never infrastructure nodes or pylons
-person GET /v1/nodes/rj-firebat/metrics -> 403 caller may not read a node's metrics: only deployers may, never infrastructure nodes or pylons
+person GET /v1/nodes/nosuch/health -> 403 caller may not read a node's health: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nPHONE
+person GET /v1/nodes/nosuch/metrics?from=0 -> 403 caller may not read a node's metrics: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nPHONE
+person GET /v1/nodes/rj-firebat/metrics -> 403 caller may not read a node's metrics: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nPHONE
 person GET /v1/images -> 200
 person POST /v1/images -> 400 ✖ Unrecognized key: "bogus"
 ✖ must be an image ID
@@ -252,9 +252,9 @@ person POST /v1/images -> 400 ✖ Unrecognized key: "bogus"
 ✖ Invalid input: expected string, received undefined
   → at sha256
 person GET /v1/images/current -> 200
-person POST /v1/images/build -> 403 caller may not build, roll out or roll back an image: only deployers may, never infrastructure nodes or pylons
-person POST /v1/images/rollout -> 403 caller may not build, roll out or roll back an image: only deployers may, never infrastructure nodes or pylons
-person POST /v1/images/rollback -> 403 caller may not build, roll out or roll back an image: only deployers may, never infrastructure nodes or pylons
+person POST /v1/images/build -> 403 caller may not build, roll out or roll back an image: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nPHONE
+person POST /v1/images/rollout -> 403 caller may not build, roll out or roll back an image: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nPHONE
+person POST /v1/images/rollback -> 403 caller may not build, roll out or roll back an image: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nPHONE
 person GET /v1/doctor -> 409 this control plane runs no doctor
 person GET /v1/checks -> 200
 person GET /v1/checks/changes -> 200
@@ -946,9 +946,9 @@ node-without-key POST /v1/threads without JSON -> 403 caller is not a tailnet no
 node-without-key GET /v1/projects under host evil.example -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /v1/whoami under host evil.example -> 403 the API does not answer to host evil.example
 node-without-key attach -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/health -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/health?x=1 -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/health -> 403 caller is not a tailnet node this control plane allows
+stranger GET /v1/health -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/health?x=1 -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/health -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET /v1/whoami -> 200 {"node":"nSTRANGER","allowed":false,"person":false,"deployer":false}
 stranger GET /v1/whoami?x=1 -> 200 {"node":"nSTRANGER","allowed":false,"person":false,"deployer":false}
 stranger POST /v1/whoami -> 405 POST is not allowed on /v1/whoami
@@ -961,12 +961,12 @@ stranger POST /v1/join?x=1 -> 400 ✖ Invalid input: expected string, received u
 ✖ Invalid input: expected string, received undefined
   → at deployKey
 stranger GET /v1/join -> 405 GET is not allowed on /v1/join
-stranger GET /v1/nosuch -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/nosuch?x=1 -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/nosuch -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/%zz -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/deployer/nosuch -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/deployer/nosuch -> 403 caller is not a tailnet node this control plane allows
+stranger GET /v1/nosuch -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/nosuch?x=1 -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/nosuch -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/%zz -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/deployer/nosuch -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/deployer/nosuch -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET /v1/deployer/release -> 403 caller is not a tailnet node this control plane allows
 stranger GET /v1/deployer/release?x=1 -> 403 caller is not a tailnet node this control plane allows
 stranger POST /v1/deployer/release -> 403 caller is not a tailnet node this control plane allows
@@ -974,98 +974,98 @@ stranger POST /v1/deployer/report -> 403 caller is not a tailnet node this contr
 stranger GET /v1/deployer/report -> 403 caller is not a tailnet node this control plane allows
 stranger POST /v1/deployer/releases -> 403 caller is not a tailnet node this control plane allows
 stranger POST /v1/deployer/drain -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/release -> 403 caller is not a tailnet node this control plane allows
-stranger PUT /v1/release -> 403 caller is not a tailnet node this control plane allows
-stranger DELETE /v1/release -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/usage -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/usage?since=7d -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/usage/backfill -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/usage/backfill -> 403 caller is not a tailnet node this control plane allows
-stranger DELETE /v1/usage/backfill -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/events -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/events?kind=thread.failed -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/threads/th-000000000000/events -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/threads/th-000000000000/claude/events -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/threads/th-000000000000/review -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/threads/th-000000000000/review/cancel -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/threads/th-000000000000/land -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/threads/th-000000000000/land -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/questions/q-nosuch/answer -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/threads/th-000000000000/previews -> 403 caller is not a tailnet node this control plane allows
-stranger DELETE /v1/threads/th-000000000000/previews/3000 -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/threads/th-000000000000/sessions -> 403 caller is not a tailnet node this control plane allows
-stranger DELETE /v1/threads/th-000000000000/sessions/s1 -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/threads/th-000000000000/sessions/s1/focus -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/threads/th-000000000000/files -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/threads/th-000000000000/files/content?path=a -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/threads/th-000000000000/image?path=a -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/threads/th-000000000000/changes -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/threads/th-000000000000/diff -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/threads -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/threads?deleted=false -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/threads -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/queued -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/queued/th-000000000000 -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/threads/th-000000000000/start -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/threads/th-000000000000 -> 403 caller is not a tailnet node this control plane allows
-stranger DELETE /v1/threads/th-000000000000 -> 403 caller is not a tailnet node this control plane allows
-stranger PUT /v1/threads/th-000000000000 -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/threads/th-000000000000/seen -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/threads/th-000000000000/unseen -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/threads/th-000000000000/archive -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/threads/th-000000000000/archive -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/threads/th-000000000000/unarchive -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/threads/th-000000000000/activity -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/threads/th-000000000000/messages -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/threads/th-000000000000/abort -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/threads/th-000000000000/retry -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/threads/th-000000000000/pylon/retry -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/threads/th-000000000000/conversation -> 403 caller is not a tailnet node this control plane allows
-stranger PATCH /v1/projects/nosuch -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/projects -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/projects -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/items -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/items -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/items/it-nosuch -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/items/it-nosuch/cancel -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/items/it-nosuch/approve -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/nodes -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/nodes/nosuch/health -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/nodes/nosuch/metrics?from=0 -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/nodes/rj-firebat/metrics -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/images -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/images -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/images/current -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/images/build -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/images/rollout -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/images/rollback -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/doctor -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/checks -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/checks/changes -> 403 caller is not a tailnet node this control plane allows
-stranger POST /v1/checks/seen -> 403 caller is not a tailnet node this control plane allows
-stranger GET / -> 403 caller is not a tailnet node this control plane allows
-stranger GET /threads/new -> 403 caller is not a tailnet node this control plane allows
-stranger GET /projects/new -> 403 caller is not a tailnet node this control plane allows
-stranger GET /usage -> 403 caller is not a tailnet node this control plane allows
-stranger GET /pipeline -> 403 caller is not a tailnet node this control plane allows
-stranger GET /cluster -> 403 caller is not a tailnet node this control plane allows
-stranger GET /health -> 403 caller is not a tailnet node this control plane allows
-stranger GET /threads/closed -> 403 caller is not a tailnet node this control plane allows
-stranger GET /threads/quiet -> 403 caller is not a tailnet node this control plane allows
-stranger GET /threads/th-000000000000 -> 403 caller is not a tailnet node this control plane allows
-stranger GET /threads/th-000000000000/stream -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/threads/th-000000000000/attach?cols=100&rows=30 -> 403 caller is not a tailnet node this control plane allows
-stranger GET /nodes/nosuch -> 403 caller is not a tailnet node this control plane allows
-stranger GET /assets/nosuch.js -> 403 caller is not a tailnet node this control plane allows
+stranger GET /v1/release -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger PUT /v1/release -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger DELETE /v1/release -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/usage -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/usage?since=7d -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/usage/backfill -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/usage/backfill -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger DELETE /v1/usage/backfill -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/events -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/events?kind=thread.failed -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/threads/th-000000000000/events -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/threads/th-000000000000/claude/events -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/threads/th-000000000000/review -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/threads/th-000000000000/review/cancel -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/threads/th-000000000000/land -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/threads/th-000000000000/land -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/questions/q-nosuch/answer -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/threads/th-000000000000/previews -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger DELETE /v1/threads/th-000000000000/previews/3000 -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/threads/th-000000000000/sessions -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger DELETE /v1/threads/th-000000000000/sessions/s1 -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/threads/th-000000000000/sessions/s1/focus -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/threads/th-000000000000/files -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/threads/th-000000000000/files/content?path=a -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/threads/th-000000000000/image?path=a -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/threads/th-000000000000/changes -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/threads/th-000000000000/diff -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/threads -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/threads?deleted=false -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/threads -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/queued -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/queued/th-000000000000 -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/threads/th-000000000000/start -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/threads/th-000000000000 -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger DELETE /v1/threads/th-000000000000 -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger PUT /v1/threads/th-000000000000 -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/threads/th-000000000000/seen -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/threads/th-000000000000/unseen -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/threads/th-000000000000/archive -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/threads/th-000000000000/archive -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/threads/th-000000000000/unarchive -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/threads/th-000000000000/activity -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/threads/th-000000000000/messages -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/threads/th-000000000000/abort -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/threads/th-000000000000/retry -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/threads/th-000000000000/pylon/retry -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/threads/th-000000000000/conversation -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger PATCH /v1/projects/nosuch -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/projects -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/projects -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/items -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/items -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/items/it-nosuch -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/items/it-nosuch/cancel -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/items/it-nosuch/approve -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/nodes -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/nodes/nosuch/health -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/nodes/nosuch/metrics?from=0 -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/nodes/rj-firebat/metrics -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/images -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/images -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/images/current -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/images/build -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/images/rollout -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/images/rollback -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/doctor -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/checks -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/checks/changes -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/checks/seen -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET / -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /threads/new -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /projects/new -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /usage -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /pipeline -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /cluster -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /health -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /threads/closed -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /threads/quiet -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /threads/th-000000000000 -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /threads/th-000000000000/stream -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/threads/th-000000000000/attach?cols=100&rows=30 -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /nodes/nosuch -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /assets/nosuch.js -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET /v1/health from its own machine -> 200
-stranger GET /v1/health?x=1 from its own machine -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/%68ealth from its own machine under host evil.example -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/health#x from its own machine under host evil.example -> 403 caller is not a tailnet node this control plane allows
+stranger GET /v1/health?x=1 from its own machine -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/%68ealth from its own machine under host evil.example -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/health#x from its own machine under host evil.example -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET /v1/health from its own machine under host evil.example -> 200
-stranger POST /v1/threads without JSON -> 403 caller is not a tailnet node this control plane allows
-stranger GET /v1/projects under host evil.example -> 403 caller is not a tailnet node this control plane allows
+stranger POST /v1/threads without JSON -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/projects under host evil.example -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET /v1/whoami under host evil.example -> 403 the API does not answer to host evil.example
-stranger attach -> 403 caller is not a tailnet node this control plane allows
+stranger attach -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 unnamed GET /v1/health -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /v1/health?x=1 -> 403 caller is not a tailnet node this control plane allows
 unnamed POST /v1/health -> 403 caller is not a tailnet node this control plane allows

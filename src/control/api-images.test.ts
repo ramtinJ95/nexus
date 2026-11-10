@@ -7,7 +7,7 @@ import { imageIdOf, type ImageRecipe } from "../protocol/images.ts";
 import { parseProbeConfig } from "../probe/config.ts";
 import { testCapacity, testObservation } from "../test-support/kit.ts";
 import type { ImageId, TailnetNodeId } from "../ids.ts";
-import { node, laptop, project, image, testApi, deployment } from "../test-support/api-kit.ts";
+import { node, laptop, project, image, testApi, deployment, admitStep } from "../test-support/api-kit.ts";
 
 test("a thread cannot start before an image is current", async (t) => {
   const s = await testApi(t);
@@ -57,7 +57,7 @@ test("an image is recorded exactly when a probe's Docker backend can name it", a
 test("only a deployer may build, roll out or roll back an image, never the control node itself", async (t) => {
   const routes = [["/v1/images/build", {}], ["/v1/images/rollout", { image: image.id }], ["/v1/images/rollback", {}]] as const;
   const off = await testApi(t);
-  for (const [path, body] of routes) assert.deepEqual(await off.call("POST", path, body), { status: 403, body: { error: "caller may not build, roll out or roll back an image: only deployers may, never infrastructure nodes or pylons", code: null, retryable: false } });
+  for (const [path, body] of routes) assert.deepEqual(await off.call("POST", path, body), { status: 403, body: { error: `caller may not build, roll out or roll back an image: only deployers may, never infrastructure nodes or pylons${admitStep(laptop, "deploy")}`, code: null, retryable: false } });
   const on = await testApi(t, { deployment });
   on.callAs("nFIREBAT" as TailnetNodeId);
   for (const [path, body] of routes) assert.equal((await on.call("POST", path, body)).status, 403, `the control node may not POST ${path}`);

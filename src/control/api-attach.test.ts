@@ -75,7 +75,7 @@ test("the attach route refuses before the 101 with the API's JSON errors, and a 
   }
 
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/archive`)).status, 200);
-  await refused(409, new RegExp(`^thread ${s.thread.id} is archived, so its pylon stays paused$`), attachTo(s.port, path));
+  await refused(409, new RegExp(`^thread ${s.thread.id} is archived, so its pylon stays paused\\. \`nexus unarchive ${s.thread.id}\` opens it again$`), attachTo(s.port, path));
 });
 
 test("an attach to a pylon running on the boot a settle sealed waits, opening nothing, until another boot runs", async (t) => {

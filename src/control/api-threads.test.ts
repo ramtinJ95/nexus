@@ -613,7 +613,7 @@ test("a harness, a Claude worker and a bare thread each answer every agent route
   const noConversation = (t: Thread) => `409 thread ${t.id} has no conversation`;
   const noWorker = (t: Thread) => `409 thread ${t.id} has no Claude worker`;
   const deleted = (t: Thread) => `409 thread ${t.id} is deleted`;
-  const archived = (t: Thread) => `409 thread ${t.id} is archived`;
+  const archived = (t: Thread) => `409 thread ${t.id} is archived. \`nexus unarchive ${t.id}\` opens it again`;
   assert.deepEqual(await routes(threads.harness, "msg:h"), {
     detail: { claudeWorker: null, agent: { parkedTasks: 0 } }, conversation: "200 harness view", events: "200 stream", claudeEvents: noWorker(threads.harness),
     page: "200 stream", message: '202 {"submission":7}', abort: "204 ", retry: "204 ",

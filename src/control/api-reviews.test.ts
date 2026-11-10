@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import type { ReviewLoop } from "./review.ts";
 import { testReview } from "../test-support/registry-kit.ts";
 import type { ProjectId, TailnetNodeId } from "../ids.ts";
-import { laptop, phone, project, testApi, withThread, deployment } from "../test-support/api-kit.ts";
+import { laptop, phone, project, testApi, withThread, deployment, admitStep } from "../test-support/api-kit.ts";
 
 test("a review needs the GitHub token's loop, and landing, at its start or later, needs a deployer", async (t) => {
   const off = await withThread(t);
@@ -45,7 +45,7 @@ test("only a project edit turns on reviews of its own, landing needs a deployer,
   s.callAs("nFIREBAT" as TailnetNodeId);
   assert.deepEqual(await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: false } }), { status: 403, body: { error: "caller may not edit a project: only a person may, never the control plane, infrastructure nodes or pylons", code: null, retryable: false } });
   s.callAs(phone);
-  assert.deepEqual(await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } }), { status: 403, body: { error: "caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons", code: null, retryable: false } });
+  assert.deepEqual(await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } }), { status: 403, body: { error: `caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons${admitStep(phone, "deploy")}`, code: null, retryable: false } });
   const reviewing = await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: false } });
   assert.deepEqual(reviewing.body.autoReview, { mode: "review", enabledBy: phone }, "reviewing alone lands nothing, so it needs no deployer");
   s.callAs(laptop);
