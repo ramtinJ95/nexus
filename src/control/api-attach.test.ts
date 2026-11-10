@@ -245,5 +245,19 @@ test("an upgrade the API serves no WebSocket for is handled as an ordinary reque
   const upgrade = { connection: "upgrade", upgrade: "websocket", "sec-websocket-version": "13", "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==" };
   assert.equal((await s.call("GET", "/v1/projects", undefined, upgrade)).status, 200);
   const other = await s.call("GET", attachPathOf(s.thread.id), undefined, { connection: "upgrade", upgrade: "h2c" });
-  assert.deepEqual(other, { status: 404, body: { error: `no route /v1/threads/${s.thread.id}/attach`, code: "no-route", retryable: false } });
+  assert.deepEqual(other, { status: 426, body: { error: "the attach route answers only a WebSocket upgrade", code: null, retryable: false } });
+});
+
+test("a GET of the attach route that does not upgrade answers the refusal the upgrade gets, which a browser's WebSocket cannot read", async (t) => {
+  const s = await withThread(t, { attachTiming: fastAttach });
+  const open = Array.from({ length: maxStreams }, () => s.events(`/v1/threads/${s.thread.id}/events`));
+  for (const stream of open) await stream.next();
+  const refusal = { error: `${maxStreams} streams are open, the most this control plane serves at once`, code: null, retryable: false };
+  const upgrade = await attachTo(s.port, attachPathOf(s.thread.id));
+  assert.deepEqual(upgrade, { status: 503, body: refusal });
+  assert.deepEqual(await s.call("GET", attachPathOf(s.thread.id)), { status: 503, body: refusal });
+  open.pop()!.close();
+  await until("a closed stream frees its place", async () => (await s.call("GET", attachPathOf(s.thread.id))).status === 426);
+  for (const stream of open) stream.close();
+  assert.equal((await s.call("GET", `/v1/threads/${s.thread.id}/attach?cols=0&rows=30`)).status, 400, "a bad query is refused as the upgrade refuses it");
 });
