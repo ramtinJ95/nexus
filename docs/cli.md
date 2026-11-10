@@ -42,7 +42,7 @@ This device is tailnet node nAbC123CNTRL. It
   may read threads, projects and nodes
   may start and message threads
   may not deploy, land reviews and build images
-To let it deploy, run this on the control plane's machine, in its nexus checkout: sudo deploy/install.sh --admit nAbC123CNTRL
+To let it deploy, run this on the control plane's machine, in its nexus checkout after git pull. It changes the config and keeps the release that runs: sudo deploy/install.sh --admit nAbC123CNTRL
 ```
 
 A device the control plane does not allow gets the same line, which admits it as a caller and a deployer. Its URL is saved all the same, so once the person reruns the installer with `--admit`, every command works without connecting again. The control plane's own node and the nodes it runs pylons on may read but never act as a person, and `connect` says to use the person's own device. When `NEXUS_URL` is set, `connect` says it overrides the saved URL.

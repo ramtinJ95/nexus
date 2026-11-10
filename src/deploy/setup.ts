@@ -1,11 +1,12 @@
 /**
  * The installer once `deploy/install.sh` has checked the prerequisites: `node src/deploy/setup.ts install --package-manager
  * apt|dnf|other [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]...
- * [--peer <device>]... [--dotfiles <git url>] [--non-interactive]` writes /etc/nexus/{control,control-plane,probe,deployer}.json,
- * runs the role installers, joins a node to its control plane with a join token, gives the agents their credentials
- * (src/deploy/credentials.ts) and says what is left for the person. `write`, with the same flags and `--github-watch`, writes
+ * [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--upgrade]` writes /etc/nexus/{control,control-plane,probe,deployer}.json,
+ * runs the role installers, which keep the release a role runs unless --upgrade, joins a node to its control
+ * plane with a join token, gives the agents their credentials (src/deploy/credentials.ts) and says what is left for the person. `write`, with the same flags and `--github-watch`, writes
  * the configs alone, which `install` runs under the deployer's lock.
  * `node src/deploy/setup.ts signed-in <control.json>` exits 0 when the harness that config names is signed in.
+ * `node src/deploy/setup.ts registry <control.json>` exits 1 when that config's registry is newer than this checkout's migrations.
  * `tailscale status --json | node src/deploy/setup.ts check` prints the tailscale settings install.sh reports as missing.
  * It runs as root from a checkout before `npm ci`, so it imports only Node's builtins and modules that do too.
  */
@@ -25,7 +26,9 @@ import { controlFields } from "../node-base/node-config.ts";
 import { isImageId } from "../ids.ts";
 import { parseTailscaleStatus, tailscaleCli, tailscaleStatus, type TailnetDevice, type TailscaleStatus } from "../tailscale.ts";
 import { localApiWhois } from "../node-base/tailscaled.ts";
-import { configFiles, deployerFiles, ports, prefix, rootPath, servicePath, stateDirs, unitNames, users } from "../node-base/node-layout.ts";
+import { backupStatusFile, configFiles, deployerFiles, ports, prefix, rootPath, servicePath, stateDirs, unitNames, users } from "../node-base/node-layout.ts";
+import { schemaStep } from "./plan.ts";
+import { nodeRegistry } from "./worker.ts";
 import type { Whois } from "../protocol/http.ts";
 import { defaultHarnessModel } from "../protocol/models.ts";
 
@@ -83,6 +86,8 @@ export interface Flags {
   nonInteractive: boolean;
   /** Names the control plane's GitHub token file as github.tokenFile, which the credentials step wrote. */
   githubWatch: boolean;
+  /** Installs the checkout's release over the one a role runs. */
+  upgrade: boolean;
   /** install.sh's, which it needs before Node is installed. */
   packageManager?: PackageManager;
 }
@@ -103,13 +108,14 @@ export function parseFlags(args: readonly string[]): { command: string | undefin
       dotfiles: { type: "string" },
       "non-interactive": { type: "boolean", default: false },
       "github-watch": { type: "boolean", default: false },
+      upgrade: { type: "boolean", default: false },
       "package-manager": { type: "string" },
     },
   });
   const manager = values["package-manager"];
   if (manager !== undefined && !packageManagers.includes(manager)) throw new Error(`--package-manager ${manager}: give ${packageManagers.join(", ")}`);
   const flags: Flags = {
-    admit: values.admit, addNode: values["add-node"], peer: values.peer, nonInteractive: values["non-interactive"], githubWatch: values["github-watch"],
+    admit: values.admit, addNode: values["add-node"], peer: values.peer, nonInteractive: values["non-interactive"], githubWatch: values["github-watch"], upgrade: values.upgrade,
     ...values.node === undefined ? {} : { node: values.node },
     ...values.join === undefined ? {} : { join: values.join },
     ...values.dotfiles === undefined ? {} : { dotfiles: values.dotfiles },
@@ -517,6 +523,14 @@ async function signedIn(path: string): Promise<boolean> {
   }
 }
 
+/** Why this checkout's control plane would refuse the registry the control.json at `path` names, or null when it would open it. */
+async function registryRefusal(path: string): Promise<string | null> {
+  const registry = nodeRegistry({ config: path, home: stateDirs.control, prefix, status: backupStatusFile });
+  const versions = { registry: await registry.version(), release: await registry.known(repo) };
+  if (schemaStep(versions) !== "refuses") return null;
+  return `the registry is at schema version ${versions.registry}, newer than the ${versions.release ?? 0} migrations this checkout applies, so its control plane would refuse to start. Install from a newer checkout, or deploy one with nexus deploy`;
+}
+
 /** The steps `install` takes that act on the machine, so the tests can record them. */
 export interface InstallSteps {
   /** Runs a program on this terminal and resolves its exit code. */
@@ -542,7 +556,7 @@ export async function install(flags: Flags, args: readonly string[], steps: Inst
     const code = await steps.run(program, rest);
     if (code !== 0) throw new Exit(code);
   };
-  const installer = (role: string, ...rest: string[]) => run("bash", join(repo, `deploy/install-${role}.sh`), ...rest);
+  const installer = (role: string, ...rest: string[]) => run("bash", join(repo, `deploy/install-${role}.sh`), ...flags.upgrade && role !== "deployer" ? ["--upgrade"] : [], ...rest);
   // The deployer's lock, which every installer and the deployer's worker take, keeps two runs from merging at once.
   // A write holds it alone, because each installer takes it itself.
   const lock = join(prefix, deployerFiles.lock);
@@ -616,7 +630,12 @@ async function main(args: readonly string[]): Promise<number> {
     return 0;
   }
   if (command === "signed-in" && operands[0] !== undefined) return await signedIn(operands[0]) ? 0 : 1;
-  console.error("usage: node src/deploy/setup.ts install|write|signed-in|check [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--package-manager apt|dnf|other], and write also [--github-watch]");
+  if (command === "registry" && operands[0] !== undefined) {
+    const refusal = await registryRefusal(operands[0]);
+    if (refusal !== null) console.error(`install: ${refusal}`);
+    return refusal === null ? 0 : 1;
+  }
+  console.error("usage: node src/deploy/setup.ts install|write|signed-in|registry|check [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--upgrade] [--package-manager apt|dnf|other], and write also [--github-watch]");
   return 1;
 }
 

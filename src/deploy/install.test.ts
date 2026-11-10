@@ -3,7 +3,9 @@ import { spawn } from "node:child_process";
 import { chmod, copyFile, mkdtemp, mkdir, readdir, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test, type TestContext } from "node:test";
+import { migrations } from "../control/schema.ts";
 import { checkoutMerged, command, ReleaseInstaller, type InstallBoundary } from "./install.ts";
 import { snapshot } from "../test-support/kit.ts";
 
@@ -225,26 +227,29 @@ make_state() { echo "make_state $1" >>"${log}"; }
     await chmod(path, mode);
   };
   const harness = join(root, "var", "lib", "nexus-control", "harness-credentials.json");
-  await credential(join(etc, "control.json"), `${JSON.stringify({ harness: { credentials: harness }, github: { tokenFile: join(etc, "github-token") } })}\n`, 0o644);
+  const db = join(root, "var", "lib", "nexus-control", "registry.db");
+  await credential(join(etc, "control.json"), `${JSON.stringify({ db, harness: { credentials: harness }, github: { tokenFile: join(etc, "github-token") } })}\n`, 0o644);
   await credential(harness, `${JSON.stringify({ deviceId: "8c1c3a51-7d5e-4a8e-9a43-2b1f4c1e0d9a", credentials: { openai: { type: "oauth" } } })}\n`, 0o600);
   await credential(join(etc, "secrets.env"), "CLAUDE_CODE_OAUTH_TOKEN=a\nGH_TOKEN=b\n", 0o600);
   await credential(join(etc, "github-token"), "b\n", 0o640);
   await credential(join(etc, "git_ed25519"), "a key\n", 0o400);
   await credential(join(etc, "git_known_hosts"), "github.com ssh-ed25519 AAAA\n", 0o644);
 
-  const run = (role: "control" | "probe", prepare: boolean) => new Promise<{ code: number | null; timedOut: boolean; stderr: string }>((done) => {
+  const run = (role: "control" | "probe", prepare: boolean, ...args: string[]) => new Promise<{ code: number | null; timedOut: boolean; stdout: string; stderr: string }>((done) => {
     const env = { PATH: `${shims}:${process.env.PATH}`, ...prepare ? { NEXUS_PREPARE: "1", NEXUS_COMMIT: commit } : {} };
-    const child = spawn("bash", [join(checkout, "deploy", `install-${role}.sh`)], { env, stdio: ["pipe", "ignore", "pipe"] });
+    const child = spawn("bash", [join(checkout, "deploy", `install-${role}.sh`), ...args], { env, stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
     let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     const timer = setTimeout(() => child.kill("SIGKILL"), 20_000);
     child.on("exit", (code) => {
       clearTimeout(timer);
       child.stdin.destroy();
-      done({ code, timedOut: code === null, stderr });
+      done({ code, timedOut: code === null, stdout, stderr });
     });
   });
-  return { root, etc, harness, run, ran: async () => (await readFile(log, "utf8").catch(() => "")).trim().split("\n") };
+  return { root, etc, harness, db, run, ran: async () => (await readFile(log, "utf8").catch(() => "")).trim().split("\n") };
 }
 
 test("the deployer's preparation runs both role installers without reading input, and changes no credential", async (t) => {
@@ -311,4 +316,37 @@ test("the control installer starts its service once the harness is signed in, an
     if (why === "") assert.doesNotMatch(result.stderr, /install:/);
     else assert.match(result.stderr, new RegExp(`install: .*${why}`));
   }
+});
+
+test("a rerun by hand keeps the release another commit installed, and starts it on the new config, unless --upgrade", async (t) => {
+  const deployed = "d".repeat(40);
+  const ranBy = async (role: "control" | "probe", ...args: string[]) => {
+    const m = await roleInstallers(t);
+    const opt = join(m.root, "opt", "nexus");
+    await mkdir(join(opt, "releases", deployed), { recursive: true });
+    await writeFile(join(opt, "releases", deployed, "release-commit"), `${deployed}\n`);
+    for (const link of ["control-current", "current"]) await symlink(`releases/${deployed}`, join(opt, link));
+    const result = await m.run(role, false, ...args);
+    assert.equal(result.code, 0, result.stderr);
+    return { stdout: result.stdout, ran: await m.ran(), opt };
+  };
+  for (const [role, link] of [["control", "control-current"], ["probe", "current"]] as const) {
+    const kept = await ranBy(role);
+    assert.ok(kept.ran.includes(`start_unit nexus-${role}.service`), kept.ran.join("\n"));
+    assert.deepEqual(kept.ran.filter((line) => /^(install_release|link_release|install_unit|make_state|usermod|tailscale)\b/.test(line)), [], "it installs nothing");
+    assert.match(kept.stdout, new RegExp(`^${link} runs ${deployed}, and this checkout holds uncommitted changes or no commit git can read\\. This run changes the config and keeps that release`, "m"));
+    const upgraded = await ranBy(role, "--upgrade");
+    assert.ok(upgraded.ran.includes("install_release") && upgraded.ran.includes(`link_release ${join(upgraded.opt, link)}`), upgraded.ran.join("\n"));
+  }
+});
+
+test("an install of the control plane by hand refuses a registry newer than the checkout's migrations before it touches the release", async (t) => {
+  const m = await roleInstallers(t);
+  const registry = new DatabaseSync(m.db);
+  registry.exec(`PRAGMA user_version = ${migrations.length + 1}`);
+  registry.close();
+  const refused = await m.run("control", false, "--upgrade");
+  assert.notEqual(refused.code, 0);
+  assert.match(refused.stderr, new RegExp(`the registry is at schema version ${migrations.length + 1}, newer than the ${migrations.length} migrations this checkout applies`));
+  assert.deepEqual((await m.ran()).filter((line) => /^(install_release|link_release|install_unit|make_state|start_unit)\b/.test(line)), []);
 });
