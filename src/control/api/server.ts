@@ -29,7 +29,7 @@ import { createServer, STATUS_CODES, type IncomingMessage, type ServerResponse }
 import type { Duplex } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { NodeName, TailnetNodeId } from "../../ids.ts";
+import type { NodeName, TailnetNodeId, ThreadId } from "../../ids.ts";
 import { probeError, type ProbeError } from "../../protocol/http.ts";
 import { runsSealed } from "../locator.ts";
 import type { NodeHealth, ProbeClient } from "../../protocol/client.ts";
@@ -46,6 +46,7 @@ import { attachRoute, parseAttachQuery } from "../../contract/attach-parse.ts";
 import { apiKeepAliveMs } from "../../contract/route.ts";
 import { openTerminal } from "../../guest-terminal.ts";
 import { attachTiming, serveAttach, type AttachTiming, type Ending, type PylonDoor } from "../attach.ts";
+import { serveExec } from "../exec.ts";
 import { refusalStatus } from "../http-error.ts";
 import { Refusal, type RefusalCode, type RefusalKind } from "../refusal.ts";
 import { ok, parse, type ApiKit, type RouteEntry } from "./kit.ts";
@@ -175,7 +176,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     guard(t, { status: "kept" });
     registry.threads.setThreadStatus(t.id, "deleted");
     wakeThread(t);
-    for (const s of open) if (s.thread === t.id) s.end();
+    for (const s of [...open, ...execs]) if (s.thread === t.id) s.end();
     await agents[registry.threads.agent(t).kind].delete(t);
     return { ...t, status: "deleted" };
   }
@@ -313,6 +314,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    * at whois has no WebSocket yet, so close() drops what is left of them itself.
    */
   const upgraded = new Set<Duplex>();
+  /**
+   * Open execs, apart from the streams' places: Herdr Core holds one per thread machine for as long as it is
+   * connected, and it renders nothing. A delete ends its thread's.
+   */
+  const execs = new Set<{ thread: ThreadId; caller: TailnetNodeId; end(): void }>();
 
   /**
    * GET /v1/threads/<thread>/attach as a WebSocket. Every refusal is an HTTP reply before the 101, so a client maps it
@@ -337,7 +343,28 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     return { t, pylon, probe, request };
   }
 
+  /**
+   * GET /v1/threads/<thread>/exec?line=L as a WebSocket, which control/exec.ts serves. It never wakes the pylon, so a
+   * pylon that does not run is refused before the 101.
+   */
+  function execable(id: string, query: URLSearchParams, caller: TailnetNodeId) {
+    if (stopping) throw new Refusal("unavailable", "the control plane is stopping");
+    const line = query.get("line");
+    if (line === null || line === "") throw new Refusal("invalid", "line must be the shell line to run in the pylon");
+    const t = thread(id);
+    guard(t, { status: "active" });
+    const { actualState } = pylonState(current(t));
+    if (actualState !== "running") throw new Refusal("conflict", `the pylon of ${t.id} is ${actualState}, and exec does not wake it`);
+    const pylon = registry.threads.pylon(t.pylonId)!;
+    const probe = probes.get(pylon.node);
+    if (probe === undefined) throw new Refusal("unavailable", `no probe is configured for ${pylon.node}`);
+    if (execs.size >= maxExecs) throw new Refusal("unavailable", `${maxExecs} execs are open, the most this control plane serves at once`);
+    if ([...execs].filter((e) => e.caller === caller).length >= maxExecsPerCaller) throw new Refusal("unavailable", `${maxExecsPerCaller} execs of ${caller} are open, the most one caller holds at once`);
+    return { t, pylon, probe, line };
+  }
+
   async function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
+    if (execRoute.test(pathOf(req.url) ?? "")) return await upgradeExec(req, socket, head);
     const { caller, roles } = await admitted(req, attach);
     demand(roles, attach, caller);
     if (stopping) throw new Refusal("unavailable", "the control plane is stopping");
@@ -366,11 +393,37 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     }
   }
 
+  async function upgradeExec(req: IncomingMessage, socket: Duplex, head: Buffer) {
+    const { caller, roles } = await admitted(req, attach);
+    demand(roles, attach, caller);
+    const foreign = foreignSite(req);
+    if (foreign !== null) throw new Refusal("forbidden", `the exec route does not answer pages from ${foreign}`);
+    const { t, pylon, probe, line } = execable(execRoute.exec(pathOf(req.url)!)![1]!, new URL(req.url ?? "/", "http://nexus").searchParams, caller);
+    const stop = new AbortController();
+    const handle = { thread: t.id, caller, end: () => stop.abort("deleted" satisfies Ending) };
+    execs.add(handle);
+    try {
+      const stream = await probe.stream(pylon.pylonId, ["sh", "-c", line]);
+      if (socket.destroyed || stop.signal.aborted) return stream.abort();
+      const ws = await new Promise<WebSocket | null>((resolve) => {
+        socket.once("close", () => resolve(null));
+        sockets.handleUpgrade(req, socket, head, resolve);
+      });
+      if (ws === null) return stream.abort();
+      if (stopping) stop.abort("stopping" satisfies Ending);
+      const session = { end: (why: Ending) => stop.abort(why), served: serveExec(ws, stream, stop.signal) };
+      attached.add(session);
+      await session.served.finally(() => attached.delete(session));
+    } finally {
+      execs.delete(handle);
+    }
+  }
+
   function makeServer(certificate?: Certificate) {
     const serverOptions = {
       keepAliveTimeout: apiKeepAliveMs,
-      // Only a WebSocket to the attach route upgrades. Any other request is handled as one, Upgrade header or not.
-      shouldUpgradeCallback: (req: IncomingMessage) => req.headers.upgrade?.toLowerCase() === "websocket" && attachRoute.test(pathOf(req.url) ?? ""),
+      // Only a WebSocket to the attach or exec route upgrades. Any other request is handled as one, Upgrade header or not.
+      shouldUpgradeCallback: (req: IncomingMessage) => req.headers.upgrade?.toLowerCase() === "websocket" && [attachRoute, execRoute].some((route) => route.test(pathOf(req.url) ?? "")),
     };
     const server = certificate ? createHttpsServer({ ...serverOptions, ...certificate }) : createServer(serverOptions);
     server.on("request", (req, res) => {
@@ -462,6 +515,9 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 }
 
 const attach = { role: "person", action: "attach to a thread's pylon" } satisfies Policy;
+const execRoute = /^\/v1\/threads\/([^/]+)\/exec$/;
+export const maxExecs = 64;
+export const maxExecsPerCaller = 32;
 
 /**
  * Where a request a browser sent comes from, when that is not one of the API's own pages: another site, another
