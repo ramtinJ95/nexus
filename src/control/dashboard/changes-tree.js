@@ -10,6 +10,44 @@ import { noteCount } from "./review-notes.js";
 // A template's icons are in its content, outside the document.
 const iconOf = (name) => document.getElementById("icons").content.querySelector(`.i-${name}`).cloneNode(true);
 
+/**
+ * The changed files the reader marked viewed, by base and then by path, each with the file's look then: its status,
+ * its old path and its counts on that base. A file whose look changed since reads as not viewed, as the agent changed
+ * it again. A base keeps its own marks, as the same file has other counts on another base.
+ */
+const viewedKey = thread === undefined ? null : storageKeys.viewed(thread);
+const lookOf = (file) => JSON.stringify([file.status, file.oldPath, file.additions, file.deletions]);
+const isLooks = (v) => typeof v === "object" && v !== null && !Array.isArray(v) && Object.values(v).every((look) => typeof look === "string");
+let viewed = (() => {
+  try {
+    const saved = JSON.parse(viewedKey === null ? "null" : kept.read(viewedKey) ?? "null");
+    return typeof saved === "object" && saved !== null && !Array.isArray(saved) ? Object.fromEntries(Object.entries(saved).filter(([, looks]) => isLooks(looks))) : {};
+  } catch {
+    return {};
+  }
+})();
+export const isViewed = (file) => viewed[checkout.base]?.[file.path] === lookOf(file);
+/** Keeps `looks` as the current base's marks. */
+function keepViewed(looks) {
+  const { [checkout.base]: _, ...others } = viewed;
+  viewed = Object.keys(looks).length === 0 ? others : { ...others, [checkout.base]: looks };
+  kept.write(viewedKey, Object.keys(viewed).length === 0 ? null : JSON.stringify(viewed));
+}
+export function markViewed(file, on) {
+  const { [file.path]: _, ...rest } = viewed[checkout.base] ?? {};
+  keepViewed(on ? { ...rest, [file.path]: lookOf(file) } : rest);
+  if (checkout.changes !== null) renderChanges();
+}
+/**
+ * Drops the current base's marks of files that changed since, or are no longer changed, so a file changed back is
+ * not viewed again. Another base's marks wait for a read of that base.
+ */
+function forgetChanged(files) {
+  const looks = viewed[checkout.base] ?? {};
+  const still = Object.fromEntries(files.filter(isViewed).map((file) => [file.path, looks[file.path]]));
+  if (Object.keys(still).length !== Object.keys(looks).length) keepViewed(still);
+}
+
 function showChanges(...nodes) {
   document.getElementById("changes-body")?.replaceChildren(...present(nodes));
 }
@@ -46,6 +84,7 @@ export async function readChanges(wake = false) {
       // The thread closed while the read was out, so the reply is stale.
       if (!factsNow().open) return changesUnreadable(factsNow());
       checkout.changes = changes;
+      forgetChanged(changes.files);
       renderChanges();
       refreshTabs(changes.files);
     } catch (err) {
@@ -71,7 +110,10 @@ export async function readChanges(wake = false) {
   if (base !== checkout.base) return readChanges();
 }
 
-/** A tree of the changed files, with each folder that holds only one folder merged into it, as src/checkout. */
+/**
+ * A tree of the changed files, each level's folders and then its files by name, with each folder that holds only one
+ * folder merged into it, as src/checkout.
+ */
 function treeOf(files) {
   const root = { dirs: new Map(), files: [] };
   for (const file of files) {
@@ -83,6 +125,12 @@ function treeOf(files) {
     }
     dir.files.push({ name: parts.at(-1), file });
   }
+  const sort = (dir) => {
+    dir.dirs = new Map([...dir.dirs].sort(([a], [b]) => a.localeCompare(b)));
+    dir.files.sort((a, b) => a.name.localeCompare(b.name));
+    for (const inner of dir.dirs.values()) sort(inner);
+  };
+  sort(root);
   const merged = (name, dir) => {
     while (dir.files.length === 0 && dir.dirs.size === 1) {
       const [[child, inner]] = dir.dirs;
@@ -92,6 +140,14 @@ function treeOf(files) {
     return [name, dir];
   };
   return { root, merged };
+}
+
+/** The changed files as the tree lists them, top to bottom, or none before the changes are read. */
+export function changedFiles() {
+  if (checkout.changes === null) return [];
+  const { root, merged } = treeOf(checkout.changes.files);
+  const walk = (dir) => [...[...dir.dirs].flatMap(([part, inner]) => walk(merged(part, inner)[1])), ...dir.files.map(({ file }) => file)];
+  return walk(root);
 }
 
 function renderChanges() {
@@ -105,7 +161,7 @@ function renderChanges() {
   const { root, merged } = treeOf(files);
   const branch = (dir, path) => {
     const items = [];
-    for (const [part, inner] of [...dir.dirs].sort(([a], [b]) => a.localeCompare(b))) {
+    for (const [part, inner] of dir.dirs) {
       const [name, deepest] = merged(part, inner);
       const at = path === "" ? name : `${path}/${name}`;
       const fold = el("details", { className: "tree-dir", open: !checkout.closed.has(at) },
@@ -114,11 +170,13 @@ function renderChanges() {
       fold.addEventListener("toggle", () => { if (fold.open) checkout.closed.delete(at); else checkout.closed.add(at); });
       items.push(fold);
     }
-    for (const { name, file } of dir.files.sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const { name, file } of dir.files) {
+      const seen = isViewed(file);
       const open = el("button", {
-        type: "button", className: `tree-file${activeTab === file.path ? " active" : ""}`,
-        title: file.oldPath === null ? file.path : `${file.path}, ${file.status} from ${file.oldPath}`,
-      }, badge(file.status), el("span", { className: "tree-name", textContent: name }), noteCount(file.path), counts(file.additions, file.deletions));
+        type: "button", className: `tree-file${activeTab === file.path ? " active" : ""}${seen ? " viewed" : ""}`,
+        title: `${file.oldPath === null ? file.path : `${file.path}, ${file.status} from ${file.oldPath}`}${seen ? ", viewed" : ""}`,
+      }, badge(file.status), el("span", { className: "tree-name", textContent: name }), seen && el("span", { className: "tree-viewed", textContent: "✓" }),
+      noteCount(file.path), counts(file.additions, file.deletions));
       open.dataset.path = file.path;
       open.addEventListener("click", () => openFile(file));
       items.push(open);
