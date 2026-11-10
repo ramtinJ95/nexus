@@ -411,7 +411,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       });
       if (ws === null) return stream.abort();
       if (stopping) stop.abort("stopping" satisfies Ending);
-      const session = { end: (why: Ending) => stop.abort(why), served: serveExec(ws, stream, stop.signal) };
+      const session = { end: (why: Ending) => stop.abort(why), served: serveExec(ws, stream, stop.signal, timing.pingMs) };
       attached.add(session);
       await session.served.finally(() => attached.delete(session));
     } finally {

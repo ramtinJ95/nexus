@@ -6,6 +6,8 @@
 import type { WebSocket } from "ws";
 import { CliError } from "./transport.ts";
 
+const maxSendingBytes = 1 << 20;
+
 export async function execLine(connect: (path: string) => Promise<WebSocket>, thread: string, line: string): Promise<number> {
   const ws = await connect(`/v1/threads/${encodeURIComponent(thread)}/exec?line=${encodeURIComponent(line)}`);
   return await new Promise<number>((resolve, reject) => {
@@ -27,8 +29,16 @@ export async function execLine(connect: (path: string) => Promise<WebSocket>, th
       if (code !== null) resolve(code);
       else reject(new CliError("unreachable", `the exec on ${thread} ended without an exit code (${status}${reason.length > 0 ? `: ${reason.toString()}` : ""})`));
     });
+    // stdin pauses while more than this waits to be sent, so a pylon that reads slowly bounds what this process holds.
+    let sending = 0;
     process.stdin.on("data", (chunk: Buffer) => {
-      if (ws.readyState === ws.OPEN) ws.send(chunk, { binary: true });
+      if (ws.readyState !== ws.OPEN) return;
+      sending += chunk.length;
+      if (sending > maxSendingBytes) process.stdin.pause();
+      ws.send(chunk, { binary: true }, () => {
+        sending -= chunk.length;
+        if (sending <= maxSendingBytes && process.stdin.isPaused() && ws.readyState === ws.OPEN) process.stdin.resume();
+      });
     });
     process.stdin.on("end", () => {
       if (ws.readyState === ws.OPEN) ws.send('{"type":"eof"}');

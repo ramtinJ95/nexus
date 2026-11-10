@@ -54,3 +54,18 @@ test("an exec takes none of the streams' places, so a caller whose share of them
   opened.ws.close();
   await opened.closed;
 });
+
+test("a quiet exec is pinged, so it outlives the CLI's idle timeout", async (t) => {
+  const s = await withThread(t, { attachTiming: { pingMs: 50, waitMs: 5_000, pollMs: 20, hangUpMs: 5_000 } });
+  observeRunning(s, {});
+  s.probePipes(async (argv) => processStream(argv[0]!, argv.slice(1), () => {}));
+  const ws = new WebSocket(`ws://127.0.0.1:${s.port}${execPath(s.thread.id, "sleep 0.3")}`, { perMessageDeflate: false });
+  let pings = 0;
+  ws.on("ping", () => { pings++; });
+  const texts: unknown[] = [];
+  ws.on("message", (data, binary) => { if (!binary) texts.push(JSON.parse(data.toString())); });
+  const [code] = await once(ws, "close");
+  assert.ok(pings >= 2, `pinged ${pings} times while the line was quiet`);
+  assert.deepEqual(texts, [{ type: "exit", code: 0 }]);
+  assert.equal(code, 1000);
+});
