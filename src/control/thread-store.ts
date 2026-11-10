@@ -172,7 +172,7 @@ export const holding = {
     start_requests: { keptOnPurge: "a repeat of the request ID would start the thread again, and the pipeline would queue its item again" },
     aborted_conversations: { purge: "conversation = $conversation" }, thread_archives: byThread, disk_cleanups: deleted,
   },
-  settings: ["backed-up-at"],
+  settings: ["backed-up-at", "retention-since"],
 } as const satisfies Holding;
 
 export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, "node" | "saveObservation" | "saveNodeState">,
@@ -354,7 +354,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
 
   function setThreadStatus(id: ThreadId, status: ThreadStatus) {
     transaction(() => {
-      sql("UPDATE threads SET status = ? WHERE id = ?").run(status, id);
+      sql("UPDATE threads SET status = $status, deleted_at = CASE WHEN $status = 'deleted' THEN coalesce(deleted_at, $at) END WHERE id = $id").run({ $status: status, $at: clock(), $id: id });
       if (status === "archived") sql("INSERT INTO thread_archives (thread, archived_at) VALUES (?, ?) ON CONFLICT(thread) DO NOTHING").run(id, clock());
       else sql("DELETE FROM thread_archives WHERE thread = ?").run(id);
       if (!isOpenStatus(status)) {
