@@ -24,7 +24,11 @@ const perRequest = { br: { params: { [constants.BROTLI_PARAM_QUALITY]: 5 } }, gz
 const kept = { br: { params: { [constants.BROTLI_PARAM_QUALITY]: 9 } }, gzip: { level: 9 } };
 const compressors: Record<Coding, (body: Buffer, options: object) => Promise<Buffer>> = { br: promisify(brotliCompress), gzip: promisify(gzip) };
 
-/** The coding `accept-encoding` takes, preferring brotli, or null for the body as it is. */
+/**
+ * The coding `accept-encoding` takes, preferring brotli, or null for the body as it is: when it names neither, or
+ * weighs identity above both. A header that refuses identity as well still gets the body as it is, as RFC 9110 has a
+ * server answer one it can meet no coding of.
+ */
 export function negotiate(header: string | undefined): Coding | null {
   if (header === undefined) return null;
   const q = new Map<string, number>();
@@ -36,7 +40,7 @@ export function negotiate(header: string | undefined): Coding | null {
   }
   const weight = (coding: Coding) => q.get(coding) ?? q.get("*") ?? 0;
   const best = (["br", "gzip"] as const).filter((c) => weight(c) > 0).sort((a, b) => weight(b) - weight(a))[0];
-  return best ?? null;
+  return best === undefined || (q.get("identity") ?? 0) > weight(best) ? null : best;
 }
 
 /** Each coding of `body`, compressed once on first use, for a body that never changes. */

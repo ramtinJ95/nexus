@@ -189,10 +189,11 @@ export function follow(url) {
 let lastRead = null;
 export async function readPage(url) {
   const href = String(url);
-  const tag = lastRead?.href === href ? { "if-none-match": lastRead.etag } : {};
+  // Another read may replace lastRead before this one answers, as overlapping node picks do.
+  const cached = lastRead?.href === href ? lastRead : null;
   // A link that stalls mid-body would otherwise hold the refresh lock forever.
-  const res = await fetch(url, { headers: { accept: "text/html", ...tag }, cache: "no-store", signal: AbortSignal.timeout(pollMs * 2) });
-  if (res.status === 304 && lastRead?.href === href) return new DOMParser().parseFromString(lastRead.text, "text/html");
+  const res = await fetch(url, { headers: { accept: "text/html", ...(cached && { "if-none-match": cached.etag }) }, cache: "no-store", signal: AbortSignal.timeout(pollMs * 2) });
+  if (res.status === 304 && cached !== null) return new DOMParser().parseFromString(cached.text, "text/html");
   if (!res.ok) throw new Error(`the control plane answered ${res.status}`);
   const text = await res.text();
   const etag = res.headers.get("etag");
