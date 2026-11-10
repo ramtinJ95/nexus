@@ -401,16 +401,17 @@ export function reviewLoop(deps: ReviewDeps) {
       // for, which a refusal for room alone leaves in line.
       const behind = heldBehind(r);
       if (behind !== null) return { kind: "run", run: sameBehind(run.behind, behind) ? run : { ...run, behind } };
-      // A run in line, held or waiting for room, has no deadline until a start ends that, even one that failed.
+      const gone = await endedOnGitHub(r);
+      if (gone !== null) return { kind: "ended", review: gone };
+      // A run in line, held or waiting for room, has no deadline until a start ends that.
       const held = run.behind !== undefined || run.room === true;
       let started: Awaited<ReturnType<CheckRuns["start"]>>;
       try {
-        const gone = await endedOnGitHub(r);
-        if (gone !== null) return { kind: "ended", review: gone };
         started = await runs.start(builder, r.pr.branch, head, kind === "beside" || undefined);
       } catch (err) {
-        // A failed start still takes the run out of line, or it would hold every other start with no deadline of its own.
-        if (!held) throw err;
+        // A held run's failed start takes it out of line, or it would hold every other start with no deadline of its
+        // own. A wait for room keeps its place, as its next start may still be refused for room alone.
+        if (run.behind === undefined) throw err;
         log(`review ${r.id} of ${r.builder}: a ${kind === "live" ? "live check" : "check"} that waited in line did not start and will be tried again (${(err as Error).name})`);
         return { kind: "run", run: { startedAt: now(), thread: null } };
       }

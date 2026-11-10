@@ -111,6 +111,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   let live: CheckState = { kind: "done", passed: true, output: "fleet ok" };
   let refuse: string | null = null;
   let liveRoom = true;
+  /** How many verify pylon starts fail next other than by a refusal. */
+  let liveStartFails = 0;
   /**
    * The memory the node has free, which each pylon a start places takes: 4 GiB for a reviewer or check, which a start
    * beside the builder takes even past what is free unless it asks for room, and 8 GiB for a verify pylon.
@@ -180,6 +182,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       },
       live: {
         async start(builder) {
+          if (liveStartFails > 0) { liveStartFails--; throw new Error("the harness is unreachable"); }
           if (refuse !== null) return { refused: refuse, room: false };
           if (!liveRoom || freeGiB < 8) return { refused: "no node can run this pylon: node is overcommitted", room: true };
           freeGiB -= 8;
@@ -259,6 +262,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     /** Whether a node has room for a verify pylon. */
     set liveRoom(room: boolean) { liveRoom = room; },
     set freeGiB(gib: number) { freeGiB = gib; },
+    set liveStartFails(n: number) { liveStartFails = n; },
     /** Room that frees, as a pylon that pauses gives back. */
     free(gib: number) { freeGiB += gib; },
     placed,
@@ -2045,6 +2049,33 @@ test("a gate's wait holds neither its own review's steps, nor the person's revie
   await loop.poll();
   assert.equal(reviewOf(f, auto).reviewerStarted, true, "a check refused for what room cannot end is no wait, so nothing waits behind it");
   assert.equal(reviewOf(f, person).second?.kind, "claude");
+});
+
+test("a verify pylon that waits for room keeps its place when a start fails other than by a refusal", async (t) => {
+  const f = fixture(t);
+  f.verifies = true;
+  f.live = { kind: "running" };
+  f.liveRoom = false;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  const earlier = await otherBuilder(f, loop, "th-builder-2", 8, "person");
+  await loop.poll();
+  await loop.poll();
+  f.reply(reviewOf(f, earlier).reviewer, verdict(reviewOf(f, earlier), {}));
+  await loop.poll();
+  f.tick(60_000);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "verifying");
+  f.liveRoom = true;
+  f.freeGiB = 8;
+  f.liveStartFails = 1;
+  f.placed.length = 0;
+  await loop.poll();
+  assert.deepEqual(f.placed, [], "the start failed");
+  assert.equal((reviewOf(f, earlier).phase as { room?: true }).room, true, "the wait keeps its room flag");
+  await loop.poll();
+  assert.deepEqual(f.placed, [`verify pylon of ${earlier}`], "and its place ahead of the later wait");
 });
 
 test("a live check held before it tried keeps its place, so a later one the loop steps first does not pass it", async (t) => {
