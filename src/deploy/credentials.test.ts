@@ -425,6 +425,23 @@ test("--rotate refuses a secrets.env that changed while it asked, and a restart 
   } }, silent), /secrets\.env changed while the token was asked for, so nothing was replaced/);
   assert.equal(await readFile(m.at(stores.claude.file), "utf8"), meanwhile);
 
+  for (const gh of [`GH_TOKEN=${ghToken}\n`, "STRIPE_KEY=a\n"]) {
+    const w = await machine(t, "control");
+    await w.put(stores.claude.file, gh, 0o640);
+    await w.put(stores.githubWatch.file, `${ghToken}\n`, 0o640);
+    const config = JSON.parse(await readFile(w.at("/etc/nexus/control.json"), "utf8")) as object;
+    await w.put("/etc/nexus/control.json", `${JSON.stringify({ ...config, github: { tokenFile: stores.githubWatch.file } })}\n`, 0o644);
+    const wider = scripted({ NEXUS_GH_TOKEN: rotatedToken });
+    await assert.rejects(rotate("github", "control", w.host, { ...wider, secret: async (q) => {
+      const value = await wider.secret(q);
+      await w.put(stores.githubWatch.file, "ghp_widerClassicToken\n", 0o640);
+      return value;
+    } }, silent), /github-token changed while the token was asked for, so nothing was replaced/);
+    assert.equal(await readFile(w.at(stores.githubWatch.file), "utf8"), "ghp_widerClassicToken\n", "the token file another run replaced is kept");
+    assert.equal(await readFile(w.at(stores.claude.file), "utf8"), gh, "secrets.env is not written either");
+    assert.deepEqual(w.runs, []);
+  }
+
   const c = await machine(t, "control");
   await c.put(stores.claude.file, `GH_TOKEN=${ghToken}\n`, 0o640);
   await c.put(stores.githubWatch.file, `${ghToken}\n`, 0o640);

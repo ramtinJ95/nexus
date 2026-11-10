@@ -151,6 +151,7 @@ main() {
   # Only what the prerequisites depend on. setup.ts install refuses the arguments that are wrong.
   for ((i = 0; i < $#; i++)); do
     case ${args[i]} in
+      --rotate|--rotate=*) fail "--rotate comes first: sudo deploy/install.sh --rotate claude|github [--non-interactive]" ;;
       --node|--node=*|--join|--join=*) role=node ;;
       --dotfiles) dotfiles=${args[i + 1]:-} ;;
       --dotfiles=*) dotfiles=${args[i]#*=} ;;

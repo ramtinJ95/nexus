@@ -429,11 +429,22 @@ const claudeNameOf = (value: string) => value.startsWith("sk-ant-api") ? "ANTHRO
  */
 export async function rotate(kind: Rotatable, role: "control" | "node", host: Host, answers: Answers, say: (line: string) => void): Promise<void> {
   const at = await locations(host);
-  const text = await host.read(at.secrets) ?? "";
+  const read = new Map<string, string | undefined>();
+  const reading = async (path: string) => {
+    const text = await host.read(path);
+    read.set(path, text);
+    return text;
+  };
+  /** Before the first write, so a file another run replaced while the person was asked is not overwritten from what this one read. */
+  const unchanged = async () => {
+    for (const [path, text] of read) {
+      if (await host.read(path) !== text) throw new Error(`${path} changed while the token was asked for, so nothing was replaced. Rerun --rotate ${kind}`);
+    }
+  };
+  const text = await reading(at.secrets) ?? "";
   const secrets = parseSecretsFile(at.secrets, text, heldNames);
   const restarts = new Set<string>();
   const replace = async (name: string, value: string) => {
-    if (await host.read(at.secrets) !== text) throw new Error(`${at.secrets} changed while the token was asked for, so nothing was replaced. Rerun --rotate ${kind}`);
     await host.write(at.secrets, replaceSecret(at.secrets, text, name, value, heldNames), stores.claude);
     say(`Replaced ${name} in ${at.secrets}.`);
     restarts.add(unitNames.probe);
@@ -454,16 +465,18 @@ export async function rotate(kind: Rotatable, role: "control" | "node", host: Ho
       });
       if (value === undefined) return say("Changed nothing.");
       const name = claudeNameOf(value);
+      await unchanged();
       await replace(name, value);
       still.push(...others(name), "The old token works until it expires or is revoked.");
       return;
     }
     const old = secrets.value("GH_TOKEN");
     const watchFile = role === "control" ? at.githubWatch : undefined;
-    const watch = watchFile === undefined ? undefined : (await host.read(watchFile))?.trim();
+    const watch = watchFile === undefined ? undefined : (await reading(watchFile))?.trim();
     if (old === undefined && watch === undefined) throw new Error(`neither ${at.secrets} nor a github.tokenFile holds a GitHub token to replace. deploy/install.sh asks for one`);
     const value = await answers.secret({ key: "NEXUS_GH_TOKEN", say: "Paste the new GitHub token, or press Enter to change nothing:", check: githubTokenLive(host, say) });
     if (value === undefined) return say("Changed nothing.");
+    await unchanged();
     if (old !== undefined) {
       await replace("GH_TOKEN", value);
       still.push(...others("GH_TOKEN"));

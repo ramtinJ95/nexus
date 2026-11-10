@@ -256,5 +256,9 @@ main --rotate claude`);
   const bare = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps}
 main --rotate`);
   assert.match(bare.stderr, /--rotate names what to replace, claude or github/);
-  assert.doesNotMatch(user.stderr + bare.stderr, /^node /m);
+  const late = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps}
+main --non-interactive --rotate github`);
+  assert.notEqual(late.code, 0);
+  assert.match(late.stderr, /--rotate comes first: sudo deploy\/install\.sh --rotate claude\|github/);
+  assert.doesNotMatch(user.stderr + bare.stderr + late.stderr, /^node /m);
 });
