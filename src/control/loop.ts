@@ -236,11 +236,7 @@ export function startLoop(options: LoopOptions): Loop {
         },
       };
       try {
-        const launch = launches.step(thread, pylonId, nodeObservation, { probe: link.probe, snapshot: (waitMs) => snapshot(link, () => true, waitMs) });
-        if (launch !== "tick") {
-          if (await launch === "skip") continue;
-          pylon.desired = ctx.desired();
-        }
+        if (launches.step(thread, pylonId, nodeObservation, { probe: link.probe, snapshot: (waitMs) => snapshot(link, () => true, waitMs), wake: () => void wake(node) }) === "skip") continue;
         const step = await tick(pylon, ctx);
         if (step.kind === "fail" && stored.failed === null) log(`${pylon.pylonId}: the planner gave up: ${step.reason}`);
         // Done for a deleted thread means its node neither has the pylon nor routes a port to it, so nothing serves the ports.
@@ -355,6 +351,8 @@ export function startLoop(options: LoopOptions): Loop {
         for (const w of link.waiters) w.done(false);
       }
       await Promise.all([...followers, ...[...links.values()].map((link) => link.passes.settled())]);
+      // A pass that was still running may have started a launch.
+      await launches.settled();
     },
   };
 }
