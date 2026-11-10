@@ -1,13 +1,13 @@
 // The thread list's rows, read for every tab of the browser by the one that follows the events, and the seen mark
 // a thread page owes. The page passes its own pieces and a test its fakes, with the browser globals last.
-import { owedSeen } from "./notifications.js";
+import { owedSeen, raiser } from "./notifications.js";
 import { requestOver } from "./request.js";
 import { callOf } from "../../contract/route.ts";
 import { streamRoutes } from "../../contract/streams.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { rowEvents } from "./contract.ts";
 
-export function startRows({ api, notifications, health = () => {}, caughtUp = () => {}, changed = () => {}, currentThread, focused, activeTab }, { window, navigator, document, BroadcastChannel, EventSource, Date, AbortSignal, setTimeout, clearTimeout, setInterval } = globalThis) {
+export function startRows({ api, notifications, health = () => {}, caughtUp = () => {}, changed = () => {}, currentThread, focused, activeTab }, { window, navigator, document, crypto, BroadcastChannel, EventSource, Date, AbortSignal, setTimeout, clearTimeout, setInterval } = globalThis) {
   const request = requestOver(api);
   // One tab of the browser holds the lock, follows those events and reads the thread list, and the other tabs show the
   // rows it hands them, so a hidden tab notifies without a request or a stream of its own. Every tab showing that one
@@ -54,8 +54,21 @@ export function startRows({ api, notifications, health = () => {}, caughtUp = ()
     } finally { readingRows = false; }
   }
   const askRows = () => sharing && !following ? rowsChannel.postMessage("read") : void readRows();
+  // Each tab tells the others which thread it shows and whether it has focus, so one tab alone raises a system
+  // notification, and none does while the person looks at a tab. Over plain HTTP, which has no randomUUID, a tab
+  // shares nothing and is the only tab it knows.
+  const id = sharing ? crypto.randomUUID() : "";
+  const tabs = new Map();
+  const view = () => ({ id, thread: currentThread(), focused: focused(), leading: following });
+  const tell = (ask = false) => rowsChannel?.postMessage({ tab: view(), ask });
+  const gone = () => rowsChannel?.postMessage({ gone: id });
+  const raises = (thread) => raiser([...tabs.values(), view()], thread) === id;
   rowsChannel?.addEventListener("message", ({ data }) => {
-    if (data === "read") {
+    if (data.tab !== undefined) {
+      tabs.set(data.tab.id, data.tab);
+      if (data.ask) tell();
+    } else if (data.gone !== undefined) tabs.delete(data.gone);
+    else if (data === "read") {
       if (following) void readRows();
     } else if (data.health !== undefined) health(data.health);
     else showRows(data.rows, data.now);
@@ -89,6 +102,7 @@ export function startRows({ api, notifications, health = () => {}, caughtUp = ()
   }
   function followRows() {
     following = true;
+    tell();
     followEvents();
     // A delete, a harness turn that starts or stops without a reply, or a session whose lease lapsed sends no event.
     setInterval(readRows, 10_000);
@@ -102,6 +116,16 @@ export function startRows({ api, notifications, health = () => {}, caughtUp = ()
       events?.close();
       events = null;
     });
+  }
+  if (sharing) {
+    for (const kind of ["focus", "blur"]) window.addEventListener(kind, () => tell());
+    document.addEventListener("visibilitychange", () => tell());
+    // A tab the browser freezes, discards or keeps in its back-forward cache hears no rows, so it raises nothing.
+    window.addEventListener("pagehide", gone);
+    document.addEventListener("freeze", gone);
+    window.addEventListener("pageshow", ({ persisted }) => { if (persisted) tell(true); });
+    document.addEventListener("resume", () => tell(true));
+    tell(true);
   }
   askRows();
 
@@ -120,5 +144,5 @@ export function startRows({ api, notifications, health = () => {}, caughtUp = ()
     } catch { /* The page's refresh reports connection failures. */ }
     finally { marking = false; }
   }
-  return { readRows, markSeen, askRows };
+  return { readRows, markSeen, askRows, raises };
 }

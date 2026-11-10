@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { coordinator, notificationChannel, needSelectors, noticeUrl, owedSeen, seenBody } from "./notifications.js";
+import { coordinator, notificationChannel, needSelectors, noticeUrl, owedSeen, raiser, seenBody } from "./notifications.js";
+import { notice, permissionControl, rowNotice } from "./health.js";
 import { apiOver } from "./request.js";
 import { startRows } from "./rows.js";
 
@@ -132,7 +133,7 @@ test("a page owes a seen mark once for each reply it shows, so one marked unseen
  * One dashboard tab's attention code from rows.js, run on fakes of the browser. Tabs given the same `browser` share its
  * BroadcastChannel and its one Web Lock, which the first tab to ask holds.
  */
-function tab(browser, { fetch, now = () => 0, notify = () => {}, health = () => {}, caughtUp = () => {}, changed = () => {}, conversation = null, focused = true, timeout = (ms) => AbortSignal.timeout(ms), locks = true, visible = true }) {
+function tab(browser, { fetch, now = () => 0, notify = () => {}, shown = () => {}, health = () => {}, caughtUp = () => {}, changed = () => {}, conversation = null, focused = true, thread = "t1", timeout = (ms) => AbortSignal.timeout(ms), locks = true, visible = true }) {
   const timers = [];
   const intervals = [];
   const favicon = { href: "/assets/favicon.svg?v=0123456789ab" };
@@ -142,7 +143,7 @@ function tab(browser, { fetch, now = () => 0, notify = () => {}, health = () => 
     querySelector: (selector) => selector === 'link[rel="icon"]' ? favicon : null,
     visibilityState: visible ? "visible" : "hidden",
     listeners: [],
-    addEventListener: (_, listener) => doc.listeners.push(listener),
+    addEventListener: (kind, listener) => { if (kind === "visibilitychange") doc.listeners.push(listener); },
   };
   class Channel {
     constructor() { browser.channels.push(this); this.listeners = []; }
@@ -153,19 +154,29 @@ function tab(browser, { fetch, now = () => 0, notify = () => {}, health = () => 
     constructor(url) { browser.streams.push(this); this.url = url; this.closed = false; }
     close() { this.closed = true; }
   }
+  const win = { BroadcastChannel: Channel, listeners: [], addEventListener: (kind, listener) => win.listeners.push({ kind, listener }) };
+  const fire = (kind, event) => { for (const l of win.listeners) if (l.kind === kind) l.listener(event); };
+  let code;
   const context = {
-    window: { BroadcastChannel: Channel }, BroadcastChannel: Channel, EventSource: Events, URLSearchParams,
+    window: win, BroadcastChannel: Channel, crypto: { randomUUID: () => `tab-${browser.tabs += 1}` }, EventSource: Events, URLSearchParams,
     navigator: locks ? { locks: { request: (_, hold) => { if (!browser.locked) { browser.locked = true; hold(); } return new Promise(() => {}); } } } : {},
     document: doc, fetch, Date: { now },
     AbortSignal: { timeout }, setTimeout: (f, ms) => timers.push({ f, at: now() + ms }), clearTimeout: () => timers.splice(0),
-    setInterval: (f, ms) => intervals.push({ f, ms }), notifications: coordinator(notify), health, caughtUp, changed, owedSeen,
-    currentThread: () => "t1", focused: () => focused, activeTab: () => null, api: apiOver({ fetch }),
+    setInterval: (f, ms) => intervals.push({ f, ms }), health, caughtUp, changed, owedSeen,
+    notifications: coordinator((row) => {
+      notify(row);
+      shown(rowNotice(row, { focused, current: thread, secure: true, permission: "granted", raises: code.raises(row.id) }));
+    }),
+    currentThread: () => thread, focused: () => focused, activeTab: () => null, api: apiOver({ fetch }),
   };
-  const code = startRows(context, context);
+  code = startRows(context, context);
   const show = (state) => { doc.visibilityState = state; for (const l of doc.listeners) l(); };
-  return { ...code, doc, favicon, timers, intervals, show };
+  const focus = (on) => { focused = on; fire(on ? "focus" : "blur"); };
+  const close = () => { fire("pagehide", { persisted: false }); browser.channels.splice(browser.channels.indexOf(close.channel), 1); };
+  close.channel = browser.channels.at(-1);
+  return { ...code, doc, favicon, timers, intervals, show, focus, close };
 }
-const browser = () => ({ channels: [], streams: [], locked: false, posts: 0 });
+const browser = () => ({ channels: [], streams: [], locked: false, posts: 0, tabs: 0 });
 const json = (body) => ({ ok: true, text: async () => JSON.stringify(body) });
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -239,7 +250,7 @@ test("a hidden tab notifies from the rows the tab that follows the events read, 
   listed = [{ ...listed[0], attention: "waiting" }];
   stream.onmessage({});
   await settle();
-  assert.deepEqual(notified, { leader: ["waiting"], hidden: ["waiting"] }, "a change that needs the person notifies every tab at once");
+  assert.deepEqual(notified, { leader: ["waiting"], hidden: ["waiting"] }, "every tab hears a change that needs the person at once");
   assert.equal(hidden.doc.title, "Threads · Nexus", "and leaves every tab's title as the page set it");
 
   now = 1000;
@@ -399,4 +410,131 @@ test("a follower whose stream opens again hands every tab the changes it missed 
   assert.equal(catchUps.length, 1);
   catchUps[0]({ id: 7, node: null, name: "backup", from: "ok", status: "warn", text: "the run failed" });
   assert.deepEqual(heard, { leader: [7], hidden: [7] });
+});
+
+test("three hidden tabs raise one system notification for a change, tagged with the thread and its attention", async () => {
+  let listed = [{ id: "t1", title: "Fix", attention: null, working: false, lastReplyAt: null }];
+  const shared = browser();
+  const raised = [];
+  const page = (name, thread) => tab(shared, { focused: false, visible: false, thread, shown: (n) => { if (n.channel !== null) raised.push({ name, ...n }); }, fetch: async () => json(listed) });
+  page("leader", null);
+  page("home", null);
+  page("other", "t2");
+  await settle();
+  listed = [{ ...listed[0], attention: "waiting" }];
+  shared.streams[0].onmessage({});
+  await settle();
+  assert.deepEqual(raised, [{ name: "leader", channel: "system", title: "Fix", body: "waiting for input", url: "/#needs-you:t1:waiting", tag: "t1:waiting" }],
+    "the tab that follows the events raises it, as no tab shows the thread");
+});
+
+test("a hidden tab on the thread raises its notice, whose click only brings that tab forward", async () => {
+  let listed = [{ id: "t1", title: "Fix", attention: null, working: false, lastReplyAt: null }];
+  const shared = browser();
+  const raised = [];
+  const page = (name, thread) => tab(shared, { focused: false, visible: false, thread, shown: (n) => { if (n.channel !== null) raised.push({ name, ...n }); }, fetch: async () => json(listed) });
+  page("leader", null);
+  page("on-thread", "t1");
+  page("other", "t2");
+  await settle();
+  listed = [{ ...listed[0], attention: "failed" }];
+  shared.streams[0].onmessage({});
+  await settle();
+  assert.deepEqual(raised.map((n) => [n.name, n.channel, n.url, n.tag]), [["on-thread", "system", null, "t1:failed"]]);
+});
+
+test("while a tab has focus no tab raises a system notification, and one on the thread shows no notice at all", async () => {
+  let listed = [{ id: "t1", title: "Fix", attention: null, working: false, lastReplyAt: null }, { id: "t2", title: "Docs", attention: null, working: false, lastReplyAt: null }];
+  const shared = browser();
+  const raised = [];
+  const page = (name, thread, focused) => tab(shared, { focused, visible: focused, thread, shown: (n) => { if (n.channel !== null) raised.push([name, n.channel, n.tag]); }, fetch: async () => json(listed) });
+  page("leader", null, false);
+  const looking = page("looking", "t1", false);
+  page("other", "t2", false);
+  await settle();
+  looking.focus(true);
+  listed = [{ ...listed[0], attention: "decision" }, listed[1]];
+  shared.streams[0].onmessage({});
+  await settle();
+  assert.deepEqual(raised, [], "the focused tab shows the thread, and the hidden ones leave it to that tab");
+  listed = [listed[0], { ...listed[1], attention: "failed" }];
+  shared.streams[0].onmessage({});
+  await settle();
+  assert.deepEqual(raised, [["looking", "toast", "t2:failed"]], "another thread's notice is the focused tab's toast alone");
+  looking.focus(false);
+  listed = [{ ...listed[0], attention: "parked" }, listed[1]];
+  shared.streams[0].onmessage({});
+  await settle();
+  assert.deepEqual(raised.at(-1), ["looking", "system", "t1:parked"], "once the person looks away, the tab on the thread raises it");
+  assert.equal(raised.length, 2);
+});
+
+test("a tab that closes leaves its notices to the tabs still open", async () => {
+  let listed = [{ id: "t1", title: "Fix", attention: null, working: false, lastReplyAt: null }];
+  const shared = browser();
+  const raised = [];
+  const page = (name, thread) => tab(shared, { focused: false, visible: false, thread, shown: (n) => { if (n.channel !== null) raised.push(n.name ?? name); }, fetch: async () => json(listed) });
+  page("leader", null);
+  page("on-thread", "t1").close();
+  await settle();
+  listed = [{ ...listed[0], attention: "waiting" }];
+  shared.streams[0].onmessage({});
+  await settle();
+  assert.deepEqual(raised, ["leader"]);
+});
+
+test("the tab that raises a thread's notice is the one on the thread, else the one that follows the events, and none while one has focus", () => {
+  const tabs = [{ id: "b", thread: null, focused: false, leading: true }, { id: "c", thread: "t2", focused: false, leading: false }, { id: "d", thread: "t1", focused: false, leading: false }];
+  assert.equal(raiser(tabs, "t1"), "d");
+  assert.equal(raiser(tabs, "t3"), "b");
+  assert.equal(raiser([...tabs, { id: "a", thread: "t1", focused: false, leading: false }], "t1"), "a", "the first of the thread's tabs by ID");
+  assert.equal(raiser(tabs.filter((t) => !t.leading), "t3"), "c", "a tab that has not yet heard from the follower picks by ID");
+  assert.equal(raiser([...tabs, { id: "e", thread: "t2", focused: true, leading: false }], "t1"), null);
+  assert.equal(notificationChannel(false, null, "t1", true, "granted", false), null, "a background tab that does not raise shows nothing");
+  assert.deepEqual(rowNotice({ id: "t1", title: "Fix", attention: "reply" }, { focused: false, current: "t1", secure: true, permission: "granted", raises: true }),
+    { channel: "system", title: "Fix", body: "new reply", url: null, tag: "t1:reply" });
+});
+
+test("a system notification's click opens its page, unless the tab already shows the thread, where it only comes forward", async (t) => {
+  const shown = [];
+  class Notification {
+    constructor(title, options) { Object.assign(this, { title, options, open: true }); shown.push(this); }
+    close() { this.open = false; }
+  }
+  const assigned = [];
+  let focuses = 0;
+  const globals = { location: { assign: (url) => assigned.push(url) }, window: { focus: () => { focuses += 1; } }, Notification };
+  const before = Object.fromEntries(Object.keys(globals).map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  for (const [k, v] of Object.entries(globals)) Object.defineProperty(globalThis, k, { value: v, configurable: true, writable: true });
+  t.after(() => { for (const [k, d] of Object.entries(before)) d === undefined ? delete globalThis[k] : Object.defineProperty(globalThis, k, d); });
+  await notice("system", "Fix", "waiting for input", null, "t1:waiting");
+  await notice("system", "Docs", "failed", "/#needs-you:t2:failed", "t2:failed");
+  assert.deepEqual(shown.map((n) => n.options), [{ body: "waiting for input", tag: "t1:waiting", renotify: true }, { body: "failed", tag: "t2:failed", renotify: true }]);
+  shown[0].onclick();
+  assert.deepEqual([focuses, assigned, shown[0].open], [1, [], false], "the tab on the thread keeps its page, draft and terminal");
+  shown[1].onclick();
+  assert.deepEqual([focuses, assigned], [2, ["/#needs-you:t2:failed"]]);
+});
+
+test("the notifications control reads the browser's permission, and asks for it only while unasked", async () => {
+  const control = (permission, { secure = true, ask = permission } = {}) => {
+    const status = { listeners: [], addEventListener: (_, l) => status.listeners.push(l) };
+    const Notification = { permission, requestPermission: async () => { Notification.permission = ask; return ask; } };
+    const window = secure ? { isSecureContext: true, Notification } : { isSecureContext: false };
+    const button = { textContent: "", disabled: true };
+    permissionControl(button, { window, navigator: { permissions: { query: async () => status } } });
+    return { button, Notification, status };
+  };
+  const read = ({ textContent, disabled }) => [textContent, disabled];
+  assert.deepEqual(read(control("granted").button), ["System notifications on", true]);
+  assert.deepEqual(read(control("denied").button), ["System notifications blocked in the browser's site settings", true]);
+  assert.deepEqual(read(control("default", { secure: false }).button), ["System notifications need HTTPS", true]);
+  const unasked = control("default", { ask: "granted" });
+  assert.deepEqual(read(unasked.button), ["Enable system notifications", false]);
+  await unasked.button.onclick();
+  assert.deepEqual(read(unasked.button), ["System notifications on", true], "the answer shows once the person gives it");
+  await settle();
+  unasked.Notification.permission = "denied";
+  for (const l of unasked.status.listeners) l();
+  assert.deepEqual(read(unasked.button), ["System notifications blocked in the browser's site settings", true], "a change in the site settings shows too");
 });
