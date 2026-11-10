@@ -10,7 +10,10 @@
 
 prefix=/opt/nexus
 etc=/etc/nexus
+unit_dir=/etc/systemd/system
 service_path=/usr/local/bin:/usr/bin
+# How long start_unit waits for a unit to answer its health check, as the deployer's healthTimeoutMs does.
+health_timeout_ms=60000
 
 fail() { echo "$(basename "$0" .sh): $*" >&2; exit 1; }
 
@@ -126,7 +129,7 @@ prepare_probe() {
 }
 
 install_unit() {
-  local source=$1 unit=/etc/systemd/system/$2
+  local source=$1 unit=$unit_dir/$2
   if ! cmp -s "$source" "$unit"; then
     install -o root -g root -m 0644 "$source" "$unit"
     systemctl daemon-reload
@@ -135,22 +138,23 @@ install_unit() {
 }
 
 # Starts the unit $1, restarting it when $release, its unit file or one of its config files, $3 onwards, differs from
-# what the file $2 says it was last started with. The file is written only once the unit runs, so a run that died between the link
-# swap and the restart leaves it stale, and the next run still restarts.
+# what the file $2 says it was last started with, then waits until the unit answers /v1/health on the listen address of
+# $3 with $release's commit, as the deployer does. The file is written only once the unit is healthy, so a run that died
+# between the link swap and the restart leaves it stale, and the next run still restarts. The checkout's setup.ts does
+# the check, since a kept release may predate it.
 start_unit() {
   local unit=$1 active_file=$2 config active
   shift 2
-  active="$release $(sha256sum < "/etc/systemd/system/$unit" | cut -c1-12)"
+  active="$release $(sha256sum < "$unit_dir/$unit" | cut -c1-12)"
   for config in "$@"; do active+=" $(sha256sum < "$config" | cut -c1-12)"; done
   if [ "$(cat "$active_file" 2>/dev/null || true)" != "$active" ]; then
     systemctl restart "$unit"
   else
     systemctl start "$unit"
   fi
-  sleep 3
-  if ! systemctl is-active --quiet "$unit"; then
+  if ! PATH=$service_path node "$repo/src/deploy/setup.ts" healthy "$unit" "$1" "$prefix/releases/$release" "$health_timeout_ms"; then
     journalctl -u "$unit" -n 20 --no-pager
-    fail "$unit is not running"
+    fail "$unit is not healthy"
   fi
   printf '%s\n' "$active" > "$active_file.new"
   mv -T "$active_file.new" "$active_file"
