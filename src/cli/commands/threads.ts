@@ -6,9 +6,10 @@ import { projectOf } from "../refs.ts";
 import { attachTerminal, processTty } from "../attach.ts";
 import { CliError, UsageError } from "../transport.ts";
 import { startRules } from "../../contract/threads-parse.ts";
-import { type Values, type Api, type Command, type Io, str, request, int, briefOptions, briefOf, table, waitMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
+import { type Values, type Api, type Command, type Io, str, request, int, briefOptions, briefOf, colourOf, waitMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
 import { thenWatch, watchOf, watchOptions } from "./watch.ts";
-import { detailText, portsText, listingText, changesText, queuedRow, queuedText, threadRow } from "../thread-text.ts";
+import { detailText, portsText, listingText, changesText, queuedTable, queuedText, threadsText } from "../thread-text.ts";
+import { needsPerson } from "../../contract/attention.ts";
 
 function portArg(given: string): number {
   const port = Number(given);
@@ -71,23 +72,30 @@ const statusChange = (route: typeof routes.archive | typeof routes.unarchive | t
 export const threadsCommands: Readonly<Record<string, Command>> = {
   threads: {
     help: [
-      "  nexus threads [--project P] [--all] [--open] [--queued]",
+      "  nexus threads [--project P] [--all] [--open] [--active] [--needs-me] [--limit N] [--queued]",
       "    threads, then queued ones; deleted ones and cancelled queued ones only with --all, no archived ones with --open, and --queued lists only queued ones",
+      "    --active lists only active threads and --needs-me only those whose attention waits on you, with no queued ones; --limit N the first N",
     ],
     args: [0, 0],
-    options: { project: { type: "string" }, all: { type: "boolean" }, open: { type: "boolean" }, queued: { type: "boolean" } },
-    async run(api, _, v) {
+    options: { project: { type: "string" }, all: { type: "boolean" }, open: { type: "boolean" }, queued: { type: "boolean" }, active: { type: "boolean" }, "needs-me": { type: "boolean" }, limit: { type: "string" } },
+    async run(api, _, v, _follow, { io }) {
       const project = str(v, "project");
-      const queuing = request(api, routes.queued, { query: { project, ...v.all === true ? {} : { status: "queued" } } });
+      const limit = int(str(v, "limit"), "--limit", Infinity);
+      if (limit === 0) throw new UsageError("--limit takes 1 or more");
+      const onlyThreads = v.active === true || v["needs-me"] === true;
+      if (v.queued === true && onlyThreads) throw new UsageError("--queued lists threads that have not started, so it cannot go with --active or --needs-me");
+      const colour = colourOf(io);
+      const queuing = onlyThreads ? Promise.resolve([]) : request(api, routes.queued, { query: { project, ...v.all === true ? {} : { status: "queued" } } });
       if (v.queued === true) {
-        const queued = await queuing;
-        return { json: queued, text: queued.length === 0 ? "No queued threads." : table(queued.map(queuedRow)) };
+        const queued = (await queuing).slice(0, limit);
+        return { json: queued, text: queued.length === 0 ? "No queued threads." : queuedTable(queued, colour) };
       }
       const listing = request(api, routes.list, { query: { project, ...v.open === true ? { deleted: false, status: "open" } : v.all === true ? {} : { deleted: false } } });
       // A control plane older than 0.77.0 ignores status=open and answers every thread but the deleted ones.
-      const [queued, shown] = await Promise.all([queuing, v.open === true ? listing.then((rows) => rows.filter((r) => r.status === "active" || r.status === "idle")) : listing]);
-      const rows = [...shown.map(threadRow), ...queued.map(queuedRow)];
-      return { json: shown, text: rows.length === 0 ? "No threads." : table(rows) };
+      const [queued, listed] = await Promise.all([queuing, listing]);
+      const shown = listed.filter((r) => (v.open !== true || r.status === "active" || r.status === "idle") && (v.active !== true || r.status === "active") && (v["needs-me"] !== true || needsPerson(r.attention)));
+      const threads = shown.slice(0, limit);
+      return { json: threads, text: threadsText(threads, queued.slice(0, limit - threads.length), colour) };
     },
   },
   show: {
@@ -282,7 +290,22 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
   abort: action("Aborted the run of", (api, thread) => request(api, routes.abort, { thread })),
   retry: action("Retried the parked tasks of", (api, thread) => request(api, routes.retry, { thread })),
   "retry-pylon": action("Retried the pylon of", (api, thread) => request(api, routes.retryPylon, { thread })),
-  wake: action("Recorded activity on", (api, thread) => request(api, routes.activity, { thread, body: { kind: "human" } })),
+  wake: {
+    help: actionHelp,
+    args: [1, 1],
+    thread: true,
+    async run(api, [id], v) {
+      await request(api, routes.activity, { thread: id!, body: { kind: "human" } });
+      if (v.json === true) return { json: null, text: "" };
+      const { thread: t, pylon, desired } = await request(api, routes.show, { thread: id! });
+      const text = desired !== "running"
+        ? `Recorded your activity on ${id}, but it is ${t.status}, so its pylon stays ${desired}.${t.status === "archived" ? ` \`nexus unarchive ${id}\` wakes it.` : ""}`
+        : pylon.actualState === "failed" || pylon.failed !== null ? `Recorded your activity on ${id}, but its pylon failed, and activity does not retry it. \`nexus retry-pylon ${id}\` does.`
+        : pylon.actualState === "running" ? `Recorded your activity on ${id}, which keeps its running pylon awake.`
+        : `Recorded your activity on ${id}, so Nexus wakes its pylon, which is ${pylon.actualState}.`;
+      return { json: null, text };
+    },
+  },
   archive: statusChange(routes.archive, "Archived", "Its queued start is cancelled."),
   unarchive: statusChange(routes.unarchive, "Unarchived", "It is queued again."),
   delete: statusChange(routes.delete, "Deleted", "It will never start."),

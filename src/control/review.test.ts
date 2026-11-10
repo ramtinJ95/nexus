@@ -111,6 +111,15 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   let live: CheckState = { kind: "done", passed: true, output: "fleet ok" };
   let refuse: string | null = null;
   let liveRoom = true;
+  /** How many verify pylon starts fail next other than by a refusal. */
+  let liveStartFails = 0;
+  /**
+   * The memory the node has free, which each pylon a start places takes: 4 GiB for a reviewer or check, which a start
+   * beside the builder takes even past what is free unless it asks for room, and 8 GiB for a verify pylon.
+   */
+  let freeGiB = Infinity;
+  /** Each pylon placed, in order, as `<role> of <builder>`. */
+  const placed: string[] = [];
   const liveThreads: ThreadId[] = [];
   const archived: ThreadId[] = [];
   let delivery: "delivered" | "later" = "delivered";
@@ -158,11 +167,13 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     })),
     runs: () => ({
       checks: {
-        async start(_, __, head, ifRoom) {
+        async start(builder, __, head, ifRoom) {
           if (checkStartFails) throw new Error("no node took the check pylon");
           if (checkRefused !== null) return { refused: checkRefused, room: false };
-          if (ifRoom && !checkRoom) return { refused: "no node has room for this pylon: node is overcommitted", room: true };
+          if (ifRoom && (!checkRoom || freeGiB < 4)) return { refused: "no node has room for this pylon: node is overcommitted", room: true };
           checkIfRoom.push(ifRoom === true);
+          freeGiB -= 4;
+          placed.push(`check of ${builder.id}`);
           const id = add(`th-check-${checkThreads.length + 1}`, false, checkCaller); checkThreads.push(id); checkHeads.push(head); return { thread: id };
         },
         step: (id) => { steps.push(id); return forgotten.has(id) ? { kind: "void" } : check; },
@@ -170,9 +181,12 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
         discard(id) { discarded.push(id); registry.threads.setThreadStatus(id, "deleted"); },
       },
       live: {
-        async start() {
+        async start(builder) {
+          if (liveStartFails > 0) { liveStartFails--; throw new Error("the harness is unreachable"); }
           if (refuse !== null) return { refused: refuse, room: false };
-          if (!liveRoom) return { refused: "no node can run this pylon: node is overcommitted", room: true };
+          if (!liveRoom || freeGiB < 8) return { refused: "no node can run this pylon: node is overcommitted", room: true };
+          freeGiB -= 8;
+          placed.push(`verify pylon of ${builder.id}`);
           const id = add(`th-verify-${liveThreads.length + 1}`, false, verifyCaller); liveThreads.push(id); return { thread: id };
         },
         step: () => live,
@@ -193,7 +207,10 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       const failed = failStart(start.request);
       if (failed !== null) throw new Error(failed);
       started.push(start);
+      freeGiB -= 4;
       const id = add(start.id ?? `th-reviewer-${started.length}`, start.request.claude !== undefined, start.caller);
+      const number = Number(/#(\d+)/.exec(start.request.title)?.[1]);
+      placed.push(`${start.request.title.startsWith("Second") ? "second reviewer" : "reviewer"} of ${registry.reviews.reviews().find((r) => r.pr.number === number)?.builder}`);
       await onStart();
       return registry.threads.thread(id)!;
     },
@@ -244,6 +261,11 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     set refuse(why: string | null) { refuse = why; },
     /** Whether a node has room for a verify pylon. */
     set liveRoom(room: boolean) { liveRoom = room; },
+    set freeGiB(gib: number) { freeGiB = gib; },
+    set liveStartFails(n: number) { liveStartFails = n; },
+    /** Room that frees, as a pylon that pauses gives back. */
+    free(gib: number) { freeGiB += gib; },
+    placed,
     liveThreads, archived,
     set delivery(d: "delivered" | "later") { delivery = d; },
     /** How many deliveries the loop has begun, including one still held. */
@@ -1889,6 +1911,292 @@ test("a verify pylon no node has room for waits past the live check's hour, star
   f.live = { kind: "done", passed: true, output: "fleet ok" };
   await loop.poll();
   assert.deepEqual(f.merges, [head1]);
+});
+
+/**
+ * Another builder in `f`'s project with PR `number` at `head2`, whose review the person starts with `land`, or the
+ * project's setting starts on its own.
+ */
+async function otherBuilder(f: ReturnType<typeof fixture>, loop: ReturnType<ReturnType<typeof fixture>["loop"]>, id: string, number: number, start: "person" | "auto") {
+  const builder = f.add(id, true);
+  const pr = { ...f.pr, number, url: `https://github.com/ramtinJ95/nexus/pull/${number}` };
+  f.registry.prWatches.savePrWatch(builder, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  f.others.set(number, { ...f.snapshot, pr: { ...pr }, detail: { ...f.snapshot.detail, head: head2, branch: id } });
+  if (start === "person") await loop.start(builder, { land: "nLAPTOP" });
+  else await loop.auto(f.registry.threads.thread(builder)!, pr);
+  return builder;
+}
+const reviewOf = (f: ReturnType<typeof fixture>, builder: ThreadId) => f.registry.reviews.review(builder)!;
+const behindVerify = (builder: string, pr: number) => `waits for ${builder}: PR #${pr}'s verify pylon waits for a node to have room, which goes to it first`;
+
+test("a verify pylon that waits for room gets the room that frees before another review's reviewer or check that asked later, which start once it has it", async (t) => {
+  const f = fixture(t, { autoReview: { mode: "review", enabledBy: "nLAPTOP" } });
+  f.verifies = true;
+  f.live = { kind: "running" };
+  f.liveRoom = false;
+  const loop = await approved(f, "nLAPTOP");
+  f.check = { kind: "running" };
+  const checked = await otherBuilder(f, loop, "th-builder-2", 8, "person");
+  await loop.poll();
+  assert.equal(reviewOf(f, checked).phase.kind, "reviewing");
+  // From here the node frees memory 4 GiB at a time, half a verify pylon.
+  f.liveRoom = true;
+  f.freeGiB = 4;
+  f.placed.length = 0;
+  f.forgetChecks();
+  const auto = await otherBuilder(f, loop, "th-builder-3", 9, "auto");
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "verifying");
+  assert.deepEqual(f.placed, [], "neither the check that starts again nor the reviewer of a later review takes the room");
+  assert.match(reviewSaidText(reviewOf(f, checked)), new RegExp(`its check ${behindVerify(f.builder, 7)}`));
+  assert.match(reviewSaidText(reviewOf(f, auto)), new RegExp(`its reviewer ${behindVerify(f.builder, 7)}`));
+  f.free(4);
+  await loop.poll();
+  assert.equal(f.placed[0], `verify pylon of ${f.builder}`, "the verify pylon fits once the second piece of room frees");
+  f.free(4);
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual(f.placed, [`verify pylon of ${f.builder}`, `check of ${checked}`, `reviewer of ${auto}`], "the held reviews start once the gate has its pylon");
+  assert.equal(reviewOf(f, auto).reviewerStarted, true);
+  assert.doesNotMatch(reviewSaidText(reviewOf(f, checked)) + reviewSaidText(reviewOf(f, auto)), /waits for th-builder:/);
+});
+
+test("verify pylons that wait for room start in the order they began to wait, and a held one keeps its place and has no deadline", async (t) => {
+  const f = fixture(t);
+  f.verifies = true;
+  f.live = { kind: "running" };
+  f.liveRoom = false;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  const earlier = await otherBuilder(f, loop, "th-builder-2", 8, "person");
+  await loop.poll();
+  await loop.poll();
+  f.reply(reviewOf(f, earlier).reviewer, verdict(reviewOf(f, earlier), {}));
+  await loop.poll();
+  assert.equal(reviewOf(f, earlier).phase.kind, "verifying");
+  f.tick(60_000);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "verifying", "the later wait, whose review the loop steps first");
+  f.liveRoom = true;
+  f.freeGiB = 8;
+  f.placed.length = 0;
+  await loop.poll();
+  assert.deepEqual(f.placed, [`verify pylon of ${earlier}`], "the room goes to the wait that began first");
+  assert.match(reviewSaidText(f.review()), new RegExp(`its live check ${behindVerify(earlier, 8)}`));
+  f.tick(90 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "verifying", "a held live check is no stop for the person");
+  f.free(8);
+  await loop.poll();
+  assert.deepEqual(f.placed, [`verify pylon of ${earlier}`, `verify pylon of ${f.builder}`]);
+});
+
+test("a check held behind another review's wait has no deadline, and starts once that wait ends", async (t) => {
+  const f = fixture(t);
+  f.verifies = true;
+  f.live = { kind: "running" };
+  f.liveRoom = false;
+  const loop = f.loop();
+  const earlier = await otherBuilder(f, loop, "th-builder-2", 8, "person");
+  await loop.poll();
+  f.reply(reviewOf(f, earlier).reviewer, verdict(reviewOf(f, earlier), {}));
+  await loop.poll();
+  assert.equal(reviewOf(f, earlier).phase.kind, "verifying");
+  f.tick(1_000);
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "checking");
+  f.tick(2 * 60 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "checking", "a held check is no stop for the person");
+  assert.match(reviewSaidText(f.review()), new RegExp(`its check ${behindVerify(earlier, 8)}`));
+  f.liveRoom = true;
+  f.placed.length = 0;
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual(f.placed.slice(0, 2), [`verify pylon of ${earlier}`, `check of ${f.builder}`]);
+  assert.notEqual(f.review().phase.kind, "needs-person");
+});
+
+test("a gate's wait holds neither its own review's steps, nor the person's review, and a refusal room cannot end holds nothing", async (t) => {
+  const f = fixture(t, { secondReview: { always: true }, secrets: claudeToken, autoReview: { mode: "review", enabledBy: "nLAPTOP" } });
+  f.failStart = (request) => request.model === "claude-opus-5-5" ? "the harness is unreachable" : null;
+  f.checkRoom = false;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  assert.equal(checkBeside(f.review()), ", .nexus/check waits for a node to have room for it: no node has room for this pylon: node is overcommitted");
+  assert.equal(f.review().second?.kind, "starting");
+  f.failStart = () => null;
+  f.tick(61_000);
+  await loop.poll();
+  assert.equal(f.review().second?.kind, "claude", "the review's own wait does not hold its second reviewer");
+
+  const person = await otherBuilder(f, loop, "th-builder-2", 8, "person");
+  await loop.poll();
+  assert.equal(reviewOf(f, person).reviewerStarted, true, "a review the person started does not wait for its reviewer");
+  assert.equal(reviewOf(f, person).second?.kind, "starting", "its second reviewer, which the loop starts, waits");
+  assert.match(reviewSaidText(reviewOf(f, person)), /its second reviewer waits for th-builder: PR #7's check thread waits for a node to have room, which goes to it first/);
+
+  f.checkRoom = true;
+  f.checkRefused = "no node can run this pylon: node is offline";
+  f.forgetChecks();
+  const auto = await otherBuilder(f, loop, "th-builder-3", 9, "auto");
+  await loop.poll();
+  await loop.poll();
+  assert.equal(reviewOf(f, auto).reviewerStarted, true, "a check refused for what room cannot end is no wait, so nothing waits behind it");
+  assert.equal(reviewOf(f, person).second?.kind, "claude");
+});
+
+test("a verify pylon that waits for room keeps its place when a start fails other than by a refusal", async (t) => {
+  const f = fixture(t);
+  f.verifies = true;
+  f.live = { kind: "running" };
+  f.liveRoom = false;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  const earlier = await otherBuilder(f, loop, "th-builder-2", 8, "person");
+  await loop.poll();
+  await loop.poll();
+  f.reply(reviewOf(f, earlier).reviewer, verdict(reviewOf(f, earlier), {}));
+  await loop.poll();
+  f.tick(60_000);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "verifying");
+  f.liveRoom = true;
+  f.freeGiB = 8;
+  f.liveStartFails = 1;
+  f.placed.length = 0;
+  await loop.poll();
+  assert.deepEqual(f.placed, [], "the start failed");
+  assert.equal((reviewOf(f, earlier).phase as { room?: true }).room, true, "the wait keeps its room flag");
+  await loop.poll();
+  assert.deepEqual(f.placed, [`verify pylon of ${earlier}`], "and its place ahead of the later wait");
+
+  const held = f.review().phase as Extract<Review["phase"], { kind: "verifying" }>;
+  assert.ok(held.behind !== undefined, "the later wait was held behind the earlier one");
+  f.registry.reviews.saveReview({ ...f.review(), phase: { ...held, refused: "no node can run this pylon: node is overcommitted", room: true } });
+  f.freeGiB = 8;
+  f.liveStartFails = 1;
+  await loop.poll();
+  const after = f.review().phase as Extract<Review["phase"], { kind: "verifying" }>;
+  assert.deepEqual([after.room, after.startedAt], [true, held.startedAt], "a wait for room that was also held keeps its place when its start fails");
+  await loop.poll();
+  assert.deepEqual(f.placed, [`verify pylon of ${earlier}`, `verify pylon of ${f.builder}`]);
+});
+
+test("a live check held before it tried keeps its place, so a later one the loop steps first does not pass it", async (t) => {
+  const f = fixture(t);
+  f.verifies = true;
+  f.live = { kind: "running" };
+  f.liveRoom = false;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  const later = await otherBuilder(f, loop, "th-builder-2", 8, "person");
+  const earlier = await otherBuilder(f, loop, "th-builder-3", 9, "person");
+  await loop.poll();
+  await loop.poll();
+  for (const builder of [f.builder, earlier, later]) {
+    f.reply(reviewOf(f, builder).reviewer, verdict(reviewOf(f, builder), {}));
+    await loop.poll();
+    assert.equal(reviewOf(f, builder).phase.kind, "verifying");
+  }
+  assert.match(reviewSaidText(reviewOf(f, later)), new RegExp(`its live check ${behindVerify(f.builder, 7)}`));
+  f.liveRoom = true;
+  f.freeGiB = 16;
+  f.placed.length = 0;
+  await loop.poll();
+  assert.deepEqual(f.placed, [`verify pylon of ${f.builder}`, `verify pylon of ${earlier}`]);
+});
+
+test("a second reviewer held with its review's first keeps its 30 minutes for after the hold", async (t) => {
+  const f = fixture(t, { secondReview: { always: true }, secrets: claudeToken, autoReview: { mode: "review", enabledBy: "nLAPTOP" } });
+  f.checkRoom = false;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const auto = await otherBuilder(f, loop, "th-builder-2", 8, "auto");
+  await loop.poll();
+  assert.equal(reviewOf(f, auto).reviewerStarted, false);
+  f.tick(31 * 60_000);
+  f.checkRoom = true;
+  f.failStart = (request) => request.model === "claude-opus-5-5" && request.title.startsWith("Second review of #8") ? "the harness is unreachable" : null;
+  await loop.poll();
+  await loop.poll();
+  assert.equal(reviewOf(f, auto).reviewerStarted, true);
+  assert.equal(reviewOf(f, auto).second?.kind, "starting", "a failed start right after the hold is tried again");
+});
+
+/** `f`'s own review approved with its live check waiting for room, in `f`'s loop. */
+async function verifyWaits(f: ReturnType<typeof fixture>) {
+  f.verifies = true;
+  f.live = { kind: "running" };
+  f.liveRoom = false;
+  const loop = await approved(f, "nLAPTOP");
+  assert.equal(f.review().phase.kind, "verifying");
+  f.tick(1_000);
+  return loop;
+}
+
+test("a check held beside the reviewer keeps its place in line through the reviewer's approval", async (t) => {
+  const f = fixture(t);
+  const loop = await verifyWaits(f);
+  const earlier = await otherBuilder(f, loop, "th-builder-3", 9, "person");
+  await loop.poll();
+  f.tick(1_000);
+  const later = await otherBuilder(f, loop, "th-builder-2", 8, "person");
+  await loop.poll();
+  f.reply(reviewOf(f, earlier).reviewer, verdict(reviewOf(f, earlier), {}));
+  await loop.poll();
+  assert.equal(reviewOf(f, earlier).phase.kind, "checking");
+  f.liveRoom = true;
+  f.placed.length = 0;
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual(f.placed.slice(0, 3), [`verify pylon of ${f.builder}`, `check of ${earlier}`, `check of ${later}`]);
+});
+
+test("a check beside the reviewer that waits for room keeps its place in line through the reviewer's approval", async (t) => {
+  const f = fixture(t);
+  f.checkRoom = false;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.tick(1_000);
+  const later = await otherBuilder(f, loop, "th-builder-2", 8, "person");
+  await loop.poll();
+  assert.match(reviewSaidText(reviewOf(f, later)), /its check waits for th-builder: PR #7's check thread waits for a node to have room/);
+  f.placed.length = 0;
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.placed, [`check of ${f.builder}`], "the approved head's check, which never waits for room, starts in the place its wait had");
+  assert.equal(f.review().phase.kind, "approved");
+});
+
+test("a held start that fails once let through ends its hold, so it holds no other start and its deadline runs", async (t) => {
+  const f = fixture(t, { autoReview: { mode: "review", enabledBy: "nLAPTOP" } });
+  const loop = await verifyWaits(f);
+  const checked = await otherBuilder(f, loop, "th-builder-2", 8, "person");
+  await loop.poll();
+  f.reply(reviewOf(f, checked).reviewer, verdict(reviewOf(f, checked), {}));
+  await loop.poll();
+  assert.match(reviewSaidText(reviewOf(f, checked)), new RegExp(`its check ${behindVerify(f.builder, 7)}`));
+  const auto = await otherBuilder(f, loop, "th-builder-3", 9, "auto");
+  await loop.poll();
+  assert.equal(reviewOf(f, auto).reviewerStarted, false);
+  f.checkStartFails = true;
+  f.liveRoom = true;
+  await loop.poll();
+  assert.doesNotMatch(reviewSaidText(reviewOf(f, checked)), /waits for th-builder:/);
+  assert.equal(reviewOf(f, auto).reviewerStarted, true, "a start that failed holds nothing");
+  assert.ok(f.logged.some((line) => line.includes(`of ${checked}: a check that waited in line did not start and will be tried again`)), "the failure is logged");
+  f.tick(61 * 60_000);
+  await loop.poll();
+  assert.deepEqual(shown(reviewOf(f, checked).phase), { kind: "needs-person", reasons: [`.nexus/check gave no verdict within 60 minutes at ${head2}.`] });
 });
 
 test("a live check its pylon cannot run goes to the person, and a verify pylon no review holds is archived", async (t) => {

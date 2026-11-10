@@ -1,7 +1,7 @@
 import { once } from "node:events";
 import { setTimeout as sleep } from "node:timers/promises";
 import { CliError } from "../transport.ts";
-import { type Command, reconnectMs, request, str, strs, untilConsumerGone } from "../kit.ts";
+import { type Command, reconnectMs, request, str, strs, untilConsumerGone, when } from "../kit.ts";
 import { callOf } from "../../contract/route.ts";
 import { streamRoutes, type EventsQuery, type NexusEvent } from "../../contract/streams.ts";
 import { transient } from "../config.ts";
@@ -14,7 +14,7 @@ export const eventsCommands: Readonly<Record<string, Command>> = {
     async run(api, _, v, follow, { io }) {
       const query: EventsQuery = { since: str(v, "since"), thread: str(v, "thread"), project: str(v, "project"), kinds: strs(v, "kind") };
       const print = async (event: NexusEvent, signal?: AbortSignal) => {
-        const line = v.json ? JSON.stringify(event) : `${event.id} ${new Date(event.time).toISOString()} ${event.thread ?? "-"} ${event.kind} ${JSON.stringify(event.payload)}`;
+        const line = v.json ? JSON.stringify(event) : `${event.id} ${when(event.time)} ${event.thread ?? "-"} ${event.kind} ${JSON.stringify(event.payload)}`;
         if (!io.stdout.write(line + "\n")) await once(io.stdout, "drain", { signal });
         query.since = event.id;
       };

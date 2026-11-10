@@ -7,7 +7,7 @@ import type { ThreadId } from "../../ids.ts";
 import { phaseStep, steps, type ItemPhase, type PipelineItem, type Step } from "../pipeline.ts";
 import { checkThread, landingAt, landingSteps, roundsSpent, type LandingAt, type LandingStep, type PhaseKind, type Review } from "../review-model.ts";
 import { html, type Html, type Tone } from "./view.ts";
-import { checkBeside, duration, liveNote, needWording } from "../wording.ts";
+import { checkBeside, duration, heldNote, liveNote, needWording } from "../wording.ts";
 import type { Context } from "./context.ts";
 import type { ThreadNeed } from "../wire.ts";
 import type { Role } from "../agent-protocol.ts";
@@ -45,11 +45,11 @@ export const phaseTone: Record<ItemPhase["kind"], Tone> = {
 function reviewNext(r: Review): string | null {
   const round = r.rounds.length;
   switch (r.phase.kind) {
-    case "reviewing": return `The reviewer reads round ${round}${checkBeside(r)}`;
+    case "reviewing": return `The reviewer reads round ${round}${checkBeside(r)}${heldNote(r)}`;
     case "fixing": return `The builder answers round ${round}'s findings`;
     case "quoting": return "The reviewer quotes what could not be checked live";
-    case "checking": return "Runs .nexus/check at the approved head";
-    case "verifying": return liveNote(r) ?? "Runs the live check";
+    case "checking": return `Runs .nexus/check at the approved head${heldNote(r)}`;
+    case "verifying": return `${liveNote(r) ?? "Runs the live check"}${heldNote(r)}`;
     case "approved": return r.land === null ? "Approved, and lands once you press Land" : "Approved, landing next";
     case "merging": return r.phase.waiting === undefined ? "Merging" : `Waits to merge while ${r.phase.waiting}`;
     case "deploying": return `Deploying ${r.phase.commit.slice(0, 12)}`;

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { once } from "node:events";
 import { Writable } from "node:stream";
 import { createServer } from "node:http";
-import { pollUntil, request, restartMs, ridingRestarts, type Api, type Result } from "./kit.ts";
+import { localTime, pollUntil, request, restartMs, ridingRestarts, table, when, type Api, type Result } from "./kit.ts";
 import { call, CliError } from "./transport.ts";
 import { createServer as createTcpServer } from "node:net";
 import { freePort } from "../test-support/kit.ts";
@@ -38,6 +38,21 @@ test("a call takes its route's idle timeout, and a route with none takes the tra
 test("the server pings a quiet stream or terminal before a client's idle timeout gives up on it", () => {
   assert.ok(apiPingMs < apiIdleMs);
   assert.ok(apiIdleMs < pylonWaitMs);
+});
+
+test("a time reads as how long ago or how soon, then the local time it names", () => {
+  const now = Date.UTC(2026, 10, 10, 12);
+  assert.equal(when(now - 42_000, now), `42s ago (${localTime(now - 42_000)})`);
+  assert.equal(when(now - 3 * 3_600_000, now), `3h ago (${localTime(now - 3 * 3_600_000)})`);
+  assert.equal(when(now - 2 * 86_400_000 - 1, now), `2d ago (${localTime(now - 2 * 86_400_000 - 1)})`);
+  assert.equal(when(now + 20 * 60_000, now), `in 20m (${localTime(now + 20 * 60_000)})`);
+  assert.equal(when(now, now), `0s ago (${localTime(now)})`);
+  assert.match(localTime(now), /^\d{4}-\d\d-\d\d \d\d:\d\d$/);
+});
+
+test("a table pads its columns under a header, and colours a toned row whole without moving its columns", () => {
+  assert.equal(table(["Name", "Size"], [["a", "1"], ["long name", "22"]]), "Name       Size\na          1\nlong name  22");
+  assert.equal(table(["Name", "Size"], [["a", "1"], ["b", "2"]], (i) => i === 1 ? "failed" : null), "Name  Size\na     1\n\x1b[31mb     2\x1b[0m");
 });
 
 /** The control plane on a port nothing listens on yet, as during the restart a deploy causes, through the real transport. */

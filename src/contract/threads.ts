@@ -45,7 +45,7 @@ export interface QueuedThread {
   createdAt: number;
   /** Archived means cancelled. */
   status: "queued" | "archived" | "deleted";
-  /** The threads it waits for, without repeats. */
+  /** The threads it waits for, without repeats, and once those landed, the builder of a review whose gate pylon waits for room. */
   after: readonly ThreadId[];
   /** One per predecessor, in `after` order. */
   waits: readonly Wait[];
