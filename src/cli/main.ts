@@ -90,10 +90,16 @@ async function runCommand(name: string, args: readonly string[], io: Io): Promis
   try {
     parsed = parseArgs({ args: [...args], options, allowPositionals: true, strict: true }) as typeof parsed;
   } catch (err) {
-    const flag = (err as { code?: string }).code === "ERR_PARSE_ARGS_UNKNOWN_OPTION" ? /'([^']+)'/.exec((err as Error).message)?.[1] : undefined;
-    if (flag === undefined) throw new UsageError((err as Error).message);
+    const { code, message } = err as Error & { code?: string };
+    const flag = /'([^']+)'/.exec(message)?.[1];
+    // Node's own words for a value that starts with a dash, such as --message "--force is broken".
+    if (code === "ERR_PARSE_ARGS_INVALID_OPTION_VALUE" && flag !== undefined && message.includes("argument is ambiguous")) {
+      const file = Object.hasOwn(options, `${flag.slice(2)}-file`) ? `, or from a file or stdin with ${flag}-file PATH|-` : "";
+      throw new UsageError(`${flag} takes a value that starts with a dash only as ${flag}=VALUE${file}`);
+    }
+    if (code !== "ERR_PARSE_ARGS_UNKNOWN_OPTION" || flag === undefined) throw new UsageError(message);
     const near = flag.startsWith("--") ? nearest(flag.slice(2), Object.keys(options)) : undefined;
-    throw new UsageError(`${name} takes no ${flag}${near === undefined ? "" : `. Did you mean --${near}?`}`);
+    throw new UsageError(`${name} takes no ${flag.trim()}${near === undefined ? "" : `. Did you mean --${near}?`}${command.dashHint === undefined ? "" : `${near === undefined ? "." : ""} ${command.dashHint}.`}`);
   }
   const { values, positionals } = parsed;
   if (values.help === true) {
