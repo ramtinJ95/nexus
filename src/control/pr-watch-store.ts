@@ -26,19 +26,26 @@ export interface PrWatchState {
   error: string | null;
 }
 
-export const holding = { tables: { pr_watches: { record: "thread" } } } as const satisfies Holding;
+export const holding = { tables: { pr_watches: { record: "thread", purge: "thread = $thread" } } } as const satisfies Holding;
 
 export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: ThreadId, payload: Record<string, unknown>) => unknown) {
-  const { transaction } = db;
+  const { transaction, sql } = db;
   const watches = db.hold(holding).records<PrWatchState>("pr_watches");
   return {
     participant: {
+      /** A pull request still open may merge, which a thread queued after the thread waits for. */
+      keeps: (threads: ReadonlyMap<ThreadId, unknown>): ReadonlyMap<ThreadId, string> => new Map(sql(`SELECT w.thread, json_extract(l.value, '$.pr.number') AS number
+        FROM pr_watches w, json_each(w.record, '$.links') l WHERE w.thread IN (SELECT value FROM json_each(?)) AND json_extract(l.value, '$.pr.state') = 'open'`)
+        .all(JSON.stringify([...threads.keys()])).map((r) => [r.thread as ThreadId, `its pull request #${r.number as number} is open`])),
       outputs(thread: ThreadId): Output[] {
         const watch = watches.get(thread);
         return watch ? watch.links.filter((l) => wasRead(l.pr)).map((l): Output => ({ thread, kind: "pull-request", ref: l.pr.url })) : [];
       },
     },
     prWatch: (thread: ThreadId): PrWatchState | null => watches.get(thread),
+    /** The threads with a pull request the watch last read open. */
+    withOpenPr: (): ThreadId[] => sql(`SELECT DISTINCT w.thread FROM pr_watches w, json_each(w.record, '$.links') l WHERE json_extract(l.value, '$.pr.state') = 'open'`)
+      .all().map((r) => r.thread as ThreadId),
     /** The number of each pull request linked to each of `threads`, or to every thread, in one read. */
     prNumbers(threads?: readonly ThreadId[]): ReadonlyMap<ThreadId, number[]> {
       const links = "SELECT thread, json_extract(link.value, '$.pr.number') AS number FROM pr_watches, json_each(pr_watches.record, '$.links') AS link";

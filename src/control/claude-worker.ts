@@ -82,7 +82,7 @@ export interface ClaudeSent { session: string; outcome: "sent" | "queued"; resum
 
 const deleted = { deletedWithThread: true } as const;
 export const holding = {
-  tables: { claude_workers: {}, claude_transcripts: deleted, claude_entries: deleted, claude_messages: deleted, claude_senders: deleted },
+  tables: { claude_workers: { purge: "thread = $thread" }, claude_transcripts: deleted, claude_entries: deleted, claude_messages: deleted, claude_senders: deleted },
 } as const satisfies Holding;
 
 export interface ClaudeWorkerThread {

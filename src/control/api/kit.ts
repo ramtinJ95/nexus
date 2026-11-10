@@ -67,6 +67,8 @@ export interface ApiKit extends Access, PylonAccess, ThreadViews, EventStreams {
   claude: ClaudeConversations;
   agents: ThreadAgents;
   agentOf(t: Thread): ThreadAgents["harness" | "claude"];
+  /** Deletes the thread, as its route and retention do. */
+  deleteThread(t: Thread): Promise<Thread>;
   draining(): boolean;
   gate: TurnGate;
 }
