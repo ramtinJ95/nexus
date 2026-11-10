@@ -481,6 +481,7 @@ h4.md-h { font-size: 1.07em; }
 .main[data-view="term"] #composer { display: none; }
 .refresh-state { position: fixed; left: 50%; top: 56px; transform: translateX(-50%); z-index: 40; max-width: calc(100vw - 24px); margin: 0; padding: 6px 12px; font-size: 12px; color: var(--warn); background: var(--bg); border: 1px solid var(--line); border-radius: 999px; box-shadow: var(--pop); }
 .refresh-state:empty { display: none; }
+.refresh-reload { padding: 0; font: inherit; color: var(--accent); background: none; border: 0; cursor: pointer; text-decoration: underline; }
 #run:empty { display: none; }
 /* the agent's state, one line above the composer, with the attach command at its end */
 .state-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-size: 12.5px; border-radius: 10px; padding: 4px 4px 4px 12px; min-height: 32px; color: var(--text-2); background: var(--raised); }

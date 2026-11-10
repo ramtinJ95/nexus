@@ -1,6 +1,6 @@
 import { request } from "./request.js";
 import { pylonRoutes } from "../../contract/pylon.ts";
-import { el, present } from "./page.js";
+import { chunk, el, present } from "./page.js";
 import { bases } from "./checkout-text.js";
 import { kept, narrow, storageKeys } from "./contract.ts";
 import { badge, canRead, checkout, counts, factsNow, thread, unreadable } from "./checkout.js";
@@ -41,14 +41,14 @@ function redrawDiff() {
 }
 phone.addEventListener("change", redrawDiff);
 // The head script has painted the theme, so the picker's module loads after the page's own.
-void import("./theme.js").then(({ onThemeChange, startThemes }) => {
+void chunk(import("./theme.js")).then(({ onThemeChange, startThemes }) => {
   startThemes();
   onThemeChange(redrawDiff);
 });
 
 async function drawDiff({ read, head, shown, truncated }) {
   try {
-    const { diffView, imagePair } = await import("./diff.js");
+    const { diffView, imagePair } = await chunk(import("./diff.js"));
     const view = shown.kind === "lines" ? await diffView(shown.files, phone.matches ? "unified" : diffLayout) : null;
     if (read !== diffRead) return;
     const typing = document.activeElement?.matches?.(".note-text") ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
@@ -91,7 +91,7 @@ export async function readDiff(path) {
   // A renamed file's old path goes too, or the diff shows it as added.
   const paths = [file.path, ...(file.oldPath === null ? [] : [file.oldPath])];
   try {
-    const [{ diff, truncated }, { diffOf }] = await Promise.all([request(pylonRoutes.diff, { thread, query: { base: checkout.base, paths } }), import("./diff.js")]);
+    const [{ diff, truncated }, { diffOf }] = await Promise.all([request(pylonRoutes.diff, { thread, query: { base: checkout.base, paths } }), chunk(import("./diff.js"))]);
     if (read !== diffRead) return;
     openDiff = { read, head, shown: diffOf(diff), truncated };
     await drawDiff(openDiff);

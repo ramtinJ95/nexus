@@ -144,6 +144,30 @@ export async function readPage(url) {
   return new DOMParser().parseFromString(await res.text(), "text/html");
 }
 
+// The client this page runs. A deploy serves another, and removes the chunks of this one it has not loaded yet.
+const clientOf = (doc) => doc.querySelector("script[src]")?.getAttribute("src");
+const client = clientOf(document);
+const holds = [];
+/** `held()` says whether a reload now would lose what the reader is doing, so a new client waits until it would not. */
+export function holdReload(held) { holds.push(held); }
+// A draft is text typed in a field. The page sets which radios and boxes are checked by itself, so those are no draft.
+const reloadLoses = () => document.querySelector("dialog[open]") !== null
+  || [...document.querySelectorAll("textarea, input")].some((f) => f.value !== f.defaultValue)
+  || holds.some((held) => held());
+let outdated = false;
+/** Says the page runs an older client than the control plane serves, as when a chunk it asked for did not load. */
+export function offerReload() {
+  if (outdated) return;
+  outdated = true;
+  document.getElementById("refresh-state")?.replaceChildren("Dashboard updated — ",
+    el("button", { type: "button", className: "refresh-reload", textContent: "Reload", onclick: () => location.reload() }));
+}
+/** A chunk loads, or the page offers the reload that brings the chunks the control plane serves now. */
+export const chunk = (loading) => loading.catch((err) => {
+  offerReload();
+  throw err;
+});
+
 /** The page the address names. A jump within it, as to a hash, is the same page. */
 const addressed = () => location.pathname + location.search;
 
@@ -159,6 +183,10 @@ async function refresh() {
     // The reader went to another page in place while this one was read, as the Cluster page goes to another node, so
     // its regions are not the page's any more.
     if (addressed() !== at) return;
+    if (clientOf(next) !== client) {
+      if (!reloadLoses()) return void location.reload();
+      offerReload();
+    }
     // A queued thread that started has a thread page, whose regions the queued page has none of.
     if ((next.getElementById("queued") === null) !== (document.getElementById("queued") === null)) return void location.reload();
     const freshConvo = next.getElementById("convo");
@@ -176,9 +204,9 @@ async function refresh() {
     const activity = next.querySelector("main")?.dataset.activity;
     if (activity === undefined) delete main.dataset.activity;
     else main.dataset.activity = activity;
-    if (state !== null) state.textContent = "";
+    if (state !== null && !outdated) state.textContent = "";
   } catch (err) {
-    if (state !== null && addressed() === at) state.textContent = `Not updated: ${err.message}. Retrying.`;
+    if (state !== null && addressed() === at && !outdated) state.textContent = `Not updated: ${err.message}. Retrying.`;
   }
 }
 export const refreshNow = () => (refreshing ??= refresh().finally(() => { refreshing = null; }));
