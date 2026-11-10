@@ -19,18 +19,20 @@ export const api = apiOver();
 
 /**
  * Calls one of the contract's routes over `api`, with its path's parameters, its query and its body. A call given no
- * `signal` gives up once the route has been silent as long as the CLI lets it be, so a stalled connection fails the
- * action rather than holding its button for good.
+ * `signal` gives up after the route's idle limit, the CLI's, so a stalled connection fails the action rather than
+ * holding its button for good.
  */
 export function requestOver(api, timeout = (ms) => AbortSignal.timeout(ms)) {
   return async function request(route, args, signal) {
     const { path, body } = callOf(route, args);
     if (signal !== undefined) return api(route.method, path, body, signal);
     const ms = route.idleMs ?? apiIdleMs;
+    const limit = timeout(ms);
     try {
-      return await api(route.method, path, body, timeout(ms));
+      return await api(route.method, path, body, limit);
     } catch (err) {
-      if (err?.name !== "TimeoutError") throw err;
+      // A body that stalls after the headers can fail with an AbortError, whatever the signal's reason.
+      if (!limit.aborted || limit.reason?.name !== "TimeoutError") throw err;
       throw Object.assign(new Error(`the control plane did not answer in ${ms / 1000} s`), { timedOut: true, retryable: false });
     }
   };

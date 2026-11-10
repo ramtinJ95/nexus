@@ -134,6 +134,10 @@ let shows = null;
 const streaming = () => stream?.readyState === EventSource.OPEN;
 export function follow(url) {
   // A hidden page keeps none of the control plane's few streams, even when a refresh it began finishes later.
+  if (url === undefined && refusedStream !== null) {
+    refusedStream = null;
+    sayUpdated();
+  }
   if (url === undefined || document.visibilityState !== "visible" || (stream !== null && stream.readyState !== EventSource.CLOSED)) return;
   // EventSource reconnects by itself after a dropped connection. A refused one is closed for good, so the next
   // poll opens another.

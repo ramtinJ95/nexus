@@ -41,6 +41,20 @@ class FakeEventSource {
   fire(type) { for (const listener of this.heard[type] ?? []) listener(new Event(type)); }
 }
 const none = () => null;
+// The page's request timeouts, which a test fires itself rather than waiting them out.
+const limits = new WeakMap();
+AbortSignal.timeout = () => {
+  const controller = new AbortController();
+  limits.set(controller.signal, () => controller.abort(new DOMException("The operation timed out.", "TimeoutError")));
+  return controller.signal;
+};
+let stalled = Promise.withResolvers();
+/** An API request that never answers, and fails as the browser's does once its limit, which it hands the test, fires. */
+const stalls = async (url, init) => {
+  if (!url.startsWith("/v1/")) throw new Error("offline");
+  stalled.resolve(limits.get(init.signal));
+  return new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason)));
+};
 Object.assign(globalThis, {
   Element: FakeElement,
   HTMLDetailsElement: class {},
@@ -107,9 +121,12 @@ test("an action that fails says why in the page's alert, which Dismiss clears", 
 });
 
 test("an action whose request timed out says it may not have happened, and its button takes another press", async () => {
-  fetchImpl = async () => { throw new DOMException("The operation timed out.", "TimeoutError"); };
+  stalled = Promise.withResolvers();
+  fetchImpl = stalls;
   const button = new FakeElement("button", { selectors: ["button[data-action]"], dataset: { action: "archive", thread: "th-x" } });
-  await dispatch("click", { target: button });
+  const pressed = dispatch("click", { target: button });
+  (await until("the action's request is made", stalled.promise))();
+  await pressed;
   assert.equal(alert.text, "This may not have happened: the control plane did not answer in 30 s. Press it again to try again. Dismiss");
   assert.equal(button.disabled, false);
 });
@@ -121,8 +138,11 @@ test("a message whose send timed out offers Try again, which sends it under the 
   form.querySelector = (selector) => selector === 'button[type=submit][value="followUp"]' ? send : null;
   form.requestSubmit = (submitter) => dispatch("submit", { target: form, submitter });
   regions.set("prompt", form);
-  fetchImpl = async () => { throw new DOMException("The operation timed out.", "TimeoutError"); };
-  await dispatch("submit", { target: form, submitter: send });
+  stalled = Promise.withResolvers();
+  fetchImpl = stalls;
+  const submitted = dispatch("submit", { target: form, submitter: send });
+  (await until("the message's request is made", stalled.promise))();
+  await submitted;
   assert.equal(alert.text, "The message may not have been sent: the control plane did not answer in 120 s. Try again Dismiss");
   const first = fetched.at(-1).body.requestId;
   form.elements.text.value = "ship it, and the docs";
@@ -187,4 +207,17 @@ test("a refused stream says why the page polls instead, until a stream opens", a
   // What is left of the read is promise reactions, which all run before the next macrotask.
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(text, "", "a reason read after another stream opened is not said");
+
+  recovered.readyState = FakeEventSource.CLOSED;
+  fetchImpl = async () => json(503, { error: "16 streams are open, the most this control plane serves at once", code: null, retryable: false });
+  const again = Promise.withResolvers();
+  Object.defineProperty(refreshState, "textContent", { get: () => text, set: (value) => {
+    text = value;
+    again.resolve();
+  }, configurable: true });
+  recovered.fire("error");
+  await until("the page says why again", again.promise);
+  assert.match(text, /^Live updates are off/);
+  follow(undefined);
+  assert.equal(text, "", "a page that no longer streams says nothing of a refused stream");
 });

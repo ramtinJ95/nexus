@@ -307,6 +307,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    */
   /** What the attach route checks of the thread and the query before it upgrades. */
   function attachable(id: string, query: URLSearchParams, caller: TailnetNodeId) {
+    if (stopping) throw new Refusal("unavailable", "the control plane is stopping");
     const t = thread(id);
     let request: ReturnType<typeof parseAttachQuery>;
     try {

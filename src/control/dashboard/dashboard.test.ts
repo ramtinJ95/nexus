@@ -1953,6 +1953,8 @@ test("Archive asks first only when it loses something, and names the open questi
   assert.equal(await confirmOf(), 'Archive "Fix checkout"? Its open question "The pylon failed on rj-firebat." is withdrawn. Its agent is in a turn, and its pylon goes to sleep at once.');
   s.registry.questions.answerQuestion(s.registry.questions.question("judgment:7")!, { option: "Leave it failed", by: laptop, at: Date.now() });
   assert.equal(await confirmOf(), 'Archive "Fix checkout"? Its agent is in a turn, and its pylon goes to sleep at once.', "an answered question is not lost");
+  s.fake.park(fix.id, 2);
+  assert.equal(await confirmOf(), 'Archive "Fix checkout"? Its agent is in a turn, and its pylon goes to sleep at once.', "parked tasks beside a turn still running");
 });
 
 test("an unknown thread page is a 404 page", async (t) => {

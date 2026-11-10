@@ -146,7 +146,7 @@ function archiveLoses(d: ThreadDetail, run: Run): string | null {
   const named = questions.map((q) => `"${q.text.split("\n")[0]}"`).join(", ");
   const lost = [
     questions.length > 0 && (questions.length === 1 ? `Its open question ${named} is withdrawn.` : `Its ${questions.length} open questions ${named} are withdrawn.`),
-    run.kind === "working" && "Its agent is in a turn, and its pylon goes to sleep at once.",
+    (run.kind === "working" || (run.kind === "parked" && run.busy)) && "Its agent is in a turn, and its pylon goes to sleep at once.",
   ].filter((part) => part !== false);
   return lost.length === 0 ? null : `Archive "${d.thread.title}"? ${lost.join(" ")}`;
 }

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { refusalAt, requestOver } from "./request.js";
+import { apiOver, refusalAt, requestOver } from "./request.js";
 import { threadRoutes } from "../../contract/threads.ts";
 import { apiIdleMs, pylonWaitMs } from "../../contract/route.ts";
 
@@ -24,6 +24,21 @@ test("an action whose request stalls fails once its route has been silent as lon
   for (const t of timers) t.fire();
   await assert.rejects(archive, { message: "the control plane did not answer in 30 s", timedOut: true, retryable: false });
   await assert.rejects(message, { message: "the control plane did not answer in 120 s", timedOut: true });
+});
+
+test("a request whose body stalls after its headers times out as one that never answered", async () => {
+  const stall = (signal) => new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("The operation was aborted.", "AbortError"))));
+  const fetch = async (path, { signal }) => ({ ok: true, status: 200, text: () => stall(signal) });
+  let fire;
+  const request = requestOver(apiOver({ fetch }), () => {
+    const controller = new AbortController();
+    fire = () => controller.abort(new DOMException("The operation timed out.", "TimeoutError"));
+    return controller.signal;
+  });
+  const archive = request(threadRoutes.archive, { thread: "th-x" });
+  await new Promise((resolve) => setImmediate(resolve));
+  fire();
+  await assert.rejects(archive, { message: "the control plane did not answer in 30 s", timedOut: true });
 });
 
 test("a request given its own signal keeps it, and a refusal is the API's error as it was", async () => {
