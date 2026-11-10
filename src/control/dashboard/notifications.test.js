@@ -796,3 +796,33 @@ test("a notice whose thread's attention moved on is no longer handed to a tab th
   await settle();
   assert.deepEqual(raised, [["leader", "t1:decision"]]);
 });
+
+test("a handed notice whose need newer rows no longer show is not raised by the tab that handed it", async (t) => {
+  const change = {
+    "work resumed": (row) => ({ ...row, working: true }),
+    "a newer reply came": (row) => ({ ...row, lastReplyAt: 9 }),
+    "the reply was seen": (row) => ({ ...row, attention: null }),
+  };
+  for (const [name, after] of Object.entries(change)) for (const ending of ["the fallback fires", "the tab leaves"]) await t.test(`${name}, then ${ending}`, async () => {
+    let now = 0;
+    let listed = [{ id: "t1", title: "Fix", attention: null, working: false, lastReplyAt: null }];
+    const { shared, raised, page } = hiddenTabs(() => listed);
+    const leader = page("leader", null, { now: () => now });
+    const silent = page("on-thread", "t1", { now: () => now, shows: () => new Promise(() => {}) });
+    await settle();
+    listed = [{ ...listed[0], attention: "reply", lastReplyAt: 1 }];
+    shared.streams[0].onmessage({});
+    await settle();
+    now = 2000;
+    leader.timers.find((timer) => timer.at === 2000).f();
+    await settle();
+    assert.equal(leader.timers.filter((timer) => timer.at === 3000).length, 1, "the reply is handed to the tab on the thread");
+    listed = [after(listed[0])];
+    await leader.readRows();
+    await settle();
+    if (ending === "the fallback fires") for (const timer of leader.timers.filter((timer) => timer.at === 3000)) timer.f();
+    else silent.close();
+    await settle();
+    assert.deepEqual(raised, []);
+  });
+});

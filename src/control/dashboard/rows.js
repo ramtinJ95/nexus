@@ -7,6 +7,12 @@ import { streamRoutes } from "../../contract/streams.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { rowEvents } from "./contract.ts";
 
+/** Whether a notice's row no longer needs the person as it did: gone, with another attention, or a reply worked past. */
+const movedOn = (saved, rows) => {
+  const now = rows.find((row) => row.id === saved.id);
+  return now?.attention !== saved.attention || (saved.attention === "reply" && (now.working || now.lastReplyAt !== saved.lastReplyAt));
+};
+
 export function startRows({ api, notifications, raise = () => {}, health = () => {}, caughtUp = () => {}, changed = () => {}, currentThread, focused, activeTab }, { window, navigator, document, crypto, BroadcastChannel, EventSource, Date, AbortSignal, setTimeout, clearTimeout, setInterval } = globalThis) {
   const request = requestOver(api);
   // One tab of the browser holds the lock, follows those events and reads the thread list, and the other tabs show the
@@ -26,7 +32,12 @@ export function startRows({ api, notifications, raise = () => {}, health = () =>
     if (shownRows !== null && text !== shownRows) changed();
     shownRows = text;
     const held = notifications(rows, now);
-    for (const [tag, notice] of kept) if (rows.find((row) => row.id === notice.row.id)?.attention !== notice.row.attention) kept.delete(tag);
+    // A notice whose need these rows no longer show is neither raised by a fallback nor handed to another tab.
+    for (const [key, notice] of handed) if (movedOn(notice.row, rows)) {
+      clearTimeout(notice.timer);
+      handed.delete(key);
+    }
+    for (const [tag, notice] of kept) if (movedOn(notice.row, rows)) kept.delete(tag);
     // A turn over an unread reply may stop with no event, and the reply notifies once a read finds it stopped.
     const next = rows.some((row) => row.attention === "reply" && row.working) ? Math.min(held ?? Infinity, now + 1000) : held;
     // A held-back reply notifies once a read at its time finds no turn running.
