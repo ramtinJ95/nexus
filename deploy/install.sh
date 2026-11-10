@@ -40,16 +40,18 @@ memory_kib() { awk '/^MemTotal:/ { print $2 }' /proc/meminfo 2>/dev/null; }
 free_space() {
   local path=$1
   while [ ! -e "$path" ]; do path=$(dirname "$path"); done
-  df -Pk "$path" 2>/dev/null | awk 'NR == 2 { print $4, $6 }' || true
+  df -Pk "$path" 2>/dev/null | awk 'NR == 2 { print $4, $6 }' | grep . || echo "0 $path"
 }
-# The systemd unit, or else the command, of the process that listens on TCP port $1, nothing when none does.
+# The systemd unit, or else the command, of each process that listens on TCP port $1, one a line, nothing when none
+# does. A port can have several listeners, one an address, so each is named.
+proc=/proc
 port_listener() {
   local line pid unit
-  line=$(ss -Hltnp "sport = :$1" 2>/dev/null | head -n 1 || true)
-  [ -n "$line" ] || return 0
-  pid=$(sed -n 's/.*pid=\([0-9]*\).*/\1/p' <<<"$line")
-  unit=$(sed -n 's|.*/\([^/]*\.service\)$|\1|p' "/proc/$pid/cgroup" 2>/dev/null | head -n 1)
-  echo "${unit:-$(cat "/proc/$pid/comm" 2>/dev/null || echo "a process ss could not name")}"
+  while IFS= read -r line; do
+    pid=$(sed -n 's/.*pid=\([0-9]*\).*/\1/p' <<<"$line")
+    unit=$(sed -n 's|.*/\([^/]*\.service\)$|\1|p' "$proc/$pid/cgroup" 2>/dev/null | head -n 1 || true)
+    echo "${unit:-$(cat "$proc/$pid/comm" 2>/dev/null || echo "a process ss could not name")}"
+  done < <(ss -Hltnp "sport = :$1" 2>/dev/null || true)
 }
 ports_readable() { command -v ss >/dev/null; }
 user_home() { getent passwd "$1" | cut -d: -f6 || true; }
@@ -143,9 +145,12 @@ check_prerequisites() {
     || miss "Pylons run x86_64 images under KVM, and this machine is $(machine)." "Install on an x86_64 Linux machine."
 
   # A machine sold with 8 GiB reports a little less, since the firmware and the kernel keep some of it.
+  # An installed machine reruns the installer to recover, so what it has outgrown warns rather than stops that rerun.
+  local short=miss
+  ! prefix_entries | grep -x releases >/dev/null || short=warn
   kib=$(memory_kib) || kib=0
   [ "${kib:-0}" -ge $((7680 * 1024)) ] \
-    || miss "Nexus needs at least 8 GiB of memory, and this machine has $((${kib:-0} / 1024)) MiB." "Install on a machine, or give this VM, at least 8 GiB of memory."
+    || $short "Nexus needs at least 8 GiB of memory, and this machine has $((${kib:-0} / 1024)) MiB." "Install on a machine, or give this VM, at least 8 GiB of memory."
 
   manager=$(package_manager)
   major=$(node_major)
@@ -192,19 +197,21 @@ check_prerequisites() {
     [[ $mounts != *" $mount "* ]] || continue
     mounts+="$mount "
     [ "${free:-0}" -ge $((20 * 1024 * 1024)) ] \
-      || miss "Nexus needs at least 20 GiB free on $mount, which holds $path, and it has $((${free:-0} / 1024 / 1024)) GiB." "Free space on $mount, or give it a larger disk."
+      || $short "Nexus needs at least 20 GiB free on $mount, which holds $path, and it has $((${free:-0} / 1024 / 1024)) GiB." "Free space on $mount, or give it a larger disk."
   done
 
-  local port listener want
+  local port listener want ports=(7480 7481)
+  [ "$role" != control ] || ports=(7470 7443 "${ports[@]}")
   if ports_readable; then
-    for port in 7470 7443 7480 7481; do
+    for port in "${ports[@]}"; do
       case $port in 7470|7443) want=nexus-control.service ;; *) want=nexus-probe.service ;; esac
-      listener=$(port_listener "$port")
-      [ -z "$listener" ] || [ "$listener" = "$want" ] \
-        || miss "Port $port is taken by $listener, and Nexus's $want listens on it." "sudo ss -ltnp 'sport = :$port' names the process. Stop it, or move it to another port."
+      while IFS= read -r listener; do
+        [ -z "$listener" ] || [ "$listener" = "$want" ] \
+          || miss "Port $port is taken by $listener, and Nexus's $want listens on it." "sudo ss -ltnp 'sport = :$port' names the process. Stop it, or move it to another port."
+      done <<<"$(port_listener "$port")"
     done
   else
-    warn "ss is missing, so ports 7470, 7443, 7480 and 7481 were not checked. A service already on one stops Nexus's from starting." "Install iproute2, which brings ss, and check again"
+    warn "ss is missing, so ports ${ports[*]} were not checked. A service already on one stops Nexus's from starting." "Install iproute2, which brings ss, and check again"
   fi
 
   local user home
@@ -270,7 +277,8 @@ check_machine() {
   roles=$(installed_roles)
   [ -z "$roles" ] || [[ $roles == *control* ]] || role=node
   check_prerequisites "$role" "$rerun"
-  if [ -n "$roles" ]; then
+  # Without root the install's files cannot be read, and the root miss already says to rerun with sudo.
+  if [ -n "$roles" ] && [ "$(uid)" = 0 ]; then
     check_units "$roles"
     mapfile -d '' -t found < <(installed_check)
     misses+=("${found[@]}")

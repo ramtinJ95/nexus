@@ -207,7 +207,7 @@ const crowded: Machine = {
 };
 
 test("a first run without Node lists every miss at once, the tailnet's settings among them", async () => {
-  assert.deepEqual((await misses(crowded, "node")).map((entry) => entry.split("\n")[0]), [
+  assert.deepEqual((await misses(crowded, "control")).map((entry) => entry.split("\n")[0]), [
     "- Nexus needs at least 8 GiB of memory, and this machine has 4096 MiB.",
     "- Node 26 or newer must be in /usr/local/bin:/usr/bin, found none.",
     "- git must be in /usr/local/bin:/usr/bin. The deployer fetches each release with it.",
@@ -220,7 +220,7 @@ test("a first run without Node lists every miss at once, the tailnet's settings 
   ]);
   const run = await bash(`. "$1/deploy/install.sh"; ${stubs(crowded)}
 node() { echo "node $*" >&2; }
-main --node firebat`);
+main --admit macbook`);
   assert.equal(run.code, 1);
   assert.match(run.stderr, /^Warnings:\n- This machine's Tailscale key expires at 2027-05-01T00:00:00Z\. Then it leaves the tailnet, and Nexus loses it until someone logs it in again\.\n {4}Turn off key expiry for this machine at https:\/\/login\.tailscale\.com\/admin\/machines\n/);
   assert.match(run.stderr, /\nThis machine is missing 9 prerequisite\(s\)\. Nothing was changed\./, "the key expiry is a warning, not a miss");
@@ -255,11 +255,12 @@ test("each filesystem short of 20 GiB is one miss, however many of Nexus's paths
 
 test("each of Nexus's ports another process holds is a miss, and Nexus's own units on them are not", async () => {
   const taken = Object.fromEntries(Object.values(ports).map((port) => [port, "caddy"]));
-  assert.deepEqual((await misses({ ...complete, listeners: taken }, "node")).map((entry) => entry.match(/^- Port (\d+) is taken by caddy/)?.[1]), Object.values(ports).map(String));
+  assert.deepEqual((await misses({ ...complete, listeners: taken }, "control")).map((entry) => entry.match(/^- Port (\d+) is taken by caddy/)?.[1]), Object.values(ports).map(String));
+  assert.deepEqual((await misses({ ...complete, listeners: taken }, "node")).map((entry) => entry.match(/^- Port (\d+) is taken by caddy/)?.[1]), [ports.probe, ports.gateway].map(String), "a node runs no control plane, so its ports are free to use");
   const blind = await bash(`. "$1/deploy/install.sh"; ${stubs({ ...complete, ss: false, listeners: taken })} ${steps}
 main --check`);
   assert.equal(blind.code, 0, blind.stderr);
-  assert.match(blind.stderr, /^Warnings:\n- ss is missing, so ports 7470, 7443, 7480 and 7481 were not checked\./, "without ss the ports are a warning, not a silent pass");
+  assert.match(blind.stderr, /^Warnings:\n- ss is missing, so ports 7470 7443 7480 7481 were not checked\./, "without ss the ports are a warning, not a silent pass");
   const own = { [ports.control]: "nexus-control.service", [ports.dashboard]: "nexus-control.service", [ports.probe]: "nexus-probe.service", [ports.gateway]: "nexus-probe.service" };
   assert.deepEqual(await misses({ ...complete, listeners: own }, "control"), [], "a rerun on an installed machine");
 });
@@ -432,4 +433,42 @@ main --check`);
     "- src/deploy/installed.ts could not check the install's links and configs.",
   ], "the misses found before it stay");
   assert.match(broken.stderr, /\n {4}See what it says: sudo node .*\/src\/deploy\/installed\.ts \/opt\/nexus \/etc\/nexus\n$/);
+});
+
+test("every listener on a port is named, so a foreign one beside Nexus's own is a miss", async (t) => {
+  const proc = await mkdtemp(join(tmpdir(), "nexus-proc-"));
+  t.after(() => rm(proc, { recursive: true, force: true }));
+  await mkdir(join(proc, "11"));
+  await writeFile(join(proc, "11/cgroup"), "0::/system.slice/nexus-control.service\n");
+  await mkdir(join(proc, "22"));
+  await writeFile(join(proc, "22/comm"), "caddy\n");
+  const ss = `ss() { case "$*" in *":${ports.control}"*) printf '%s\\n' 'LISTEN 0 511 100.64.0.2:${ports.control} 0.0.0.0:* users:(("node",pid=11,fd=20))' 'LISTEN 0 511 [::1]:${ports.control} [::]:* users:(("caddy",pid=22,fd=7))' ;; esac; }`;
+  const run = await bash(`. "$1/deploy/install.sh"; real=$(declare -f port_listener); ${stubs(complete)} eval "$real"; proc=${proc}; ${ss}
+port_listener ${ports.control}; echo --; check_prerequisites control 'sudo deploy/install.sh'; printf '%s\\0' "\${misses[@]}"`);
+  assert.equal(run.code, 0, run.stderr);
+  const [listed, found] = run.stdout.split("--\n");
+  assert.equal(listed, "nexus-control.service\ncaddy\n");
+  assert.deepEqual(found!.split("\0").filter((entry) => entry !== "").map((entry) => entry.split("\n")[0]), [`- Port ${ports.control} is taken by caddy, and Nexus's nexus-control.service listens on it.`]);
+});
+
+test("a rerun on an installed machine with too little disk or memory warns and goes on, so recovery still works", async () => {
+  const low = { ...installed, memoryKib: 4 * gib, free: { "/var/lib/nexus": `${5 * gib} /`, "/opt/nexus": `${5 * gib} /` } };
+  assert.deepEqual(await misses(low, "control"), []);
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(low)} ${steps}
+main --upgrade`);
+  assert.equal(run.code, 0, run.stderr);
+  assert.match(run.stderr, /^Warnings:\n- Nexus needs at least 8 GiB of memory[^]*\n- Nexus needs at least 20 GiB free on \/[^]*\nnode \.\/src\/deploy\/setup\.ts install --package-manager apt --upgrade\n$/);
+});
+
+test("--check without root checks no installed file, since only root can read them", async () => {
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs({ ...installed, uid: 1000 })}
+installed_check() { echo installed_check >&2; }
+main --check`);
+  assert.equal(run.code, 1);
+  assert.deepEqual(run.stderr.split("\n").filter((line) => line.startsWith("- ")), ["- The installer changes the system, so it runs as root."]);
+});
+
+test("a disk df cannot read is a miss that names the path", async () => {
+  const run = await bash(`. "$1/deploy/install.sh"; df() { return 1; }; free_space /nonexistent/nexus`);
+  assert.equal(run.stdout, "0 /\n");
 });
