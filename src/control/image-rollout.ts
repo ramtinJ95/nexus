@@ -5,41 +5,49 @@
  * only once each holds it, since `--node auto` places a pylon only on a node that holds the current image. A rollback is
  * a rollout of the previous image.
  *
+ * While no rollout runs, a pass also sends the current image to each online node that lacks it, as one that joined or
+ * was offline when the last rollout began, so `auto` placement does not pass over it for good. A node gets
+ * maxImageFetches jobs in a row, each after the backoff from the last failure, and then none until a rollout begins or
+ * it goes offline and comes back.
+ *
  * A pass derives each step from its node's observation and the probe's status of the step's job, never from what an
  * earlier pass meant to do, so a control plane that restarts mid-operation carries on from the stored operation.
  */
+import { isDeepStrictEqual } from "node:util";
 import { imageIdOf, type ImageManifest, type ImageRecipe } from "../protocol/images.ts";
 import type { ImageId, NodeName, TailnetNodeId } from "../ids.ts";
 import type { Job } from "../protocol/jobs.ts";
 import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { singleFlight } from "../single-flight.ts";
-import { failureMessage } from "./reconcile.ts";
+import { backoffMs, failureMessage } from "./reconcile.ts";
 import { jobOutcome, submitJob } from "./tick.ts";
 import { Refusal } from "./refusal.ts";
 import type { Registry } from "./registry.ts";
 import type { NodeRecord } from "./node-store.ts";
-import type { ImageOperation, ImageStep, Outcome, RecordedImage } from "./image-store.ts";
+import { maxImageFetches, type ImageFetch, type ImageOperation, type ImageStep, type Outcome, type RecordedImage } from "./image-store.ts";
 
-type ImageRolloutRegistry = Pick<Registry, "images" | "nodes">;
+type ImageRolloutRegistry = Pick<Registry, "images" | "nodes" | "now">;
 
 /** A recorded image, and the registry nodes whose last observation lists it, online or not. */
 export type ImageEntry = RecordedImage & { nodes: NodeName[] };
 /**
  * `previous` is the image current before the last rollout, which rollback makes current again. `images` are newest
- * build first, and `operation` is the running operation, or the last one.
+ * build first, and `operation` is the running operation, or the last one. `fetches` are the copies of the current image
+ * the control plane sends outside a rollout, one per online node that lacks it.
  */
-export interface ImagesView { current: ImageId | null; previous: ImageId | null; images: ImageEntry[]; operation: ImageOperation | null }
+export interface ImagesView { current: ImageId | null; previous: ImageId | null; images: ImageEntry[]; operation: ImageOperation | null; fetches: ImageFetch[] }
 
 export function imagesView(registry: ImageRolloutRegistry): ImagesView {
   const nodes = registry.nodes.nodes();
   const images = registry.images.images()
     .map((image): ImageEntry => ({ ...image, nodes: nodes.filter((n) => holds(n, image.id)).map((n) => n.name) }))
     .sort((a, b) => Date.parse(b.builtAt) - Date.parse(a.builtAt));
-  return { current: registry.images.currentImage(), previous: registry.images.previousImage(), images, operation: registry.images.imageOperation() };
+  return { current: registry.images.currentImage(), previous: registry.images.previousImage(), images, operation: registry.images.imageOperation(), fetches: registry.images.imageFetches() };
 }
 
 const holds = (node: NodeRecord, image: ImageId): boolean => node.observation?.artifacts.includes(image) === true;
+const noSource = "no other online node holds it";
 
 export interface ImageRollout {
   build(caller: TailnetNodeId): Promise<ImageOperation>;
@@ -69,6 +77,11 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
   const log = options.log ?? ((message: string) => console.error(message));
   const online = (node: NodeRecord): boolean => node.state === "online" && probes.has(node.name);
 
+  const rolloutRuns = (): boolean => {
+    const operation = registry.images.imageOperation();
+    return operation?.state === "running" && operation.kind === "rollout";
+  };
+
   /** The running operation if it is this one, or null when none runs. Another one running is a conflict. */
   function running(kind: ImageOperation["kind"], image: ImageId): ImageOperation | null {
     const operation = registry.images.imageOperation();
@@ -89,11 +102,13 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
     if (same !== null) return same;
     const nodes = registry.nodes.nodes();
     if (!nodes.some((n) => online(n) && holds(n, image))) throw new Refusal("conflict", `no online node holds ${image}, so no node could fetch it`);
+    // Its steps cover every online node, and a node it skips or fails gets a fresh run of fetches once it ends.
+    registry.images.saveImageFetches([]);
     return start({
       kind: "rollout", image, requestedBy: caller, requestedAt: Date.now(), state: "running",
       steps: nodes.map((n) => online(n)
         ? { node: n.name, state: "pending", job: null, reason: null }
-        : { node: n.name, state: "skipped", job: null, reason: "offline when the rollout began; it fetches the image on first use" }),
+        : { node: n.name, state: "skipped", job: null, reason: "offline when the rollout began; the control plane sends it the image once it is back online" }),
     });
   }
 
@@ -104,10 +119,15 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
       const id = imageIdOf(recipe);
       return id === operation.image ? { kind: "build-image", image: id, recipe } : `the control plane now runs another release, whose recipe is ${id}`;
     }
-    const recorded = registry.images.image(operation.image)!;
-    const holders = registry.nodes.nodes().filter((n) => n.name !== node && online(n) && holds(n, operation.image)).map((n) => n.name);
+    return fetchJob(operation.image, node) ?? "no online node holds it";
+  }
+
+  /** fetch-artifact of the image to `node` from another online node that holds it, the one that built it if it can, or null when none does. */
+  function fetchJob(image: ImageId, node: NodeName): Job | null {
+    const recorded = registry.images.image(image)!;
+    const holders = registry.nodes.nodes().filter((n) => n.name !== node && online(n) && holds(n, image)).map((n) => n.name);
     const from = holders.find((n) => n === recorded.builtOn) ?? holders[0];
-    return from === undefined ? "no online node holds it" : { kind: "fetch-artifact", artifact: operation.image, from, sha256: recorded.sha256 };
+    return from === undefined ? null : { kind: "fetch-artifact", artifact: image, from, sha256: recorded.sha256 };
   }
 
   /** Moves the step on as far as its node allows now. Returns why the operation fails, or null. */
@@ -168,9 +188,7 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
     return null;
   }
 
-  async function pass() {
-    const operation = registry.images.imageOperation();
-    if (operation?.state !== "running") return;
+  async function advanceOperation(operation: ImageOperation) {
     const steps = [...operation.steps];
     const { kind, image } = operation;
     const save = (outcome: Outcome) => registry.images.saveImageOperation({ ...operation, steps, ...outcome } as ImageOperation);
@@ -199,6 +217,74 @@ export function startImageRollout(options: ImageRolloutOptions): ImageRollout {
     } catch (err) {
       unexpected(err);
     }
+  }
+
+  /** Moves the node's fetch on as far as it allows now. */
+  async function advanceFetch(fetch: ImageFetch, set: (next: Partial<ImageFetch>) => void) {
+    if (fetch.state === "failed") return;
+    const probe = probes.get(fetch.node)!;
+    const failed = (reason: string, invalid = false) => {
+      const failures = fetch.failures + 1;
+      const state = invalid || failures >= maxImageFetches ? "failed" : "waiting";
+      set({ state, job: null, failures, failedAt: registry.now(), reason });
+      const what = invalid ? "was refused as invalid" : `failed ${failures} times in a row`;
+      if (state === "failed") log(`image fetch of ${fetch.image} to ${fetch.node} ${what}, and none is sent again until a rollout begins or the node comes back online: ${reason}`);
+    };
+    if (fetch.job !== null) {
+      const status = await jobOutcome(probe, fetch.job.id, fetch.job.notAfter);
+      if (status === "wait") return;
+      if (status === "expired") return set({ state: "waiting", job: null });
+      if (status.state === "failed") return failed(`${status.code}: ${failureMessage(status.message, status.logTail)}`);
+      // A job that succeeded waits for the observation that lists the image.
+      if (fetch.state !== "running") set({ state: "running" });
+      return;
+    }
+    if (fetch.failedAt !== null && registry.now() < fetch.failedAt + backoffMs(fetch.failures)) return;
+    const job = fetchJob(fetch.image, fetch.node);
+    if (job === null) {
+      if (fetch.reason !== noSource) set({ reason: noSource });
+      return;
+    }
+    const sent = await submitJob(probe, job, fetch.node, (env) => set({ job: { id: env.jobId, notAfter: env.notAfter } }));
+    if (sent === "accepted") set({ state: "running", reason: fetch.reason === noSource ? null : fetch.reason });
+    // busy: another job on the image runs on the node, such as a pylon's fetch of it.
+    else if (sent === "retry") set({ job: null });
+    else failed(sent.invalid, true);
+  }
+
+  /** The current image to each online node that lacks it, one record per node, derived again on every pass. */
+  async function catchUp() {
+    const stored = registry.images.imageFetches();
+    const image = registry.images.currentImage();
+    const fetches = image === null ? [] : registry.nodes.nodes().filter((n) => online(n) && !holds(n, image)).map((n): ImageFetch => {
+      const was = stored.find((f) => f.node === n.name);
+      return was?.image === image ? was : { node: n.name, image, state: "waiting", job: null, failures: 0, failedAt: null, reason: null };
+    });
+    // A rollout that began while this pass waited on a probe cleared the records, and its steps take over.
+    const save = () => { if (!rolloutRuns()) registry.images.saveImageFetches(fetches); };
+    if (!isDeepStrictEqual(fetches, stored)) save();
+    for (let i = 0; i < fetches.length; i++) {
+      if (rolloutRuns()) return;
+      const set = (next: Partial<ImageFetch>) => {
+        fetches[i] = { ...fetches[i]!, ...next };
+        save();
+      };
+      try {
+        await advanceFetch(fetches[i]!, set);
+      } catch (err) {
+        if ((err as ProbeError).code !== "unreachable") log(`image fetch of ${image} to ${fetches[i]!.node}: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  /** The running operation first, then, unless a rollout still runs, the fetches of the current image. */
+  async function pass() {
+    const operation = registry.images.imageOperation();
+    if (operation?.state === "running") {
+      await advanceOperation(operation);
+      if (rolloutRuns()) return;
+    }
+    await catchUp();
   }
 
   let closed = false;

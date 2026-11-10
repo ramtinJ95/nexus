@@ -5,9 +5,12 @@ import { join } from "node:path";
 import { startImageRollout, type ImageRollout } from "./image-rollout.ts";
 import type { ImageOperation } from "./image-store.ts";
 import { openRegistry, type Registry } from "./registry.ts";
+import { weighNodes } from "./placement.ts";
+import { backoffMs } from "./reconcile.ts";
 import { imageIdOf, type ImageManifest, type ImageRecipe } from "../protocol/images.ts";
 import type { ImageId, JobId, NodeName, TailnetNodeId } from "../ids.ts";
 import type { JobEnvelope, JobErrorCode, JobStatus } from "../protocol/jobs.ts";
+import type { BootInputs } from "../protocol/spawn.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { tempDir, testCapacity, testImage, testObservation, watch } from "../test-support/kit.ts";
 
@@ -86,7 +89,8 @@ function fakeNodes(registry: Registry, names: readonly NodeName[]) {
 }
 
 function setup(t: TestContext, names: readonly NodeName[]) {
-  const registry = openRegistry(join(dir, `${randomUUID()}.db`));
+  const clock = { now: Date.now(), advance(ms: number) { this.now += ms; } };
+  const registry = openRegistry(join(dir, `${randomUUID()}.db`), () => clock.now);
   const nodes = fakeNodes(registry, names);
   const workers: ImageRollout[] = [];
   const logged: string[] = [];
@@ -100,7 +104,7 @@ function setup(t: TestContext, names: readonly NodeName[]) {
     workers.push(worker);
     return worker;
   }
-  return { registry, nodes, start, logged };
+  return { registry, nodes, start, logged, clock };
 }
 
 /** A registry where `old` is current on every node, and `next` is recorded and held only by the node that built it. */
@@ -116,6 +120,27 @@ function withTwoImages(t: TestContext, names: readonly NodeName[]) {
 
 const fetchOf = (image: ImageId) => ({ kind: "fetch-artifact", artifact: image, from: testbench, sha256: manifestOf(image, testbench).sha256 });
 const stepsOf = (operation: ImageOperation | null) => operation?.steps.map((s) => [s.node, s.state, s.reason]);
+const fetchesOf = (registry: Registry) => registry.images.imageFetches().map((f) => [f.node, f.image, f.state, f.failures, f.reason]);
+const sentTo = (s: ReturnType<typeof setup>, node: NodeName) => s.nodes.submitted.filter((env) => env.node === node).map((env) => env.job);
+
+/** What `auto` placement says of the node for a pylon of `image`: the room left there, or why it refuses it. */
+function weighed(registry: Registry, node: NodeName, image: ImageId) {
+  const need = {
+    image, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, network: { allowedHosts: [], secrets: [] },
+    repo: { kind: "empty", branch: "main" }, dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
+  } as unknown as Pick<BootInputs, "image" | "resources" | "network" | "repo" | "dotfiles">;
+  const w = weighNodes(registry, need).weighed.find((n) => n.node === node);
+  return w === undefined ? "unweighed" : "refused" in w ? w.refused : "fits";
+}
+
+/** A registry where `next` is current and held by `holders`, and every other node is registered but not yet observed. */
+function withCurrent(t: TestContext, names: readonly NodeName[], holders: readonly NodeName[]) {
+  const s = setup(t, names);
+  s.registry.images.saveImage(manifestOf(next, testbench), release);
+  s.registry.images.setCurrentImage(next);
+  for (const node of holders) s.nodes.hold(node, next, testbench);
+  return s;
+}
 
 test("a build sends build-image with the recipe to the build node and records the manifest it reads back with the release, and an unchanged recipe returns the recorded image at once", async (t) => {
   const s = setup(t, [firebat, testbench]);
@@ -231,7 +256,7 @@ test("an offline node is skipped, and a worker that starts mid-rollout resumes f
   s.registry.nodes.upsertNode({ name: nuc, tailnetHost: "rj-nuc.tail.ts.net", tailnetNodeId: "nRJ-NUC" as TailnetNodeId });
   const first = s.start();
   const started = first.rollout(next, laptop);
-  assert.deepEqual(stepsOf(started), [[testbench, "pending", null], [firebat, "pending", null], [nuc, "skipped", "offline when the rollout began; it fetches the image on first use"]]);
+  assert.deepEqual(stepsOf(started), [[testbench, "pending", null], [firebat, "pending", null], [nuc, "skipped", "offline when the rollout began; the control plane sends it the image once it is back online"]]);
   await first.wake();
   assert.equal(s.nodes.submitted.length, 1);
   await first.close();
@@ -242,7 +267,7 @@ test("an offline node is skipped, and a worker that starts mid-rollout resumes f
   s.nodes.finish(firebat);
   await second.wake();
   assert.equal(s.registry.images.currentImage(), next, "a skipped node does not hold the rollout up");
-  assert.deepEqual(stepsOf(s.registry.images.imageOperation()), [[testbench, "done", null], [firebat, "done", null], [nuc, "skipped", "offline when the rollout began; it fetches the image on first use"]]);
+  assert.deepEqual(stepsOf(s.registry.images.imageOperation()), [[testbench, "done", null], [firebat, "done", null], [nuc, "skipped", "offline when the rollout began; the control plane sends it the image once it is back online"]]);
 });
 
 test("a job the probe does not know is sent again only once its envelope has expired, and a node that goes offline fails the rollout", async (t) => {
@@ -375,4 +400,182 @@ test("a pass that throws rejects its wakes, and the next wake runs a new pass", 
   s.registry.images.imageOperation = () => { reads++; return imageOperation.call(s.registry); };
   await worker.wake();
   assert.equal(reads, 2);
+});
+
+test("a node that joins gets fetch-artifact of the current image from a holder, and auto placement passes over it only until it holds the image", async (t) => {
+  const s = withCurrent(t, [firebat, testbench, nuc], [testbench, firebat]);
+  const worker = s.start();
+  await worker.wake();
+  assert.deepEqual([s.nodes.submitted, fetchesOf(s.registry)], [[], []], "a node registered but never observed is not online");
+
+  s.nodes.observe(nuc);
+  assert.equal(weighed(s.registry, nuc, next), `does not hold image ${next}`);
+  await worker.wake();
+  assert.deepEqual(sentTo(s, nuc), [fetchOf(next)]);
+  assert.deepEqual(fetchesOf(s.registry), [[nuc, next, "running", 0, null]]);
+  await worker.wake();
+  assert.equal(s.nodes.submitted.length, 1, "a running fetch is asked about, not sent again");
+
+  s.nodes.finish(nuc);
+  await worker.wake();
+  assert.deepEqual(fetchesOf(s.registry), []);
+  assert.equal(weighed(s.registry, nuc, next), "fits");
+  assert.equal(s.nodes.submitted.length, 1);
+});
+
+test("a worker that starts mid-fetch asks the probe about the saved job, keeps the failures counted before it, and sends a job the probe lost only once its envelope expired", async (t) => {
+  const s = withCurrent(t, [firebat, testbench, nuc], [testbench, firebat]);
+  s.nodes.observe(nuc);
+  const first = s.start();
+  await first.wake();
+  await first.close();
+
+  const second = s.start();
+  await second.wake();
+  assert.equal(sentTo(s, nuc).length, 1, "the restarted worker asked the probe about the saved job");
+  s.nodes.finish(nuc, { code: "backend", message: "the copy hashes to 0000", logTail: "" });
+  await second.wake();
+  await second.close();
+
+  const third = s.start();
+  await third.wake();
+  assert.deepEqual([sentTo(s, nuc).length, fetchesOf(s.registry)[0]?.[3]], [1, 1], "the backoff and the count survive a restart");
+  s.clock.advance(backoffMs(1));
+  await third.wake();
+  assert.equal(sentTo(s, nuc).length, 2);
+
+  const [running] = s.registry.images.imageFetches();
+  s.nodes.finish(nuc, { code: "backend", message: "ended so the probe runs no fetch of it", logTail: "" });
+  s.registry.images.saveImageFetches([{ ...running!, job: { id: "on-its-way" as JobId, notAfter: new Date(Date.now() + 30_000).toISOString() } }]);
+  await third.wake();
+  assert.equal(sentTo(s, nuc).length, 2, "a send that may still reach the probe is waited for");
+  s.registry.images.saveImageFetches([{ ...running!, job: { id: "lost" as JobId, notAfter: new Date(Date.now() - 1).toISOString() } }]);
+  await third.wake();
+  await third.wake();
+  assert.deepEqual([sentTo(s, nuc).length, fetchesOf(s.registry)], [3, [[nuc, next, "running", 1, "backend: the copy hashes to 0000"]]]);
+});
+
+test("a node offline when a rollout began gets the image the rollout made current once it is back online, and then takes auto placements", async (t) => {
+  const s = withTwoImages(t, [firebat, testbench, nuc]);
+  s.registry.nodes.markOffline(nuc);
+  const worker = s.start();
+  worker.rollout(next, laptop);
+  await worker.wake();
+  s.nodes.finish(firebat);
+  await worker.wake();
+  assert.equal(s.registry.images.currentImage(), next);
+  assert.deepEqual(stepsOf(s.registry.images.imageOperation())?.[2], [nuc, "skipped", "offline when the rollout began; the control plane sends it the image once it is back online"]);
+  assert.deepEqual([sentTo(s, nuc), fetchesOf(s.registry)], [[], []], "nothing is sent to an offline node");
+
+  s.nodes.observe(nuc);
+  assert.equal(weighed(s.registry, nuc, next), `does not hold image ${next}`);
+  await worker.wake();
+  assert.deepEqual(sentTo(s, nuc), [fetchOf(next)]);
+  s.nodes.finish(nuc);
+  await worker.wake();
+  assert.deepEqual(fetchesOf(s.registry), []);
+  assert.equal(weighed(s.registry, nuc, next), "fits");
+});
+
+test("a failed fetch is sent again only after the backoff, 3 failures in a row stop it, and a node that comes back online or a new rollout gets a fresh run, while a busy reply counts for nothing", async (t) => {
+  const s = withCurrent(t, [testbench, nuc], [testbench]);
+  let busy = true;
+  const probes = new Map([...s.nodes.probes].map(([node, probe]) => [node, node !== nuc ? probe : {
+    ...probe,
+    async submit(env: JobEnvelope) { return busy ? { rejected: "busy" as const, inFlight: "a-pylons-fetch" as JobId } : probe.submit(env); },
+  }]));
+  const worker = s.start(release, probes);
+  const failure = { code: "backend" as const, message: "the copy hashes to 0000, so it was thrown away", logTail: "" };
+  const reason = "backend: the copy hashes to 0000, so it was thrown away";
+  s.nodes.observe(nuc);
+  await worker.wake();
+  assert.deepEqual([sentTo(s, nuc), fetchesOf(s.registry)], [[], [[nuc, next, "waiting", 0, null]]]);
+  busy = false;
+  await worker.wake();
+  assert.equal(sentTo(s, nuc).length, 1, "a busy reply starts no backoff");
+
+  s.nodes.finish(nuc, failure);
+  await worker.wake();
+  assert.deepEqual(fetchesOf(s.registry), [[nuc, next, "waiting", 1, reason]]);
+  s.clock.advance(backoffMs(1) - 1);
+  await worker.wake();
+  assert.equal(sentTo(s, nuc).length, 1, "none is sent within the backoff");
+  s.clock.advance(1);
+  await worker.wake();
+  assert.equal(sentTo(s, nuc).length, 2);
+  assert.deepEqual(fetchesOf(s.registry), [[nuc, next, "running", 1, reason]]);
+
+  s.nodes.finish(nuc, failure);
+  await worker.wake();
+  s.clock.advance(backoffMs(2));
+  await worker.wake();
+  assert.equal(sentTo(s, nuc).length, 3);
+  s.nodes.finish(nuc, failure);
+  await worker.wake();
+  assert.deepEqual(fetchesOf(s.registry), [[nuc, next, "failed", 3, reason]]);
+  assert.match(s.logged.join("\n"), new RegExp(`image fetch of ${next} to rj-nuc failed 3 times in a row`));
+  s.clock.advance(60 * 60_000);
+  await worker.wake();
+  await worker.wake();
+  assert.equal(sentTo(s, nuc).length, 3, "a node whose fetches failed 3 times gets no other");
+
+  s.registry.nodes.markOffline(nuc);
+  await worker.wake();
+  assert.deepEqual(fetchesOf(s.registry), []);
+  s.nodes.observe(nuc);
+  await worker.wake();
+  assert.equal(sentTo(s, nuc).length, 4, "a node back online gets a fresh run at once");
+  s.nodes.finish(nuc, failure);
+  await worker.wake();
+  assert.deepEqual(fetchesOf(s.registry), [[nuc, next, "waiting", 1, reason]]);
+
+  worker.rollout(next, laptop);
+  assert.deepEqual(fetchesOf(s.registry), [], "a rollout begins with no fetch counted");
+  await worker.wake();
+  assert.deepEqual(stepsOf(s.registry.images.imageOperation())?.[1], [nuc, "running", null]);
+  assert.equal(sentTo(s, nuc).length, 5);
+});
+
+test("no fetch of the current image goes out while a rollout runs, and once it is done the node gets the image the rollout made current", async (t) => {
+  const s = setup(t, [firebat, testbench, nuc]);
+  s.registry.images.saveImage(manifestOf(old, testbench), null);
+  s.registry.images.saveImage(manifestOf(next, testbench), release);
+  s.registry.images.setCurrentImage(old);
+  for (const node of [firebat, testbench]) s.nodes.hold(node, old, testbench);
+  s.nodes.hold(testbench, next, testbench);
+  const worker = s.start();
+  worker.rollout(next, laptop);
+  s.nodes.observe(nuc);
+  await worker.wake();
+  await worker.wake();
+  assert.deepEqual(s.nodes.submitted.map((env) => [env.node, env.job]), [[firebat, fetchOf(next)]], `rj-nuc lacks the current ${old}, and the rollout runs`);
+  assert.deepEqual(fetchesOf(s.registry), []);
+
+  s.nodes.finish(firebat);
+  await worker.wake();
+  assert.equal(s.registry.images.currentImage(), next);
+  assert.deepEqual(sentTo(s, nuc), [fetchOf(next)]);
+  assert.deepEqual(fetchesOf(s.registry), [[nuc, next, "running", 0, null]]);
+});
+
+test("a rollout that begins while a fetch is on its way to the probe keeps the records it cleared", async (t) => {
+  const s = withCurrent(t, [testbench, nuc], [testbench]);
+  const sending = Promise.withResolvers<void>();
+  const sent = Promise.withResolvers<void>();
+  const probes = new Map([...s.nodes.probes].map(([node, probe]) => [node, node !== nuc ? probe : {
+    ...probe,
+    async submit(env: JobEnvelope) {
+      sending.resolve();
+      await sent.promise;
+      return probe.submit(env);
+    },
+  }]));
+  const worker = s.start(release, probes);
+  s.nodes.observe(nuc);
+  const pass = worker.wake();
+  await sending.promise;
+  worker.rollout(next, laptop);
+  sent.resolve();
+  await pass;
+  assert.deepEqual(fetchesOf(s.registry), []);
 });

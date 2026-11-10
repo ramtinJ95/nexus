@@ -14,7 +14,8 @@ import type { Question } from "../control/questions.ts";
 import { testReview } from "../test-support/registry-kit.ts";
 import type { ReviewLoop } from "../control/review.ts";
 import type { ImageManifest } from "../protocol/images.ts";
-import type { ImageId, ThreadId } from "../ids.ts";
+import type { ImageId, JobId, NodeName, ThreadId } from "../ids.ts";
+import type { ImageFetch } from "../control/image-store.ts";
 import { testCapacity, testObservation, until } from "../test-support/kit.ts";
 import { CliError } from "./transport.ts";
 import type { Api } from "./kit.ts";
@@ -69,7 +70,20 @@ test("image list and current print each image's role, build, release and nodes, 
     "img-0123456789ab  current  built 2027-01-01T00:00:00Z on rj-firebat  release unknown       on rj-firebat",
     "img-00000000000a  -        built 2026-12-01T00:00:00Z on rj-firebat  release ffffffffffff  on rj-firebat",
   ].join("\n") + "\n");
-  assert.deepEqual(await s.json(["image", "list"]), { current: image.id, previous: null, images: [entry, olderEntry], operation: null });
+  assert.deepEqual(await s.json(["image", "list"]), { current: image.id, previous: null, images: [entry, olderEntry], operation: null, fetches: [] });
+  const fetches: ImageFetch[] = [
+    { node: "infra-testbench" as NodeName, image: image.id, state: "running", job: { id: "j-fetch" as JobId, notAfter: new Date().toISOString() }, failures: 0, failedAt: null, reason: null },
+    { node: "rj-nuc" as NodeName, image: image.id, state: "failed", job: null, failures: 3, failedAt: Date.now(), reason: "backend: the copy hashes to 0000, so it was thrown away" },
+  ];
+  s.registry.images.saveImageFetches(fetches);
+  assert.equal((await s.nexus(["image", "list"])).stdout, [
+    "img-0123456789ab  current  built 2027-01-01T00:00:00Z on rj-firebat  release unknown       on rj-firebat",
+    "img-00000000000a  -        built 2026-12-01T00:00:00Z on rj-firebat  release ffffffffffff  on rj-firebat",
+    "Fetches of the current image img-0123456789ab:",
+    "  infra-testbench: running",
+    "  rj-nuc: failed, 3 failed: backend: the copy hashes to 0000, so it was thrown away",
+  ].join("\n") + "\n");
+  assert.deepEqual((await s.json(["image", "list"])).fetches, fetches);
   assert.equal((await s.nexus(["image", "current"])).stdout, "img-0123456789ab  current  built 2027-01-01T00:00:00Z on rj-firebat  release unknown  on rj-firebat\n");
 
   const rolled = await s.nexus(["image", "rollout", older.id, "--wait"]);
