@@ -200,8 +200,8 @@ interface Outbox { id: string; text: string; attempted: number | null }
 export interface Talk<O extends Outbox = Outbox> { expect: string; asked: string; since: number; nudges: number; outbox: O | null }
 
 /**
- * The second reviewer the project's rule gave a review for `rule`'s reason: a Claude worker on another model than the
- * builder's and the first reviewer's, in `thread`, with its own conversation. `starting` until its thread starts,
+ * The second reviewer the project's rule gave a review for `rule`'s reason: a Claude worker on Claude Opus 5.5, even when the
+ * builder or the first reviewer also runs it, in `thread`, with its own conversation. `starting` until its thread starts,
  * tried since `since` and last at `tried`, which failed for `why`. `none` when no such model could run or its thread
  * did not start in time, for `why`, which holds the landing for the person.
  */
@@ -459,6 +459,20 @@ export function waitsForRoom(phase: Phase): boolean {
 }
 /** The gate run `phase` steps: a reviewing round's check beside the reviewer, the check, or the live check. */
 export const gateRun = (phase: Phase): GateRun | null => phase.kind === "checking" || phase.kind === "verifying" ? phase : phase.kind === "reviewing" ? phase.check ?? null : null;
+/**
+ * Every thread the review names, with its part in it: its builder, its reviewers, the gate thread its phase runs, and
+ * the verify pylon of each live check a round ran. One review may name a thread twice.
+ */
+export function reviewThreads(r: Review): (readonly [ThreadId, ReviewPart])[] {
+  const gate = gateRun(r.phase)?.thread ?? null;
+  return [
+    [r.builder, "builder"], [r.reviewer, "reviewer"],
+    ...r.second?.kind === "claude" ? [[r.second.thread, "second reviewer"] as const] : [],
+    ...gate === null ? [] : [[gate, r.phase.kind === "verifying" ? "verify pylon" : "check thread"] as const],
+    ...r.rounds.flatMap((round) => round.live?.kind === "ran" ? [[round.live.thread, "verify pylon"] as const] : []),
+  ];
+}
+type ReviewPart = "builder" | "reviewer" | "second reviewer" | "check thread" | "verify pylon";
 /** The check thread `phase` holds: a checking round's, or a reviewing round's, which runs beside the reviewer. */
 export const checkThread = (phase: Phase): ThreadId | null => phase.kind === "verifying" ? null : gateRun(phase)?.thread ?? null;
 export const checkOutput = (output: string) => `The check's output:\n${output}`;

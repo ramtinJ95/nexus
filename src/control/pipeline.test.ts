@@ -175,6 +175,16 @@ test("an archived thread, a cancelled queued thread and a PR merged outside any 
   f.review(tc, { kind: "cancelled", who: "builder", status: "deleted" });
   r.threads.setThreadStatus(tc, "deleted");
   assert.equal(phase(r, c), "archived: its thread is deleted");
+  r.threads.purgeThread(tc);
+  assert.equal(phase(r, c), "archived: its thread was deleted and purged from the registry", "a thread purged since it started still ends its item");
+  const purgedAhead = "C's thread was deleted and purged from the registry, so whether its pull request merged is not known. Add it again after other items, or with none";
+  assert.throws(() => f.add("After C", [c]), (err: { kind?: string; message: string }) => err.kind === "conflict" && err.message === `item ${c}: ${purgedAhead}`, "an item cannot come after a purged thread");
+  const late = f.add("Late");
+  const behindLate = f.add("Behind Late", [late]);
+  r.pipeline.saveItem({ ...r.pipeline.item(behindLate)!, after: [c] });
+  await f.passes();
+  assert.equal(phase(r, behindLate), `held: ${purgedAhead}`, "an item added before its predecessor was purged is held, not queued after a thread that is gone");
+  assert.equal(itemThread(r, behindLate), null);
   assert.throws(() => f.items.cancel(b, laptop), (err: { kind?: string; message: string }) => err.kind === "conflict" && err.message.includes(`is thread ${tb} now`));
 });
 

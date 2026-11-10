@@ -37,8 +37,8 @@ const autoReviewText = (project: Project) => {
 const secondReviewText = (p: Project) => {
   const rule = p.secondReview;
   if (rule == null) return "no second reviewer";
-  if (rule.always) return "a second reviewer on another model for every pull request";
-  return `a second reviewer on another model for a pull request with ${[...rule.reserved ? ["a reserved path hold"] : [], ...rule.lines === null ? [] : [`at least ${rule.lines} changed lines`]].join(" or ")}`;
+  if (rule.always) return "an independent second reviewer on Claude Opus 5.5 for every pull request";
+  return `an independent second reviewer on Claude Opus 5.5 for a pull request with ${[...rule.reserved ? ["a reserved path hold"] : [], ...rule.lines === null ? [] : [`at least ${rule.lines} changed lines`]].join(" or ")}`;
 };
 function secondReviewOf(flag: string): SecondReview | null {
   if (flag === "off") return null;
@@ -108,7 +108,7 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
       "    [--template-input PATH]... [--clear-template-inputs]   repository files, such as package-lock.json, that key the project's templates with .nexus/setup",
       "    [--auto-review off|review|land|yolo]   review each builder's PR on its own, land it too, and with yolo waive the holds you may; land and yolo need a deployer",
       "    [--pipeline off|approve|start]    turn pipeline items into threads, once the person approves each or on their own",
-      "    [--second-reviewer off|on|always|reserved,lines=N]   a second reviewer on another model for the PRs the rule names",
+      "    [--second-reviewer off|on|always|reserved,lines=N]   an independent second reviewer on Claude Opus 5.5 for the PRs the rule names",
       "    [--rules-file PATH|- | --clear-rules]   the standing rules from a file, or - for stdin, or none",
     ],
     args: [1, 1],

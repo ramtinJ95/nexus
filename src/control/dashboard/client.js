@@ -5,7 +5,7 @@
 // each changed file's diff as a tab beside the conversation.
 import { coordinator, notificationChannel, noticeText, noticeUrl } from "./notifications.js";
 import { api } from "./request.js";
-import { chunk, el, end, follow, main, pollMs, recordVisit, refreshNow, stream, tick, toggled } from "./page.js";
+import { chunk, el, end, follow, main, pollMs, recordVisit, refreshAfter, refreshNow, stream, tick, toggled } from "./page.js";
 import { pickPane, setOpen } from "./nav.js";
 import { applyFilter, listRows } from "./find.js";
 import { dialog, openProject, openStart, projectDialog } from "./dialogs.js";
@@ -93,5 +93,5 @@ const listed = (rows, now) => {
   listRows(rows);
   return notifications(rows, now);
 };
-const { markSeen, askRows } = startRows({ api, notifications: listed, health, caughtUp, currentThread, focused, activeTab: () => activeTab });
+const { markSeen, askRows } = startRows({ api, notifications: listed, health, caughtUp, changed: () => { if (document.visibilityState === "visible") void refreshAfter(); }, currentThread, focused, activeTab: () => activeTab });
 setInterval(markSeen, 1000);

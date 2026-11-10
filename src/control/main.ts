@@ -20,6 +20,8 @@ import type { Models } from "@earendil-works/pi-ai/models";
 import { chatgptToken, harnessModels, loginState, openCredentials, requireModel } from "./harness/credentials.ts";
 import { gateTurns, openHarnessHost, type ConversationId } from "./harness/host.ts";
 import { startApi } from "./api/server.ts";
+import { retentionPass } from "./retention-pass.ts";
+import { retentionPassMs } from "./retention.ts";
 import { registryLocator } from "./locator.ts";
 import { jobDeadlineMs } from "../protocol/jobs.ts";
 import { startLoop } from "./loop.ts";
@@ -297,6 +299,8 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     health: health.latest,
     log,
   }));
+  // After the API, whose delete it shares, so it closes first.
+  services.start({ everyMs: retentionPassMs, ...retentionPass({ registry, deleteThread: api.deleteThread, log }) });
   console.error(`nexus control plane: API on ${config.listen.host}:${api.port}, following ${[...probeMap.keys()].join(", ")}`);
 
   return {

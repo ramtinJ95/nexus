@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { factsData, factsOf, growParts, keeping, noticeHash, noticeOf, storageKeys, unticked, type Facts, type Storage } from "./contract.ts";
-import { dataset, grows, growing, html, since } from "./view.ts";
+import { ago, dataset, grows, growing, html, since } from "./view.ts";
 
 /** An element's `data-*` attributes as the browser's `dataset` reads them. */
 const datasetOf = (markup: string) => Object.fromEntries([...markup.matchAll(/ data-([\w-]+)="([^"]*)"/g)]
@@ -25,6 +25,17 @@ test("a run clock's ticking is no change to its region, and a new start is", () 
   const region = (at: number, now: number) => unticked(html`<p>working ${since(at, now)}</p>`.text);
   assert.equal(region(1000, 5000), region(1000, 65_000));
   assert.notEqual(region(1000, 5000), region(2000, 5000));
+});
+
+test("a time ago's minute tick is no change to its region, as the server or a browser writes it, and a new moment is", () => {
+  const served = (at: number, now: number) => html`<td>${ago(at, now)}</td>`.text;
+  const browser = (markup: string) => markup.replace(" data-ago>", ' data-ago="">');
+  for (const write of [(m: string) => m, browser]) {
+    const region = (at: number, now: number) => unticked(write(served(at, now)));
+    assert.notEqual(served(1000, 61_000), served(1000, 121_000), "the minute text differs");
+    assert.equal(region(1000, 61_000), region(1000, 121_000));
+    assert.notEqual(region(1000, 61_000), region(2000, 61_000));
+  }
 });
 
 test("a notice's hash names the thread and the attention its card is for", () => {

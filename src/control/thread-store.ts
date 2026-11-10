@@ -22,6 +22,7 @@ import { claudeWorkerStore, type ClaudeStop, type ClaudeWorker } from "./claude-
 import type { NodeStore } from "./node-store.ts";
 import type { Placement } from "./placement-model.ts";
 import { upgradeAttempts, upgradeSubmitted } from "./record-upgrade.ts";
+import { removalOf, type Removal, type RetainedThread, type RetentionClock } from "./retention.ts";
 
 /** A thread's own row, without what its sessions and the usage backfill say. */
 export interface StoredThread extends Pick<ActivityFacts, "status" | "agentTurnRunning" | "lastAgentActivityAt" | "lastHumanActivityAt"> {
@@ -161,23 +162,32 @@ export interface ThreadParticipant {
   reading?(): readonly ThreadId[];
   /** What the usage module says of each of `threads`' archive beyond its row, which the planner reads. */
   facts?(threads: readonly Thread[]): ReadonlyMap<ThreadId, Pick<ArchiveFacts, "readingUsage" | "settleWaiting">>;
+  /**
+   * Why the feature keeps those of `threads` it still reads from the removal retention (retention.ts) gives each once
+   * its week is up: an archived one's delete, or a deleted one's purge from the registry.
+   */
+  keeps?(threads: ReadonlyMap<ThreadId, Removal>): ReadonlyMap<ThreadId, string>;
 }
 
 interface AwaitWindow { from: number; until: number }
 
 const deleted = { deletedWithThread: true } as const;
+const byThread = { purge: "thread = $thread" } as const;
+const byPylon = { purge: "pylon = $pylon" } as const;
 export const holding = {
   tables: {
-    threads: {}, pylons: {}, sessions: {}, previews: {}, outputs: {}, jobs: {}, events: {}, event_receipts: {}, session_activity: {},
-    session_order: deleted, session_order_floor: deleted, thread_attention: {}, start_requests: {}, aborted_conversations: {},
-    thread_archives: {}, disk_cleanups: deleted,
+    threads: {}, pylons: byThread, sessions: byPylon, previews: byPylon, outputs: byThread, jobs: { purge: "subject = $pylon" },
+    events: { keptOnPurge: "retainEvents keeps the newest 10,000, and deleting a thread's from among them could move the oldest past a cursor, which then reads as expired" },
+    event_receipts: {}, session_activity: byThread, session_order: deleted, session_order_floor: deleted, thread_attention: byThread,
+    start_requests: { keptOnPurge: "a repeat of the request ID would start the thread again, and the pipeline would queue its item again" },
+    aborted_conversations: { purge: "conversation = $conversation" }, thread_archives: byThread, disk_cleanups: deleted,
   },
-  settings: ["backed-up-at"],
+  settings: ["backed-up-at", "retention-since"],
 } as const satisfies Holding;
 
 export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, "node" | "saveObservation" | "saveNodeState">,
   holdReleased: (thread: ThreadId, until: number) => boolean) {
-  const { transaction, afterCommit, sql, deleteThreadRows } = db;
+  const { transaction, afterCommit, sql, deleteThreadRows, purgeThreadRows } = db;
   const { setting, setSetting } = db.hold(holding);
   const { node } = nodes;
   let participants: readonly ThreadParticipant[] = [];
@@ -354,7 +364,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
 
   function setThreadStatus(id: ThreadId, status: ThreadStatus) {
     transaction(() => {
-      sql("UPDATE threads SET status = ? WHERE id = ?").run(status, id);
+      sql("UPDATE threads SET status = $status, deleted_at = CASE WHEN $status = 'deleted' THEN coalesce(deleted_at, $at) END WHERE id = $id").run({ $status: status, $at: clock(), $id: id });
       if (status === "archived") sql("INSERT INTO thread_archives (thread, archived_at) VALUES (?, ?) ON CONFLICT(thread) DO NOTHING").run(id, clock());
       else sql("DELETE FROM thread_archives WHERE thread = ?").run(id);
       if (!isOpenStatus(status)) {
@@ -423,6 +433,65 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       kind: r.kind as EventKind, payload: json<Record<string, unknown>>(r.payload),
     }));
     return { events, watermark: String(Math.max(cursor, newest ?? 0)) };
+  }
+
+  /**
+   * The node's pylons less those of deleted and archived threads that a tick would leave as they are: the node neither
+   * has nor routes them, as `present` says, and no job, preview, disk delete, retry, Claude launch or wake for reading is
+   * left to settle, nor, for an archived thread, a failure the planner has yet to record. Such a pylon's desired phase is
+   * paused or deleted, and the planner is done with an absent one either way. A change to its project's live spec or git
+   * identity reaches it on the tick after any of these.
+   */
+  function pylonIdsToTick(node: NodeName, present: readonly PylonId[]): PylonId[] {
+    return (sql(`SELECT p.id FROM pylons p JOIN threads t ON t.id = p.thread WHERE p.node = $node AND (t.status NOT IN ('deleted', 'archived')
+      OR p.submitted IS NOT NULL OR p.retrying = 1 OR p.id IN (SELECT value FROM json_each($present))
+      OR EXISTS (SELECT 1 FROM previews WHERE pylon = p.id) OR EXISTS (SELECT 1 FROM disk_cleanups WHERE pylon = p.id)
+      OR t.id IN (SELECT value FROM json_each($launching)) OR t.id IN (SELECT value FROM json_each($reading))
+      OR (t.status = 'archived' AND p.failed IS NULL AND (json_extract(p.attempts, '$.last.code') IN (SELECT value FROM json_each($final))
+        OR json_extract(p.attempts, '$.count') >= $maxAttempts)))
+      ORDER BY p.id`).all({ $node: node, $present: JSON.stringify(present), $launching: JSON.stringify(launching()),
+      $reading: JSON.stringify(participants.flatMap((p) => p.reading?.() ?? [])), $final: JSON.stringify(finalCodes), $maxAttempts: maxAttempts }) as Row[]).map((r) => r.id as PylonId);
+  }
+
+  /**
+   * Why each of the deleted `threads` cannot leave the registry yet, for what this store holds of it. Its pylon is not
+   * gone while its node, as last observed, lists or routes it, or anything is left for the planner to settle, since only
+   * a pylon the registry knows is ever deleted, so its disk would stay on its node for good. A node no longer in the
+   * registry has nothing of it. A harness thread stays until its conversation's abort is recorded, which a start reads.
+   */
+  function unpurgeable(threads: readonly ThreadId[]): Map<ThreadId, string> {
+    const kept = new Map<ThreadId, string>();
+    const left = new Map<NodeName, ReadonlySet<PylonId> | null>();
+    const leftOn = (name: NodeName) => {
+      const seen = node(name)?.observation ?? null;
+      return seen === null ? null : new Set(pylonIdsToTick(name, [...seen.pylons.map((p) => p.pylonId), ...seen.previewRoutes.map((r) => r.pylonId)]));
+    };
+    const rows = sql(`SELECT t.id, p.id AS pylon, p.node, EXISTS (SELECT 1 FROM nodes n WHERE n.name = p.node) AS known,
+      t.conversation_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM claude_workers w WHERE w.thread = t.id)
+        AND t.conversation_id NOT IN (SELECT conversation FROM aborted_conversations) AS unaborted
+      FROM threads t JOIN pylons p ON p.thread = t.id WHERE t.id IN (SELECT value FROM json_each(?))`).all(JSON.stringify(threads));
+    for (const r of rows) {
+      const [id, pylonId, on] = [r.id as ThreadId, r.pylon as PylonId, r.node as NodeName];
+      if (r.unaborted === 1) {
+        kept.set(id, "the abort of its harness conversation is not recorded yet");
+        continue;
+      }
+      if (r.known === 0) continue;
+      if (!left.has(on)) left.set(on, leftOn(on));
+      const settling = left.get(on)!;
+      if (settling === null) kept.set(id, `${on} has not been observed, so whether it still has the thread's pylon is unknown`);
+      else if (settling.has(pylonId)) kept.set(id, `its pylon is not gone from ${on}: the node lists or routes it, or a job, preview port, retry or Claude launch of it is left to settle`);
+    }
+    return kept;
+  }
+
+  /** Why this store, or a participant, keeps each of `threads` from its removal, by the first that keeps it. */
+  function keeps(threads: ReadonlyMap<ThreadId, Removal>): Map<ThreadId, string> {
+    const kept = new Map<ThreadId, string>();
+    const purges = [...threads].flatMap(([id, removal]) => removal === "purge" ? [id] : []);
+    const reasons = [unpurgeable(purges), ...participants.flatMap((p) => p.keeps === undefined ? [] : [p.keeps(threads)])];
+    for (const [id, why] of reasons.flatMap((r) => [...r])) if (!kept.has(id)) kept.set(id, why);
+    return kept;
   }
 
   /** What waits on the person for the thread. A review that asks about its holds has its question's need, which shows the review too. */
@@ -701,6 +770,38 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       transaction(() => { recordReply(at, id); appendEvent("thread.turn-ended", id, {} , at); updateAttention(id); });
     },
     setThreadStatus,
+    /**
+     * Removes the deleted thread from the registry: its rows of every table whose holding purges them (db.ts), and its
+     * own row last, in one transaction. A thread that is not deleted is left as it is.
+     */
+    purgeThread(id: ThreadId) {
+      transaction(() => {
+        const row = threadRecord(id);
+        if (row?.status !== "deleted") return;
+        purgeThreadRows({ thread: id, pylon: pylonIdOf(id), conversation: row.conversation_id as string | null });
+        sql("DELETE FROM threads WHERE id = ?").run(id);
+      });
+    },
+    /**
+     * Every archived and deleted thread as retention reads it (retention.ts), with why this store or a participant keeps
+     * each from its removal, when retention began, and when the newest verified backup began.
+     */
+    retained(): { threads: RetainedThread[] } & Omit<RetentionClock, "now"> {
+      const rows = sql(`SELECT t.id, t.status, t.last_human_activity_at, t.last_agent_activity_at, t.last_reply_at, t.deleted_at, a.archived_at
+        FROM threads t LEFT JOIN thread_archives a ON a.thread = t.id WHERE t.status IN ('archived', 'deleted') ORDER BY t.created_at, t.id`).all();
+      const kept = keeps(new Map(rows.map((r) => [r.id as ThreadId, removalOf[r.status as RetainedThread["status"]]])));
+      const since = setting("retention-since");
+      return {
+        threads: rows.map((r): RetainedThread => {
+          const thread = { id: r.id as ThreadId, kept: kept.get(r.id as ThreadId) ?? null };
+          return r.status === "archived"
+            ? { ...thread, status: "archived", archivedAt: r.archived_at as number | null, lastHumanActivityAt: r.last_human_activity_at as number, lastAgentActivityAt: r.last_agent_activity_at as number, lastReplyAt: r.last_reply_at as number | null }
+            : { ...thread, status: "deleted", deletedAt: r.deleted_at as number | null };
+        }),
+        since: since === null ? null : Number(since),
+        backedUpAt: backedUpAt(),
+      };
+    },
     /** Timestamps only move forward, so a late or repeated report cannot make a thread look idle sooner. */
     recordActivity(id: ThreadId, activity: { human?: number; agent?: number; agentTurnRunning?: boolean }) {
       transaction(() => {
@@ -738,22 +839,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       const held = new Set(participants.flatMap((p) => [...p.awaited?.(open.map((r) => r.id as ThreadId)) ?? []].flatMap(([id, hold]) => hold.until > now ? [id] : [])));
       return withSessions(open.filter((r) => held.has(r.id as ThreadId))).flatMap((thread) => thread.awaitedUntil === undefined ? [] : [{ pylon: pylon(thread.pylonId)!, thread }]);
     },
-    /**
-     * The node's pylons less those of deleted and archived threads that a tick would leave as they are: the node neither
-     * has nor routes them, as `present` says, and no job, preview, disk delete, retry, Claude launch or wake for reading is
-     * left to settle, nor, for an archived thread, a failure the planner has yet to record. Such a pylon's desired phase is
-     * paused or deleted, and the planner is done with an absent one either way. A change to its project's live spec or git
-     * identity reaches it on the tick after any of these.
-     */
-    pylonIdsToTick: (node: NodeName, present: readonly PylonId[]) =>
-      (sql(`SELECT p.id FROM pylons p JOIN threads t ON t.id = p.thread WHERE p.node = $node AND (t.status NOT IN ('deleted', 'archived')
-        OR p.submitted IS NOT NULL OR p.retrying = 1 OR p.id IN (SELECT value FROM json_each($present))
-        OR EXISTS (SELECT 1 FROM previews WHERE pylon = p.id) OR EXISTS (SELECT 1 FROM disk_cleanups WHERE pylon = p.id)
-        OR t.id IN (SELECT value FROM json_each($launching)) OR t.id IN (SELECT value FROM json_each($reading))
-        OR (t.status = 'archived' AND p.failed IS NULL AND (json_extract(p.attempts, '$.last.code') IN (SELECT value FROM json_each($final))
-          OR json_extract(p.attempts, '$.count') >= $maxAttempts)))
-        ORDER BY p.id`).all({ $node: node, $present: JSON.stringify(present), $launching: JSON.stringify(launching()),
-        $reading: JSON.stringify(participants.flatMap((p) => p.reading?.() ?? [])), $final: JSON.stringify(finalCodes), $maxAttempts: maxAttempts }) as Row[]).map((r) => r.id as PylonId),
+    pylonIdsToTick,
     /** Takes a whole PylonRecord, so the tick can save what it holds. The desired phase is dropped. */
     savePylon(saved: Omit<PylonRecord, "desired">) {
       transaction(() => {

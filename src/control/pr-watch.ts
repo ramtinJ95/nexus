@@ -61,7 +61,10 @@ export function prWatcher(options: {
       return finds.get(key)!;
     };
     // A queued thread starts when these threads' pull requests merge, which the watch must see even where it sends nothing.
-    const awaited = new Set(registry.queue.queuedThreads().flatMap((q) => q.status === "queued" ? q.after : []));
+    // Retention keeps a closed thread while its pull request is open, so the watch reads those too, or a merge after the
+    // archive would keep it for good.
+    const awaited = new Set([...registry.queue.queuedThreads().flatMap((q) => q.status === "queued" ? q.after : []),
+      ...registry.prWatches.withOpenPr().filter((id) => !isOpenStatus(registry.threads.threadStatus(id) ?? "deleted"))]);
     /**
      * Keeps the state of every PR of a thread a queued thread waits for current, whatever else holds its watch: an
      * archive, the comment cap, a message it cannot deliver yet, a PR it last saw closed, or a PR that opened and merged

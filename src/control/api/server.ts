@@ -116,6 +116,8 @@ export interface ApiOptions {
 export interface Api {
   readonly port: number;
   readonly httpsPort: number | undefined;
+  /** Deletes the thread as `DELETE /v1/threads/<thread>` does, for retention's pass. */
+  deleteThread(t: Thread): Promise<Thread>;
   close(): Promise<void>;
 }
 
@@ -168,9 +170,19 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const sse = eventStreams(streamStallMs);
   const { open, noRoom } = sse;
 
+  /** Its status first, which its agent's delete relies on, then a wake of its node, the end of its streams and terminals, and its agent's delete. */
+  async function deleteThread(t: Thread): Promise<Thread> {
+    guard(t, { status: "kept" });
+    registry.threads.setThreadStatus(t.id, "deleted");
+    wakeThread(t);
+    for (const s of open) if (s.thread === t.id) s.end();
+    await agents[registry.threads.agent(t).kind].delete(t);
+    return { ...t, status: "deleted" };
+  }
+
   const draining = () => isDraining(registry.releases.drain(), registry.now());
   const { gate } = options;
-  const kit: ApiKit = { ...access, ...pylon, ...views, ...sse, registry, harness, startThread, claude, agents, agentOf, draining, gate };
+  const kit: ApiKit = { ...access, ...pylon, ...views, ...sse, registry, harness, startThread, claude, agents, agentOf, deleteThread, draining, gate };
 
   const routes: readonly RouteEntry[] = [
     ["GET", /^\/v1\/health$/, anyAllowed, () => ok(health())],
@@ -428,6 +440,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   return {
     port: address.port,
+    deleteThread,
     get httpsPort() { return secure?.listening ? (secure.address() as import("node:net").AddressInfo).port : undefined; },
     async close() {
       stopping = true;

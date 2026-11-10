@@ -30,7 +30,7 @@ export type Nudge =
    */
   | { state: "no-change"; turn: number; reason: string; archived: boolean };
 
-export const holding = { tables: { nudges: { record: "thread" } } } as const satisfies Holding;
+export const holding = { tables: { nudges: { record: "thread", purge: "thread = $thread" } } } as const satisfies Holding;
 
 export function nudgeStore(db: Db, updateAttention: (thread: ThreadId) => void) {
   const { transaction, sql } = db;
