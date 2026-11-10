@@ -19,7 +19,7 @@ const isUp = (p: PylonObservation) => p.phase !== "stopped" && !crashed(p);
 type PlacementRegistry = Pick<Registry, "now"> & {
   nodes: Pick<Registry["nodes"], "nodes">;
   placement: Pick<Registry["placement"], "reserved">;
-  threads: Pick<Registry["threads"], "pylonsWithStatusOn" | "pylonsWithThreadsOn">;
+  threads: Pick<Registry["threads"], "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "pylonsWithHeldThreadsOn">;
 };
 type WeighingRegistry = PlacementRegistry & { nodeMetrics: Pick<Registry["nodeMetrics"], "latestHealthSample"> };
 
@@ -106,7 +106,7 @@ function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighe
  * placement counts it as free, and `freeHeldRoom` pauses them once the node needs it.
  */
 function heldOnly(registry: PlacementRegistry, node: NodeName, now: number) {
-  return registry.threads.pylonsWithThreadsOn(node).filter(({ pylon, thread: { awaitedUntil, ...unheld } }) => pylon.failed === null && awaitedUntil !== undefined
+  return registry.threads.pylonsWithHeldThreadsOn(node).filter(({ pylon, thread: { awaitedUntil, ...unheld } }) => pylon.failed === null && awaitedUntil !== undefined
     && desiredPhase({ ...unheld, awaitedUntil }, now) === "running" && desiredPhase(unheld, now) === "paused");
 }
 const heldRoom = (registry: PlacementRegistry, node: NodeName, now: number) => heldOnly(registry, node, now).reduce((gib, { pylon }) => gib + pylon.boot.resources.memoryGiB, 0);
