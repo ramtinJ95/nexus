@@ -71,10 +71,16 @@ export function showTab(path) {
   if (path === terminalTab) void tabShows.terminal();
 }
 
-export function openFile(file) {
+/**
+ * Opens a changed file's tab. A step from file to file passes the path it steps from, whose tab the next file takes,
+ * so a review of many files keeps one tab rather than pushing the reader's own tabs out.
+ */
+export function openFile(file, from = null) {
   const at = openTabs.findIndex((f) => f.path === file.path);
-  if (at === -1) openTabs = [...openTabs, file].slice(-maxTabs);
-  else openTabs[at] = file;
+  const stepped = openTabs.findIndex((f) => f.path === from);
+  if (at !== -1) openTabs[at] = file;
+  else if (stepped !== -1) openTabs = openTabs.with(stepped, file);
+  else openTabs = [...openTabs, file].slice(-maxTabs);
   saveTabs();
   showTab(file.path);
 }

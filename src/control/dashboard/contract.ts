@@ -98,6 +98,8 @@ export const storageKeys = {
   tabs: (thread: string) => `nexus.tabs.${thread}` as const,
   review: (thread: string) => `nexus.review.${thread}` as const,
   draft: (thread: string) => `nexus.draft.${thread}` as const,
+  /** The changed files the reader marked viewed. */
+  viewed: (thread: string) => `nexus.viewed.${thread}` as const,
 } as const;
 type Keys = typeof storageKeys;
 export type StorageKey = { [K in keyof Keys]: Keys[K] extends (thread: string) => infer R ? R : Keys[K] }[keyof Keys];

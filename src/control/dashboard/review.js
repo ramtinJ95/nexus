@@ -102,6 +102,9 @@ const untab = (text) => text.replaceAll("\t", "    ");
 /** The line that opens a note's entry in the review, after its number. */
 const noteHeader = (note) => `**[${kinds[note.kind].label.toUpperCase()}]** \`${note.path}\` ${linesLabel(note.lines)}`;
 
+/** The numbered entries' header lines a message holds. */
+const headersIn = (text) => text.split("\n").map((line) => /^\d+\. (.*)$/.exec(line)?.[1]).filter((header) => header !== undefined);
+
 /**
  * The review after a message is sent: `sent` is what the composer held when the send began, the review composed into
  * it and its notes as they were then. A note is done if the message holds its entry's header line and the note has
@@ -110,7 +113,7 @@ const noteHeader = (note) => `**[${kinds[note.kind].label.toUpperCase()}]** \`${
  */
 export function afterSend(review, sent, text) {
   if (sent.composed === null) return review;
-  const headers = text.split("\n").map((line) => /^\d+\. (.*)$/.exec(line)?.[1]).filter((header) => header !== undefined);
+  const headers = headersIn(text);
   const groups = Map.groupBy(sent.notes, noteHeader);
   const done = new Map([...groups].filter(([header, group]) => headers.filter((h) => h === header).length >= group.length)
     .flatMap(([, group]) => group.map((note) => [note.id, JSON.stringify(note)])));
@@ -119,6 +122,21 @@ export function afterSend(review, sent, text) {
     notes: review.notes.filter((note) => done.get(note.id) !== JSON.stringify(note)),
     composed: review.composed === sent.composed ? null : review.composed,
   };
+}
+
+/**
+ * The review as the composer holding `text` leaves it, as when a page loads with the composer's draft: `composed`
+ * keeps the notes whose entry's header line the composer still holds, by afterSend's test, so notes that share a
+ * header stay only if it holds that line once for each. It is null when the composer holds none of them.
+ */
+export function heldBy(review, text) {
+  if (review.composed === null || text.includes(review.composed.text)) return review;
+  const headers = headersIn(text);
+  const composed = review.notes.filter((n) => review.composed.ids.includes(n.id));
+  const held = [...Map.groupBy(composed, noteHeader)].filter(([header, group]) => headers.filter((h) => h === header).length >= group.length);
+  const ids = held.flatMap(([, group]) => group.map((n) => n.id));
+  if (ids.length === review.composed.ids.length) return review;
+  return { ...review, composed: ids.length === 0 ? null : { ...review.composed, ids } };
 }
 
 /** The review as a message for the reader to edit and send: one numbered entry per note, in file and line order. */
