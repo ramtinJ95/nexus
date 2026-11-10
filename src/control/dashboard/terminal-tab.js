@@ -47,12 +47,20 @@ export async function showTerminal() {
     if (over) terminal = null;
   };
   shown({ text: "Attaching…", over: false });
+  let fading;
+  const copied = (text) => {
+    const clip = document.getElementById("term-clip");
+    clip.textContent = text;
+    clip.hidden = false;
+    clearTimeout(fading);
+    fading = setTimeout(() => { clip.hidden = true; }, 15_000);
+  };
   const pane = landing;
   landing = null;
   terminal = chunk(import("./term-view.js")).then(({ openTerminal }) => {
     lastTerminal?.close();
     document.getElementById("term-host").replaceChildren();
-    lastTerminal = openTerminal(document.getElementById("term-host"), thread, shown, pane);
+    lastTerminal = openTerminal(document.getElementById("term-host"), thread, shown, pane, copied);
     return lastTerminal;
   }).catch((err) => {
     shown({ text: `The terminal did not load: ${err.message}`, over: true });

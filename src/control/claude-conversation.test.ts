@@ -8,7 +8,7 @@ import { queryObjects } from "node:v8";
 import { claudeConversations } from "./claude-conversation.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
-import { addThread, observeNode, seedRegistry, testRegistry, claudeWorkerAt } from "../test-support/registry-kit.ts";
+import { addThread, observeNode, seedRegistry, testProject, testRegistry, claudeWorkerAt } from "../test-support/registry-kit.ts";
 import type { ClaudeEntry } from "./claude-transcript.ts";
 import { maxEntries } from "../contract/streams.ts";
 import { processStream } from "../process-stream.ts";
@@ -189,6 +189,22 @@ test("a watched thread's view, which reads on from the last one, holds what the 
   await watch.stop();
   await appendFile(file("another-session"), lines("F"));
   assert.deepEqual(await shown(), stored(), "an unwatched thread's view");
+});
+
+test("a read keeps a pull request Claude Code records only when it is of the thread's project's GitHub repository", async (t) => {
+  const registry = seedRegistry(testRegistry(t, join(dir, `${randomUUID()}.db`)), { nodes: [node], project: testProject({ defaultNode: node, repoUrl: "https://github.com/acme/shop.git" }) });
+  const thread = claudeThread(registry);
+  const projects = await mkdtemp(join(dir, "projects-"));
+  await mkdir(join(projects, "-home-user-workspace-repo"));
+  const pr = (repo: string, number: number) => JSON.stringify({ type: "pr-link", sessionId: session, prNumber: number, prUrl: `https://github.com/${repo}/pull/${number}`, prRepository: repo, timestamp: "2026-11-09T02:00:00.000Z" });
+  await writeFile(join(projects, "-home-user-workspace-repo", `${session}.jsonl`), [pr("acme/shop", 7), pr("someone/else", 8)].map((l) => `${l}\n`).join(""));
+  const probe: Pick<ProbeClient, "stream"> = {
+    stream: async (_, argv) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === claudeProjects ? projects : arg), () => {}),
+  };
+  const conversations = claudeConversations({ log: assert.fail, registry, probes: new Map([[node, probe]]) });
+  t.after(() => conversations.close());
+  await conversations.refresh(thread);
+  assert.deepEqual(conversations.view(thread).entries, [{ kind: "pull-request", at: Date.parse("2026-11-09T02:00:00.000Z"), number: 7, url: "https://github.com/acme/shop/pull/7", repository: "acme/shop" }]);
 });
 
 test("a read asks the pylon's hook which dialogs wait while a turn runs or waits or an ask is open, and its report opens the worker's question though the transcript holds no call yet", async (t) => {

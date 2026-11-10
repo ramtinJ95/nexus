@@ -104,6 +104,7 @@ ${t.status !== "deleted" && termView(t)}
 function termView(t: Thread): Html {
   return html`<section class="term-view" id="term-view" role="tabpanel" aria-label="Terminal" hidden>
 <div class="tv-head"><span class="tv-where">The pylon's Herdr session</span><span class="tv-status" id="term-status" role="status"></span><button type="button" class="btn btn-xs" id="term-again" hidden>Attach again</button><button type="button" class="btn btn-xs btn-ghost" id="term-detach" hidden>Detach</button></div>
+<p class="tv-clip" id="term-clip" role="status" hidden></p>
 <div class="tv-host" id="term-host"></div>
 </section>`;
 }
