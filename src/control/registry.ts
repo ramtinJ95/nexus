@@ -39,7 +39,8 @@ export function openRegistry(path: string, clock = Date.now, log = (message: str
   const { participant: watching, ...prWatches } = prWatchStore(kernel, appendEvent);
   const { participant: queueing, ...queue } = queueStore(kernel, saveStartKey);
   const { participant: usageHolding, ...usage } = usageStore(kernel, { threadRecord, archivedAt, recordSettle });
-  start([reviewing, asking, nudging, watching, queueing, usageHolding], usage.failUsageRead);
+  const { participant: piping, ...pipeline } = pipelineStore(kernel, threads.startRequest);
+  start([reviewing, asking, nudging, watching, queueing, usageHolding, piping], usage.failUsageRead);
 
   return {
     close() { kernel.db.close(); },
@@ -60,7 +61,7 @@ export function openRegistry(path: string, clock = Date.now, log = (message: str
     nodes,
     nodeMetrics: nodeMetricsStore(kernel),
     projects: projectStore(kernel),
-    pipeline: pipelineStore(kernel),
+    pipeline,
     images: imageStore(kernel),
   };
 }

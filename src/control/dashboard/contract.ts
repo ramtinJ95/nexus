@@ -89,6 +89,8 @@ export const storageKeys = {
   /** The dark theme the toggle goes back to. */
   darkTheme: "nexus.theme.dark",
   pane: "nexus.pane",
+  /** "folded" while the reader keeps the sidebar folded away, above a phone's width. */
+  side: "nexus.side",
   /** The sidebar's thread filter, kept for the tab. */
   filter: "nexus.filter",
   folded: "nexus.folded",
