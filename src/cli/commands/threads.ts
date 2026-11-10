@@ -4,7 +4,7 @@ import { threadRoutes as routes, type Preview } from "../../contract/threads.ts"
 import { pylonRoutes, type ChangesBase } from "../../contract/pylon.ts";
 import { projectOf } from "../refs.ts";
 import { attachTerminal, processTty } from "../attach.ts";
-import { CliError } from "../transport.ts";
+import { CliError, UsageError } from "../transport.ts";
 import { startRules } from "../../contract/threads-parse.ts";
 import { type Values, type Api, type Command, str, request, int, briefOptions, briefOf, table, waitMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
 import { thenWatch, watchOf, watchOptions } from "./watch.ts";
@@ -12,12 +12,12 @@ import { detailText, portsText, listingText, changesText, queuedRow, queuedText,
 
 function portArg(given: string): number {
   const port = Number(given);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new CliError("invalid", `the port must be a whole number from 1 to 65535, got ${given}`);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new UsageError(`the port must be a whole number from 1 to 65535, got ${given}`);
   return port;
 }
 
 const baseOf = (v: Values): ChangesBase => {
-  if (v.uncommitted === true && v.turn === true) throw new CliError("invalid", "--turn and --uncommitted cannot be used together");
+  if (v.uncommitted === true && v.turn === true) throw new UsageError("--turn and --uncommitted cannot be used together");
   return v.turn === true ? "turn" : v.uncommitted === true ? "head" : "start";
 };
 
@@ -204,8 +204,8 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     options: { ...briefOptions, ...watchOptions, "request-id": { type: "string" }, plan: { type: "boolean" } },
     async run(api, _, v, follow, { io }) {
       const interval = watchOf(v);
-      if (v.watch === true && v.message === undefined && v.claude === undefined) throw new CliError("invalid", "--watch waits for the reply to the first message, so it needs --message or --claude");
-      if (v.watch === true && v.after !== undefined) throw new CliError("invalid", "--watch cannot go with --after, since a queued thread has no run yet");
+      if (v.watch === true && v.message === undefined && v.claude === undefined) throw new UsageError("--watch waits for the reply to the first message, so it needs --message or --claude");
+      if (v.watch === true && v.after !== undefined) throw new UsageError("--watch cannot go with --after, since a queued thread has no run yet");
       // One request: the control plane sends the first message once the thread starts, as the person's.
       const body = briefOf(v, await projectOf(api, v, "start"), startRules);
       if (body.after !== undefined) {
@@ -266,7 +266,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     options: { unread: { type: "boolean" }, "last-reply-at": { type: "string" } },
     async run(api, [id], v) {
       const shown = str(v, "last-reply-at");
-      if (shown !== undefined && v.unread) throw new CliError("invalid", "--last-reply-at marks a reply seen, so it cannot go with --unread");
+      if (shown !== undefined && v.unread) throw new UsageError("--last-reply-at marks a reply seen, so it cannot go with --unread");
       await request(api, v.unread ? routes.unseen : routes.seen, { thread: id!, body: shown === undefined ? {} : { lastReplyAt: int(shown, "--last-reply-at", 0) } });
       return { json: null, text: `Marked ${id} ${v.unread ? "unread" : "seen"}.` };
     },

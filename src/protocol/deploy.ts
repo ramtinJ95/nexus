@@ -45,8 +45,10 @@ export interface DrainBody { commit: string; release?: boolean; hold?: boolean }
 /** `expiresAt` is null once a release has cleared the drain. */
 export interface DrainReply { idle: boolean; expiresAt: number | null; threads?: string[]; entering?: boolean }
 
+/** A failure the control plane received before the desired release was requested belongs to an earlier request for its commit. */
 export function releaseOutcome(view: ReleaseView, commit: string): "pending" | "healthy" | "failed" | "superseded" {
-  if (view.desired?.commit !== commit) return "superseded";
-  if (view.nodes.some((r) => r.target === commit && (r.state === "failed" || r.state === "rolled-back"))) return "failed";
+  const desired = view.desired;
+  if (desired?.commit !== commit) return "superseded";
+  if (view.nodes.some((r) => r.target === commit && (r.state === "failed" || r.state === "rolled-back") && r.observedAt >= desired.requestedAt)) return "failed";
   return view.nodes.length > 0 && view.nodes.every((r) => r.commit === commit && r.state === "healthy") ? "healthy" : "pending";
 }

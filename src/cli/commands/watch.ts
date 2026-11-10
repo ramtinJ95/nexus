@@ -2,7 +2,7 @@
 import type { Writable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { EntryRecord, LiveState } from "@earendil-works/pi-durable";
-import { CliError } from "../transport.ts";
+import { CliError, UsageError } from "../transport.ts";
 import { type Api, type Follow, type Command, type Io, type Result, type Values, str, request, int, clip, reconnectMs, untilConsumerGone } from "../kit.ts";
 import { transient } from "../config.ts";
 import { agentView, threadRoutes, type ClaudeEntry, type ListeningPort, type ThreadDetail } from "../../contract/threads.ts";
@@ -349,7 +349,7 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
 
 const intervalOf = (v: Values) => {
   const interval = int(str(v, "interval"), "--interval", 2000);
-  if (interval === 0) throw new CliError("invalid", "--interval must be above 0");
+  if (interval === 0) throw new UsageError("--interval must be above 0");
   return interval;
 };
 
@@ -359,7 +359,7 @@ export const watchOptions = { watch: { type: "boolean" }, interval: { type: "str
 /** The poll of a start's or send's `--watch`, or null without one, read before the request so a bad flag sends nothing. */
 export function watchOf(v: Values): number | null {
   if (v.watch === true) return intervalOf(v);
-  if (v.interval !== undefined) throw new CliError("invalid", "--interval goes with --watch");
+  if (v.interval !== undefined) throw new UsageError("--interval goes with --watch");
   return null;
 }
 
@@ -394,9 +394,9 @@ export const watchCommands: Readonly<Record<string, Command>> = {
     thread: true,
     options: { last: { type: "boolean" } },
     async run(api, [id, count], v) {
-      if (count !== undefined && v.last !== true) throw new CliError("invalid", `conversation takes a count only after --last, got ${count}`);
+      if (count !== undefined && v.last !== true) throw new UsageError(`conversation takes a count only after --last, got ${count}`);
       const last = v.last !== true ? null : count === undefined ? "reply" : int(count, "--last", 1);
-      if (last === 0) throw new CliError("invalid", "--last N must be above 0");
+      if (last === 0) throw new UsageError("--last N must be above 0");
       const served = agentView((await request(api, threadRoutes.conversation, { thread: id! }))!);
       if (last === null) return { json: served.view, text: served.kind === "claude" ? claudeText(served.view) : conversationText(served.view) };
       if (served.kind === "claude") {

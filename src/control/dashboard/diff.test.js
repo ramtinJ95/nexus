@@ -142,6 +142,27 @@ ${lines.join("\n")}
   assert.equal(errors.mock.callCount(), 0, "the cut hunk's header matches its lines");
 });
 
+test("each load of more rows shows the next stretch of a long diff, which says how many rows it has in all", (t) => {
+  const errors = t.mock.method(console, "error", () => {});
+  const first = Array.from({ length: 3_000 }, (_, i) => `+first ${i}`);
+  const second = Array.from({ length: 2_000 }, (_, i) => `+second ${i}`);
+  const text = `diff --git a/gen.ts b/gen.ts
+index 1111111..2222222 100644
+--- a/gen.ts
++++ b/gen.ts
+@@ -0,0 +1,3000 @@
+${first.join("\n")}
+@@ -10,0 +3011,2000 @@
+${second.join("\n")}
+`;
+  const shown = (loads) => diffOf(text, maxDiffRows * (loads + 1));
+  assert.deepEqual([shown(0).cut, shown(0).rows, linesOf(shown(0)).length], [true, 5_000, maxDiffRows]);
+  assert.deepEqual([shown(1).cut, shown(1).rows, linesOf(shown(1)).length], [true, 5_000, 2 * maxDiffRows]);
+  assert.equal(linesOf(shown(1)).at(-1), `+second ${2 * maxDiffRows - first.length - 1}`, "the second load reaches into the second hunk");
+  assert.deepEqual([shown(2).cut, shown(2).rows, linesOf(shown(2)).length], [false, null, 5_000], "the third load shows the whole diff");
+  assert.equal(errors.mock.callCount(), 0);
+});
+
 test("a diff within the row cap is not cut", () => {
   assert.equal(diffOf(edit).cut, false);
 });

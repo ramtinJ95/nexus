@@ -2,13 +2,13 @@ import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { Whoami } from "../../contract/threads.ts";
 import { saveJson } from "../../node-base/json-file.ts";
-import { call, CliError } from "../transport.ts";
+import { call, CliError, UsageError } from "../transport.ts";
 import { type Command, type Io, str } from "../kit.ts";
 import { controlPorts, configFile, readConfig, checkVersion, socksOf, controlUrl } from "../config.ts";
 
 function candidatesOf(host: string): URL[] {
   if (host.includes("://")) return [controlUrl(host)];
-  if (!/^[A-Za-z0-9.-]+$/.test(host)) throw new CliError("invalid", `${host} is neither a tailnet name, such as rj-firebat or rj-firebat.example.ts.net, nor a URL`);
+  if (!/^[A-Za-z0-9.-]+$/.test(host)) throw new UsageError(`${host} is neither a tailnet name, such as rj-firebat or rj-firebat.example.ts.net, nor a URL`);
   return controlPorts.map((url) => controlUrl(url.replace("{host}", host)));
 }
 

@@ -10,9 +10,9 @@ import { constants } from "node:fs";
 import { access, appendFile, open, readFile, rename, rm, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { appendSecret, parseSecretsFile } from "../node-base/secrets-env.ts";
+import { appendSecret, parseSecretsFile, replaceSecret } from "../node-base/secrets-env.ts";
 import { chatgptTokenGrant } from "../protocol/secret-grants.ts";
-import { configFiles, prefix, roleLinks, servicePath, stateDirs, users } from "../node-base/node-layout.ts";
+import { configFiles, prefix, roleLinks, servicePath, stateDirs, unitNames, users } from "../node-base/node-layout.ts";
 import { controlFields, probeFields } from "../node-base/node-config.ts";
 
 const exec = promisify(execFile);
@@ -73,6 +73,41 @@ export function githubHostKeys(scan: string): string {
 const token = (value: string) => /^[\x21-\x7e]+$/.test(value) ? undefined : "a token is one line of printable characters with no spaces";
 const githubToken = (value: string) => /^[A-Za-z0-9_]+$/.test(value) ? undefined : "a GitHub token is letters, digits and underscores";
 
+/** What GitHub's `GET /user` says of a token. `expires` is the github-authentication-token-expiration header as GitHub wrote it, null without one. */
+export type GithubAnswer =
+  | { kind: "accepted"; login: string; expires: string | null }
+  | { kind: "refused" }
+  | { kind: "unchecked"; reason: string };
+
+export async function askGithub(token: string, request: Host["fetch"]): Promise<GithubAnswer> {
+  try {
+    const response = await request("https://api.github.com/user", {
+      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "nexus-installer" },
+      redirect: "error",
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (response.status === 401) return { kind: "refused" };
+    if (!response.ok) return { kind: "unchecked", reason: `GitHub answered ${response.status}` };
+    const { login } = await response.json() as { login?: unknown };
+    return { kind: "accepted", login: typeof login === "string" ? login : "an account GitHub did not name", expires: response.headers.get("github-authentication-token-expiration") };
+  } catch (err) {
+    return { kind: "unchecked", reason: `GitHub could not be reached: ${(err as Error).message}` };
+  }
+}
+
+/** The GitHub token's check at the prompt: its shape, then GitHub's answer, which refuses only a 401. */
+function githubTokenLive(host: Host, say: (line: string) => void) {
+  return async (value: string) => {
+    const wrong = githubToken(value);
+    if (wrong !== undefined) return wrong;
+    const answer = await askGithub(value, host.fetch);
+    if (answer.kind === "refused") return "GitHub refused it with 401, so it is mistyped, expired or revoked";
+    if (answer.kind === "accepted") say(`GitHub knows the token as ${answer.login}, ${answer.expires === null ? "with no expiry" : `until ${answer.expires}`}.`);
+    else say(`Took the GitHub token unchecked, because ${answer.reason}. A thread that uses it fails if GitHub refuses it.`);
+    return undefined;
+  };
+}
+
 export interface Question {
   /** The variable that answers it without a terminal. */
   key: string;
@@ -87,7 +122,7 @@ export interface Choice {
 
 export interface Answers {
   /** The value, or undefined to skip it. `check` says what is wrong with a value, if anything. */
-  secret(question: Question & { check: (value: string) => string | undefined }): Promise<string | undefined>;
+  secret(question: Question & { check: (value: string) => string | undefined | Promise<string | undefined> }): Promise<string | undefined>;
   /** A choice's ID. The first choice is the default, and `unattended` the answer without a terminal. */
   choose(question: Question & { choices: readonly Choice[]; unattended: string }): Promise<string>;
 }
@@ -102,7 +137,7 @@ export function scripted(env: NodeJS.ProcessEnv): Answers {
   return {
     async secret({ key, check }) {
       const answer = await value(key);
-      const wrong = answer === undefined ? undefined : check(answer);
+      const wrong = answer === undefined ? undefined : await check(answer);
       if (wrong !== undefined) throw new Error(`${key}: ${wrong}`);
       return answer;
     },
@@ -157,7 +192,7 @@ export function terminal(): Answers {
       for (;;) {
         const answer = (await readLine(`${say} `, true)).trim();
         if (answer === "") return undefined;
-        const wrong = check(answer);
+        const wrong = await check(answer);
         if (wrong === undefined) return answer;
         console.error(`That is not it: ${wrong}. Try again, or press Enter to skip.`);
       }
@@ -187,6 +222,7 @@ export interface Host {
   own(path: string, store: { mode: number; owner: string }): Promise<void>;
   /** Runs a command and returns its stdout, or with `interactive` gives it the terminal, its stdout going to stderr. */
   run(program: string, args: readonly string[], options?: { interactive?: boolean }): Promise<string>;
+  fetch(url: string, init: RequestInit): Promise<Response>;
 }
 
 /** Through the open file rather than its path, so an owner of the directory cannot swap in a symlink first. */
@@ -232,6 +268,7 @@ export const system: Host = {
     if (code !== 0) throw new Error(`${program} exited with ${code}`);
     return "";
   },
+  fetch: (url, init) => fetch(url, init),
 };
 
 export interface Locations { harness: string; secrets: string; gitKey: string; githubWatch: string | undefined; node: string | undefined }
@@ -325,7 +362,7 @@ export async function provision(role: "control" | "node", host: Host, answers: A
     github = await answers.secret({
       key: "NEXUS_GH_TOKEN",
       say: "Pylons use a GitHub token for gh and git over HTTPS: a fine-grained token for all repositories with Administration and Contents read and write. Paste it, or press Enter to skip:",
-      check: githubToken,
+      check: githubTokenLive(host, say),
     });
     if (github !== undefined) await addSecret("GH_TOKEN", github);
   }
@@ -379,4 +416,89 @@ export async function provision(role: "control" | "node", host: Host, answers: A
     }
   }
   return next;
+}
+
+export const rotatable = ["claude", "github"] as const;
+export type Rotatable = (typeof rotatable)[number];
+
+const claudeNameOf = (value: string) => value.startsWith("sk-ant-api") ? "ANTHROPIC_API_KEY" : "CLAUDE_CODE_OAUTH_TOKEN";
+
+/**
+ * Replaces this machine's stored `kind` of credential with one the person gives, through `host.write`, restarts what
+ * reads it, and says what still holds the old value. A machine that stores none is refused, as the install asks for it.
+ */
+export async function rotate(kind: Rotatable, role: "control" | "node", host: Host, answers: Answers, say: (line: string) => void): Promise<void> {
+  const at = await locations(host);
+  const read = new Map<string, string | undefined>();
+  const reading = async (path: string) => {
+    const text = await host.read(path);
+    read.set(path, text);
+    return text;
+  };
+  /** Before the first write, so a file another run replaced while the person was asked is not overwritten from what this one read. */
+  const unchanged = async () => {
+    for (const [path, text] of read) {
+      if (await host.read(path) !== text) throw new Error(`${path} changed while the token was asked for, so nothing was replaced. Rerun --rotate ${kind}`);
+    }
+  };
+  const text = await reading(at.secrets) ?? "";
+  const secrets = parseSecretsFile(at.secrets, text, heldNames);
+  const restarts = new Set<string>();
+  const replace = async (name: string, value: string) => {
+    await host.write(at.secrets, replaceSecret(at.secrets, text, name, value, heldNames), stores.claude);
+    say(`Replaced ${name} in ${at.secrets}.`);
+    restarts.add(unitNames.probe);
+  };
+  const others = (name: string) => [
+    `Each running pylon on this node that was granted ${name} keeps the old value until it boots again, as on a wake after a pause or nexus archive then nexus unarchive, because a pylon takes its secrets only at boot.`,
+    `Every other node keeps its own ${name} in its own secrets.env. nexus nodes lists them. Run sudo deploy/install.sh --rotate ${kind} on each.`,
+  ];
+  const still: string[] = [];
+  try {
+    if (kind === "claude") {
+      const held = claudeNames.filter((name) => secrets.names().includes(name));
+      if (held.length === 0) throw new Error(`${at.secrets} holds no Claude token to replace. deploy/install.sh asks for one`);
+      const value = await answers.secret({
+        key: "NEXUS_CLAUDE_TOKEN",
+        say: `Paste the new ${held.join(" or ")}, or press Enter to change nothing:`,
+        check: (value) => token(value) ?? (held.includes(claudeNameOf(value)) ? undefined : `it would be ${claudeNameOf(value)}, and ${at.secrets} holds ${held.join(" and ")}, so give one of that kind`),
+      });
+      if (value === undefined) return say("Changed nothing.");
+      const name = claudeNameOf(value);
+      await unchanged();
+      await replace(name, value);
+      still.push(...others(name), "The old token works until it expires or is revoked.");
+      return;
+    }
+    const old = secrets.value("GH_TOKEN");
+    const watchFile = role === "control" ? at.githubWatch : undefined;
+    const watch = watchFile === undefined ? undefined : (await reading(watchFile))?.trim();
+    if (old === undefined && watch === undefined) throw new Error(`neither ${at.secrets} nor a github.tokenFile holds a GitHub token to replace. deploy/install.sh asks for one`);
+    const value = await answers.secret({ key: "NEXUS_GH_TOKEN", say: "Paste the new GitHub token, or press Enter to change nothing:", check: githubTokenLive(host, say) });
+    if (value === undefined) return say("Changed nothing.");
+    await unchanged();
+    if (old !== undefined) {
+      await replace("GH_TOKEN", value);
+      still.push(...others("GH_TOKEN"));
+    }
+    if (watch !== undefined && (old === undefined || watch === old)) {
+      await host.write(watchFile!, `${value}\n`, stores.githubWatch);
+      say(`Replaced the token in github.tokenFile ${watchFile}.`);
+      restarts.add(unitNames.control);
+    } else if (watch !== undefined) {
+      still.push(`github.tokenFile ${watchFile} holds a token other than GH_TOKEN, so it was left alone. Replace it as deploy/README.md describes, then restart the control plane.`);
+    }
+    if (role === "node") still.push(`The control plane's github.tokenFile, if it holds the same token, is on the control plane's machine. Run sudo deploy/install.sh --rotate github there.`);
+    still.push("GitHub accepts the old token until you revoke it, at https://github.com/settings/tokens, once every copy is replaced.");
+  } finally {
+    const failed: string[] = [];
+    for (const unit of restarts) {
+      await host.run("systemctl", ["try-restart", unit]).then(() => say(`Restarted ${unit} if it ran.`), (err: unknown) => {
+        failed.push(`${unit} did not restart: ${(err as Error).message}. Run sudo systemctl restart ${unit}`);
+      });
+    }
+    if (still.length > 0) say("Still holding the old value:");
+    for (const line of [...failed, ...still]) say(`- ${line}`);
+    if (failed.length > 0) throw new Error(failed.join(". "));
+  }
 }

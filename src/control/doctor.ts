@@ -3,7 +3,7 @@
  * holds, gathered by src/control/doctor-run.ts. Each gives ok, warn or fail with one line that says what is wrong and
  * what to do.
  */
-import type { NodeName, ThreadId } from "../ids.ts";
+import type { ImageId, NodeName, ThreadId } from "../ids.ts";
 import { diskText, keptFreeGiB, lowDisk } from "../disk-space.ts";
 import { keptPastDay, settleFailuresFail, settleOverdueMs, type ActivityFacts, type ArchiveFacts } from "./reconcile.ts";
 import type { ReleaseReport, ReleaseView } from "../protocol/deploy.ts";
@@ -12,6 +12,7 @@ import type { BackupStatusRead } from "./backup-status.ts";
 import type { NodeSummary } from "./wire.ts";
 import type { TokenAnswer } from "./github.ts";
 import type { TailnetDevice } from "../tailscale.ts";
+import { maxImageFetches, type ImageFetch } from "./image-store.ts";
 import { worst, type Check, type ControlCheckName, type DoctorReport, type NodeCheckName, type Verdict } from "./doctor-model.ts";
 
 /** The dashboard's certificate as a TLS client sees it on the dashboard's port, or `none` without control.json's https. */
@@ -38,6 +39,8 @@ export interface DoctorFacts {
   tailnet: readonly TailnetDevice[] | { unreadable: string };
   /** The archived threads whose disk may be kept for their usage, as the registry's keptArchives lists them, less those whose node has no disk for them. */
   keptArchives: readonly (ActivityFacts & ArchiveFacts & { id: ThreadId; title: string })[];
+  /** The current image, the nodes whose last observation lists it, online or not, and the fetches the image worker keeps of it. */
+  image: { current: ImageId | null; holders: readonly NodeName[]; fetches: readonly ImageFetch[] };
 }
 
 const minute = 60_000;
@@ -163,6 +166,26 @@ function tailnetKey(n: NodeSummary, f: DoctorFacts): Verdict {
   return ok(`its tailnet key is valid for ${span(left)}`);
 }
 
+function image(n: NodeSummary, f: DoctorFacts): Verdict {
+  const { current, holders, fetches } = f.image;
+  if (current === null) return ok("no image is current");
+  if (holders.includes(n.name)) return ok(`holds the current image ${current}`);
+  if (n.state !== "online" || n.observedAt === null) return ok(`offline, which the online check reports, and the control plane sends it the current image ${current} once it is back online`);
+  const lacks = `lacks the current image ${current}, so auto placement passes over it`;
+  const fetch = fetches.find((r) => r.node === n.name && r.image === current);
+  // A probe's reason can end in its log's lines, which nexus image list shows.
+  const reason = fetch?.reason?.split("\n")[0];
+  if (fetch?.state === "failed") {
+    const why = fetch.failures >= maxImageFetches ? `${fetch.failures} fetches of it in a row failed, the last with ${reason}` : `Its probe refused the fetch of it as invalid: ${reason}`;
+    return warn(`${lacks}. ${why}. nexus image rollout ${current} tries again`);
+  }
+  if (fetch?.state === "running") return warn(`${lacks}. A fetch-artifact job copies it there now`);
+  const online = new Set(f.nodes.filter((m) => m.state === "online").map((m) => m.name));
+  if (!holders.some((h) => h !== n.name && online.has(h))) return warn(`${lacks}. No other online node holds it to copy it from`);
+  if (fetch !== undefined && fetch.failures > 0) return warn(`${lacks}. The last of ${fetch.failures} ${fetch.failures === 1 ? "fetch" : "fetches"} of it failed with ${reason}, and another is sent after the backoff`);
+  return warn(`${lacks}. The control plane sends it a fetch-artifact job on its next pass`);
+}
+
 function certificate(f: DoctorFacts): Verdict {
   const c = f.certificate;
   if (c.kind === "none") return ok("control.json sets no https, so the dashboard serves no certificate");
@@ -210,6 +233,7 @@ const nodeChecks: Readonly<Record<NodeCheckName, (n: NodeSummary, f: DoctorFacts
   disk,
   pylons,
   "tailnet-key": tailnetKey,
+  image,
 };
 const controlChecks: Readonly<Record<ControlCheckName, (f: DoctorFacts) => Verdict>> = {
   release: (f) => release(f.release.nodes.find((r) => r.node === f.controlNode && r.role === "control"), f.release.desired, f.now),

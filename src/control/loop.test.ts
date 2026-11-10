@@ -2331,6 +2331,40 @@ test("a Claude launch whose probe restarts mid-way is sent again under its sessi
   assert.ok(logged.some((line) => line.includes("the Claude launch lost its probe (rj-firebat: socket hang up). Sending it again")));
 });
 
+test("a pass wakes a paused pylon while another's Claude launch on its node waits, and that launch still survives a probe restart", async (t) => {
+  const registry = openRegistry(tempDb());
+  seedRegistry(registry, { nodes: [node] });
+  const paused = addThread(registry, { node, boot: { image }, thread: { id: "th-bbbbbbbbbbbb" as Thread["id"] } });
+  const fake = fakeNode({ autoFinish: true });
+  const commands: PylonCommand[] = [];
+  const { promise: answered, resolve: answer } = Promise.withResolvers<void>();
+  t.after(() => answer());
+  const restarting = restartingProbe(fake, ["restart", { kind: "open-session", herdrPane: "w1:p1" }], commands);
+  const probe: ProbeClient = { ...restarting, command: async (pylonId, command) => {
+    if (commands.length === 0) await answered;
+    return restarting.command(pylonId, command);
+  } };
+  const logged: string[] = [];
+  const loop = run(t, registry, probe, { log: (line) => logged.push(line) });
+  await until("the pylon runs", () => fake.pylons.get(paused.pylonId)?.phase === "running");
+  registry.threads.setThreadStatus(paused.id, "archived");
+  await until("the pylon is paused", () => registry.threads.pylon(paused.pylonId)?.pauses === 1);
+
+  // Its pylon sorts first, so a pass that waited on its launch would never reach the paused pylon.
+  const builder = addThread(registry, { node, boot: { image }, thread: { id: "th-aaaaaaaaaaaa" as Thread["id"] }, claudePrompt: "hello" });
+  await until("the launch waits on the probe", () => registry.threads.claudeWorker(builder.id)?.state === "starting");
+  registry.threads.setThreadStatus(paused.id, "active");
+  registry.threads.recordActivity(paused.id, { human: Date.now() });
+  await until("the wake's pass ends", watch(loop.wake(node)));
+  assert.deepEqual(fake.submitted.filter((job) => "pylonId" in job && job.pylonId === paused.pylonId).map((job) => job.kind === "spawn" ? `spawn ${job.boot.source.kind}` : job.kind), ["spawn fresh", "pause", "spawn resume"]);
+  assert.equal(commands.length, 0, "the launch has not been answered");
+
+  answer();
+  await until("worker started", () => registry.threads.claudeWorker(builder.id)?.state === "started");
+  assert.deepEqual(commands.map((c) => c.kind === "open-session" && c.resume), [registry.threads.claudeWorker(builder.id)!.session, registry.threads.claudeWorker(builder.id)!.session]);
+  assert.ok(logged.some((line) => line.includes("the Claude launch lost its probe")));
+});
+
 test("a Claude launch whose probe stays away fails once the wait is over", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry, {}, "hello");

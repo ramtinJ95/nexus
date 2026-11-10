@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DiffHunksRenderer } from "@pierre/diffs";
 import { diffOf } from "./diff.js";
-import { afterSend, emptyReview, formatReview, maxQuoteRows, noteOn, place, readReview, rowsOf } from "./review.js";
+import { afterSend, emptyReview, formatReview, heldBy, maxQuoteRows, noteOn, place, readReview, rowsOf } from "./review.js";
 
 const patch = `diff --git a/src/a.go b/src/a.go
 --- a/src/a.go
@@ -179,6 +179,19 @@ test("a send with no review composed leaves the notes", () => {
   const notes = [note("comment", 0, 0, "Fine.", "c")];
   const review = { notes, draft: null, composed: null };
   assert.equal(afterSend(review, { composed: null, notes: [] }, formatReview(notes)), review);
+});
+
+test("a composer that holds the review keeps it composed, one that holds some entries keeps those, and one that holds none drops it", () => {
+  const notes = [note("comment", at(1), at(1), "One.", "one"), note("question", at(12), at(12), "Twelve?", "twelve")];
+  const { review } = composedReview(notes);
+  assert.equal(heldBy(review, `Before.\n\n${review.composed.text}`), review);
+  const edited = review.composed.text.replace("One.", "One, edited.");
+  assert.deepEqual(heldBy(review, edited).composed.ids, ["one", "twelve"], "an entry's edited body still holds its note");
+  assert.deepEqual(heldBy(review, cut(review.composed.text, "line 1")).composed.ids, ["twelve"]);
+  assert.equal(heldBy(review, "").composed, null);
+  assert.equal(heldBy({ ...review, composed: null }, review.composed.text).composed, null);
+  const twins = composedReview([note("comment", at(11), at(12), "First.", "first"), note("comment", at(11), at(12), "Second.", "second")]).review;
+  assert.equal(heldBy(twins, twins.composed.text.split(/\n(?=2\. )/)[0]).composed, null, "one entry left of two that share a header holds neither");
 });
 
 test("a stored review reads back, and anything else reads as no review", () => {
