@@ -1,8 +1,9 @@
-// The dashboard's notices, a check's alerts and the Health page's seen mark, loaded as the page starts but outside its
-// first script. It reads the page's pieces when it runs, so a test reads what a change says without a page.
+// The dashboard's notices, a check's alerts, the notifications control and the Health page's seen mark, loaded as
+// the page starts but outside its first script. It reads the page's pieces when it runs, so a test reads what a change says without a page.
 import { doctorRoutes } from "../../contract/reports.ts";
 import { checkName } from "../plain-wording.ts";
 import { statuses } from "../doctor-model.ts";
+import { notificationChannel, noticeText, noticeUrl } from "./notifications.js";
 
 const focused = () => document.visibilityState === "visible" && document.hasFocus();
 const refresh = async () => (await import("./page.js")).refreshNow();
@@ -50,10 +51,25 @@ export async function caughtUp(hand, wait = 1000) {
   }
 }
 
-export async function notice(channel, title, body, url) {
+/**
+ * Shows a notice in `channel`. A system notification with a `tag` replaces the browser's one of that tag, and alerts
+ * again unless `quiet`. Its click brings the tab forward, and opens `url` there unless it is null. When `elsewhere`
+ * says another tab came to show the notice's thread and did not take the notice over, the click opens `url` in a new
+ * tab instead, as a page cannot bring another tab forward, and this one keeps its draft and terminal. `ended` runs once
+ * the notification is clicked or closed.
+ */
+export async function notice(channel, title, body, url, tag, { elsewhere = () => false, quiet = false, ended = () => {} } = {}) {
   if (channel === "system") {
-    const shown = new Notification(title, { body });
-    shown.onclick = () => { window.focus(); location.assign(url); shown.close(); };
+    const shown = new Notification(title, tag === undefined ? { body } : { body, tag, renotify: !quiet });
+    shown.onclose = ended;
+    shown.onclick = () => {
+      ended();
+      shown.close();
+      window.focus();
+      if (url === null) return;
+      if (elsewhere()) window.open(url, "_blank");
+      else location.assign(url);
+    };
     return () => shown.close();
   }
   if (channel !== "toast") return () => {};
@@ -70,6 +86,48 @@ export async function notice(channel, title, body, url) {
   while (stack.children.length > 5) stack.children[0].remove();
   setTimeout(() => toast.remove(), 15000);
   return () => toast.remove();
+}
+
+/**
+ * The notice a row's change shows in this tab. Its tag is the row's ID and attention, so a system notification
+ * replaces one the browser shows for the same need. A tab already on the thread has no page to open, so its notice
+ * only brings the tab forward.
+ */
+export function rowNotice(row, { focused, current, secure, permission, raises }) {
+  return {
+    channel: notificationChannel(focused, current, row.id, secure, permission, raises),
+    title: row.title, body: noticeText(row), url: current === row.id ? null : noticeUrl(row), tag: `${row.id}:${row.attention}`,
+  };
+}
+/** Shows a row's notice, as `rowNotice` says it, in this tab, and resolves to the channel it showed it in. */
+export async function showRow(row, tab) {
+  const n = rowNotice(row, tab);
+  let ended = () => {};
+  const close = await notice(n.channel, n.title, n.body, n.url, n.tag, { elsewhere: () => tab.elsewhere(row.id), quiet: tab.quiet, ended: () => ended() });
+  // A notice that would open a page is kept, so a tab that comes to show its thread can take it over.
+  if (n.channel === "system" && n.url !== null) ended = tab.keep(row, close);
+  return n.channel;
+}
+
+const permissionStates = {
+  default: { text: "Enable system notifications", ask: true },
+  granted: { text: "System notifications on", ask: false },
+  denied: { text: "System notifications blocked in the browser's site settings", ask: false },
+  unavailable: { text: "System notifications need HTTPS", ask: false },
+};
+/** The sidebar's control for system notifications, which says the browser's permission and asks for it while unasked. */
+export function permissionControl(button, { window, navigator } = globalThis) {
+  const available = window.isSecureContext && "Notification" in window;
+  const show = () => {
+    const state = permissionStates[available ? window.Notification.permission : "unavailable"] ?? permissionStates.default;
+    button.textContent = state.text;
+    button.disabled = !state.ask;
+  };
+  show();
+  if (!available) return;
+  button.onclick = async () => { await window.Notification.requestPermission(); show(); };
+  // A change in the browser's site settings reaches an open page too.
+  navigator.permissions?.query({ name: "notifications" }).then((status) => status.addEventListener("change", show), () => {});
 }
 
 // Each check's notice, which its next change closes, so a recovery takes its alert away.
