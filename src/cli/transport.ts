@@ -83,13 +83,14 @@ function handshake(raw: Socket, host: string): Promise<Socket> {
 
 /**
  * A request the API answers only once its work is done, such as a session open that waits for its agent, passes a
- * longer `idleMs`.
+ * longer `idleMs`. With `as` set to `bytes`, a success answers the body's bytes as a Buffer rather than its JSON.
  */
-export async function call(endpoint: Endpoint, method: string, path: string, body?: unknown, idleMs = apiIdleMs): Promise<unknown> {
+export async function call(endpoint: Endpoint, method: string, path: string, body?: unknown, idleMs = apiIdleMs, as?: "bytes"): Promise<unknown> {
   // Only a GET shares a connection. An error on a reused one may hide a request that ran, and only a GET may run twice.
   const via = method === "GET" ? pool(endpoint) : await open(endpoint);
-  const { status, text } = await exchange(via, endpoint.url.host, method, path, body, idleMs);
-  return reply(method, path, status, text);
+  const { status, bytes } = await exchange(via, endpoint.url.host, method, path, body, idleMs);
+  if (as === "bytes" && status >= 200 && status < 300) return bytes;
+  return reply(method, path, status, bytes.toString("utf8"));
 }
 
 const pooledMs = apiKeepAliveMs - 1_000;
@@ -217,7 +218,7 @@ export async function upgrade(endpoint: Endpoint, path: string): Promise<WebSock
   });
 }
 
-function exchange(via: Agent | Socket, host: string, method: string, path: string, body: unknown, idleMs: number, retried = false): Promise<{ status: number; text: string }> {
+function exchange(via: Agent | Socket, host: string, method: string, path: string, body: unknown, idleMs: number, retried = false): Promise<{ status: number; bytes: Buffer }> {
   const payload = body === undefined ? undefined : JSON.stringify(body);
   return new Promise((resolve, reject) => {
     let answered = false;
@@ -231,10 +232,9 @@ function exchange(via: Agent | Socket, host: string, method: string, path: strin
       },
     }, (res) => {
       answered = true;
-      let text = "";
-      res.setEncoding("utf8");
-      res.on("data", (chunk: string) => { text += chunk; });
-      res.on("end", () => resolve({ status: res.statusCode!, text }));
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => { chunks.push(chunk); });
+      res.on("end", () => resolve({ status: res.statusCode!, bytes: Buffer.concat(chunks) }));
       res.on("error", (err) => reject(lost(host, err)));
     });
     // A reused socket holds the last request's timeout, or the pool's.

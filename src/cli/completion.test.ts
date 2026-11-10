@@ -49,12 +49,13 @@ test("bash completes commands, subcommands, flags, and the threads and projects 
     child.on("error", reject).on("close", () => resolve({ words: stdout.split("\n").filter((w) => w !== "").sort(), stderr }));
   });
 
-  assert.deepEqual((await complete("nexus thr")).words, ["threads"]);
+  assert.deepEqual((await complete("nexus thr")).words, ["thread", "threads"], "thread, the group of thread show, and threads");
   assert.deepEqual((await complete("nexus image roll")).words, ["rollback", "rollout"]);
   assert.deepEqual((await complete("nexus usage ")).words, ["backfill"], "a command that is also a group offers its subcommands");
   assert.deepEqual((await complete("nexus --json threads --needs")).words, ["--needs-me"]);
   assert.deepEqual((await complete("nexus show ")).words, ["@last", id]);
   assert.deepEqual((await complete("nexus send --steer ")).words, ["@last", id]);
+  assert.deepEqual((await complete("nexus archive ")).words, ["@last", id], "a command that takes several threads completes them too");
   assert.deepEqual((await complete(`nexus show ${id} `)).words, [], "only the first argument is a thread");
   assert.deepEqual((await complete("nexus project edit ")).words, [project.id]);
   assert.deepEqual((await complete("nexus threads --project ")).words, [project.id]);

@@ -23,7 +23,7 @@ function modelOf(commands: Readonly<Record<string, Command>>) {
   const specOf = (name: string | null): Spec => {
     const command = name === null ? undefined : commands[name]!;
     const flags = [...globals, ...name === null ? [{ flag: "--version", valued: false }] : flagsOf(command?.options ?? {})];
-    return { flags: flags.map((f) => f.flag), valued: flags.filter((f) => f.valued).map((f) => f.flag), first: command?.thread === true ? "thread" : command?.project === true ? "project" : "" };
+    return { flags: flags.map((f) => f.flag), valued: flags.filter((f) => f.valued).map((f) => f.flag), first: command?.thread !== undefined ? "thread" : command?.project === true ? "project" : "" };
   };
   return { names, tops, groups, specOf };
 }
