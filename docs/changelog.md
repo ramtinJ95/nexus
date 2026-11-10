@@ -2,6 +2,10 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.79.0
+
+Adds `fetches` to `ImagesView`, which `GET /v1/images` and `image list --json` answer: one `ImageFetch` per online node that lacks the current image, which the control plane copies it to outside a rollout, as [Images](cli.md#images) describes. Plain `image list` prints them under the images. A control plane older than 0.79.0 omits the field, and `image list` prints no fetches. A rollout step a node skips now says the control plane sends it the image once it is back online. `nexus doctor` gains an `image` check per node.
+
 ## 0.78.0
 
 Adds `templateInputs` to `Project`, a list of repository paths whose git object IDs at the thread's commit join the template key beside `.nexus/setup`'s, as [Templates at thread start](cli.md#templates-at-thread-start) describes. `project edit --template-input PATH` sets it, and `--clear-template-inputs` empties it. `PATCH /v1/projects/<id>` and `POST /v1/projects` accept it. A project that lists none keeps the template keys it had. A control plane older than 0.78.0 answers an edit that sets it with 400, so `project edit --template-input` fails there with exit code 64.

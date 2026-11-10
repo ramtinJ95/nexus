@@ -1,4 +1,4 @@
-import { afterSend, emptyReview, formatReview, kinds, linesLabel, noteOn, place, rangeOf, readReview, rowsOf } from "./review.js";
+import { afterSend, emptyReview, formatReview, heldBy, kinds, linesLabel, noteOn, place, rangeOf, readReview, rowsOf } from "./review.js";
 import { el, holdReload, notify, present } from "./page.js";
 import { kept, storageKeys } from "./contract.ts";
 import { thread } from "./checkout.js";
@@ -17,6 +17,8 @@ let annotated = null;
 /** The rows the reader selected, `{ entry, anchor, head }` as places in that entry's rows. `head` moves with the keyboard. */
 let selection = null;
 let dragging = false;
+/** The note deleted last, `{ note, at }` with its place among the notes, until Undo puts it back or the review moves on. */
+let deleted = null;
 export const reviewBox = el("div", { className: "fv-review" });
 const picker = el("div", { className: "note-pick", hidden: true });
 picker.setAttribute("role", "toolbar");
@@ -77,6 +79,7 @@ function saveDraft() {
   if (at !== -1 && review.composed !== null) review.composed = { ...review.composed, ids: review.composed.ids.filter((id) => id !== note.id) };
   review.draft = null;
   selection = null;
+  deleted = null;
   saveReview();
   decorate();
   annotated?.view.node.focus({ preventScroll: true });
@@ -112,6 +115,7 @@ function noteCard(note, entry = null, range = null) {
   });
   const remove = el("button", { type: "button", className: "btn btn-xs btn-ghost danger", textContent: "Delete" });
   remove.addEventListener("click", () => {
+    deleted = { note, at: review.notes.findIndex((n) => n.id === note.id) };
     review.notes = review.notes.filter((n) => n.id !== note.id);
     saveReview();
     decorate();
@@ -204,6 +208,9 @@ function decorate() {
     gone.push(...notes.filter((n) => n.path === path));
   }
   const count = review.notes.length;
+  const inBox = review.composed === null ? 0 : review.notes.filter((n) => review.composed.ids.includes(n.id)).length;
+  const undo = el("button", { type: "button", className: "btn btn-xs", textContent: "Undo" });
+  undo.addEventListener("click", undoDelete);
   const add = el("button", { type: "button", className: "btn btn-xs btn-primary", textContent: "Add to message" });
   add.addEventListener("click", composeReview);
   const discard = el("button", { type: "button", className: "btn btn-xs btn-ghost danger", textContent: "Discard" });
@@ -212,11 +219,16 @@ function decorate() {
     review = emptyReview();
     saveReview();
     selection = null;
+    deleted = null;
     decorate();
   });
   reviewBox.replaceChildren(...present([
     count > 0 && el("div", { className: "review-bar" },
-      el("span", { textContent: `Review: ${count} ${count === 1 ? "note" : "notes"}${review.composed !== null ? ", in the message box" : ""}` }), add, discard),
+      el("span", { textContent: `Review: ${count} ${count === 1 ? "note" : "notes"}${inBox === 0 ? "" : inBox === count ? ", in the message box" : `, ${inBox} in the message box`}` }), add, discard),
+    deleted !== null && el("div", { className: "review-undo" },
+      el("span", { className: "dim small", textContent: `Deleted the ${kinds[deleted.note.kind].label.toLowerCase()} on ${deleted.note.path} ${linesLabel(deleted.note.lines)}.` }), undo),
+    annotated !== null && annotated.path === path && el("p", { className: "dim small note-hint", id: "note-hint",
+      textContent: "Select lines by their numbers, or focus the diff and press Up or Down, with Shift to extend. C, Q, S or R starts a note on them, and Esc clears them. [ and ] open the previous and next changed file." }),
     gone.length > 0 && el("div", { className: "notes-outdated" },
       el("p", { className: "dim small", textContent: "The diff no longer shows these lines as quoted. The notes stay in the review with their quotes." }),
       ...gone.map((note) => noteCard(note))),
@@ -235,6 +247,28 @@ function decorate() {
     text.focus({ preventScroll: true });
     text.setSelectionRange(...typing);
   }
+}
+
+/** Puts the note deleted last back in its place. A note of the same ID saved since stays as it is. */
+function undoDelete() {
+  if (deleted === null) return;
+  const { note, at } = deleted;
+  deleted = null;
+  if (!review.notes.some((n) => n.id === note.id)) review.notes = review.notes.toSpliced(Math.min(at, review.notes.length), 0, note);
+  saveReview();
+  decorate();
+}
+
+/**
+ * Takes the composer's text as what holds the review, as on a page load, when the review kept says it was put in the
+ * composer but the draft the composer restored may hold only some of it, or none.
+ */
+export function composerHolds(text) {
+  const after = heldBy(review, text);
+  if (after === review) return;
+  review = after;
+  saveReview();
+  decorate();
 }
 
 /** Puts the review in the composer, in place of the review put there before if the composer still holds it. */
@@ -259,6 +293,7 @@ export function reviewSent(sent, text) {
   const after = afterSend(review, sent, text);
   if (after === review) return;
   review = after;
+  deleted = null;
   saveReview();
   decorate();
 }
@@ -282,7 +317,8 @@ export function annotate(view, path, files) {
   annotated = { view, path, rows: files.map(rowsOf) };
   selection = null;
   view.node.tabIndex = 0;
-  view.node.setAttribute("aria-label", "Diff. Up and Down move between lines, Shift with them extends the selection, C, Q, S or R starts a comment, question, suggestion or requested change on it, and Escape clears it.");
+  view.node.setAttribute("aria-label", "Diff");
+  view.node.setAttribute("aria-describedby", "note-hint");
   view.node.addEventListener("pointerdown", (event) => {
     const row = rowAt(event);
     if (row === null || !row.number || event.button !== 0) return;
@@ -325,6 +361,7 @@ addEventListener("pointerup", () => { dragging = false; });
 addEventListener("storage", (event) => {
   if (event.key !== reviewKey) return;
   review = readReview(event.newValue);
+  deleted = null;
   decorate();
 });
 

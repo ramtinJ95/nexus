@@ -7,30 +7,55 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { bridgeRequestPath, maxEventMessageLength, maxSessionLength, nexusApi, sessionKinds } from "./nexus-contract.ts";
 
-const version = "0.3.0";
+const version = "0.4.0";
 const api = process.env.NEXUS_API || nexusApi;
 
+/** Each command family's lines of `nexus --help`, which `nexus <family> --help` prints alone. */
+const help = {
+  event: [
+    "  nexus event <kind> [--session ID] [--message TEXT]",
+    `                      <kind> is one of ${sessionKinds.join(", ")}`,
+  ],
+  info: ["  nexus info                                     this pylon's thread, project, node, hosts and previews"],
+  services: [
+    "  nexus services [list]                          list services and their preview URLs",
+    "  nexus services ensure                          start what .nexus/services.yaml declares, wait for health and preview URLs",
+    "  nexus services restart|stop [name]",
+  ],
+  service: [
+    "  nexus service logs <name> [--lines N]",
+    "  nexus service restart|stop <name>",
+    "  nexus service start <name> --command CMD [--port N] [--cwd DIR] [--health PATH|process]",
+    "                      [--env NAME=VALUE]... [--preview] [--title T] [--description D] [--timeout-ms N]",
+  ],
+  preview: [
+    "  nexus preview <port> [--title T] [--wait]      publish a port that is already listening, and print its URL",
+    "                                                 --wait keeps asking for up to 120 seconds until it has one",
+  ],
+  unpreview: ["  nexus unpreview <port>                         stop publishing a port that preview published"],
+  output: [
+    "  nexus output add file <path> [--title T]       declare a file as an output of this thread",
+    "  nexus output add diff [--title T]              snapshot the working tree as a diff output",
+    "  nexus output list",
+  ],
+};
+const families = Object.keys(help);
+const footer = "Every command takes --json, which prints the reply as JSON, and an error as one JSON line on stderr.\n";
 const usage = `nexus ${version}, the Nexus pylon CLI
 
-  nexus event <kind> [--session ID] [--message TEXT]
-  nexus info                                     this pylon's thread, project, node, hosts and previews
-  nexus services ensure|list                     start what .nexus/services.yaml declares, or list services
-  nexus services restart|stop [name]
-  nexus service logs <name> [--lines N]
-  nexus service restart|stop <name>
-  nexus service start <name> --command CMD [--port N] [--cwd DIR] [--health PATH|process]
-                      [--env NAME=VALUE]... [--preview] [--title T] [--description D] [--timeout-ms N]
-  nexus preview <port> [--title T]               publish a port that is already listening
-  nexus unpreview <port>                         stop publishing a port that preview published
-  nexus output add file <path> [--title T]       declare a file as an output of this thread
-  nexus output add diff [--title T]              snapshot the working tree as a diff output
-  nexus output list
+${Object.values(help).flat().join("\n")}
   nexus --version
 
-Every command takes --json, which prints the reply as JSON.
-`;
+${footer}`;
+const familyHelp = (family) => `${help[family].join("\n")}\n\n${footer}`;
+const unknown = `This is the pylon's nexus CLI, which talks to this pylon's node. The person's nexus CLI, which docs/cli.md describes, runs on their machine and is not here. This one offers ${families.join(", ")}`;
 
-class UsageError extends Error {}
+class UsageError extends Error {
+  constructor(message, family) {
+    super(message);
+    this.family = family;
+  }
+}
 
 function int(value, name) {
   const n = Number(value);
@@ -62,7 +87,7 @@ const commands = {
     request([kind], { session, message, at }) {
       const time = at === undefined ? Date.now() : Number(at);
       if (!Number.isSafeInteger(time) || time < 0) throw new UsageError("--at must be a nonnegative Unix millisecond timestamp");
-      if (!sessionKinds.includes(kind)) throw new UsageError("not a pylon event kind");
+      if (!sessionKinds.includes(kind)) throw new UsageError(`not a pylon event kind: ${kind}. The kinds are ${sessionKinds.join(", ")}`);
       if (session !== undefined && (session.length === 0 || session.length > maxSessionLength)) throw new UsageError(`session must be 1 to ${maxSessionLength} characters`);
       if (message !== undefined && message.length > maxEventMessageLength) throw new UsageError(`message exceeds ${maxEventMessageLength} characters`);
       return { op: "event", kind, at: time, ...(session === undefined ? {} : { session }), ...(message === undefined ? {} : { message }) };
@@ -79,6 +104,8 @@ const commands = {
       i.previews.length === 0 ? "Previews: none" : `Previews:\n${i.previews.map((p) => `  ${p.service}: ${p.url}`).join("\n")}`,
     ].join("\n"),
   },
+  services: { args: 0, request: () => ({ op: "services", action: "list" }), print: printServices },
+  service: { args: 0, request: () => ({ op: "services", action: "list" }), print: printServices },
   "services ensure": { args: 0, request: () => ({ op: "services", action: "ensure" }), print: printServices },
   "services list": { args: 0, request: () => ({ op: "services", action: "list" }), print: printServices },
   "services restart": { args: [0, 1], request: ([name]) => ({ op: "services", action: "restart", ...(name === undefined ? {} : { name }) }), print: printServices },
@@ -121,13 +148,11 @@ const commands = {
   },
   preview: {
     args: 1,
-    options: { title: { type: "string" } },
+    options: { title: { type: "string" }, wait: { type: "boolean" } },
+    /** With --wait, the request is sent again until a reply passes this. */
+    settled: (r) => r.url !== null,
     request: ([port], { title }) => ({ op: "preview", port: int(port, "the port"), ...(title === undefined ? {} : { title }) }),
-    print(r) {
-      if (r.url !== null) return r.url;
-      console.error(`nexus: ${pending(r.service)}`);
-      return `${r.service}\t${r.port}\t-`;
-    },
+    print: (r) => r.url,
   },
   unpreview: {
     args: 1,
@@ -158,27 +183,72 @@ function parse(argv) {
   const key = Object.keys(commands)
     .filter((k) => k.split(" ").every((word, i) => argv[i] === word))
     .sort((a, b) => b.length - a.length)[0];
-  if (key === undefined) throw new UsageError(argv.length === 0 ? "no command given" : `unknown command: ${argv.join(" ")}`);
+  if (key === undefined) {
+    if (argv.length === 0) throw new UsageError("no command given");
+    if (families.includes(argv[0])) throw new UsageError(`unknown command: ${argv.join(" ")}`, argv[0]);
+    throw new UsageError(`unknown command: ${argv.join(" ")}. ${unknown}`);
+  }
   const command = commands[key];
+  const family = key.split(" ")[0];
   let parsed;
   try {
     parsed = parseArgs({ args: argv.slice(key.split(" ").length), options: { ...command.options, json: { type: "boolean" } }, allowPositionals: true, strict: true });
   } catch (err) {
-    throw new UsageError(err.message);
+    throw new UsageError(err.message, family);
   }
   const [min, max] = Array.isArray(command.args) ? command.args : [command.args, command.args];
   const { positionals, values } = parsed;
-  if (positionals.length < min || positionals.length > max) throw new UsageError(`${key} takes ${min === max ? min : `${min} to ${max}`} argument${max === 1 ? "" : "s"}, got ${positionals.length}`);
-  return { command, request: command.request(positionals, values), json: values.json === true };
+  if (positionals.length < min || positionals.length > max) throw new UsageError(`${key} takes ${min === max ? min : `${min} to ${max}`} argument${max === 1 ? "" : "s"}, got ${positionals.length}`, family);
+  try {
+    return { command, request: command.request(positionals, values), wait: values.wait === true };
+  } catch (err) {
+    if (err instanceof UsageError) err.family = family;
+    throw err;
+  }
 }
 
+/** One reply of the probe, or the failure's message and HTTP status, null when there was no reply. */
+async function send(request, ms) {
+  let res;
+  try {
+    res = await fetch(`${api}${bridgeRequestPath}`, { method: "POST", signal: AbortSignal.timeout(request.op === "event" ? 1500 : ms), headers: { "content-type": "application/json" }, body: JSON.stringify(request) });
+  } catch (err) {
+    return { error: `cannot reach ${api}: ${err.cause?.message ?? err.message}`, status: null };
+  }
+  let body;
+  try {
+    body = await res.text();
+  } catch (err) {
+    return { error: `the probe's reply broke off: ${err.cause?.message ?? err.message}`, status: res.status };
+  }
+  if (res.status !== 200) return { error: body.trimEnd() || `HTTP ${res.status}`, status: res.status };
+  try {
+    return { reply: JSON.parse(body) };
+  } catch {
+    return { error: `the probe answered 200 with a body that is not JSON: ${body.slice(0, 200)}`, status: 200 };
+  }
+}
+
+/** How long `preview --wait` keeps asking. NEXUS_PREVIEW_WAIT_MS shortens it for tests. */
+const waitMs = Number(process.env.NEXUS_PREVIEW_WAIT_MS) || 120_000;
+
 async function main(argv) {
+  const end = argv.indexOf("--");
+  const flags = end === -1 ? argv : argv.slice(0, end);
+  const json = flags.includes("--json");
+  const fail = (error, status, code) => {
+    process.stderr.write(json ? `${JSON.stringify({ error, status })}\n` : `nexus: ${error}\n`);
+    return code;
+  };
   if (argv[0] === "--version" || argv[0] === "version") {
     console.log(`nexus ${version}`);
     return 0;
   }
-  if (argv[0] === "--help" || argv[0] === "help") {
-    process.stdout.write(usage);
+  const asked = argv[0] === "help" ? argv.slice(1) : flags.includes("--help") || flags.includes("-h") ? flags : null;
+  if (asked !== null) {
+    if (asked.length === 0 || asked[0].startsWith("-")) process.stdout.write(usage);
+    else if (families.includes(asked[0])) process.stdout.write(familyHelp(asked[0]));
+    else return fail(`unknown command: ${asked[0]}. ${unknown}. Run nexus --help for usage`, null, 64);
     return 0;
   }
   let call;
@@ -186,23 +256,35 @@ async function main(argv) {
     call = parse(argv);
   } catch (err) {
     if (!(err instanceof UsageError)) throw err;
-    process.stderr.write(argv.length === 0 ? usage : `nexus: ${err.message}. Run nexus --help for usage\n`);
+    if (argv.length === 0 && !json) {
+      process.stderr.write(usage);
+      return 64;
+    }
+    if (json || err.family === undefined) return fail(`${err.message}. Run nexus --help for usage`, null, 64);
+    process.stderr.write(`nexus: ${err.message}. Run nexus --help for usage\n\n${familyHelp(err.family)}`);
     return 64;
   }
-  let res;
-  try {
-    res = await fetch(`${api}${bridgeRequestPath}`, { method: "POST", signal: AbortSignal.timeout(call.request.op === "event" ? 1500 : 120_000), headers: { "content-type": "application/json" }, body: JSON.stringify(call.request) });
-  } catch (err) {
-    console.error(`nexus: cannot reach ${api}: ${err.cause?.message ?? err.message}`);
-    return 1;
+  const deadline = Date.now() + waitMs;
+  let answer = await send(call.request, waitMs);
+  let last = answer.reply;
+  while (call.wait && answer.reply !== undefined && !call.command.settled(answer.reply) && deadline - Date.now() > 1000) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    answer = await send(call.request, Math.max(1, deadline - Date.now()));
+    if (answer.reply !== undefined) last = answer.reply;
   }
-  const body = await res.text();
-  if (res.status !== 200) {
-    console.error(`nexus: ${body.trimEnd() || `HTTP ${res.status}`}`);
-    return 1;
+  // A retry cut off by the wait's own deadline ran out of time; it does not mean the probe is gone.
+  if (call.wait && answer.reply === undefined && last !== undefined && answer.status === null && Date.now() >= deadline) answer = { reply: last };
+  if (answer.reply === undefined) return fail(answer.error, answer.status, 1);
+  const { reply } = answer;
+  if (call.command.settled?.(reply) === false && (call.wait || !json)) {
+    const why = call.wait ? `no preview URL for ${reply.service} after ${waitMs / 1000} seconds` : pending(reply.service);
+    return fail(`${why}. Port ${reply.port} stays published, and \`nexus preview ${reply.port} --wait\` waits for its URL`, null, 1);
   }
-  const reply = JSON.parse(body);
-  console.log(call.json ? JSON.stringify(reply, null, 2) : call.command.print(reply));
+  if (json) {
+    console.log(JSON.stringify(reply, null, 2));
+    return 0;
+  }
+  console.log(call.command.print(reply));
   return 0;
 }
 

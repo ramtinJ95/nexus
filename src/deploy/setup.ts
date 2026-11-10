@@ -16,7 +16,7 @@ import { readdir } from "node:fs/promises";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { text } from "node:stream/consumers";
 import { promisify, isDeepStrictEqual, parseArgs } from "node:util";
-import { claudeNames, harnessSignedIn, locations, provision, scripted, stores, system, terminal, heldNames, type FollowUp } from "./credentials.ts";
+import { claudeNames, harnessSignedIn, locations, provision, rotatable, rotate, scripted, stores, system, terminal, heldNames, type FollowUp, type Rotatable } from "./credentials.ts";
 import { parseWorkerConfig, readControlPlane, type WorkerConfig } from "./control-plane.ts";
 import { parseSecretsFile } from "../node-base/secrets-env.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
@@ -625,6 +625,13 @@ async function main(args: readonly string[]): Promise<number> {
     return await install(flags, args.slice(1), machineSteps(flags, flags.packageManager));
   }
   if (command === "write") return await write(flags);
+  if (command === "rotate" && operands.length === 1) {
+    const kind = operands[0]!;
+    if (!(rotatable as readonly string[]).includes(kind)) throw new Error(`--rotate ${kind}: give ${rotatable.join(" or ")}`);
+    const answers = flags.nonInteractive || !process.stdin.isTTY ? scripted(process.env) : terminal();
+    await rotate(kind as Rotatable, await system.exists(configFiles.control) ? "control" : "node", system, answers, (line) => console.error(line));
+    return 0;
+  }
   if (command === "check") {
     for (const miss of tailnetMisses(await text(process.stdin))) console.log(miss);
     return 0;
@@ -635,7 +642,7 @@ async function main(args: readonly string[]): Promise<number> {
     if (refusal !== null) console.error(`install: ${refusal}`);
     return refusal === null ? 0 : 1;
   }
-  console.error("usage: node src/deploy/setup.ts install|write|signed-in|registry|check [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--upgrade] [--package-manager apt|dnf|other], and write also [--github-watch]");
+  console.error("usage: node src/deploy/setup.ts install|write|signed-in|registry|check|rotate claude|github [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--upgrade] [--package-manager apt|dnf|other], and write also [--github-watch]");
   return 1;
 }
 

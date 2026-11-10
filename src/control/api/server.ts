@@ -73,6 +73,7 @@ import type { Features } from "../features.ts";
 import type { Log } from "../log-once.ts";
 import { attachScript } from "../../guest-contract.ts";
 import { asset, entry } from "../dashboard/assets.ts";
+import { writeBody } from "./encoding.ts";
 
 export interface ApiOptions {
   https?: { port: number; certificate(): Promise<Certificate>; renewalMs?: number; retryMs?: number };
@@ -256,10 +257,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       if (foreign !== null) throw new Refusal("forbidden", `${path} streams to no page from ${foreign}`);
       return reply.stream(res);
     }
-    if (reply.file !== undefined) sendFile(res, reply.file, reply.type, reply.cache);
-    else if (reply.headers !== undefined) res.writeHead(reply.status, reply.headers).end(reply.body);
+    if (reply.file !== undefined) await sendFile(req, res, reply.file, reply.type, reply.cache);
+    else if (reply.headers !== undefined) await writeBody(req, res, reply.status, reply.headers, reply.body, reply.encode);
     else if (reply.body === undefined) res.writeHead(reply.status).end();
-    else send(res, reply.status, reply.body);
+    else await send(req, res, reply.status, reply.body);
   }
 
   /** The pane a terminal attached to the thread lands in: its Claude worker's, while the node reports it. */
@@ -364,7 +365,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       handle(req, res).catch((err: unknown) => {
         if (res.headersSent) return res.destroy(err as Error);
         const reply = errorReply(err);
-        send(res, reply.status, reply.body);
+        send(req, res, reply.status, reply.body).catch((failed: unknown) => res.destroy(failed as Error));
       });
     });
     server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -485,11 +486,11 @@ async function readJson(req: IncomingMessage, empty?: unknown): Promise<unknown>
 }
 
 /** The sandbox keeps a file that a browser opens anyway from running as a page of the API's origin. */
-function sendFile(res: ServerResponse, content: Buffer, type: string, cache = "no-store") {
-  res.writeHead(200, {
-    "content-type": type, "content-length": content.length, "cache-control": cache,
+function sendFile(req: IncomingMessage, res: ServerResponse, content: Buffer, type: string, cache = "no-store") {
+  return writeBody(req, res, 200, {
+    "content-type": type, "cache-control": cache,
     "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'; sandbox",
-  }).end(content);
+  }, content);
 }
 
 /** The path a request's URL names, decoded as `handle` matches it, or null for one that cannot be decoded. */
@@ -535,6 +536,6 @@ function refuseUpgrade(socket: Duplex, { status, body: error }: ErrorReply) {
   socket.end(`HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\ncontent-type: application/json\r\ncache-control: no-store\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
 }
 
-function send(res: ServerResponse, status: number, body: unknown) {
-  res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }).end(JSON.stringify(body));
+function send(req: IncomingMessage, res: ServerResponse, status: number, body: unknown) {
+  return writeBody(req, res, status, { "content-type": "application/json", "cache-control": "no-store" }, JSON.stringify(body));
 }
