@@ -13,6 +13,7 @@ export const reportSchema = z.strictObject({
   role: z.enum(["control", "probe"] satisfies Role[]), commit: commitSchema.nullable(), target: commitSchema.nullable(),
   state: z.enum(reportStates),
   reason: z.string().max(20_000).nullable(),
+  worker: z.union([z.literal("bootstrap"), commitSchema]).exactOptional(),
 }) satisfies z.ZodType<ReportBody>;
 
 const name = z.string().regex(releaseName);

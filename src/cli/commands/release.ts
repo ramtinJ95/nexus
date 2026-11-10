@@ -10,7 +10,7 @@ import { landOption, questionRoutes, reviewRoutes, type ReviewView } from "../..
 
 function releaseText(view: ReleaseView): string {
   return [`Desired: ${view.desired === null ? "none" : `${view.desired.commit} by ${view.desired.requestedBy} at ${new Date(view.desired.requestedAt).toISOString()}`}`,
-    ...view.nodes.map((r) => `${r.node} ${r.role}: ${r.commit ?? "unknown"} ${r.state}${r.reason === null ? "" : `: ${r.reason}`}`)].join("\n");
+    ...view.nodes.map((r) => `${r.node} ${r.role}: ${r.commit ?? "unknown"} ${r.state}${r.worker === undefined ? "" : ` (worker ${r.worker})`}${r.reason === null ? "" : `: ${r.reason}`}`)].join("\n");
 }
 
 const imageRow = (image: ImageEntry, role: string): string[] => [

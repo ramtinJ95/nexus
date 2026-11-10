@@ -47,6 +47,9 @@ test("deploy and release use the shared release view and wait for both roles", a
   for (const role of ["control", "probe"] as const) s.registry.releases.reportRelease({ node, role, commit: requested.desired.commit, target: requested.desired.commit, state: "healthy", reason: null, observedAt: Date.now() });
   assert.equal((await s.json(["deploy", "main", "--wait"])).nodes.every((r: { state: string }) => r.state === "healthy"), true);
   assert.equal((await s.json(["release"])).desired.commit, requested.desired.commit);
+  s.registry.releases.reportRelease({ node, role: "probe", commit: requested.desired.commit, target: requested.desired.commit, state: "healthy", reason: null, worker: "bootstrap", observedAt: Date.now() });
+  assert.match((await s.nexus(["release"])).stdout, new RegExp(`^${node} probe: ${requested.desired.commit} healthy \\(worker bootstrap\\)$`, "m"));
+  assert.equal((await s.json(["release"])).nodes.find((r: { role: string }) => r.role === "probe").worker, "bootstrap");
   s.registry.releases.reportRelease({ node, role: "control", commit: "b".repeat(40), target: requested.desired.commit, state: "rolled-back", reason: "failed to bind", observedAt: Date.now() });
   const failed = await s.nexus(["deploy", "main", "--wait", "--json"]);
   assert.equal(failed.code, 1);
