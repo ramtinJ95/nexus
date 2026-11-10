@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { json, jsonOrNull, type Db, type Holding, type Row } from "./db.ts";
 import type { ImageId, JobId, NodeName, ProjectId, TailnetNodeId, TemplateId } from "../ids.ts";
 import type { ImageManifest } from "../protocol/images.ts";
@@ -57,6 +58,21 @@ export function imageStore(db: Db) {
   return {
     /** Kept in the manifest column, so a control plane older than `release` still reads the row. */
     saveImage(manifest: ImageManifest, release: string | null) { sql("INSERT INTO images (id, manifest) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET manifest = excluded.manifest").run(manifest.id, JSON.stringify({ ...manifest, release })); },
+    /**
+     * Records an image that is new, as POST /v1/images does. An ID recorded already keeps its manifest and release, because
+     * nodes verify the bytes they fetch against its sha256. False when the ID is recorded with another manifest.
+     */
+    addImage(manifest: ImageManifest): boolean {
+      return transaction(() => {
+        const recorded = image(manifest.id);
+        if (recorded === undefined) {
+          sql("INSERT INTO images (id, manifest) VALUES (?, ?)").run(manifest.id, JSON.stringify({ ...manifest, release: null }));
+          return true;
+        }
+        const { release: _, ...was } = recorded;
+        return isDeepStrictEqual(was, JSON.parse(JSON.stringify(manifest)));
+      });
+    },
     image,
     images: () => (sql("SELECT manifest FROM images ORDER BY id").all() as Row[]).map(recordedImage),
     /** The image every new pylon boots. Only a recorded image can become current, and the one it replaces becomes the previous image. */

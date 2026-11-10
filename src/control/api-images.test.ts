@@ -30,6 +30,18 @@ test("an image is recorded only with every pin, gh included, each in its pinned 
   assert.deepEqual((await s.call("GET", "/v1/images")).body.images, [{ ...image, release: null, nodes: [] }], "an image recorded by hand comes from no known release");
 });
 
+test("POST /v1/images records a new image, answers an identical one the same way, and never replaces a recorded manifest", async (t) => {
+  const s = await testApi(t);
+  const recorded = { ...image, release: null, nodes: [] };
+  assert.deepEqual(await s.call("POST", "/v1/images", image), { status: 201, body: image });
+  assert.deepEqual(await s.call("POST", "/v1/images", { ...image }), { status: 201, body: image }, "the same manifest again is answered as it was the first time");
+  s.registry.images.setCurrentImage(image.id as ImageId);
+  const swapped = await s.call("POST", "/v1/images", { ...image, sha256: "f".repeat(64) });
+  assert.equal(swapped.status, 409);
+  assert.match(swapped.body.error, new RegExp(`image ${image.id} is recorded with another manifest`));
+  assert.deepEqual((await s.call("GET", "/v1/images")).body.images, [recorded], "the current image keeps the sha256 nodes verify it against");
+});
+
 test("an image is recorded exactly when a probe's Docker backend can name it", async (t) => {
   const s = await testApi(t);
   const probe = JSON.parse(await readFile(new URL("../../deploy/probe.example.json", import.meta.url), "utf8"));
