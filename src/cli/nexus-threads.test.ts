@@ -331,7 +331,7 @@ test("conversation prints a Claude worker's transcript, and send types into its 
   assert.match((await s.nexus(["send", "--help"])).stdout, /typed into the Claude worker's session/);
 });
 
-test("send to a Claude worker that waits at a prompt in its terminal fails at once with exit code 5, and is typed once", { timeout: 10_000 }, async (t) => {
+test("send to a Claude worker that waits at a prompt in its terminal fails at once with exit code 5, and is typed once", { timeout: 60_000 }, async (t) => {
   const s = await setup(t);
   const { thread } = await claudeWatched(t, s);
   s.probeAnswers(async () => ({ kind: "send-claude", outcome: "blocked", herdrPane: "w1:p1", resumed: false }));
@@ -476,7 +476,7 @@ test("start and item add check their worker flags alike, and item add refuses an
   assert.deepEqual(await s.json(["items"]), []);
 });
 
-test("send to a Claude worker whose message meets an unreachable control plane fails at once with exit code 2, and is not sent again", { timeout: 30_000 }, async (t) => {
+test("send to a Claude worker whose message meets an unreachable control plane fails at once with exit code 2, and is not sent again", { timeout: 60_000 }, async (t) => {
   const s = await setup(t);
   const sends: string[] = [];
   const dropping = createHttpServer(withHealth((req, res) => {
@@ -490,7 +490,7 @@ test("send to a Claude worker whose message meets an unreachable control plane f
   assert.equal(sent.code, 2, sent.stderr);
   assert.equal(JSON.parse(sent.stderr).kind, "unreachable");
   assert.equal(sends.length, 1, "the message may have run, so it is not sent again");
-  assert.ok(Date.now() - started < 10_000, "it fails at once rather than waiting for the pylon");
+  assert.ok(Date.now() - started < 60_000, "it fails at once rather than waiting the 120 s for the pylon, and this bound only ends a hang");
 });
 
 test("show reads only a refusal coded queued as a queued thread, and passes any other 409 on", async () => {

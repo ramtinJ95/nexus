@@ -69,6 +69,8 @@ export interface PylonVmBackendOptions {
   previewHost?: string;
   /** A retry's stop deadline and SIGTERM grace for a stuck controller, 30 s and 10 s unless a test sets them. */
   retryStop?: RetryStopDeadlines;
+  /** What ends a retry's read of a stuck guest's sessions, 3 s unless a test sets it. */
+  retrySessions?: () => AbortSignal;
 }
 
 /** Each controller's limit, so a stuck one cannot hold the update past the control plane's 10 s wait for the probe. */
@@ -161,7 +163,7 @@ export function pylonVmHostBridge(stateRoot: string): HostBridge {
 }
 
 export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend {
-  const { stateRoot } = options;
+  const { stateRoot, retrySessions = () => AbortSignal.timeout(3000) } = options;
   const longest = instanceFiles(directory(stateRoot, "instances", "p".repeat(maxPylonIdLength))).socket;
   if (Buffer.byteLength(longest) >= socketPathLimit) {
     throw new Error(`state root ${stateRoot} is too long: a pylon's control socket would be ${Buffer.byteLength(longest)} bytes, and a Unix socket path must stay under ${socketPathLimit}`);
@@ -504,7 +506,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         const sidecar = await readSidecar(pylonId);
         // While the guest still runs, so the checkpoint carries the record. A dead controller's disk keeps its last one,
         // and so does a guest whose sessions never came back, which Herdr would record as none.
-        const sessionSignal = retry ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : undefined;
+        const sessionSignal = retry ? AbortSignal.any([signal, retrySessions()]) : undefined;
         const sessionRun: Sandbox = sessionSignal === undefined ? sandbox : (action) => sandbox(action, sessionSignal);
         const sessions = instance.status.state === "running"
           ? await pauseSessions(pylonGuest(pylonId, instanceDir(pylonId), sessionRun, statuses, shells), controllerLog(instanceDir(pylonId)), sidecarMark(pylonId, sidecar)) : sidecar.sessions;

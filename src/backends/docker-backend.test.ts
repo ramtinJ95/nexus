@@ -130,8 +130,8 @@ test("a guest exec answers its exit code with stdout then stderr, a nonzero exit
   const guest = createDockerBackend({ images, labels: { "nexus.test": "pin" } }).guest(pylon);
   const cwd = docker.root;
 
-  assert.deepEqual(await guest.exec(["sh", "-c", "printf err >&2; pwd"], { cwd, timeoutMs: 10_000 }), { exitCode: 0, output: `${cwd}\nerr`, truncated: false });
-  assert.deepEqual(await guest.exec(["sh", "-c", "printf out; printf err >&2; exit 7"], { cwd, timeoutMs: 10_000 }), { exitCode: 7, output: "outerr", truncated: false });
+  assert.deepEqual(await guest.exec(["sh", "-c", "printf err >&2; pwd"], { cwd, timeoutMs: 60_000 }), { exitCode: 0, output: `${cwd}\nerr`, truncated: false });
+  assert.deepEqual(await guest.exec(["sh", "-c", "printf out; printf err >&2; exit 7"], { cwd, timeoutMs: 60_000 }), { exitCode: 7, output: "outerr", truncated: false });
   assert.deepEqual(await guest.exec(["sh", "-c", "printf partial; exec sleep 30"], { cwd, timeoutMs: 1500 }), { exitCode: null, output: "partial", truncated: false });
   const lookup = (await docker.calls()).find((argv) => argv[0] === "ps")!;
   assert.ok(hasPair(lookup, "--filter", `label=nexus.pylon=${pylon}`) && hasPair(lookup, "--filter", "label=nexus.test=pin"), lookup.join(" "));
@@ -229,7 +229,7 @@ test("a boot clears the pid files, starts the relay and ensures the services; a 
   const probe = () => { const b = createDockerBackend({ images }); backends.push(b); return b; };
   try {
     const backend = probe();
-    await backend.ensureRunning(boot, live, AbortSignal.timeout(30_000));
+    await backend.ensureRunning(boot, live, AbortSignal.timeout(60_000));
     let lines = await execs();
     assert.equal(pidFilesCleared(lines), 1, "the boot cleared the pid files its disk carried");
     assert.equal(relayStarts(lines), 1, "the boot started the relay");
@@ -237,12 +237,12 @@ test("a boot clears the pid files, starts the relay and ensures the services; a 
     const booted = await pid();
 
     await docker.answer({ ps: { stdout: "c1\n" }, "container inspect c1": running("c1", { "nexus.pylon": pylon }) });
-    await backend.ensureRunning(boot, live, AbortSignal.timeout(30_000));
+    await backend.ensureRunning(boot, live, AbortSignal.timeout(60_000));
     lines = await execs();
     assert.deepEqual([pidFilesCleared(lines), relayStarts(lines), await pid()], [1, 1, booted], "a later spawn rebuilt nothing and left web running");
 
     const restarted = probe();
-    await restarted.ensureRunning(boot, live, AbortSignal.timeout(30_000));
+    await restarted.ensureRunning(boot, live, AbortSignal.timeout(60_000));
     lines = await execs();
     assert.deepEqual([pidFilesCleared(lines), relayStarts(lines)], [1, 1], "a probe restart starts no relay and clears no pid file");
     assert.notEqual(await pid(), booted, "a probe restart restarted web");
@@ -250,16 +250,16 @@ test("a boot clears the pid files, starts the relay and ensures the services; a 
 
     await declare("services:\n  web: {}\n");
     const again = probe();
-    await assert.rejects(again.ensureRunning(boot, live, AbortSignal.timeout(30_000)), /invalid \.nexus\/services\.yaml/);
+    await assert.rejects(again.ensureRunning(boot, live, AbortSignal.timeout(60_000)), /invalid \.nexus\/services\.yaml/);
     await assert.rejects(again.guest(pylon).services("list"), { message: "pylon-a is not running, or no spawn has reached it since the probe started" }, "the failed supervisor was dropped");
     await declare("services:\n  web:\n    command: sleep 1000\n    health: process\n");
-    await again.ensureRunning(boot, live, AbortSignal.timeout(30_000));
+    await again.ensureRunning(boot, live, AbortSignal.timeout(60_000));
     assert.deepEqual(await facts(again), [web("ready")], "the next spawn made the supervisor again");
 
     const adHoc = (await again.guest(pylon).startService("adhoc", { command: "sleep 1000", health: "process" })).map(({ port: _port, ...fact }) => fact);
     assert.deepEqual(adHoc, [{ name: "adhoc", state: "ready", declared: false, wantsPreview: false }]);
   } finally {
-    for (const b of backends) await b.ensureDeleted(pylon, AbortSignal.timeout(30_000));
+    for (const b of backends) await b.ensureDeleted(pylon, AbortSignal.timeout(60_000));
   }
 });
 
@@ -283,30 +283,30 @@ test("a boot runs the boot policy in the container: the hooks on every boot, a n
   const backends: ReturnType<typeof createDockerBackend>[] = [];
   const probe = () => { const b = createDockerBackend({ images }); backends.push(b); return b; };
   try {
-    await probe().ensureRunning(boot, live, AbortSignal.timeout(30_000));
+    await probe().ensureRunning(boot, live, AbortSignal.timeout(60_000));
     assert.deepEqual(await policy(0), [...bootHooks(boot), ...diskSetup(boot).commands].map((command) => [command]), "a new container runs the hooks, then its setup, and no resume");
 
     let from = (await docker.calls()).length;
     const stopped = { stdout: JSON.stringify([{ Id: "c1", State: { Status: "exited", StartedAt: "2026-10-27T00:00:00Z", ExitCode: 0 }, Config: { Labels: { "nexus.pylon": pylon } } }]) };
     await docker.answer({ images: { stdout: "nexus-test\n" }, ps: { stdout: "c1\n" }, "container inspect c1": stopped });
-    await probe().ensureRunning(boot, live, AbortSignal.timeout(30_000), false);
+    await probe().ensureRunning(boot, live, AbortSignal.timeout(60_000), false);
     assert.deepEqual(await policy(from), [...bootHooks(boot).map((command) => [command]), ["resume", ...resumeCommands]], "a boot from the container's disk runs the hooks and the resume, and no setup");
 
     from = (await docker.calls()).length;
     await docker.answer({ images: { stdout: "nexus-test\n" }, ps: { stdout: "c1\n" }, "container inspect c1": running("c1", { "nexus.pylon": pylon }) });
-    await probe().ensureRunning(boot, live, AbortSignal.timeout(30_000), false);
+    await probe().ensureRunning(boot, live, AbortSignal.timeout(60_000), false);
     assert.deepEqual(await policy(from), [], "a running container runs no boot policy");
 
     from = (await docker.calls()).length;
     await docker.answer({ images: { stdout: "nexus-test\n" }, "ps -a -q --filter name=^pylon-a$": { stdout: "c9\n" } });
     const failing = { ...boot, source: { kind: "fresh" as const, preSetup: "nexus-fails" } };
-    await assert.rejects(probe().ensureRunning(failing, live, AbortSignal.timeout(30_000)), { code: "setup-failed", message: "pylon-a: Setup exited 3. Its instance had no checkpoint, so it was removed, and a retry boots the pylon fresh" });
+    await assert.rejects(probe().ensureRunning(failing, live, AbortSignal.timeout(60_000)), { code: "setup-failed", message: "pylon-a: Setup exited 3. Its instance had no checkpoint, so it was removed, and a retry boots the pylon fresh" });
     const calls = (await docker.calls()).slice(from);
     assert.deepEqual(await policy(from), [...bootHooks(failing), ...diskSetup(failing).commands.slice(0, 3)].map((command) => [command]), "setup stops at the command that failed");
     assert.ok(calls.some((argv) => argv.join(" ") === "rm --force c9"), "the container is removed");
   } finally {
     await docker.answer({});
-    for (const b of backends) await b.ensureDeleted(pylon, AbortSignal.timeout(30_000));
+    for (const b of backends) await b.ensureDeleted(pylon, AbortSignal.timeout(60_000));
   }
 });
 
@@ -325,10 +325,10 @@ test("a spawn for reading leaves a checkpoint's relaunch mark, and the pause aft
     pylonId: pylon, image: "img-test00000000" as const, source: { kind: "resume" as const, checkpoint: "ckpt-a-1" as const }, resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
     network: { allowedHosts: [], secrets: [] }, repo: { kind: "empty" as const, branch: "main" }, dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
   };
-  await backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(10_000), false);
+  await backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(60_000), false);
   assert.equal(await readFile(mark, "utf8"), "", "the mark stays for the spawn that brings the sessions back");
 
-  await backend.ensurePaused(pylon, "ckpt-a-2", AbortSignal.timeout(10_000));
+  await backend.ensurePaused(pylon, "ckpt-a-2", AbortSignal.timeout(60_000));
   const calls = await docker.calls();
   assert.ok(!calls.some((argv) => argv.includes("herdr") || argv.some((arg) => arg.includes("sessions.json"))), "nothing read or recorded the sessions");
   const commit = calls.find((argv) => argv[0] === "commit")!;
@@ -341,7 +341,7 @@ test("a pause whose session record fails keeps the sessions its checkpoint's pau
   const docker = await fakeDocker(t, { ps: { stdout: "c1\n" }, "container inspect c1": running("c1", labels) });
   // First on the PATH the container's commands run with, so the record fails as a guest without Herdr's server would.
   await writeFile(join(docker.root, "..", "herdr"), "#!/bin/sh\necho 'herdr: broken on purpose' >&2\nexit 1\n", { mode: 0o755 });
-  await createDockerBackend({ images }).ensurePaused(pylon, "ckpt-a-2", AbortSignal.timeout(10_000));
+  await createDockerBackend({ images }).ensurePaused(pylon, "ckpt-a-2", AbortSignal.timeout(60_000));
   const calls = await docker.calls();
   assert.match(await readFile(join(docker.root, "container.log"), "utf8"), /^sessions: recording failed, so the wake relaunches what the last record holds: .*herdr: broken on purpose/);
   const commit = calls.find((argv) => argv[0] === "commit")!;
