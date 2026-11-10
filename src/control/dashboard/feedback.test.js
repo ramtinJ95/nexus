@@ -220,4 +220,25 @@ test("a refused stream says why the page polls instead, until a stream opens", a
   assert.match(text, /^Live updates are off/);
   follow(undefined);
   assert.equal(text, "", "a page that no longer streams says nothing of a refused stream");
+
+  follow("/threads/th-x/stream");
+  const last = FakeEventSource.opened.at(-1);
+  const pending = Promise.withResolvers();
+  const reading = Promise.withResolvers();
+  fetchImpl = async () => {
+    reading.resolve();
+    return pending.promise;
+  };
+  last.readyState = FakeEventSource.CLOSED;
+  last.fire("error");
+  await until("the page asks why", reading.promise);
+  follow(undefined);
+  const told = Promise.withResolvers();
+  pending.resolve({ ok: false, status: 503, text: async () => {
+    told.resolve();
+    return JSON.stringify({ error: "16 streams are open, the most this control plane serves at once", code: null, retryable: false });
+  } });
+  await until("the reason is read", told.promise);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(text, "", "a reason read after the page stopped streaming is not said");
 });

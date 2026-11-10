@@ -134,7 +134,9 @@ let shows = null;
 const streaming = () => stream?.readyState === EventSource.OPEN;
 export function follow(url) {
   // A hidden page keeps none of the control plane's few streams, even when a refresh it began finishes later.
-  if (url === undefined && refusedStream !== null) {
+  // A page that no longer streams forgets a refused stream, and a reason still being read for it.
+  if (url === undefined && stream?.readyState === EventSource.CLOSED) {
+    stream = null;
     refusedStream = null;
     sayUpdated();
   }
