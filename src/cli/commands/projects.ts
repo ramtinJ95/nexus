@@ -85,7 +85,7 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
     args: [0, 0],
     async run(api) {
       const projects = await request(api, projectRoutes.list, {});
-      return { json: projects, text: projects.length === 0 ? "No projects." : table(projects.map((p) => [p.id, `node ${p.defaultNode}`, `branch ${p.defaultBranch}`, autoReviewText(p), pipelineText(p), p.repoUrl ?? "scratch"])) };
+      return { json: projects, text: projects.length === 0 ? "No projects." : table(["Project", "Node", "Branch", "Review", "Pipeline", "Repository"], projects.map((p) => [p.id, p.defaultNode, p.defaultBranch, autoReviewText(p), pipelineText(p), p.repoUrl ?? "scratch"])) };
     },
   },
   "project show": {

@@ -6,9 +6,10 @@ import { projectOf } from "../refs.ts";
 import { attachTerminal, processTty } from "../attach.ts";
 import { CliError, UsageError } from "../transport.ts";
 import { startRules } from "../../contract/threads-parse.ts";
-import { type Values, type Api, type Command, type Io, str, request, int, briefOptions, briefOf, table, waitMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
+import { type Values, type Api, type Command, type Io, str, request, int, briefOptions, briefOf, textFrom, colourOf, waitMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
 import { thenWatch, watchOf, watchOptions } from "./watch.ts";
-import { detailText, portsText, listingText, changesText, queuedRow, queuedText, threadRow } from "../thread-text.ts";
+import { detailText, portsText, listingText, changesText, queuedTable, queuedText, threadsText } from "../thread-text.ts";
+import { needsPerson } from "../../contract/attention.ts";
 
 function portArg(given: string): number {
   const port = Number(given);
@@ -71,23 +72,30 @@ const statusChange = (route: typeof routes.archive | typeof routes.unarchive | t
 export const threadsCommands: Readonly<Record<string, Command>> = {
   threads: {
     help: [
-      "  nexus threads [--project P] [--all] [--open] [--queued]",
+      "  nexus threads [--project P] [--all] [--open] [--active] [--needs-me] [--limit N] [--queued]",
       "    threads, then queued ones; deleted ones and cancelled queued ones only with --all, no archived ones with --open, and --queued lists only queued ones",
+      "    --active lists only active threads and --needs-me only those whose attention waits on you, with no queued ones; --limit N the first N",
     ],
     args: [0, 0],
-    options: { project: { type: "string" }, all: { type: "boolean" }, open: { type: "boolean" }, queued: { type: "boolean" } },
-    async run(api, _, v) {
+    options: { project: { type: "string" }, all: { type: "boolean" }, open: { type: "boolean" }, queued: { type: "boolean" }, active: { type: "boolean" }, "needs-me": { type: "boolean" }, limit: { type: "string" } },
+    async run(api, _, v, _follow, { io }) {
       const project = str(v, "project");
-      const queuing = request(api, routes.queued, { query: { project, ...v.all === true ? {} : { status: "queued" } } });
+      const limit = int(str(v, "limit"), "--limit", Infinity);
+      if (limit === 0) throw new UsageError("--limit takes 1 or more");
+      const onlyThreads = v.active === true || v["needs-me"] === true;
+      if (v.queued === true && onlyThreads) throw new UsageError("--queued lists threads that have not started, so it cannot go with --active or --needs-me");
+      const colour = colourOf(io);
+      const queuing = onlyThreads ? Promise.resolve([]) : request(api, routes.queued, { query: { project, ...v.all === true ? {} : { status: "queued" } } });
       if (v.queued === true) {
-        const queued = await queuing;
-        return { json: queued, text: queued.length === 0 ? "No queued threads." : table(queued.map(queuedRow)) };
+        const queued = (await queuing).slice(0, limit);
+        return { json: queued, text: queued.length === 0 ? "No queued threads." : queuedTable(queued, colour) };
       }
       const listing = request(api, routes.list, { query: { project, ...v.open === true ? { deleted: false, status: "open" } : v.all === true ? {} : { deleted: false } } });
       // A control plane older than 0.77.0 ignores status=open and answers every thread but the deleted ones.
-      const [queued, shown] = await Promise.all([queuing, v.open === true ? listing.then((rows) => rows.filter((r) => r.status === "active" || r.status === "idle")) : listing]);
-      const rows = [...shown.map(threadRow), ...queued.map(queuedRow)];
-      return { json: shown, text: rows.length === 0 ? "No threads." : table(rows) };
+      const [queued, listed] = await Promise.all([queuing, listing]);
+      const shown = listed.filter((r) => (v.open !== true || r.status === "active" || r.status === "idle") && (v.active !== true || r.status === "active") && (v["needs-me"] !== true || needsPerson(r.attention)));
+      const threads = shown.slice(0, limit);
+      return { json: threads, text: threadsText(threads, queued.slice(0, limit - threads.length), colour) };
     },
   },
   show: {
@@ -203,6 +211,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     help: [
       "  nexus start [--project P] [--title T] [--message M | --claude PROMPT [--model ID]] [--node N|auto] [--branch B] [--commit C]",
       "              [--cpus n] [--memory GiB] [--disk GiB] [--after THREAD[,THREAD...]] [--request-id ID] [--plan] [--watch [--interval MS]]",
+      "    --message-file PATH|- and --claude-file PATH|- read the message or prompt from a file or stdin",
       "    --after queues it to start once each of those threads' pull requests has merged",
       "    --plan makes it a planning thread, whose proposed items become questions you accept or reject",
       "    --request-id makes a repeat of the start answer the thread the first made",
@@ -212,10 +221,10 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     options: { ...briefOptions, ...watchOptions, "request-id": { type: "string" }, plan: { type: "boolean" } },
     async run(api, _, v, follow, { io }) {
       const interval = watchOf(v);
-      if (v.watch === true && v.message === undefined && v.claude === undefined) throw new UsageError("--watch waits for the reply to the first message, so it needs --message or --claude");
+      if (v.watch === true && ["message", "message-file", "claude", "claude-file"].every((flag) => v[flag] === undefined)) throw new UsageError("--watch waits for the reply to the first message, so it needs --message, --claude or their -file flags");
       if (v.watch === true && v.after !== undefined) throw new UsageError("--watch cannot go with --after, since a queued thread has no run yet");
       // One request: the control plane sends the first message once the thread starts, as the person's.
-      const body = briefOf(v, await projectOf(api, v, "start"), startRules);
+      const body = await briefOf(v, await projectOf(api, v, "start"), startRules, io.stdin);
       if (body.after !== undefined) {
         const q = await request(api, routes.start, { body });
         // A repeat of the request ID after the queued thread started answers the thread.
@@ -223,7 +232,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
         return { json: q, text: `Queued ${q.id} on ${q.project}: ${q.title}. It starts once ${listed(q.after)} ${q.after.length === 1 ? "has merged its pull request" : "have merged their pull requests"}.` };
       }
       const t = await request(api, routes.start, { body });
-      const started = `Started ${v.plan === true ? "planning thread " : ""}${t.id} on ${t.project}: ${t.title}${v.message === undefined ? "" : "\nSent the first message."}`;
+      const started = `Started ${v.plan === true ? "planning thread " : ""}${t.id} on ${t.project}: ${t.title}${body.message == null ? "" : "\nSent the first message."}`;
       return await thenWatch(api, follow, io, v, interval, t.id, {
         json: t, text: v.watch === true ? started : `${started}\n\`nexus watch ${t.id}\` follows it.`,
       }, { since: { lastReplyAt: null, questions: [] }, from: null });
@@ -240,28 +249,34 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
   },
   send: {
     help: [
-      "  nexus send <thread> <text...> [--steer] [--request-id ID] [--watch [--interval MS]]",
+      "  nexus send <thread> (<text...> | - | --file PATH) [--steer] [--request-id ID] [--watch [--interval MS]]",
       "    a message to the agent, or typed into the Claude worker's session, which waits for a paused pylon to wake",
+      "    - reads it from stdin and --file from a file. Text after -- is never read as flags, such as nexus send <thread> -- -x",
       "    --watch then follows the run until it replies, as watch --until-idle does",
     ],
     thread: true,
-    args: [2, Infinity],
-    options: { ...watchOptions, steer: { type: "boolean" }, "request-id": { type: "string" } },
+    args: [1, Infinity],
+    options: { ...watchOptions, steer: { type: "boolean" }, "request-id": { type: "string" }, file: { type: "string" } },
+    dashHint: "To send text that starts with a dash, put -- before it, or pass it on stdin with - or from a file with --file PATH",
     async run(api, [id, ...words], v, follow, { io }) {
       const interval = watchOf(v);
+      const file = str(v, "file");
+      if (file !== undefined && words.length > 0) throw new UsageError("send takes its text as words, -, or --file, not both words and --file");
+      if (file === undefined && words.length === 0) throw new UsageError("send needs the message: words, - to read stdin, or --file PATH");
+      const text = file !== undefined ? await textFrom(file, "--file", io.stdin) : words.length === 1 && words[0] === "-" ? await textFrom("-", "send -", io.stdin) : words.join(" ");
       const steer = v.steer === true;
       // The API treats a resend with the same request ID as the same message, so a caller that retries passes one.
       const requestId = str(v, "request-id") ?? `msg:${randomUUID()}`;
       // A Claude worker's message is typed in its pylon, so its send waits for a paused pylon to wake.
       const before = await request(api, routes.show, { thread: id! });
       const claude = before.claudeWorker !== undefined;
-      const body = { text: words.join(" "), requestId, mode: steer ? "steer" as const : "followUp" as const };
+      const body = { text, requestId, mode: steer ? "steer" as const : "followUp" as const };
       const message = () => request(api, routes.message, { thread: id!, body });
       const reply = claude ? await whenRunning(api, io, id!, message, "the message was not sent") : await message();
       const resumed = "claude" in reply && reply.claude.resumed ? " Its session was resumed to take it." : "";
-      const text = "claude" in reply ? reply.claude.outcome === "queued" ? `Queued for Claude in ${id}, which takes it at its next step.${resumed}` : `Sent to Claude in ${id}.${resumed}`
+      const said = "claude" in reply ? reply.claude.outcome === "queued" ? `Queued for Claude in ${id}, which takes it at its next step.${resumed}` : `Sent to Claude in ${id}.${resumed}`
         : steer ? `Sent to ${id}, to join the current run after its tool round.` : `Sent to ${id}.`;
-      return await thenWatch(api, follow, io, v, interval, id!, { json: reply, text }, { since: before, from: body.text });
+      return await thenWatch(api, follow, io, v, interval, id!, { json: reply, text: said }, { since: before, from: body.text });
     },
   },
   seen: {
@@ -282,7 +297,22 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
   abort: action("Aborted the run of", (api, thread) => request(api, routes.abort, { thread })),
   retry: action("Retried the parked tasks of", (api, thread) => request(api, routes.retry, { thread })),
   "retry-pylon": action("Retried the pylon of", (api, thread) => request(api, routes.retryPylon, { thread })),
-  wake: action("Recorded activity on", (api, thread) => request(api, routes.activity, { thread, body: { kind: "human" } })),
+  wake: {
+    help: actionHelp,
+    args: [1, 1],
+    thread: true,
+    async run(api, [id], v) {
+      await request(api, routes.activity, { thread: id!, body: { kind: "human" } });
+      if (v.json === true) return { json: null, text: "" };
+      const { thread: t, pylon, desired } = await request(api, routes.show, { thread: id! });
+      const text = desired !== "running"
+        ? `Recorded your activity on ${id}, but it is ${t.status}, so its pylon stays ${desired}.${t.status === "archived" ? ` \`nexus unarchive ${id}\` wakes it.` : ""}`
+        : pylon.actualState === "failed" || pylon.failed !== null ? `Recorded your activity on ${id}, but its pylon failed, and activity does not retry it. \`nexus retry-pylon ${id}\` does.`
+        : pylon.actualState === "running" ? `Recorded your activity on ${id}, which keeps its running pylon awake.`
+        : `Recorded your activity on ${id}, so Nexus wakes its pylon, which is ${pylon.actualState}.`;
+      return { json: null, text };
+    },
+  },
   archive: statusChange(routes.archive, "Archived", "Its queued start is cancelled."),
   unarchive: statusChange(routes.unarchive, "Unarchived", "It is queued again."),
   delete: statusChange(routes.delete, "Deleted", "It will never start."),

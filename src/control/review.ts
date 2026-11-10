@@ -39,9 +39,9 @@ import { newThreadId, type NodeName, type ProjectId, type TailnetNodeId, type Th
 import { holdOptions, landOption } from "../contract/reviews.ts";
 import { askingHolds, isOpen, type HeldQuestion, type HoldsQuestion, type Unanswered } from "./questions.ts";
 import {
-  answered, approves, blocks, cancellable, cannotLand, changedPaths, changeOf, checkOutput, checkThread, descriptionDigest, ended, type EndedKind, findingsOf, gateFailure, gateRun, heldForGate, humanLabel,
-  inLanding, landable, landingVerb, liveOutput, maxRounds, personPhase, pushedHead, reviewerApproved, reviewersFindings, roundsSpent, secondReads, seatsFor, settled, seatsOf, verdictAt, verdictsFor,
-  type GateRun, type HoldCause, type Refused, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type Seat, type SecondReviewer, type Talk, type Waiver,
+  answered, approves, behindOf, blocks, cancellable, cannotLand, changedPaths, changeOf, checkOutput, checkThread, descriptionDigest, ended, type EndedKind, findingsOf, gateAhead, gateFailure, gateRun, heldForGate, humanLabel,
+  inLanding, landable, landingVerb, liveOutput, maxRounds, personPhase, pushedHead, reviewerApproved, reviewersFindings, roundsSpent, sameBehind, secondReads, seatsFor, settled, seatsOf, verdictAt, verdictsFor,
+  type Behind, type GateRun, type HoldCause, type Refused, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type Seat, type SecondReviewer, type Talk, type Waiver,
 } from "./review-model.ts";
 import { landsOnItsOwn, type Project } from "./project.ts";
 import { landing } from "./landing.ts";
@@ -184,6 +184,16 @@ export function reviewLoop(deps: ReviewDeps) {
   const wake = (id: ThreadId) => closed ? Promise.resolve() : passes.wake(id);
   const { checks, live } = deps.runs((id) => void wake(id));
   const poll = passes.poll;
+
+  /**
+   * What holds a start of `r`'s new reviewer, second reviewer or gate pylon: another review's gate pylon that waits for
+   * room and began before any wait of `r`'s own, so the room that frees goes to the oldest wait. Read before each start,
+   * since a step earlier in the pass may have saved a wait or ended one.
+   */
+  const heldBehind = (r: Review): Behind | null => {
+    const ahead = gateAhead(registry.reviews.reviewsToStep(), r);
+    return ahead === null ? null : behindOf(ahead);
+  };
 
   /** Each PR as GitHub said it in this pass, which a step reads rather than GitHub again. A landing reads it afresh. */
   let reads = new Map<string, Promise<PrSnapshot>>();
@@ -378,7 +388,8 @@ export function reviewLoop(deps: ReviewDeps) {
    * discard. The check beside the reviewer never overcommits a node. One no node has room for starts once room frees,
    * and one no node could take for another reason waits for the verdict. A live check refused waits for a node that
    * nests KVM with room. Only those two wait, so a refused check fails the step, which the next pass tries again. A
-   * wait for room alone has no deadline, so the gate's deadline counts from the start that ends it.
+   * wait for room alone has no deadline, so the gate's deadline counts from the start that ends it. Nor has a start
+   * another review's wait holds (`heldBehind`), whose deadline counts from when the hold ends.
    */
   const stepGate = async <Run extends GateRun & Refused>(r: Review, kind: "beside" | "check" | "live", run: Run, builder: Thread): Promise<
     { kind: "ended"; review: Review } | { kind: "run"; run: Run | GateRun } | { kind: "unrunnable"; thread: ThreadId; output: string } | { kind: "done"; thread: ThreadId; passed: boolean; output: string }
@@ -386,14 +397,33 @@ export function reviewLoop(deps: ReviewDeps) {
     const runs = kind === "live" ? live : checks;
     const { head } = r.rounds.at(-1)!;
     if (run.thread === null) {
+      // A held run keeps its `startedAt`, and with it its place in the line `gateAhead` reads, until the start it waits
+      // for, which a refusal for room alone leaves in line.
+      const behind = heldBehind(r);
+      if (behind !== null) return { kind: "run", run: sameBehind(run.behind, behind) ? run : { ...run, behind } };
       const gone = await endedOnGitHub(r);
       if (gone !== null) return { kind: "ended", review: gone };
-      const started = await runs.start(builder, r.pr.branch, head, kind === "beside" || undefined);
-      const startedAt = run.room === true && !("room" in started && started.room) ? now() : run.startedAt;
+      // A run in line, held or waiting for room, has no deadline until a start ends that.
+      const held = run.behind !== undefined || run.room === true;
+      let started: Awaited<ReturnType<CheckRuns["start"]>>;
+      try {
+        started = await runs.start(builder, r.pr.branch, head, kind === "beside" || undefined);
+      } catch (err) {
+        // A held run's failed start takes it out of line, or it would hold every other start with no deadline of its
+        // own. A wait for room keeps its place, held or not, as its next start may still be refused for room alone.
+        if (run.behind === undefined || run.room === true) throw err;
+        log(`review ${r.id} of ${r.builder}: a ${kind === "live" ? "live check" : "check"} that waited in line did not start and will be tried again (${(err as Error).name})`);
+        return { kind: "run", run: { startedAt: now(), thread: null } };
+      }
+      const startedAt = held && !("room" in started && started.room) ? now() : run.startedAt;
       if ("thread" in started) return { kind: "run", run: { startedAt, thread: started.thread } };
-      if (kind === "check") throw new Error(started.refused);
-      if (run.refused === started.refused && (run.room === true) === started.room) return { kind: "run", run };
-      const { room: _, ...kept } = run;
+      // Saved rather than thrown once, so the check's deadline counts from when it left the line.
+      if (kind === "check") {
+        if (held) return { kind: "run", run: { startedAt, thread: null } };
+        throw new Error(started.refused);
+      }
+      if (run.behind === undefined && run.refused === started.refused && (run.room === true) === started.room) return { kind: "run", run };
+      const { room: _, behind: __, ...kept } = run;
       return { kind: "run", run: { ...kept, startedAt, refused: started.refused, ...started.room && { room: true as const } } };
     }
     const state = runs.step(run.thread, head);
@@ -591,7 +621,10 @@ export function reviewLoop(deps: ReviewDeps) {
       const n = roundsSpent(next);
       if (reviewerApproved(round)) {
         if (phase.check?.unrunnable !== undefined) return await checkUnrunnable(next, phase.check.unrunnable);
-        const after: Phase = phase.check === undefined || phase.check.refused !== undefined ? checking() : { kind: "checking", startedAt: phase.check.startedAt, thread: phase.check.thread };
+        // A held check, or one that waited for room, keeps its place in line.
+        const { check } = phase;
+        const after: Phase = check === undefined || (check.refused !== undefined && check.room === undefined) ? checking()
+          : { kind: "checking", startedAt: check.startedAt, thread: check.thread, ...check.behind && { behind: check.behind }, ...check.room && { room: true, refused: check.refused! } };
         return reviewersFindings(round).length ? send({ ...next, phase: after }, "builder", () => builderNotes(next)) : { ...next, phase: after, nudges: 0 };
       }
       const asks = seatsOf(round).filter((seat) => verdictAt(round, seat)!.verdict === "changes");
@@ -656,7 +689,7 @@ export function reviewLoop(deps: ReviewDeps) {
       const round = r.rounds.at(-1)!;
       // The check clones the head commit alone, so a result there, such as one from beside the reviewer, is kept, as the live check is.
       if (phase.thread === null && round.check !== null) return round.check.passed ? await checkPassed(r, round.live === undefined && await github.has(r.pr.repo, round.head, ".nexus/verify")) : gateFailed(r, r);
-      if (now() - phase.startedAt > checkMs) return toPerson(r, "no-verdict", { code: "check-failed", text: `.nexus/check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.` });
+      if (phase.room === undefined && phase.behind === undefined && now() - phase.startedAt > checkMs) return toPerson(r, "no-verdict", { code: "check-failed", text: `.nexus/check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.` });
       const step = await stepGate(r, "check", phase, builder);
       if (step.kind === "ended") return step.review;
       if (step.kind === "run") return step.run === phase ? r : { ...r, phase: { kind: "checking", ...step.run } };
@@ -672,7 +705,7 @@ export function reviewLoop(deps: ReviewDeps) {
     async verifying(r, phase, builder) {
       const round = r.rounds.at(-1)!;
       const refused = phase.refused === undefined ? [] : [`No node could take its verify pylon: ${phase.refused}`];
-      if (phase.room === undefined && now() - phase.startedAt > checkMs) return toPerson(r, "no-verdict", { code: "live-failed", text: `The live check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.` }, ...refused);
+      if (phase.room === undefined && phase.behind === undefined && now() - phase.startedAt > checkMs) return toPerson(r, "no-verdict", { code: "live-failed", text: `The live check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.` }, ...refused);
       const step = await stepGate(r, "live", phase, builder);
       if (step.kind === "ended") return step.review;
       if (step.kind === "run") return step.run === phase ? r : { ...r, phase: { kind: "verifying", ...step.run } };
@@ -861,8 +894,18 @@ export function reviewLoop(deps: ReviewDeps) {
     if (second !== null && r.phase.kind === "reviewing" && secondThread?.status !== "active") {
       return toPerson(r, "thread", `The second reviewer thread ${second.thread} is ${secondThread?.status ?? "gone"}, so the review stopped.`);
     }
-    if (r.second?.kind === "starting" && r.phase.kind === "reviewing" && (r.second.tried === null || now() - r.second.tried >= secondRetryMs)) {
-      return await startSecond(r, (await read(r)).detail);
+    if (r.second?.kind === "starting" && r.phase.kind === "reviewing") {
+      // A held start leaves the rest of the step to run, and its deadline counts from when the hold ends.
+      const second = r.second;
+      const behind = heldBehind(r);
+      if (behind !== null) {
+        if (!sameBehind(second.behind, behind)) return { ...r, second: { ...second, behind } };
+      } else if (second.behind !== undefined) {
+        const { behind: _, ...freed } = second;
+        return { ...r, second: { ...freed, since: now(), tried: null } };
+      } else if (second.tried === null || now() - second.tried >= secondRetryMs) {
+        return await startSecond(r, (await read(r)).detail);
+      }
     }
     // The builder's or the first reviewer's message goes before the second reviewer's.
     const to = (["builder", "reviewer", "second"] as const).find((party) => talking(r, party) && conversation(r, party).talk.outbox != null);
@@ -1061,19 +1104,29 @@ export function reviewLoop(deps: ReviewDeps) {
   /**
    * The first reviewer's thread, under the ID its review was recorded with, unless a start that went through before a
    * crash made it. A refused start, such as of a branch the remote no longer has, holds the review for the person, and
-   * one that fails otherwise, as while the harness is down, is tried each pass until `secondStartMs` after the start.
+   * one that fails otherwise, as while the harness is down, is tried each pass until `secondStartMs` after its request,
+   * `since`. A review that started on its own waits while another review's gate pylon waits for room, and its request
+   * dates from when that ends. One the person started never waits.
    */
   async function startFirst(r: Review, builder: Thread): Promise<Review> {
     if (registry.threads.thread(r.reviewer) === undefined) {
+      const behind = r.auto ? heldBehind(r) : null;
+      if (behind !== null) return sameBehind(r.behind, behind) ? r : { ...r, behind };
+      // The second reviewer's 30 minutes, which start with the review, count from the end of the hold too.
+      if (r.behind !== undefined) {
+        const { behind: _, ...freed } = r;
+        return { ...freed, since: now(), ...freed.second?.kind === "starting" && { second: { ...freed.second, since: now() } } };
+      }
       try {
         await startReviewer(builder, `Review of #${r.pr.number}: ${r.pr.title}`, r.pr.branch, r.models.reviewer, r.reviewerKind === "claude", r.asked, r.reviewer);
       } catch (err) {
         if (err instanceof Refusal) return toPerson(r, "thread", `The reviewer thread ${r.reviewer} did not start: ${err.message}.`);
-        if (now() - r.startedAt < secondStartMs) throw err;
+        if (now() - r.since < secondStartMs) throw err;
         return toPerson(r, "thread", `The reviewer thread ${r.reviewer} did not start within ${secondStartMs / 60_000} minutes: ${(err as Error).message}.`);
       }
     }
-    return { ...r, reviewerStarted: true };
+    const { behind: _, ...started } = r;
+    return { ...started, reviewerStarted: true };
   }
   /** An independent second reviewer for `rule` on the default Claude model, to start, or why none can run. */
   const secondFor = (rule: string, models: Review["models"], secrets: Project["secrets"]): SecondReviewer => {

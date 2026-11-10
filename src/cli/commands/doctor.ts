@@ -4,8 +4,8 @@ import { doctorRoutes, type DoctorReport } from "../../contract/reports.ts";
 
 export function doctorText(report: DoctorReport): string {
   const rows = report.checks.map((c) => [`  ${c.status}`, c.name, c.text]);
-  const widths = table(rows).split("\n");
-  const lines: string[] = [];
+  const [head, ...widths] = table(["  Status", "Check", "Result"], rows).split("\n");
+  const lines: string[] = [head!];
   let group: string | undefined;
   report.checks.forEach((c, i) => {
     const name = c.node ?? "control plane";

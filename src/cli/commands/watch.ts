@@ -3,7 +3,7 @@ import type { Writable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { EntryRecord, LiveState } from "@earendil-works/pi-durable";
 import { CliError, UsageError } from "../transport.ts";
-import { type Api, type Follow, type Command, type Io, type Result, type Values, str, request, int, clip, reconnectMs, untilConsumerGone } from "../kit.ts";
+import { type Api, type Follow, type Command, type Io, type Result, type Values, str, request, int, clip, reconnectMs, untilConsumerGone, when } from "../kit.ts";
 import { transient } from "../config.ts";
 import { agentView, threadRoutes, type ClaudeEntry, type ListeningPort, type ThreadDetail } from "../../contract/threads.ts";
 import { claudeFrames, maxEntries, queuedOf, streamRoutes, type ClaudeFrame, type ViewFrame } from "../../contract/streams.ts";
@@ -97,7 +97,7 @@ function deathEnding(d: ThreadDetail, died: NonNullable<ThreadDetail["thread"]["
  */
 function afterRun(d: ThreadDetail): Ending | null {
   const limit = d.thread.usageLimit;
-  if (limit !== undefined) return { outcome: "waiting", text: `Claude stopped on its usage limit${limit.resetsAt === null ? "" : `, which resets at ${new Date(limit.resetsAt).toISOString()}`}. Send it "continue" after the reset` };
+  if (limit !== undefined) return { outcome: "waiting", text: `Claude stopped on its usage limit${limit.resetsAt === null ? "" : `, which resets ${when(limit.resetsAt)}`}. Send it "continue" after the reset` };
   if (d.thread.turnDied !== undefined) return deathEnding(d, d.thread.turnDied, 0);
   return d.attention === "decision" ? { outcome: "waiting", text: `It replied, and waits on your decision, which \`nexus show ${d.thread.id}\` says` } : { outcome: "replied", text: "It replied." };
 }

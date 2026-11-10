@@ -1,9 +1,9 @@
 import { projectOf } from "../refs.ts";
-import { type Command, str, request, briefOptions, briefOf, ago, table, clip } from "../kit.ts";
+import { type Command, str, request, briefOptions, briefOf, when, table, clip } from "../kit.ts";
 import { itemRules } from "../../contract/threads-parse.ts";
 import { itemRoutes, type PipelineItem } from "../../contract/projects.ts";
 
-const itemRow = (i: PipelineItem) => [i.id, i.phase.kind, i.phase.why, i.thread ?? "no thread yet", i.project, ago(i.addedAt), i.title];
+const itemRow = (i: PipelineItem) => [i.id, i.phase.kind, i.phase.why, i.thread ?? "no thread yet", i.project, when(i.addedAt), i.title];
 
 function itemText(i: PipelineItem): string {
   return [
@@ -14,8 +14,8 @@ function itemText(i: PipelineItem): string {
     `worker: ${i.worker === "claude" ? `Claude worker, model ${i.model ?? "unknown"}` : "Nexus agent"}`,
     ...i.after.map((id) => `after: ${id}`),
     ...i.brief === null ? [] : [`brief: ${clip(i.brief.split("\n").find((line) => line.trim() !== "")?.trim() ?? "", 120)}`],
-    `added by ${i.addedBy} ${ago(i.addedAt)}`,
-    ...i.approved === null ? [] : [`approved by ${i.approved.by} ${ago(i.approved.at)}`],
+    `added by ${i.addedBy} ${when(i.addedAt)}`,
+    ...i.approved === null ? [] : [`approved by ${i.approved.by} ${when(i.approved.at)}`],
     ...i.thread === null ? [] : [`nexus show ${i.thread} shows its thread.`],
   ].join("\n");
 }
@@ -27,19 +27,20 @@ export const itemsCommands: Readonly<Record<string, Command>> = {
     options: { project: { type: "string" }, all: { type: "boolean" } },
     async run(api, _, v) {
       const items = await request(api, itemRoutes.list, { query: { project: str(v, "project"), ...v.all === true ? {} : { cancelled: false } } });
-      return { json: items, text: items.length === 0 ? "No pipeline items." : table(items.map(itemRow)) };
+      return { json: items, text: items.length === 0 ? "No pipeline items." : table(["Item", "Phase", "Why", "Thread", "Project", "Added", "Title"], items.map(itemRow)) };
     },
   },
   "item add": {
     help: [
       "  nexus item add [--project P] [--title T] (--message M | --claude PROMPT [--model ID]) [--after ITEM[,ITEM...]]",
       "                 [--node N|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB]",
+      "    --message-file PATH|- and --claude-file PATH|- read the brief from a file or stdin",
       "    an item becomes a queued thread once the items it is after are, and starts once their pull requests merge",
     ],
     args: [0, 0],
     options: briefOptions,
-    async run(api, _, v) {
-      const i = await request(api, itemRoutes.add, { body: briefOf(v, await projectOf(api, v, "item add"), itemRules) });
+    async run(api, _, v, _follow, local) {
+      const i = await request(api, itemRoutes.add, { body: await briefOf(v, await projectOf(api, v, "item add"), itemRules, local.io.stdin) });
       return { json: i, text: `Added ${i.id} to ${i.project}: ${i.title}. It is ${i.phase.kind}: ${i.phase.why}.` };
     },
   },

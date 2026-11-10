@@ -23,7 +23,8 @@ import { CliError } from "./transport.ts";
 import type { Api, Result } from "./kit.ts";
 import { answeredText, pressOf } from "./commands/release.ts";
 import { version } from "../version.ts";
-import { node, laptop, image, setup } from "../test-support/cli-kit.ts";
+import { node, laptop, image, setup, timeless } from "../test-support/cli-kit.ts";
+import { localTime } from "./kit.ts";
 
 const approvedRound = { head: "1".repeat(40), verdict: { token: "a", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: null }, check: { passed: true, output: "ok" }, live: { kind: "ran" as const, thread: "th-0123456789ab" as ThreadId, passed: true, output: "ok" }, answers: null };
 
@@ -105,11 +106,13 @@ test("image list and current print each image's role, build, release and nodes, 
   s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
   s.registry.threads.ingested(testObservation(node, { artifacts: [image.id, older.id] }), []);
   const entry = { ...image, release: null, nodes: [node] };
+  const [built27, built26] = [image.builtAt, older.builtAt].map((at) => localTime(Date.parse(at)));
   const olderEntry = { ...older, release: "f".repeat(40), nodes: [node] };
 
-  assert.equal((await s.nexus(["image", "list"])).stdout, [
-    "img-0123456789ab  current  built 2027-01-01T00:00:00Z on rj-firebat  release unknown       on rj-firebat",
-    "img-00000000000a  -        built 2026-12-01T00:00:00Z on rj-firebat  release ffffffffffff  on rj-firebat",
+  assert.equal(timeless((await s.nexus(["image", "list"])).stdout), [
+    "Image  Role  Built  Release  Nodes",
+    `img-0123456789ab  current  ${built27} on rj-firebat  unknown  rj-firebat`,
+    `img-00000000000a  -  ${built26} on rj-firebat  ffffffffffff  rj-firebat`,
   ].join("\n") + "\n");
   assert.deepEqual(await s.json(["image", "list"]), { current: image.id, previous: null, images: [entry, olderEntry], operation: null, fetches: [] });
   const fetches: ImageFetch[] = [
@@ -117,22 +120,24 @@ test("image list and current print each image's role, build, release and nodes, 
     { node: "rj-nuc" as NodeName, image: image.id, state: "failed", job: null, failures: 3, failedAt: Date.now(), reason: "backend: the copy hashes to 0000, so it was thrown away" },
   ];
   s.registry.images.saveImageFetches(fetches);
-  assert.equal((await s.nexus(["image", "list"])).stdout, [
-    "img-0123456789ab  current  built 2027-01-01T00:00:00Z on rj-firebat  release unknown       on rj-firebat",
-    "img-00000000000a  -        built 2026-12-01T00:00:00Z on rj-firebat  release ffffffffffff  on rj-firebat",
+  assert.equal(timeless((await s.nexus(["image", "list"])).stdout), [
+    "Image  Role  Built  Release  Nodes",
+    `img-0123456789ab  current  ${built27} on rj-firebat  unknown  rj-firebat`,
+    `img-00000000000a  -  ${built26} on rj-firebat  ffffffffffff  rj-firebat`,
     "Fetches of the current image img-0123456789ab:",
     "  infra-testbench: running",
     "  rj-nuc: failed, 3 failed: backend: the copy hashes to 0000, so it was thrown away",
   ].join("\n") + "\n");
   assert.deepEqual((await s.json(["image", "list"])).fetches, fetches);
-  assert.equal((await s.nexus(["image", "current"])).stdout, "img-0123456789ab  current  built 2027-01-01T00:00:00Z on rj-firebat  release unknown  on rj-firebat\n");
+  assert.equal(timeless((await s.nexus(["image", "current"])).stdout), `Image  Role  Built  Release  Nodes\nimg-0123456789ab  current  ${built27} on rj-firebat  unknown  rj-firebat\n`);
 
   const rolled = await s.nexus(["image", "rollout", older.id, "--wait"]);
   assert.equal(rolled.code, 0, rolled.stderr);
   assert.equal(rolled.stderr, "", "off a terminal the wait writes nothing to stderr");
-  assert.equal(rolled.stdout, [
-    "img-0123456789ab  previous  built 2027-01-01T00:00:00Z on rj-firebat  release unknown       on rj-firebat",
-    "img-00000000000a  current   built 2026-12-01T00:00:00Z on rj-firebat  release ffffffffffff  on rj-firebat",
+  assert.equal(timeless(rolled.stdout), [
+    "Image  Role  Built  Release  Nodes",
+    `img-0123456789ab  previous  ${built27} on rj-firebat  unknown  rj-firebat`,
+    `img-00000000000a  current  ${built26} on rj-firebat  ffffffffffff  rj-firebat`,
     "rollout img-00000000000a: done",
     "  rj-firebat: done",
   ].join("\n") + "\n");

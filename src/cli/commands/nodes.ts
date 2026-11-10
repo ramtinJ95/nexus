@@ -2,7 +2,7 @@ import { gib } from "../../util/gib.ts";
 import type { NodeCapacity } from "../../protocol/observations.ts";
 import type { NodeHealth } from "../../protocol/client.ts";
 import { diskText, lowDisk } from "../../disk-space.ts";
-import { type Command, ago, request, table } from "../kit.ts";
+import { type Command, when, request, table } from "../kit.ts";
 import { nodeRoutes, type NodePylons } from "../../contract/reports.ts";
 
 /** A probe from before pylons were counted reports no CPUs or committed disk, and always 0 GiB of memory committed. */
@@ -31,7 +31,7 @@ function pylonsText(p: NodePylons | null): string {
 function healthText(h: NodeHealth): string {
   const { load, memory, temperatures, pylons } = h;
   return [
-    `node: ${h.node}, read ${h.readAt}`,
+    `node: ${h.node}, read ${when(Date.parse(h.readAt))}`,
     `load: ${load === null ? "unknown" : `${load.one.toFixed(2)} ${load.five.toFixed(2)} ${load.fifteen.toFixed(2)} (1, 5, 15 min)`} on ${h.cpus} CPUs`,
     `memory: ${memory === null ? "unknown" : `${gib(memory.availableGiB)} of ${gib(memory.totalGiB)} GiB available`}`,
     `swap: ${memory === null ? "unknown" : memory.swapTotalGiB === 0 ? "none" : `${gib(memory.swapTotalGiB - memory.swapFreeGiB)} of ${gib(memory.swapTotalGiB)} GiB used`}`,
@@ -58,11 +58,11 @@ export const nodesCommands: Readonly<Record<string, Command>> = {
       const nodes = await request(api, nodeRoutes.list, {});
       return {
         json: nodes,
-        text: nodes.length === 0 ? "No nodes." : table(nodes.map((n) => [
-          n.name, n.state, n.observedAt === null ? "never observed" : `observed ${ago(Date.parse(n.observedAt))}`,
+        text: nodes.length === 0 ? "No nodes." : table(["Node", "State", "Observed", "Capacity"], nodes.map((n) => [
+          n.name, n.state, n.observedAt === null ? "never" : when(Date.parse(n.observedAt)),
           n.capacity === null ? "" : capacityText(n.capacity, n.overcommitted),
         ])).split("\n").flatMap((line, i) => {
-          const held = pylonsText(nodes[i]!.pylons);
+          const held = i === 0 ? "" : pylonsText(nodes[i - 1]!.pylons);
           return held === "" ? [line] : [line, `  pylons: ${held}`];
         }).join("\n"),
       };

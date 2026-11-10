@@ -98,7 +98,7 @@ Every command takes `--json`, `--url` and `--socks`, before its name or after it
 
 `start` and `item add` without `--project` take the project whose `repoUrl` is the `origin` of the git checkout they run in, read from `GET /v1/projects`, and name it on stderr. The ssh and https spellings of a URL match, with or without a trailing `.git`. A port other than its scheme's default must match too, so `https://host:8443/o/r` and `https://host:9443/o/r` are different repositories. Without an `origin`, or unless exactly one project matches, they fail with exit code 64 as before.
 
-With `--json`, a command prints one JSON value on stdout, pretty-printed. The value is the API's reply, apart from the exceptions noted in the table. Without `--json`, output is plain text for people. Its format is not part of this contract.
+With `--json`, a command prints one JSON value on stdout, pretty-printed. The value is the API's reply, apart from the exceptions noted in the table. Without `--json`, output is plain text for people, and it is not part of this contract. Every table has a header row. A time prints as how long ago or how soon, then the local time it names, such as `3h ago (2026-11-10 14:05)` or `in 20m (2026-11-10 17:30)`. The usage report counts UTC days, and the usage-limit wording is the dashboard's too, so their times stay in UTC. `threads` colours a failed row red and a row whose attention waits on you yellow, only when stdout is a terminal and `NO_COLOR` is unset or empty. `--json` is never coloured. Its format is not part of this contract.
 
 | Command | Route | `--json` prints |
 |---|---|---|
@@ -114,8 +114,8 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `image rollback [--wait]` | `POST /v1/images/rollback` with `{}`, then `GET /v1/images` while waiting | `ImageOperation`, the rollout back to the previous image, or `ImagesView` with `--wait` |
 | `image list` | `GET /v1/images` | `ImagesView` |
 | `image current` | `GET /v1/images/current` | `{ current: ImageEntry \| null, previous: ImageEntry \| null }` |
-| `threads [--project P] [--all] [--open]` | `GET /v1/threads?deleted=false[&project=P]`, or `GET /v1/threads[?project=P]` with `--all`, or `GET /v1/threads?deleted=false&status=open[&project=P]` with `--open`, and `GET /v1/queued?status=queued[&project=P]`, or `GET /v1/queued[?project=P]` with `--all`, for the queued threads its text lists after the others | `ThreadRow[]`: each `Thread` with `desired` and `pylon: { node, actualState, failed }`, as in `ThreadDetail`. A thread whose harness or session turn runs carries `workingSince`, the earliest known start of those turns in Unix milliseconds, unless no start is known. Deleted threads are left out unless `--all` is given, and `--open` lists only active and idle threads. Queued threads are never in it |
-| `threads --queued [--project P] [--all]` | `GET /v1/queued?status=queued[&project=P]`, or `GET /v1/queued[?project=P]` with `--all` | `QueuedThread[]`, the threads that have not started. Cancelled and deleted ones are left out unless `--all` is given |
+| `threads [--project P] [--all] [--open] [--active] [--needs-me] [--limit N]` | `GET /v1/threads?deleted=false[&project=P]`, or `GET /v1/threads[?project=P]` with `--all`, or `GET /v1/threads?deleted=false&status=open[&project=P]` with `--open`, and `GET /v1/queued?status=queued[&project=P]`, or `GET /v1/queued[?project=P]` with `--all`, for the queued threads its text lists after the others | `ThreadRow[]`: each `Thread` with `desired` and `pylon: { node, actualState, failed }`, as in `ThreadDetail`. A thread whose harness or session turn runs carries `workingSince`, the earliest known start of those turns in Unix milliseconds, unless no start is known. Deleted threads are left out unless `--all` is given, and `--open` lists only active and idle threads. `--active` lists only active threads, and `--needs-me` only those whose `attention` waits on the person: `failed`, `decision`, `parked`, `limited`, `reply` or `waiting`. Either leaves the queued threads out of the text too. `--limit N` keeps the first N rows, the threads before the queued ones. Queued threads are never in it. The text heads its columns: the thread, its status, its attention, whether it works or stopped on its usage limit, the pylon's state, the project, when it last replied, and the title. The queued threads follow under a header of their own |
+| `threads --queued [--project P] [--all] [--limit N]` | `GET /v1/queued?status=queued[&project=P]`, or `GET /v1/queued[?project=P]` with `--all` | `QueuedThread[]`, the threads that have not started. Cancelled and deleted ones are left out unless `--all` is given |
 | `show <thread>` | `GET /v1/threads/<thread>`, then `GET /v1/queued/<thread>` when that answers 409 with code `queued` | `ThreadDetail`. Its `said` holds the sentences the text prints of the thread's state and review. Its `desired` is what the planner wants of the pylon now: `running`, `paused` or `deleted`. Its `attach` is the command that attaches to the pylon's Herdr sessions from a shell in the pylon. Without `--json`, it prints `attach: nexus attach <thread>`, the command that attaches from this Mac, unless the thread is archived or deleted, and `disk: kept past its 24 hours, as ...` with why for an archived thread whose disk is kept. For a thread that has not started, `QueuedThread` |
 | `ports <thread>` | `GET /v1/threads/<thread>` | `ListeningPort[] \| null`, the detail's `ports` |
 | `preview <thread> <port> [--wait]` | `POST /v1/threads/<thread>/previews` with `{"port": number}`, then with `--wait` polls `GET /v1/threads/<thread>` | `Preview`, the port's preview |
@@ -128,24 +128,24 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `session open <thread> [--harness claude-code\|pi\|shell] [--title T]` | `POST /v1/threads/<thread>/sessions` with `{"harness"?: string, "title"?: string}`, which answers 201. While the pylon is not running, it tries again once a second | `OpenedSession`, the session it opened |
 | `session close <thread> <pane\|id>` | `DELETE /v1/threads/<thread>/sessions/<id>` with `{}`, which answers 204. It does not try again | `null` |
 | `attach <thread>` | `GET /v1/threads/<thread>/attach`, a WebSocket, as [the attach route](#the-attach-route) describes | Nothing. The terminal is the session's |
-| `start [--project P] [--title T] [--message M \| --claude PROMPT [--model ID]] [--node N\|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB] [--request-id ID]` | Without `--project`, `GET /v1/projects` first, as above. Then one `POST /v1/threads`, with `"message": string` when `--message` is given, `"claude": string` and `"model"?: string` when `--claude` is, as [Event stream and Claude workers](#event-stream-and-claude-workers) describes, and `"requestId": string` when `--request-id` is, which answers 201 | `Thread`, the thread that was started, with its `placement` |
+| `start [--project P] [--title T] [--message M \| --message-file PATH\|- \| --claude PROMPT \| --claude-file PATH\|- [--model ID]] [--node N\|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB] [--request-id ID]` | Without `--project`, `GET /v1/projects` first, as above. Then one `POST /v1/threads`, with `"message": string` when `--message` is given, `"claude": string` and `"model"?: string` when `--claude` is, as [Event stream and Claude workers](#event-stream-and-claude-workers) describes, and `"requestId": string` when `--request-id` is, which answers 201 | `Thread`, the thread that was started, with its `placement` |
 | `start --plan ...` | One `POST /v1/threads` with `"planning": true`, as for any start | `Thread`, the planning thread that was started |
 | `start ... --after THREAD[,THREAD...]` | One `POST /v1/threads` with `"after": string[]`, and `"message"` and `"requestId"` as for any start, which answers 201 | `QueuedThread`, the thread that was queued |
-| `start ... --watch [--interval MS]` | The start, then the watch of [Waiting for the reply](#waiting-for-the-reply). It needs `--message` or `--claude`, and cannot go with `--after` | `Thread` as one compact line, then the watch stream. The exit code is the watch's |
+| `start ... --watch [--interval MS]` | The start, then the watch of [Waiting for the reply](#waiting-for-the-reply). It needs `--message`, `--message-file`, `--claude` or `--claude-file`, and cannot go with `--after` | `Thread` as one compact line, then the watch stream. The exit code is the watch's |
 | `start-queued <thread>` | `POST /v1/threads/<thread>/start` with no body, which answers 201 | `Thread`, the thread that was started |
 | `items [--project P] [--all]` | `GET /v1/items?cancelled=false[&project=P]`, or `GET /v1/items[?project=P]` with `--all` | `PipelineItem[]`, in the order they were added. Cancelled items are left out unless `--all` is given |
-| `item add [--project P] [--title T] (--message M \| --claude PROMPT [--model ID]) [--after ITEM[,ITEM...]] [--node N\|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB]` | Without `--project`, `GET /v1/projects` first, as above. Then `POST /v1/items` with the fields of a start, its brief as `"message"` or `"claude"`, and `"after": string[]`, which answers 201 | `PipelineItem`, the item that was added |
+| `item add [--project P] [--title T] (--message M \| --message-file PATH\|- \| --claude PROMPT \| --claude-file PATH\|- [--model ID]) [--after ITEM[,ITEM...]] [--node N\|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB]` | Without `--project`, `GET /v1/projects` first, as above. Then `POST /v1/items` with the fields of a start, its brief as `"message"` or `"claude"`, and `"after": string[]`, which answers 201 | `PipelineItem`, the item that was added |
 | `item show <item>` | `GET /v1/items/<item>` | `PipelineItem` |
 | `item approve <item>` | `POST /v1/items/<item>/approve` with `{}` | `PipelineItem` |
 | `item cancel <item>` | `POST /v1/items/<item>/cancel` with `{}` | `PipelineItem` |
-| `send <thread> <text...> [--steer] [--request-id ID]` | `POST /v1/threads/<thread>/messages`. For a Claude worker thread, while the pylon is not running, it tries again once a second | `{ "submission": number }`, or `{ "claude": ClaudeSent }` for a Claude worker thread |
-| `send <thread> <text...> --watch [--interval MS]` | `GET /v1/threads/<thread>` for what came before, the send, then the watch of [Waiting for the reply](#waiting-for-the-reply). The text's first print of the conversation starts at the sent message | The send's reply as one compact line, then the watch stream. The exit code is the watch's |
+| `send <thread> (<text...> \| - \| --file PATH) [--steer] [--request-id ID]` | `POST /v1/threads/<thread>/messages`. For a Claude worker thread, while the pylon is not running, it tries again once a second | `{ "submission": number }`, or `{ "claude": ClaudeSent }` for a Claude worker thread |
+| `send <thread> (<text...> \| - \| --file PATH) --watch [--interval MS]` | `GET /v1/threads/<thread>` for what came before, the send, then the watch of [Waiting for the reply](#waiting-for-the-reply). The text's first print of the conversation starts at the sent message | The send's reply as one compact line, then the watch stream. The exit code is the watch's |
 | `watch <thread> [--interval MS] [--until-idle]` | Follows `GET /v1/threads/<thread>/events`, or `GET /v1/threads/<thread>/claude/events` for a Claude worker thread, and polls `GET /v1/threads/<thread>` | A stream of JSON lines, described below. `--until-idle` ends it as [Waiting for the reply](#waiting-for-the-reply) says |
 | `abort <thread>` | `POST /v1/threads/<thread>/abort`. For a Claude worker thread it interrupts the turn with Esc, and never wakes a paused pylon | `null` |
 | `retry <thread>` | `POST /v1/threads/<thread>/retry` | `null` |
 | `retry-pylon <thread>` | `POST /v1/threads/<thread>/pylon/retry` | `null` |
 | `seen <thread> [--unread \| --last-reply-at MS]` | `POST /v1/threads/<thread>/seen` with `{}`, or `{"lastReplyAt": MS}` with `--last-reply-at`, or `/unseen` with `--unread` | `null` |
-| `wake <thread>` | `POST /v1/threads/<thread>/activity` with `{"kind":"human"}` | `null` |
+| `wake <thread>` | `POST /v1/threads/<thread>/activity` with `{"kind":"human"}`, then, without `--json`, `GET /v1/threads/<thread>` for the text, which says whether the activity wakes the pylon or keeps it awake, that a failed pylon needs `retry-pylon`, or that an archived thread's pylon stays paused until `unarchive` | `null` |
 | `archive <thread>` | `POST /v1/threads/<thread>/archive` | `Thread`, or `QueuedThread` with status `archived` for a thread that has not started, which cancels it. An archived thread with no activity for 7 days is deleted, as `delete` deletes it, unless something still reads it, as [Retention](data-model.md#retention) says |
 | `unarchive <thread>` | `POST /v1/threads/<thread>/unarchive` | `Thread`, or `QueuedThread` with status `queued` for a cancelled one, which queues it again. A thread whose disk the cleanup deleted, once it had been archived 24 hours and its usage was read and backed up, has no disk left, so its pylon boots fresh from the thread's recorded image and commit. A thread retention purged is not found, so it fails with exit code 4, as `show` of it does |
 | `delete <thread>` | `DELETE /v1/threads/<thread>` | `Thread`, with status `deleted`, or `QueuedThread` with status `deleted`. A deleted thread is purged from the registry 7 days after its delete, once a backup began since, and is then not found, the API's 404 |
@@ -167,7 +167,8 @@ These commands need more explanation:
 - Since 0.62.0 a `start --branch B` whose remote answers that it has no branch `B` fails with exit code 64 and boots nothing, because the pylon's checkout of it would fail: `POST /v1/threads` answers 400 with the code `no-branch` and `branch B does not exist on the remote of project <id>. Push it first, or start from the project's default branch, <default branch>, by naming no branch, and the agent creates its own`. The dashboard's start dialog shows the same error. The control plane learns it from the read of `.nexus/setup` the start already makes, as [Templates at thread start](#templates-at-thread-start) describes, so a remote it cannot read at all, such as an SSH one, a network failure or a refused token, still starts the thread and boots it fresh. A start with another `--disk`, which uses no template, still reads the branch it names. A start that names a full `--commit` reads the commit, not the branch, so it is not refused. A queued thread or a [pipeline item](#pipeline-items) that names such a branch is accepted, and is held for the person once its start is refused, as [When it starts](#when-it-starts) describes.
 - `start`, `start-queued` and `send` need a person, as `item add` does. The API answers anything else, the control node, an infrastructure node and so a pylon, with 403 and exit code 3: `caller may not start a thread: only a person may, never the control plane, infrastructure nodes or pylons`, or `start a queued thread` or `message a thread` in its place. The control plane's own starts and messages never go through the API.
 - Since 0.45.0 every other command that acts on a thread, its pylon or a project needs a person too, with its own words in the 403: `abort` (`abort a thread's turn`), `retry` (`retry a thread's turn`), `retry-pylon` (`retry a thread's pylon`), `session open` and `session close` (`open a session in a thread's pylon`, `close a session in a thread's pylon`), `attach` (`attach to a thread's pylon`), `preview` and `unpreview` (`publish a preview`, `unpublish a preview`), `review` (`start a review`), `review --cancel` (`cancel a review`), `project edit` (`edit a project`), `archive`, `unarchive` and `delete` (`archive a thread`, `unarchive a thread`, `delete a thread`). The control plane's review loop, queue and planner archive and start threads in its own process, never through these routes.
-- `send` joins its words with single spaces. By default the message is a follow-up, so a busy run takes it after its current turn. With `--steer`, the message joins the current run after its current tool round. The API treats a second send with the same `--request-id` as the same message. A caller that retries a send should pass its own request ID, such as `msg:<uuid>`. Without one, each run mints a new ID. A Claude worker thread's message goes to Claude, never to the Nexus agent, whatever the mode.
+- `send` joins its words with single spaces. The parser still reads flags among them, so `nexus send <thread> check the --steer flag` steers and sends `check the flag`, and a word that starts with a dash, such as `- first bullet`, fails with exit code 64 and says how to pass it. Words after `--` are never read as flags: `nexus send <thread> -- --force is broken` sends `--force is broken`. `-` as the only word reads the message from stdin, and `--file PATH` from a file, so text of any length or shape reaches the agent as written, less one final line break. A lone `-` used to send the text `-`. An empty file or stdin fails with exit code 64 and sends nothing. By default the message is a follow-up, so a busy run takes it after its current turn. With `--steer`, the message joins the current run after its current tool round. The API treats a second send with the same `--request-id` as the same message. A caller that retries a send should pass its own request ID, such as `msg:<uuid>`. Without one, each run mints a new ID. A Claude worker thread's message goes to Claude, never to the Nexus agent, whatever the mode.
+- `start` and `item add` take `--message-file PATH|-` in place of `--message`, and `--claude-file PATH|-` in place of `--claude`, which read the message or prompt from a file or, with `-`, from stdin, less one final line break. A flag's value that starts with a dash, such as `--message "--force is broken"`, needs `--message="--force is broken"` or the file flag, and the error says so.
 - `project add` adds a project whose threads clone `<repo-url>` and boot on node `N`, or with `--node auto` or no `--node` on the node where each pylon fits best, unless `start --node` picks another, as [Placement](#placement) describes. With `--scratch` instead of a URL, the project has no repository: each thread's pylon starts from `git init` on the branch, nothing is fetched, and nothing in the pylon is kept once the thread is deleted unless its agent pushed it somewhere. It sends this `Project`: `repoUrl` is `<repo-url>`, or null with `--scratch`. `defaultBranch` is `--branch`, or `main`. `defaultNode` is `--node`, or `auto`. `resources` is `{ cpus, memoryGiB, diskGiB }` from `--cpus`, `--memory` and `--disk`, or 2, 4 and 10. The API refuses `memoryGiB` under 3 with 400 and says why, since a pylon VM needs at least 3 GiB to boot. The projects in use run at 2 CPUs and 4 GiB, and coding threads were measured to peak at about 1.4 GiB in the guest. `allowedHosts` holds each `--allow-host`, `logins` each `--login`, and `secrets` each `--secret`, in the order given. `preSetup` is null, which only the API can set. Without `--json` it prints `Added project <id> (<repo-url>) on <node>`, or `Added scratch project <id> on <node>`, where `<node>` may be `auto`. Exactly one of `<repo-url>` and `--scratch` is required. Without one, or with both, the command fails with exit code 64 before it sends any request, so a forgotten URL never makes a scratch project. `nexus nodes` lists the nodes. A project that exists fails with exit code 5. A node the control plane does not know, an ID that is not lowercase letters, digits and hyphens starting with a letter or digit, up to 63 characters, an `https://` URL that does not parse, or a login other than `claude` or `chatgpt` fails with exit code 64. The API accepts any other non-empty `<repo-url>`, such as an SSH one. Use `project edit` to change settings; IDs and repository URLs cannot change. Projects cannot be removed from the CLI.
 - `--secret NAME:HOST[,HOST]` grants the secret `NAME` to those hosts, such as `--secret GH_TOKEN:api.github.com,github.com`, which lets the project's agents create GitHub repositories with `gh` and push to them. The value is never sent: it lives in each node's `/etc/nexus/secrets.env`, as [deploy/README.md](../deploy/README.md) describes, and a pylon on a node that lacks it fails to boot. The name is upper-case letters, digits and underscores, not starting with a digit, and each host a lower-case hostname with a dot. Anything else, such as `GH_TOKEN=<token>` pasted by mistake, fails with exit code 64 before any request, and the error does not repeat it. Each host joins the pylon's allowlist.
 - `session open` opens a session in the pylon: a Herdr workspace in the checkout, `/home/user/workspace/repo`, labelled with the title, with the harness's agent in it. The harness is `claude-code` by default, and the title is the harness's name by default, at most 80 characters. The command returns once the agent is ready or waits for its human, such as Claude Code at its login or trust screen, so a session that needs `/login` opens and waits for it. Starting an agent can take most of a minute, so the command waits up to 120 seconds for the reply, rather than the usual 30. Opening is human activity, so a paused pylon is woken, and the command tries again once a second until the pylon runs, failing with exit code 1 after 120 seconds. An archived or deleted thread fails with exit code 5, a harness other than the three with exit code 64, and a node the control plane cannot reach with exit code 1. The session is listed in the thread's `sessions` within moments, because the node reads its sessions again at once. Without `--json` it prints `Opened <harness> session "<title>" in pane <pane> of <thread>.` and how to attach.
@@ -619,7 +620,7 @@ type ThreadSetup =
   | { how: "fresh"; reason: string; building?: TemplateId }; // building: the build this start asked for or found running, for the next thread
 ```
 
-Plain `show` prints it after the placement line, such as `setup: from template tpl-3f2a9c1b0d4e, built 2h ago, then checked out 91ce5419faae`, or `setup: fresh boot runs .nexus/setup, because no template of this setup is on rj-firebat yet; tpl-3f2a9c1b0d4e builds for the next thread`. When a template's build failed, the reason ends in its log, of which plain `show` prints the first line and `--json` all.
+Plain `show` prints it after the placement line, such as `setup: from template tpl-3f2a9c1b0d4e, built 2h ago (2026-11-10 12:05), then checked out 91ce5419faae`, or `setup: fresh boot runs .nexus/setup, because no template of this setup is on rj-firebat yet; tpl-3f2a9c1b0d4e builds for the next thread`. When a template's build failed, the reason ends in its log, of which plain `show` prints the first line and `--json` all.
 
 ## Placement
 
@@ -697,7 +698,7 @@ Since 0.45.0 `review --cancel` ends the thread's running review, and prints it. 
 
 `Review` is a builder's latest review as the control plane stores it, and as the review routes answer it. `GET /v1/threads/<thread>` sends none of it, and serves its public facts as `ThreadDetail.reviewView`, described below:
 
-<!-- types: src/control/review-model.ts Review Talk Outbox SecondReviewer LandRequest Round LiveCheck HeldAt Waiver Phase GateRun Refused HoldCause ModelFailure -->
+<!-- types: src/control/review-model.ts Review Talk Outbox SecondReviewer LandRequest Round LiveCheck HeldAt Waiver Phase GateRun Behind Refused HoldCause ModelFailure -->
 ```ts
 // src/control/review-model.ts
 /**
@@ -713,6 +714,8 @@ interface Review extends Talk<Outbox & { to: "builder" | "reviewer" }> {
   reviewer: ThreadId;
   /** False until the loop starts the reviewer's thread, under the ID the review was recorded with. */
   reviewerStarted: boolean;
+  /** While the reviewer has not started, the review whose gate pylon that waits for room holds its start. */
+  behind?: Behind;
   pr: { repo: string; number: number; url: string; title: string; branch: string };
   models: { builder: string; reviewer: string };
   /**
@@ -755,12 +758,13 @@ interface Outbox { id: string; text: string; attempted: number | null }
 /**
  * The second reviewer the project's rule gave a review for `rule`'s reason: a Claude worker on Claude Opus 5.5, even when the
  * builder or the first reviewer also runs it, in `thread`, with its own conversation. `starting` until its thread starts,
- * tried since `since` and last at `tried`, which failed for `why`. `none` when no such model could run or its thread
+ * tried since `since` and last at `tried`, which failed for `why`, and `behind` while another review's gate pylon
+ * that waits for room holds its start. `none` when no such model could run or its thread
  * did not start in time, for `why`, which holds the landing for the person.
  */
 type SecondReviewer =
   | ({ kind: "claude"; rule: string; thread: ThreadId; model: string; failing?: ModelFailure } & Talk)
-  | { kind: "starting"; rule: string; model: string; since: number; tried: number | null; why: string | null }
+  | { kind: "starting"; rule: string; model: string; since: number; tried: number | null; why: string | null; behind?: Behind }
   | { kind: "none"; rule: string; why: string };
 /**
  * A request to land a review's PR once approved: the person's; the project's setting's, which each landing reads again
@@ -815,8 +819,12 @@ type Phase =
   | { kind: "reviewing"; failing?: ModelFailure; check?: GateRun & { unrunnable?: string } & Refused }
   /** The builder has the round's findings and owes an answer to each, and a push for what it fixed. */
   | { kind: "fixing"; failing?: ModelFailure }
-  /** The repository's checks run at the approved head, in a check thread thrown away afterwards. */
-  | { kind: "checking" } & GateRun
+  /**
+   * The repository's checks run at the approved head, in a check thread thrown away afterwards. `room` and `refused`
+   * carry a check beside the reviewer that waited for room into the approval, so it keeps its place in line until its
+   * start, which never waits for room.
+   */
+  | { kind: "checking" } & GateRun & Refused
   /**
    * The live check runs at the approved head, in a verify pylon archived afterwards. `refused` is why no node could take
    * the verify pylon yet, which the loop tries again.
@@ -859,8 +867,16 @@ type Phase =
   /** The person archived or deleted one of the review's threads, or, as `by`, cancelled the review itself. */
   | { kind: "cancelled"; who: "builder" | "reviewer"; status: "archived" | "deleted" }
   | { kind: "cancelled"; who: "person"; by: string };
-/** A run of a gate at a round's head, in `thread` once it started, the check thread or verify pylon. */
-interface GateRun { startedAt: number; thread: ThreadId | null }
+/**
+ * A run of a gate at a round's head, in `thread` once it started, the check thread or verify pylon. `behind` while
+ * another review's gate pylon that waits for room holds its start (`gateAhead`).
+ */
+interface GateRun { startedAt: number; thread: ThreadId | null; behind?: Behind }
+/**
+ * The review whose gate pylon waits for room ahead of a held start: its builder, its PR, and the pylon it waits to
+ * start, which the person reads as what the start waits for.
+ */
+interface Behind { builder: ThreadId; pr: number; pylon: "check thread" | "verify pylon" }
 /**
  * Why no node took the run's pylon at its last start, with `room` when a node refused it for room alone. Such a run
  * waits for room with no deadline, and its deadline counts from the start that room let through.
@@ -989,7 +1005,7 @@ Once `.nexus/check` passes at the approved head, a head with an executable `.nex
 
 `Round.live` is the result once the checks passed: `ran`, with the verify pylon's `thread`, `passed` for exit status 0, and the output's tail, or `absent` for a head with no `.nexus/verify`. A live check that passed stands in for the pull request's statement of what it could not check live. One that failed goes back to the builder as a `LIVE` finding (P0), as a failed check does, and holds the landing. A head with no `.nexus/verify` goes from `checking` to `approved` or `merging` as before, and lands on the statement. A round with no `live`, such as one a control plane older than 0.37.0 approved, holds the landing until a landing runs its live check, so a landing in flight across the upgrade cannot skip it. A change to `.nexus/verify` holds the landing for the person, who may waive it on the dashboard.
 
-`show` prints one line under the `review` line for the latest round once its check passed: `live check running .nexus/verify at <commit> in verify pylon <thread>`, `live check waiting for a node to take its verify pylon: <why>`, `live check passed at <commit>`, `live check failed at <commit>` with the last 20 lines of its output indented under it, `no live check: <commit> has no .nexus/verify, ...`, or `no live check ran at <commit>` for a live check that gave no verdict, such as one that could not run. While the reviewer reads, or the builder answers changes it asked for, a check that passed beside it gives `no live check yet: it runs at <commit> once the reviewer approves it`. The dashboard's landing card has a Live check step between Check and Merge, skipped for a head with no `.nexus/verify`, and shows the script's output. A verify pylon the person unarchives stays open.
+`show` prints one line under the `review` line for the latest round once its check passed: `live check running .nexus/verify at <commit> in verify pylon <thread>`, `live check waiting for a node to take its verify pylon: <why>`, `live check passed at <commit>`, `live check failed at <commit>` with the last 20 lines of its output indented under it, `no live check: <commit> has no .nexus/verify, ...`, or `no live check ran at <commit>` for a live check that gave no verdict, such as one that could not run. While the reviewer reads, or the builder answers changes it asked for, a check that passed beside it gives `no live check yet: it runs at <commit> once the reviewer approves it`. While another review's check or verify pylon waits for room, this review starts no reviewer, second reviewer, check or live check, so the room that frees goes to that pylon first, and waiting gates start in the order their runs began, a held one included. Its review line then ends with `its <reviewer|second reviewer|check|live check> waits for <builder>: PR #<n>'s <verify pylon|check thread> waits for a node to have room, which goes to it first`, the words a queued thread uses for the same wait, and the held start has no deadline until the wait ends. A review is never held by its own wait, and a review started with `nexus review` starts its first reviewer all the same. The dashboard's landing card has a Live check step between Check and Merge, skipped for a head with no `.nexus/verify`, and shows the script's output. A verify pylon the person unarchives stays open.
 
 ## Queued threads
 
@@ -1024,7 +1040,7 @@ The PR watch reads a pull request every two minutes, so a queued thread starts u
 
 ### When it starts
 
-The control plane looks at the queue every 15 seconds, and right after a start is queued. A queued thread whose every wait is `landed`, or one `start-queued` asked for, starts exactly as `nexus start` would start it with the recorded request, under its recorded ID. Placement and capacity apply as for any start. An `auto` thread goes to the node with the most room then, and when no node has room the start fails with `no node can run this pylon: ...`, so the thread stays queued and the next pass tries again, until a node has room. A thread on a named node starts there, as any start does, which never waits for room. While a review's check or verify pylon waits for room, no queued thread starts on a pass, so the gate takes the room that frees first, and the threads queued after its pull request are not held up by a builder that took it. A `start-queued` starts the thread all the same. Any other refusal, such as no current image or a deploy's drain, also leaves it queued. Each failure is the record's `lastError` until a start clears it.
+The control plane looks at the queue every 15 seconds, and right after a start is queued. A queued thread whose every wait is `landed`, or one `start-queued` asked for, starts exactly as `nexus start` would start it with the recorded request, under its recorded ID. Placement and capacity apply as for any start. An `auto` thread goes to the node with the most room then, and when no node has room the start fails with `no node can run this pylon: ...`, so the thread stays queued and the next pass tries again, until a node has room. A thread on a named node starts there, as any start does, which never waits for room. While a review's check or verify pylon waits for room, no queued thread starts on a pass, so the gate takes the room that frees first, and the threads queued after its pull request are not held up by a builder that took it. A queued thread whose every other wait is `landed` then lists a `waiting` wait on that review's builder, `PR #<n>'s verify pylon waits for a node to have room, which goes to it first`, or its check thread's, the oldest such wait first. A `start-queued` starts the thread all the same. Any other refusal, such as no current image or a deploy's drain, also leaves it queued. Each failure is the record's `lastError` until a start clears it.
 
 A Nexus agent thread queued with `--message` gets it once it has started, as the person's message, under the request ID `queued:<id>`. The harness answers a repeated request ID with its first submission, so a send repeated after a crash is the same message. A Claude worker's prompt is its `--claude`, which starts it with `/poteto-mode` in front as any start does. `--message` with `--claude` is refused.
 
@@ -1058,7 +1074,7 @@ interface QueuedThread {
   createdAt: number;
   /** Archived means cancelled. */
   status: "queued" | "archived" | "deleted";
-  /** The threads it waits for, without repeats. */
+  /** The threads it waits for, without repeats, and once those landed, the builder of a review whose gate pylon waits for room. */
   after: readonly ThreadId[];
   /** One per predecessor, in `after` order. */
   waits: readonly Wait[];
@@ -1434,7 +1450,7 @@ turn that ends with a background task still running reports a heartbeat for its 
 or when the turn ends on a model error that is not its usage
 limit, an error notice that is the newest entry that is not bookkeeping, as for
 [usage-limit stops](#usage-limit-stops). Until a turn of a session starts after
-it, the thread has `turnDied` and `show` prints `turn died: <reason>, at <time>`, with
+it, the thread has `turnDied` and `show` prints `turn died: <reason>, <time>`, with
 what Nexus does next. Its attention stays what it was, often none, since a session
 that ends records no reply.
 
@@ -1568,7 +1584,7 @@ question qn-image: Rebuild the pylon image?
   needs a deployer
 ```
 
-The first line has only the text's first line. `reserved:` is printed only for a reserved case. The last line is `needs you` for a person question, `needs a deployer` for a deployer question, or `answered "<option>" by <node> at <ISO time>` once it is answered, or since 0.62.0 `withdrawn when the thread was archived at <ISO time>`.
+The first line has only the text's first line. `reserved:` is printed only for a reserved case. The last line is `needs you` for a person question, `needs a deployer` for a deployer question, or `answered "<option>" by <node> <time>` once it is answered, or since 0.62.0 `withdrawn when the thread was archived <time>`.
 
 ### A Claude worker's AskUserQuestion
 
@@ -1618,7 +1634,7 @@ An ordinary question answered with `{"choices": ...}` is refused with 400, `ques
 ```text
 question ask-toolu_01: Drink: Which drink?
   Extras: What goes in it?
-  answered "Drink: Tea; Extras: Milk, Oat cream" by nLAPTOP at 2026-10-28T09:00:00.000Z
+  answered "Drink: Tea; Extras: Milk, Oat cream" by nLAPTOP 13d ago (2026-10-28 10:00)
 ```
 
 ## Pipeline items
@@ -1799,7 +1815,7 @@ judgment of failure 812 on node-a: retry, by the judgment: The controller died w
 judgment of failure 813 on node-a: person, by the control plane: the judgment did not answer within 15 minutes
   waits for your answer to question judgment:813
 judgment of failure 814 on node-a: no verdict yet
-  judging since 2026-10-28T09:00:00.000Z
+  judging since 13d ago (2026-10-28 10:00)
 ```
 
 The second line is what Nexus did, the question it waits on, or `Nexus acts on it` for the moment between a verdict and its action. The thread page shows a card per judgment above the questions, with what failed, the verdict, who gave it and what Nexus did, and the brief and the reply under a fold. The question is the ordinary question card.

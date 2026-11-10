@@ -13,19 +13,19 @@ function backfillText(b: UsageBackfill): string {
     : b.state === "stopped" ? `Backfill: stopped at ${threads}, ${recovered}.`
     : `Backfill: done at ${utc(b.finishedAt!)}, ${threads}, ${b.skipped.length} skipped, ${recovered}.`;
   if (b.state === "running" || b.skipped.length === 0) return line;
-  return `${line}\nSkipped:\n${table(b.skipped.map((t) => [t.thread, t.title, t.reason ?? ""]))}`;
+  return `${line}\nSkipped:\n${table(["Thread", "Title", "Why"], b.skipped.map((t) => [t.thread, t.title, t.reason ?? ""]))}`;
 }
 
 function backfillPlanText(plan: readonly BackfillPlanRow[]): string {
   if (plan.length === 0) return "No archived thread is left to read.";
-  const lines = table(plan.map((r) => [r.thread, r.project, r.node, r.title])).split("\n");
-  return [`A start reads ${plan.length} archived thread${plan.length === 1 ? "" : "s"}, one pylon at a time:`,
+  const [head, ...lines] = table(["Thread", "Project", "Node", "Title"], plan.map((r) => [r.thread, r.project, r.node, r.title])).split("\n");
+  return [`A start reads ${plan.length} archived thread${plan.length === 1 ? "" : "s"}, one pylon at a time:`, head!,
     ...lines.flatMap((line, i) => plan[i]!.reason === null ? [line] : [line, `  skipped before: ${plan[i]!.reason}`])].join("\n");
 }
 
 function usageText(r: UsageReport): string {
   const rows = (keyHead: string, of: readonly (UsageTotals & { key: string })[]) =>
-    table([[keyHead, ...tokenColumns.map((col) => col.label), "Calls"], ...of.map((row) => [row.key, ...tokenColumns.map((col) => tokenCount(row[col.field])), String(row.calls)])]);
+    table([keyHead, ...tokenColumns.map((col) => col.label), "Calls"], of.map((row) => [row.key, ...tokenColumns.map((col) => tokenCount(row[col.field])), String(row.calls)]));
   const head = `Usage of ${r.project === null ? "all projects" : `project ${r.project}`} ${r.since === null ? "for all time" : `since ${utc(r.since)}`}. Counting started ${utc(r.countingSince)}.\n${backfillText(r.backfill)}`;
   if (r.total.calls === 0) return `${head}\nNo model calls were counted in this period.`;
   return [head, rows("", [{ key: "Total", ...r.total }]), ...breakdowns.flatMap((b) => {

@@ -9,18 +9,21 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import { promisify } from "node:util";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { planningPrefix } from "../control/agent-protocol.ts";
-import type { QueuedThread } from "../contract/threads.ts";
+import type { QueuedThread, ThreadRow } from "../contract/threads.ts";
 import type { Thread } from "../control/thread-store.ts";
 import { claudeWorkerAt } from "../test-support/registry-kit.ts";
 import type { ProjectId } from "../ids.ts";
 import type { InterruptClaudeOutcome } from "../protocol/commands.ts";
 import { transcriptStart, type ClaudeEntry } from "../control/claude-transcript.ts";
-import { tempDir } from "../test-support/kit.ts";
+import { tempDir, testCapacity, testObservation } from "../test-support/kit.ts";
 import { CliError } from "./transport.ts";
 import type { Api } from "./kit.ts";
 import { threadsCommands } from "./commands/threads.ts";
-import { node, project, withHealth, listening, setup, claudeWatched } from "../test-support/cli-kit.ts";
+import { node, project, withHealth, listening, setup, claudeWatched, timeless } from "../test-support/cli-kit.ts";
+import { localTime } from "./kit.ts";
 
 test("a thread is named by a unique prefix of its ID, with or without th-, or by @last, and a full ID costs no lookup", async (t) => {
   const s = await setup(t);
@@ -154,6 +157,76 @@ test("show exposes the registry's failed worker and its selected model", async (
   assert.equal((await s.nexus(["start", "--project", "acme", "--title", "no worker", "--model", "x"])).code, 64);
 });
 
+/** Four threads: one quiet, one with a reply unseen, one whose Claude worker failed, and one idle. */
+async function fourThreads(s: Awaited<ReturnType<typeof setup>>) {
+  const start = (title: string, ...flags: string[]): Promise<Thread> => s.json(["start", "--project", "acme", "--title", title, ...flags]);
+  const quiet = await start("quiet");
+  const replied = await start("replied");
+  const broken = await start("broken", "--claude", "fix it");
+  const dozing = await start("dozing");
+  const repliedAt = Date.UTC(2026, 9, 28, 9);
+  s.registry.threads.recordReply(replied.id, repliedAt);
+  claudeWorkerAt(s.registry, broken.id, "failed", { message: "Claude launch did not complete" });
+  s.registry.threads.setThreadStatus(dozing.id, "idle");
+  return { quiet, replied, broken, dozing, repliedAt };
+}
+
+test("threads heads its columns, says each thread's attention and last reply, and --needs-me, --active and --limit narrow it", async (t) => {
+  const s = await setup(t);
+  const { quiet, replied, broken, dozing, repliedAt } = await fourThreads(s);
+  const all = await s.nexus(["threads"]);
+  assert.equal(all.code, 0, all.stderr);
+  const lines = timeless(all.stdout).split("\n");
+  assert.equal(lines[0], "Thread  Status  Attention  Run  Pylon  Project  Last reply  Title");
+  assert.ok(lines.includes(`${replied.id}  active  reply  -  unknown  acme  ${localTime(repliedAt)}  replied`), all.stdout);
+  assert.ok(lines.includes(`${quiet.id}  active  -  -  unknown  acme  no reply yet  quiet`), all.stdout);
+  assert.ok(lines.includes(`${broken.id}  active  failed  -  unknown  acme  no reply yet  broken`), all.stdout);
+  assert.ok(lines.includes(`${dozing.id}  idle  -  -  unknown  acme  no reply yet  dozing`), all.stdout);
+
+  const listed: ThreadRow[] = await s.json(["threads"]);
+  const rowsOf = (...ids: string[]) => listed.filter((r) => ids.includes(r.id));
+  assert.deepEqual(await s.json(["threads", "--needs-me"]), rowsOf(replied.id, broken.id), "--json prints the same rows, only fewer");
+  const needed = (await s.nexus(["threads", "--needs-me"])).stdout;
+  assert.deepEqual([quiet.id, replied.id, broken.id, dozing.id].map((id) => needed.includes(id)), [false, true, true, false], needed);
+  assert.deepEqual(await s.json(["threads", "--active"]), rowsOf(quiet.id, replied.id, broken.id));
+  assert.deepEqual(await s.json(["threads", "--active", "--needs-me"]), rowsOf(replied.id, broken.id));
+  assert.deepEqual(await s.json(["threads", "--limit", "2"]), listed.slice(0, 2));
+  assert.equal((await s.nexus(["threads", "--limit", "2"])).stdout.trimEnd().split("\n").length, 3, "the header and two rows");
+  for (const flags of [["--limit", "0"], ["--limit", "two"], ["--queued", "--needs-me"], ["--queued", "--active"]]) {
+    assert.equal((await s.nexus(["threads", ...flags])).code, 64, flags.join(" "));
+  }
+});
+
+test("threads colours failed and attention rows only on a terminal, and not under NO_COLOR", async (t) => {
+  const s = await setup(t);
+  const { quiet, replied, broken } = await fourThreads(s);
+  const rowOf = (text: string, id: string) => text.split("\n").find((line) => line.includes(id))!;
+  const coloured = (await s.ttyOut(["threads"])).stdout;
+  assert.ok(rowOf(coloured, broken.id).startsWith("\x1b[31m"), coloured);
+  assert.ok(rowOf(coloured, replied.id).startsWith("\x1b[33m"), coloured);
+  assert.ok(rowOf(coloured, quiet.id).startsWith(quiet.id), "a row that needs no one stays plain");
+  assert.ok(coloured.startsWith("Thread "), "the header stays plain");
+  assert.ok(!(await s.nexus(["threads"])).stdout.includes("\x1b"), "no colour when stdout is not a terminal");
+  assert.ok(!(await s.ttyOut(["threads"], { NO_COLOR: "1" })).stdout.includes("\x1b"), "no colour under NO_COLOR");
+  assert.equal(timeless((await s.ttyOut(["threads"], { NO_COLOR: "" })).stdout), timeless(coloured), "an empty NO_COLOR is unset");
+  assert.ok(!(await s.ttyOut(["threads", "--json"])).stdout.includes("\x1b"), "--json is never coloured");
+});
+
+test("wake says it recorded the person's activity and what that does to the pylon", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "sleepy"]);
+  const before = s.registry.threads.thread(thread.id)!.lastHumanActivityAt;
+  await until("the clock moves past the start", () => Date.now() > before);
+  assert.equal((await s.nexus(["wake", thread.id])).stdout, `Recorded your activity on ${thread.id}, so Nexus wakes its pylon, which is unknown.\n`);
+  assert.ok(s.registry.threads.thread(thread.id)!.lastHumanActivityAt > before);
+  assert.equal(await s.json(["wake", thread.id]), null, "--json prints null, as before");
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  s.registry.threads.ingested(testObservation(node, { pylons: [{ pylonId: thread.pylonId, phase: "broken", detail: "the controller exited", cause: "controller", logTail: "" }] }), []);
+  assert.equal((await s.nexus(["wake", thread.id])).stdout, `Recorded your activity on ${thread.id}, but its pylon failed, and activity does not retry it. \`nexus retry-pylon ${thread.id}\` does.\n`);
+  await s.json(["archive", thread.id]);
+  assert.equal((await s.nexus(["wake", thread.id])).stdout, `Recorded your activity on ${thread.id}, but it is archived, so its pylon stays paused. \`nexus unarchive ${thread.id}\` wakes it.\n`);
+});
+
 test("threads and show say a Claude worker is working while its session's turn runs", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
@@ -161,10 +234,10 @@ test("threads and show say a Claude worker is working while its session's turn r
   const report = (sequence: number, kind: "session.turn-started" | "session.turn-ended") =>
     s.registry.threads.reportSession(node, { sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1" } });
   report(1, "session.turn-started");
-  assert.match((await s.nexus(["threads"])).stdout, new RegExp(`${thread.id} +active +working +pylon`));
+  assert.match((await s.nexus(["threads"])).stdout, new RegExp(`^${thread.id} +active +working +working +`, "m"));
   assert.match((await s.nexus(["show", thread.id])).stdout, /^status: active, agent working$/m);
   report(2, "session.turn-ended");
-  assert.match((await s.nexus(["threads"])).stdout, new RegExp(`${thread.id} +active +- +pylon`));
+  assert.match((await s.nexus(["threads"])).stdout, new RegExp(`^${thread.id} +active +reply +- +`, "m"));
   assert.match((await s.nexus(["show", thread.id])).stdout, /^status: active$/m);
 });
 
@@ -176,7 +249,7 @@ test("threads, show and conversation say a Claude worker stopped on its usage li
   const until = `${new Date(resetsAt).toISOString().slice(11, 16)} UTC`;
   const entries: ClaudeEntry[] = [{ kind: "notice", at: 1, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt } }];
   s.registry.threads.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries, cursor: { ...transcriptStart, offset: 9 }, reset: false, readAt: Date.now() });
-  assert.match((await s.nexus(["threads"])).stdout, new RegExp(`${thread.id} +active +stopped on its usage limit until ${until}`));
+  assert.match((await s.nexus(["threads"])).stdout, new RegExp(`^${thread.id} +active +limited +stopped on its usage limit until ${until}`, "m"));
   const shown = (await s.nexus(["show", thread.id])).stdout;
   assert.ok(shown.includes("attention: limited"), shown);
   assert.ok(shown.includes(`usage limit: stopped on its usage limit until ${until}. \`nexus send ${thread.id} continue\` resumes it once the limit resets`), shown);
@@ -191,9 +264,9 @@ test("show says a Claude worker's turn died, when Nexus resumes it, and why Nexu
     s.registry.threads.reportSession(node, { sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1", at } });
   report(1, "session.turn-started", 1_000);
   report(2, "session.ended", 4_000);
-  assert.match((await s.nexus(["show", thread.id])).stdout, /^turn died: its Claude session ended during the turn, at 1970-01-01T00:00:04\.000Z$/m);
+  assert.ok(timeless((await s.nexus(["show", thread.id])).stdout).includes(`\nturn died: its Claude session ended during the turn, ${localTime(4_000)}\n`));
   s.registry.threads.saveClaudeResume(thread.id, { state: "waiting", turn: 4_000, count: 1, due: 64_000 });
-  assert.match((await s.nexus(["show", thread.id])).stdout, /^turn died: its Claude session ended during the turn, at 1970-01-01T00:00:04\.000Z; Nexus resumes it at 1970-01-01T00:01:04\.000Z, 1 in a row$/m);
+  assert.ok(timeless((await s.nexus(["show", thread.id])).stdout).includes(`\nturn died: its Claude session ended during the turn, ${localTime(4_000)}; Nexus resumes it ${localTime(64_000)}, 1 in a row\n`));
   const why = "Its turn died 4 times in a row (last: its Claude session ended during the turn), so Nexus stopped resuming it.";
   s.registry.threads.saveClaudeResume(thread.id, { state: "person", turn: 4_000, count: 3, why });
   const shown = (await s.nexus(["show", thread.id])).stdout;
@@ -354,7 +427,7 @@ test("start --after queues a thread in one request, and threads, show, start-que
   s.registry.prWatches.savePrWatch(first.id, { links: [pr(3, "open")], commentWakes: 0, pending: null, error: null });
   s.registry.prWatches.savePrWatch(second.id, { links: [pr(4, "closed")], commentWakes: 0, pending: null, error: null });
   const rows = (await s.nexus(["threads"])).stdout;
-  assert.match(rows, new RegExp(`^${id}\\s+blocked\\s+blocked by ${second.id}: PR #4 closed without merging\\s+node rj-firebat\\s+acme\\s+\\S+ ago\\s+Fix the next bug$`, "m"));
+  assert.match(rows, new RegExp(`^${id}\\s+blocked\\s+blocked by ${second.id}: PR #4 closed without merging\\s+rj-firebat\\s+acme\\s+\\S+ ago \\(.+\\)\\s+Fix the next bug$`, "m"));
   assert.match(rows, new RegExp(`^${later.id}\\s+queued\\s+waits for ${id}: is queued\\s`, "m"));
   assert.deepEqual((await s.json(["threads"])).map((r: Thread) => r.id), [first.id, second.id], "--json prints the thread rows alone, as before");
   assert.deepEqual((await s.json(["threads", "--queued"])).map((q: QueuedThread) => q.id), [id, later.id]);
@@ -420,6 +493,54 @@ test("send to a Claude worker whose message meets an unreachable control plane f
   assert.equal(JSON.parse(sent.stderr).kind, "unreachable");
   assert.equal(sends.length, 1, "the message may have run, so it is not sent again");
   assert.ok(Date.now() - started < 60_000, "it fails at once rather than waiting the 120 s for the pylon, and this bound only ends a hang");
+});
+
+test("send, start and item add take a message from stdin or a file as written, and text that starts with a dash after --", async (t) => {
+  const s = await setup(t, { queue: true });
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "texts"]);
+  const sent = () => s.fake.calls.at(-1)?.slice(2, 3)[0];
+  const dir = await tempDir("nexus-message-", t);
+  const file = join(dir, "message.md");
+  const awkward = "- first bullet\n--force is broken\nplease check the --json output\n";
+  await writeFile(file, awkward);
+
+  assert.equal((await s.nexus(["send", thread.id, "-"], undefined, awkward)).stdout, `Sent to ${thread.id}.\n`);
+  assert.equal(sent(), awkward.slice(0, -1), "send - reads stdin, less the last line break");
+  assert.equal((await s.nexus(["send", thread.id, "--file", file, "--steer"])).code, 0);
+  assert.deepEqual(s.fake.calls.at(-1)?.slice(2), [awkward.slice(0, -1), s.fake.calls.at(-1)![3], "steer"], "--file reads the file, and flags still parse");
+  assert.equal((await s.nexus(["send", thread.id, "--", "- first bullet"])).code, 0);
+  assert.equal(sent(), "- first bullet", "after -- text that starts with a dash is sent");
+  assert.equal((await s.nexus(["send", thread.id, "please", "check", "--steer", "this"])).code, 0);
+  assert.deepEqual(s.fake.calls.at(-1)?.slice(2), ["please check this", s.fake.calls.at(-1)![3], "steer"], "flags among the words parse as before");
+  await s.nexus(["send", thread.id, "-"], undefined, Buffer.from("\uFEFFhi\r\n"));
+  assert.equal(sent(), "\uFEFFhi", "stdin is decoded as a file is, keeping a byte order mark");
+  await s.nexus(["send", thread.id, "-", "x"]);
+  assert.equal(sent(), "- x", "- with other words is text, as before");
+
+  const before = s.fake.calls.length;
+  const refused = async (args: string[], stderr: string, stdin?: string) => assert.deepEqual(
+    [(await s.nexus(args, undefined, stdin)).stderr, s.fake.calls.length], [`nexus: ${stderr}\n`, before], args.join(" "));
+  await refused(["send", thread.id, "- first bullet"], "send takes no -. To send text that starts with a dash, put -- before it, or pass it on stdin with - or from a file with --file PATH. Run nexus send --help for usage");
+  await refused(["send", thread.id], "send needs the message: words, - to read stdin, or --file PATH. Run nexus send --help for usage");
+  await refused(["send", thread.id, "-"], "send - read nothing from stdin. Run nexus send --help for usage");
+  await refused(["send", thread.id, "hi", "--file", file], "send takes its text as words, -, or --file, not both words and --file. Run nexus send --help for usage");
+  await refused(["send", thread.id, "--file", join(dir, "none")], `--file could not read ${join(dir, "none")}: ENOENT: no such file or directory, open '${join(dir, "none")}'`);
+  await refused(["start", "--project", "acme", "--message", "--force is broken"], "--message takes a value that starts with a dash only as --message=VALUE, or from a file or stdin with --message-file PATH|-. Run nexus start --help for usage");
+  await refused(["start", "--project", "acme", "--message", "x", "--message-file", file], "--message and --message-file cannot be used together. Run nexus start --help for usage");
+  await refused(["send", thread.id, "--stee", "x"], "send takes no --stee. Did you mean --steer? To send text that starts with a dash, put -- before it, or pass it on stdin with - or from a file with --file PATH. Run nexus send --help for usage");
+  await refused(["start", "--project", "acme", "--message-file", "-", "--claude-file", "-"], "--message-file is for a Nexus agent thread. A Claude worker's first prompt is its --claude-file. Run nexus start --help for usage", "never read");
+
+  const started: Thread = await s.json(["start", "--project", "acme", "--message-file", "-"], undefined, async (args, overrides) => s.nexus(args, overrides, awkward));
+  assert.equal(started.title, "- first bullet", "the title is the file's first line");
+  assert.deepEqual(s.fake.calls.at(-1)?.slice(1, 3), [started.id, awkward.slice(0, -1)], "start --message-file - sends stdin as the first message");
+  assert.match((await s.nexus(["start", "--project", "acme", "--message-file", file])).stdout, /\nSent the first message\.\n/, "the text says a message from a file was sent");
+  const claude: Thread = await s.json(["start", "--project", "acme", "--title", "c", "--claude-file", file]);
+  assert.equal(s.registry.threads.claudeWorker(claude.id)?.prompt, `/poteto-mode ${awkward.trim()}`, "start --claude-file reads the prompt from the file");
+
+  await s.nexus(["project", "edit", "acme", "--pipeline", "approve"]);
+  const item = await s.json(["item", "add", "--project", "acme", "--message-file", file]);
+  const prompted = await s.json(["item", "add", "--project", "acme", "--claude-file", "-"], undefined, async (args, overrides) => s.nexus(args, overrides, "--force is broken"));
+  assert.deepEqual([item.brief, prompted.brief, prompted.worker], [awkward.slice(0, -1), "--force is broken", "claude"]);
 });
 
 test("show reads only a refusal coded queued as a queued thread, and passes any other 409 on", async () => {

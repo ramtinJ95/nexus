@@ -8,7 +8,7 @@
  * record keeps the ID the thread gets, and the transaction that inserts the thread's row marks the record started,
  * so it starts once whatever crashes, restarts or concurrent passes come between. What blocks it is derived on every
  * pass and read rather than stored, so a reopened or later-merged pull request unblocks it. None starts on its own while
- * a review's gate pylon waits for room, so the gate gets the room that frees first.
+ * a review's gate pylon waits for room (`gateAhead`), so the gate gets the room that frees first, and its record says so.
  */
 import { defaultClaudeModel } from "../protocol/models.ts";
 import { newThreadId, requestIds, type ProjectId, type ThreadId } from "../ids.ts";
@@ -24,7 +24,8 @@ import { deliverDurable } from "./durable-message.ts";
 import { noChangeOf, prLocationOf, servesReview, threadRole } from "./work-model.ts";
 import { brokenRule, startRules } from "../contract/threads-parse.ts";
 import { isOpenStatus } from "./reconcile.ts";
-import { waitsForRoom } from "./review-model.ts";
+import { behindOf, gateAhead } from "./review-model.ts";
+import { behindGate } from "./wording.ts";
 
 type QueueRegistry = Pick<Registry, "threads" | "images" | "reviews" | "nodeMetrics" | "nodes" | "now" | "nudges" | "planning" | "prWatches" | "projects" | "queue" | "placement">;
 
@@ -71,10 +72,16 @@ export function waitOf(registry: QueueRegistry, id: ThreadId): Wait {
   return where.kind === "open" ? waiting(id, `PR #${where.number} is open`) : waiting(id, "has no pull request yet");
 }
 
+/**
+ * What a queued thread waits for: each thread it is queued after, and once those landed, the builder of the review
+ * whose gate pylon waits for room, unless the person asked it to start now.
+ */
 export function queuedView(registry: QueueRegistry, record: QueuedRecord): QueuedThread {
   if (record.status === "started") throw new Error(`thread ${record.id} has started, so it is no longer queued`);
   const { request } = record;
-  const waits = record.after.map((id) => waitOf(registry, id));
+  const after = record.after.map((id) => waitOf(registry, id));
+  const ahead = record.startNow === null && after.every((w) => w.state === "landed") ? gateAhead(registry.reviews.reviewsToStep()) : null;
+  const waits = ahead === null ? after : [...after, waiting(ahead.builder, behindGate(behindOf(ahead)))];
   const claude = request.claude !== undefined;
   return {
     id: record.id, title: record.title, project: record.project, startedBy: record.startedBy, createdAt: record.createdAt, status: record.status,
@@ -155,7 +162,7 @@ export function threadQueue(options: {
     // A gate pylon that waits for room gets it before a builder that would take it, since a review held waiting for
     // one keeps its pull request, and the threads queued after it, from landing. Read before each start, since the
     // review loop can save a wait while an earlier start is in flight.
-    const gateWaits = () => registry.reviews.reviewsToStep().some((r) => waitsForRoom(r.phase));
+    const gateWaits = () => gateAhead(registry.reviews.reviewsToStep()) !== null;
     for (const record of registry.queue.queuedThreads()) {
       if (record.status === "started") {
         await deliver(record.id).catch((err: unknown) => log(`queued thread ${record.id} started, but its first message was not sent yet: ${(err as Error).message}`));

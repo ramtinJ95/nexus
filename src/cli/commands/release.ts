@@ -3,19 +3,20 @@ import type { Readable, Writable } from "node:stream";
 import type { ImageId } from "../../ids.ts";
 import { fullCommit, releaseOutcome, type ReleaseView } from "../../protocol/deploy.ts";
 import { CliError, UsageError } from "../transport.ts";
-import { type Api, type Io, type Result, type Command, str, request, int, table, pollUntil } from "../kit.ts";
+import { type Api, type Io, type Result, type Command, str, request, int, table, pollUntil, when } from "../kit.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { deployWaitMs, imageRoutes, releaseRoutes, type ImageEntry, type ImageOperation, type ImagesView } from "../../contract/release.ts";
 import { landOption, questionRoutes, reviewRoutes, type ReviewView } from "../../contract/reviews.ts";
 
 function releaseText(view: ReleaseView): string {
-  return [`Desired: ${view.desired === null ? "none" : `${view.desired.commit} by ${view.desired.requestedBy} at ${new Date(view.desired.requestedAt).toISOString()}`}`,
+  return [`Desired: ${view.desired === null ? "none" : `${view.desired.commit} by ${view.desired.requestedBy} ${when(view.desired.requestedAt)}`}`,
     ...view.nodes.map((r) => `${r.node} ${r.role}: ${r.commit ?? "unknown"} ${r.state}${r.worker === undefined ? "" : ` (worker ${r.worker})`}${r.reason === null ? "" : `: ${r.reason}`}`)].join("\n");
 }
 
+const imageHead = ["Image", "Role", "Built", "Release", "Nodes"];
 const imageRow = (image: ImageEntry, role: string): string[] => [
-  image.id, role, `built ${image.builtAt} on ${image.builtOn}`, `release ${image.release?.slice(0, 12) ?? "unknown"}`,
-  `on ${image.nodes.length === 0 ? "none" : image.nodes.join(", ")}`,
+  image.id, role, `${when(Date.parse(image.builtAt))} on ${image.builtOn}`, image.release?.slice(0, 12) ?? "unknown",
+  image.nodes.length === 0 ? "none" : image.nodes.join(", "),
 ];
 
 function operationText(o: ImageOperation): string {
@@ -24,7 +25,7 @@ function operationText(o: ImageOperation): string {
 
 function imagesText(view: ImagesView): string {
   const role = (id: string) => id === view.current ? "current" : id === view.previous ? "previous" : "-";
-  const images = view.images.length === 0 ? "No images." : table(view.images.map((image) => imageRow(image, role(image.id))));
+  const images = view.images.length === 0 ? "No images." : table(imageHead, view.images.map((image) => imageRow(image, role(image.id))));
   // A control plane older than 0.79.0 sends no fetches.
   const fetches = view.fetches ?? [];
   return [
@@ -208,7 +209,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
     async run(api) {
       const images = await request(api, imageRoutes.current, {});
       const rows = (["current", "previous"] as const).flatMap((role) => images[role] === null ? [] : [imageRow(images[role], role)]);
-      return { json: images, text: rows.length === 0 ? "No image is current." : table(rows) };
+      return { json: images, text: rows.length === 0 ? "No image is current." : table(imageHead, rows) };
     },
   },
 };
