@@ -40,6 +40,17 @@ test("the release view shows a deployer report 90 s old as pending, so a wait on
   assert.equal(releaseOutcome(view, deployCommit), "pending");
 });
 
+test("a deployer report may say which worker sent it, bootstrap or a release's commit, and the release view shows it", async (t) => {
+  const s = await testApi(t, { deployment });
+  assert.equal((await s.call("PUT", "/v1/release", { commit: "main" })).status, 200);
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  const report = { role: "probe", commit: deployCommit, target: deployCommit, state: "healthy", reason: null };
+  assert.equal((await s.call("POST", "/v1/deployer/report", { ...report, worker: "current" }, reporterHeaders)).status, 400);
+  for (const worker of [deployCommit, "bootstrap"]) assert.equal((await s.call("POST", "/v1/deployer/report", { ...report, worker }, reporterHeaders)).status, 200);
+  s.callAs(laptop);
+  assert.deepEqual((await s.call("GET", "/v1/release")).body.nodes.map((r: ReleaseReport) => [r.role, r.worker]), [["control", undefined], ["probe", "bootstrap"]], "a node with no report yet has no worker");
+});
+
 test("a deployer report may carry every report state", () => {
   for (const state of reportStates) assert.equal(reportSchema.parse({ role: "probe", commit: deployCommit, target: null, state, reason: null }).state, state);
 });

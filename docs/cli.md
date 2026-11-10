@@ -467,6 +467,8 @@ interface ReleaseReport {
   target: string | null;
   state: (typeof reportStates)[number];
   reason: string | null;
+  /** The deployer worker that sent it: `bootstrap`, or the commit of the release it was promoted from. Absent from a worker from before the field. */
+  worker?: string;
   /** When the control plane received the report, in Unix milliseconds, or 0 before the first. */
   observedAt: number;
 }
@@ -474,7 +476,7 @@ type Role = "control" | "probe";
 const reportStates = ["pending", "waiting-for-control", "waiting-for-idle", "installing", "healthy", "rolled-back", "failed"] as const;
 ```
 
-Missing or 90-second-old reports are pending with a reason; a probe-only node has no control row. CLI `--wait` polls every second for up to 30 minutes. Every configured component must report healthy at the full desired commit, freshly. Transient connection failures during control restart are retried. A rollback, terminal failure or deadline exits 1 with the component reasons; supersession by another release exits 5. Caller refusal is 3, invalid syntax is 64, and other transport/HTTP failures use the existing exit-code contract. Without `--wait`, success means the desired release was recorded, not deployed. `--json` prints one ReleaseView on success and the normal CLI error contract on failure.
+Missing or 90-second-old reports are pending with a reason; a probe-only node has no control row. `worker` says which deployer worker ran the poll, so a node that fell back to its bootstrap shows it; the text output prints it as `(worker bootstrap)` or `(worker <commit>)` after the state. CLI `--wait` polls every second for up to 30 minutes. Every configured component must report healthy at the full desired commit, freshly. Transient connection failures during control restart are retried. A rollback, terminal failure or deadline exits 1 with the component reasons; supersession by another release exits 5. Caller refusal is 3, invalid syntax is 64, and other transport/HTTP failures use the existing exit-code contract. Without `--wait`, success means the desired release was recorded, not deployed. `--json` prints one ReleaseView on success and the normal CLI error contract on failure.
 
 Release changes require both ordinary API admission and `deployers` membership. Configured infrastructure nodes and the control node itself are always excluded, even if listed. No new in-pylon CLI command is added. Node-only polling/reporting routes are not client routes: they require the node's tailnet identity and root token. See [deployment setup](../deploy/README.md#deploy-a-merged-commit).
 
