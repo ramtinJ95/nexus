@@ -41,7 +41,7 @@ export interface Judgment {
   phase: Phase;
 }
 
-export const holding = { tables: { judgments: { record: "failure" }, judgment_since: {} } } as const satisfies Holding;
+export const holding = { tables: { judgments: { record: "failure", purge: "thread = $thread" }, judgment_since: {} } } as const satisfies Holding;
 
 export function judgmentStore(db: Db) {
   const { transaction, sql } = db;

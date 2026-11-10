@@ -310,4 +310,10 @@ export const migrations: readonly string[] = [
   // The rounds each review spent, by its PR, so a later review of the PR counts them, whichever builder's record it
   // replaced. The review store writes the row of a review stored before as it opens.
   `CREATE TABLE IF NOT EXISTS review_rounds (review TEXT PRIMARY KEY, repo TEXT NOT NULL, number INTEGER NOT NULL, rounds INTEGER NOT NULL) STRICT;`,
+  // When each deleted thread was deleted, which its purge from the registry a week later counts from, and when retention
+  // began, which an archived thread's idle week counts from too. A thread deleted before has no time, so it gets this
+  // migration's, and retention deletes and purges nothing until a week after it.
+  `ALTER TABLE threads ADD COLUMN deleted_at INTEGER;
+   UPDATE threads SET deleted_at = CAST(strftime('%s', 'now') AS INTEGER) * 1000 WHERE status = 'deleted' AND deleted_at IS NULL;
+   INSERT OR IGNORE INTO settings (key, value) VALUES ('retention-since', CAST(CAST(strftime('%s', 'now') AS INTEGER) * 1000 AS TEXT));`,
 ];

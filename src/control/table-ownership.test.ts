@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { deletedWithThread, openDb, type Holding } from "./db.ts";
+import { deletedWithThread, openDb, purged, type Holding } from "./db.ts";
 
 const foreignReads: Record<string, string[]> = {
   // previews joins each preview's node, and harnessThreads leaves out the threads with a Claude worker.
@@ -32,9 +32,27 @@ test("a deleted thread's rows go from the tables a thread's delete cleared by ha
   assert.deepEqual(deletedWithThread([...holdings.values()]).sort(), ["session_order", "session_order_floor", "claude_transcripts", "claude_entries", "claude_messages", "claude_senders", "disk_cleanups"].sort());
 });
 
+test("every table whose rows name a thread or its pylon says what a thread's purge does with them, and each purge's condition reads its table", () => {
+  const { db } = openDb(":memory:");
+  const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> 'threads'").all() as { name: string }[]).map((r) => r.name);
+  const tied = tables.filter((table) => {
+    const columns = (db.prepare("SELECT name FROM pragma_table_info(?)").all(table) as { name: string }[]).map((c) => c.name);
+    const references = (db.prepare('SELECT "table" FROM pragma_foreign_key_list(?)').all(table) as { table: string }[]).map((f) => f.table);
+    return columns.some((c) => /thread|pylon|builder|reviewer/.test(c)) || references.includes("threads") || references.includes("pylons");
+  });
+  const declared = new Map([...holdings.values()].flatMap((h) => Object.entries(h.tables)));
+  const undecided = tied.filter((table) => {
+    const t = declared.get(table);
+    return t?.purge === undefined && t?.keptOnPurge === undefined && t?.deletedWithThread === undefined;
+  });
+  assert.deepEqual(undecided, [], "each declares purge, keptOnPurge or deletedWithThread in its holding");
+  for (const [table, where] of purged([...holdings.values()])) assert.doesNotThrow(() => db.prepare(`DELETE FROM ${table} WHERE ${where}`), `${table}'s purge`);
+  db.close();
+});
+
 test("no two stores hold one settings key", () => {
   const keys = [...holdings.values()].flatMap((h) => h.settings ?? []);
-  assert.deepEqual(keys.sort(), ["backed-up-at", "current", "deploy-drain", "image-fetches", "image-operation", "previous-image", "release", "releases:"]);
+  assert.deepEqual(keys.sort(), ["backed-up-at", "current", "deploy-drain", "image-fetches", "image-operation", "previous-image", "release", "releases:", "retention-since"]);
 });
 
 test("every registry table has one owning file, the one whose holding names it, and only its owner writes it or names it, but for the listed reads", () => {
