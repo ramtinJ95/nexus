@@ -30,6 +30,13 @@ test("the shipped example config parses", () => {
   assert.deepEqual(config.dotfiles, { repo: "https://github.com/example/dotfiles.git", ref: "main" });
 });
 
+test("a config without dotfiles parses, for pylons that keep the image's baked layer, and one with dotfiles parses as before", () => {
+  const { dotfiles, ...rest } = JSON.parse(example);
+  assert.equal(parseConfig(JSON.stringify(rest)).dotfiles, undefined);
+  assert.deepEqual(parseConfig(JSON.stringify({ ...rest, dotfiles })).dotfiles, dotfiles);
+  assert.throws(() => parseConfig(JSON.stringify({ ...rest, dotfiles: { repo: dotfiles.repo } })), /dotfiles/, "a dotfiles without its ref is still refused");
+});
+
 test("a config without the harness, or with a relative harness path, is refused", () => {
   const { harness, ...rest } = JSON.parse(example);
   assert.throws(() => parseConfig(JSON.stringify(rest)), /harness/);

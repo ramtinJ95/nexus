@@ -1,11 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { tempDir } from "../test-support/kit.ts";
-import { commitMissing, setupRemoved, templateCheckout } from "./pylon-boot.ts";
+import { bootHooks, commitMissing, setupRemoved, templateCheckout } from "./pylon-boot.ts";
+import { bakedDotfilesDir, home } from "../../images/pylon/nexus-contract.ts";
+import type { BootInputs } from "../protocol/spawn.ts";
 import type { PylonId } from "../ids.ts";
 
 const run = promisify(execFile);
@@ -40,4 +42,29 @@ test("a template boot's checkout of a commit a force-push took off its remote fa
   assert.equal(setupRemoved("pylon-th-check" as PylonId, true, "Setup exited 128", "", 128).code, "backend", "a fetch that failed is retried");
   assert.equal(await checkout(newHead), 0);
   assert.equal(await git(template, "rev-parse", "HEAD"), newHead);
+});
+
+test("a boot pulls the dotfiles repository it names, and keeps the image's baked layer without one or when the pull fails", async (t) => {
+  const dir = await tempDir("nexus-dotfiles-pull-", t);
+  const [baked, remote] = [join(dir, "baked"), join(dir, "remote")];
+  for (const [repo, layer] of [[baked, "baked"], [remote, "pulled"]] as const) {
+    await run("git", ["init", "--quiet", "--initial-branch=main", repo]);
+    await writeFile(join(repo, "install"), `#!/bin/sh\necho ${layer} > ../layer\n`, { mode: 0o755 });
+    await git(repo, "add", "install");
+    await git(repo, "commit", "--quiet", "-m", layer);
+  }
+  const [bakedAt, remoteAt] = [await git(baked, "rev-parse", "--short", "HEAD"), await git(remote, "rev-parse", "--short", "HEAD")];
+  let boots = 0;
+  const boot = async (dotfiles: BootInputs["dotfiles"]) => {
+    const user = join(dir, `home-${boots++}`);
+    await mkdir(join(user, ".nexus"), { recursive: true });
+    const hook = bootHooks({ network: { allowedHosts: [], secrets: [] }, ...dotfiles === undefined ? {} : { dotfiles } })[0]!
+      .replaceAll(bakedDotfilesDir, baked).replaceAll(home, user);
+    const { stdout } = await run("bash", ["-c", `runuser() { bash -c "herdr() { :; }; $4"; }; ${hook}`]);
+    return { log: stdout.trim().split("\n").filter((line) => line.startsWith("dotfiles:")), layer: await run("cat", [join(user, ".nexus/layer")]).then((r) => r.stdout.trim()) };
+  };
+  assert.deepEqual(await boot(undefined), { log: [`dotfiles: no repository is set, keeping ${bakedAt}`, "dotfiles: installed"], layer: "baked" });
+  assert.deepEqual(await boot({ repo: remote, ref: "main" }), { log: [`dotfiles: pulled ${remote} main at ${remoteAt}`, "dotfiles: installed"], layer: "pulled" });
+  const typo = join(dir, "typo");
+  assert.deepEqual(await boot({ repo: typo, ref: "main" }), { log: [`dotfiles: the pull of ${typo} main failed, keeping ${bakedAt}`, "dotfiles: installed"], layer: "baked" });
 });
