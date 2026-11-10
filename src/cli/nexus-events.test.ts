@@ -88,8 +88,8 @@ test("events bounds stdout buffering when its pipe is not read", { timeout: 60_0
       if (!ready) process.send({ buffered: process.stdout.writableLength });
       return ready;
     };
-    const { main } = await import(${JSON.stringify(cli)});
-    process.exitCode = await main(["events", "--follow", "--json", "--url", "http://127.0.0.1:${port}", "--socks", "none"]);
+    process.argv = [process.execPath, ${JSON.stringify(cli)}, "events", "--follow", "--json", "--url", "http://127.0.0.1:${port}", "--socks", "none"];
+    await import(${JSON.stringify(cli)});
     process.disconnect();
   `;
   const child = spawn(process.execPath, ["--input-type=module", "-e", script], { stdio: ["ignore", "pipe", "pipe", "ipc"] });

@@ -203,7 +203,7 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
   }
   // Only the poll ends the watch. The stream stops early for a thread without a conversation, which leaves the
   // watch running, or with a failure such as a refusal, which ends it.
-  const dispose = untilConsumerGone(output, () => process.exit(0));
+  const dispose = untilConsumerGone(() => process.exit(0));
   const streaming = stream();
   try {
     await Promise.race([poll(), streaming.then(() => new Promise<never>(() => {}))]);

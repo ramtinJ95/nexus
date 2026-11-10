@@ -32,7 +32,7 @@ import { runningPylon, tempDir, testCapacity, testImage, testObservation } from 
 import { version } from "../version.ts";
 import { claudeProjects } from "../../images/pylon/nexus-contract.ts";
 import { Readable, Writable } from "node:stream";
-import { main } from "../cli/nexus.ts";
+import { main } from "../cli/main.ts";
 import type { Io } from "../cli/kit.ts";
 
 export const cli = fileURLToPath(new URL("../cli/nexus.ts", import.meta.url));

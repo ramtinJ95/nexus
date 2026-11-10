@@ -24,7 +24,7 @@ export const eventsCommands: Readonly<Record<string, Command>> = {
       }
       query.follow = true;
       const stop = new AbortController();
-      const dispose = untilConsumerGone(io.stdout, () => { stop.abort(); process.exit(0); });
+      const dispose = untilConsumerGone(() => { stop.abort(); process.exit(0); });
       try {
         for (let failed = 0; !stop.signal.aborted; failed++) {
           const read = (data: unknown) => { failed = 0; return print(data as NexusEvent, stop.signal); };
