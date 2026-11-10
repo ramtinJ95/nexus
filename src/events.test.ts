@@ -53,7 +53,7 @@ test("bounded retention reports an expired cursor instead of silently skipping",
 });
 
 test("the probe journal survives restart and preserves bounded ordered replay", async () => {
-  const { eventJournal } = await import("./probe/event-journal.ts");
+  const { eventJournal, journalPerPylon } = await import("./probe/event-journal.ts");
   const dir = mkdtempSync(join(tmpdir(), "nexus-journal-"));
   const path = join(dir, "events.sqlite");
   let journal = eventJournal(path);
@@ -63,9 +63,24 @@ test("the probe journal survives restart and preserves bounded ordered replay", 
     journal = eventJournal(path);
     assert.deepEqual(journal.recent(), [first]);
     for (let i = 0; i < 101; i++) journal.append(first.pylon, { kind: "session.turn-ended", session: "c1" });
-    assert.equal(journal.recent().length, 100);
-    assert.equal(journal.recent()[0]!.sequence, 3);
+    assert.deepEqual(journal.recent().map((r) => r.sequence), Array.from({ length: journalPerPylon }, (_, i) => 102 - journalPerPylon + 1 + i));
   } finally { journal.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a pylon reporting in a loop keeps only its own share, and leaves other pylons' unread reports in the journal", async () => {
+  const { eventJournal, journalPerNode, journalPerPylon } = await import("./probe/event-journal.ts");
+  const journal = eventJournal(":memory:");
+  try {
+    const pylon = (n: number) => `pylon-t${n}` as import("./ids.ts").PylonId;
+    const quiet = journal.append(pylon(2), { kind: "session.turn-ended", session: "c2" });
+    for (let i = 0; i < 10 * journalPerNode; i++) journal.append(pylon(1), { kind: "session.heartbeat", session: "c1" });
+    const kept = journal.recent();
+    assert.deepEqual(kept.filter((r) => r.pylon === pylon(2)), [quiet]);
+    assert.equal(kept.filter((r) => r.pylon === pylon(1)).length, journalPerPylon);
+    for (let n = 3; n < 3 + journalPerNode; n++) journal.append(pylon(n), { kind: "session.turn-ended", session: `c${n}` });
+    assert.equal(journal.recent().length, journalPerNode, "the node cap still bounds the journal across many pylons");
+    assert.equal(journal.recent().some((r) => r.pylon === pylon(2)), false, "past the node cap the oldest report goes first");
+  } finally { journal.close(); }
 });
 
 test("parallel tool hooks share a throttled heartbeat, and refresh after five minutes", async () => {
