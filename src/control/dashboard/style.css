@@ -323,6 +323,8 @@ a.link { color: var(--accent); text-decoration: underline; text-underline-offset
 .row.active { background: var(--selected); color: var(--accent); }
 .row-icon { position: relative; display: inline-flex; flex: none; color: var(--text-3); }
 .row.active .row-icon { color: var(--accent); }
+/* The selected row's tint is too dark under the third text level, so its metadata takes the second. */
+.row.active .row-at, .fl-row[aria-current] :is(.fl-why, .fl-when) { color: var(--text-2); }
 .row-icon .i { width: 16px; height: 16px; }
 .row-icon .dot { position: absolute; right: -3px; bottom: -2px; width: 8px; height: 8px; box-shadow: 0 0 0 1.5px var(--side); }
 .row-icon .dot-busy, .row-icon .dot-idle { background: var(--side); }

@@ -63,6 +63,8 @@ function pairs(props: Map<string, string>): [pair: string, ratio: number, bar: n
     // Body text, and the two levels the dashboard derives from it, as text on each surface it lies on. The third level
     // sets timestamps, tags and tool calls at 10.5 to 12px, so it is small text too.
     ...["--text", "--text-2", "--text-3"].flatMap((fg) => surfaces.map((bg): [string, string, string, number] => [fg, bg, bg, 4.5])),
+    // A selected row's metadata, which takes the second level on the selected tint.
+    ["--text-2", "--selected", "--side", 4.5],
     ["--on-accent", "--accent", "--accent", 4.5], ["--term-text", "--term-bg", "--term-bg", 4.5],
     ["--add-text", "--add-bg", "--bg", 4.5], ["--del-text", "--del-bg", "--bg", 4.5],
     // Status colours, at the bar WCAG sets for large text and a control's parts.
@@ -79,8 +81,15 @@ test("every theme's text meets WCAG AA on every surface, but for the pairs macar
 
 test("a dimmed row recedes by colour, which the pairs above check, and never by opacity, which would undo them", () => {
   const dimmed = styleRules().filter(({ selector }) => /\.dim\b/.test(selector));
-  assert.ok(dimmed.some(({ body }) => /color:\s*var\(--text-3\)/.test(body)), "a dimmed row takes the third text level");
+  const byColour = dimmed.filter(({ body }) => /color:\s*var\(--text-3\)/.test(body)).map(({ selector }) => selector).join(", ");
+  for (const row of [".row.dim", "tr.dim", ".fl-row.dim"]) assert.ok(byColour.includes(row), `${row} takes the third text level`);
   assert.deepEqual(dimmed.filter(({ body }) => /opacity/.test(body)).map(({ selector }) => selector), []);
+});
+
+test("a selected row's metadata takes the second text level, which the pairs above check on the selected tint", () => {
+  const rule = styleRules().find((r) => r.at === "" && r.selector.includes(".row.active .row-at"))!;
+  assert.ok(rule.selector.includes(".fl-row[aria-current]"), rule.selector);
+  assert.match(rule.body, /color:\s*var\(--text-2\);/);
 });
 
 test("a link is underlined wherever it is, as some themes' accent is no lighter than their text", () => {
