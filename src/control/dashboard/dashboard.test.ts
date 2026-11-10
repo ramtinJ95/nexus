@@ -148,7 +148,7 @@ const marks = { ok: "✓", bad: "✕", none: "–" };
  * tool calls, folds and clipped outputs start open, and the dock under it with the run bar and the prompt box.
  */
 function conversationOf(html: string) {
-  const convo = html.split('id="convo"')[1]!.split('<section class="file-view"')[0]!;
+  const convo = html.split('id="convo"')[1]!.split('<button type="button" class="btn btn-xs jump-end"')[0]!;
   const dock = html.split('<div class="dock">')[1]!.split("</main>")[0]!;
   return {
     rows: convo.replace(/<span class="t-mark (ok|bad|none)"[^>]*>/g, (mark, state: keyof typeof marks) => `${mark}${marks[state]}`)
@@ -1556,7 +1556,7 @@ test("a thread page's stream sends its conversation, then only the text that gre
     return { grow };
   };
   const first = await stream.next();
-  assert.ok(page.includes(`data-stream="/threads/${fix.id}/stream">${first.convo}</div></div>`), "the first event is the region the page holds");
+  assert.ok(page.includes(`data-stream="/threads/${fix.id}/stream">${first.convo}</div><button type="button" class="btn btn-xs jump-end"`), "the first event is the region the page holds");
   assert.deepEqual(conversationOf(`<div id="convo" ${first.convo}<div class="dock"></main>`).rows.slice(1), ["Bash npm run build 1 line › npm run build compiling", "Hal"]);
 
   transcript.docs["pi.live"] = live("Half an <answer>", "compiling\nlinking\n");
@@ -2672,7 +2672,7 @@ test("a harness, a Claude worker and a bare thread each show the conversation, s
     const convo = html.split('id="convo"')[1]!;
     return {
       stream: /^[^>]*data-stream="([^"]*)"/.exec(convo)?.[1]?.replace(thread.id, "<id>") ?? null,
-      convo: textOf(convo.split('<section class="file-view"')[0]!.replace(/^[^>]*>/, "")).replace(thread.id, "<id>"),
+      convo: textOf(convo.split('<button type="button" class="btn btn-xs jump-end"')[0]!.replace(/^[^>]*>/, "")).replace(thread.id, "<id>"),
       run: textOf(html.split('<div id="run" data-live>')[1]!.split('<div id="composer"')[0]!).replace(thread.id, "<id>"),
       composer: /<div id="composer" data-live>\s*(<[^/>][^>]*>)?/.exec(html)?.[1] ?? null,
     };
@@ -3148,7 +3148,7 @@ test("the sidebar's release lines read as the release view does: stale and missi
 /** The page's conversation region: its named view, and what it renders. */
 function convoRegion(html: string) {
   const tag = /<div class="convo" id="convo" data-rendered-reply-at="\d*"(?: data-shows="([^"]+)")? data-live[^>]*>/.exec(html)!;
-  return { named: tag[1], inside: html.slice(tag.index + tag[0].length).split('<section class="file-view"')[0]!.replace(/<\/div><\/div>\s*$/, "") };
+  return { named: tag[1], inside: html.slice(tag.index + tag[0].length).split('<button type="button" class="btn btn-xs jump-end"')[0]!.replace(/<\/div>$/, "") };
 }
 
 test("a poll of a streaming harness thread's page names the view its stream shows rather than render it", async (t) => {
