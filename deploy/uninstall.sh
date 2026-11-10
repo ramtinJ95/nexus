@@ -61,11 +61,15 @@ operator_is_nexus() {
     process.exit(JSON.parse(require("fs").readFileSync(0, "utf8")).OperatorUser === "nexus" ? 0 : 1)'
 }
 
-# Everything Nexus puts on a machine, one `<kind> <name>` per line, in the order it goes.
+# Everything Nexus puts on a machine, one `<kind> <name>` per line, in the order it goes. $1 picks a stage: services,
+# what can still add serve entries, or rest, which is read only once those have stopped. Without $1, both.
 inventory() {
   local unit user dir ports port
-  for unit in "${units[@]}"; do echo "unit $unit"; done
-  echo "pylons controllers"
+  if [ "${1:-services}" = services ]; then
+    for unit in "${units[@]}"; do echo "unit $unit"; done
+    echo "pylons controllers"
+  fi
+  [ "${1:-rest}" = rest ] || return 0
   if has_tailscale; then
     if ports=$(PATH=$service_path tailscale serve status --json 2>/dev/null | serve_ports); then
       for port in $ports; do echo "serve $port"; done
@@ -160,15 +164,17 @@ main() {
   fi
 
   $yes || echo "Nothing is changed without --yes. The uninstall would:"
-  local plan tailscale_unread=false
-  plan=$(inventory)
-  [[ $'\n'$plan != *$'\n'"unread -"* ]] || tailscale_unread=true
-  while read -r kind name; do
-    if present "$kind" "$name" && [ -z "$(kept_by "$kind" "$name")" ]; then
-      echo "- $(describe "$kind" "$name")"
-      if $yes; then remove "$kind" "$name"; fi
-    fi
-  done <<<"$plan"
+  local plan stage tailscale_unread=false
+  for stage in services rest; do
+    plan=$(inventory "$stage")
+    [[ $'\n'$plan != *$'\n'"unread -"* ]] || tailscale_unread=true
+    while read -r kind name; do
+      if present "$kind" "$name" && [ -z "$(kept_by "$kind" "$name")" ]; then
+        echo "- $(describe "$kind" "$name")"
+        if $yes; then remove "$kind" "$name"; fi
+      fi
+    done <<<"$plan"
+  done
 
   if $yes; then echo "What remains of Nexus here:"; else echo "What would remain:"; fi
   local left=0

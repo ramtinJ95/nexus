@@ -93,7 +93,7 @@ Each role installer reads its link under the deployer's lock, so a deploy that l
 
 1. Stops, disables and removes the 7 units: `nexus-deployer.path`, `.timer` and `.service` first, so the deployer starts nothing again, then `nexus-backup.timer` and `.service`, `nexus-control.service` and `nexus-probe.service`.
 2. Stops the pylons' controllers, with `--stop-pylons`.
-3. Removes each `tailscale serve` entry whose only handler proxies `/` to the probe's preview gateway, the `previews.gatewayPort` in `/etc/nexus/probe.json`, and leaves every other entry. It unsets tailscaled's operator when that is `nexus`.
+3. Removes each `tailscale serve` entry whose only handler proxies `/` to the probe's preview gateway, the `previews.gatewayPort` in `/etc/nexus/probe.json`, and leaves every other entry. It unsets tailscaled's operator when that is `nexus`. It reads the entries only once the units and the controllers have stopped, so an entry the probe adds while it stops goes too.
 4. Removes `/etc/systemd/system/tailscaled.service.d/nexus-cert.conf`. tailscaled keeps letting `nexus-control` fetch certificates until it next restarts, which the uninstall leaves to you, since a restart drops tailnet connections for a moment.
 5. Removes `/opt/nexus`, the users and groups `nexus` and `nexus-control`, and with them `nexus`'s membership of `kvm` and `docker`, then `/etc/nexus`, `/var/lib/nexus`, `/var/lib/nexus-control` and `/var/lib/nexus-backup`.
 

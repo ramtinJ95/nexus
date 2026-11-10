@@ -15,7 +15,7 @@ const gateway = `http://127.0.0.1:${ports.gateway}`;
  * outside the file system: systemd, the users and groups, the pylons' controllers and tailscaled. Each shim keeps its
  * state in a file under `state` and logs each change it makes to `log`.
  */
-async function machine(t: TestContext, { controllers = [] as number[], booting = [] as number[], hiddenFor = 0, stopWait = 180 } = {}) {
+async function machine(t: TestContext, { controllers = [] as number[], booting = [] as number[], hiddenFor = 0, stopWait = 180, lateEntry = false } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "nexus-uninstall-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const root = join(dir, "root");
@@ -69,7 +69,12 @@ async function machine(t: TestContext, { controllers = [] as number[], booting =
   await shim("userdel", `echo "userdel $*" >> "$log"\nNAME=$1\n${drop("users")}`);
   await shim("groupdel", `echo "groupdel $*" >> "$log"\nNAME=$1\n${drop("groups")}`);
   await shim("pgrep", `echo >> "$state/pgrep-calls"\n[ "$(wc -l < "$state/pgrep-calls")" -gt ${hiddenFor} ] || exit 1\n[ "$1 $2" = "-u nexus" ] && cat "$state/controllers"`);
-  await shim("systemctl", `case $1 in show|is-active|is-enabled) exit 0 ;; esac\necho "systemctl $*" >> "$log"`);
+  const late = `[ "$*" != "disable --now ${unitNames.probe}" ] || node -e '
+  const fs = require("fs"), file = process.argv[1], config = JSON.parse(fs.readFileSync(file, "utf8"));
+  config.TCP[3002] = { HTTPS: true };
+  config.Web["firebat.tail1234.ts.net:3002"] = { Handlers: { "/": { Proxy: process.argv[2] } } };
+  fs.writeFileSync(file, JSON.stringify(config));' "$state/serve.json" "${gateway}"`;
+  await shim("systemctl", `case $1 in show|is-active|is-enabled) exit 0 ;; esac\necho "systemctl $*" >> "$log"\n${lateEntry ? late : ""}`);
   await shim("tailscale", `case "$1 $2" in
 "serve status") cat "$state/serve.json" ;;
 "debug prefs") cat "$state/prefs.json" ;;
@@ -194,6 +199,16 @@ test("a controller that starts after the check is not stopped without --stop-pyl
   assert.equal(run.code, 1);
   assert.match(run.stderr, /the pylons' controllers 4242 started after the check\. Rerun with --stop-pylons/);
   assert.ok(!(await m.changes()).some((line) => line.startsWith("kill ")));
+});
+
+test("a serve entry the probe adds while it stops is read after the services stop, and removed", async (t) => {
+  const m = await machine(t, { lateEntry: true });
+  const run = await m.run("--yes", "--remove-backups");
+  assert.equal(run.code, 0, run.stderr);
+  const removed = (await m.changes()).filter((line) => line.startsWith("tailscale serve"));
+  assert.deepEqual(removed, ["tailscale serve --https=443 off", "tailscale serve --https=3001 off", "tailscale serve --https=3002 off"]);
+  assert.deepEqual(await m.serve(), ["firebat.tail1234.ts.net:8443"]);
+  assert.match(run.stdout, /What remains of Nexus here:\n- nothing\n/);
 });
 
 test("--keep-state keeps the state directories, /etc/nexus and the users that own them, and removes the rest", async (t) => {
