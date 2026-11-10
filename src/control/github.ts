@@ -60,6 +60,15 @@ export interface GitHub {
   has(repo: string, commit: string, path: string): Promise<boolean>;
 }
 
+/**
+ * What GitHub last said of the client's token: `refused` for a 401, which an expired or revoked token gets, and
+ * otherwise when it expires, as GitHub's github-authentication-token-expiration header gives it, null without one.
+ */
+export type TokenAnswer = { kind: "refused" } | { kind: "accepted"; expiresAt: string | null };
+
+/** How old the token's last answer may be before `token()` asks GitHub again. */
+const tokenAnswerMaxAgeMs = 60 * 60_000;
+
 export function githubRepo(url: string | null): string | null {
   return url?.match(/^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/)?.[1] ?? null;
 }
@@ -78,7 +87,8 @@ const changedFile = (f: FileEntry): ChangedFile => ({ path: f.filename, previous
  * Each resource has its own ETag: a PR's ETag says nothing about its checks or comments. The cache keeps the resources
  * read most recently, and drops a PR's commit resources once its head moves, since nothing reads them again.
  */
-export function githubClient(token: string, request: typeof fetch = fetch): GitHub {
+export function githubClient(token: string, request: typeof fetch = fetch, clock: () => number = Date.now): GitHub & { token(): Promise<TokenAnswer> } {
+  let answer: { at: number; value: TokenAnswer } | null = null;
   const cache = new Map<string, { etag: string | null; value: unknown; next: string | null }>();
   /** Each open PR's head at its last read, by repository and number. */
   const heads = new Map<string, string>();
@@ -88,7 +98,7 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
     const retryAfter = response.headers.get("retry-after");
     const exhausted = response.headers.get("x-ratelimit-remaining") === "0";
     if ((response.status === 403 || response.status === 429) && (exhausted || retryAfter !== null)) {
-      const now = Date.now();
+      const now = clock();
       const after = retryAfter === null ? NaN : /^\d+(?:\.\d+)?$/.test(retryAfter) ? now + Number(retryAfter) * 1000 : Date.parse(retryAfter);
       const reset = exhausted ? Number(response.headers.get("x-ratelimit-reset")) * 1000 : NaN;
       const deadlines = [after, reset].filter((at) => Number.isFinite(at) && at >= now);
@@ -99,8 +109,19 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
   }
   /** No request goes out while a rate limit lasts, and none follows a redirect away from GitHub. */
   async function call(path: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) {
-    if (Date.now() < retryAt) throw new Error("GitHub is waiting for its rate limit");
-    return await request(`https://api.github.com${path}`, { ...init, headers: { ...headers, ...init.headers }, signal: AbortSignal.timeout(30_000), redirect: "error" });
+    if (clock() < retryAt) throw Object.assign(new Error("GitHub is waiting for its rate limit"), { code: "rate-limited" });
+    const response = await request(`https://api.github.com${path}`, { ...init, headers: { ...headers, ...init.headers }, signal: AbortSignal.timeout(30_000), redirect: "error" });
+    noteToken(response);
+    return response;
+  }
+  // A 304 or an error other than 401 may leave the header out, so only a 2xx without it says the token has no expiry.
+  function noteToken(response: Response) {
+    const expiration = response.headers.get("github-authentication-token-expiration");
+    const expiresAt = expiration === null ? NaN : Date.parse(expiration);
+    const value: TokenAnswer | null = response.status === 401 ? { kind: "refused" }
+      : !Number.isNaN(expiresAt) ? { kind: "accepted", expiresAt: new Date(expiresAt).toISOString() }
+      : response.ok ? { kind: "accepted", expiresAt: null } : null;
+    if (value !== null) answer = { at: clock(), value };
   }
   /** Makes `path` the most recently used entry, evicting the least recently used one when the cache is full. */
   function remember(path: string, entry: { etag: string | null; value: unknown; next: string | null }) {
@@ -145,6 +166,20 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
     return all;
   }
   return {
+    /** The token's last answer, asking GitHub's rate limit, which costs none of it, when no call had one in the last hour. */
+    async token() {
+      if (answer === null || clock() - answer.at >= tokenAnswerMaxAgeMs) {
+        try {
+          const response = await call("/rate_limit");
+          await response.body?.cancel();
+          if (!response.ok) limited(response);
+          if (answer === null) throw Object.assign(new Error(`GitHub rate limit: HTTP ${response.status}`), { code: `HTTP-${response.status}` });
+        } catch (err) {
+          if (answer === null) throw err;
+        }
+      }
+      return answer.value;
+    },
     async find(repo, branch, state = "open") {
       const prs = await list<Pr>(`/repos/${repo}/pulls?state=${state}&head=${encodeURIComponent(`${repo.split("/")[0]}:${branch}`)}`);
       return prs.filter((p) => p.head.repo?.full_name.toLowerCase() === repo.toLowerCase()).map((p) => p.number);

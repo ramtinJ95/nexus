@@ -627,7 +627,7 @@ Path('/etc/nexus/github-token').write_text(values[0] + '\n')
 PY
 ```
 
-Add `"github": { "tokenFile": "/etc/nexus/github-token" }` to `/etc/nexus/control.json`, then restart the control plane during your normal deployment window. Rotation requires replacing the file and restarting. Never put the value in JSON, logs or a pylon. A configured unreadable/empty/malformed file fails startup rather than silently disabling watching. With `github` omitted, watching is off and `nexus show` and the dashboard say so once per detail view.
+Add `"github": { "tokenFile": "/etc/nexus/github-token" }` to `/etc/nexus/control.json`, then restart the control plane during your normal deployment window. Rotation requires replacing the file and restarting. `nexus doctor`'s `github-token` check warns 14 days before this token expires and fails once GitHub refuses it. It cannot read the `GH_TOKEN` copy in each node's `/etc/nexus/secrets.env`, so renew that copy at the same time. Never put the value in JSON, logs or a pylon. A configured unreadable/empty/malformed file fails startup rather than silently disabling watching. With `github` omitted, watching is off and `nexus show` and the dashboard say so once per detail view.
 
 Discovery watches `origin/` branch outputs for projects with a github.com repository. It does not infer a scratch project's published repository or another remote's identity. Network/authentication failures remain visible as a PR-watch error on the thread detail and are retried. The watcher stops a thread after ten consecutive comment-only wakes; archive/unarchive preserves that stop and all cursors. There is no reset command in this version.
 

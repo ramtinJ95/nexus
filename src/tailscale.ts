@@ -19,6 +19,8 @@ export interface TailnetDevice {
   host: string | null;
   /** The first IPv4 address of its TailscaleIPs. */
   ipv4: string | null;
+  /** The ISO time its node key expires, null when key expiry is off for it, as tailscaled then reports no KeyExpiry. */
+  keyExpiry: string | null;
 }
 
 export interface TailscaleStatus {
@@ -47,10 +49,11 @@ export function parseTailscaleStatus(json: string): TailscaleStatus {
 
 function tailnetDevice(raw: unknown): TailnetDevice | null {
   if (typeof raw !== "object" || raw === null) return null;
-  const { ID, DNSName, TailscaleIPs } = raw as { ID?: unknown; DNSName?: unknown; TailscaleIPs?: unknown };
+  const { ID, DNSName, TailscaleIPs, KeyExpiry } = raw as { ID?: unknown; DNSName?: unknown; TailscaleIPs?: unknown; KeyExpiry?: unknown };
   const nonEmpty = (value: unknown) => typeof value === "string" && value !== "" ? value : null;
   const ipv4 = Array.isArray(TailscaleIPs) ? TailscaleIPs.find((a): a is string => typeof a === "string" && !a.includes(":")) : undefined;
-  return { id: nonEmpty(ID), host: nonEmpty(DNSName)?.replace(/\.$/, "") ?? null, ipv4: ipv4 ?? null };
+  const expiry = typeof KeyExpiry === "string" ? Date.parse(KeyExpiry) : NaN;
+  return { id: nonEmpty(ID), host: nonEmpty(DNSName)?.replace(/\.$/, "") ?? null, ipv4: ipv4 ?? null, keyExpiry: Number.isNaN(expiry) ? null : new Date(expiry).toISOString() };
 }
 
 export async function tailscaleStatus(cli: TailscaleCli): Promise<TailscaleStatus> {

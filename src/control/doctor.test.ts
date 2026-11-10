@@ -30,6 +30,8 @@ function nodeOf(name: NodeName, over: Partial<NodeSummary> = {}): NodeSummary {
 const report = (n: NodeName, role: ReleaseReport["role"], over: Partial<ReleaseReport> = {}): ReleaseReport =>
   ({ node: n, role, commit, target: commit, state: "healthy", reason: null, observedAt: now - 10_000, ...over });
 
+const device = (name: NodeName, keyExpiry: string | null) => ({ id: `n${name}`, host: `${name}.example.ts.net`, ipv4: "100.64.0.1", keyExpiry });
+
 function healthy(over: Partial<DoctorFacts> = {}): DoctorFacts {
   return {
     now,
@@ -40,6 +42,8 @@ function healthy(over: Partial<DoctorFacts> = {}): DoctorFacts {
     backup: { ranAt: iso(now - 3 * hour), succeeded: true, newest: { name: "2026-11-01T09-00-00Z", verified: true, createdAt: iso(now - 3 * hour) } },
     login: { provider: "openai", modelId: "gpt-6-astra", credential: "oauth", offered: ["gpt-6-astra", "gpt-6-mini"], refresh: { ok: true } },
     certificate: { kind: "served", hostname: "rj-firebat.example.ts.net", validTo: iso(now + 60 * day), forHostname: true },
+    github: { kind: "accepted", expiresAt: iso(now + 90 * day) },
+    tailnet: [device(node, iso(now + 120 * day)), device(peer, null)],
     keptArchives: [],
     ...over,
   };
@@ -62,9 +66,9 @@ test("a healthy install passes every check, the control plane's first and then e
   assert.equal(r.at, iso(now));
   assert.equal(r.status, "ok");
   assert.deepEqual(r.checks.map((c) => [c.node, c.name, c.status]), [
-    [null, "release", "ok"], [null, "backup", "ok"], [null, "login", "ok"], [null, "certificate", "ok"], [null, "archived-disks", "ok"],
-    [node, "online", "ok"], [node, "release", "ok"], [node, "disk", "ok"], [node, "pylons", "ok"],
-    [peer, "online", "ok"], [peer, "release", "ok"], [peer, "disk", "ok"], [peer, "pylons", "ok"],
+    [null, "release", "ok"], [null, "backup", "ok"], [null, "login", "ok"], [null, "github-token", "ok"], [null, "certificate", "ok"], [null, "archived-disks", "ok"],
+    [node, "online", "ok"], [node, "release", "ok"], [node, "disk", "ok"], [node, "pylons", "ok"], [node, "tailnet-key", "ok"],
+    [peer, "online", "ok"], [peer, "release", "ok"], [peer, "disk", "ok"], [peer, "pylons", "ok"], [peer, "tailnet-key", "ok"],
   ]);
 });
 
@@ -184,4 +188,35 @@ test("a missing backup status only warns while this control plane has run under 
 
 test("a login that could not be read fails the login check with the error's code", () => {
   expect(healthy({ login: { unreadable: "EACCES" } }), null, "login", "fail", /could not be read, with a EACCES error/);
+});
+
+test("the control plane's GitHub token is ok with weeks left or no expiry, warns under 14 days or unread, and fails expired or refused, naming the pylons' copy it does not read", () => {
+  const expiring = (left: number) => healthy({ github: { kind: "accepted", expiresAt: iso(now + left) } });
+  const copy = /each node's GH_TOKEN in \/etc\/nexus\/secrets\.env, which the pylons get, is another copy this check does not read/i;
+  expect(healthy(), null, "github-token", "ok", /valid for 90 days/);
+  expect(healthy(), null, "github-token", "ok", copy);
+  expect(expiring(14 * day), null, "github-token", "ok", /valid for 14 days/);
+  expect(healthy({ github: { kind: "accepted", expiresAt: null } }), null, "github-token", "ok", /no expiry/);
+  expect(healthy({ github: { kind: "none" } }), null, "github-token", "ok", /names no github\.tokenFile, so the PR watch, the review loop and landings are off/);
+  expect(expiring(13 * day), null, "github-token", "warn", /expires in 13 days, at 2026-11-14T12:00:00\.000Z.*Install a new token in github\.tokenFile/);
+  expect(expiring(13 * day), null, "github-token", "warn", copy);
+  expect(expiring(5 * hour), null, "github-token", "warn", /expires in 5 h/);
+  expect(healthy({ github: { kind: "unread", error: "TimeoutError" } }), null, "github-token", "warn", /no answer .* TimeoutError error, so its expiry is unknown/);
+  expect(expiring(0), null, "github-token", "fail", /expired at 2026-11-01T12:00:00\.000Z, so the PR watch, the review loop and landings fail/);
+  expect(healthy({ github: { kind: "refused" } }), null, "github-token", "fail", /GitHub refuses the control plane's token/);
+  expect(healthy({ github: { kind: "refused" } }), null, "github-token", "fail", copy);
+});
+
+test("each node's tailnet key is ok with weeks left or expiry off, warns under 14 days or when tailscaled's status does not tell, and fails expired", () => {
+  const keys = (control: string | null, other: string | null) => healthy({ tailnet: [device(node, control), device(peer, other)] });
+  expect(healthy(), node, "tailnet-key", "ok", /^its tailnet key is valid for 120 days$/);
+  expect(healthy(), peer, "tailnet-key", "ok", /^key expiry is off for it in the tailnet$/);
+  expect(keys(iso(now + 14 * day), null), node, "tailnet-key", "ok", /valid for 14 days/);
+  expect(keys(null, iso(now + 3 * day)), peer, "tailnet-key", "warn", /expires in 3 days, at 2026-11-04T12:00:00\.000Z, and then it drops off the tailnet\. Turn off key expiry/);
+  expect(keys(null, iso(now + 3 * day)), peer, "tailnet-key", "warn", /^(?!.*the API)/);
+  expect(keys(null, iso(now + 3 * day)), node, "tailnet-key", "ok", /off/);
+  expect(keys(iso(now + 10 * day), null), node, "tailnet-key", "warn", /expires in 10 days.*drops off the tailnet, which takes the API, the dashboard, the CLI and every alert with it/);
+  expect(keys(null, iso(now - hour)), peer, "tailnet-key", "fail", /expired at 2026-11-01T11:00:00\.000Z, so it is off the tailnet\. .*tailscale up --force-reauth/);
+  expect(healthy({ tailnet: [device(node, null)] }), peer, "tailnet-key", "warn", /does not list tailnet node ninfra-testbench, so its key expiry is unknown\. Check that infra-testbench\.example\.ts\.net is in the tailnet/);
+  expect(healthy({ tailnet: { unreadable: "ECONNREFUSED" } }), node, "tailnet-key", "warn", /status .* could not be read, with a ECONNREFUSED error/);
 });

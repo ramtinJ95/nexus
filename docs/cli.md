@@ -1922,6 +1922,7 @@ control plane
   ok    release         control on rj-firebat runs the desired 0123456789ab and is healthy
   fail  backup          the newest backup, 2026-10-30T00-23-41Z, is 2 days old, and the run at 2026-11-01T00:41:02.000Z failed. sudo systemctl status nexus-backup and journalctl -u nexus-backup on the control plane's machine say why
   ok    login           signed in to openai with ChatGPT, which offers gpt-6-astra
+  ok    github-token    the control plane's GitHub token is valid for 74 days. This is the control plane's token in github.tokenFile. Each node's GH_TOKEN in /etc/nexus/secrets.env, which the pylons get, is another copy this check does not read
   ok    certificate     the dashboard's certificate for rj-firebat.example.ts.net is valid for 62 days
   ok    archived-disks  no archived disk is kept past its 24 hours
 rj-firebat
@@ -1929,7 +1930,8 @@ rj-firebat
   ok    release         probe on rj-firebat runs the desired 0123456789ab and is healthy
   warn  disk            12.4 of 98.0 GiB free at /var/lib/nexus-control, low. Free space there, or delete archived threads
   ok    pylons          3 up, 2 paused, none crashed or orphaned
-1 failed, 1 warned, 7 ok
+  ok    tailnet-key     key expiry is off for it in the tailnet
+1 failed, 1 warned, 9 ok
 ```
 
 `--json` prints the report:
@@ -1950,8 +1952,8 @@ type Status = (typeof statuses)[number];
 type Check = Verdict & ({ node: NodeName; name: NodeCheckName } | { node: null; name: ControlCheckName });
 /** `text` is one line: what is wrong and what to do, or what was found when nothing is. */
 interface Verdict { status: Status; text: string }
-type NodeCheckName = "online" | "release" | "disk" | "pylons";
-type ControlCheckName = "release" | "backup" | "login" | "certificate" | "archived-disks";
+type NodeCheckName = "online" | "release" | "disk" | "pylons" | "tailnet-key";
+type ControlCheckName = "release" | "backup" | "login" | "github-token" | "certificate" | "archived-disks";
 ```
 
 The control plane runs the same checks every 5 minutes and keeps each change of a check's status that two passes in a row confirmed, for 30 days, as [the design's health alerts](design.md#doctor-and-health-alerts) describe. Any allowed caller may read them, as it may `nodes` and `release`. `GET /v1/checks` serves a `HealthView`, and `GET /v1/checks/changes` every `HealthChange` kept, newest first. `POST /v1/checks/seen` with `{"through": number}` marks each open problem whose change's `id` is `through` or lower seen, and answers 204. The dashboard's Health page sends it, and any caller may, since what the person saw changes no check. Each change is also a `health.changed` event, with the `HealthChange` as its payload and no thread.
