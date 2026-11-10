@@ -1,4 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
+import type { Readable, Writable } from "node:stream";
 import type { ParseArgsOptionsConfig } from "node:util";
 import type { z } from "zod";
 import type { Project } from "../contract/projects.ts";
@@ -18,8 +19,16 @@ export async function request<R extends ApiRoute>(api: Api, route: R, args: Call
 }
 /** With `exit`, the command prints its result and then exits as that kind of failure. */
 export interface Result { json: unknown; text: string; exit?: ErrorKind }
+/** The process's streams and environment, or a test's, which runs the CLI in its own process. */
+export interface Io {
+  readonly stdin: Readable & { readonly isTTY?: boolean };
+  readonly stdout: Writable;
+  readonly stderr: Writable & { readonly isTTY?: boolean };
+  readonly env: Readonly<Record<string, string | undefined>>;
+}
 interface Local {
   connect(path: string): Promise<WebSocket>;
+  io: Io;
 }
 export interface Command {
   /** Commands that share an entry share the array. */

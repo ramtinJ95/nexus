@@ -1,14 +1,15 @@
 import { version } from "../version.ts";
 import { configFile } from "./config.ts";
 import { commands } from "./commands/index.ts";
+import type { Io } from "./kit.ts";
 
-export const usage = `nexus ${version}, the Nexus control plane from this Mac
+export const usage = (env: Io["env"]) => `nexus ${version}, the Nexus control plane from this Mac
 
 ${[...new Set(Object.values(commands).map((command) => command.help))].flat().join("\n")}
   nexus --version
 
 Every command takes --json, --url URL and --socks HOST:PORT|none. The URL and proxy come from those flags,
-then NEXUS_URL and NEXUS_SOCKS, then ${configFile()}, which \`nexus connect\` writes. Without a proxy the CLI
+then NEXUS_URL and NEXUS_SOCKS, then ${configFile(env)}, which \`nexus connect\` writes. Without a proxy the CLI
 connects directly.
 `;
 
