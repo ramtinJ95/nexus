@@ -22,7 +22,7 @@ import { artifactDirectory, sha256Of, tarCodec, type ArtifactDirectory } from ".
 import { JobFailure } from "../protocol/jobs.ts";
 import { reapGroup, signalGroup } from "../process-group.ts";
 import { compare } from "../util/compare.ts";
-import { imageIdOf, pinsSchema, type ImageManifest, type ImageRecipe } from "../protocol/images.ts";
+import { buildPinsSchema, imageIdOf, type BuildPins, type ImageManifest, type ImageRecipe } from "../protocol/images.ts";
 import { loadImageRecipe } from "./recipe.ts";
 import { shellQuote } from "../shell.ts";
 import type { ImageId, NodeName } from "../ids.ts";
@@ -35,8 +35,8 @@ const gondolinBuild = fileURLToPath(new URL("./gondolin-build.ts", import.meta.u
  * The recipe arrives in a job, so its paths, modes, pins and agent setup manifest are checked again before
  * anything touches the disk.
  */
-function parseRecipe(recipe: ImageRecipe): ImageRecipe {
-  const pins = pinsSchema.safeParse(recipe.pins);
+function parseRecipe(recipe: ImageRecipe): ImageRecipe & { pins: BuildPins } {
+  const pins = buildPinsSchema.safeParse(recipe.pins);
   if (!pins.success) throw new JobFailure("invalid", `recipe pins: ${z.prettifyError(pins.error)}`);
   for (const { path, mode } of recipe.files) {
     if (path.startsWith("/") || path.split("/").some((part) => part === "" || part === "." || part === "..")) {
@@ -80,7 +80,7 @@ async function writeRecipeFiles(files: ImageRecipe["files"], context: string): P
   for (const dir of dirs) await chmod(dir, 0o755);
 }
 
-function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
+function dockerBuildArgs(pins: BuildPins): Record<string, string> {
   return {
     DEBIAN_DIGEST: pins.debianDigest,
     NODE_VERSION: pins.node,
@@ -88,6 +88,7 @@ function dockerBuildArgs(pins: ImageRecipe["pins"]): Record<string, string> {
     CLAUDE_CODE_VERSION: pins.claudeCode,
     PI_VERSION: pins.pi,
     HERDR_VERSION: pins.herdr,
+    HERDR_SHA256: pins.herdrSha256,
     PI_ENV_VERSION: pins.piEnv,
     PI_ENV_SHA256: pins.piEnvSha256,
     DOTFILES_COMMIT: pins.dotfilesCommon,

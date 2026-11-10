@@ -3,7 +3,7 @@ import { request } from "./request.js";
 import { answerFinal } from "../plain-wording.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { questionRoutes } from "../../contract/reviews.ts";
-import { chunk, end, onSwap, refreshAfter, showError, whenRunning } from "./page.js";
+import { chunk, end, notify, onSwap, refreshAfter, whenRunning } from "./page.js";
 import { review, reviewSent } from "./review-notes.js";
 import { kept } from "./contract.ts";
 import { composerDraft } from "./draft.js";
@@ -27,27 +27,29 @@ function showStatus(text) {
 // The last message sent. Sending the same text again after a failure reuses its request ID, so a send whose
 // reply was lost is not posted twice. One send at a time, so a second one cannot take the first one's ID.
 let outgoing = null;
-document.addEventListener("submit", async (event) => {
+document.addEventListener("submit", (event) => {
   if (!event.target.matches("#prompt")) return;
   event.preventDefault();
   if (outgoing?.inFlight) return;
-  const form = event.target;
-  const thread = form.dataset.thread;
-  const text = form.elements.text.value;
-  // The notes as they are now, so an edit saved while the send is out is not taken as sent.
-  const composed = { composed: review.composed, notes: review.notes.filter((n) => review.composed?.ids.includes(n.id)) };
+  const text = event.target.elements.text.value;
   // The button pressed, or the one its shortcut stands for, says whether the message steers the run or follows it.
   const mode = event.submitter?.value ?? "followUp";
-  if (outgoing?.text !== text) outgoing = { text, requestId: newRequestId() };
-  outgoing.inFlight = true;
-  for (const send of form.querySelectorAll("button[type=submit]")) send.disabled = true;
-  const { requestId } = outgoing;
-  const post = () => request(threadRoutes.message, { thread, body: { text, requestId, mode } });
+  return send(event.target, { text, mode, requestId: outgoing?.text === text ? outgoing.requestId : newRequestId() });
+});
+
+async function send(form, message) {
+  const thread = form.dataset.thread;
+  const { text, requestId } = message;
+  // The notes as they are now, so an edit saved while the send is out is not taken as sent.
+  const composed = { composed: review.composed, notes: review.notes.filter((n) => review.composed?.ids.includes(n.id)) };
+  outgoing = { text, requestId, inFlight: true };
+  for (const button of form.querySelectorAll("button[type=submit]")) button.disabled = true;
+  const post = () => request(threadRoutes.message, { thread, body: message });
   try {
     const terminalOnly = form.dataset.claude === undefined || !text.trimStart().startsWith("/") ? null : (await chunk(import("./slash.js"))).terminalOnlyReason(text, thread);
     if (terminalOnly !== null) {
       outgoing = null;
-      return showError("action-error", new Error(terminalOnly));
+      return notify(new Error(terminalOnly));
     }
     // A Claude worker's message is typed in its pylon, so it waits for a paused pylon to wake, under the same request
     // ID, which the API types once however often it is asked.
@@ -58,7 +60,7 @@ document.addEventListener("submit", async (event) => {
     outgoing = null;
     reviewSent(composed, text);
     draft.sent(thread, text);
-    showError("action-error", null);
+    notify(null);
     await refreshAfter();
     end?.toEnd();
   } catch (err) {
@@ -68,11 +70,16 @@ document.addEventListener("submit", async (event) => {
     // The reader checks the conversation, and sending again is a new message. A 503 may still be typed, and its
     // reason says so: sending the same text again keeps the request ID, which answers what became of it.
     if (err.status === 422) outgoing = null;
-    showError("action-error", err.status === 422 || err.status === 503 ? err : new Error(`The message was not sent: ${err.message}`));
+    // A send that timed out may have reached the agent. Try again sends the same message under the same request ID,
+    // whatever the draft holds now, so it goes at most once. A thread that takes no messages any more refuses it.
+    if (err.timedOut) notify(new Error(`The message may not have been sent: ${err.message}.`), () => {
+      if (!outgoing?.inFlight) void send(document.getElementById("prompt") ?? form, message);
+    });
+    else notify(err.status === 422 || err.status === 503 ? err : new Error(`The message was not sent: ${err.message}`));
   } finally {
-    for (const send of document.querySelectorAll("#prompt button[type=submit]")) send.disabled = false;
+    for (const button of document.querySelectorAll("#prompt button[type=submit]")) button.disabled = false;
   }
-});
+}
 
 // A swap keeps the prompt box, so only a box that was not there before, as on unarchiving, takes the draft.
 onSwap(() => {
@@ -111,17 +118,17 @@ document.addEventListener("submit", async (event) => {
   const choices = askChoices(form);
   const headers = [...form.querySelectorAll("fieldset.ask-q")].map((q) => q.dataset.header);
   const missing = choices.findIndex((c) => c.picked.length === 0 && c.own === undefined);
-  if (missing !== -1) return void showError("action-error", new Error(`Answer "${headers[missing]}" first: pick an option or write your own answer.`));
+  if (missing !== -1) return void notify(new Error(`Answer "${headers[missing]}" first: pick an option or write your own answer.`));
   const summary = choices.map((c, i) => `${headers[i]}: ${[...c.picked, ...(c.own === undefined ? [] : [c.own])].join(", ")}`).join("; ");
   if (!confirm(`Answer Claude "${summary}"? ${answerFinal}`)) return;
   const submit = form.querySelector("button[type=submit]");
   submit.disabled = true;
   try {
     await request(questionRoutes.answer, { question: form.dataset.question, body: { choices } });
-    showError("action-error", null);
+    notify(null);
     await refreshAfter();
   } catch (err) {
-    showError("action-error", err);
+    notify(err);
     submit.disabled = false;
     // An ask nobody waits for any more is withdrawn, so the page drops its form.
     if (err.status === 409) await refreshAfter();

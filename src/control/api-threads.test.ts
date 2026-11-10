@@ -26,7 +26,7 @@ test("starting a thread creates its pylon, boots fresh from the current image, a
   assert.deepEqual(s.calls, [["start", { threadId: thread.id, pylonId: thread.pylonId }]]);
   assert.equal(thread.conversationId, "1");
   assert.deepEqual(s.woken, [node]);
-  const row = { ...thread, attention: null, desired: "running", pylon: { node, actualState: "unknown", failed: null } };
+  const row = { ...thread, attention: null, desired: "running", pylon: { node, actualState: "unknown", failed: null }, pullRequestNumbers: [] };
   assert.deepEqual((await s.call("GET", "/v1/threads")).body, [row]);
   assert.deepEqual((await s.call("GET", "/v1/threads?project=acme")).body, [row]);
   assert.deepEqual((await s.call("GET", "/v1/threads?project=other")).body, []);
@@ -157,7 +157,7 @@ test("each row of the list says what its thread's detail says, over threads on t
   const listed = async () => {
     const rows = (await s.call("GET", "/v1/threads")).body as ThreadRow[];
     const details = await Promise.all(rows.map(async (r) => (await s.call("GET", `/v1/threads/${r.id}`)).body as ThreadDetail));
-    assert.deepEqual(rows, details.map((d) => ({ ...d.thread, attention: d.attention, desired: d.desired, pylon: { node: d.pylon.node, actualState: d.pylon.actualState, failed: d.pylon.failed } })));
+    assert.deepEqual(rows, details.map((d) => ({ ...d.thread, attention: d.attention, desired: d.desired, pylon: { node: d.pylon.node, actualState: d.pylon.actualState, failed: d.pylon.failed }, pullRequestNumbers: d.pullRequests.map((pr) => pr.number) })));
     return rows.map((r) => [r.id, r.pylon.node, r.pylon.actualState, r.attention]);
   };
   assert.deepEqual(await listed(), [

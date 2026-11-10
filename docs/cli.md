@@ -66,7 +66,7 @@ Before 0.9.0, `attach` ran ssh to the pylon's node, chosen by `"ssh"` in the con
 - `cols` and `rows` are the terminal's size, whole numbers from 1 to 9999, and both are required, because Herdr refuses a terminal of zero size. `term` is the terminal type, which matches `^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$`, and is `xterm-256color` when it is left out. The CLI sends `$TERM` when it matches, and `xterm-256color` otherwise.
 - `pane` is the Herdr pane the terminal lands in, such as `w2:p1`, in place of the Claude worker's, and matches `^w[0-9]{1,9}:p[0-9]{1,9}$`. The route passes it to the pylon as an argument, never as shell text. A pane that is not open focuses nothing, and the terminal lands where Herdr was. Herdr's focus is the server's, so every terminal attached to the pylon moves there. The CLI sends no `pane`.
 - The route admits the caller as every route does, and then only a person. An `Origin` header must be absent, as it is from the CLI, or exactly the dashboard's own origin, `http://<Host>` on the plain-HTTP listener and `https://<Host>` on the HTTPS one, and a `Sec-Fetch-Site` header must not be `cross-site` or `same-site`. A browser sends Origin with every WebSocket, and previews are served under the API's hostname on other ports, so a preview's page could otherwise open a terminal.
-- Every refusal comes before the 101, as an ordinary reply with the API's error body, as [Failures](#failures) describes: 403 for a caller, Host, Origin or site it does not allow, 400 for a bad query, 404 for an unknown thread, 409 for an archived or deleted thread, and 503 when the node has no probe, 16 streams are open, which terminals share with the event streams, or this machine holds 8 of them.
+- Every refusal comes before the 101, as an ordinary reply with the API's error body, as [Failures](#failures) describes: 403 for a caller, Host, Origin or site it does not allow, 400 for a bad query, 404 for an unknown thread, 409 for an archived or deleted thread, and 503 when the node has no probe, 16 streams are open, which terminals share with the event streams, or this machine holds 8 of them. A browser's WebSocket cannot read that reply, so a GET of the route that does not upgrade answers the refusal the upgrade would get, or 426 when the upgrade would be taken, and the dashboard's terminal says the reason it reads.
 
 After the 101, a binary message carries terminal bytes, both ways, and a text message carries one JSON object, whose `type` says what it is. Either end ignores a type it does not know.
 
@@ -219,6 +219,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 | `settleWaiting` | optional string | Why the archive's next settle waits, such as its node being offline or without room for its pylon. Left out once a settle read the disk, or while it does not wait |
 | `backedUpAt` | optional number | On an archived thread only: when the newest backup the control plane has seen verify began, in milliseconds. Its disk waits for one that began after `usageSettledAt` |
 | `attention`, `desired`, `pylon` | | In `ThreadRow` only. `ThreadDetail` has them at its top level, beside `thread` |
+| `pullRequestNumbers` | `number[]` | In `ThreadRow` only: the number of each pull request linked to the thread, in the order linked. `ThreadDetail` has the pull requests whole in `pullRequests` |
 
 `ThreadDetail` has `thread`, `attention`, `seenAt`, `lastReplyAt`, `desired`, `pylon` (`id`, `node`, `actualState`, `failed`, `observedAt`, `grantsOutdated` and `retryRefused`, why a retry cannot help or null, and `notAnswering` while its guest gives no answer to its guest commands), `sessions`, `previews`, `ports`, `outputs`, `prWatch`, `pullRequests`, `reviewView` (the thread's latest review as a builder and what a Land press does to it now, described below, or null), `keptPastDay` (why an archived thread's disk is kept past its 24 hours, or null), `questions` (every question the thread asked, answered or not, as [Questions](#questions) describes), `judgments` (every judgment of its failed pylon, as [Failure judgments](#failure-judgments) describes), `attach`, `said` (the sentences plain `show` prints of the thread's state and review: `guest`, `disk`, `usage`, `paused`, `prWatch` and `review`, each null where the state is not, apart from `paused` and `prWatch`), `agent` (`{ parkedTasks }`, or null for a thread without a Nexus agent conversation), and for a Claude worker thread `claudeWorker` (`model`, `state`, optional `message`) and `resume`, Nexus resuming its turns that died, or null.
 
@@ -1921,6 +1922,7 @@ control plane
   ok    release         control on rj-firebat runs the desired 0123456789ab and is healthy
   fail  backup          the newest backup, 2026-10-30T00-23-41Z, is 2 days old, and the run at 2026-11-01T00:41:02.000Z failed. sudo systemctl status nexus-backup and journalctl -u nexus-backup on the control plane's machine say why
   ok    login           signed in to openai with ChatGPT, which offers gpt-6-astra
+  ok    github-token    the control plane's GitHub token is valid for 74 days. This is the control plane's token in github.tokenFile. Each node's GH_TOKEN in /etc/nexus/secrets.env, which the pylons get, is another copy this check does not read
   ok    certificate     the dashboard's certificate for rj-firebat.example.ts.net is valid for 62 days
   ok    archived-disks  no archived disk is kept past its 24 hours
 rj-firebat
@@ -1928,7 +1930,8 @@ rj-firebat
   ok    release         probe on rj-firebat runs the desired 0123456789ab and is healthy
   warn  disk            12.4 of 98.0 GiB free at /var/lib/nexus-control, low. Free space there, or delete archived threads
   ok    pylons          3 up, 2 paused, none crashed or orphaned
-1 failed, 1 warned, 7 ok
+  ok    tailnet-key     key expiry is off for it in the tailnet
+1 failed, 1 warned, 9 ok
 ```
 
 `--json` prints the report:
@@ -1949,8 +1952,8 @@ type Status = (typeof statuses)[number];
 type Check = Verdict & ({ node: NodeName; name: NodeCheckName } | { node: null; name: ControlCheckName });
 /** `text` is one line: what is wrong and what to do, or what was found when nothing is. */
 interface Verdict { status: Status; text: string }
-type NodeCheckName = "online" | "release" | "disk" | "pylons";
-type ControlCheckName = "release" | "backup" | "login" | "certificate" | "archived-disks";
+type NodeCheckName = "online" | "release" | "disk" | "pylons" | "tailnet-key";
+type ControlCheckName = "release" | "backup" | "login" | "github-token" | "certificate" | "archived-disks";
 ```
 
 The control plane runs the same checks every 5 minutes and keeps each change of a check's status that two passes in a row confirmed, for 30 days, as [the design's health alerts](design.md#doctor-and-health-alerts) describe. Any allowed caller may read them, as it may `nodes` and `release`. `GET /v1/checks` serves a `HealthView`, and `GET /v1/checks/changes` every `HealthChange` kept, newest first. `POST /v1/checks/seen` with `{"through": number}` marks each open problem whose change's `id` is `through` or lower seen, and answers 204. The dashboard's Health page sends it, and any caller may, since what the person saw changes no check. Each change is also a `health.changed` event, with the `HealthChange` as its payload and no thread.
