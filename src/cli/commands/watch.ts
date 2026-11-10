@@ -56,16 +56,19 @@ interface Until { since: Since | null; from: string | null }
 /**
  * A run has replied once nothing runs or is queued and the control plane holds a reply later than the one before
  * the wait, as it records one at every end of a run. A failure, a new question or a Claude prompt ends the
- * wait at once, since the run cannot go on without the person.
+ * wait at once, since the run cannot go on without the person. Those need only the thread's detail, so they end
+ * it while `run`, which the conversation's stream says, is still unknown.
  */
-function ending(d: ThreadDetail, s: ThreadStateEvent, since: Since): Ending | null {
-  if (s.status === "archived" || s.status === "deleted") return { outcome: "failed", text: `The thread was ${s.status} before its run replied` };
+function ending(d: ThreadDetail, run: { working: boolean; queued: number } | null, since: Since): Ending | null {
+  const status = d.thread.status;
+  if (status === "archived" || status === "deleted") return { outcome: "failed", text: `The thread was ${status} before its run replied` };
   if (d.attention === "failed") return { outcome: "failed", text: `It failed: ${(d.pylon.failed ?? d.claudeWorker?.message ?? "no reason given").split("\n")[0]}` };
   const asked = d.questions.some((q) => q.answer === null && q.withdrawn === undefined && !since.questions.some((old) => old.id === q.id));
   if (asked) return { outcome: "waiting", text: `It asks you a question, which \`nexus show ${d.thread.id}\` shows` };
   if (d.claudeWorker !== undefined && d.thread.sessionWaiting === true) return { outcome: "waiting", text: `Claude waits for your input in its terminal${d.thread.sessionWaitingMessage === undefined ? "" : `: ${d.thread.sessionWaitingMessage}`}` };
-  if (s.run === "parked") return { outcome: "parked", text: `${s.parkedTasks} parked tasks hold the run, which \`nexus retry ${d.thread.id}\` retries` };
-  if (s.run === "working" || s.queued > 0 || (d.lastReplyAt ?? -Infinity) <= (since.lastReplyAt ?? -Infinity)) return null;
+  const parked = d.agent?.parkedTasks ?? 0;
+  if (parked > 0) return { outcome: "parked", text: `${parked} parked tasks hold the run, which \`nexus retry ${d.thread.id}\` retries` };
+  if (run === null || run.working || run.queued > 0 || (d.lastReplyAt ?? -Infinity) <= (since.lastReplyAt ?? -Infinity)) return null;
   return d.attention === "decision" ? { outcome: "waiting", text: `It replied, and waits on your decision, which \`nexus show ${d.thread.id}\` says` } : { outcome: "replied", text: "It replied." };
 }
 
@@ -170,24 +173,42 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
     const d = detail;
     if (d === null || over) return;
     const run = d.claudeWorker === undefined ? printConversation(d) : printTranscript(d);
-    if (run === null) return;
-    const state = stateOf(d, run.working, run.live.queued.length);
-    const key = JSON.stringify(state);
-    // After an outage the state is printed again, which tells the consumer the control plane is back.
-    if (key !== shown || recovered) emit(state, stateText(state));
-    shown = key;
-    recovered = false;
-    // The text stream already says what the state does of the run, so only JSON carries it.
-    const liveKey = JSON.stringify(run.live);
-    if (liveKey !== liveShown) emit(run.live, "");
-    liveShown = liveKey;
+    if (run !== null) {
+      const state = stateOf(d, run.working, run.live.queued.length);
+      const key = JSON.stringify(state);
+      // After an outage the state is printed again, which tells the consumer the control plane is back.
+      if (key !== shown || recovered) emit(state, stateText(state));
+      shown = key;
+      recovered = false;
+      // The text stream already says what the state does of the run, so only JSON carries it.
+      const liveKey = JSON.stringify(run.live);
+      if (liveKey !== liveShown) emit(run.live, "");
+      liveShown = liveKey;
+    }
     if (until === null) return;
     since ??= d;
-    const end = ending(d, state, since);
+    const end = ending(d, run === null ? null : { working: run.working, queued: run.live.queued.length }, since);
     if (end === null) return;
     over = true;
-    if (!json) output.write(`-- ${end.text}\n`);
-    ended.resolve(untilIdleExits[end.outcome]);
+    // A failed read still ends it, since the reply is recorded and the transcript only lags it.
+    void (end.outcome === "replied" && d.claudeWorker !== undefined ? readReply(d).catch(() => {}) : Promise.resolve()).then(() => {
+      if (!json) output.write(`-- ${end.text}\n`);
+      ended.resolve(untilIdleExits[end.outcome]);
+    });
+  }
+
+  /**
+   * The stream can say a Claude turn ended before the control plane reads the reply it wrote. The conversation's route
+   * reads first, waiting a while, so this prints what it found until a read began after the reply was recorded.
+   */
+  async function readReply(d: ThreadDetail) {
+    for (let reads = 0; reads < 3; reads++) {
+      const read = agentView((await request(api, threadRoutes.conversation, { thread: id }))!);
+      if (read.kind !== "claude") return;
+      transcript = { session: read.view.session, entries: read.view.entries.slice(-maxEntries), dropped: read.view.dropped, working: read.view.working };
+      printTranscript(d);
+      if ((read.view.readAt ?? -Infinity) >= (d.lastReplyAt ?? Infinity)) return;
+    }
   }
 
   /** Each connection's first frame is the whole view, and each later one replaces what changed. */

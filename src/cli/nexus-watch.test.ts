@@ -500,3 +500,36 @@ test("start --watch follows the first message's run until it replies, and needs 
   assert.equal(res.code, 0, res.stderr);
   assert.match(res.stdout, /^Started th-[0-9a-f]+ on acme: Count the lines\nSent the first message\.\n> Count the lines\nhello\.py has 3 lines\.\n-- active, pylon unknown\n-- It replied\.\n$/);
 });
+
+test("watch --until-idle prints the reply a Claude turn wrote before it exits, though the stream says the turn ended before the transcript is read", async (t) => {
+  const s = await setup(t);
+  const c = await claudeWatched(t, s);
+  await writeFile(c.transcript, jsonl(claudeRecords.prompt));
+  assert.equal((await s.json(["conversation", c.thread.id])).entries.length, 1);
+  const watch = watchLines(t, s, [c.thread.id, "--until-idle"]);
+  const exited = once(watch.child, "exit");
+  for (let line = await watch.next(); line.type !== "live"; line = await watch.next());
+  c.report("session.turn-started");
+  for (let line = await watch.next(); line.type !== "state" || line.run !== "working"; line = await watch.next());
+
+  const release = c.holdReads();
+  await appendFile(c.transcript, jsonl(claudeRecords.reply));
+  c.report("session.turn-ended");
+  for (let line = await watch.next(); line.type !== "state" || line.run !== "idle"; line = await watch.next());
+  release();
+  let line = await watch.next();
+  for (; line.type !== "claude-entry"; line = await watch.next());
+  assert.equal(line.text, "There is no hello.py.");
+  assert.deepEqual(await exited, [0, null]);
+});
+
+test("watch --until-idle ends on what the thread's detail says, though the conversation's stream never opens", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--message", "hi"]);
+  s.fake.holdWatches();
+  const watch = s.nexus(["watch", thread.id, "--until-idle", "--interval", "50"]);
+  await until("the watch asked for the stream", async () => s.fake.calls.some(([call, id]) => call === "watch" && id === thread.id));
+  s.fake.park(thread.id, 1);
+  const res = await watch;
+  assert.deepEqual([res.code, res.stdout], [10, `-- 1 parked tasks hold the run, which \`nexus retry ${thread.id}\` retries\n`]);
+});

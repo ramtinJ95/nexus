@@ -211,11 +211,21 @@ export async function claudeWatched(t: TestContext, s: Awaited<ReturnType<typeof
   if (launched) claudeWorkerAt(s.registry, thread.id, "started", { session: "s1" });
   const projects = await tempDir("nexus-claude-projects-", t);
   await mkdir(join(projects, "-home-user-workspace-repo"));
-  s.probePipes(async (argv) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === claudeProjects ? projects : arg), () => {}));
+  let held: Promise<void> | null = null;
+  s.probePipes(async (argv) => {
+    await held;
+    return processStream(argv[0]!, argv.slice(1).map((arg) => arg === claudeProjects ? projects : arg), () => {});
+  });
   observeRunning(s, thread, [], []);
   let sequence = 0;
   return {
     thread, transcript: join(projects, "-home-user-workspace-repo", "s1.jsonl"),
+    /** Makes each read of the pylon wait until the returned function is called. */
+    holdReads() {
+      const gate = Promise.withResolvers<void>();
+      held = gate.promise;
+      return () => { held = null; gate.resolve(); };
+    },
     report: (kind: "session.turn-started" | "session.turn-ended") => s.registry.threads.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1" } }),
   };
 }
