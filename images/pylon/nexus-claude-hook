@@ -19,10 +19,11 @@ case $input in
         stamp="${HOME}/.nexus/heartbeats/${stamp%% *}"
         last=
         [ -f "$stamp" ] && IFS= read -r last <"$stamp"
-        case $last in
+        now=$(date +%s)
+        case $last$now in
           ''|*[!0-9]*) ;;
           # Now is at most a millisecond before the clock's next second, so an exit here is never a due heartbeat.
-          *) [ $((($(date +%s) + 1) * 1000 - last)) -le 300000 ] && exit 0 ;;
+          *) [ -n "$last" ] && [ -n "$now" ] && [ $(((now + 1) * 1000 - last)) -le 300000 ] && exit 0 ;;
         esac
         ;;
     esac

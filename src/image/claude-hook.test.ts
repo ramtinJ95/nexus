@@ -41,7 +41,7 @@ async function run(t: { after(fn: () => Promise<void>): void }, args: string[], 
 
 const nodeHook = (...args: string[]) => [new URL("../../images/pylon/nexus-claude-hook.mjs", import.meta.url).pathname, ...args].join(" ");
 
-test("a heartbeat within the throttle, at any instant of the clock's second, ends without starting Node", async (t) => {
+test("a heartbeat within the throttle, at any instant of the clock's second, ends without starting Node", { skip: process.platform !== "linux" && "the hook hashes with GNU sha256sum, as the pylon's Debian has it" }, async (t) => {
   const stamp = second * 1000 + 999 - heartbeatIntervalMs + 1;
   assert.equal(await run(t, ["session.heartbeat"], postToolUse("Bash", { command: "ls" }), stamp), null);
   assert.equal(await run(t, ["session.heartbeat"], postToolUse("Bash", { command: "ls" }), second * 1000), null);
