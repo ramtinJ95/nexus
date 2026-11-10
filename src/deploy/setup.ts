@@ -7,14 +7,12 @@
  * the configs alone, which `install` runs under the deployer's lock.
  * `node src/deploy/setup.ts signed-in <control.json>` exits 0 when the harness that config names is signed in.
  * `node src/deploy/setup.ts registry <control.json>` exits 1 when that config's registry is newer than this checkout's migrations.
- * `tailscale status --json | node src/deploy/setup.ts check` prints the tailscale settings install.sh reports as missing.
  * It runs as root from a checkout before `npm ci`, so it imports only Node's builtins and modules that do too.
  */
 import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { dirname, join, resolve as resolvePath } from "node:path";
-import { text } from "node:stream/consumers";
 import { promisify, isDeepStrictEqual, parseArgs } from "node:util";
 import { claudeNames, harnessSignedIn, locations, provision, rotatable, rotate, scripted, stores, system, terminal, heldNames, type FollowUp, type Rotatable } from "./credentials.ts";
 import { parseWorkerConfig, readControlPlane, type WorkerConfig } from "./control-plane.ts";
@@ -25,7 +23,7 @@ import { readJson, saveJson } from "../node-base/json-file.ts";
 import { controlFields } from "../node-base/node-config.ts";
 import { isImageId } from "../ids.ts";
 import { shellQuote } from "../shell.ts";
-import { parseTailscaleStatus, tailscaleCli, tailscaleStatus, type TailnetDevice, type TailscaleStatus } from "../tailscale.ts";
+import { tailscaleCli, tailscaleStatus, type TailnetDevice, type TailscaleStatus } from "../tailscale.ts";
 import { localApiWhois } from "../node-base/tailscaled.ts";
 import { backupStatusFile, configFiles, deployerFiles, ports, prefix, rootPath, servicePath, stateDirs, unitNames, users } from "../node-base/node-layout.ts";
 import { schemaStep } from "./plan.ts";
@@ -62,18 +60,6 @@ export function tailnetDevices(status: TailscaleStatus): Tailnet {
 function device(d: TailnetDevice | null): Device | undefined {
   if (d === null || d.id === null || d.host === null || d.ipv4 === null) return undefined;
   return { id: d.id, name: d.host.split(".")[0]!, host: d.host, ip: d.ipv4 };
-}
-
-/** What install.sh reports from `tailscale status --json`: the settings Nexus needs that are off, by name. Text that is not JSON is a tailscale that is not running. */
-export function tailnetMisses(statusJson: string): string[] {
-  let status: TailscaleStatus;
-  try {
-    status = parseTailscaleStatus(statusJson);
-  } catch {
-    return ["not-running"];
-  }
-  if (!status.running) return ["not-running"];
-  return [...status.magicDns ? [] : ["magicdns-off"], ...status.certificates ? [] : ["certificates-off"]];
 }
 
 export interface Flags {
@@ -715,17 +701,13 @@ async function main(args: readonly string[]): Promise<number> {
     await rotate(kind as Rotatable, await system.exists(configFiles.control) ? "control" : "node", system, answers, (line) => console.error(line));
     return 0;
   }
-  if (command === "check") {
-    for (const miss of tailnetMisses(await text(process.stdin))) console.log(miss);
-    return 0;
-  }
   if (command === "signed-in" && operands[0] !== undefined) return await signedIn(operands[0]) ? 0 : 1;
   if (command === "registry" && operands[0] !== undefined) {
     const refusal = await registryRefusal(operands[0]);
     if (refusal !== null) console.error(`install: ${refusal}`);
     return refusal === null ? 0 : 1;
   }
-  console.error("usage: node src/deploy/setup.ts install|write|signed-in|registry|check|rotate claude|github [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--upgrade] [--package-manager apt|dnf|other], and write also [--github-watch]");
+  console.error("usage: node src/deploy/setup.ts install|write|signed-in|registry|rotate claude|github [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--upgrade] [--package-manager apt|dnf|other], and write also [--github-watch]");
   return 1;
 }
 
