@@ -77,4 +77,5 @@ test("accept-encoding is read by its weights, and a coding it refuses or does no
   assert.equal(negotiate("identity;q=1, br;q=0.1"), null, "identity weighed above every coding");
   assert.equal(negotiate("identity, br"), "br", "a tie with identity compresses");
   assert.equal(negotiate("*;q=0"), null);
+  assert.equal(negotiate("gzip ;q=0.5"), "gzip", "space before a weight is allowed");
 });

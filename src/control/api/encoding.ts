@@ -33,7 +33,8 @@ export function negotiate(header: string | undefined): Coding | null {
   if (header === undefined) return null;
   const q = new Map<string, number>();
   for (const part of header.split(",")) {
-    const [name, ...params] = part.trim().toLowerCase().split(";");
+    const [rawName = "", ...params] = part.toLowerCase().split(";");
+    const name = rawName.trim();
     const weight = params.map((p) => p.trim()).find((p) => p.startsWith("q="));
     const value = weight === undefined ? 1 : Number(weight.slice(2));
     if (name) q.set(name, Number.isFinite(value) ? value : 0);
@@ -46,7 +47,10 @@ export function negotiate(header: string | undefined): Coding | null {
 /** Each coding of `body`, compressed once on first use, for a body that never changes. */
 export function keptEncodings(body: Buffer): Encode {
   const made: Partial<Record<Coding, Promise<Buffer>>> = {};
-  return (coding) => made[coding] ??= compressors[coding](body, kept[coding]);
+  return (coding) => made[coding] ??= compressors[coding](body, kept[coding]).catch((err: unknown) => {
+    delete made[coding];
+    throw err;
+  });
 }
 
 /**
