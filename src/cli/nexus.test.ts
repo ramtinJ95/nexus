@@ -185,6 +185,7 @@ test("a group such as image, alone or with --help, prints the entries of its com
     assert.deepEqual(await s.nexus([group, "-h"]), asked);
     assert.deepEqual(await s.nexus(["help", group]), asked);
     assert.deepEqual(await s.nexus([group]), { code: 64, stdout: "", stderr: asked.stdout }, `${group} alone prints them on stderr as a failure`);
+    assert.equal((await s.nexus([group, "--", "--help"])).code, 64, "after -- --help is no flag");
   }
   const json = await s.nexus(["image", "--json"]);
   assert.deepEqual([json.code, JSON.parse(json.stderr)], [64, { error: "image takes a command: build, rollout, rollback, list, current", kind: "invalid", status: null, code: null }]);
@@ -215,6 +216,9 @@ test("global flags work before the command as after it", async (t) => {
   assert.equal((await s.nexus(["-h", "start"])).stdout, (await s.nexus(["start", "--help"])).stdout);
   assert.deepEqual(await s.nexus(["--bogus", "projects"]), { code: 64, stdout: "", stderr: "nexus: unknown flag --bogus, since before a command nexus takes only --json, --url, --socks, --help and --version. Run nexus --help for usage\n" });
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Flags"]);
+  const sent = s.fake.calls.length;
+  assert.deepEqual(await s.nexus(["help", "send", thread.id, "--", "hello"]), await s.nexus(["send", "--help"]));
+  assert.equal(s.fake.calls.length, sent, "help sends nothing");
   assert.equal((await s.nexus(["--json", "send", thread.id, "--", "--json"])).code, 0);
   assert.deepEqual(s.fake.calls.at(-1)?.slice(0, 3), ["send", thread.id, "--json"], "a leading flag stays before --");
 });
@@ -224,6 +228,7 @@ test("a usage error points at its command's help, and an error that is not about
   assert.deepEqual(await s.nexus(["show"]), { code: 64, stdout: "", stderr: "nexus: show takes 1 argument, got 0. Run nexus show --help for usage\n" });
   assert.deepEqual(await s.nexus(["session", "open"]), { code: 64, stdout: "", stderr: "nexus: session open takes 1 argument, got 0. Run nexus session open --help for usage\n" });
   assert.deepEqual(await s.nexus(["diff", "th-x", "--turn", "--uncommitted"]), { code: 64, stdout: "", stderr: "nexus: --turn and --uncommitted cannot be used together. Run nexus diff --help for usage\n" });
+  assert.equal((await s.nexus(["deploy", "abc"])).stderr, "nexus: deploy takes main or a full lower-case commit hash. Run nexus deploy --help for usage\n");
   assert.deepEqual(await s.nexus(["projects"], { NEXUS_URL: "", NEXUS_SOCKS: "" }), { code: 64, stdout: "", stderr: "nexus: no control plane is set. Run nexus connect <host> with its tailnet name, or give --url or NEXUS_URL\n" });
   const json = await s.nexus(["show", "--json"]);
   assert.equal(JSON.parse(json.stderr).error, "show takes 1 argument, got 0", "--json's error has no pointer");

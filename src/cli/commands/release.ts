@@ -165,7 +165,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
     help: ["  nexus deploy <commit|main> [--wait]"],
     args: [1, 1], options: { wait: { type: "boolean" } },
     async run(api, [commit], values) {
-      if (commit !== "main" && !fullCommit.test(commit!)) throw new CliError("invalid", "deploy takes main or a full lower-case commit hash");
+      if (commit !== "main" && !fullCommit.test(commit!)) throw new UsageError("deploy takes main or a full lower-case commit hash");
       let view = await request(api, releaseRoutes.deploy, { body: { commit: commit! } });
       const target = view.desired!.commit;
       const settled = (): ReleaseView | undefined => {

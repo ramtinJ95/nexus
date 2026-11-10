@@ -42,15 +42,16 @@ function invocationOf(argv: readonly string[]): Invocation {
   }
   const words = argv.slice(at);
   if (leading.includes("--version") || words[0] === "version") return { to: "version" };
-  if (words[0] === "help") return words.length === 1 ? { to: "help", of: null, asked: true } : invocationOf([...leading, ...words.slice(1), "--help"]);
+  if (words[0] === "help") return words.length === 1 ? { to: "help", of: null, asked: true } : invocationOf([...leading, "--help", ...words.slice(1)]);
   const asked = leading.some(isHelp);
   const [first, second] = words;
+  const flags = words.slice(1, words.includes("--") ? words.indexOf("--") : undefined);
   if (first === undefined) return { to: "help", of: null, asked };
   for (const name of [`${first} ${second}`, first]) {
     if (Object.hasOwn(commands, name)) return { to: "command", name, args: [...leading, ...words.slice(name.split(" ").length)] };
   }
   if (!groups.has(first)) return { to: "unknown", name: first, group: null };
-  if (second === undefined || second.startsWith("-")) return { to: "help", of: first, asked: asked || words.some(isHelp) };
+  if (second === undefined || second.startsWith("-")) return { to: "help", of: first, asked: asked || flags.some(isHelp) };
   return { to: "unknown", name: `${first} ${second}`, group: first };
 }
 
