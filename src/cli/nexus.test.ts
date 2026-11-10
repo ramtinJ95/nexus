@@ -88,6 +88,8 @@ test("the CLI runs a thread's life through the SOCKS proxy, and --json prints th
   assert.equal(human.stdout, "> \n>   Fix the build  \n> and run the tests\n\n> now the lint\n\n> stop that\n");
 
   assert.equal((await s.json(["archive", thread.id])).status, "archived");
+  assert.deepEqual((await s.json(["threads"])).map((r: Thread) => r.status), ["archived"], "threads lists archived threads");
+  assert.deepEqual(await s.json(["threads", "--open"]), [], "--open leaves them out");
   assert.equal((await s.nexus(["send", thread.id, "x"])).code, 5, "an archived thread takes no messages");
   assert.doesNotMatch((await s.nexus(["show", thread.id])).stdout, /^attach:/m, "nor an attach, since its pylon stays paused");
   assert.equal((await s.json(["unarchive", thread.id])).status, "active");
@@ -268,6 +270,15 @@ test("a command refuses a control plane that reports no version, or one older th
   const current = await versioned(t, { commit: null, version });
   assert.deepEqual(await bare(t, ["projects"], { NEXUS_URL: current.url }).then((r) => [r.code, r.stdout]), [0, "No projects.\n"]);
   assert.deepEqual(current.paths, ["/v1/health", "/v1/projects"]);
+});
+
+test("threads --open asks for the open threads, and leaves out the others a control plane that ignores status=open answers", async (t) => {
+  const rows = ["active", "idle", "archived"].map((status, i) => ({ id: `th-00000000000${i}`, status, project: "acme", title: "t", pylon: { actualState: "paused" }, createdAt: 0 }));
+  const old = await versioned(t, { commit: null, version: "0.76.0" }, rows);
+  const res = await bare(t, ["threads", "--open", "--json"], { NEXUS_URL: old.url });
+  assert.equal(res.code, 0, res.stderr);
+  assert.deepEqual(JSON.parse(res.stdout).map((r: Thread) => r.status), ["active", "idle"]);
+  assert.ok(old.paths.includes("/v1/threads?deleted=false&status=open"), old.paths.join(" "));
 });
 
 test("a follow whose first health read fails reads it again, and follows once the control plane answers", { timeout: 30_000 }, async (t) => {

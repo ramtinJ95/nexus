@@ -36,7 +36,7 @@ export function startRows({ api, notifications, health = () => {}, caughtUp = ()
     try {
       do {
         stale = false;
-        const rows = await request(threadRoutes.list, { query: { deleted: false } }, AbortSignal.timeout(10_000));
+        const rows = await request(threadRoutes.list, { query: { status: "open" } }, AbortSignal.timeout(10_000));
         const now = Date.now();
         if (following) rowsChannel?.postMessage({ rows, now });
         showRows(rows, now);

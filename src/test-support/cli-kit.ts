@@ -222,12 +222,12 @@ export async function claudeWatched(t: TestContext, s: Awaited<ReturnType<typeof
 
 export const at = (n: number) => new Date(Date.UTC(2026, 9, 26, 2, 0, n)).toISOString();
 
-/** A control plane whose health answers `health`, and every other GET an empty list. Answers the paths it was sent. */
-export async function versioned(t: TestContext, health: unknown) {
+/** A control plane whose health answers `health`, the thread list `threads`, and every other GET an empty list. Answers the paths it was sent. */
+export async function versioned(t: TestContext, health: unknown, threads: unknown[] = []) {
   const paths: string[] = [];
   const server = createHttpServer((req, res) => {
     paths.push(req.url!);
-    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(req.url === "/v1/health" ? health : []));
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(req.url === "/v1/health" ? health : req.url!.split("?")[0] === "/v1/threads" ? threads : []));
   });
   return { url: `http://127.0.0.1:${await listening(t, server)}`, paths };
 }
