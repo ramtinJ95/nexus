@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { test, type TestContext } from "node:test";
-import { chmod, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { chmod, mkdir, open, readdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
@@ -205,6 +207,50 @@ test("a backup root that is a link is neither written to nor restored from", asy
   await assert.rejects(m.run(m.day(1)), /is a link/);
   assert.deepEqual(await readdir(elsewhere), []);
   await assert.rejects(restore({ root: m.root, name: nameOf(m.day(1)), unitState: stopped }), /is a link/);
+});
+
+test("a source that is a link or a FIFO is refused, as a database or as a file, and the run leaves nothing of its own", async (t) => {
+  const m = await controlPlane(t);
+  const rootOnly = join(m.dir, "root-only");
+  await writeFile(rootOnly, "a secret of root's\n", { mode: 0o600 });
+  await rm(m.paths.credentials);
+  await symlink(rootOnly, m.paths.credentials);
+  await assert.rejects(m.run(m.day(1)), /harness-credentials\.json is not a regular file/);
+  await rm(m.paths.credentials);
+  execFileSync("mkfifo", [m.paths.credentials]);
+  await assert.rejects(m.run(m.day(2)), /harness-credentials\.json is not a regular file/);
+  await rm(m.paths.credentials);
+  await writeFile(m.paths.credentials, "{}\n", { mode: 0o600 });
+  await m.stop();
+  await rename(m.paths.db, join(m.dir, "another.db"));
+  await symlink(join(m.dir, "another.db"), m.paths.db);
+  await assert.rejects(m.run(m.day(3)), /registry\.db is not a regular file/);
+  assert.deepEqual(await readdir(m.root), []);
+});
+
+test("a file past the 2 GiB readFile refuses is backed up with its SHA-256, verifies, and is restored", async (t) => {
+  const m = await controlPlane(t);
+  const large = join(m.etc, "large");
+  const size = 2 ** 31 + 8;
+  const write = async (tail: string) => {
+    const file = await open(large, "w", 0o600);
+    try { await file.truncate(size - tail.length); await file.write(tail, size - tail.length); } finally { await file.close(); }
+  };
+  await write("backedup");
+  await assert.rejects(readFile(large), { code: "ERR_FS_FILE_TOO_LARGE" });
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(large)) hash.update(chunk);
+  const sha256 = hash.digest("hex");
+  const dir = await m.run(m.day(1));
+  const manifest = JSON.parse(await readFile(join(dir, "manifest.json"), "utf8")) as { entries: { name: string; size: number; sha256: string }[] };
+  const entry = manifest.entries.find((e) => e.name === join("etc", "large"));
+  assert.deepEqual({ size: entry?.size, sha256: entry?.sha256 }, { size, sha256 }, "the run verified it, so its copy has this SHA-256 too");
+  await m.stop();
+  await write("changed!");
+  await restore({ root: m.root, name: nameOf(m.day(1)), unitState: stopped });
+  assert.equal((await stat(large)).size, size);
+  const file = await open(large, "r");
+  try { assert.equal((await file.read(Buffer.alloc(8), 0, 8, size - 8)).buffer.toString(), "backedup"); } finally { await file.close(); }
 });
 
 test("restore on a stopped control plane puts back the backed-up state with its modes, over later changes and a stale WAL", async (t) => {
