@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Installs or upgrades the Nexus probe on this node from the checkout this script is in. deploy/install.sh runs it
 # after writing /etc/nexus/probe.json, and the deployer runs it with NEXUS_PREPARE=1 from each release it installs,
-# by this name.
+# by this name. Once the probe runs a release, it installs nothing and only starts that release on the configs,
+# unless --upgrade.
 #
 # Safe to rerun. The release becomes /opt/nexus/releases/<content hash> (see deploy/release.sh), and
 # /opt/nexus/current points at the newest.
@@ -18,6 +19,8 @@ repo="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [ "${NEXUS_PREPARE:-0}" = 1 ]; then prepare_probe "$repo"; exit 0; fi
 take_deployer_lock
-prepare_probe "$repo"
-link_release "$prefix/current"
+if ! keeps_release "$prefix/current" "$repo" "${1:-}"; then
+  prepare_probe "$repo"
+  link_release "$prefix/current"
+fi
 start_unit nexus-probe.service "$prefix/active-release" "$etc/probe.json" "$etc/control-plane.json"
