@@ -4,19 +4,19 @@ import { threadRoutes as routes, type Preview } from "../../contract/threads.ts"
 import { pylonRoutes, type ChangesBase } from "../../contract/pylon.ts";
 import { projectOf } from "../refs.ts";
 import { attachTerminal, processTty } from "../attach.ts";
-import { CliError } from "../transport.ts";
+import { CliError, UsageError } from "../transport.ts";
 import { startRules } from "../../contract/threads-parse.ts";
 import { type Values, type Api, type Command, str, request, int, briefOptions, briefOf, table, waitMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
 import { detailText, portsText, listingText, changesText, queuedRow, queuedText, threadRow } from "../thread-text.ts";
 
 function portArg(given: string): number {
   const port = Number(given);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new CliError("invalid", `the port must be a whole number from 1 to 65535, got ${given}`);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new UsageError(`the port must be a whole number from 1 to 65535, got ${given}`);
   return port;
 }
 
 const baseOf = (v: Values): ChangesBase => {
-  if (v.uncommitted === true && v.turn === true) throw new CliError("invalid", "--turn and --uncommitted cannot be used together");
+  if (v.uncommitted === true && v.turn === true) throw new UsageError("--turn and --uncommitted cannot be used together");
   return v.turn === true ? "turn" : v.uncommitted === true ? "head" : "start";
 };
 
@@ -256,7 +256,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     options: { unread: { type: "boolean" }, "last-reply-at": { type: "string" } },
     async run(api, [id], v) {
       const shown = str(v, "last-reply-at");
-      if (shown !== undefined && v.unread) throw new CliError("invalid", "--last-reply-at marks a reply seen, so it cannot go with --unread");
+      if (shown !== undefined && v.unread) throw new UsageError("--last-reply-at marks a reply seen, so it cannot go with --unread");
       await request(api, v.unread ? routes.unseen : routes.seen, { thread: id!, body: shown === undefined ? {} : { lastReplyAt: int(shown, "--last-reply-at", 0) } });
       return { json: null, text: `Marked ${id} ${v.unread ? "unread" : "seen"}.` };
     },

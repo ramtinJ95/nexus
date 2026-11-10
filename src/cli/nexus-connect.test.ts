@@ -86,7 +86,7 @@ test("attach with a config of only the URL and the proxy prints nothing but its 
   await mkdir(join(s.home, ".config", "nexus"), { recursive: true });
   await writeFile(join(s.home, ".config", "nexus", "cli.json"), JSON.stringify({ url: s.localUrl, socks: "none" }));
   const attach = await s.spawned(["attach", "th-0123456789ab"], { NEXUS_URL: "", NEXUS_SOCKS: "" });
-  assert.deepEqual([attach.code, attach.stderr], [64, "nexus: attach needs a terminal, and stdin or stdout is not one. Run nexus --help for usage\n"]);
+  assert.deepEqual([attach.code, attach.stderr], [64, "nexus: attach needs a terminal, and stdin or stdout is not one\n"]);
 });
 
 test("the attach settings retired in 0.9.0 are unknown keys of the config file, and NEXUS_ATTACH is not read", async (t) => {
@@ -98,7 +98,7 @@ test("the attach settings retired in 0.9.0 are unknown keys of the config file, 
   assert.match(projects.stderr, /cli\.json is not a CLI config: config: Unrecognized keys: "ssh", "attach"/);
   await writeFile(join(s.home, ".config", "nexus", "cli.json"), "{}");
   const attach = await s.spawned(["attach", "th-0123456789ab"], { NEXUS_ATTACH: "ssh -t y" });
-  assert.deepEqual([attach.code, attach.stderr], [64, "nexus: attach needs a terminal, and stdin or stdout is not one. Run nexus --help for usage\n"]);
+  assert.deepEqual([attach.code, attach.stderr], [64, "nexus: attach needs a terminal, and stdin or stdout is not one\n"]);
 });
 
 test("connect finds the API on the dashboard's HTTPS port, saves it, and the next command uses it", async (t) => {
