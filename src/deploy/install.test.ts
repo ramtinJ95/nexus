@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test, type TestContext } from "node:test";
 import { migrations } from "../control/schema.ts";
-import { checkoutMerged, command, ReleaseInstaller, type InstallBoundary } from "./install.ts";
+import { checkoutMerged, command, NotSwitched, ReleaseInstaller, type InstallBoundary } from "./install.ts";
 import { snapshot } from "../test-support/kit.ts";
 
 const commit = "a".repeat(40);
@@ -129,7 +129,7 @@ test("an install refuses to run over an unfinished one, which only recovery may 
 test("a preparation failure never touches the running release", async (t) => {
   const { prefix, boundary, installer } = await fixture(t);
   boundary.prepare = async () => { throw new Error("build failed"); };
-  await assert.rejects(installer.install(commit), /build failed/);
+  await assert.rejects(installer.install(commit), (error) => error instanceof NotSwitched && /build failed/.test(error.message));
   assert.equal(await readlink(join(prefix, "control-current")), "releases/old");
   assert.equal(await installer.observed(), null);
 });
