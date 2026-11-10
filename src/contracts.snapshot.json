@@ -28,6 +28,7 @@
     "deploy/secrets.example.env: reserved-path:secrets",
     "deploy/set-control-plane.sh: reserved-path:secrets",
     "deploy/supervise-deployer.sh: reserved-path:secrets",
+    "deploy/uninstall.sh: reserved-path:secrets",
     "images/pylon-test/Dockerfile: reserved-path:image-rebuild",
     "images/pylon-test/build.sh: reserved-path:image-rebuild",
     "images/pylon-test/restore-modes.ts: reserved-path:image-rebuild",
