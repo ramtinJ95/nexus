@@ -66,6 +66,7 @@ const row = (t) => {
 function page() {
   const group = (project, open) => new El("details", { id: `group-${project}`, class: "group", open }, [new El("ul", {}, threads.filter((t) => t.project === project).map(row))]);
   const filter = new Input("input", { id: "filter" });
+  filter.setAttribute("name", "q");
   const form = new Form("form", { id: "filter-form" }, [filter]);
   form.setAttribute("action", "/threads/closed");
   form.setAttribute("role", "search");
@@ -85,7 +86,7 @@ let phone = false;
 let assigned = [];
 Object.assign(globalThis, {
   HTMLInputElement: Input, HTMLTextAreaElement: TextArea, HTMLSelectElement: class extends El {}, HTMLFormElement: Form,
-  FormData: class { constructor(form) { return form.querySelectorAll("input").map((input) => [input.id === "filter" ? "q" : input.id, input.value]); } },
+  FormData: class { constructor(form) { return form.querySelectorAll("input").map((input) => [input.getAttribute("name"), input.value]); } },
   matchMedia: (query) => ({ matches: query === narrowQuery && phone }),
   sessionStorage: { getItem: (k) => stored.get(k) ?? null, setItem: (k, v) => stored.set(k, String(v)), removeItem: (k) => stored.delete(k) },
   location: { assign: (href) => assigned.push(href) },
@@ -197,6 +198,8 @@ test("Ctrl/⌘K opens the switcher over the listed rows, and the keyboard picks 
   switcherInput.fire("keydown", { key: "ArrowDown" });
   assert.deepEqual(listed().map(([, , selected]) => selected), ["true", "false"], "the pick wraps around");
   assert.equal(switcherInput.getAttribute("aria-activedescendant"), switcherList.children[0].id);
+  switcherInput.fire("keydown", { key: "Enter", isComposing: true });
+  assert.deepEqual(assigned, [], "an input method's Enter confirms what it composes, and opens nothing");
   switcherInput.fire("keydown", { key: "Enter" });
   assert.deepEqual(assigned, [`/threads/${threads[1].id}`], "Enter opens the picked thread");
   type(switcherInput, "412");

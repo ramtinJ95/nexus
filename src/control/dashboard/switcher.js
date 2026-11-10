@@ -52,6 +52,8 @@ if (dialog !== null) {
     draw();
   });
   input.addEventListener("keydown", (event) => {
+    // An input method's Enter or arrow is its own, choosing what the reader composes.
+    if (event.isComposing) return;
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       if (entries.length === 0) return;
