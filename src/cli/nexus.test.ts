@@ -336,6 +336,7 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
     "  nexus project edit <id> [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]\n"
     + "    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...\n"
     + "    [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]\n"
+    + "    [--template-input PATH]... [--clear-template-inputs]   repository files, such as package-lock.json, that key the project's templates with .nexus/setup\n"
     + "    [--auto-review off|review|land|yolo]   review each builder's PR on its own, land it too, and with yolo waive the holds you may; land and yolo need a deployer\n"
     + "    [--pipeline off|approve|start]    turn pipeline items into threads, once the person approves each or on their own\n"
     + "    [--second-reviewer off|on|always|reserved,lines=N]   a second reviewer on another model for the PRs the rule names\n");
@@ -1960,6 +1961,19 @@ test("project edit sets which pull requests get a second reviewer on another mod
   assert.deepEqual((await s.json(["project", "edit", "second", "--node", node])).secondReview, { always: true }, "an edit that does not name it keeps it");
   assert.equal((await s.json(["project", "edit", "second", "--second-reviewer", "off"])).secondReview, undefined);
   assert.doesNotMatch((await s.nexus(["project", "show", "second"])).stdout, /second reviewer/);
+});
+
+test("project edit sets the files that key the project's templates, project show lists them, and a path outside the repository is refused", async (t) => {
+  const s = await setup(t);
+  await s.nexus(["project", "add", "keyed", "https://github.com/example/repo.git", "--node", node]);
+  assert.deepEqual((await s.json(["project", "edit", "keyed", "--template-input", "package-lock.json", "--template-input", "web/package-lock.json"])).templateInputs, ["package-lock.json", "web/package-lock.json"]);
+  assert.match((await s.nexus(["project", "show", "keyed"])).stdout, /^template inputs: package-lock\.json, web\/package-lock\.json$/m);
+  assert.deepEqual((await s.json(["project", "edit", "keyed", "--node", node])).templateInputs, ["package-lock.json", "web/package-lock.json"], "an edit that does not name them keeps them");
+  for (const bad of ["/etc/passwd", "../x", "a//b", "a/", "./a"]) assert.equal((await s.nexus(["project", "edit", "keyed", "--template-input", bad])).code, 64, bad);
+  assert.equal((await s.nexus(["project", "edit", "keyed", "--template-input", "a", "--template-input", "a"])).code, 64, "a path listed twice");
+  assert.equal((await s.nexus(["project", "edit", "keyed", "--template-input", "a", "--clear-template-inputs"])).code, 64);
+  assert.deepEqual((await s.json(["project", "edit", "keyed", "--clear-template-inputs"])).templateInputs, []);
+  assert.doesNotMatch((await s.nexus(["project", "show", "keyed"])).stdout, /template inputs/);
 });
 
 test("project add and edit set standing rules from a file or stdin, edit clears them, and project show and show print them", async (t) => {

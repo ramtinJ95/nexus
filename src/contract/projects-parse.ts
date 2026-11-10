@@ -9,6 +9,10 @@ import { briefSchema, itemRules, resourcesSchema, startFields } from "./threads-
 
 const name = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
 const host = z.string().min(1);
+/** A path inside the repository as git names it in a tree: relative, with no empty, `.` or `..` part. */
+const repoPath = z.string().min(1).max(256)
+  .refine((path) => !/[\0\n\r]/.test(path) && path.split("/").every((part) => part !== "" && part !== "." && part !== ".."), "a template input is a path inside the repository, such as package-lock.json, with no leading or trailing slash and no . or .. parts");
+export const templateInputsLimit = 16;
 export const projectSchema = z.strictObject({
   id: name.transform((id) => id as ProjectId),
   repoUrl: gitUrl.nullable(),
@@ -22,6 +26,8 @@ export const projectSchema = z.strictObject({
   logins: z.array(z.enum(["claude", "chatgpt"])),
   preSetup: z.string().nullable(),
   gitIdentity: gitIdentitySchema.nullable().optional(),
+  templateInputs: z.array(repoPath).max(templateInputsLimit)
+    .refine((paths) => new Set(paths).size === paths.length, "a template input is listed twice").optional(),
 });
 const rulesText = z.string().trim().min(1).max(standingRulesLimit).refine((text) => !text.includes("\0"), "standing rules cannot hold a NUL character, which no Claude prompt can");
 /** A caller gives standing rules as their text, and Nexus counts their revisions. */
