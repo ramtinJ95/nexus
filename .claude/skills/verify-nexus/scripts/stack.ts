@@ -54,7 +54,7 @@ const tag = `nexus-verify-pylon:${run}`;
 const imageId = "img-0000000000aa" as ImageId;
 const api = `http://127.0.0.1:${ports.api}`;
 const log = (message: string) => console.error(`${new Date().toISOString()} ${message}`);
-// An image that already holds the packages, herdr and user, which .nexus/verify makes from the verify pylon's own root,
+// An image that already holds the packages, herdr, herdr-core and user, which .nexus/verify makes from the verify pylon's own root,
 // because that pylon's allowlist reaches neither Docker Hub, Debian nor herdr.dev.
 const base = process.env.NEXUS_VERIFY_BASE;
 /** The repository in the stack's image that the project names and the dotfiles layer is pulled from. */
@@ -64,7 +64,7 @@ async function buildImage() {
   const arch = await docker("info", "--format", "{{.Architecture}}");
   const daemonArch = arch === "aarch64" || arch === "arm64" ? "arm64" : arch === "x86_64" || arch === "amd64" ? "x64" : undefined;
   if (daemonArch === undefined) throw new Error(`no pi-env build for Docker architecture ${arch}`);
-  const { herdr } = JSON.parse(await readFile(join(repoRoot, "images/pylon/pins.json"), "utf8")) as { herdr: string };
+  const { herdr, herdrCore } = JSON.parse(await readFile(join(repoRoot, "images/pylon/pins.json"), "utf8")) as { herdr: string; herdrCore: string };
   const dir = join(runDir, "image");
   await mkdir(dir, { recursive: true });
   await copyFile(packagedDaemon({ platform: "linux", arch: daemonArch }), join(dir, "pi-env"));
@@ -85,14 +85,18 @@ async function buildImage() {
     ...base === undefined ? [
       "ARG HERDR_VERSION",
       'RUN curl -fsSL https://herdr.dev/install.sh -o /tmp/herdr-install.sh && HERDR_INSTALL_DIR=/usr/local/bin sh /tmp/herdr-install.sh && rm /tmp/herdr-install.sh && test "$(herdr --version)" = "herdr ${HERDR_VERSION}"',
+      // Core's installer takes the version and links hc, so unlike Herdr's it installs the pin, not the latest release.
+      "ARG HERDR_CORE_VERSION",
+      'RUN curl -fsSL https://releases.herdr.dev/core/install.sh -o /tmp/hc-install.sh && HC_VERSION=${HERDR_CORE_VERSION} HC_INSTALL_DIR=/usr/local/bin sh /tmp/hc-install.sh && rm /tmp/hc-install.sh && test "$(hc --version)" = "hc ${HERDR_CORE_VERSION}"',
     ] : [],
     "RUN mkdir -p /root/.config/herdr && printf 'onboarding = false\\n\\n[session]\\nresume_agents_on_restore = false\\n' > /root/.config/herdr/config.toml",
+    "RUN mkdir -p /root/.config/herdr-core && printf 'notes = false\\n' > /root/.config/herdr-core/config.toml",
     "COPY pi-env /usr/local/libexec/nexus/pi-env",
     "COPY nexus /usr/local/bin/nexus",
     "RUN chmod 0755 /usr/local/libexec/nexus/pi-env /usr/local/bin/nexus",
   ].join("\n") + "\n");
   log(`building ${tag}`);
-  await docker("build", "--quiet", "--label", `nexus.verify=${run}`, "--build-arg", `HERDR_VERSION=${herdr}`, "--tag", tag, dir);
+  await docker("build", "--quiet", "--label", `nexus.verify=${run}`, "--build-arg", `HERDR_VERSION=${herdr}`, "--build-arg", `HERDR_CORE_VERSION=${herdrCore}`, "--tag", tag, dir);
 }
 
 /** tailscaled's LocalAPI whois for the control plane, answered by port: the probe's is the probe, everything else is the laptop. */
