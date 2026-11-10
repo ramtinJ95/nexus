@@ -50,7 +50,7 @@ test("each layout constant is the literal it replaced", () => {
     roleLinks: { probe: "current", control: "control-current" },
     deployerLink: "deployer-current",
     releasesDir: "releases",
-    deployerFiles: { lock: "deployer/lock", roles: "deployer/roles", repo: "deployer/repo", rejected: "deployer/rejected", releaseBytes: "deployer/release-bytes.json" },
+    deployerFiles: { lock: "deployer/lock", roles: "deployer/roles", repo: "deployer/repo", rejected: "deployer/rejected", bootstrap: "deployer/bootstrap", releaseBytes: "deployer/release-bytes.json" },
     deployerWakeFile: "/var/lib/nexus/deployer-wake",
     backupStatusFile: "/var/lib/nexus-backup/status.json",
     releaseName: /^(?:[0-9a-f]{12}|[0-9a-f]{40})$/,
@@ -89,11 +89,12 @@ test("release.sh and the role installers name the layout's prefix, releases, rel
   assert.ok(installDeployer.includes(`[ -e ${configFiles.deployer} ]`));
 });
 
-test("supervise-deployer.sh, which runs alone, names the layout's prefix, lock, link and rejected file", () => {
+test("supervise-deployer.sh, which runs alone, names the layout's prefix, lock, link, rejected file and bootstrap", () => {
   const supervise = read("deploy/supervise-deployer.sh");
   for (const line of [
     `prefix=${prefix}`, `exec 9>"$prefix/${deployerFiles.lock}"`, `worker="$prefix/${deployerLink}/src/deploy/worker.ts"`,
     `readlink "$prefix/${deployerLink}" > "$prefix/${deployerFiles.rejected}"`, `rm -f "$prefix/${deployerLink}"`,
+    `run_worker "$prefix/${deployerFiles.bootstrap}/src/deploy/worker.ts"`,
   ]) assert.ok(supervise.includes(line), line);
 });
 

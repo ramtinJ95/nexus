@@ -31,6 +31,7 @@ import { senders } from "../agent-protocol.ts";
 import { startHint, type HintPart } from "./start-hint.ts";
 import { agoText, clock } from "./elapsed.ts";
 import { bundle } from "./assets.ts";
+import { inlineSteps } from "./markdown.ts";
 import { imageTypes } from "../../image-types.ts";
 import { defaultClaudeModel } from "../../protocol/models.ts";
 import { testApi, type TestApiOptions } from "../../test-support/api-kit.ts";
@@ -1639,6 +1640,25 @@ test("markdown nested past what a page shows renders the rest as escaped text in
   for (const word of ["quoted", "listed"]) assert.ok(res.text.includes(`&lt;x&gt;${word}&lt;/x&gt;`), `${word} shows, escaped`);
   assert.ok(!res.text.includes("<x>"));
   assert.ok((res.text.match(/<blockquote>/g)?.length ?? 0) < 100 && (res.text.match(/<li>/g)?.length ?? 0) < 100, "the nesting shown is bounded");
+});
+
+test("a reply's inline markdown renders in work linear in its length, whatever openers it leaves unclosed", async (t) => {
+  const s = await seeded(t);
+  const stepsFor = async (unit: string, size: number) => {
+    const fix = await s.start("acme", `Render ${unit} at ${size}`);
+    const reply = `${unit.repeat(Math.ceil(size / unit.length)).slice(0, size)}\n\nend of reply`;
+    s.fake.transcript(fix.id).messages.push(assistant([{ type: "text", text: reply }]));
+    const before = inlineSteps;
+    const res = await s.call("GET", `/threads/${fix.id}`);
+    assert.equal(res.status, 200);
+    assert.ok(res.text.includes("<p>end of reply</p>"), "the whole reply renders");
+    return inlineSteps - before;
+  };
+  for (const unit of ["*a ", "_a ", "**a ", "__a ", "`a ", "[a](", "[*a](", "[a](b(c)", "*_**__[`a ", "**a _b [*c*](https://x) `d`_** "]) {
+    const [half, full] = [await stepsFor(unit, 32 * 1024), await stepsFor(unit, 64 * 1024)];
+    assert.ok(half >= 32 * 1024 && full >= 64 * 1024, `${unit}: every character is scanned`);
+    assert.ok(full <= 2.2 * half && full <= 4 * 64 * 1024, `${unit}: doubling the reply about doubles the work (${half} then ${full} steps)`);
+  }
 });
 
 test("strings from humans and probes are escaped, never markup", async (t) => {

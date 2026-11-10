@@ -68,8 +68,8 @@ test("records survive closing and reopening the file", async (t) => {
   const second = testRegistry(t, path);
   assert.deepEqual(second.projects.projects(), [project]);
   assert.deepEqual(second.threads.thread(threadId), thread);
-  assert.deepEqual(second.threads.threads(project.id), [thread]);
-  assert.deepEqual(second.threads.threads("other" as ProjectId), []);
+  assert.deepEqual(second.threads.threads({ project: project.id }), [thread]);
+  assert.deepEqual(second.threads.threads({ project: "other" as ProjectId }), []);
   assert.deepEqual(second.threads.pylon(pylonId), submitted);
   assert.deepEqual(second.threads.pylonsOn(node), [submitted]);
   assert.deepEqual(second.images.image(image.id), { ...image, release: "c".repeat(40) });
@@ -1769,7 +1769,7 @@ test("threads() reads each thread's session facts as thread() does, whichever fa
   const listed = registry.threads.threads();
   assert.deepEqual(listed.map((l) => l.id), [...ids].sort(), "threads made in one millisecond, by ID");
   for (const id of ids) assert.deepEqual(listed.find((l) => l.id === id), registry.threads.thread(id), id);
-  assert.deepEqual(registry.threads.threads(project.id), listed);
+  assert.deepEqual(registry.threads.threads({ project: project.id }), listed);
   const of = (id: string) => registry.threads.thread(id as ThreadId)!;
   assert.equal(of("th-live").sessionTurnRunning, true);
   assert.ok(of("th-live").workingSince !== undefined);

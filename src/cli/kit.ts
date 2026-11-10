@@ -138,14 +138,11 @@ export const reconnectMs = (failed: number, maxMs = 30_000) => Math.min(maxMs, 1
 
 /**
  * A consumer killed outright never closes the pipe, and a quiet stream writes nothing that would find it closed, so
- * the parent is checked every second. The pipe's handler stays, since a closed pipe fails the last write after the
- * stream ends.
+ * the parent is checked every second. A consumer that closes the pipe ends the CLI at its entry, nexus.ts.
  */
 export function untilConsumerGone(onEnd: () => void): () => void {
   const parent = process.ppid;
   const orphan = setInterval(() => { if (process.ppid !== parent) onEnd(); }, 1000);
-  const outputError = (err: NodeJS.ErrnoException) => { if (err.code === "EPIPE") onEnd(); else throw err; };
-  process.stdout.on("error", outputError);
   const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
   for (const signal of signals) process.once(signal, onEnd);
   return () => {

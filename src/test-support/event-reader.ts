@@ -26,13 +26,14 @@ export interface EventReader {
   close(): void;
 }
 
-export function readEvents(port: number, path: string): EventReader {
+/** `headers` overrides any header, so a test can pose as a browser page. */
+export function readEvents(port: number, path: string, headers: Record<string, string> = {}): EventReader {
   const queued: unknown[] = [];
   let wake = () => {};
   const ended = Promise.withResolvers<"end" | "dropped">();
   let res: IncomingMessage | undefined;
   let cursor: string | undefined;
-  const req = request({ host: "127.0.0.1", port, path, headers: { host: `127.0.0.1:${port}`, accept: "text/event-stream" } });
+  const req = request({ host: "127.0.0.1", port, path, headers: { host: `127.0.0.1:${port}`, accept: "text/event-stream", ...headers } });
   req.on("error", () => {});
   req.on("close", () => ended.resolve("dropped"));
   req.end();
