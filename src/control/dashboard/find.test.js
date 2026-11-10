@@ -76,6 +76,7 @@ function page() {
     getElementById: (id) => [...root.all()].find((el) => el.id === id) ?? null,
     createElement: (tag) => new El(tag),
     activeElement: null,
+    documentElement: root,
     body: new El("body"),
   });
   return { doc, filter, form, textarea, shown: () => doc.querySelectorAll("li").filter((li) => !li.hidden && li.parentElement.parentElement.open).map((li) => threads.find((t) => li.querySelector("a.row").dataset.find === findText(t, t.prs)).id) };
@@ -88,7 +89,7 @@ Object.defineProperty(globalThis, "navigator", { value: { platform: "Linux x86_6
 Object.assign(globalThis, {
   HTMLInputElement: Input, HTMLTextAreaElement: TextArea, HTMLSelectElement: class extends El {},
   FormData: class { constructor(form) { return form.querySelectorAll("input").map((input) => [input.getAttribute("name"), input.value]); } },
-  matchMedia: (query) => ({ matches: query === narrowQuery && phone }),
+  matchMedia: (query) => ({ get matches() { return query === narrowQuery && phone; }, addEventListener() {} }),
   sessionStorage: { getItem: (k) => stored.get(k) ?? null, setItem: (k, v) => stored.set(k, String(v)), removeItem: (k) => stored.delete(k) },
   location: { assign: (href) => assigned.push(href) },
 });

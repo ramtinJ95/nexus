@@ -1,19 +1,23 @@
-// The sidebar and the phone's panels: which panel is open, the thread filter on each swap, copy buttons and the
+// The sidebar and the drawers: which panel is open, the thread filter on each swap, copy buttons and the
 // inspector's tab.
 import { afterSwap } from "./page.js";
 import { applyFilter } from "./find.js";
-import { kept, storageKeys } from "./contract.ts";
+import { kept, narrow, storageKeys } from "./contract.ts";
+import { syncMenu, toggleFold } from "./side.js";
 
-/** The phone's thread list, inspector or thread actions, one at a time. */
+/** A drawer, one at a time: the phone's thread list or thread actions, or the inspector of a window 1100px wide or less. */
 export function setOpen(panel) {
   if (panel === null) delete document.body.dataset.open;
   else document.body.dataset.open = panel;
   // The phone's thread list is hidden until it opens, so the open thread's row is brought into view then.
   if (panel === "side") document.querySelector(".row.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  syncMenu();
 }
 document.addEventListener("click", (event) => {
   const target = event.target instanceof Element ? event.target : null;
-  const opener = target?.closest("[data-open]");
+  // A button, as the body's data-open names the open drawer and opens none.
+  const opener = target?.closest("button[data-open]");
+  if (opener?.dataset.open === "side" && !matchMedia(narrow).matches) return toggleFold();
   if (opener !== null && opener !== undefined) {
     setOpen(document.body.dataset.open === opener.dataset.open ? null : opener.dataset.open);
     if (opener.dataset.pane !== undefined) pickPane(opener.dataset.pane);
@@ -27,6 +31,8 @@ document.addEventListener("click", (event) => {
 });
 
 afterSwap(applyFilter);
+// A poll swaps the thread page's bar, and its menu button with it.
+afterSwap(syncMenu);
 
 document.addEventListener("click", (event) => {
   const button = event.target instanceof Element ? event.target.closest("button[data-copy]") : null;
