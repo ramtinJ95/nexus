@@ -96,16 +96,10 @@ export function startRows({ api, notifications, raise = () => {}, health = () =>
     rowsChannel.postMessage({ raise: row, to, key });
     return false;
   }
-  /** Asks a tab that shows `thread` to come forward, and says whether there was one. */
-  function elsewhere(thread) {
-    const to = [...tabs.values()].filter((tab) => tab.thread === thread).map((tab) => tab.id).sort()[0];
-    if (to !== undefined) rowsChannel.postMessage({ show: to });
-    return to !== undefined;
-  }
+  /** Whether another tab shows `thread`. */
+  const elsewhere = (thread) => [...tabs.values()].some((tab) => tab.thread === thread);
   rowsChannel?.addEventListener("message", ({ data }) => {
-    if (data.show !== undefined) {
-      if (data.show === id) window.focus();
-    } else if (data.tab !== undefined) {
+    if (data.tab !== undefined) {
       tabs.set(data.tab.id, data.tab);
       if (data.ask) tell();
     } else if (data.gone !== undefined) {

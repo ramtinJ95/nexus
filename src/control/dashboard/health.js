@@ -53,17 +53,19 @@ export async function caughtUp(hand, wait = 1000) {
 
 /**
  * Shows a notice in `channel`. A system notification with a `tag` replaces the browser's one of that tag and alerts
- * again. Its click brings the tab forward, and opens `url` there unless it is null. `elsewhere` asks a tab that came
- * to show the notice's thread since to come forward, and says whether one did, so the click leaves this page alone.
+ * again. Its click brings the tab forward, and opens `url` there unless it is null. When `elsewhere` says another tab
+ * came to show the notice's thread since, the click opens `url` in a new tab instead, as a page cannot bring another
+ * tab forward, and this one keeps its draft and terminal.
  */
 export async function notice(channel, title, body, url, tag, elsewhere = () => false) {
   if (channel === "system") {
     const shown = new Notification(title, tag === undefined ? { body } : { body, tag, renotify: true });
     shown.onclick = () => {
       shown.close();
-      if (url !== null && elsewhere()) return;
       window.focus();
-      if (url !== null) location.assign(url);
+      if (url === null) return;
+      if (elsewhere()) window.open(url, "_blank");
+      else location.assign(url);
     };
     return () => shown.close();
   }

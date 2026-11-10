@@ -160,7 +160,7 @@ function tab(browser, { fetch, now = () => 0, notify = () => {}, shown = () => {
     constructor(url) { browser.streams.push(this); this.url = url; this.closed = false; }
     close() { this.closed = true; }
   }
-  const win = { BroadcastChannel: Channel, listeners: [], focuses: 0, focus: () => { win.focuses += 1; }, addEventListener: (kind, listener) => win.listeners.push({ kind, listener }) };
+  const win = { BroadcastChannel: Channel, listeners: [], addEventListener: (kind, listener) => win.listeners.push({ kind, listener }) };
   const fire = (kind, event) => { for (const l of win.listeners) if (l.kind === kind) l.listener(event); };
   let code;
   let holds = false;
@@ -204,7 +204,7 @@ function tab(browser, { fetch, now = () => 0, notify = () => {}, shown = () => {
   close.channel = browser.channels.at(-1);
   // As a crashed tab does, it stops hearing the channel and says nothing.
   const freeze = () => browser.channels.splice(browser.channels.indexOf(close.channel), 1);
-  return { ...code, doc, favicon, timers, intervals, show, focus, close, freeze, win };
+  return { ...code, doc, favicon, timers, intervals, show, focus, close, freeze };
 }
 const browser = () => ({ channels: [], streams: [], locked: false, waiting: [], posts: 0, tabs: 0 });
 const json = (body) => ({ ok: true, text: async () => JSON.stringify(body) });
@@ -678,15 +678,16 @@ test("the notifications control reads the browser's permission, and asks for it 
   assert.deepEqual(read(unasked.button), ["System notifications blocked in the browser's site settings", true], "a change in the site settings shows too");
 });
 
-test("a click on a notice raised while no tab showed its thread brings forward a tab that has shown it since, and opens nothing", async (t) => {
+test("a click on a notice raised while no tab showed its thread opens a new tab when one has shown the thread since, and keeps its own page", async (t) => {
   const notifications = [];
   class Notification {
     constructor(title, options) { Object.assign(this, { title, options }); notifications.push(this); }
     close() {}
   }
   const assigned = [];
+  const opened = [];
   let focuses = 0;
-  const globals = { location: { assign: (url) => assigned.push(url) }, window: { focus: () => { focuses += 1; } }, Notification };
+  const globals = { location: { assign: (url) => assigned.push(url) }, window: { focus: () => { focuses += 1; }, open: (url, target) => opened.push([url, target]) }, Notification };
   const before = Object.fromEntries(Object.keys(globals).map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
   for (const [k, v] of Object.entries(globals)) Object.defineProperty(globalThis, k, { value: v, configurable: true, writable: true });
   t.after(() => { for (const [k, d] of Object.entries(before)) d === undefined ? delete globalThis[k] : Object.defineProperty(globalThis, k, d); });
@@ -707,13 +708,13 @@ test("a click on a notice raised while no tab showed its thread brings forward a
   await settle();
   assert.equal(shown.at(-1).url, "/#needs-you:t1:failed");
   await click();
-  assert.deepEqual([assigned, focuses], [["/#needs-you:t1:failed"], 1], "with no tab on the thread, the click opens the notice's page");
+  assert.deepEqual([assigned, opened, focuses], [["/#needs-you:t1:failed"], [], 1], "with no tab on the thread, the click opens the notice's page in its tab");
 
   listed = [{ ...listed[0], attention: "decision" }];
   shared.streams[0].onmessage({});
   await settle();
-  const opened = tab(shared, { focused: false, visible: false, thread: "t1", fetch: async () => json(listed) });
+  tab(shared, { focused: false, visible: false, thread: "t1", fetch: async () => json(listed) });
   await settle();
   await click();
-  assert.deepEqual([assigned.length, focuses, opened.win.focuses], [1, 1, 1], "the tab now on the thread comes forward, and this tab keeps its page");
+  assert.deepEqual([assigned.length, opened, focuses], [1, [["/#needs-you:t1:decision", "_blank"]], 2], "the clicked tab comes forward, keeps its page and opens the notice's in a new tab");
 });
