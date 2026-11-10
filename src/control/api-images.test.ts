@@ -77,7 +77,7 @@ test("a deployer's image operations answer 200 once done and 202 while running, 
   s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
   s.registry.threads.ingested(testObservation(node, { observedAt: "2027-01-01T00:01:00Z", artifacts: [image.id as ImageId] }), []);
   const entries = [{ ...built, release: null, nodes: [] }, { ...image, release: null, nodes: [node] }];
-  assert.deepEqual((await s.call("GET", "/v1/images")).body, { current: null, previous: null, images: entries, operation: null }, "newest build first");
+  assert.deepEqual((await s.call("GET", "/v1/images")).body, { current: null, previous: null, images: entries, operation: null, fetches: [] }, "newest build first");
 
   const build = await s.call("POST", "/v1/images/build", {});
   assert.equal(build.status, 200, "the recipe's image is recorded already");
