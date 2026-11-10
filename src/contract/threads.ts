@@ -68,11 +68,14 @@ export interface QueuedThread {
   lastError: string | null;
 }
 
-/** `deleted: false` leaves out deleted threads. */
-export interface ThreadsQuery { project?: string | undefined; deleted?: false }
-const threadsQuery: QueryCodec<ThreadsQuery> = {
-  encode: ({ project, deleted }) => queryOf([["project", project], ["deleted", deleted === false ? "false" : undefined]]),
-  decode: (params) => ({ ...params.has("project") ? { project: params.get("project")! } : {}, ...params.get("deleted") === "false" ? { deleted: false } : {} }),
+/** `deleted: false` leaves out deleted threads, and `status: "open"` lists only active and idle ones. */
+export interface ThreadsQuery { project?: string | undefined; deleted?: false; status?: "open" }
+const threadsQuery: QueryCodec<ThreadsQuery, Omit<ThreadsQuery, "status"> & { status?: string }> = {
+  encode: ({ project, deleted, status }) => queryOf([["project", project], ["deleted", deleted === false ? "false" : undefined], ["status", status]]),
+  decode: (params) => ({
+    ...params.has("project") ? { project: params.get("project")! } : {}, ...params.get("deleted") === "false" ? { deleted: false } : {},
+    ...params.has("status") ? { status: params.get("status")! } : {},
+  }),
 };
 
 /** `status: "queued"` leaves out cancelled and deleted queued threads. */

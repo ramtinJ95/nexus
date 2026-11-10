@@ -207,11 +207,11 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
       };
       return ok(threadPage(c, page, r.query.has("streaming")));
     }],
-    ["GET", /^\/threads\/([^/]+)\/stream$/, anyAllowed, ([, id]) => {
+    ["GET", /^\/threads\/([^/]+)\/stream$/, anyAllowed, ([, id], { caller }) => {
       const t = kit.thread(id!, { status: "kept" });
       const agent = kit.agentOf(t);
       const reader = live(t, registry.threads.claudeWorker(t.id)?.model ?? null, itemsOf(t.id));
-      return { stream: (res) => kit.stream(res, t, () => agent.watch(t), reader.frames, reader.leave) };
+      return { stream: (res) => kit.stream(res, caller, t, () => agent.watch(t), reader.frames, reader.leave) };
     }],
     ["GET", /^\/nodes\/([^/]+)$/, anyAllowed, async (m, r) => {
       const name = m[1]! as NodeName;

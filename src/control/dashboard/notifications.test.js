@@ -222,7 +222,7 @@ test("a hidden tab notifies from the rows the tab that follows the events read, 
   const notified = { leader: [], hidden: [] };
   const page = (name) => tab(shared, {
     now: () => now, notify: (row) => notified[name].push(row.attention),
-    fetch: async (path) => { assert.equal(path, "/v1/threads?deleted=false"); reads[name] += 1; return json(listed); },
+    fetch: async (path) => { assert.equal(path, "/v1/threads?status=open"); reads[name] += 1; return json(listed); },
   });
   const leader = page("leader");
   const hidden = page("hidden");
