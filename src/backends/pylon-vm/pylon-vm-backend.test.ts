@@ -216,10 +216,11 @@ test("a boot granted the ChatGPT token signs pi in after the dotfiles pull, as u
   const gitIdentity = { name: "Example Person", email: "person@example.com" };
   const granted = bootHooks(bootOf("pylon-pi", { gitIdentity, network: { allowedHosts: ["api.openai.com"], secrets: [chatgptTokenGrant] } }));
   const signIn = asUserIn(launchers.pi!.login!, "/home/user");
-  assert.equal(granted.length, 3);
+  assert.equal(granted.length, 4);
   assert.match(granted[0]!, /dotfiles: pulled/);
   assert.equal(granted[1], signIn, "after the pull, whose install may replace ~/.pi/agent files");
   assert.match(granted[2]!, /git config --global user\.name/);
+  assert.match(granted[3]!, /herdr-core serve/, "the core starts last");
   assert.ok(!bootHooks(bootOf("pylon-pi", { gitIdentity })).includes(signIn));
 });
 

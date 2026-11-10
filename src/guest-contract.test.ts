@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as contract from "./guest-contract.ts";
 
 test("each name and limit equals the literal it replaced", () => {
-  const { asUser, onClaudeTranscript, herdrPanePattern, startHerdrServer, focusScript, attachScript, ...values } = contract;
+  const { asUser, onClaudeTranscript, coreRunning, startCore, ensureCore, herdrPanePattern, startHerdrServer, focusScript, attachScript, ...values } = contract;
   assert.deepEqual(values, {
     servicesActions: ["ensure", "list", "restart", "stop"],
     maxServiceLogLines: 500,
@@ -12,7 +12,11 @@ test("each name and limit equals the literal it replaced", () => {
     herdrSession: "nexus",
     herdrClient: "herdr --session nexus",
     herdrServerStartMs: 5_000,
+    coreStartMs: 5_000,
   });
+  assert.equal(coreRunning, `pgrep -u "$(id -u)" -x -f '([^ ]*/)?herdr-core serve' >/dev/null`);
+  assert.equal(startCore, "setsid -f tini -s -- herdr-core serve </dev/null >/dev/null 2>&1");
+  assert.equal(ensureCore, `{ ${coreRunning} || { ${startCore}; i=0; until ${coreRunning}; do i=$((i + 1)); [ $i -lt 50 ] || break; sleep 0.1; done; ${coreRunning}; }; }`);
   assert.equal(herdrPanePattern.source, "^w[0-9]{1,9}:p[0-9]{1,9}$");
   assert.equal(herdrPanePattern.flags, "");
   assert.deepEqual(asUser("id"), ["runuser", "-l", "user", "-c", "id"]);

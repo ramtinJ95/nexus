@@ -1,6 +1,6 @@
 /**
  * How the probe and the control plane drive the pylon guest: the `services` actions and log limit, the exec output
- * cap, the user every command runs as, the call timeout, and how a command reaches Herdr. It imports nothing, so
+ * cap, the user every command runs as, the call timeout, and how a command reaches Herdr Core. It imports nothing, so
  * every side reads this one copy. The guest's layout and the in-pylon API, which the image defines, are in
  * images/pylon/nexus-contract.ts.
  */
@@ -23,6 +23,26 @@ export const asUser = (script: string): readonly string[] => ["runuser", "-l", "
  * Claude gave the cwd. Exits `none` when no project does.
  */
 export const onClaudeTranscript = (body: string, none: number) => `for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; ${body}; exit 0; done; exit ${none}`;
+
+/**
+ * Exits 0 while the user's Herdr Core runs. It matches the process, because every Core command, a read included,
+ * starts a core when none runs (spikes/herdr-core/README.md, core-autostart).
+ */
+export const coreRunning = `pgrep -u "$(id -u)" -x -f '([^ ]*/)?herdr-core serve' >/dev/null`;
+export const coreStartMs = 5_000;
+/**
+ * setsid detaches the core from the exec, and the redirects let the exec return without waiting on its output. In an
+ * image built before rootfs-init-extra.sh made tini PID 1, PID 1 is Gondolin's sandboxd, which never reaps the orphans
+ * it adopts, so an agent whose terminal ends first would stay a zombie. tini -s is the subreaper for everything under
+ * the core there. It is unconditional because the base image guarantees /usr/bin/tini.
+ */
+export const startCore = "setsid -f tini -s -- herdr-core serve </dev/null >/dev/null 2>&1";
+/**
+ * Starts the core unless one runs, and waits until it does. Its status says whether a core runs. Every boot runs it,
+ * so the core gets the login environment rather than that of whatever reaches it first, such as a Claude whose
+ * session variables would pass to every terminal.
+ */
+export const ensureCore = `{ ${coreRunning} || { ${startCore}; i=0; until ${coreRunning}; do i=$((i + 1)); [ $i -lt ${coreStartMs / 100} ] || break; sleep 0.1; done; ${coreRunning}; }; }`;
 
 /** The named Herdr session every pane of a pylon runs in, and every terminal attaches to. */
 export const herdrSession = "nexus";
