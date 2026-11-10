@@ -82,3 +82,17 @@ test("another tab clearing the storage forgets the remembered dark theme too", (
   assert.deepEqual([store.choice, store.lastDark], ["system", null]);
   assert.equal(toggled("light", store.lastDark), "dark");
 });
+
+test("the first-paint script names the platform beside the theme, as find.js tells a Mac, so each shortcut shows its own keys", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const { themeScript } = await import("./view.ts");
+  const painted = (platform) => {
+    const root = { dataset: {} };
+    runInNewContext(themeScript, { document: { documentElement: root }, navigator: { platform }, localStorage: storage(), matchMedia: () => ({ matches: false }) });
+    return root.dataset;
+  };
+  assert.deepEqual(painted("MacIntel"), { theme: "light", platform: "mac" });
+  assert.deepEqual(painted("iPhone"), { theme: "light", platform: "mac" });
+  assert.deepEqual(painted("Win32"), { theme: "light", platform: "other" });
+  assert.deepEqual(painted("Linux x86_64"), { theme: "light", platform: "other" });
+});

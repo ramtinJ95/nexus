@@ -148,7 +148,7 @@ const marks = { ok: "✓", bad: "✕", none: "–" };
  * tool calls, folds and clipped outputs start open, and the dock under it with the run bar and the prompt box.
  */
 function conversationOf(html: string) {
-  const convo = html.split('id="convo"')[1]!.split('<section class="file-view"')[0]!;
+  const convo = html.split('id="convo"')[1]!.split('<button type="button" class="btn btn-xs jump-end"')[0]!;
   const dock = html.split('<div class="dock">')[1]!.split("</main>")[0]!;
   return {
     rows: convo.replace(/<span class="t-mark (ok|bad|none)"[^>]*>/g, (mark, state: keyof typeof marks) => `${mark}${marks[state]}`)
@@ -238,6 +238,17 @@ test("an archive whose usage will not be read without the person needs them, as 
   assert.doesNotMatch(await archived(), /kept/);
 });
 
+test("every page's first stop for Tab skips the sidebar to the page, and the page has the list of its shortcuts", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  for (const path of ["/", `/threads/${fix.id}`, "/cluster"]) {
+    const page = (await s.call("GET", path)).text;
+    assert.match(page, /<body>\s*<a class="skip" href="#main">Skip to the page<\/a>\s*<div class="app/, `${path} opens with the skip link`);
+    assert.match(page, /<main class="main" id="main" tabindex="-1"/, `${path}'s main takes the skip link's focus`);
+    assert.match(page, /<dialog id="keys" class="modal keys" aria-labelledby="keys-h">.*<dl id="keys-list"><\/dl><\/dialog>/, `${path} has the shortcuts overlay ? opens`);
+  }
+});
+
 test("the sidebar lists every project's threads with their state, counts the archived with a link to them and marks the open one", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const s = await seeded(t);
@@ -255,7 +266,7 @@ test("the sidebar lists every project's threads with their state, counts the arc
     const html = (await s.call("GET", path)).text;
     const sidebar = sidebarOf(html);
     // Threads started in the same millisecond have no order between them.
-    assert.deepEqual(sidebar.rows.toSorted(), ["agent working Write docs working 1m 03s", "running Fix checkout now"], `${path} lists the open threads`);
+    assert.deepEqual(sidebar.rows.toSorted(), ["agent idle Fix checkout now", "agent working Write docs working 1m 03s"], `${path} lists the open threads`);
     assert.match(sidebar.text, /^acme main Fix checkout now 1 archived, 1 deleted beta main Write docs working 1m 03s$/);
     assert.match(html, /<a class="archived-link" id="archived-acme" href="\/threads\/closed\?project=acme">1 archived, 1 deleted<\/a>/, `${path} links the closed threads' page`);
     assert.match(html, new RegExp(`<span class="row-at">working <time data-since="${started}">1m 03s</time></span>`), `${path} ticks the working thread's clock`);
@@ -727,7 +738,7 @@ test("Needs you lists, oldest first, each held review, open question and ask, an
   for (const c of cards) assert.match(c.html, new RegExp(`<a class="need-thread" href="/threads/${c.thread}"[ >]`), "each card links its thread");
 
   const land = cards[0]!;
-  assert.match(land.text, /^Review needs you acme \/ Cache the list just now Planned Queued Building In review held for you Landing Deployed #7 round 2 of 5 .* Open thread Caches the thread list between polls\. Not checked live The cache's behaviour under load could not be checked live\. Head /);
+  assert.match(land.text, /^Review needs you acme \/ Cache the list just now The pull request's GitHub checks are pending\. Planned Queued Building In review held for you Landing Deployed #7 round 2 of 5 .* Open thread Caches the thread list between polls\. Not checked live The cache's behaviour under load could not be checked live\. Head /);
   assert.match(land.text, /pending\. not waivable .* src\/control\/api\.ts\. you may waive /);
   const button = /<button [^>]*data-action="land"[^>]*>/.exec(land.html)![0];
   assert.match(button, new RegExp(`id="land-${held.id}" data-action="land" data-thread="${held.id}" data-head="${head}"`), "the thread page's Land button, under an ID of the card's own");
@@ -778,7 +789,7 @@ test("a thread in Needs you has its call to action once, in its card, with where
     assert.match(flight, new RegExp(`<a class="fl-row" href="/\\?peek=${thread.id}" data-peek="${thread.id}" aria-current="true">`), "its line leads to its card");
   }
   const land = needsOf((await s.call("GET", `/?peek=${held.id}`)).text).cards.find((c) => c.thread === held.id)!;
-  assert.match(land.text, /^Review needs you acme \/ Cache the list just now Planned Queued Building In review held for you Landing Deployed #7 round 2 of 5 .* Open thread Latest reply (.* )?Opened #7\. It waits for you to land\. Caches the thread list\./, "the strip has the pull request, its round and the latest reply in a line");
+  assert.match(land.text, /^Review needs you acme \/ Cache the list just now Always needs the person: changes to login or auth, as it changes src\/control\/api\.ts\. Planned Queued Building In review held for you Landing Deployed #7 round 2 of 5 .* Open thread Latest reply (.* )?Opened #7\. It waits for you to land\. Caches the thread list\./, "the strip has the pull request, its round and the latest reply in a line");
   assert.doesNotMatch(land.text, /#7 Cache|Held for you/, "nor names the pull request again under a title of its own");
   assert.equal(land.text.match(/Not checked live/g)!.length, 1);
   assert.match(land.html, /<details id="land-why-[^"]+"><summary>Findings and checks<\/summary>/, "the findings and checks are folded");
@@ -789,7 +800,7 @@ test("a thread in Needs you has its call to action once, in its card, with where
   const waiting = (await s.call("GET", `/?peek=${approved.id}`)).text;
   assert.doesNotMatch(waiting.split('id="peek"')[1]!.split('id="in-flight"')[0]!, /class="peek"/, "an approved review that cannot land previews in its card too");
   const heldCard = waiting.split(`id="need-${approved.id}-review"`)[1]!.split("</article>")[0]!;
-  assert.match(textOf(heldCard.replace(/^[^>]*>/, "")), /^Review needs you acme \/ Name the TTL just now Planned Queued Building In review held for you Landing Deployed #8 round 2 of 5 .* Open thread It cannot land, as pull request #8 is closed on GitHub outside this review, so there is nothing to land\.$/, "with where its work is and why it cannot land");
+  assert.match(textOf(heldCard.replace(/^[^>]*>/, "")), /^Review needs you acme \/ Name the TTL just now Approved, and lands once you press Land Planned Queued Building In review held for you Landing Deployed #8 round 2 of 5 .* Open thread It cannot land, as pull request #8 is closed on GitHub outside this review, so there is nothing to land\.$/, "with where its work is and why it cannot land");
   assert.equal([...heldCard.matchAll(/Open thread/g)].length, 1);
 
   const page = (await s.call("GET", `/?peek=${quiet.id}`)).text;
@@ -1105,10 +1116,57 @@ test("a paused thread's unread reply has a dot of its own, so it never looks lik
     assert.ok(dot !== null, `a dot for ${thread.title}`);
     return `${dot[2]} ${dot[1]}`;
   });
-  const want = ["running ok", "new reply reply", "agent working work"];
+  const want = ["agent idle ok", "new reply reply", "agent working work"];
   assert.deepEqual(dots(home.split('id="overview"')[1]!.split("<tr")), want, "the home table, which the phone lists too");
   assert.deepEqual(dots(home.split('id="side-threads"')[1]!.split("</nav>")[0]!.split("<li>")), want, "the sidebar");
   assert.match((await s.call("GET", `/threads/${replied.id}`)).text, /<span class="chip chip-reply"><span class="dot dot-reply" aria-hidden="true"><\/span><span class="chip-label">new reply<\/span><\/span>/, "the thread page's header");
+});
+
+test("a thread's state reads the same in its sidebar row, the home table and its page's header, and each red state has a shape of its own", async (t) => {
+  const s = await seeded(t);
+  const now = Date.now();
+  const start = (title: string) => s.start("acme", title);
+  const [idle, working, replied, waiting, failed, decision, parked, paused, archived] = [
+    await start("Idle"), await start("Working"), await start("Replied"), await start("Waiting"), await start("Failed"),
+    await start("Decision"), await start("Parked"), await start("Paused"), await start("Archived"),
+  ];
+  const limited = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Limited", claude: "write them" })).text) as Thread;
+  claudeWorkerAt(s.registry, limited.id, "started", { session: "s1" });
+  const resetsAt = now + 3_600_000;
+  assert.ok(s.registry.threads.appendClaudeRead(limited.id, { session: "s1", from: transcriptStart, entries: [{ kind: "notice", at: now, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt } }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: now }));
+  const running = [idle, working, replied, waiting, decision, parked];
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity });
+  s.registry.threads.ingested(testObservation(node, { pylons: [...running.map((th) => runningPylon(th.pylonId)), stoppedPylon(paused.pylonId, { sessions: null })] }), []);
+  s.registry.threads.recordActivity(working.id, { agent: now, agentTurnRunning: true });
+  s.registry.threads.recordReply(replied.id, now);
+  s.registry.threads.reportSession(node, { sequence: 1, pylon: waiting.pylonId, time: now, event: { kind: "session.waiting", session: "s1" } });
+  s.registry.threads.savePylon({ ...s.registry.threads.pylon(failed.pylonId)!, failed: "setup exited 1" });
+  s.registry.nudges.saveNudge(decision.id, { state: "person", turn: now });
+  s.registry.threads.recordParked(parked.id, true);
+  assert.equal((await s.call("POST", `/v1/threads/${archived.id}/archive`)).status, 200);
+
+  const want: [Thread, string][] = [
+    [idle, "agent idle ok"], [working, "agent working work"], [replied, "new reply reply"], [waiting, "waiting for input idle"],
+    [failed, "failed bad"], [decision, "needs your decision decide"], [parked, "parked stuck"],
+    [limited, `stopped on its usage limit until ${new Date(resetsAt).toISOString().slice(11, 16)} UTC limit`],
+    [paused, "paused idle"], [archived, "archived muted"],
+  ];
+  const dotIn = (html: string, thread: Thread) => {
+    const dot = /class="dot dot-(\w+)" role="img" aria-label="([^"]+)"/.exec(html);
+    assert.ok(dot !== null, `a dot for ${thread.title}`);
+    return `${dot[2]} ${dot[1]}`;
+  };
+  const home = (await s.call("GET", "/")).text.split('id="overview"')[1]!.split("<tr");
+  for (const [thread, state] of want) {
+    const page = (await s.call("GET", `/threads/${thread.id}`)).text;
+    const chip = /<span class="chip chip-(\w+)"><span class="dot dot-(\w+)" aria-hidden="true"><\/span><span class="chip-label">([^<]*)<\/span>/.exec(page);
+    assert.ok(chip !== null && chip[1] === chip[2], `${thread.title}'s header has a chip`);
+    assert.equal(`${chip[3]} ${chip[1]}`, state, `${thread.title}'s header`);
+    const row = page.split('id="side-threads"')[1]!.split("<li>").find((li) => li.includes(`href="/threads/${thread.id}"`));
+    assert.equal(dotIn(row ?? "", thread), state, `${thread.title}'s sidebar row`);
+    const inHome = home.find((tr) => tr.includes(`href="/threads/${thread.id}"`));
+    if (thread !== archived) assert.equal(dotIn(inHome ?? "", thread), state, `${thread.title}'s row in the home table`);
+  }
 });
 
 test("the side nodes show each node's committed memory, mark an overcommitted one, and say what its paused pylons need to wake", async (t) => {
@@ -1258,7 +1316,8 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
   const previews = sectionOf(res.text, "previews-h");
   assert.ok(previews.includes('href="https://rj-firebat.tail.ts.net:8443/"'), "a ready preview links to its tailnet HTTPS URL");
   assert.equal(textOf(previews), "Previews 2 api starting rj-firebat.tail.ts.net:8444 web Open ↗ rj-firebat.tail.ts.net:8443");
-  assert.ok(!previews.includes(":8444/"), "a preview that is not ready has no link yet");
+  assert.ok(!previews.includes('href="https://rj-firebat.tail.ts.net:8444/"'), "a preview that is not ready has no link yet");
+  assert.ok(previews.includes('<div class="pv-url" title="https://rj-firebat.tail.ts.net:8444/">rj-firebat.tail.ts.net:8444</div>'), "the URL the inspector cuts is whole on hover");
 
   const outputs = sectionOf(res.text, "outputs-h");
   assert.equal(textOf(outputs), "Outputs 3 PR watch: off (no control-plane GitHub token configured). branch nexus/fix-checkout diff abc1234 file out-1", "web's preview is listed once, under Previews");
@@ -1288,7 +1347,7 @@ test("the inspector's tabs pick the changes, the previews or the pylon, and the 
   assert.match(page, /<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="[^"]+"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">.*Fix checkout<\/span><\/button><button type="button" class="tab tab-tl" role="tab" aria-selected="false" aria-controls="timeline-view" data-tab="timeline">.*Timeline<\/span><\/button><button type="button" class="tab tab-term" role="tab" aria-selected="false" aria-controls="term-view" data-tab="term"[^>]*>.*Terminal<\/span><\/button><\/div>/, "the conversation is the first tab, and the terminal is one click away beside it");
 });
 
-test("the inspector lists each listening port once: under Ports with an Open button until it has a preview, then under Previews", async (t) => {
+test("the inspector lists each listening port once: under Ports with a Publish button until it has a preview, then under Previews", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   const page = async () => {
@@ -1299,11 +1358,11 @@ test("the inspector lists each listening port once: under Ports with an Open but
   s.observeWith({ services: [{ name: "web", state: "ready", port: 5173, declared: true, wantsPreview: true }, { name: "db", state: "ready", port: 5432, declared: true, wantsPreview: false }], listening: [3000, 5173, 5432] }, fix);
   s.registry.threads.allocatePreviews(fix.pylonId, ["web"], { first: 8443, last: 8443 });
   const before = await page();
-  assert.equal(textOf(before.ports), "Ports 2 3000 Open 5432 db", "web's port is under Previews, and db's has no preview to open");
-  assert.ok(before.ports.includes(`<button type="button" class="btn btn-xs" data-action="link-port" data-thread="${fix.id}" data-port="3000" aria-label="Open port 3000">Open</button>`), "a port no service owns offers to publish it");
+  assert.equal(textOf(before.ports), "Ports 2 3000 Publish 5432 db", "web's port is under Previews, and db's has no preview to publish");
+  assert.ok(before.ports.includes(`<button type="button" class="btn btn-xs" data-action="link-port" data-thread="${fix.id}" data-port="3000" aria-label="Publish port 3000">Publish</button>`), "a port no service owns offers to publish it");
   assert.equal(before.previews, "Previews 1 web starting rj-firebat.tail.ts.net:8443");
 
-  // Opening 3000 links it, and the node's next read lists its service.
+  // Publishing 3000 links it, and the node's next read lists its service.
   s.registry.threads.allocatePreviews(fix.pylonId, ["web", "port-3000"], { first: 8443, last: 8444 });
   s.observeWith({ services: [{ name: "web", state: "ready", port: 5173, declared: true, wantsPreview: true }, { name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true }], listening: [3000, 5173] }, fix);
   const after = await page();
@@ -1387,10 +1446,12 @@ test("a lone tool call is its own line, and a run of calls folds under a line th
     assistant([call("c4", "read", { path: "src/b.ts", offset: 10 })], "aborted"),
     assistant([], "error", "rate limited"),
     { role: "user", content: [{ type: "text", text: "Look at this " }, { type: "image", data: "", mimeType: "image/png" }], timestamp: 0 },
-    assistant([{ type: "text", text: "All 40 pass." }]),
+    { ...assistant([{ type: "text", text: "All 40 pass." }]), timestamp: 1_700_000_000_000 },
   );
 
-  const { rows, open } = conversationOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  const page = (await s.call("GET", `/threads/${fix.id}`)).text;
+  assert.match(page, /<div class="msg agent" data-at="1700000000000"><div class="text"><p>All 40 pass\.<\/p>/, "an answer carries its time, which the page titles in the reader's zone");
+  const { rows, open } = conversationOf(page);
   assert.deepEqual(rows, [
     "You Run the tests",
     "Running them with npm test .",
@@ -1479,7 +1540,7 @@ test("a running turn shows its tool's output so far, the partial answer, queued 
   ]);
   assert.deepEqual(open, [["tool-c1", true]]);
   assert.match(html, /<span class="t-mark run" role="img" aria-label="running" title="running"><span class="spin"><\/span><\/span>/, "its mark spins, and a screen reader hears it runs");
-  assert.match(dock, new RegExp(`^Working 1m 12s · 1 tool this turn Abort nexus attach ${fix.id} Copy gpt-test Steer joins the run after its current tool round\\. Queue ⌥↵ Steer ⌘↵$`));
+  assert.match(dock, new RegExp(`^Working 1m 12s · 1 tool this turn Abort nexus attach ${fix.id} Copy gpt-test Steer joins the run after its current tool round\\. Queue ⌥↵ Alt\\+↵ Steer ⌘↵ Ctrl\\+↵$`));
   assert.match(html, /placeholder="Steer the run…"/);
   assert.match(html, /<button type="submit" class="btn btn-ghost send-alt" id="queue" name="mode" value="followUp"[^>]*>/, "⌥↵ queues a follow-up after the run");
   assert.match(html, /<button type="submit" class="send send-steer" id="send" name="mode" value="steer"[^>]*>/, "⌘↵ steers the run that works");
@@ -1506,7 +1567,7 @@ test("a thread page's stream sends its conversation, then only the text that gre
     return { grow };
   };
   const first = await stream.next();
-  assert.ok(page.includes(`data-stream="/threads/${fix.id}/stream">${first.convo}</div></div>`), "the first event is the region the page holds");
+  assert.ok(page.includes(`data-stream="/threads/${fix.id}/stream">${first.convo}</div><button type="button" class="btn btn-xs jump-end"`), "the first event is the region the page holds");
   assert.deepEqual(conversationOf(`<div id="convo" ${first.convo}<div class="dock"></main>`).rows.slice(1), ["Bash npm run build 1 line › npm run build compiling", "Hal"]);
 
   transcript.docs["pi.live"] = live("Half an <answer>", "compiling\nlinking\n");
@@ -1548,7 +1609,8 @@ test("each thread state offers only the actions and prompt box that apply", asyn
 
   const fresh = await state();
   assert.deepEqual([fresh.actions, fresh.prompt, fresh.running, fresh.visit, fresh.text], [["archive", "delete"], true, false, true, `${fix.id} · started just now No messages yet.`]);
-  assert.equal(fresh.dock, `Idle nexus attach ${fix.id} Copy Send ⌘↵`);
+  assert.equal(fresh.dock, `Idle nexus attach ${fix.id} Copy Send ⌘↵ Ctrl+↵`);
+  assert.match((await s.call("GET", `/threads/${fix.id}`)).text, /title="Send"><svg[^]*?<\/svg><span class="send-label">Send<\/span> <kbd><span class="k-mac">⌘↵<\/span><span class="k-other">Ctrl\+↵<\/span><\/kbd><\/button>/, "the send key shows as the device's platform names it");
   assert.match(fresh.dock, /^Idle /, "an idle agent says so");
 
   s.fake.transcript(fix.id).docs["pi.live"] = { run: { taskId: 1, inputs: [1] } };
@@ -1619,7 +1681,7 @@ test("a paused pylon's prompt box says a message wakes it", async (t) => {
   const fix = await s.start("acme", "Fix checkout");
   s.observe(fix);
   s.registry.threads.ingested(testObservation(node, { pylons: [stoppedPylon(fix.pylonId, { sessions: null })] }), []);
-  assert.equal(conversationOf((await s.call("GET", `/threads/${fix.id}`)).text).dock, `Idle the pylon is paused, and a message wakes it nexus attach ${fix.id} Copy Send ⌘↵`);
+  assert.equal(conversationOf((await s.call("GET", `/threads/${fix.id}`)).text).dock, `Idle the pylon is paused, and a message wakes it nexus attach ${fix.id} Copy Send ⌘↵ Ctrl+↵`);
 });
 
 test("a thread deleted while its conversation is read shows no conversation", async (t) => {
@@ -2154,6 +2216,8 @@ test("a Claude worker's transcript reads as its conversation: prompts by who sen
   ]);
 
   const html = (await s.call("GET", `/threads/${thread.id}`)).text;
+  assert.match(html, /<div class="msg user" data-at="1">/, "a prompt carries its time, which the page titles in the reader's zone");
+  assert.match(html, /<div class="msg agent" data-at="8"><div class="text"><p>Counting with/, "so does Claude's reply");
   const { rows, open, dock } = conversationOf(html);
   assert.deepEqual(rows, [
     "You Write hello.py, then count its lines",
@@ -2174,7 +2238,7 @@ test("a Claude worker's transcript reads as its conversation: prompts by who sen
   assert.match(textOf(html.split('<p class="convo-meta">')[1]!.split("</p>")[0]!), new RegExp(`^${thread.id} · started just now · Claude Code · claude-opus-5-5$`));
   assert.match(html, /<form id="prompt" class="composer composer-send" data-thread="[^"]+" data-claude>/);
   assert.match(html, /placeholder="Message Claude…"/);
-  assert.equal(dock, `Idle nexus attach ${thread.id} Copy The pylon is not running, so the transcript is as of its last read, just now . Sending a message wakes it and resumes Claude. claude-opus-5-5 Send ⌘↵`);
+  assert.equal(dock, `Idle nexus attach ${thread.id} Copy The pylon is not running, so the transcript is as of its last read, just now . Sending a message wakes it and resumes Claude. claude-opus-5-5 Send ⌘↵ Ctrl+↵`);
   assert.match(html, new RegExp(`data-stream="/threads/${thread.id}/stream"`));
 });
 
@@ -2220,10 +2284,11 @@ test("a Claude worker that works shows its turn's call running, the turn's clock
     "Slash command /compact",
     "Bash npm test › npm test No output yet.",
   ], "only a call of the running turn runs");
-  assert.match(dock, new RegExp(`^Claude is working 0s · 1 tool this turn Interrupt nexus attach ${thread.id} Copy claude-opus-5-5 Claude takes it at its next step\\. Steer ⌘↵$`),
+  assert.match(dock, new RegExp(`^Claude is working 0s · 1 tool this turn Interrupt nexus attach ${thread.id} Copy claude-opus-5-5 Claude takes it at its next step\\. Steer ⌘↵ Ctrl\\+↵$`),
     "the turn is timed from when control heard it start, and Interrupt stops it");
   const since = s.registry.threads.thread(thread.id)!.workingSince;
   assert.equal(html.split(`<time data-since="${since}">`).length - 1, 4, "the run bar, the sidebar row, the inspector and the timeline tick the same clock");
+  assert.match(html, new RegExp(`<div class="state-bar state-working" id="agent-state" data-state="working" role="status">.*<span aria-hidden="true"><time data-since="${since}">`), "the run bar announces its state, and not its clock each second");
   assert.match(html, new RegExp(`<button [^>]*data-action="abort" data-thread="${thread.id}"[^>]*>Interrupt</button>`), "Interrupt takes the abort route, which presses Esc in Claude's pane");
   assert.match(html, /placeholder="Steer the run…"/);
   assert.doesNotMatch(html, /id="queue"/, "Claude takes a message at its next step whatever its mode, so nothing queues after the turn");
@@ -2454,7 +2519,7 @@ test("a queued and a blocked thread show in the sidebar and the overview as queu
   assert.equal(sidebarOf(page.text).active, stuck.id);
   assert.match(page.text, /<span class="chip chip-bad">.*?<span class="chip-label">blocked<\/span><\/span>/);
   assert.match(page.text, new RegExp(`<button type="button" class="btn" id="start-queued" data-action="start-queued" data-thread="${stuck.id}">Start now</button>`));
-  assert.match(page.text, new RegExp(`id="archive" data-action="archive" data-thread="${stuck.id}"`));
+  assert.match(page.text, new RegExp(`id="archive" data-action="archive" data-thread="${stuck.id}">Cancel</button>`), "archiving a queued thread cancels it, so its button says so");
   const body = textOf(page.text.split('id="queued"')[1]!.split('<div class="dock">')[0]!);
   assert.match(body, /Starts once these threads' pull requests merge blocked Spike : is archived and its pull request did not merge/, "each wait links its predecessor");
   assert.match(body, /Prompt Do it Worker Claude Code · claude-opus-5-5 Node auto Size 2 CPUs, 4 GiB memory, 10 GiB disk/);
@@ -2464,7 +2529,7 @@ test("a queued and a blocked thread show in the sidebar and the overview as queu
   assert.equal((await s.call("POST", `/v1/threads/${stuck.id}/archive`)).status, 200);
   const cancelled = (await s.call("GET", `/threads/${stuck.id}`)).text;
   assert.match(cancelled, /<span class="chip-label">cancelled<\/span>/);
-  assert.match(cancelled, /id="unarchive" data-action="unarchive"/);
+  assert.match(cancelled, new RegExp(`id="unarchive" data-action="unarchive" data-thread="${stuck.id}">Queue again</button>`));
   assert.doesNotMatch(cancelled, /id="start-queued"/);
   assert.ok(!sidebarOf((await s.call("GET", "/")).text).rows.some((r) => r.includes("Stuck step")), "a cancelled thread leaves the sidebar");
 
@@ -2619,7 +2684,7 @@ test("a harness, a Claude worker and a bare thread each show the conversation, s
     const convo = html.split('id="convo"')[1]!;
     return {
       stream: /^[^>]*data-stream="([^"]*)"/.exec(convo)?.[1]?.replace(thread.id, "<id>") ?? null,
-      convo: textOf(convo.split('<section class="file-view"')[0]!.replace(/^[^>]*>/, "")).replace(thread.id, "<id>"),
+      convo: textOf(convo.split('<button type="button" class="btn btn-xs jump-end"')[0]!.replace(/^[^>]*>/, "")).replace(thread.id, "<id>"),
       run: textOf(html.split('<div id="run" data-live>')[1]!.split('<div id="composer"')[0]!).replace(thread.id, "<id>"),
       composer: /<div id="composer" data-live>\s*(<[^/>][^>]*>)?/.exec(html)?.[1] ?? null,
     };
@@ -2749,13 +2814,14 @@ test("the work in flight lists each item at its phase, an item held for the pers
   const phaseOf = (key: string) => /<section class="phase[^"]*" id="phase-(\w+)"/.exec(flight.slice(0, flight.indexOf(`data-peek="${key}"`)).split("</section>").at(-1)!)?.[1];
   assert.equal(phaseOf(c.id), "planned", "an item waiting for the one it is after is planned");
   assert.match(flight, new RegExp(`<a class="fl-row" href="/\\?peek=${c.id}" data-peek="${c.id}">`));
+  assert.match(flight, new RegExp(`data-peek="${c.id}">.*?<span class="fl-why" title="([^"]+)">\\1</span>`), "a line's why, which the stack cuts, is whole on hover");
   assert.match(phaseOf(thread) ?? "", /^(queued|building)$/, "an item that became a thread shows as its thread");
   assert.doesNotMatch(flight, new RegExp(`data-peek="${a.id}"`), "nor as itself");
   assert.match(flight, new RegExp(`<a class="fl-row" href="/\\?peek=${b.id}" data-peek="${b.id}">.*<span class="tag tag-bad">needs you</span>`), "held work is in Needs you, and its line leads to its card");
   assert.equal(phaseOf(b.id), "planned");
   const needs = page.split('id="needs-you"')[1]!.split('id="peek"')[0]!;
   const card = needs.split(`id="need-${b.id}"`)[1]!.split("</article>")[0]!;
-  assert.equal(textOf(card.replace(/^[^>]*>/, "")), `Approve item acme / Greet in French item Planned held for you Queued Building In review Landing Deployed project acme waits for the person to approve each item: nexus item approve ${b.id}. After Greet by name Brief Build Greet in French. Approve Cancel`);
+  assert.equal(textOf(card.replace(/^[^>]*>/, "")), `Approve item acme / Greet in French item project acme waits for the person to approve each item: nexus item approve ${b.id} Planned held for you Queued Building In review Landing Deployed project acme waits for the person to approve each item: nexus item approve ${b.id}. After Greet by name Brief Build Greet in French. Approve Cancel`);
   assert.match(card, new RegExp(`<a class="link" href="/\\?peek=${thread}" data-peek="${thread}">Greet by name</a>`), "what it is after links its preview, as the thread it became");
   assert.match(card, new RegExp(`<button type="button" class="btn btn-xs" data-action="approve-item" data-item="${b.id}">Approve</button>`));
   assert.match(card, new RegExp(`data-action="cancel-item" data-item="${b.id}"`));
@@ -3094,7 +3160,7 @@ test("the sidebar's release lines read as the release view does: stale and missi
 /** The page's conversation region: its named view, and what it renders. */
 function convoRegion(html: string) {
   const tag = /<div class="convo" id="convo" data-rendered-reply-at="\d*"(?: data-shows="([^"]+)")? data-live[^>]*>/.exec(html)!;
-  return { named: tag[1], inside: html.slice(tag.index + tag[0].length).split('<section class="file-view"')[0]!.replace(/<\/div><\/div>\s*$/, "") };
+  return { named: tag[1], inside: html.slice(tag.index + tag[0].length).split('<button type="button" class="btn btn-xs jump-end"')[0]!.replace(/<\/div>$/, "") };
 }
 
 test("a poll of a streaming harness thread's page names the view its stream shows rather than render it", async (t) => {
