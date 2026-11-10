@@ -25,6 +25,7 @@ export const recipePaths = [
   "nexus",
   "nexus-ask.ts",
   "nexus-claude-hook",
+  "nexus-claude-hook.mjs",
   "nexus-contract.ts",
   "nexus-heartbeat.ts",
   "nexus-kvm",
