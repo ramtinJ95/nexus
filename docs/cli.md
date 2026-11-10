@@ -18,7 +18,7 @@ The CLI keeps Node's compile cache, the stripped TypeScript and compiled code of
 
 ## Where it connects
 
-A Mac on the tailnet, through the Tailscale app, connects to the control plane directly. A Mac that reaches the tailnet only through a userspace tailscaled, such as ts-home's on `localhost:1055`, opens a SOCKS5 CONNECT to the control plane and speaks HTTP, or TLS for an `https://` URL, through it. The GETs of one command share a pool of kept connections, one for GETs sent one at a time, so a watch or a wait that polls opens no tunnel per poll. The CLI lets go of it after 4 idle seconds, before the API's server closes it after 5, and sends a GET that met a kept connection closing under it once more on a new one. Every other method opens a connection of its own, since a failure there may hide a request that ran. A watch's or a follower's stream holds a connection of its own too. The proxy resolves the name, because only it knows MagicDNS. The API allows a device by its tailnet node, so the CLI sends no token.
+A Mac on the tailnet, through the Tailscale app, connects to the control plane directly. A Mac that reaches the tailnet only through a userspace tailscaled, such as ts-home's on `localhost:1055`, opens a SOCKS5 CONNECT to the control plane and speaks HTTP, or TLS for an `https://` URL, through it. The GETs of one command share a pool of kept connections, one for GETs sent one at a time, so a watch or a wait that polls opens no tunnel per poll. The CLI lets go of it after 4 idle seconds, before the API's server closes it after 5, and sends a GET that met a kept connection closing under it once more on a new one. Every other method opens a connection of its own, since a failure there may hide a request that ran. A watch's or a follower's stream holds a connection of its own too. The proxy resolves the name, because only it knows MagicDNS. The API allows a device by its tailnet node, so the CLI sends no token. The API compresses a reply over 1 KiB of HTML, JSON, JavaScript, CSS or SVG with brotli or gzip, whichever the request's `Accept-Encoding` prefers, and says `Vary: Accept-Encoding`. An event stream and the attach route's WebSocket are never compressed. The CLI sends no `Accept-Encoding`, so its replies come as they are.
 
 Two settings choose the endpoint. For each one, the first of these that is set wins:
 
@@ -487,7 +487,7 @@ The `image` commands build the pylon image and make it current, as [the deploy g
 
 The control plane runs one image operation at a time. It is stored in the registry and advanced every 2 seconds, so it carries on across a control plane restart:
 
-<!-- types: src/control/image-store.ts ImageOperation ImageStep Outcome src/control/image-rollout.ts ImagesView ImageEntry src/control/image-store.ts RecordedImage src/protocol/images.ts ImageManifest -->
+<!-- types: src/control/image-store.ts ImageOperation ImageStep Outcome src/control/image-rollout.ts ImagesView ImageEntry src/control/image-store.ts RecordedImage ImageFetch src/protocol/images.ts ImageManifest -->
 ```ts
 // src/control/image-store.ts
 /**
@@ -507,8 +507,8 @@ type ImageOperation = ({ kind: "build"; release: string | null } | { kind: "roll
 interface ImageStep {
   node: NodeName;
   /**
-   * done: the node's observation lists the image. skipped: the node was offline when the rollout began, so it fetches
-   * the image on first use (planPylon's missing-artifact rule).
+   * done: the node's observation lists the image. skipped: the node was offline when the rollout began, so the control
+   * plane sends it the image once it is back online, as an ImageFetch.
    */
   state: "pending" | "running" | "done" | "failed" | "skipped";
   /** The job last sent for this step, saved before it is sent, so a restarted control plane asks the probe about it. */
@@ -520,9 +520,10 @@ type Outcome = { state: "running" } | { state: "done"; finishedAt: number } | { 
 // src/control/image-rollout.ts
 /**
  * `previous` is the image current before the last rollout, which rollback makes current again. `images` are newest
- * build first, and `operation` is the running operation, or the last one.
+ * build first, and `operation` is the running operation, or the last one. `fetches` are the copies of the current image
+ * the control plane sends outside a rollout, one per online node that lacks it.
  */
-interface ImagesView { current: ImageId | null; previous: ImageId | null; images: ImageEntry[]; operation: ImageOperation | null }
+interface ImagesView { current: ImageId | null; previous: ImageId | null; images: ImageEntry[]; operation: ImageOperation | null; fetches: ImageFetch[] }
 /** A recorded image, and the registry nodes whose last observation lists it, online or not. */
 type ImageEntry = RecordedImage & { nodes: NodeName[] };
 // src/control/image-store.ts
@@ -531,6 +532,25 @@ type ImageEntry = RecordedImage & { nodes: NodeName[] };
  * unknown, as for a build from a dev checkout or an image recorded through POST /v1/images.
  */
 type RecordedImage = ImageManifest & { release: string | null };
+/** The current image's copy to one online node that lacks it, which the image worker sends outside a rollout. */
+interface ImageFetch {
+  node: NodeName;
+  image: ImageId;
+  /**
+   * waiting: no job runs (before the first send, in the backoff after a failure, or while no other online node holds the
+   * image). running: a fetch-artifact job was accepted. failed: maxImageFetches jobs in a row failed, or the probe
+   * refused the job as invalid, so none is sent again until a rollout begins or the node goes offline and comes back.
+   */
+  state: "waiting" | "running" | "failed";
+  /** The job last sent, saved before it is sent, so a restarted control plane asks the probe about it. */
+  job: { id: JobId; notAfter: string } | null;
+  /** Failed jobs in a row. */
+  failures: number;
+  /** Unix ms of the last failure, which the backoff counts from, or null. */
+  failedAt: number | null;
+  /** The last failure's reason, or why no job can be sent now, or null. */
+  reason: string | null;
+}
 // src/protocol/images.ts
 interface ImageManifest {
   id: ImageId;
@@ -545,9 +565,11 @@ interface ImageManifest {
 
 `build` has one step, on the image build node. A recipe already recorded answers 200 with a `done` build at once, and no job is sent. Otherwise the build answers 202 while it runs. `rollout` has one step per node. A node that is offline when it begins is `skipped`. Each other node is `done` once its observation lists the image, after a `fetch-artifact` job from a node that holds it, checked against the recorded sha256. The image becomes current only when no step is pending, running or failed. `rollback` is a rollout of `previous`.
 
+While no rollout runs, the control plane sends the current image to each online node that lacks it, such as one that joined or was skipped because it was offline, with the same `fetch-artifact` job, since `--node auto` places no pylon on a node that lacks the current image. `fetches` holds one `ImageFetch` per such node. A failed job is sent again after a backoff of 5 and then 15 seconds, and after 3 failures in a row, or one job the probe refuses as invalid, the fetch is `failed` and none is sent again until a rollout begins, which clears `fetches`, or the node goes offline and comes back. A busy node, such as one where a pylon's own fetch of the image runs, is asked again on the next pass without counting a failure. A node is `waiting` with the reason `no other online node holds it` while no other online node holds the image to copy it from. `nexus doctor`'s `image` check warns about each online node that lacks the current image.
+
 Each command answers 409, exit code 5, while another operation runs, when the image build node is unknown or offline, when no online node holds the image to roll out, or when there is no previous image. Asking for the operation that runs again returns it. `rollout` of an image that is not recorded answers 404, exit code 4.
 
-Without `--wait`, success means the operation started. `--wait` polls `GET /v1/images` every 2 seconds for up to 45 minutes and retries connection failures, so a control plane restart does not end it. It exits 0 when the operation is done, 1 with its reason when it failed or the wait timed out, and 5 when another operation replaced it. Plain `image list` prints one line per image, its role (`current`, `previous` or `-`), when and where it was built, its release, and its nodes, then the last operation and its steps.
+Without `--wait`, success means the operation started. `--wait` polls `GET /v1/images` every 2 seconds for up to 45 minutes and retries connection failures, so a control plane restart does not end it. It exits 0 when the operation is done, 1 with its reason when it failed or the wait timed out, and 5 when another operation replaced it. Plain `image list` prints one line per image, its role (`current`, `previous` or `-`), when and where it was built, its release, and its nodes, then `Fetches of the current image <id>:` with one line per fetch, its node, its state, how many jobs in a row failed and its reason, and then the last operation and its steps.
 
 ## Templates at thread start
 
@@ -1931,7 +1953,8 @@ rj-firebat
   warn  disk            12.4 of 98.0 GiB free at /var/lib/nexus-control, low. Free space there, or delete archived threads
   ok    pylons          3 up, 2 paused, none crashed or orphaned
   ok    tailnet-key     key expiry is off for it in the tailnet
-1 failed, 1 warned, 9 ok
+  ok    image           holds the current image img-0123456789ab
+1 failed, 1 warned, 10 ok
 ```
 
 `--json` prints the report:
@@ -1952,7 +1975,7 @@ type Status = (typeof statuses)[number];
 type Check = Verdict & ({ node: NodeName; name: NodeCheckName } | { node: null; name: ControlCheckName });
 /** `text` is one line: what is wrong and what to do, or what was found when nothing is. */
 interface Verdict { status: Status; text: string }
-type NodeCheckName = "online" | "release" | "disk" | "pylons" | "tailnet-key";
+type NodeCheckName = "online" | "release" | "disk" | "pylons" | "tailnet-key" | "image";
 type ControlCheckName = "release" | "backup" | "login" | "github-token" | "certificate" | "archived-disks";
 ```
 
