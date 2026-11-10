@@ -7,6 +7,7 @@ import { attachTerminal, processTty } from "../attach.ts";
 import { CliError, UsageError } from "../transport.ts";
 import { startRules } from "../../contract/threads-parse.ts";
 import { type Values, type Api, type Command, str, request, int, briefOptions, briefOf, table, waitMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
+import { thenWatch, watchOf, watchOptions } from "./watch.ts";
 import { detailText, portsText, listingText, changesText, queuedRow, queuedText, threadRow } from "../thread-text.ts";
 
 function portArg(given: string): number {
@@ -193,14 +194,18 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
   start: {
     help: [
       "  nexus start [--project P] [--title T] [--message M | --claude PROMPT [--model ID]] [--node N|auto] [--branch B] [--commit C]",
-      "              [--cpus n] [--memory GiB] [--disk GiB] [--after THREAD[,THREAD...]] [--request-id ID] [--plan]",
+      "              [--cpus n] [--memory GiB] [--disk GiB] [--after THREAD[,THREAD...]] [--request-id ID] [--plan] [--watch [--interval MS]]",
       "    --after queues it to start once each of those threads' pull requests has merged",
       "    --plan makes it a planning thread, whose proposed items become questions you accept or reject",
       "    --request-id makes a repeat of the start answer the thread the first made",
+      "    --watch then follows the run until it replies, as watch --until-idle does",
     ],
     args: [0, 0],
-    options: { ...briefOptions, "request-id": { type: "string" }, plan: { type: "boolean" } },
-    async run(api, _, v) {
+    options: { ...briefOptions, ...watchOptions, "request-id": { type: "string" }, plan: { type: "boolean" } },
+    async run(api, _, v, follow, { io }) {
+      const interval = watchOf(v);
+      if (v.watch === true && v.message === undefined && v.claude === undefined) throw new UsageError("--watch waits for the reply to the first message, so it needs --message or --claude");
+      if (v.watch === true && v.after !== undefined) throw new UsageError("--watch cannot go with --after, since a queued thread has no run yet");
       // One request: the control plane sends the first message once the thread starts, as the person's.
       const body = briefOf(v, await projectOf(api, v, "start"), startRules);
       if (body.after !== undefined) {
@@ -210,7 +215,10 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
         return { json: q, text: `Queued ${q.id} on ${q.project}: ${q.title}. It starts once ${listed(q.after)} ${q.after.length === 1 ? "has merged its pull request" : "have merged their pull requests"}.` };
       }
       const t = await request(api, routes.start, { body });
-      return { json: t, text: `Started ${v.plan === true ? "planning thread " : ""}${t.id} on ${t.project}: ${t.title}${v.message === undefined ? "" : "\nSent the first message."}` };
+      const started = `Started ${v.plan === true ? "planning thread " : ""}${t.id} on ${t.project}: ${t.title}${v.message === undefined ? "" : "\nSent the first message."}`;
+      return await thenWatch(api, follow, io, v, interval, t.id, {
+        json: t, text: v.watch === true ? started : `${started}\n\`nexus watch ${t.id}\` follows it.`,
+      }, { since: { lastReplyAt: null, questions: [] }, from: null });
     },
   },
   "start-queued": {
@@ -224,26 +232,28 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
   },
   send: {
     help: [
-      "  nexus send <thread> <text...> [--steer] [--request-id ID]",
+      "  nexus send <thread> <text...> [--steer] [--request-id ID] [--watch [--interval MS]]",
       "    a message to the agent, or typed into the Claude worker's session, which waits for a paused pylon to wake",
+      "    --watch then follows the run until it replies, as watch --until-idle does",
     ],
     thread: true,
     args: [2, Infinity],
-    options: { steer: { type: "boolean" }, "request-id": { type: "string" } },
-    async run(api, [id, ...words], v) {
+    options: { ...watchOptions, steer: { type: "boolean" }, "request-id": { type: "string" } },
+    async run(api, [id, ...words], v, follow, { io }) {
+      const interval = watchOf(v);
       const steer = v.steer === true;
       // The API treats a resend with the same request ID as the same message, so a caller that retries passes one.
       const requestId = str(v, "request-id") ?? `msg:${randomUUID()}`;
       // A Claude worker's message is typed in its pylon, so its send waits for a paused pylon to wake.
-      const claude = (await request(api, routes.show, { thread: id! })).claudeWorker !== undefined;
+      const before = await request(api, routes.show, { thread: id! });
+      const claude = before.claudeWorker !== undefined;
       const body = { text: words.join(" "), requestId, mode: steer ? "steer" as const : "followUp" as const };
       const message = () => request(api, routes.message, { thread: id!, body });
       const reply = claude ? await whenRunning(api, id!, message, "the message was not sent") : await message();
-      if ("claude" in reply) {
-        const resumed = reply.claude.resumed ? " Its session was resumed to take it." : "";
-        return { json: reply, text: reply.claude.outcome === "queued" ? `Queued for Claude in ${id}, which takes it at its next step.${resumed}` : `Sent to Claude in ${id}.${resumed}` };
-      }
-      return { json: reply, text: steer ? `Sent to ${id}, to join the current run after its tool round.` : `Sent to ${id}.` };
+      const resumed = "claude" in reply && reply.claude.resumed ? " Its session was resumed to take it." : "";
+      const text = "claude" in reply ? reply.claude.outcome === "queued" ? `Queued for Claude in ${id}, which takes it at its next step.${resumed}` : `Sent to Claude in ${id}.${resumed}`
+        : steer ? `Sent to ${id}, to join the current run after its tool round.` : `Sent to ${id}.`;
+      return await thenWatch(api, follow, io, v, interval, id!, { json: reply, text }, { since: before, from: body.text });
     },
   },
   seen: {

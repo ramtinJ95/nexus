@@ -117,12 +117,14 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `changes <thread> [--uncommitted \| --turn]` | `GET /v1/threads/<thread>/changes?base=start`, or `base=head` with `--uncommitted`, or `base=turn` with `--turn`. While the pylon is not running, it tries again once a second | `Changes` |
 | `diff <thread> [path...] [--uncommitted \| --turn]` | `GET /v1/threads/<thread>/diff?base=start&path=<path>...`, or `base=head` with `--uncommitted`, or `base=turn` with `--turn`. While the pylon is not running, it tries again once a second | `Diff` |
 | `conversation <thread>` | `GET /v1/threads/<thread>/conversation` | `ConversationView`, or a `ClaudeConversation` for a Claude worker thread |
+| `conversation <thread> --last [N]` | `GET /v1/threads/<thread>/conversation` | The same view with only the entries its text prints in `entries`: the newest reply, or with `N` the newest `N` entries that print anything. The text prints only those, or `No reply yet.` |
 | `session open <thread> [--harness claude-code\|pi\|shell] [--title T]` | `POST /v1/threads/<thread>/sessions` with `{"harness"?: string, "title"?: string}`, which answers 201. While the pylon is not running, it tries again once a second | `OpenedSession`, the session it opened |
 | `session close <thread> <pane\|id>` | `DELETE /v1/threads/<thread>/sessions/<id>` with `{}`, which answers 204. It does not try again | `null` |
 | `attach <thread>` | `GET /v1/threads/<thread>/attach`, a WebSocket, as [the attach route](#the-attach-route) describes | Nothing. The terminal is the session's |
 | `start [--project P] [--title T] [--message M \| --claude PROMPT [--model ID]] [--node N\|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB] [--request-id ID]` | Without `--project`, `GET /v1/projects` first, as above. Then one `POST /v1/threads`, with `"message": string` when `--message` is given, `"claude": string` and `"model"?: string` when `--claude` is, as [Event stream and Claude workers](#event-stream-and-claude-workers) describes, and `"requestId": string` when `--request-id` is, which answers 201 | `Thread`, the thread that was started, with its `placement` |
 | `start --plan ...` | One `POST /v1/threads` with `"planning": true`, as for any start | `Thread`, the planning thread that was started |
 | `start ... --after THREAD[,THREAD...]` | One `POST /v1/threads` with `"after": string[]`, and `"message"` and `"requestId"` as for any start, which answers 201 | `QueuedThread`, the thread that was queued |
+| `start ... --watch [--interval MS]` | The start, then the watch of [Waiting for the reply](#waiting-for-the-reply). It needs `--message` or `--claude`, and cannot go with `--after` | `Thread` as one compact line, then the watch stream. The exit code is the watch's |
 | `start-queued <thread>` | `POST /v1/threads/<thread>/start` with no body, which answers 201 | `Thread`, the thread that was started |
 | `items [--project P] [--all]` | `GET /v1/items?cancelled=false[&project=P]`, or `GET /v1/items[?project=P]` with `--all` | `PipelineItem[]`, in the order they were added. Cancelled items are left out unless `--all` is given |
 | `item add [--project P] [--title T] (--message M \| --claude PROMPT [--model ID]) [--after ITEM[,ITEM...]] [--node N\|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB]` | Without `--project`, `GET /v1/projects` first, as above. Then `POST /v1/items` with the fields of a start, its brief as `"message"` or `"claude"`, and `"after": string[]`, which answers 201 | `PipelineItem`, the item that was added |
@@ -130,7 +132,8 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `item approve <item>` | `POST /v1/items/<item>/approve` with `{}` | `PipelineItem` |
 | `item cancel <item>` | `POST /v1/items/<item>/cancel` with `{}` | `PipelineItem` |
 | `send <thread> <text...> [--steer] [--request-id ID]` | `POST /v1/threads/<thread>/messages`. For a Claude worker thread, while the pylon is not running, it tries again once a second | `{ "submission": number }`, or `{ "claude": ClaudeSent }` for a Claude worker thread |
-| `watch <thread> [--interval MS]` | Follows `GET /v1/threads/<thread>/events`, or `GET /v1/threads/<thread>/claude/events` for a Claude worker thread, and polls `GET /v1/threads/<thread>` | A stream of JSON lines, described below |
+| `send <thread> <text...> --watch [--interval MS]` | `GET /v1/threads/<thread>` for what came before, the send, then the watch of [Waiting for the reply](#waiting-for-the-reply). The text's first print of the conversation starts at the sent message | The send's reply as one compact line, then the watch stream. The exit code is the watch's |
+| `watch <thread> [--interval MS] [--until-idle]` | Follows `GET /v1/threads/<thread>/events`, or `GET /v1/threads/<thread>/claude/events` for a Claude worker thread, and polls `GET /v1/threads/<thread>` | A stream of JSON lines, described below. `--until-idle` ends it as [Waiting for the reply](#waiting-for-the-reply) says |
 | `abort <thread>` | `POST /v1/threads/<thread>/abort`. For a Claude worker thread it interrupts the turn with Esc, and never wakes a paused pylon | `null` |
 | `retry <thread>` | `POST /v1/threads/<thread>/retry` | `null` |
 | `retry-pylon <thread>` | `POST /v1/threads/<thread>/pylon/retry` | `null` |
@@ -326,7 +329,7 @@ The control plane also serves `POST /v1/images`, which records the manifest of a
 
 A reader that closes stdout before a command finishes writing, such as `head` or a `less` quit early, ends any command with exit code 0 and nothing on stderr.
 
-A failed command prints nothing on stdout and exits with one of these codes. `doctor` alone prints its report and then exits 1 when a check failed:
+A failed command prints nothing on stdout and exits with one of these codes. `doctor` alone prints its report and then exits 1 when a check failed, and a watch that waits for the reply exits with the codes [Waiting for the reply](#waiting-for-the-reply) lists:
 
 | Exit | Kind | Meaning |
 |---|---|---|
@@ -405,6 +408,21 @@ The stream follows these rules:
 - `error` reports that the control plane is unreachable or failing. The watch keeps polling, and opens a dropped stream again after 1 second, then after twice as long each time it fails, up to the interval. An outage prints one `error` per distinct message, whether the poll or the stream failed with it. Once both work again, `state` is printed again, which means the control plane is back.
 - The stream ends with exit code 0 after the `state` whose `status` is `deleted`, or at SIGINT, SIGTERM or SIGHUP, or when the reader closes the pipe, or when the process that started it has exited, noticed within a second whatever `--interval` is, so a consumer killed outright leaves no watch behind. An unknown thread exits 4, and a refusal exits 3, with the usual stderr line.
 - A consumer must ignore event types and fields it does not know, so that later versions can add them.
+
+### Waiting for the reply
+
+`watch --until-idle`, and `start --watch` or `send --watch` after their request, print the same stream and end once the run replies, so a script can send a message and block until the agent is done. `--interval` sets the poll as for `watch`.
+
+A run has ended once nothing works or is queued and the thread's `lastReplyAt` is later than it was when the wait began: before the send for `send`, at the start for `start`, and at the watch's first print for `watch`. A watch that begins while the thread is idle waits for the next run. The control plane records a reply at the end of every run, so a run that ended on an error, an abort, a Claude usage-limit stop or a Claude turn that died ends it too. The stream can lag that end, as a pi stream that missed the run's commits does, or a Claude stream that says the turn ended before the control plane read what it wrote. So the watch then reads `GET /v1/threads/<thread>/conversation` and prints what it had not printed, for a Claude worker up to three times until a read began after the reply was recorded. Then it reads `GET /v1/threads/<thread>` again for what the end means, and reads through any run that ended meanwhile. A run working again keeps the wait. So does a Claude turn that died, as [Turns that died](#turns-that-died) describes, while Nexus resumes it, until the resumed turn ends. Nexus's resumer records its resume on its next pass, every 15 seconds, and resumes only a builder's turn, so a death it has no record for keeps the wait for 30 seconds. Each poll then reads the resume again, without another turn. The text prints `-- Its turn died: <reason>. Waiting for Nexus to resume it` when the wait begins to hold for it. The endings other than a run's end need only `GET /v1/threads/<thread>`, so they end the watch before its stream opens. Each ending prints one last text line, and nothing more with `--json`:
+
+| Exit | Ending |
+|---|---|
+| 0 | The run replied |
+| 10 | Tasks that hit the restart limit park the run, which `nexus retry` clears |
+| 11 | The pylon or the Claude worker's launch failed, so `attention` is `failed`, or the thread was archived or deleted before the run replied, or a Claude turn died and Nexus leaves it to the person who wrote to it, or records no resume for it within 30 seconds |
+| 12 | The run waits on the person: a question asked since the wait began has no answer, which ends it at once, or a Claude worker waits at a prompt in its terminal, or the run ended with `attention` at `decision`, which an open question from before the wait also gives, or a Claude turn stopped on its usage limit, or died and Nexus gave its resume to the person |
+
+Then `nexus conversation <thread> --last` prints only the reply. A failure of the CLI itself, such as an unknown thread, still exits with the codes of [Failures](#failures).
 
 ## Pull requests
 
@@ -1777,7 +1795,7 @@ The second line is what Nexus did, the question it waits on, or `Nexus acts on i
 
 A planning thread is a Nexus agent thread you open to plan work with. When it has a plan, each item it proposes becomes a question on its page that you accept or reject, and only an accepted one becomes a [pipeline item](#pipeline-items), added by you. The thread has no tool that starts, messages or waits on another thread or adds an item, so nothing it writes starts a builder, whatever the project's `--pipeline` setting. `item add` stays the way to add an item yourself.
 
-`nexus start --project P --plan [--message M]` starts one, and so does the start dialog's Planning thread box under Nexus agent. The text is `Started planning thread <id> on <project>: <title>`. `--plan` with `--claude` or `--after` fails with exit code 64, as the API refuses `"planning": true` with `claude` or `after`. `show` prints `planning: its proposed items become questions you accept or reject` after the project line, and `ThreadDetail.planning` is true.
+`nexus start --project P --plan [--message M]` starts one, and so does the start dialog's Planning thread box under Nexus agent. The text is `Started planning thread <id> on <project>: <title>`, then a line that names `nexus watch <id>`, the command that follows it, as after any start. `--plan` with `--claude` or `--after` fails with exit code 64, as the API refuses `"planning": true` with `claude` or `after`. `show` prints `planning: its proposed items become questions you accept or reject` after the project line, and `ThreadDetail.planning` is true.
 
 The control plane puts a guide before the thread's first message, the one `--message` sends or the first you send: it tells the agent its token and the block to end a turn with.
 

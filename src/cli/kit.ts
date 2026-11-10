@@ -37,8 +37,8 @@ export interface Command {
   /** Its first argument names a thread, which a prefix of the ID or `@last` may give. */
   thread?: true;
   options?: ParseArgsOptionsConfig;
-  /** Nothing when the command printed its own output, as watch does. */
-  run(api: Api, args: readonly string[], values: Values, follow: Follow, local: Local): Promise<Result | void>;
+  /** Nothing when the command printed its own output, as watch does, or the exit code it ends with then. */
+  run(api: Api, args: readonly string[], values: Values, follow: Follow, local: Local): Promise<Result | number | void>;
 }
 
 export const str = (v: Values, key: string) => v[key] as string | undefined;
