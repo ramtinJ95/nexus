@@ -54,12 +54,10 @@ type Since = Pick<ThreadDetail, "lastReplyAt" | "questions">;
 interface Until { since: Since | null; from: string | null }
 
 /**
- * A run has replied once nothing runs or is queued and the control plane holds a reply later than the one before
- * the wait, as it records one at every end of a run. A failure, a new question or a Claude prompt ends the
- * wait at once, since the run cannot go on without the person. Those need only the thread's detail, so they end
- * it while `run`, which the conversation's stream says, is still unknown.
+ * A failure, a new question or a Claude prompt ends the wait at once, since the run cannot go on without the person.
+ * They need only the thread's detail, so they end it while the conversation's stream has not opened.
  */
-function ending(d: ThreadDetail, run: { working: boolean; queued: number } | null, since: Since): Ending | null {
+function stopped(d: ThreadDetail, since: Since): Ending | null {
   const status = d.thread.status;
   if (status === "archived" || status === "deleted") return { outcome: "failed", text: `The thread was ${status} before its run replied` };
   if (d.attention === "failed") return { outcome: "failed", text: `It failed: ${(d.pylon.failed ?? d.claudeWorker?.message ?? "no reason given").split("\n")[0]}` };
@@ -68,7 +66,30 @@ function ending(d: ThreadDetail, run: { working: boolean; queued: number } | nul
   if (d.claudeWorker !== undefined && d.thread.sessionWaiting === true) return { outcome: "waiting", text: `Claude waits for your input in its terminal${d.thread.sessionWaitingMessage === undefined ? "" : `: ${d.thread.sessionWaitingMessage}`}` };
   const parked = d.agent?.parkedTasks ?? 0;
   if (parked > 0) return { outcome: "parked", text: `${parked} parked tasks hold the run, which \`nexus retry ${d.thread.id}\` retries` };
-  if (run === null || run.working || run.queued > 0 || (d.lastReplyAt ?? -Infinity) <= (since.lastReplyAt ?? -Infinity)) return null;
+  return null;
+}
+
+/**
+ * A run has ended once nothing runs or is queued and the control plane holds a reply later than the one before the
+ * wait, as it records one at every end of a run, a Claude turn's usage-limit stop and death included.
+ */
+const runEnded = (d: ThreadDetail, run: { working: boolean; queued: number } | null, since: Since) =>
+  run !== null && !run.working && run.queued === 0 && (d.lastReplyAt ?? -Infinity) > (since.lastReplyAt ?? -Infinity);
+
+/**
+ * What the end of a run means, from the detail read once the transcript is read through it, since the control plane
+ * finds a Claude turn's usage-limit stop or death in its transcript. Null while Nexus resumes a turn that died.
+ */
+function afterRun(d: ThreadDetail): Ending | null {
+  const limit = d.thread.usageLimit;
+  if (limit !== undefined) return { outcome: "waiting", text: `Claude stopped on its usage limit${limit.resetsAt === null ? "" : `, which resets at ${new Date(limit.resetsAt).toISOString()}`}. Send it "continue" after the reset` };
+  const died = d.thread.turnDied;
+  if (died !== undefined) {
+    const resume = d.resume ?? null;
+    if (resume?.state === "person") return { outcome: "waiting", text: `Its turn died, and Nexus stopped resuming it: ${resume.why}` };
+    if (resume !== null && resume.state !== "left-alone" && resume.turn >= died.at) return null;
+    return { outcome: "failed", text: `Its turn died: ${died.reason}` };
+  }
   return d.attention === "decision" ? { outcome: "waiting", text: `It replied, and waits on your decision, which \`nexus show ${d.thread.id}\` says` } : { outcome: "replied", text: "It replied." };
 }
 
@@ -187,24 +208,50 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
     }
     if (until === null) return;
     since ??= d;
-    const end = ending(d, run === null ? null : { working: run.working, queued: run.live.queued.length }, since);
-    if (end === null) return;
+    const end = stopped(d, since);
+    if (end !== null) return finish(end);
+    if (!runEnded(d, run === null ? null : { working: run.working, queued: run.live.queued.length }, since)) return;
     over = true;
-    // A failed read still ends it, since the reply is recorded and the transcript only lags it.
-    void (end.outcome === "replied" && d.claudeWorker !== undefined ? readReply(d).catch(() => {}) : Promise.resolve()).then(() => {
-      if (!json) output.write(`-- ${end.text}\n`);
-      ended.resolve(untilIdleExits[end.outcome]);
-    });
+    void settle(d, since);
+  }
+
+  function finish(end: Ending) {
+    over = true;
+    if (!json) output.write(`-- ${end.text}\n`);
+    ended.resolve(untilIdleExits[end.outcome]);
   }
 
   /**
-   * The stream can say a Claude turn ended before the control plane reads the reply it wrote. The conversation's route
-   * reads first, waiting a while, so this prints what it found until a read began after the reply was recorded.
+   * The stream can lag the reply the poll saw recorded: a pi stream that missed the run's commits, or a Claude stream
+   * that says the turn ended before the control plane read what it wrote. So the run's end prints what the
+   * conversation's route reads, then reads the detail again for what the end means, through any run that ended
+   * meanwhile. A run working again, as a resumed turn does, keeps the wait. A failed read still ends the wait, since
+   * the reply is recorded and only the printing lags it.
    */
-  async function readReply(d: ThreadDetail) {
+  async function settle(d: ThreadDetail, before: Since) {
+    let after = d;
+    try {
+      for (let through = d; ; through = after) {
+        await readThrough(through);
+        after = await request(api, threadRoutes.show, { thread: id });
+        if ((after.lastReplyAt ?? -Infinity) <= (through.lastReplyAt ?? -Infinity)) break;
+      }
+    } catch {}
+    const end = stopped(after, before) ?? (after.thread.working ? null : afterRun(after));
+    if (end !== null) return finish(end);
+    since = { ...before, lastReplyAt: after.lastReplyAt };
+    over = false;
+  }
+
+  /** The route reads a Claude transcript first, waiting a while, so this reads until a read began after the reply was recorded. */
+  async function readThrough(d: ThreadDetail) {
     for (let reads = 0; reads < 3; reads++) {
       const read = agentView((await request(api, threadRoutes.conversation, { thread: id }))!);
-      if (read.kind !== "claude") return;
+      if (read.kind !== "claude") {
+        streamed = { entries: read.view.entries, docs: read.view.docs };
+        printConversation(d);
+        return;
+      }
       transcript = { session: read.view.session, entries: read.view.entries.slice(-maxEntries), dropped: read.view.dropped, working: read.view.working };
       printTranscript(d);
       if ((read.view.readAt ?? -Infinity) >= (d.lastReplyAt ?? Infinity)) return;

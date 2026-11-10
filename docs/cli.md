@@ -411,14 +411,16 @@ The stream follows these rules:
 
 ### Waiting for the reply
 
-`watch --until-idle`, and `start --watch` or `send --watch` after their request, print the same stream and end once the run replies, so a script can send a message and block until the agent is done. `--interval` sets the poll as for `watch`. The run has replied once nothing works or is queued and the thread's `lastReplyAt` is later than it was when the wait began: before the send for `send`, at the start for `start`, and at the watch's first print for `watch`. The control plane records a reply at the end of every run, so a reply that ended the run on an error or an abort counts too. A watch that begins while the thread is idle waits for the next run. Since the stream can say a Claude turn ended before the control plane has read the reply it wrote, a Claude worker's watch then reads `GET /v1/threads/<thread>/conversation`, up to three times until a read began after the reply was recorded, and prints what it had not printed. The endings other than a reply need only `GET /v1/threads/<thread>`, so they end the watch before its stream opens. Each ending prints one last text line, and nothing more with `--json`:
+`watch --until-idle`, and `start --watch` or `send --watch` after their request, print the same stream and end once the run replies, so a script can send a message and block until the agent is done. `--interval` sets the poll as for `watch`.
+
+A run has ended once nothing works or is queued and the thread's `lastReplyAt` is later than it was when the wait began: before the send for `send`, at the start for `start`, and at the watch's first print for `watch`. A watch that begins while the thread is idle waits for the next run. The control plane records a reply at the end of every run, so a run that ended on an error, an abort, a Claude usage-limit stop or a Claude turn that died ends it too. The stream can lag that end, as a pi stream that missed the run's commits does, or a Claude stream that says the turn ended before the control plane read what it wrote. So the watch then reads `GET /v1/threads/<thread>/conversation` and prints what it had not printed, for a Claude worker up to three times until a read began after the reply was recorded. Then it reads `GET /v1/threads/<thread>` again for what the end means, and reads through any run that ended meanwhile. A run working again keeps the wait, and so does a Claude turn that died while Nexus resumes it, as [Turns that died](#turns-that-died) describes, until the resumed turn ends. The endings other than a run's end need only `GET /v1/threads/<thread>`, so they end the watch before its stream opens. Each ending prints one last text line, and nothing more with `--json`:
 
 | Exit | Ending |
 |---|---|
-| 0 | The run replied, as above |
+| 0 | The run replied |
 | 10 | Tasks that hit the restart limit park the run, which `nexus retry` clears |
-| 11 | The pylon or the Claude worker's launch failed, so `attention` is `failed`, or the thread was archived or deleted before the run replied |
-| 12 | The run waits on the person: a question asked since the wait began has no answer, a Claude worker waits at a prompt in its terminal, or the run replied with `attention` at `decision` |
+| 11 | The pylon or the Claude worker's launch failed, so `attention` is `failed`, or the thread was archived or deleted before the run replied, or a Claude turn died and Nexus does not resume it |
+| 12 | The run waits on the person: a question asked since the wait began has no answer, which ends it at once, or a Claude worker waits at a prompt in its terminal, or the run ended with `attention` at `decision`, which an open question from before the wait also gives, or a Claude turn stopped on its usage limit, or died and Nexus gave its resume to the person |
 
 Then `nexus conversation <thread> --last` prints only the reply. A failure of the CLI itself, such as an unknown thread, still exits with the codes of [Failures](#failures).
 

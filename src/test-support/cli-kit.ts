@@ -226,7 +226,8 @@ export async function claudeWatched(t: TestContext, s: Awaited<ReturnType<typeof
       held = gate.promise;
       return () => { held = null; gate.resolve(); };
     },
-    report: (kind: "session.turn-started" | "session.turn-ended") => s.registry.threads.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1" } }),
+    /** A session event, at `time` by the pylon's clock, now unless given. */
+    report: (kind: "session.turn-started" | "session.turn-ended", time = Date.now()) => s.registry.threads.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time, event: { kind, session: "s1" } }),
   };
 }
 
