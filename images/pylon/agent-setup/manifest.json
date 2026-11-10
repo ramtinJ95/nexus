@@ -1,31 +1,30 @@
 {
-  "dotfiles": {"url":"https://github.com/ramtinJ95/dotfiles","commit":"8692b390f5ab912c9dc701a528cba84fd36fddba"},
+  "dotfiles": {"url":"https://github.com/ramtinJ95/dotfiles","commit":"30ee68ba509bfa926bd2731e9dfbfa0ab7fedac5"},
   "claude": {
     "marketplaces": [
-      {"name":"claude-mods","url":"https://github.com/ramtinJ95/claude-mods","commit":"27f39a788c765ae7db7c3759b25d13ad17bda2fe"},
-      {"name":"cursor-plugins","url":"https://github.com/cursor/plugins","commit":"99b609a72323b70204eab407c622f436e858e112"}
+      {"name":"claude-mods","url":"https://github.com/ramtinJ95/claude-mods","commit":"f8608ce1beb664c4ec8172c4bc9ccbbf5ec2c0fe"},
+      {"name":"cursor-plugins","url":"https://github.com/cursor/plugins","commit":"236e5481d05cbadc315b374a5de54971858c27bb"}
     ],
     "plugins": [
       {"id":"notes-compaction@claude-mods","version":"0.2.11"},
-      {"id":"pstack@cursor-plugins","version":"0.15.32"},
+      {"id":"pstack@cursor-plugins","version":"0.15.36"},
       {"id":"review-pane@claude-mods","version":"0.3.0"},
       {"id":"shepherdr@claude-mods","version":"0.2.6"}
     ]
   },
   "pi": {
     "packages": [
-      {"kind":"npm","name":"@howaboua/pi-codex-conversion","version":"4.0.4"},
-      {"kind":"npm","name":"@howaboua/pi-auto-trees","version":"0.1.18"},
-      {"kind":"npm","name":"@howaboua/pi-subagent-review","version":"0.2.25"},
-      {"kind":"npm","name":"@howaboua/pi-ask","version":"0.0.16"},
+      {"kind":"npm","name":"@howaboua/pi-codex-conversion","version":"4.0.9"},
+      {"kind":"npm","name":"@howaboua/pi-ask","version":"0.0.18"},
       {"kind":"npm","name":"@ramtinj95/pi-comment-editor","version":"2.0.1"},
       {"kind":"local","path":"common-config/common-dotfiles/pi/.pi/agent/extensions/pi-visualize-code-changes"},
       {"kind":"npm","name":"@ramtinj95/pi-mermaid-tui","version":"0.2.4"},
-      {"kind":"npm","name":"@howaboua/pi-gpt-switcher","version":"0.1.5"},
+      {"kind":"npm","name":"@howaboua/pi-gpt-switcher","version":"0.1.6"},
       {"kind":"npm","name":"@ramtinj95/pi-claude-delegation","version":"0.2.0"},
-      {"kind":"npm","name":"@howaboua/pi-codex-web-run","version":"0.0.8"},
-      {"kind":"npm","name":"@howaboua/pi-codex-imagegen","version":"0.0.11"},
-      {"kind":"npm","name":"@howaboua/pi-shepherdr","version":"0.2.23"}
+      {"kind":"npm","name":"@howaboua/pi-codex-web-run","version":"0.0.10"},
+      {"kind":"npm","name":"@howaboua/pi-codex-imagegen","version":"0.0.13"},
+      {"kind":"npm","name":"@howaboua/pi-shepherdr","version":"0.2.27"},
+      {"kind":"npm","name":"@howaboua/pi-notes-compaction","version":"0.0.15"}
     ],
     "extensions": [
       "common-config/common-dotfiles/pi/.pi/agent/extensions/exa-deep-research.ts",
@@ -42,8 +41,9 @@
   "skills": [
     {"path":"common-config/common-dotfiles/agents/.agents/skills/grill-me","for":["claude","pi"]},
     {"path":"common-config/common-dotfiles/agents/.agents/skills/grilling","for":["claude","pi"]},
-    {"path":"common-config/common-dotfiles/agents/.agents/skills/grok","for":["pi"]},
+    {"path":"common-config/common-dotfiles/agents/.agents/skills/grok","for":["claude","pi"]},
     {"path":"common-config/common-dotfiles/agents/.agents/skills/herdr","for":["claude","pi"]},
+    {"path":"common-config/common-dotfiles/agents/.agents/skills/nexus-new-project","for":["claude","pi"]},
     {"path":"common-config/common-dotfiles/agents/.agents/skills/pr-diary","for":["claude","pi"]},
     {"path":"common-config/common-dotfiles/agents/.agents/skills/practice","for":["claude","pi"]},
     {"path":"common-config/common-dotfiles/agents/.agents/skills/scribebase-article-ingest","for":["pi"]},
