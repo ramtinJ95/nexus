@@ -229,7 +229,8 @@ async function send(request, ms) {
   }
 }
 
-const waitMs = 120_000;
+/** How long `preview --wait` keeps asking. NEXUS_PREVIEW_WAIT_MS shortens it for tests. */
+const waitMs = Number(process.env.NEXUS_PREVIEW_WAIT_MS) || 120_000;
 
 async function main(argv) {
   const end = argv.indexOf("--");
@@ -265,10 +266,14 @@ async function main(argv) {
   }
   const deadline = Date.now() + waitMs;
   let answer = await send(call.request, waitMs);
+  let last = answer.reply;
   while (call.wait && answer.reply !== undefined && !call.command.settled(answer.reply) && deadline - Date.now() > 1000) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
-    answer = await send(call.request, deadline - Date.now());
+    answer = await send(call.request, Math.max(1, deadline - Date.now()));
+    if (answer.reply !== undefined) last = answer.reply;
   }
+  // A retry cut off by the wait's own deadline ran out of time; it does not mean the probe is gone.
+  if (call.wait && answer.reply === undefined && last !== undefined && answer.status === null && Date.now() >= deadline) answer = { reply: last };
   if (answer.reply === undefined) return fail(answer.error, answer.status, 1);
   const { reply } = answer;
   if (call.command.settled?.(reply) === false && (call.wait || !json)) {

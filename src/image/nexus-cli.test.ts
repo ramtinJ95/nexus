@@ -68,12 +68,12 @@ async function probe(t: TestContext, guest: Partial<Guest> = {}, deps: Partial<P
   });
   const bridge = await listenHostBridge({ host: "127.0.0.1", port }, async (req) => req.url === "/token/v1/request" ? pylonId : null)(api.answer);
   t.after(() => bridge.close());
-  return { nexus: (args: string[], cwd?: string) => run(`http://127.0.0.1:${port}/token`, args, cwd), calls };
+  return { nexus: (args: string[], cwd?: string, env?: NodeJS.ProcessEnv) => run(`http://127.0.0.1:${port}/token`, args, cwd, env), calls };
 }
 
-function run(api: string, args: string[], cwd = process.cwd()) {
+function run(api: string, args: string[], cwd = process.cwd(), env: NodeJS.ProcessEnv = {}) {
   return new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
-    execFile("node", [cli, ...args], { cwd, env: { ...process.env, NEXUS_API: api } }, (err, stdout, stderr) => {
+    execFile("node", [cli, ...args], { cwd, env: { ...process.env, NEXUS_API: api, ...env } }, (err, stdout, stderr) => {
       resolve({ code: err === null ? 0 : (err as { code: number }).code, stdout, stderr });
     });
   });
@@ -157,12 +157,32 @@ test("preview without a URL in time prints nothing on stdout, says why on stderr
 test("preview --wait asks again until the port has a URL, and prints only the URL", async (t) => {
   let links = 0;
   const url = "https://pylon-t1.example.ts.net:8443/";
-  const { nexus, calls } = await probe(t, { async linkPort(p) { links += 1; return `port-${p}`; } }, {
+  const { nexus } = await probe(t, { async linkPort(p) { links += 1; return `port-${p}`; } }, {
     published: () => links < 2 ? [] : [{ service: "port-3000", httpsPort: 8443 }],
     previewUrls: async () => new Map([[8443, url]]),
   });
   assert.deepEqual(await nexus(["preview", "3000", "--wait"]), { code: 0, stdout: `${url}\n`, stderr: "" });
   assert.equal(links, 2, "the first reply had no URL, so it asked once more");
+});
+
+test("preview --wait that runs out of time says so and exits 1, as text and under --json", async (t) => {
+  const { nexus } = await probe(t);
+  const env = { NEXUS_PREVIEW_WAIT_MS: "1500" };
+  const message = "no preview URL for port-3000 after 1.5 seconds. Port 3000 stays published, and `nexus preview 3000 --wait` waits for its URL";
+  assert.deepEqual(await nexus(["preview", "3000", "--wait"], undefined, env), { code: 1, stdout: "", stderr: `nexus: ${message}\n` });
+  assert.deepEqual(await nexus(["preview", "3000", "--wait", "--json"], undefined, env), { code: 1, stdout: "", stderr: `${JSON.stringify({ error: message, status: null })}\n` });
+});
+
+test("preview --wait whose last request outlasts the wait reports the wait, not an unreachable probe", async (t) => {
+  let requests = 0;
+  const server = createServer((_, res) => {
+    requests += 1;
+    if (requests === 1) res.end(JSON.stringify({ service: "port-3000", port: 3000, url: null }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const reply = await run(`http://127.0.0.1:${(server.address() as { port: number }).port}`, ["preview", "3000", "--wait"], undefined, { NEXUS_PREVIEW_WAIT_MS: "2500" });
+  assert.deepEqual(reply, { code: 1, stdout: "", stderr: "nexus: no preview URL for port-3000 after 2.5 seconds. Port 3000 stays published, and `nexus preview 3000 --wait` waits for its URL\n" });
 });
 
 test("--help and -h print usage without calling the probe, the whole of it at the top and a command's own lines after one", async (t) => {
