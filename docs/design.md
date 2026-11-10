@@ -901,7 +901,7 @@ The dashboard follows its thread stream as it does for a harness conversation, a
 the conversation pane renders the entries with the same blocks. The page swaps in
 only the blocks whose markup changed since the server last sent them, so a selection
 in an earlier reply survives the run. A reader scrolled up from the end gets a Jump to
-latest button, marked in the accent once more arrives below them. While a thread is
+latest button, which says in words and in the accent when more arrives below them. While a thread is
 watched, its view reads only the entries after the last one it holds, and a read
 that found nothing new sends the watchers nothing. A stream whose view has not
 changed sends a bare ping, and the client ticks the ages in the page itself. A poll

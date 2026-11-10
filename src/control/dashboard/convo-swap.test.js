@@ -7,11 +7,16 @@ class FakeNode extends EventTarget {
     super();
     Object.assign(this, { localName, text, attributes: new Map(), childNodes: [], parentNode: null, dataset: {}, hidden: false });
   }
-  get nodeType() { return this.localName === "#text" ? 3 : this.localName === null ? 11 : 1; }
+  get nodeType() { return this.localName === "#text" ? 3 : this.localName === "#comment" ? 8 : this.localName === null ? 11 : 1; }
   get id() { return this.attributes.get("id") ?? ""; }
   get children() { return this.childNodes.filter((c) => c.nodeType === 1); }
   get isConnected() { return this.parentNode === null ? this === root : this.parentNode.isConnected; }
-  get textContent() { return this.nodeType === 3 ? this.text : this.childNodes.map((c) => c.textContent).join(""); }
+  get textContent() { return this.nodeType === 3 ? this.text : this.childNodes.filter((c) => c.nodeType !== 8).map((c) => c.textContent).join(""); }
+  set textContent(text) {
+    for (const child of [...this.childNodes]) child.remove();
+    this.append(new FakeNode("#text", text));
+  }
+  get classList() { return { contains: (name) => (this.attributes.get("class") ?? "").split(" ").includes(name) }; }
   get innerHTML() { return this.childNodes.map((c) => c.outerHTML).join(""); }
   set innerHTML(markup) {
     for (const child of [...this.childNodes]) child.remove();
@@ -19,6 +24,7 @@ class FakeNode extends EventTarget {
   }
   get outerHTML() {
     if (this.nodeType === 3) return this.text;
+    if (this.nodeType === 8) return `<!--${this.text}-->`;
     const attrs = [...this.attributes].map(([name, value]) => ` ${name}="${value}"`).join("");
     return `<${this.localName}${attrs}>${this.innerHTML}</${this.localName}>`;
   }
@@ -44,7 +50,11 @@ class FakeNode extends EventTarget {
   }
   contains(node) { for (let n = node; n instanceof FakeNode; n = n.parentNode) if (n === this) return true; return false; }
   querySelector() { return null; }
-  querySelectorAll() { return []; }
+  /** Only the `[name]` selector the grow frame uses, in document order. */
+  querySelectorAll(selector) {
+    const name = /^\[([\w-]+)\]$/.exec(selector)?.[1];
+    return this.childNodes.flatMap((c) => [...(name !== undefined && c.attributes.has(name) ? [c] : []), ...c.querySelectorAll(selector)]);
+  }
   getBoundingClientRect() { return { top: 0, bottom: 0 }; }
 }
 
@@ -52,8 +62,9 @@ class FakeNode extends EventTarget {
 function parse(markup) {
   const fragment = new FakeNode(null);
   let open = fragment;
-  for (const [, close, name, attrs, text] of markup.matchAll(/<\/([\w-]+)>|<([\w-]+)((?:\s+[\w-]+="[^"]*")*)\s*>|([^<]+)/g)) {
-    if (close !== undefined) open = open.parentNode;
+  for (const [, comment, close, name, attrs, text] of markup.matchAll(/<!--(.*?)-->|<\/([\w-]+)>|<([\w-]+)((?:\s+[\w-]+="[^"]*")*)\s*>|([^<]+)/g)) {
+    if (comment !== undefined) open.append(new FakeNode("#comment", comment));
+    else if (close !== undefined) open = open.parentNode;
     else if (text !== undefined) open.append(new FakeNode("#text", text));
     else {
       const el = new FakeNode(name);
@@ -93,6 +104,7 @@ const convo = new FakeNode("div");
 convo.setAttribute("id", "convo");
 convo.innerHTML = `<div class="msg">first reply</div><div class="tools">running</div>`;
 const jump = new FakeNode("button");
+jump.textContent = "Jump to latest";
 jump.setAttribute("id", "jump-end");
 jump.hidden = true;
 scroller.append(convo, jump);
@@ -157,4 +169,32 @@ test("Jump to latest shows while the reader is up the conversation, marks what a
   assert.equal(end.following, true);
   assert.equal(jump.hidden, true, "hidden again");
   assert.equal(jump.dataset.fresh, undefined, "the mark clears");
+});
+
+test("a block whose output grew keeps its element when the next frame sends the output it grew to", () => {
+  end.toEnd();
+  send({ convo: `<div class="msg">first reply</div><div class="tools"><pre data-grow=""><!--grow-->compiling<!--/grow--></pre></div>`, shows: "k5" });
+  const tools = convo.childNodes[1];
+  send({ grow: [[0, "compiling\nlinking"]], shows: "k6" });
+  assert.equal(tools.textContent, "compiling\nlinking", "the grow frame writes the output in place");
+  const selection = { anchorNode: tools.childNodes[0].childNodes[0], focusNode: tools.childNodes[0].childNodes[0] };
+
+  send({ convo: `<div class="msg">first reply</div><div class="tools"><pre data-grow=""><!--grow-->compiling\nlinking<!--/grow--></pre></div><div class="msg">built</div>`, shows: "k7" });
+  assert.equal(convo.childNodes[1], tools, "the grown block is the same element");
+  assert.equal(selection.anchorNode.isConnected && selection.focusNode.isConnected, true, "the selection in its output is still in the document");
+  assert.equal(convo.childNodes[2].textContent, "built", "the reply after it is appended");
+});
+
+test("a reader up the conversation is told in words that more arrived, and not for the meta line's age alone", () => {
+  end.toEnd();
+  send({ convo: `<p class="convo-meta">started 1 min ago</p><div class="msg">first reply</div>`, shows: "k8" });
+  scroller.scrollTop = 600;
+  assert.equal(jump.textContent, "Jump to latest");
+  send({ convo: `<p class="convo-meta">started 2 min ago</p><div class="msg">first reply</div>`, shows: "k9" });
+  assert.equal(jump.dataset.fresh, undefined, "the meta line's age is not news");
+  send({ convo: `<p class="convo-meta">started 2 min ago</p><div class="msg">first reply</div><div class="msg">next</div>`, shows: "k10" });
+  assert.equal(jump.dataset.fresh, "");
+  assert.equal(jump.textContent, "New below, jump to latest", "the button says so in words, not by colour alone");
+  jump.dispatchEvent(new Event("click"));
+  assert.equal(jump.textContent, "Jump to latest", "following again resets the words");
 });
