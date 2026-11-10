@@ -16,7 +16,7 @@ import { claudeWorkerAt } from "../test-support/registry-kit.ts";
 import type { ProjectId } from "../ids.ts";
 import type { InterruptClaudeOutcome } from "../protocol/commands.ts";
 import { transcriptStart, type ClaudeEntry } from "../control/claude-transcript.ts";
-import { tempDir } from "../test-support/kit.ts";
+import { tempDir, testCapacity, testObservation } from "../test-support/kit.ts";
 import { CliError } from "./transport.ts";
 import type { Api } from "./kit.ts";
 import { threadsCommands } from "./commands/threads.ts";
@@ -199,15 +199,15 @@ test("threads colours failed and attention rows only on a terminal, and not unde
   const s = await setup(t);
   const { quiet, replied, broken } = await fourThreads(s);
   const rowOf = (text: string, id: string) => text.split("\n").find((line) => line.includes(id))!;
-  const coloured = (await s.terminal(["threads"])).stdout;
+  const coloured = (await s.ttyOut(["threads"])).stdout;
   assert.ok(rowOf(coloured, broken.id).startsWith("\x1b[31m"), coloured);
   assert.ok(rowOf(coloured, replied.id).startsWith("\x1b[33m"), coloured);
   assert.ok(rowOf(coloured, quiet.id).startsWith(quiet.id), "a row that needs no one stays plain");
   assert.ok(coloured.startsWith("Thread "), "the header stays plain");
   assert.ok(!(await s.nexus(["threads"])).stdout.includes("\x1b"), "no colour when stdout is not a terminal");
-  assert.ok(!(await s.terminal(["threads"], { NO_COLOR: "1" })).stdout.includes("\x1b"), "no colour under NO_COLOR");
-  assert.equal((await s.terminal(["threads"], { NO_COLOR: "" })).stdout, coloured, "an empty NO_COLOR is unset");
-  assert.ok(!(await s.terminal(["threads", "--json"])).stdout.includes("\x1b"), "--json is never coloured");
+  assert.ok(!(await s.ttyOut(["threads"], { NO_COLOR: "1" })).stdout.includes("\x1b"), "no colour under NO_COLOR");
+  assert.equal(timeless((await s.ttyOut(["threads"], { NO_COLOR: "" })).stdout), timeless(coloured), "an empty NO_COLOR is unset");
+  assert.ok(!(await s.ttyOut(["threads", "--json"])).stdout.includes("\x1b"), "--json is never coloured");
 });
 
 test("wake says it recorded the person's activity and what that does to the pylon", async (t) => {
@@ -218,6 +218,9 @@ test("wake says it recorded the person's activity and what that does to the pylo
   assert.equal((await s.nexus(["wake", thread.id])).stdout, `Recorded your activity on ${thread.id}, so Nexus wakes its pylon, which is unknown.\n`);
   assert.ok(s.registry.threads.thread(thread.id)!.lastHumanActivityAt > before);
   assert.equal(await s.json(["wake", thread.id]), null, "--json prints null, as before");
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  s.registry.threads.ingested(testObservation(node, { pylons: [{ pylonId: thread.pylonId, phase: "broken", detail: "the controller exited", cause: "controller", logTail: "" }] }), []);
+  assert.equal((await s.nexus(["wake", thread.id])).stdout, `Recorded your activity on ${thread.id}, but its pylon failed, and activity does not retry it. \`nexus retry-pylon ${thread.id}\` does.\n`);
   await s.json(["archive", thread.id]);
   assert.equal((await s.nexus(["wake", thread.id])).stdout, `Recorded your activity on ${thread.id}, but it is archived, so its pylon stays paused. \`nexus unarchive ${thread.id}\` wakes it.\n`);
 });

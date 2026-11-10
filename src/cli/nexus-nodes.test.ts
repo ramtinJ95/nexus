@@ -8,7 +8,7 @@ import type { Thread } from "../control/thread-store.ts";
 import type { PylonId } from "../ids.ts";
 import type { NodeHealth } from "../protocol/client.ts";
 import { stoppedPylon, testCapacity, testObservation } from "../test-support/kit.ts";
-import { node, image, setup } from "../test-support/cli-kit.ts";
+import { node, image, setup, timeless } from "../test-support/cli-kit.ts";
 import { localTime } from "./kit.ts";
 
 test("nodes marks an overcommitted node and says what its pylons hold", async (t) => {
@@ -135,9 +135,8 @@ test("node prints a node's health, unknown where the host exposes nothing, and -
   };
   s.nodeHealth(async () => health);
   assert.deepEqual(await s.json(["node", node]), health);
-  const shown = (await s.nexus(["node", node])).stdout;
-  assert.match(shown, new RegExp(`^node: ${node}, read in \\d+d \\(${localTime(Date.parse(health.readAt))}\\)\n`), "a time reads relative, then local");
-  assert.equal(shown.replace(/^.*\n/, ""), [
+  assert.equal(timeless((await s.nexus(["node", node])).stdout), [
+    `node: ${node}, read ${localTime(Date.parse(health.readAt))}`,
     "load: 2.50 1.75 1.00 (1, 5, 15 min) on 16 CPUs",
     "memory: 40.2 of 62.8 GiB available",
     "swap: 2 of 8 GiB used",
