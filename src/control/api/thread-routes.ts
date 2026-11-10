@@ -18,22 +18,17 @@ import { activitySchema, messageSchema, seenSchema, startSchema } from "../../co
 const keptStatuses = Object.keys({ active: true, idle: true, archived: true } satisfies Record<Exclude<ThreadStatus, "deleted">, true>) as ThreadStatus[];
 
 export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEntry[] {
-  const { lookup, thread, guard, wakeThread, rows, shown, open, registry, harness, startThread, agents, agentOf } = kit;
+  const { lookup, thread, guard, wakeThread, rows, shown, open, registry, harness, startThread, agents, agentOf, deleteThread } = kit;
 
   const queueOrRefuse = () => feature(features, "queue");
 
   const queuedStatus = (id: string, status: "archived" | "queued" | "deleted") => queuedView(registry, queueOrRefuse().setStatus(id as ThreadId, status));
 
-  async function setStatus(t: Thread, status: "archived" | "deleted"): Promise<Thread> {
+  function archive(t: Thread): Thread {
     guard(t, { status: "kept" });
-    registry.threads.setThreadStatus(t.id, status);
+    registry.threads.setThreadStatus(t.id, "archived");
     wakeThread(t);
-    if (status === "deleted") {
-      for (const s of open) if (s.thread === t.id) s.end();
-      // After the status, which each agent's delete relies on.
-      await agents[registry.threads.agent(t).kind].delete(t);
-    }
-    return { ...t, status };
+    return { ...t, status: "archived" };
   }
 
   /** Activity never unarchives a thread, because opening its page is activity too. */
@@ -95,11 +90,14 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
     return answer;
   }
 
-  /** A repeat that answered an archived, deleted or cancelled thread would read as a start that went through. */
+  /**
+   * A repeat that answered an archived, deleted or cancelled thread would read as a start that went through. A thread
+   * retention purged from the registry has no row left to answer.
+   */
   function refuseEnded(requestId: string, id: ThreadId) {
     const queued = registry.queue.queuedThread(id);
-    const status = queued !== undefined && queued.status !== "started" ? (queued.status === "archived" ? "cancelled" : queued.status) : registry.threads.thread(id)!.status;
-    if (status === "archived" || status === "deleted" || status === "cancelled") {
+    const status = queued !== undefined && queued.status !== "started" ? (queued.status === "archived" ? "cancelled" : queued.status) : registry.threads.threadStatus(id) ?? "purged from the registry";
+    if (status === "archived" || status === "deleted" || status === "cancelled" || status === "purged from the registry") {
       throw new HttpError(409, `request ID ${requestId} started thread ${id}, which is ${status}, so it starts nothing. Start a new thread under a new request ID`);
     }
   }
@@ -158,13 +156,13 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
     on(routes.show, anyAllowed, ({ thread: id }) => ok(shown(thread(id)))),
     on(routes.delete, { role: "person", action: "delete a thread" }, async ({ thread: id }) => {
       const found = lookup(id);
-      return ok("queued" in found ? queuedStatus(id, "deleted") : await setStatus(found.thread, "deleted"));
+      return ok("queued" in found ? queuedStatus(id, "deleted") : await deleteThread(found.thread));
     }),
     on(routes.seen, { role: "allowed", why: "what the person has read changes no thread or pylon" }, seen(false)),
     on(routes.unseen, { role: "allowed", why: "what the person has read changes no thread or pylon" }, seen(true)),
     on(routes.archive, { role: "person", action: "archive a thread" }, async ({ thread: id }) => {
       const found = lookup(id);
-      return ok("queued" in found ? queuedStatus(id, "archived") : await setStatus(found.thread, "archived"));
+      return ok("queued" in found ? queuedStatus(id, "archived") : archive(found.thread));
     }),
     on(routes.unarchive, { role: "person", action: "unarchive a thread" }, ({ thread: id }) => {
       const found = lookup(id);
