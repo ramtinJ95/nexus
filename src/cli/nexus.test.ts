@@ -16,7 +16,7 @@ import type { Thread } from "../control/thread-store.ts";
 import { titleOf } from "../thread-title.ts";
 import type { TailnetNodeId } from "../ids.ts";
 import { testCertificate } from "../test-certificate.ts";
-import { freePort, tempDir } from "../test-support/kit.ts";
+import { deadPort, tempDir } from "../test-support/kit.ts";
 import { call, CliError, follow } from "./transport.ts";
 import { whenRunning, type Api } from "./kit.ts";
 import { commandGroups, commands, sections } from "./commands/index.ts";
@@ -213,7 +213,7 @@ test("global flags work before the command as after it", async (t) => {
     return JSON.parse(res.stdout);
   };
   assert.deepEqual(await listed(["--json", "projects"]), [project]);
-  const dead = { NEXUS_URL: `http://127.0.0.1:${await freePort()}`, NEXUS_SOCKS: "" };
+  const dead = { NEXUS_URL: `http://127.0.0.1:${await deadPort(t)}`, NEXUS_SOCKS: "" };
   assert.deepEqual(await listed(["--socks", "none", "--url", s.localUrl, "--json", "projects"], dead), [project], "--socks and --url before projects");
   assert.deepEqual(await listed([`--url=${s.localUrl}`, "--socks=none", "--json", "projects"], dead), [project], "and as --flag=value");
   assert.equal((await s.nexus(["-h", "start"])).stdout, (await s.nexus(["start", "--help"])).stdout);
@@ -265,7 +265,7 @@ test("each failure has its own exit code, and with --json its error is one JSON 
   await fails(["start", "--project", "acme", "--node", "nowhere", "--title", "x"], 64, { kind: "invalid", status: 400, error: "no node nowhere" });
   await fails(["show"], 64, { kind: "invalid", status: null });
 
-  const down = await fails(["threads"], 2, { kind: "unreachable", status: null }, { NEXUS_SOCKS: `127.0.0.1:${await freePort()}` });
+  const down = await fails(["threads"], 2, { kind: "unreachable", status: null }, { NEXUS_SOCKS: `127.0.0.1:${await deadPort(t)}` });
   assert.match(down, /nothing is listening on the SOCKS proxy at \S+\. Start the proxy, such as a userspace tailscaled, or give the one this device uses with --socks HOST:PORT or NEXUS_SOCKS, or none to connect directly$/);
   const refusing = await socksProxy(t, 4);
   const offline = await fails(["threads"], 2, { kind: "unreachable", status: null }, { NEXUS_SOCKS: `127.0.0.1:${refusing.port}` });

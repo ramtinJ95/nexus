@@ -16,7 +16,7 @@ import type { TailnetNodeId } from "../ids.ts";
 import type { ByteStream, StreamEnd } from "../protocol/streams.ts";
 import { testCertificate } from "../test-certificate.ts";
 import { version } from "../version.ts";
-import { freePort, tempDir, until } from "../test-support/kit.ts";
+import { deadPort, tempDir, until } from "../test-support/kit.ts";
 import { cli, laptop, phone, apiName, project, withHealth, listening, socksProxy, setup, observeRunning } from "../test-support/cli-kit.ts";
 
 /** A pipe to the relay in the guest that prints Herdr's screen once its source is in, and exits 0 when its stdin ends. */
@@ -195,7 +195,7 @@ test("connect fails without saving when no control plane answers, or one does no
   const s = await setup(t);
   const env = { NEXUS_URL: "", NEXUS_SOCKS: "" };
   const config = join(s.home, ".config", "nexus", "cli.json");
-  const dead = await freePort();
+  const dead = await deadPort(t);
   const proxy = await socksProxy(t, 0, { 7443: dead, 7470: dead });
 
   const down = await s.nexus(["connect", apiName, "--socks", `127.0.0.1:${proxy.port}`], env);

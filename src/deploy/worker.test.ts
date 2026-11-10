@@ -4,6 +4,7 @@ import { cp, mkdtemp, mkdir, readFile, readlink, rm, stat, symlink, writeFile } 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
+import { deadPort } from "../test-support/kit.ts";
 import { command, ReleaseInstaller } from "./install.ts";
 import { parseWorkerConfig } from "./control-plane.ts";
 import { prepareTries, retryBaseMs } from "./plan.ts";
@@ -86,13 +87,10 @@ test("a poll whose call to the control plane fails or is refused exits with the 
   await symlink(`releases/${commit}`, join(dir, "current"));
   await writeFile(join(dir, "etc/probe.json"), JSON.stringify({ listen: { host: "127.0.0.1", port: 1 } }));
   const refusing = createServer((_req, res) => { res.statusCode = 503; res.end("control plane is restarting"); }).listen(0, "127.0.0.1");
-  const closed = createServer().listen(0, "127.0.0.1");
-  await Promise.all([once(refusing, "listening"), once(closed, "listening")]);
+  await once(refusing, "listening");
   t.after(() => { refusing.closeAllConnections(); refusing.close(); });
-  const url = (server: typeof closed) => `http://127.0.0.1:${(server.address() as { port: number }).port}/`;
-  const down = url(closed);
-  closed.close();
-  await once(closed, "close");
+  const url = (server: typeof refusing) => `http://127.0.0.1:${(server.address() as { port: number }).port}/`;
+  const down = `http://127.0.0.1:${await deadPort(t)}/`;
   const boundary = { prefix: dir, etc: join(dir, "etc"), units: join(dir, "units"), async checkout() {}, async run() { return ""; } };
   const poll = (controlUrl: string) => {
     const config = { controlUrl, controlNodeId: "nControl", token: "a".repeat(64), healthTimeoutMs: 1000, drainTimeoutMs: 0 };
