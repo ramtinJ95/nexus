@@ -148,7 +148,7 @@ const marks = { ok: "✓", bad: "✕", none: "–" };
  * tool calls, folds and clipped outputs start open, and the dock under it with the run bar and the prompt box.
  */
 function conversationOf(html: string) {
-  const convo = html.split('id="convo"')[1]!.split('<section class="file-view"')[0]!;
+  const convo = html.split('id="convo"')[1]!.split('<button type="button" class="btn btn-xs jump-end"')[0]!;
   const dock = html.split('<div class="dock">')[1]!.split("</main>")[0]!;
   return {
     rows: convo.replace(/<span class="t-mark (ok|bad|none)"[^>]*>/g, (mark, state: keyof typeof marks) => `${mark}${marks[state]}`)
@@ -236,6 +236,17 @@ test("an archive whose usage will not be read without the person needs them, as 
   assert.equal(await card(), undefined, "a disk whose usage cannot be read is not kept for it");
   assert.match(await archived(), /Usage unread: its disk goes 24 hours after the archive with the token usage on it unread, as its pylon failed: gave up after 5 failed attempts\.$/);
   assert.doesNotMatch(await archived(), /kept/);
+});
+
+test("every page's first stop for Tab skips the sidebar to the page, and the page has the list of its shortcuts", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  for (const path of ["/", `/threads/${fix.id}`, "/cluster"]) {
+    const page = (await s.call("GET", path)).text;
+    assert.match(page, /<body>\s*<a class="skip" href="#main">Skip to the page<\/a>\s*<div class="app/, `${path} opens with the skip link`);
+    assert.match(page, /<main class="main" id="main" tabindex="-1"/, `${path}'s main takes the skip link's focus`);
+    assert.match(page, /<dialog id="keys" class="modal keys" aria-labelledby="keys-h">.*<dl id="keys-list"><\/dl><\/dialog>/, `${path} has the shortcuts overlay ? opens`);
+  }
 });
 
 test("the sidebar lists every project's threads with their state, counts the archived with a link to them and marks the open one", async (t) => {
@@ -727,7 +738,7 @@ test("Needs you lists, oldest first, each held review, open question and ask, an
   for (const c of cards) assert.match(c.html, new RegExp(`<a class="need-thread" href="/threads/${c.thread}"[ >]`), "each card links its thread");
 
   const land = cards[0]!;
-  assert.match(land.text, /^Review needs you acme \/ Cache the list just now Planned Queued Building In review held for you Landing Deployed #7 round 2 of 5 .* Open thread Caches the thread list between polls\. Not checked live The cache's behaviour under load could not be checked live\. Head /);
+  assert.match(land.text, /^Review needs you acme \/ Cache the list just now The pull request's GitHub checks are pending\. Planned Queued Building In review held for you Landing Deployed #7 round 2 of 5 .* Open thread Caches the thread list between polls\. Not checked live The cache's behaviour under load could not be checked live\. Head /);
   assert.match(land.text, /pending\. not waivable .* src\/control\/api\.ts\. you may waive /);
   const button = /<button [^>]*data-action="land"[^>]*>/.exec(land.html)![0];
   assert.match(button, new RegExp(`id="land-${held.id}" data-action="land" data-thread="${held.id}" data-head="${head}"`), "the thread page's Land button, under an ID of the card's own");
@@ -778,7 +789,7 @@ test("a thread in Needs you has its call to action once, in its card, with where
     assert.match(flight, new RegExp(`<a class="fl-row" href="/\\?peek=${thread.id}" data-peek="${thread.id}" aria-current="true">`), "its line leads to its card");
   }
   const land = needsOf((await s.call("GET", `/?peek=${held.id}`)).text).cards.find((c) => c.thread === held.id)!;
-  assert.match(land.text, /^Review needs you acme \/ Cache the list just now Planned Queued Building In review held for you Landing Deployed #7 round 2 of 5 .* Open thread Latest reply (.* )?Opened #7\. It waits for you to land\. Caches the thread list\./, "the strip has the pull request, its round and the latest reply in a line");
+  assert.match(land.text, /^Review needs you acme \/ Cache the list just now Always needs the person: changes to login or auth, as it changes src\/control\/api\.ts\. Planned Queued Building In review held for you Landing Deployed #7 round 2 of 5 .* Open thread Latest reply (.* )?Opened #7\. It waits for you to land\. Caches the thread list\./, "the strip has the pull request, its round and the latest reply in a line");
   assert.doesNotMatch(land.text, /#7 Cache|Held for you/, "nor names the pull request again under a title of its own");
   assert.equal(land.text.match(/Not checked live/g)!.length, 1);
   assert.match(land.html, /<details id="land-why-[^"]+"><summary>Findings and checks<\/summary>/, "the findings and checks are folded");
@@ -789,7 +800,7 @@ test("a thread in Needs you has its call to action once, in its card, with where
   const waiting = (await s.call("GET", `/?peek=${approved.id}`)).text;
   assert.doesNotMatch(waiting.split('id="peek"')[1]!.split('id="in-flight"')[0]!, /class="peek"/, "an approved review that cannot land previews in its card too");
   const heldCard = waiting.split(`id="need-${approved.id}-review"`)[1]!.split("</article>")[0]!;
-  assert.match(textOf(heldCard.replace(/^[^>]*>/, "")), /^Review needs you acme \/ Name the TTL just now Planned Queued Building In review held for you Landing Deployed #8 round 2 of 5 .* Open thread It cannot land, as pull request #8 is closed on GitHub outside this review, so there is nothing to land\.$/, "with where its work is and why it cannot land");
+  assert.match(textOf(heldCard.replace(/^[^>]*>/, "")), /^Review needs you acme \/ Name the TTL just now Approved, and lands once you press Land Planned Queued Building In review held for you Landing Deployed #8 round 2 of 5 .* Open thread It cannot land, as pull request #8 is closed on GitHub outside this review, so there is nothing to land\.$/, "with where its work is and why it cannot land");
   assert.equal([...heldCard.matchAll(/Open thread/g)].length, 1);
 
   const page = (await s.call("GET", `/?peek=${quiet.id}`)).text;
@@ -1556,7 +1567,7 @@ test("a thread page's stream sends its conversation, then only the text that gre
     return { grow };
   };
   const first = await stream.next();
-  assert.ok(page.includes(`data-stream="/threads/${fix.id}/stream">${first.convo}</div></div>`), "the first event is the region the page holds");
+  assert.ok(page.includes(`data-stream="/threads/${fix.id}/stream">${first.convo}</div><button type="button" class="btn btn-xs jump-end"`), "the first event is the region the page holds");
   assert.deepEqual(conversationOf(`<div id="convo" ${first.convo}<div class="dock"></main>`).rows.slice(1), ["Bash npm run build 1 line › npm run build compiling", "Hal"]);
 
   transcript.docs["pi.live"] = live("Half an <answer>", "compiling\nlinking\n");
@@ -2277,6 +2288,7 @@ test("a Claude worker that works shows its turn's call running, the turn's clock
     "the turn is timed from when control heard it start, and Interrupt stops it");
   const since = s.registry.threads.thread(thread.id)!.workingSince;
   assert.equal(html.split(`<time data-since="${since}">`).length - 1, 4, "the run bar, the sidebar row, the inspector and the timeline tick the same clock");
+  assert.match(html, new RegExp(`<div class="state-bar state-working" id="agent-state" data-state="working" role="status">.*<span aria-hidden="true"><time data-since="${since}">`), "the run bar announces its state, and not its clock each second");
   assert.match(html, new RegExp(`<button [^>]*data-action="abort" data-thread="${thread.id}"[^>]*>Interrupt</button>`), "Interrupt takes the abort route, which presses Esc in Claude's pane");
   assert.match(html, /placeholder="Steer the run…"/);
   assert.doesNotMatch(html, /id="queue"/, "Claude takes a message at its next step whatever its mode, so nothing queues after the turn");
@@ -2672,7 +2684,7 @@ test("a harness, a Claude worker and a bare thread each show the conversation, s
     const convo = html.split('id="convo"')[1]!;
     return {
       stream: /^[^>]*data-stream="([^"]*)"/.exec(convo)?.[1]?.replace(thread.id, "<id>") ?? null,
-      convo: textOf(convo.split('<section class="file-view"')[0]!.replace(/^[^>]*>/, "")).replace(thread.id, "<id>"),
+      convo: textOf(convo.split('<button type="button" class="btn btn-xs jump-end"')[0]!.replace(/^[^>]*>/, "")).replace(thread.id, "<id>"),
       run: textOf(html.split('<div id="run" data-live>')[1]!.split('<div id="composer"')[0]!).replace(thread.id, "<id>"),
       composer: /<div id="composer" data-live>\s*(<[^/>][^>]*>)?/.exec(html)?.[1] ?? null,
     };
@@ -2809,7 +2821,7 @@ test("the work in flight lists each item at its phase, an item held for the pers
   assert.equal(phaseOf(b.id), "planned");
   const needs = page.split('id="needs-you"')[1]!.split('id="peek"')[0]!;
   const card = needs.split(`id="need-${b.id}"`)[1]!.split("</article>")[0]!;
-  assert.equal(textOf(card.replace(/^[^>]*>/, "")), `Approve item acme / Greet in French item Planned held for you Queued Building In review Landing Deployed project acme waits for the person to approve each item: nexus item approve ${b.id}. After Greet by name Brief Build Greet in French. Approve Cancel`);
+  assert.equal(textOf(card.replace(/^[^>]*>/, "")), `Approve item acme / Greet in French item project acme waits for the person to approve each item: nexus item approve ${b.id} Planned held for you Queued Building In review Landing Deployed project acme waits for the person to approve each item: nexus item approve ${b.id}. After Greet by name Brief Build Greet in French. Approve Cancel`);
   assert.match(card, new RegExp(`<a class="link" href="/\\?peek=${thread}" data-peek="${thread}">Greet by name</a>`), "what it is after links its preview, as the thread it became");
   assert.match(card, new RegExp(`<button type="button" class="btn btn-xs" data-action="approve-item" data-item="${b.id}">Approve</button>`));
   assert.match(card, new RegExp(`data-action="cancel-item" data-item="${b.id}"`));
@@ -3148,7 +3160,7 @@ test("the sidebar's release lines read as the release view does: stale and missi
 /** The page's conversation region: its named view, and what it renders. */
 function convoRegion(html: string) {
   const tag = /<div class="convo" id="convo" data-rendered-reply-at="\d*"(?: data-shows="([^"]+)")? data-live[^>]*>/.exec(html)!;
-  return { named: tag[1], inside: html.slice(tag.index + tag[0].length).split('<section class="file-view"')[0]!.replace(/<\/div><\/div>\s*$/, "") };
+  return { named: tag[1], inside: html.slice(tag.index + tag[0].length).split('<button type="button" class="btn btn-xs jump-end"')[0]!.replace(/<\/div>$/, "") };
 }
 
 test("a poll of a streaming harness thread's page names the view its stream shows rather than render it", async (t) => {

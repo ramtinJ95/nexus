@@ -103,3 +103,16 @@ test("a reader who scrolled up keeps their place when a diff tab covers the conv
   end.settle();
   assert.equal(el.scrollTop, 600);
 });
+
+test("the page hears each time the reader leaves the end or comes back to it, and nothing in between", () => {
+  const el = scroller(3000, 800);
+  const heard = [];
+  const end = endFollower(el, el.observe, (following) => heard.push(following));
+  end.toEnd();
+  el.scrollTop = 600;
+  el.scrollTop = 500;
+  el.scrollTop = 2200;
+  el.scrollTop = 400;
+  end.toEnd();
+  assert.deepEqual(heard, [false, true, false, true]);
+});

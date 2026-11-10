@@ -77,7 +77,7 @@ ${role === "builder" ? html`<nav class="life-bar" id="life" data-live aria-label
 <div class="strip" id="strip" data-live>${strip(d)}</div>
 <div id="facts" data-live hidden>${facts(d)}</div>
 ${life !== null && html`<section class="timeline-view" id="timeline-view" role="tabpanel" aria-label="Timeline" hidden><div class="tl-wrap" id="timeline" data-live>${timeline(c, page, life)}</div></section>`}
-<div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}"${shows !== null && html` data-shows="${shows}"`} data-live${agent.kind !== "none" && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${shows === null && convo(t, view, items, model, c.now)}</div></div>
+<div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}"${shows !== null && html` data-shows="${shows}"`} data-live${agent.kind !== "none" && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${shows === null && convo(t, view, items, model, c.now)}</div><button type="button" class="btn btn-xs jump-end" id="jump-end" hidden>Jump to latest</button></div>
 <section class="file-view" id="file-view" role="tabpanel" aria-label="File diff" hidden></section>
 ${t.status !== "deleted" && termView(t)}
 <div class="dock">

@@ -62,7 +62,7 @@ export function stateBar(t: Thread, run: Run, now: number): Html {
   const [label, detail, end] = (() => {
     switch (run.kind) {
       case "idle": return [html`Idle`, html`${run.repliedAt !== null && html`replied ${ago(run.repliedAt, now)}`}${run.paused && html`${run.repliedAt !== null && " · "}the pylon is paused, and a message wakes it`}`, html``];
-      case "working": return [html`${run.claude ? "Claude is working" : "Working"}`, html`${run.since !== null && html`${since(run.since, now)} · `}${run.tools} ${run.tools === 1 ? "tool" : "tools"} this turn`, run.claude ? interrupt : abort];
+      case "working": return [html`${run.claude ? "Claude is working" : "Working"}`, html`${run.since !== null && html`<span aria-hidden="true">${since(run.since, now)} · </span>`}${run.tools} ${run.tools === 1 ? "tool" : "tools"} this turn`, run.claude ? interrupt : abort];
       case "waiting": return [html`Waiting for you`, html`${run.why}`, open && run.inTerminal && terminal];
       case "parked": return [html`Stuck`, html`${parkedText(run.tasks)}. ${t.status === "archived" ? "Unarchive the thread to retry them." : "Retry runs them again."}`, html`${t.status !== "archived" && html`<button type="button" class="btn btn-xs" id="retry"${act("retry")} data-thread="${t.id}">Retry</button>`}${run.busy && abort}`];
     }
