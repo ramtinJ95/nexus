@@ -6,12 +6,25 @@ import { refusalAt, request } from "./request.js";
 import { threadRoutes } from "../../contract/threads.ts";
 import { toggledBy } from "./folds.js";
 import { swapKeeping } from "./keep.js";
-import { grow, kept, storageKeys, unticked } from "./contract.ts";
+import { grow, grown, kept, storageKeys, unticked } from "./contract.ts";
 
 export const main = document.querySelector("main");
 export const pollMs = Number(main?.dataset.pollMs);
 export const scroller = document.getElementById("scroll");
-export const end = scroller === null ? null : endFollower(scroller, (resized) => new ResizeObserver(resized).observe(scroller));
+const jump = document.getElementById("jump-end");
+export const end = scroller === null ? null : endFollower(scroller, (resized) => new ResizeObserver(resized).observe(scroller), (following) => {
+  jump.hidden = following;
+  if (!following) return;
+  delete jump.dataset.fresh;
+  jump.textContent = "Jump to latest";
+});
+jump?.addEventListener("click", () => end.toEnd());
+/** Tells a reader who left the end that the conversation changed below them, in words as well as the accent. */
+function arrived() {
+  if (end === null || end.following) return;
+  jump.dataset.fresh = "";
+  jump.textContent = "New below, jump to latest";
+}
 
 export function showError(id, err) {
   const el = document.getElementById(id);
@@ -72,6 +85,36 @@ export function tick() {
 // What the server last sent for each region. Comparing against it rather than the live DOM means a tool the
 // reader opened or the ticking run clock is not a change, so an unchanged region is never swapped.
 const served = new Map([...document.querySelectorAll("[data-live]")].map((el) => [el.id, unticked(el.innerHTML)]));
+// The conversation is swapped block by block, each compared with what the server last sent for it, so a block that did
+// not change stays the same element and a selection in it survives the run's updates.
+const blockKey = (node) => node.nodeType === Node.ELEMENT_NODE ? unticked(node.outerHTML) : node.textContent;
+let servedBlocks = [...(document.getElementById("convo")?.childNodes ?? [])].map(blockKey);
+/** Whether a block other than the meta line, whose age a poll renders anew each minute, came or changed. */
+function patchBlocks(region, fresh) {
+  const live = [...region.childNodes];
+  const next = [...fresh.childNodes];
+  const keys = next.map(blockKey);
+  const came = next.filter((node, i) => live[i] === undefined || servedBlocks[i] !== keys[i]);
+  for (const [i, node] of next.entries()) {
+    if (live[i] === undefined) region.append(node);
+    else if (servedBlocks[i] !== keys[i]) live[i].replaceWith(node);
+  }
+  for (const node of live.slice(next.length)) node.remove();
+  servedBlocks = keys;
+  return came.some((node) => node.nodeType === Node.ELEMENT_NODE && !node.classList.contains("convo-meta"));
+}
+/**
+ * A grow frame's parts written into what the server last sent for their blocks, so the next full frame, which sends
+ * them again, finds those blocks unchanged. The n-th part is the n-th the region's comments bound, as on the server.
+ */
+function regrow(grew) {
+  const insides = new Map(grew);
+  let n = 0;
+  servedBlocks = servedBlocks.map((key) => key.replace(grown, (whole) => {
+    const inside = insides.get(n++);
+    return inside === undefined ? whole : grow.open + unticked(serialized(inside)) + grow.close;
+  }));
+}
 // The folds the reader opened or closed. The rest follow the server, so a fold that opened for a running step
 // closes once the step is done.
 export const toggled = new Map();
@@ -108,6 +151,15 @@ function anchor() {
   };
 }
 
+function template(html) {
+  const fresh = document.createElement("template");
+  fresh.innerHTML = html;
+  return fresh;
+}
+const parsed = (html) => template(html).content;
+/** Markup as the browser serializes it, which is how each block's key reads. */
+const serialized = (html) => template(html).innerHTML;
+
 const keepers = [];
 const settlers = [];
 /** `keep(regions)` runs before a swap replaces the regions, and the function it returns runs after. */
@@ -129,12 +181,10 @@ export function swap(regions) {
   const kept = keepers.map((keep) => keep(changed.map(([el]) => el)));
   const restoreScroll = anchor();
   for (const [el, html, key] of changed) {
-    if (el.querySelector("[data-keep]") === null) el.innerHTML = html;
-    else {
-      const fresh = document.createElement("template");
-      fresh.innerHTML = html;
-      swapKeeping(el, fresh.content);
-    }
+    if (el.id === "convo") {
+      if (patchBlocks(el, parsed(html))) arrived();
+    } else if (el.querySelector("[data-keep]") !== null) swapKeeping(el, parsed(html));
+    else el.innerHTML = html;
     served.set(el.id, key);
   }
   for (const restore of kept) restore?.();
@@ -193,9 +243,7 @@ export function follow(url) {
     if (convo === null) return;
     if (frame.convo !== undefined) {
       // Parsed and serialized as the poll's regions are, so an unchanged region compares equal.
-      const fresh = document.createElement("template");
-      fresh.innerHTML = frame.convo;
-      swap([[convo, fresh.innerHTML]]);
+      swap([[convo, serialized(frame.convo)]]);
     } else if (frame.grow !== undefined) {
       const slots = convo.querySelectorAll(grow.slots);
       const restoreScroll = anchor();
@@ -207,7 +255,9 @@ export function follow(url) {
         slot.innerHTML = inside;
         if (stick) slot.scrollTop = slot.scrollHeight;
       }
+      regrow(frame.grow);
       restoreScroll();
+      arrived();
     }
     if (frame.shows !== undefined) shows = frame.shows;
   });
