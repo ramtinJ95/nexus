@@ -307,7 +307,7 @@ const records = table<Parse>({
     if (!ofRepo(url, r.prNumber, repo)) return [];
     return [{ kind: "pull-request", at, number: r.prNumber, url: `https://github.com/${repo}/pull/${r.prNumber}`, repository: repo }];
   },
-  "queue-operation": (r, at) => [{ kind: "queue", at, op: cut(str(r.operation, "operation"), textLimits.summary), text: r.content === undefined ? null : cut(str(r.content, "content"), textLimits.prompt) }],
+  "queue-operation": (r, at) => [{ kind: "queue", at, op: cut(str(r.operation, "operation"), textLimits.summary), text: r.content === undefined ? null : cut(unpasted(str(r.content, "content")), textLimits.prompt) }],
 });
 
 const systems = table<Parse>({
@@ -335,7 +335,7 @@ const attachments = table<Parse>({
   // A prompt or a task's notification that Claude took from its queue in the middle of a turn.
   queued_command: (r, at) => {
     const queued = fields(r.attachment, "attachment");
-    const text = typeof queued.prompt === "string" ? queued.prompt : partsText(queued.prompt);
+    const text = typeof queued.prompt === "string" ? unpasted(queued.prompt) : partsText(queued.prompt);
     if (queued.commandMode === "task-notification") return [task(text, at)];
     if (queued.commandMode === "prompt") return [prompt(at, text, isFields(queued.origin) && queued.origin.kind === "human" ? "person" : "other")];
     return [record("attachment/queued_command", r, at)];
@@ -386,9 +386,10 @@ function userRecord(r: Fields, at: number, where: Where): ClaudeEntry[] {
   // command the person typed, such as the worker's first `/poteto-mode` prompt, is recorded in its command form.
   const from = isFields(r.origin) && r.origin.kind === "human" ? "person" : "other";
   if (typeof content === "string") {
-    const tag = leadingTag(content);
+    const text = unpasted(content);
+    const tag = leadingTag(text);
     const form = from === "person" ? personForms.get(tag) : forms.get(tag);
-    return form === undefined ? [prompt(at, content, from)] : form(content, r, at);
+    return form === undefined ? [prompt(at, text, from)] : form(text, r, at);
   }
   // Claude's metadata for a subagent it started in the background, which tells Claude not to show it.
   const background = isFields(r.toolUseResult) && r.toolUseResult.status === "async_launched";
@@ -406,7 +407,7 @@ function userRecord(r: Fields, at: number, where: Where): ClaudeEntry[] {
       const output = background ? "Started in the background" : cut(typeof part.content === "string" ? part.content : partsText(list(part.content ?? [], "content").filter((p) => !isFields(p) || p.type !== "image")), textLimits.output);
       entries.push({ kind: "result", at, toolUseId: cut(str(part.tool_use_id, "tool_use_id"), textLimits.summary), output, isError: part.is_error === true, ...withImages(imagesOf(i)) });
     } else if (type === "text" && interruptions.has(str(part.text, "text"))) entries.push(notice(at, "info", "Interrupted"));
-    else if (type === "text") words.push(str(part.text, "text"));
+    else if (type === "text") words.push(unpasted(str(part.text, "text")));
     else if (type === "image") pasted.push(...imagesOf(i));
     else entries.push(record(`user/${type}`, part, at));
   }
@@ -490,6 +491,15 @@ function partsText(parts: unknown): string {
 function inner(text: string, name: string): string | null {
   const match = new RegExp(`<${name}>([\\s\\S]*?)(?:</${name}>|$)`).exec(text);
   return match === null ? null : match[1]!;
+}
+
+/**
+ * The text inside a message Claude Code took as a paste, which it records as one `<pasted_content id="…">` block
+ * between newlines, or `text` as it is. Tags anywhere else are the text's own.
+ */
+function unpasted(text: string): string {
+  const match = /^\n*<pasted_content id="([^"\n]+)">\n([\s\S]*)\n<\/pasted_content id="\1">\n*$/.exec(text);
+  return match === null || match[2]!.includes(`</pasted_content id="${match[1]}">`) ? text : match[2]!;
 }
 
 const leadingTag = (text: string): string => /^\s*<([a-z_-]+)>/.exec(text)?.[1] ?? "";

@@ -21,7 +21,7 @@ import type { ConversationId, DocumentObserver, LiveState, TaskId } from "@earen
 import type { JobId, LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { NodeObservation, ServiceFact } from "../protocol/observations.ts";
 import type { TemplateRecord } from "./templates.ts";
-import { transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
+import { parseRecord, transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
 import { maxEntries } from "../contract/streams.ts";
 import { runningPylon, stoppedPylon, tempDir, testCapacity, testImage, testObservation } from "../test-support/kit.ts";
 import type { WaitingAsk } from "./questions.ts";
@@ -122,6 +122,15 @@ test("a Claude message recorded before senders were reads as unknown, and only i
   assert.equal(promptSenders(fresh, threadId)(review), null, "on a thread whose every send is recorded, an unrecorded prompt is the person's");
   await typeIntoClaude(fresh, threadId, "s1", null, "rv-1:1", review, async () => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed: false }), "review");
   assert.equal(promptSenders(fresh, threadId)(review), "review");
+});
+
+test("a long message Nexus typed, which Claude recorded as a paste, is still Nexus's", async (t) => {
+  const registry = seeded(t, tempDb());
+  const review = `${senders.review.prefix}\n${"Review pull request #7, every file of it.\n".repeat(100).trim()}`;
+  await typeIntoClaude(registry, threadId, "s1", null, "rv-1:1", review, async () => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed: false }), "review");
+  const record = JSON.stringify({ type: "user", timestamp: "2026-11-10T12:00:00.000Z", origin: { kind: "human" }, message: { role: "user", content: `\n\n<pasted_content id="cbe0">\n${review}\n</pasted_content id="cbe0">\n` } });
+  const [entry] = parseRecord(record);
+  assert.equal(entry?.kind === "prompt" && promptSenders(registry, threadId)(entry.text), "review");
 });
 
 test("an image recorded before images carried their release reads as of no known release", async (t) => {
