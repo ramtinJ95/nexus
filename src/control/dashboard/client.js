@@ -76,10 +76,10 @@ const checks = import("./health.js");
 const showRow = (row, raises) => {
   const tab = { focused: focused(), current: currentThread(), secure: window.isSecureContext,
     permission: window.isSecureContext && "Notification" in window ? Notification.permission : "unavailable", raises };
-  void checks.then((m) => m.showRow(row, tab));
+  return checks.then((m) => m.showRow(row, tab));
 };
 // A focused tab shows its own notice, and the tab that follows the events says which tab raises a background one.
-const notifications = coordinator((row) => showRow(row, !focused() && raises(row)));
+const notifications = coordinator((row) => void showRow(row, !focused() && raises(row)));
 const health = (change) => void checks.then((m) => m.showHealth(change, notificationChannel));
 const caughtUp = (hand) => void checks.then((m) => m.caughtUp(hand));
 if (location.pathname === "/health") void checks.then((m) => m.markHealthSeen());

@@ -78,12 +78,13 @@ export function startRows({ api, notifications, raise = () => {}, health = () =>
     if (notice === undefined) return;
     handed.delete(key);
     clearTimeout(notice.timer);
-    raise(notice.row);
+    if (![...tabs.values(), view()].some((tab) => tab.focused)) void raise(notice.row);
   };
   /**
    * Whether this tab raises a row's background notice now. The tab that follows the events decides for every tab, as
    * each read reaches it first and it is open as long as any is. It hands the notice to a tab on the thread, and takes
-   * it back if that tab leaves or does not say within a second that it raised it.
+   * it back if that tab leaves or does not say within a second that it raised it. A tab that answers later than that
+   * raises it too, a second alert of the same notice, which is better than none.
    */
   function raises(row) {
     if (!following) return false;
@@ -104,13 +105,12 @@ export function startRows({ api, notifications, raise = () => {}, health = () =>
       for (const [key, notice] of handed) if (notice.to === data.gone) takeBack(key);
     } else if (data.raise !== undefined) {
       if (data.to !== id) return;
-      raise(data.raise);
-      rowsChannel.postMessage({ raised: data.key });
+      // Answered once shown, so a tab that closes before then leaves the notice to the tab that handed it.
+      void Promise.resolve(raise(data.raise)).then(() => rowsChannel.postMessage({ raised: data.key }));
     } else if (data.raised !== undefined) {
       clearTimeout(handed.get(data.raised)?.timer);
       handed.delete(data.raised);
-    }
-    else if (data === "read") {
+    } else if (data === "read") {
       if (following) void readRows();
     } else if (data.health !== undefined) health(data.health);
     else showRows(data.rows, data.now);
