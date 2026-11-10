@@ -22,10 +22,13 @@ export const templateMaxAgeMs = 72 * 3_600_000;
 export interface SetupInputs {
   commit: string; // the full commit ID the ref resolved to
   setupBlob: string | null; // git object ID of .nexus/setup at `commit`
+  /** The git object ID at `commit` of each path in project.templateInputs, or null where the commit has none. Absent when the project lists none. */
+  inputBlobs?: Readonly<Record<string, string | null>> | undefined;
 }
 export interface ProjectMirror {
   /**
-   * Resolves a branch's tip or a full commit ID on the remote, and reads .nexus/setup's object ID there. Null when the
+   * Resolves a branch's tip or a full commit ID on the remote, and reads the object IDs of .nexus/setup and of each of
+   * project.templateInputs there. Null when the
    * remote answers that it has no such branch. Throws when the remote cannot be read.
    */
   setupInputs(project: RemoteProject, ref: { branch: string } | { commit: string }, signal?: AbortSignal): Promise<SetupInputs | null>;
@@ -34,10 +37,12 @@ export interface ProjectMirror {
 /**
  * sha256 of setupBlob, project.preSetup and effectiveAllowedHosts(project), since the hosts setup can reach change what
  * it can install. The disk size is in it because a template's disk is the pylon's, and a pylon's disk size is fixed
- * once it exists.
+ * once it exists. inputBlobs joins it only when it names a path, so a project that lists no template inputs keeps the
+ * keys its templates were built under.
  */
 export function setupHashOf(project: Project, inputs: SetupInputs): string {
-  return canonicalSha256({ setupBlob: inputs.setupBlob, preSetup: project.preSetup, allowedHosts: effectiveAllowedHosts(project), diskGiB: project.resources.diskGiB });
+  const blobs = inputs.inputBlobs === undefined || Object.keys(inputs.inputBlobs).length === 0 ? {} : { inputBlobs: inputs.inputBlobs };
+  return canonicalSha256({ setupBlob: inputs.setupBlob, preSetup: project.preSetup, allowedHosts: effectiveAllowedHosts(project), diskGiB: project.resources.diskGiB, ...blobs });
 }
 export function templateIdOf(key: TemplateKey, node: NodeName, startedAt: number): TemplateId {
   return `tpl-${canonicalSha256({ project: key.project, image: key.image, setupHash: key.setupHash, node, startedAt }).slice(0, 12)}`;

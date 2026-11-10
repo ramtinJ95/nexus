@@ -25,6 +25,12 @@ export interface Project {
   /** A script stored in Nexus, not the repo. It runs as user before .nexus/setup, so a project can be set up without a commit. */
   preSetup: string | null;
   /**
+   * Repository paths, such as package-lock.json, whose git object IDs at the thread's commit join the template key
+   * beside .nexus/setup's, so a commit that changes one builds a new template rather than reusing one whose setup
+   * installed from the old file. A path the commit lacks counts as absent. Absent or empty is none.
+   */
+  templateInputs?: readonly string[] | undefined;
+  /**
    * Whether the review loop starts on its own for each builder's pull request, lands it once approved, and in yolo
    * mode answers its own holds question with Land too. Only a person sets it, and `enabledBy` is the caller who did,
    * on whose behalf a landing merges and deploys and a yolo waiver waives.

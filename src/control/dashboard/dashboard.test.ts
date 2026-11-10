@@ -1921,6 +1921,42 @@ test("every page has somewhere to say a refresh failed", async (t) => {
   }
 });
 
+test("every page has one alert for what failed where the person acted, outside the dock a diff hides and every live region a swap replaces", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const alert = '<div class="notices"><p id="refresh-state" class="refresh-state" role="status"></p><div id="action-error" class="error alert" role="alert" hidden></div></div>';
+  for (const path of ["/", `/threads/${fix.id}`, "/cluster", "/usage"]) {
+    const page = (await s.call("GET", path)).text;
+    assert.equal(page.split('id="action-error"').length, 2, `${path} has one alert`);
+    assert.ok(page.split("</main>")[1]!.includes(alert), `${path} says it beside the page's refresh status, outside main`);
+  }
+  const css = await readFile(new URL("./style.css", import.meta.url), "utf8");
+  assert.match(css, /\.main\[data-view="file"\] \.dock \{ display: none; \}/, "a diff hides the dock, where the alert was");
+  assert.match(css, /\n\.notices \{ position: fixed;/);
+});
+
+test("Archive asks first only when it loses something, and names the open questions and the running turn", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const archive = async () => /<button[^>]* id="archive"[^>]*>/.exec((await s.call("GET", `/threads/${fix.id}`)).text)![0];
+  const confirmOf = async () => {
+    const said = /data-confirm="([^"]*)"/.exec(await archive());
+    return said === null ? null : textOf(said[1]!);
+  };
+  assert.equal(await confirmOf(), null, "an idle thread with nothing open archives at once");
+  s.registry.questions.askQuestion({ kind: "holds", id: "qn-holds", thread: fix.id, text: "Land with these holds?", options: ["Land", "Leave it"], reserved: null, answerer: "person", askedAt: Date.now(), holds: { review: "rv-1", head: "h", base: null, holds: [] } });
+  assert.equal(await confirmOf(), null, "an archive leaves a holds question open");
+  s.registry.questions.askQuestion({ kind: "judgment", id: "judgment:7", thread: fix.id, failure: 7, text: "The pylon failed on rj-firebat.\n\nRetry it?", options: ["Retry", "Leave it failed"], reserved: null, answerer: "person", askedAt: Date.now() });
+  assert.equal(await confirmOf(), 'Archive "Fix checkout"? Its open question "The pylon failed on rj-firebat." is withdrawn.');
+  s.fake.transcript(fix.id).docs["pi.live"] = { run: { taskId: 1, inputs: [1] } };
+  s.registry.threads.recordActivity(fix.id, { agent: Date.now(), agentTurnRunning: true });
+  assert.equal(await confirmOf(), 'Archive "Fix checkout"? Its open question "The pylon failed on rj-firebat." is withdrawn. Its agent is in a turn, and its pylon goes to sleep at once.');
+  s.registry.questions.answerQuestion(s.registry.questions.question("judgment:7")!, { option: "Leave it failed", by: laptop, at: Date.now() });
+  assert.equal(await confirmOf(), 'Archive "Fix checkout"? Its agent is in a turn, and its pylon goes to sleep at once.', "an answered question is not lost");
+  s.fake.park(fix.id, 2);
+  assert.equal(await confirmOf(), 'Archive "Fix checkout"? Its agent is in a turn, and its pylon goes to sleep at once.', "parked tasks beside a turn still running");
+});
+
 test("an unknown thread page is a 404 page", async (t) => {
   const s = await setup(t);
   const res = await s.call("GET", "/threads/th-missing");
@@ -2093,19 +2129,21 @@ test("a Claude worker's transcript reads as its conversation: prompts by who sen
   assert.match(html, new RegExp(`data-stream="/threads/${thread.id}/stream"`));
 });
 
-test("a pull request Claude opened shows once, as an escaped link to it, however often its transcript names it", async (t) => {
+test("a pull request Claude opened shows once, as a link to it, however often its transcript names it, and one of another repository is no Nexus note", async (t) => {
   const s = await seeded(t);
-  const url = 'https://github.com/acme/shop/pull/7?x="><b>';
+  s.registry.projects.editProject("acme" as ProjectId, (p) => ({ ...p, repoUrl: "git@github.com:acme/shop.git" }));
+  const url = "https://github.com/acme/shop/pull/7";
   const thread = await claudeThread(s, [
     { kind: "pull-request", at: 1, number: 7, url, repository: "acme/shop" },
     { kind: "reply", at: 2, text: "Opened it." },
     { kind: "pull-request", at: 3, number: 7, url, repository: "acme/shop" },
     { kind: "pull-request", at: 4, number: 8, url: "https://github.com/acme/shop/pull/8", repository: "acme/shop" },
+    { kind: "pull-request", at: 5, number: 9, url: "https://evil.example/login", repository: "acme/shop" },
   ]);
   const html = (await s.call("GET", `/threads/${thread.id}`)).text;
-  assert.deepEqual(conversationOf(html).rows, ["Opened pull request #7 ↗", "Opened it.", "Opened pull request #8 ↗"]);
-  assert.ok(html.includes('<a class="link" href="https://github.com/acme/shop/pull/7?x=&quot;&gt;&lt;b&gt;" target="_blank" rel="noopener">Opened pull request #7 ↗</a>'), "the URL is escaped");
-  assert.ok(html.includes('<a class="link" href="https://github.com/acme/shop/pull/8" target="_blank" rel="noopener">'));
+  assert.deepEqual(conversationOf(html).rows, ["Opened pull request #7 ↗", "Opened it.", "Opened pull request #8 ↗", "! Claude Code wrote a pr-link record: a pull request link that is not of the project's repository"]);
+  assert.ok(html.includes(`<a class="link" href="${url}" target="_blank" rel="noopener">Opened pull request #7 ↗</a>`));
+  assert.ok(!html.includes("evil.example"), "a link of another repository shows nowhere");
 });
 
 test("a Claude worker that works shows its turn's call running, the turn's clock and calls, and a box that queues for Claude", async (t) => {

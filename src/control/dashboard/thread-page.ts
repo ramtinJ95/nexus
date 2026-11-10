@@ -19,6 +19,7 @@ import type { Context, ThreadView } from "./context.ts";
 import { prose } from "./markdown.ts";
 import { modelOf } from "./items.ts";
 import { runOf, stateBar, composer, type Run } from "./conversation.ts";
+import { isOpen } from "../questions.ts";
 import { convo, shownKey } from "./live-frames.ts";
 import { judgmentCards, questionCards, landing, cancelReview, nudgeCard, resumeCard } from "./cards.ts";
 import { layout, queuedLook } from "./shell.ts";
@@ -64,7 +65,7 @@ export function threadPage(c: Context, page: ThreadView, streaming = false): Htm
   const open = isOpenStatus(t.status);
   const life = role === "builder" ? lifeOfThread(c, t.id) : null;
   const bar = threadBar(t, headState(d, row, run, c.now), [
-    t.status !== "deleted" && archiveButton(t.id, t.status === "archived"),
+    t.status !== "deleted" && archiveButton(t.id, t.status === "archived", archiveLoses(d, run)),
     t.status !== "deleted" && html`<button type="button" class="btn btn-ghost danger" id="delete"${act("delete")} data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its pylon and disk are removed.">Delete</button>`,
   ], d.planning === true && html` <span class="tag" id="planning" title="Its proposed items become cards you accept or reject">planning</span>`);
   return layout(c, {
@@ -81,7 +82,6 @@ ${life !== null && html`<section class="timeline-view" id="timeline-view" role="
 <section class="file-view" id="file-view" role="tabpanel" aria-label="File diff" hidden></section>
 ${t.status !== "deleted" && termView(t)}
 <div class="dock">
-<p id="action-error" class="error" role="alert" hidden></p>
 <p id="action-status" class="comp-note" role="status" hidden></p>
 <div id="judgments" data-live>${judgmentCards(c, d)}</div>
 <div id="questions" data-live>${questionCards(c, d)}</div>
@@ -104,6 +104,7 @@ ${t.status !== "deleted" && termView(t)}
 function termView(t: Thread): Html {
   return html`<section class="term-view" id="term-view" role="tabpanel" aria-label="Terminal" hidden>
 <div class="tv-head"><span class="tv-where">The pylon's Herdr session</span><span class="tv-status" id="term-status" role="status"></span><button type="button" class="btn btn-xs" id="term-again" hidden>Attach again</button><button type="button" class="btn btn-xs btn-ghost" id="term-detach" hidden>Detach</button></div>
+<p class="tv-clip" id="term-copied" role="status" hidden></p><p class="tv-clip" id="term-refused" role="status" hidden></p>
 <div class="tv-host" id="term-host"></div>
 </section>`;
 }
@@ -131,9 +132,24 @@ ${shown.length > 0 && html`<div class="bar-actions" id="thread-actions">${shown}
 </header>`;
 }
 
-const archiveButton = (id: ThreadId, archived: boolean) => archived
+/** Archive asks first only when `confirm` says what it loses. */
+const archiveButton = (id: ThreadId, archived: boolean, confirm: string | null = null) => archived
   ? html`<button type="button" class="btn btn-ghost" id="unarchive"${act("unarchive")} data-thread="${id}">Unarchive</button>`
-  : html`<button type="button" class="btn btn-ghost" id="archive"${act("archive")} data-thread="${id}">Archive</button>`;
+  : html`<button type="button" class="btn btn-ghost" id="archive"${act("archive")} data-thread="${id}"${confirm !== null && html` data-confirm="${confirm}"`}>Archive</button>`;
+
+/**
+ * What archiving the thread loses, or null when nothing: the open questions an archive withdraws, a failed pylon's
+ * judgment and a Claude worker's asks, and the turn its agent is in, whose pylon goes to sleep at once.
+ */
+function archiveLoses(d: ThreadDetail, run: Run): string | null {
+  const questions = d.questions.filter((q) => (q.kind === "judgment" || q.kind === "ask") && isOpen(q));
+  const named = questions.map((q) => `"${q.text.split("\n")[0]}"`).join(", ");
+  const lost = [
+    questions.length > 0 && (questions.length === 1 ? `Its open question ${named} is withdrawn.` : `Its ${questions.length} open questions ${named} are withdrawn.`),
+    (run.kind === "working" || (run.kind === "parked" && run.busy)) && "Its agent is in a turn, and its pylon goes to sleep at once.",
+  ].filter((part) => part !== false);
+  return lost.length === 0 ? null : `Archive "${d.thread.title}"? ${lost.join(" ")}`;
+}
 
 /**
  * A thread that has not started: what it waits for, what it will start with, and the actions a queued thread has. It
@@ -167,8 +183,7 @@ ${q.commit !== null && html`<dt>Commit</dt><dd><code>${q.commit}</code></dd>`}
 <code class="id">${q.id}</code>
 ${q.lastError !== null && html`<p class="error">The last start attempt failed: ${q.lastError}</p>`}
 </section>
-</div></div>
-<div class="dock"><p id="action-error" class="error" role="alert" hidden></p></div>`,
+</div></div>`,
   });
 }
 

@@ -22,6 +22,11 @@ let lastTerminal = null;
 /** The pane the next attach lands in, in place of the Claude worker's. */
 let landing = null;
 holdReload(() => terminal !== null);
+/**
+ * Each clipboard notice line's fade, across attaches. A write that did not land has its own line, so output in the
+ * pylon cannot hide the notice of one that did.
+ */
+const fading = new Map();
 
 /**
  * Shows `pane` in the terminal tab. A terminal that is not attached attaches there. An attached one has Herdr focus
@@ -47,12 +52,19 @@ export async function showTerminal() {
     if (over) terminal = null;
   };
   shown({ text: "Attaching…", over: false });
+  const copied = (text, landed) => {
+    const line = document.getElementById(landed ? "term-copied" : "term-refused");
+    line.textContent = text;
+    line.hidden = false;
+    clearTimeout(fading.get(line.id));
+    fading.set(line.id, setTimeout(() => { line.hidden = true; }, 15_000));
+  };
   const pane = landing;
   landing = null;
   terminal = chunk(import("./term-view.js")).then(({ openTerminal }) => {
     lastTerminal?.close();
     document.getElementById("term-host").replaceChildren();
-    lastTerminal = openTerminal(document.getElementById("term-host"), thread, shown, pane);
+    lastTerminal = openTerminal(document.getElementById("term-host"), thread, shown, pane, copied);
     return lastTerminal;
   }).catch((err) => {
     shown({ text: `The terminal did not load: ${err.message}`, over: true });
