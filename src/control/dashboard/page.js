@@ -48,9 +48,23 @@ export function notify(err, retry = null) {
   ])));
 }
 
+// A button without an ID, such as an answer's, a session's or a review's, is the one its data attributes name.
+const dataKey = (el) => [...el.attributes].filter((a) => a.name.startsWith("data-")).map((a) => `[${a.name}="${CSS.escape(a.value)}"]`).join("");
 const focusKey = (el) => el.id !== "" ? `#${CSS.escape(el.id)}`
   : el instanceof HTMLAnchorElement ? `a[href="${CSS.escape(el.getAttribute("href"))}"]`
+  : el instanceof HTMLButtonElement && dataKey(el) !== "" ? `button${dataKey(el)}`
   : null;
+
+// An action disables its button while it runs, and a disabled button can lose focus to the body, so the swap the
+// action causes finds the button the person pressed here.
+let pressed = null;
+export function pressing(button) { pressed = button; }
+/** Ends `button`'s hold, and says whether it still held it, which a later press takes over. */
+export function released(button) {
+  const held = pressed === button;
+  if (held) pressed = null;
+  return held;
+}
 
 /** Ticks the run clocks and the times ago, and puts each moment the server sent in UTC in the reader's zone. */
 export function tick() {
@@ -160,7 +174,10 @@ export function afterSwap(settle) { settlers.push(settle); }
 export function swap(regions) {
   const changed = regions.map(([el, html]) => [el, html, unticked(html)]).filter(([el, , key]) => el !== null && served.get(el.id) !== key);
   if (changed.length === 0) return;
-  const focused = changed.some(([el]) => el.contains(document.activeElement)) ? focusKey(document.activeElement) : null;
+  const active = pressed !== null && document.activeElement === document.body ? pressed : document.activeElement;
+  const focused = changed.some(([el]) => el.contains(active)) ? focusKey(active) : null;
+  // Two buttons can carry the same attributes, as the phone strip's pylon and outputs do, so focus goes to the same one of them.
+  const nth = focused === null ? -1 : [...document.querySelectorAll(focused)].indexOf(active);
   const kept = keepers.map((keep) => keep(changed.map(([el]) => el)));
   const restoreScroll = anchor();
   for (const [el, html, key] of changed) {
@@ -172,7 +189,7 @@ export function swap(regions) {
   }
   for (const restore of kept) restore?.();
   for (const d of document.querySelectorAll("details[id]")) if (toggled.has(d.id)) d.open = toggled.get(d.id);
-  if (focused !== null) document.querySelector(focused)?.focus({ preventScroll: true });
+  if (focused !== null) document.querySelectorAll(focused)[nth]?.focus({ preventScroll: true });
   restoreScroll();
   tick();
   for (const settle of settlers) settle();
