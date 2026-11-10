@@ -12,9 +12,19 @@ From the root of a fresh clone, on macOS or Linux, with Node 26 or newer on `PAT
 deploy/mac/install
 ```
 
-It runs `npm ci`, records the `package.json` and `package-lock.json` it installed in `node_modules/.nexus-lockfile-sha256`, as a pylon's `.nexus/resume` does, links `~/.local/bin/nexus` to [`deploy/mac/nexus`](../deploy/mac/nexus), prints the version, and says so when `~/.local/bin` is not on `PATH`, with the line to add to the profile of the shell in `SHELL`. Without Node 26 it names a way to get it: `brew install node` on macOS, and the distribution's packages, nodejs.org or mise on Linux. Give it another directory as its argument to link there instead. The shim follows its symlink back to the checkout and runs `node src/cli/nexus.ts`, so a `git pull` updates the CLI. A pull that changes `package-lock.json` needs the script run again, and until then the shim exits 1 with one line that says so, rather than run the CLI on packages installed for another lockfile. It also exits 1 with one line when the `node` on `PATH` is older than Node 26, as in a project that pins an older one. Then run `nexus connect <host>`.
+It runs `npm ci`, records the `package.json` and `package-lock.json` it installed in `node_modules/.nexus-lockfile-sha256`, as a pylon's `.nexus/resume` does, links `~/.local/bin/nexus` to [`deploy/mac/nexus`](../deploy/mac/nexus), prints the version, and says so when `~/.local/bin` is not on `PATH`, with the line to add to the profile of the shell in `SHELL`. It ends with how to turn on [shell completion](#shell-completion). Without Node 26 it names a way to get it: `brew install node` on macOS, and the distribution's packages, nodejs.org or mise on Linux. Give it another directory as its argument to link there instead. The shim follows its symlink back to the checkout and runs `node src/cli/nexus.ts`, so a `git pull` updates the CLI. A pull that changes `package-lock.json` needs the script run again, and until then the shim exits 1 with one line that says so, rather than run the CLI on packages installed for another lockfile. It also exits 1 with one line when the `node` on `PATH` is older than Node 26, as in a project that pins an older one. Then run `nexus connect <host>`.
 
 The CLI keeps Node's compile cache, the stripped TypeScript and compiled code of its modules, in `~/.cache/nexus/compile-cache`, or where `NODE_COMPILE_CACHE` says, so a command after the first starts in about two thirds of the time. Node keeps one cache per Node version and per user in it, and replaces an entry whose file changed, as after a `git pull`. A cache it cannot create or write, such as under a `~/.cache` that is a file, leaves the CLI as it would run without one, with nothing on stderr. `NODE_DISABLE_COMPILE_CACHE=1` turns it off. It is not Node's default, the temp directory's `node-compile-cache`, because on a machine several users share, the first user's directory there is one the others cannot write in.
+
+### Shell completion
+
+`nexus completion zsh|bash|fish` prints a script that completes the commands, their subcommands and flags, and the thread and project IDs where an argument or a `--thread` or `--project` flag takes one. The script is made from the same command registry as `nexus --help`, so it never falls behind the CLI. A thread's argument also offers `@last`. The IDs come from `nexus threads --json` and `nexus projects --json`, which the script runs through Node with a 2-second timeout and with the line's own `--url` and `--socks`, if it gives them. A control plane that cannot be reached or answers too late completes no IDs, with nothing on the terminal. Any other flag that takes a value completes file names. `deploy/mac/install` prints the line that turns it on for the shell in `$SHELL`:
+
+| Shell | Line, in the shell's profile |
+|---|---|
+| zsh | `source <(nexus completion zsh)` in `~/.zshrc`, which loads `compinit` when nothing has |
+| bash | `eval "$(nexus completion bash)"` in `~/.bashrc`, or `~/.bash_profile` on macOS, since its bash 3.2 cannot `source` a process substitution |
+| fish | `nexus completion fish \| source` in `~/.config/fish/config.fish` |
 
 ## Where it connects
 
@@ -103,6 +113,7 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | Command | Route | `--json` prints |
 |---|---|---|
 | `connect <host> [--socks HOST:PORT\|none]` | `GET /v1/health`, then `GET /v1/whoami`, at each port it tries | `{"url", "socks", "config", "caller", "versions"}`, as [Connecting a device](#connecting-a-device) describes |
+| `completion zsh\|bash\|fish` | None | `{"shell", "script"}`. The text is the script, as [Shell completion](#shell-completion) describes |
 | `events [--follow] [--since ID] [--thread T] [--project P] [--kind K]...` | `GET /v1/events?since=ID&thread=T&project=P&kind=K`, with `follow=true` and `--follow`, as [Event stream and Claude workers](#event-stream-and-claude-workers) describes | One `NexusEvent` per line |
 | `review <thread> [--pr N] [--rounds N] [--land]` | `POST /v1/threads/<thread>/review` with `{"pr"?: number, "rounds"?: number, "land"?: true}`, which answers 201 | `Review`, the review it started, with `said`, its line and notes as the text prints them, as each review route's reply has |
 | `review --cancel <thread>` | `POST /v1/threads/<thread>/review/cancel` with `{}`. It takes no `--pr`, `--rounds` or `--land` | `Review` with `said`, ended `cancelled` |

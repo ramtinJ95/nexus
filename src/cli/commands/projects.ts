@@ -92,7 +92,7 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
     help: [
       "  nexus project show <id>                      a project's settings, and the standing rules each builder thread gets with its first message",
     ],
-    args: [1, 1],
+    args: [1, 1], project: true,
     async run(api, [id]) {
       // From the list, so the command needs no route newer than `projects`.
       const p = (await request(api, projectRoutes.list, {})).find((project) => project.id === id);
@@ -111,7 +111,7 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
       "    [--second-reviewer off|on|always|reserved,lines=N]   an independent second reviewer on Claude Opus 5.5 for the PRs the rule names",
       "    [--rules-file PATH|- | --clear-rules]   the standing rules from a file, or - for stdin, or none",
     ],
-    args: [1, 1],
+    args: [1, 1], project: true,
     options: {
       node: { type: "string" }, branch: { type: "string" }, ...resourceOptions,
       "allow-host": { type: "string", multiple: true }, login: { type: "string", multiple: true }, secret: { type: "string", multiple: true },

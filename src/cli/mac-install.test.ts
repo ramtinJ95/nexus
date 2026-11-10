@@ -68,9 +68,15 @@ test("the shim says to run deploy/mac/install when the packages were installed f
   assert.equal(pulled.stderr, hint, "a lockfile a pull changed");
 });
 
-test("install stamps the packages it installed, so the shim it links runs, and its PATH hint names the shell's profile", async (t) => {
-  const cases = [["Darwin", "/bin/zsh", "~/.zprofile"], ["Linux", "/bin/bash", "~/.bashrc"], ["Darwin", "/bin/bash", "~/.bash_profile"], ["Linux", "/bin/sh", "~/.profile"]] as const;
-  for (const [system, shell, profile] of cases) {
+test("install stamps the packages it installed, so the shim it links runs, and its PATH and completion hints name the shell's profile", async (t) => {
+  const generic = "Shell completion: nexus completion zsh|bash|fish prints a script for your shell's profile to load";
+  const cases = [
+    ["Darwin", "/bin/zsh", "~/.zprofile", "Shell completion: add this line to ~/.zshrc: source <(nexus completion zsh)"],
+    ["Linux", "/bin/bash", "~/.bashrc", `Shell completion: add this line to ~/.bashrc: eval "$(nexus completion bash)"`],
+    ["Darwin", "/bin/bash", "~/.bash_profile", `Shell completion: add this line to ~/.bash_profile: eval "$(nexus completion bash)"`],
+    ["Linux", "/bin/sh", "~/.profile", generic],
+  ] as const;
+  for (const [system, shell, profile, completion] of cases) {
     const c = await checkout(t);
     await c.shim("uname", `echo ${system}`);
     const bin = join(c.dir, "bin");
@@ -79,14 +85,17 @@ test("install stamps the packages it installed, so the shim it links runs, and i
     assert.equal(await readFile(join(c.repo, "node_modules", ".nexus-lockfile-sha256"), "utf8"), `${c.stamp}\n`);
     assert.match(ran.stdout, /^\["--version"\]$/m, "the linked shim ran the CLI");
     assert.ok(ran.stdout.includes(`is not on PATH. Add it to your shell's profile, such as with: echo 'export PATH="${bin}:$PATH"' >> ${profile}\n`), `${system} ${shell}: ${ran.stdout}`);
+    assert.ok(ran.stdout.includes(`\n${completion}\nNext: nexus connect`), `${system} ${shell} completion: ${ran.stdout}`);
   }
   const unset = await checkout(t);
   const bare = await unset.run("/usr/bin/env", ["-u", "SHELL", join(unset.repo, "deploy", "mac", "install"), join(unset.dir, "bin")]);
   assert.equal(bare.code, 0, bare.stderr);
-  assert.match(bare.stdout, /> ~\/\.profile\nNext: nexus connect/, "no SHELL gets the POSIX profile");
+  assert.match(bare.stdout, /> ~\/\.profile\n/, "no SHELL gets the POSIX profile");
+  assert.ok(bare.stdout.includes(`\n${generic}\n`), "no SHELL gets the completion line for every shell");
   const c = await checkout(t);
   const fish = await c.run(join(c.repo, "deploy", "mac", "install"), [join(c.dir, "bin")], { SHELL: "/usr/bin/fish" });
   assert.match(fish.stdout, new RegExp(`such as with: fish_add_path ${join(c.dir, "bin")}\n`));
+  assert.ok(fish.stdout.includes("\nShell completion: add this line to ~/.config/fish/config.fish: nexus completion fish | source\n"));
 });
 
 test("install names a way to get Node that fits the platform", async (t) => {
