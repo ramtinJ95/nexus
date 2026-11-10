@@ -113,6 +113,7 @@ async function runCommand(name: string, args: readonly string[], io: Io): Promis
   const result = await command.run(api, positionals, values,
     async (path, onEvent, signal, onCursor) => follow(await endpoint(), path, onEvent, signal, onCursor), { connect: async (path) => upgrade(await endpoint(), path), io });
   if (result === undefined) return 0;
+  if (typeof result === "number") return result;
   io.stdout.write(`${values.json === true ? JSON.stringify(result.json, null, 2) : result.text}\n`);
   return result.exit === undefined ? 0 : exitCodes[result.exit];
 }

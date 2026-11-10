@@ -96,3 +96,18 @@ test("the first-paint script names the platform beside the theme, as find.js tel
   assert.deepEqual(painted("Win32"), { theme: "light", platform: "other" });
   assert.deepEqual(painted("Linux x86_64"), { theme: "light", platform: "other" });
 });
+
+test("the page's head script folds the sidebar before the first paint where the device keeps it folded, and only then", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const { themeScript } = await import("./view.ts");
+  const painted = (store) => {
+    const root = { dataset: {} };
+    runInNewContext(themeScript, { document: { documentElement: root }, navigator: { platform: "Linux x86_64" }, localStorage: store, matchMedia: () => ({ matches: false }) });
+    return root.dataset.side;
+  };
+  const folded = storage();
+  folded.setItem("nexus.side", "folded");
+  assert.equal(painted(folded), "folded");
+  assert.equal(painted(storage()), undefined);
+  assert.equal(painted(storage({ reads: false })), undefined, "a refused read leaves the sidebar shown");
+});
