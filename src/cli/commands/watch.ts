@@ -76,20 +76,29 @@ function stopped(d: ThreadDetail, since: Since): Ending | null {
 const runEnded = (d: ThreadDetail, run: { working: boolean; queued: number } | null, since: Since) =>
   run !== null && !run.working && run.queued === 0 && (d.lastReplyAt ?? -Infinity) > (since.lastReplyAt ?? -Infinity);
 
+/** Nexus's resumer records that it resumes a dead turn on its next pass, every 15 s, so the wait gives it two. */
+const resumeGraceMs = 30_000;
+
+/**
+ * What a dead Claude turn means once it has waited `waitedMs` for Nexus to resume it: null while Nexus resumes it,
+ * or may still, since only a builder's turn is resumed and only a pass after the death records that.
+ */
+function deathEnding(d: ThreadDetail, died: NonNullable<ThreadDetail["thread"]["turnDied"]>, waitedMs: number): Ending | null {
+  const resume = d.resume ?? null;
+  if (resume?.state === "person") return { outcome: "waiting", text: `Its turn died, and Nexus stopped resuming it: ${resume.why}` };
+  if (resume?.state === "left-alone") return { outcome: "failed", text: `Its turn died, and Nexus leaves it to you, as you wrote to it: ${died.reason}` };
+  if (resume !== null && resume.turn >= died.at) return null;
+  return waitedMs >= resumeGraceMs ? { outcome: "failed", text: `Its turn died, and Nexus did not resume it: ${died.reason}` } : null;
+}
+
 /**
  * What the end of a run means, from the detail read once the transcript is read through it, since the control plane
- * finds a Claude turn's usage-limit stop or death in its transcript. Null while Nexus resumes a turn that died.
+ * finds a Claude turn's usage-limit stop or death in its transcript. Null for a death Nexus resumes or may resume.
  */
 function afterRun(d: ThreadDetail): Ending | null {
   const limit = d.thread.usageLimit;
   if (limit !== undefined) return { outcome: "waiting", text: `Claude stopped on its usage limit${limit.resetsAt === null ? "" : `, which resets at ${new Date(limit.resetsAt).toISOString()}`}. Send it "continue" after the reset` };
-  const died = d.thread.turnDied;
-  if (died !== undefined) {
-    const resume = d.resume ?? null;
-    if (resume?.state === "person") return { outcome: "waiting", text: `Its turn died, and Nexus stopped resuming it: ${resume.why}` };
-    if (resume !== null && resume.state !== "left-alone" && resume.turn >= died.at) return null;
-    return { outcome: "failed", text: `Its turn died: ${died.reason}` };
-  }
+  if (d.thread.turnDied !== undefined) return deathEnding(d, d.thread.turnDied, 0);
   return d.attention === "decision" ? { outcome: "waiting", text: `It replied, and waits on your decision, which \`nexus show ${d.thread.id}\` says` } : { outcome: "replied", text: "It replied." };
 }
 
@@ -125,6 +134,8 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
   let since = until?.since ?? null;
   const ended = Promise.withResolvers<number>();
   let over = false;
+  /** The dead turn the wait holds for Nexus to resume, and when the wait saw it. */
+  let death: { at: number; seen: number } | null = null;
   const sent = until?.from == null ? null : until.from.split("\n").map((line) => `> ${line}`).join("\n");
   /** What the text's first print shows: all of it, or from the sent message on, which is nothing until it joins. */
   const backlogOf = <E extends { text: string }>(all: E[]): E[] => {
@@ -210,6 +221,12 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
     since ??= d;
     const end = stopped(d, since);
     if (end !== null) return finish(end);
+    const died = d.thread.turnDied;
+    if (death !== null && !d.thread.working && died?.at === death.at && (d.lastReplyAt ?? -Infinity) <= (since.lastReplyAt ?? -Infinity)) {
+      const dead = deathEnding(d, died, Date.now() - death.seen);
+      return dead === null ? undefined : finish(dead);
+    }
+    death = null;
     if (!runEnded(d, run === null ? null : { working: run.working, queued: run.live.queued.length }, since)) return;
     over = true;
     void settle(d, since);
@@ -240,6 +257,11 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
     const end = stopped(after, before) ?? (after.thread.working ? null : afterRun(after));
     if (end !== null) return finish(end);
     since = { ...before, lastReplyAt: after.lastReplyAt };
+    const died = after.thread.turnDied;
+    if (!after.thread.working && died !== undefined) {
+      death = { at: died.at, seen: Date.now() };
+      if (!json) output.write(`-- Its turn died: ${died.reason}. Waiting for Nexus to resume it\n`);
+    }
     over = false;
   }
 

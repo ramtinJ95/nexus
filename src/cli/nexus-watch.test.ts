@@ -21,8 +21,8 @@ function watchLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: 
   return jsonLines(t, s, ["watch", ...args, "--json", "--interval", String(interval)]);
 }
 
-/** The JSON lines a run of the CLI prints, one at a time. */
-function jsonLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: readonly string[]) {
+/** The JSON lines a run of the CLI prints, one at a time, or its text lines with `parse` as given. */
+function jsonLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: readonly string[], parse: (line: string) => any = JSON.parse) {
   const child = spawn(process.execPath, [cli, ...args], { env: s.env() });
   t.after(() => { child.kill(); });
   let stderr = "";
@@ -35,12 +35,12 @@ function jsonLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: r
       const timeout = AbortSignal.timeout(60_000);
       const line = await Promise.race([lines.next(), once(timeout, "abort").then(() => assert.fail(`no line from ${args[0]}. stderr: ${stderr}`))]);
       assert.ok(!line.done, `${args[0]} ended early. stderr: ${stderr}`);
-      return JSON.parse(line.value);
+      return parse(line.value);
     },
     /** Every line left until the output ends. */
     async rest(): Promise<any[]> {
       const left = [];
-      for (let line = await lines.next(); !line.done; line = await lines.next()) left.push(JSON.parse(line.value));
+      for (let line = await lines.next(); !line.done; line = await lines.next()) left.push(parse(line.value));
       return left;
     },
   };
@@ -555,9 +555,64 @@ test("watch --until-idle exits 12 when a Claude turn stops on its usage limit, s
   assert.equal((await claudeTurn(t, s, [usageStop])).code, 12);
 });
 
-test("watch --until-idle exits 11 when a Claude turn dies on a model error that Nexus does not resume", async (t) => {
+/**
+ * A Claude worker's turn from `at(2)` to `at(4)` that dies on a model error, watched in text with --until-idle.
+ * `before` runs before the watch starts, and `act` once the watch says it waits for Nexus to resume the turn.
+ * Answers the watch's lines and its exit code.
+ */
+async function claudeDeath(t: TestContext, s: Awaited<ReturnType<typeof setup>>, before: (thread: string) => void, act: (c: Awaited<ReturnType<typeof claudeWatched>>) => Promise<void>) {
+  const c = await claudeWatched(t, s);
+  await writeFile(c.transcript, jsonl(claudeRecords.prompt));
+  assert.equal((await s.json(["conversation", c.thread.id])).entries.length, 1);
+  before(c.thread.id);
+  const watch = jsonLines(t, s, ["watch", c.thread.id, "--until-idle", "--interval", "50"], (line) => line);
+  const exited = once(watch.child, "exit");
+  const printed: string[] = [];
+  const upTo = async (wanted: (line: string) => boolean) => {
+    for (let line = await watch.next(); ; line = await watch.next()) {
+      printed.push(line);
+      if (wanted(line)) return;
+    }
+  };
+  await upTo((line) => line.includes("pylon running"));
+  c.report("session.turn-started", Date.parse(at(2)));
+  await upTo((line) => line.endsWith("agent working"));
+  await appendFile(c.transcript, jsonl(modelError));
+  c.report("session.turn-ended", Date.parse(at(4)));
+  await upTo((line) => line.startsWith("-- Its turn died:") && line.endsWith("Waiting for Nexus to resume it"));
+  await act(c);
+  printed.push(...await watch.rest());
+  return { printed, code: (await exited)[0] };
+}
+
+test("watch --until-idle waits on a Claude turn that died before Nexus records its resume, and exits 0 on the resumed turn's reply", async (t) => {
   const s = await setup(t);
-  assert.equal((await claudeTurn(t, s, [modelError])).code, 11);
+  const { printed, code } = await claudeDeath(t, s, () => {}, async (c) => {
+    s.registry.threads.saveClaudeResume(c.thread.id, { state: "waiting", turn: Date.parse(at(3)), count: 1, due: 0 });
+    c.report("session.turn-started", Date.parse(at(5)));
+    await appendFile(c.transcript, jsonl({ ...claudeRecords.reply, timestamp: at(6), message: { model: "claude-opus-5-5", content: [{ type: "text", text: "Done." }] } }));
+    c.report("session.turn-ended", Date.parse(at(7)));
+  });
+  assert.equal(code, 0, printed.join("\n"));
+  assert.deepEqual(printed.slice(-2), ["Done.", "-- It replied."]);
+});
+
+test("watch --until-idle exits 12 when Nexus gives the resume it waits on to the person, with no turn since", async (t) => {
+  const s = await setup(t);
+  const resuming = (thread: string) => s.registry.threads.saveClaudeResume(thread as never, { state: "waiting", turn: Date.parse(at(3)), count: 1, due: 0 });
+  const { printed, code } = await claudeDeath(t, s, resuming, async (c) => {
+    s.registry.threads.saveClaudeResume(c.thread.id, { state: "person", turn: Date.parse(at(3)), count: 3, why: "it died three times in a row" });
+  });
+  assert.equal(code, 12, printed.join("\n"));
+  assert.equal(printed.at(-1), "-- Its turn died, and Nexus stopped resuming it: it died three times in a row");
+});
+
+test("watch --until-idle exits 11 when Nexus leaves the dead turn it waits on to the person", async (t) => {
+  const s = await setup(t);
+  const { printed, code } = await claudeDeath(t, s, () => {}, async (c) => {
+    s.registry.threads.saveClaudeResume(c.thread.id, { state: "left-alone" });
+  });
+  assert.equal(code, 11, printed.join("\n"));
 });
 
 test("watch --until-idle exits 12 when a Claude turn died and Nexus gave its resume to the person", async (t) => {
