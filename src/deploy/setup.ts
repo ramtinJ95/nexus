@@ -24,6 +24,7 @@ import { digestPattern, tokenDigest, tsNet } from "../protocol/deploy.ts";
 import { readJson, saveJson } from "../node-base/json-file.ts";
 import { controlFields } from "../node-base/node-config.ts";
 import { isImageId } from "../ids.ts";
+import { shellQuote } from "../shell.ts";
 import { parseTailscaleStatus, tailscaleCli, tailscaleStatus, type TailnetDevice, type TailscaleStatus } from "../tailscale.ts";
 import { localApiWhois } from "../node-base/tailscaled.ts";
 import { backupStatusFile, configFiles, deployerFiles, ports, prefix, rootPath, servicePath, stateDirs, unitNames, users } from "../node-base/node-layout.ts";
@@ -198,6 +199,39 @@ function file(path: string, mode: number, existing: Json | undefined, generated:
   return { path, mode, value, state: changes.some((c) => c.kind !== "kept") ? "updated" : "unchanged", changes, secrets };
 }
 
+/** The branch of --dotfiles that pylons pull. */
+const dotfilesRef = "main";
+
+/** What `git ls-remote` on this machine says of a dotfiles repository, before the installer names it in control.json. */
+export type DotfilesCheck =
+  | { kind: "reachable" }
+  | { kind: "refused" | "unchecked"; reason: string };
+
+/**
+ * Whether git here reaches `ref` of `url` as a pylon would: an HTTPS URL without credentials, and any other with the
+ * node's git SSH key and known hosts. The credentials step makes that key after the configs are written, so a first
+ * install cannot check an SSH URL yet.
+ */
+export async function checkDotfiles(url: string, ref: string, ssh: { key: string; knownHosts: string } | null): Promise<DotfilesCheck> {
+  const https = url.startsWith("https://");
+  if (!https && ssh === null) return { kind: "unchecked", reason: "pylons reach an SSH URL with this machine's git SSH key, which the credentials step makes. Rerun the installer with --dotfiles after it to check the URL" };
+  const env = {
+    ...process.env, GIT_TERMINAL_PROMPT: "0",
+    ...https || ssh === null ? {} : { GIT_SSH_COMMAND: `ssh -i ${shellQuote(ssh.key)} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${shellQuote(ssh.knownHosts)}` },
+  };
+  try {
+    await exec("git", ["ls-remote", "--exit-code", url, `refs/heads/${ref}`], { env, timeout: 60_000 });
+    return { kind: "reachable" };
+  } catch (err) {
+    const failed = err as { code?: unknown; killed?: boolean; stderr?: string };
+    if (failed.code === 2) return { kind: "refused", reason: `the repository has no branch ${ref}, which pylons pull` };
+    if (failed.killed === true) return { kind: "refused", reason: "git ls-remote did not answer within 60 s" };
+    const said = (failed.stderr ?? "").trim().split("\n").filter((line) => line !== "").join(" ");
+    const hint = https ? ". When the repository is private, give its SSH URL, which pylons reach with the node's git SSH key" : "";
+    return { kind: "refused", reason: `git ls-remote failed${said === "" ? "" : `: ${said}`}${hint}` };
+  }
+}
+
 /** Every config this machine needs, merged over what is on disk. `newToken` is used only when deployer.json has none. */
 export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newToken: string): Setup {
   const errors: string[] = [];
@@ -238,7 +272,6 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
   }
 
   if (flags.node === undefined) {
-    if (existing.control === undefined && flags.dotfiles === undefined) errors.push("--dotfiles <git url> is needed on the first control install: the dotfiles repository every new pylon pulls on boot");
     const servedControl = isObject(existing.controlPlane) ? existing.controlPlane.tailnetNodeId : undefined;
     if (existing.control === undefined && typeof servedControl === "string" && servedControl !== self.id) {
       const known = tailnet.peers.find((p) => p.id === servedControl);
@@ -267,7 +300,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
       callers: admitted.map((d) => d.id),
       deployers: admitted.map((d) => d.id),
       deployKeys: Object.fromEntries([[self.id, tokenDigest(token)], ...addNodes.map((a) => [a.node.id, a.digest])]),
-      ...flags.dotfiles === undefined ? {} : { dotfiles: { repo: flags.dotfiles, ref: "main" } },
+      ...flags.dotfiles === undefined ? {} : { dotfiles: { repo: flags.dotfiles, ref: dotfilesRef } },
       ...flags.githubWatch ? { github: { tokenFile: stores.githubWatch.file } } : {},
       harness: {
         storage: `${stateDirs.control}/harness.sqlite`,
@@ -445,6 +478,14 @@ async function write(flags: Flags): Promise<number> {
   if (!result.ok) {
     for (const error of result.errors) console.error(`install: ${error}`);
     return 1;
+  }
+  if (flags.dotfiles !== undefined) {
+    const check = await checkDotfiles(flags.dotfiles, dotfilesRef, existing.gitKey ? { key: paths.gitKey, knownHosts: paths.gitKnownHosts } : null);
+    if (check.kind === "refused") {
+      console.error(`install: --dotfiles ${flags.dotfiles}: ${check.reason}`);
+      return 1;
+    }
+    if (check.kind === "unchecked") console.log(`--dotfiles ${flags.dotfiles} is not checked yet: ${check.reason}`);
   }
   for (const f of result.files) if (f.state !== "unchanged") await saveJson(f.path, f.value, { mode: f.mode, mkdir: true });
   console.log(report(result.files));

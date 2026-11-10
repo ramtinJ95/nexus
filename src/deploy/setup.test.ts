@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { promisify } from "node:util";
 import { migrations } from "../control/schema.ts";
 import { tempDir } from "../test-support/kit.ts";
 import { parseConfig } from "../control/main.ts";
@@ -13,7 +14,7 @@ import { parseProbeConfig } from "../probe/config.ts";
 import { parseControlPlane } from "./control-plane.ts";
 import { parseTailscaleStatus } from "../tailscale.ts";
 import type { FollowUp } from "./credentials.ts";
-import { formatLeft, holdsImage, install, left, paths, parseFlags, report, tailnetDevices, setup, type Existing, type Facts, type FileWrite, type InstallSteps, type Json, type Setup } from "./setup.ts";
+import { checkDotfiles, formatLeft, holdsImage, install, left, paths, parseFlags, report, tailnetDevices, setup, type Existing, type Facts, type FileWrite, type InstallSteps, type Json, type Setup } from "./setup.ts";
 
 const status = JSON.stringify({
   Version: "1.90.0",
@@ -128,7 +129,7 @@ test("a rerun keeps the token and every value the person changed, adds what is n
   const merged = parseConfig(JSON.stringify(value(written, paths.control)));
   assert.equal(merged.listen.port, 7471);
   assert.deepEqual(merged.gitIdentity, { name: "A Person", email: "a@example.com" });
-  assert.equal(merged.dotfiles.repo, dotfiles);
+  assert.equal(merged.dotfiles?.repo, dotfiles);
   assert.deepEqual(merged.callers, ["nMac1CNTRL"]);
   assert.deepEqual(merged.deployers, ["nMac1CNTRL"]);
   assert.equal(value(written, paths.deployer).token, "d".repeat(64));
@@ -200,8 +201,28 @@ test("every control-role mistake is reported together", () => {
   assert.match(found.join("\n"), /--peer ghost: tailscale knows no such device/);
 });
 
-test("a first control install needs --dotfiles, and a node cannot become a control plane by accident", () => {
-  assert.match(errors(run([])).join("\n"), /--dotfiles <git url> is needed/);
+test("a first control install without --dotfiles writes a control.json without dotfiles, whose pylons keep the image's baked layer", () => {
+  const control = parseConfig(JSON.stringify(value(files(run([])), paths.control)));
+  assert.equal(control.dotfiles, undefined);
+});
+
+test("--dotfiles is checked with git ls-remote, as a pylon would pull it", async (t) => {
+  const dir = await tempDir("nexus-dotfiles-", t);
+  const repo = join(dir, "dotfiles");
+  const git = (...args: string[]) => promisify(execFile)("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", ...args]);
+  await git("init", "--quiet", "--initial-branch=main", repo);
+  await git("-C", repo, "commit", "--quiet", "--allow-empty", "-m", "layer");
+  const key = { key: join(dir, "git_ed25519"), knownHosts: join(dir, "git_known_hosts") };
+  assert.deepEqual(await checkDotfiles(repo, "main", key), { kind: "reachable" });
+  assert.deepEqual(await checkDotfiles(repo, "trunk", key), { kind: "refused", reason: "the repository has no branch trunk, which pylons pull" });
+  const missing = await checkDotfiles(join(dir, "typo"), "main", key);
+  assert.ok(missing.kind === "refused", "a URL git cannot reach is refused");
+  assert.match(missing.reason, /^git ls-remote failed: .*does not appear to be a git repository/);
+  const before = await checkDotfiles("git@github.com:example/dotfiles.git", "main", null);
+  assert.equal(before.kind, "unchecked", "an SSH URL waits for the git SSH key the credentials step makes");
+});
+
+test("a node cannot become a control plane by accident", () => {
   assert.match(errors(run(["--join", "token", "--dotfiles", dotfiles])).join("\n"), /--join needs --node <the control plane's tailnet name>/);
   const nodeControlPlane: Existing = { gitKey: false, controlPlane: { tailnetNodeId: "nBench1CNTRL", url: "http://infra-testbench.tail1234.ts.net:7470/" } };
   assert.match(errors(run(["--dotfiles", dotfiles], nodeControlPlane)).join("\n"), /already a node of the control plane infra-testbench\. Pass --node infra-testbench/);
