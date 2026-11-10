@@ -45,6 +45,8 @@ export interface Context {
   reviews(): readonly Review[];
   /** The list's row of a thread, read only for the threads a render shows, so the closed ones a fold hides cost nothing. */
   row(thread: Thread): ThreadRow;
+  /** What a search matches of a thread, as contract.ts `findText` writes it, with its pull requests read once per render. */
+  find(thread: Thread): string;
   thread(id: ThreadId): Thread | undefined;
   /** A thread's or a queued thread's title, or its ID once neither is known. */
   title(id: ThreadId): string;
@@ -57,8 +59,11 @@ export interface Context {
 /** `items` are in the order they were added. */
 export interface HomeView { offline: ReadonlySet<NodeName>; role(thread: Thread): Role; items: readonly PipelineItem[] }
 
-/** `cancelled` is, for the closed fold, the queued threads cancelled or deleted before they started, newest first. */
-export interface FoldView { projects: readonly Project[]; offline: ReadonlySet<NodeName>; cancelled: readonly QueuedThread[] }
+/**
+ * `cancelled` is, for the closed fold, the queued threads cancelled or deleted before they started, newest first. `project`
+ * is the project the page names, or null for every project's.
+ */
+export interface FoldView { project: ProjectId | null; projects: readonly Project[]; offline: ReadonlySet<NodeName>; cancelled: readonly QueuedThread[] }
 
 export interface Latest { reply: { text: string; at: number | null } | null; asked: { text: string; at: number } | null }
 

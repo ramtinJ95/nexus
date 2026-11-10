@@ -1,7 +1,7 @@
 /**
  * tailscaled's LocalAPI over its Unix socket, for every Nexus process and the bootstrap deployer, so it imports only
- * Node's builtins and modules that do too: who is on the other end of a tailnet connection, and this node's HTTPS
- * certificate. Both sides use whois: the probe checks its callers, and the control plane checks that it reached the
+ * Node's builtins and modules that do too: who is on the other end of a tailnet connection, this node's HTTPS
+ * certificate, and its status. Both sides use whois: the probe checks its callers, and the control plane checks that it reached the
  * probe it meant to.
  */
 import { X509Certificate } from "node:crypto";
@@ -98,6 +98,16 @@ export async function verifyPeer(socket: Socket, whois: Whois, accepts: (id: Tai
   if (address === undefined || port === undefined) throw new PeerRefused(null);
   const id = await whois(address, port);
   if (id === null || !accepts(id)) throw new PeerRefused({ address, port, id });
+}
+
+/**
+ * LocalAPI `GET /localapi/v0/status`: the JSON `tailscale status --json` prints, for src/tailscale.ts's
+ * parseTailscaleStatus, which the bootstrap does not have. Any local user may read it. A large tailnet's runs to megabytes.
+ */
+export async function localApiStatus(socketPath = linuxTailscaledSocket): Promise<string> {
+  const res = await localApiGet(socketPath, "/localapi/v0/status", "status", 16 * 1024 * 1024, 30_000);
+  if (res.status !== 200) throw new Error(`tailscaled status: HTTP ${res.status}`);
+  return res.body;
 }
 
 export interface Certificate { key: string; cert: string }

@@ -78,10 +78,11 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
     const nodes = new Map<NodeName, ReturnType<typeof observedOn>>();
     const nodeOf = (name: NodeName) => nodes.get(name) ?? nodes.set(name, observedOn(registry.nodes.node(name)!)).get(name)!;
     const now = Date.now();
+    const prs = registry.prWatches.prNumbers(threads.map((t) => t.id));
     return threads.map((t) => {
       const { node, failed, job, attention } = listed.get(t.pylonId)!;
       const { online, pylons } = nodeOf(node);
-      return { ...t, attention, desired: desiredPhase(t, now), pylon: { node, actualState: actualState(pylons.get(t.pylonId) ?? "absent", job, online, gaveUp(t, failed)), failed } };
+      return { ...t, attention, desired: desiredPhase(t, now), pylon: { node, actualState: actualState(pylons.get(t.pylonId) ?? "absent", job, online, gaveUp(t, failed)), failed }, pullRequestNumbers: prs.get(t.id) ?? [] };
     });
   }
 
