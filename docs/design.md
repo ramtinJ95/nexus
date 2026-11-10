@@ -810,7 +810,10 @@ of its work. The control plane treats a lost probe connection as no answer, not
 as a failure. It waits up to three minutes for a snapshot from the probe that came
 back and sends the same launch again, under the session ID it recorded before the
 first. It does the same for a launch still `starting` when the control plane
-itself starts, as after its own deploy.
+itself starts, as after its own deploy. A launch runs beside its node's pass, one
+per thread, as a job does. The pass skips that pylon's tick while its launch runs,
+and so a wait for a launch, or for its probe to come back, holds up no other
+pylon on the node. The launch asks for a pass when it ends.
 
 Sending a prompted launch again is safe because the launch records its progress in
 the pylon, in `~/.nexus/claude-launches/<session>/`: `opened` names its workspace
