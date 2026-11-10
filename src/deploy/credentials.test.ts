@@ -413,6 +413,36 @@ test("--rotate github on a node leaves a control plane token file of another val
   await assert.rejects(rotate("github", "node", empty.host, scripted({ NEXUS_GH_TOKEN: rotatedToken }), silent), /holds a GitHub token to replace\. deploy\/install\.sh asks for one/);
 });
 
+test("--rotate refuses a secrets.env that changed while it asked, and a restart that fails neither stops the next one nor hides what still holds the old value", async (t) => {
+  const m = await machine(t, "node");
+  await m.put(stores.claude.file, `GH_TOKEN=${ghToken}\n`, 0o640);
+  const answers = scripted({ NEXUS_GH_TOKEN: rotatedToken });
+  const meanwhile = `GH_TOKEN=${ghToken}\nSTRIPE_KEY=added_meanwhile\n`;
+  await assert.rejects(rotate("github", "node", m.host, { ...answers, secret: async (q) => {
+    const value = await answers.secret(q);
+    await m.put(stores.claude.file, meanwhile, 0o640);
+    return value;
+  } }, silent), /secrets\.env changed while the token was asked for, so nothing was replaced/);
+  assert.equal(await readFile(m.at(stores.claude.file), "utf8"), meanwhile);
+
+  const c = await machine(t, "control");
+  await c.put(stores.claude.file, `GH_TOKEN=${ghToken}\n`, 0o640);
+  await c.put(stores.githubWatch.file, `${ghToken}\n`, 0o640);
+  const control = JSON.parse(await readFile(c.at("/etc/nexus/control.json"), "utf8")) as object;
+  await c.put("/etc/nexus/control.json", `${JSON.stringify({ ...control, github: { tokenFile: stores.githubWatch.file } })}\n`, 0o644);
+  const restarted: string[] = [];
+  c.host.run = async (program, args) => {
+    restarted.push(args[1]!);
+    if (args[1] === "nexus-probe.service") throw new Error("systemctl exited with 1");
+    return "";
+  };
+  const said: string[] = [];
+  await assert.rejects(rotate("github", "control", c.host, scripted({ NEXUS_GH_TOKEN: rotatedToken }), (line) => said.push(line)), /nexus-probe\.service did not restart/);
+  assert.deepEqual(restarted, ["nexus-probe.service", "nexus-control.service"]);
+  assert.ok(said.includes("Restarted nexus-control.service if it ran."));
+  assert.ok(said.some((line) => line.includes("Every other node keeps its own GH_TOKEN")));
+});
+
 test("--rotate claude replaces the Claude token of the kind secrets.env holds, and refuses one of the other kind", async (t) => {
   const m = await machine(t, "node");
   const secrets = `GH_TOKEN=${ghToken}\nCLAUDE_CODE_OAUTH_TOKEN=${claudeToken}\n# after\n`;

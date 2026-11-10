@@ -433,6 +433,7 @@ export async function rotate(kind: Rotatable, role: "control" | "node", host: Ho
   const secrets = parseSecretsFile(at.secrets, text, heldNames);
   const restarts = new Set<string>();
   const replace = async (name: string, value: string) => {
+    if (await host.read(at.secrets) !== text) throw new Error(`${at.secrets} changed while the token was asked for, so nothing was replaced. Rerun --rotate ${kind}`);
     await host.write(at.secrets, replaceSecret(at.secrets, text, name, value, heldNames), stores.claude);
     say(`Replaced ${name} in ${at.secrets}.`);
     restarts.add(unitNames.probe);
@@ -477,11 +478,14 @@ export async function rotate(kind: Rotatable, role: "control" | "node", host: Ho
     if (role === "node") still.push(`The control plane's github.tokenFile, if it holds the same token, is on the control plane's machine. Run sudo deploy/install.sh --rotate github there.`);
     still.push("GitHub accepts the old token until you revoke it, at https://github.com/settings/tokens, once every copy is replaced.");
   } finally {
+    const failed: string[] = [];
     for (const unit of restarts) {
-      await host.run("systemctl", ["try-restart", unit]);
-      say(`Restarted ${unit} if it ran.`);
+      await host.run("systemctl", ["try-restart", unit]).then(() => say(`Restarted ${unit} if it ran.`), (err: unknown) => {
+        failed.push(`${unit} did not restart: ${(err as Error).message}. Run sudo systemctl restart ${unit}`);
+      });
     }
     if (still.length > 0) say("Still holding the old value:");
-    for (const line of still) say(`- ${line}`);
+    for (const line of [...failed, ...still]) say(`- ${line}`);
+    if (failed.length > 0) throw new Error(failed.join(". "));
   }
 }
