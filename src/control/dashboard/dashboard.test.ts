@@ -1970,7 +1970,7 @@ test("every page has somewhere to say a refresh failed", async (t) => {
   }
 });
 
-test("every page has one alert for what failed where the person acted, outside the dock a diff hides and every live region a swap replaces", async (t) => {
+test("every page has one alert for what failed where the person acted, outside the dock a diff shrinks and every live region a swap replaces", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   const alert = '<div class="notices"><p id="refresh-state" class="refresh-state" role="status"></p><div id="action-error" class="error alert" role="alert" hidden></div></div>';
@@ -1980,7 +1980,7 @@ test("every page has one alert for what failed where the person acted, outside t
     assert.ok(page.split("</main>")[1]!.includes(alert), `${path} says it beside the page's refresh status, outside main`);
   }
   const css = await readFile(new URL("./style.css", import.meta.url), "utf8");
-  assert.match(css, /\.main\[data-view="file"\] \.dock \{ display: none; \}/, "a diff hides the dock, where the alert was");
+  assert.match(css, /\.main\[data-view="file"\] \.dock > :not\(#run\) \{ display: none; \}/, "a diff shrinks the dock to the agent's state, where the alert was");
   assert.match(css, /\n\.notices \{ position: fixed;/);
 });
 

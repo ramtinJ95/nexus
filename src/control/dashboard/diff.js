@@ -6,22 +6,34 @@ import { callOf } from "../../contract/route.ts";
 import { pylonRoutes } from "../../contract/pylon.ts";
 import { themeValue } from "./theme.js";
 
-/** A diff this long is shown up to here, so a huge one does not stall the page. */
+/** A diff this long is shown up to here, so a huge one does not stall the page, and each Load more rows shows this many more. */
 export const maxDiffRows = 2_000;
 /** What a diff says of a file beyond its lines, such as a rename or a new mode. */
 const metaLine = /^(old mode|new mode|new file mode|deleted file mode|similarity index|rename from|rename to|copy from|copy to) /;
 
+/** The lines of hunks a patch holds, which are the rows its diff draws in the unified layout. */
+function rowsIn(patch) {
+  let rows = 0;
+  let inHunk = false;
+  for (const line of patch.split("\n")) {
+    if (/^@@ /.test(line)) inHunk = true;
+    else if (/^diff --git /.test(line)) inHunk = false;
+    else if (inHunk && /^[ +-]/.test(line)) rows++;
+  }
+  return rows;
+}
+
 /**
- * The patch up to its first maxDiffRows lines of hunks, and whether it went further. A cut hunk's header takes the
+ * The patch up to its first `limit` lines of hunks, and whether it went further. A cut hunk's header takes the
  * counts of the lines kept, so the parser reads a whole hunk and the highlighter never sees the rest.
  */
-function cutPatch(patch) {
+function cutPatch(patch, limit) {
   const lines = patch.split("\n");
   let rows = 0;
   let header = -1;
   for (let i = 0; i < lines.length; i++) {
     if (/^@@ /.test(lines[i])) header = i;
-    else if (header !== -1 && /^[ +-]/.test(lines[i]) && ++rows > maxDiffRows) {
+    else if (header !== -1 && /^[ +-]/.test(lines[i]) && ++rows > limit) {
       const kept = lines.slice(header + 1, i).filter((line) => /^[ +-]/.test(line));
       const old = kept.filter((line) => line[0] !== "+").length;
       const added = kept.filter((line) => line[0] !== "-").length;
@@ -56,13 +68,14 @@ function endingsChange(file) {
 /**
  * What the pylon's diff of one file has to show: its lines, or that it is binary, or only what it says of the file
  * beyond its lines, or nothing. Every kind but the last has those lines of meta. A file whose type changed, such as
- * a file that became a symlink, has two entries, its removal and its addition, and both are its lines.
+ * a file that became a symlink, has two entries, its removal and its addition, and both are its lines. Lines show up to
+ * `limit` rows, and a cut diff says how many it has in all.
  */
-export function diffOf(text) {
+export function diffOf(text, limit = maxDiffRows) {
   const meta = text.split("\n").filter((line) => metaLine.test(line));
-  const { patch, cut } = cutPatch(text);
+  const { patch, cut } = cutPatch(text, limit);
   const files = parsePatchFiles(patch).flatMap((p) => p.files).filter((file) => file.hunks.length > 0);
-  if (files.length > 0) return { kind: "lines", files, meta: [...meta, ...files.flatMap(endingsChange)], cut };
+  if (files.length > 0) return { kind: "lines", files, meta: [...meta, ...files.flatMap(endingsChange)], cut, rows: cut ? rowsIn(text) : null };
   if (/^Binary files /m.test(text)) return { kind: "binary", meta };
   return meta.length > 0 ? { kind: "meta", meta } : { kind: "none" };
 }
