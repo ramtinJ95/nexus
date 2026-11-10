@@ -6,6 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { createServer } from "node:http";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -14,7 +15,7 @@ import type { NodeHealth } from "../protocol/client.ts";
 import { processStream } from "../process-stream.ts";
 import { checkoutDir } from "../../images/pylon/nexus-contract.ts";
 import { tempDir, testCapacity, testObservation } from "../test-support/kit.ts";
-import { node, image, setup } from "../test-support/cli-kit.ts";
+import { node, image, setup, bare, inProcessBytes, listening, withHealth } from "../test-support/cli-kit.ts";
 
 test("images, node show and thread show print what image list, node and show print", async (t) => {
   const s = await setup(t);
@@ -83,6 +84,8 @@ test("cat writes one file of the pylon's checkout as its bytes, and waits for a 
   await promisify(execFile)("git", ["-C", repo, "init", "-q"]);
   await mkdir(join(repo, "src"));
   await writeFile(join(repo, "src", "app.ts"), "export const café = 1;\nno final line break");
+  const binary = Buffer.from([0x89, 0x50, 0x00, 0xff, 0xfe, 0xc3, 0x28, 0xe2, 0x82, 0x00, 0x0a, 0xc3]);
+  await writeFile(join(repo, "shot.bin"), binary);
   let refusals = 2;
   s.probePipes(async (argv) => {
     if (refusals-- > 0) throw Object.assign(new Error("rj-firebat: pylon-x is stopped, not running"), { code: "not-running" });
@@ -93,6 +96,9 @@ test("cat writes one file of the pylon's checkout as its bytes, and waits for a 
   assert.equal(read.code, 0, read.stderr);
   assert.equal(read.stdout, "export const café = 1;\nno final line break", "the file as it is, woken and asked again until the pylon runs, with nothing added");
   assert.equal(read.stderr, "");
+  const bytes = await inProcessBytes(["cat", thread.id, "shot.bin"], s.env());
+  assert.equal(bytes.code, 0, bytes.stderr.toString());
+  assert.deepEqual(bytes.stdout, binary, "NUL and bytes that are not UTF-8 come through as they are");
 
   const absent = await s.nexus(["cat", thread.id, "nope.txt"]);
   assert.equal(absent.code, 4);
@@ -100,4 +106,26 @@ test("cat writes one file of the pylon's checkout as its bytes, and waits for a 
   assert.equal((await s.nexus(["cat", thread.id, "src"])).code, 64, "a directory is not a file");
   const json = await s.nexus(["cat", thread.id, "src/app.ts", "--json"]);
   assert.deepEqual([json.code, json.stdout], [64, ""], "cat takes no --json");
+});
+
+test("a reply's bytes split anywhere, even inside a character, read as the bytes sent", async (t) => {
+  const listing = Buffer.from(JSON.stringify({ path: "", entries: [{ name: "café", kind: "file", size: 1 }], truncated: false }));
+  const file = Buffer.from([0xc3, 0xa9, 0x00, 0xff, 0xe2, 0x82, 0xac]);
+  // Each write is a chunk of its own on the wire, so the reader sees every byte apart, the two of é included.
+  const oneByteAtATime = (res: import("node:http").ServerResponse, body: Buffer) => {
+    for (const byte of body) res.write(Buffer.from([byte]));
+    res.end();
+  };
+  const port = await listening(t, createServer(withHealth((req, res) => {
+    const url = new URL(req.url!, "http://x");
+    res.writeHead(200, { "content-type": url.pathname.endsWith("/content") ? "application/octet-stream" : "application/json" });
+    oneByteAtATime(res, url.pathname.endsWith("/content") ? file : listing);
+  })));
+  const env = { NEXUS_URL: `http://127.0.0.1:${port}` };
+  const listed = await bare(t, ["files", "th-0123456789ab", "--json"], env);
+  assert.equal(listed.code, 0, listed.stderr);
+  assert.equal(JSON.parse(listed.stdout).entries[0].name, "café", "a JSON reply decodes once all its bytes are in");
+  const read = await inProcessBytes(["cat", "th-0123456789ab", "x"], { PATH: process.env.PATH!, HOME: await tempDir("nexus-cli-home-", t), NEXUS_SOCKS: "none", ...env });
+  assert.equal(read.code, 0, read.stderr.toString());
+  assert.deepEqual(read.stdout, file, "and a file's reply is its bytes");
 });

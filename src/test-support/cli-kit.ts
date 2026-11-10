@@ -40,11 +40,17 @@ export const cli = fileURLToPath(new URL("../cli/nexus.ts", import.meta.url));
 export interface Run { code: number; stdout: string; stderr: string }
 
 /** One run of the CLI in this process, with `env` as its environment, `stdin` on its stdin, and stdout a terminal when `tty`. */
-export async function inProcess(args: readonly string[], env: Io["env"], { tty = false, stdin = "" }: { tty?: boolean; stdin?: string | Buffer | undefined } = {}): Promise<Run> {
-  const printed = { stdout: "", stderr: "" };
-  const sink = (stream: keyof typeof printed) => new Writable({ decodeStrings: false, write(chunk, _encoding, done) { printed[stream] += chunk; done(); } });
+export async function inProcess(args: readonly string[], env: Io["env"], options: { tty?: boolean; stdin?: string | Buffer | undefined } = {}): Promise<Run> {
+  const { code, stdout, stderr } = await inProcessBytes(args, env, options);
+  return { code, stdout: stdout.toString("utf8"), stderr: stderr.toString("utf8") };
+}
+
+/** inProcess with stdout and stderr as the bytes written, for output that is not UTF-8, such as cat's. */
+export async function inProcessBytes(args: readonly string[], env: Io["env"], { tty = false, stdin = "" }: { tty?: boolean; stdin?: string | Buffer | undefined } = {}): Promise<{ code: number; stdout: Buffer; stderr: Buffer }> {
+  const printed: Record<"stdout" | "stderr", Buffer[]> = { stdout: [], stderr: [] };
+  const sink = (stream: keyof typeof printed) => new Writable({ write(chunk: Buffer, _encoding, done) { printed[stream].push(chunk); done(); } });
   const code = await main(args, { stdin: Readable.from(stdin.length === 0 ? [] : [stdin]), stdout: Object.assign(sink("stdout"), tty ? { isTTY: true } : {}), stderr: sink("stderr"), env });
-  return { code, ...printed };
+  return { code, stdout: Buffer.concat(printed.stdout), stderr: Buffer.concat(printed.stderr) };
 }
 
 /**
