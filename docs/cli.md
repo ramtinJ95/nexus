@@ -787,8 +787,12 @@ type Phase =
   | { kind: "reviewing"; failing?: ModelFailure; check?: GateRun & { unrunnable?: string } & Refused }
   /** The builder has the round's findings and owes an answer to each, and a push for what it fixed. */
   | { kind: "fixing"; failing?: ModelFailure }
-  /** The repository's checks run at the approved head, in a check thread thrown away afterwards. */
-  | { kind: "checking" } & GateRun
+  /**
+   * The repository's checks run at the approved head, in a check thread thrown away afterwards. `room` and `refused`
+   * carry a check beside the reviewer that waited for room into the approval, so it keeps its place in line until its
+   * start, which never waits for room.
+   */
+  | { kind: "checking" } & GateRun & Refused
   /**
    * The live check runs at the approved head, in a verify pylon archived afterwards. `refused` is why no node could take
    * the verify pylon yet, which the loop tries again.

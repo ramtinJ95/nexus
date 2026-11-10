@@ -2118,6 +2118,23 @@ test("a check held beside the reviewer keeps its place in line through the revie
   assert.deepEqual(f.placed.slice(0, 3), [`verify pylon of ${f.builder}`, `check of ${earlier}`, `check of ${later}`]);
 });
 
+test("a check beside the reviewer that waits for room keeps its place in line through the reviewer's approval", async (t) => {
+  const f = fixture(t);
+  f.checkRoom = false;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.tick(1_000);
+  const later = await otherBuilder(f, loop, "th-builder-2", 8, "person");
+  await loop.poll();
+  assert.match(reviewSaidText(reviewOf(f, later)), /its check waits for th-builder: PR #7's check thread waits for a node to have room/);
+  f.placed.length = 0;
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.placed, [`check of ${f.builder}`], "the approved head's check, which never waits for room, starts in the place its wait had");
+  assert.equal(f.review().phase.kind, "approved");
+});
+
 test("a held start that fails once let through ends its hold, so it holds no other start and its deadline runs", async (t) => {
   const f = fixture(t, { autoReview: { mode: "review", enabledBy: "nLAPTOP" } });
   const loop = await verifyWaits(f);
@@ -2134,6 +2151,7 @@ test("a held start that fails once let through ends its hold, so it holds no oth
   await loop.poll();
   assert.doesNotMatch(reviewSaidText(reviewOf(f, checked)), /waits for th-builder:/);
   assert.equal(reviewOf(f, auto).reviewerStarted, true, "a start that failed holds nothing");
+  assert.ok(f.logged.some((line) => line.includes(`of ${checked}: a check that waited in line did not start and will be tried again`)), "the failure is logged");
   f.tick(61 * 60_000);
   await loop.poll();
   assert.deepEqual(shown(reviewOf(f, checked).phase), { kind: "needs-person", reasons: [`.nexus/check gave no verdict within 60 minutes at ${head2}.`] });

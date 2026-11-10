@@ -401,25 +401,27 @@ export function reviewLoop(deps: ReviewDeps) {
       // for, which a refusal for room alone leaves in line.
       const behind = heldBehind(r);
       if (behind !== null) return { kind: "run", run: sameBehind(run.behind, behind) ? run : { ...run, behind } };
-      const held = run.behind !== undefined;
+      // A run in line, held or waiting for room, has no deadline until a start ends that, even one that failed.
+      const held = run.behind !== undefined || run.room === true;
       let started: Awaited<ReturnType<CheckRuns["start"]>>;
       try {
         const gone = await endedOnGitHub(r);
         if (gone !== null) return { kind: "ended", review: gone };
         started = await runs.start(builder, r.pr.branch, head, kind === "beside" || undefined);
       } catch (err) {
-        // A hold that ends in a failed start still ends, or it would hold every other start with no deadline of its own.
+        // A failed start still takes the run out of line, or it would hold every other start with no deadline of its own.
         if (!held) throw err;
+        log(`review ${r.id} of ${r.builder}: a ${kind === "live" ? "live check" : "check"} that waited in line did not start and will be tried again (${(err as Error).name})`);
         return { kind: "run", run: { startedAt: now(), thread: null } };
       }
-      const startedAt = (run.room === true || held) && !("room" in started && started.room) ? now() : run.startedAt;
+      const startedAt = held && !("room" in started && started.room) ? now() : run.startedAt;
       if ("thread" in started) return { kind: "run", run: { startedAt, thread: started.thread } };
-      // Saved rather than thrown once, so the check's deadline counts from the end of its hold.
+      // Saved rather than thrown once, so the check's deadline counts from when it left the line.
       if (kind === "check") {
         if (held) return { kind: "run", run: { startedAt, thread: null } };
         throw new Error(started.refused);
       }
-      if (!held && run.refused === started.refused && (run.room === true) === started.room) return { kind: "run", run };
+      if (run.behind === undefined && run.refused === started.refused && (run.room === true) === started.room) return { kind: "run", run };
       const { room: _, behind: __, ...kept } = run;
       return { kind: "run", run: { ...kept, startedAt, refused: started.refused, ...started.room && { room: true as const } } };
     }
@@ -618,9 +620,10 @@ export function reviewLoop(deps: ReviewDeps) {
       const n = roundsSpent(next);
       if (reviewerApproved(round)) {
         if (phase.check?.unrunnable !== undefined) return await checkUnrunnable(next, phase.check.unrunnable);
-        // A held check goes on held, keeping its place in line.
+        // A held check, or one that waited for room, keeps its place in line.
         const { check } = phase;
-        const after: Phase = check === undefined || check.refused !== undefined ? checking() : { kind: "checking", startedAt: check.startedAt, thread: check.thread, ...check.behind && { behind: check.behind } };
+        const after: Phase = check === undefined || (check.refused !== undefined && check.room === undefined) ? checking()
+          : { kind: "checking", startedAt: check.startedAt, thread: check.thread, ...check.behind && { behind: check.behind }, ...check.room && { room: true, refused: check.refused! } };
         return reviewersFindings(round).length ? send({ ...next, phase: after }, "builder", () => builderNotes(next)) : { ...next, phase: after, nudges: 0 };
       }
       const asks = seatsOf(round).filter((seat) => verdictAt(round, seat)!.verdict === "changes");
@@ -685,7 +688,7 @@ export function reviewLoop(deps: ReviewDeps) {
       const round = r.rounds.at(-1)!;
       // The check clones the head commit alone, so a result there, such as one from beside the reviewer, is kept, as the live check is.
       if (phase.thread === null && round.check !== null) return round.check.passed ? await checkPassed(r, round.live === undefined && await github.has(r.pr.repo, round.head, ".nexus/verify")) : gateFailed(r, r);
-      if (phase.behind === undefined && now() - phase.startedAt > checkMs) return toPerson(r, "no-verdict", { code: "check-failed", text: `.nexus/check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.` });
+      if (phase.room === undefined && phase.behind === undefined && now() - phase.startedAt > checkMs) return toPerson(r, "no-verdict", { code: "check-failed", text: `.nexus/check gave no verdict within ${checkMs / 60_000} minutes at ${round.head}.` });
       const step = await stepGate(r, "check", phase, builder);
       if (step.kind === "ended") return step.review;
       if (step.kind === "run") return step.run === phase ? r : { ...r, phase: { kind: "checking", ...step.run } };

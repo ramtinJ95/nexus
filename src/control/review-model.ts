@@ -111,8 +111,12 @@ export type Phase =
   | { kind: "reviewing"; failing?: ModelFailure; check?: GateRun & { unrunnable?: string } & Refused }
   /** The builder has the round's findings and owes an answer to each, and a push for what it fixed. */
   | { kind: "fixing"; failing?: ModelFailure }
-  /** The repository's checks run at the approved head, in a check thread thrown away afterwards. */
-  | { kind: "checking" } & GateRun
+  /**
+   * The repository's checks run at the approved head, in a check thread thrown away afterwards. `room` and `refused`
+   * carry a check beside the reviewer that waited for room into the approval, so it keeps its place in line until its
+   * start, which never waits for room.
+   */
+  | { kind: "checking" } & GateRun & Refused
   /**
    * The live check runs at the approved head, in a verify pylon archived afterwards. `refused` is why no node could take
    * the verify pylon yet, which the loop tries again.
@@ -465,7 +469,7 @@ export const pushedHead = (r: Review, pr: Pick<PullRequest, "state"> & { head?: 
   pr?.state !== "open" || pr.head === undefined || r.rounds.at(-1)!.head === pr.head || (r.phase.kind === "needs-person" && r.phase.unreviewed === pr.head) ? null : pr.head;
 /** Whether the review's gate pylon waits for a node to have room for it, which no queued builder thread takes first. */
 export function waitsForRoom(phase: Phase): boolean {
-  const run = phase.kind === "verifying" ? phase : phase.kind === "reviewing" ? phase.check : undefined;
+  const run = phase.kind === "verifying" || phase.kind === "checking" ? phase : phase.kind === "reviewing" ? phase.check : undefined;
   return run?.thread === null && run.room === true;
 }
 /** The gate run `phase` steps: a reviewing round's check beside the reviewer, the check, or the live check. */
