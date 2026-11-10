@@ -277,7 +277,7 @@ function directFailure(target: HostPort, err: Error): CliError {
     return new CliError("unreachable", `nothing is listening on ${at}`, null, null, false, true);
   }
   if (unresolved.has(code)) {
-    return new CliError("unreachable", `${target.host} does not resolve. If this device reaches the tailnet only through a SOCKS5 proxy, such as ts-home's userspace tailscaled, give it with --socks HOST:PORT or NEXUS_SOCKS. Otherwise \`tailscale status\` shows whether this device is on the tailnet`);
+    return new CliError("unreachable", `${target.host} does not resolve. If this device reaches the tailnet only through a SOCKS5 proxy, such as a userspace tailscaled, give it with --socks HOST:PORT or NEXUS_SOCKS. Otherwise \`tailscale status\` shows whether this device is on the tailnet`);
   }
   return new CliError("unreachable", `cannot reach ${at}: ${reason(err)}`, null, null, false, restartCodes.has(code));
 }
@@ -303,7 +303,7 @@ function tunnel(proxy: HostPort, target: HostPort): Promise<Socket> {
       reject(err);
     };
     const onError = (err: NodeJS.ErrnoException) => fail(err instanceof CliError ? err
-      : err.code === "ECONNREFUSED" ? new CliError("unreachable", `nothing is listening on ${where}. It is ts-home's userspace tailscaled, the only way this Mac reaches the home tailnet. Check it with \`ts-home status\``)
+      : err.code === "ECONNREFUSED" ? new CliError("unreachable", `nothing is listening on ${where}. Start the proxy, such as a userspace tailscaled, or give the one this device uses with --socks HOST:PORT or NEXUS_SOCKS, or none to connect directly`)
       : new CliError("unreachable", `cannot reach ${where}: ${reason(err)}`));
     const onData = (chunk: Buffer) => {
       received = Buffer.concat([received, chunk]);
@@ -317,7 +317,7 @@ function tunnel(proxy: HostPort, target: HostPort): Promise<Socket> {
       if (received.length < 5) return;
       if (received[1] !== 0) {
         // Reply 5 is the control plane's own refusal, as while it restarts.
-        return fail(new CliError("unreachable", `${where} could not reach ${target.host}:${target.port}: ${replies[received[1]!] ?? `reply ${received[1]}`}. The node may be offline or its control plane down. \`ts-home status\` shows whether the node is online`, null, null, false, received[1] === 5));
+        return fail(new CliError("unreachable", `${where} could not reach ${target.host}:${target.port}: ${replies[received[1]!] ?? `reply ${received[1]}`}. The node may be offline or its control plane down. \`tailscale status\`, asked of the tailscaled behind the proxy, shows whether the node is online`, null, null, false, received[1] === 5));
       }
       const length = boundLength(received);
       if (length === undefined) return fail(new CliError("unreachable", `${where} sent a reply with unknown address type ${received[3]}`));

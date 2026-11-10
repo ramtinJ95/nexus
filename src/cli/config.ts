@@ -1,10 +1,12 @@
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { z } from "zod";
 import { readJson } from "../node-base/json-file.ts";
 import { parse } from "../parse.ts";
 import { call, CliError, type Endpoint, type HostPort } from "./transport.ts";
-import { type Io, type Values, str } from "./kit.ts";
+import { type Io, type Note, type Values, type Versions, str } from "./kit.ts";
+import { version } from "../version.ts";
 import { ports } from "../node-base/node-layout.ts";
 
 /**
@@ -16,7 +18,18 @@ export const minControlVersion = "0.74.0";
 class OutdatedControl extends CliError {}
 export const transient = (err: CliError): err is CliError & { kind: "unreachable" | "failed" } => (err.kind === "unreachable" || err.kind === "failed") && !(err instanceof OutdatedControl);
 export const controlPorts = [`https://{host}:${ports.dashboard}`, `http://{host}:${ports.control}`];
-export const configFile = (env: Io["env"] = process.env) => join(env.HOME || homedir(), ".config", "nexus", "cli.json");
+
+/**
+ * `$XDG_CONFIG_HOME/nexus/cli.json`, or under `~/.config` when that is unset or not absolute. A file at the
+ * `~/.config` path, where every CLI before 0.80.0 kept it, stays the one read and written until the other exists.
+ */
+export function configFile(env: Io["env"] = process.env): string {
+  const home = join(env.HOME || homedir(), ".config");
+  const xdg = env.XDG_CONFIG_HOME;
+  const file = join(xdg !== undefined && isAbsolute(xdg) ? xdg : home, "nexus", "cli.json");
+  const before = join(home, "nexus", "cli.json");
+  return existsSync(file) || !existsSync(before) ? file : before;
+}
 
 const configSchema = z.strictObject({ url: z.string().optional(), socks: z.string().optional() });
 
@@ -51,16 +64,38 @@ function atLeast(parts: readonly number[], min: readonly number[]): boolean {
   return i === -1 || parts[i]! > min[i]!;
 }
 
-export function checkVersion(url: URL, health: unknown): void {
+export function versionsOf(health: unknown): Versions {
   const reported = (health as { version?: unknown } | null)?.version;
-  const parts = versionParts(reported);
-  if (parts !== null && atLeast(parts, versionParts(minControlVersion)!)) return;
-  throw new OutdatedControl("failed", `the control plane at ${url.origin} runs Nexus ${typeof reported === "string" ? reported : `older than ${minControlVersion}`}, and this CLI needs ${minControlVersion} or later. Upgrade it, as deploy/README.md describes`);
+  return { cli: version, control: typeof reported === "string" ? reported : null };
 }
 
-export async function checked(endpoint: Endpoint): Promise<Endpoint> {
-  checkVersion(endpoint.url, await call(endpoint, "GET", "/v1/health"));
-  return endpoint;
+export const versionsText = (v: Versions) => `This CLI runs Nexus ${v.cli}, and the control plane ${v.control ?? "reports no version"}.`;
+
+export function outdated(url: URL, v: Versions): OutdatedControl | null {
+  const parts = versionParts(v.control);
+  if (parts !== null && atLeast(parts, versionParts(minControlVersion)!)) return null;
+  return new OutdatedControl("failed", `the control plane at ${url.origin} runs Nexus ${v.control ?? `older than ${minControlVersion}`}, and this CLI needs ${minControlVersion} or later. Upgrade it, as deploy/README.md describes`);
+}
+
+/**
+ * What a person at a terminal should do about the skew, if anything: pull the CLI up to a newer control plane, or
+ * upgrade one too old, which `deploy`, `release`, `doctor` and `connect` still run against.
+ */
+export function skewNote(url: URL, v: Versions): string | undefined {
+  const parts = versionParts(v.control);
+  if (parts !== null && !atLeast(versionParts(v.cli)!, parts)) return `nexus: the control plane runs Nexus ${v.control}, newer than this CLI's ${v.cli}. Run git pull in the nexus checkout, then deploy/mac/install`;
+  const old = outdated(url, v);
+  return old === null ? undefined : `nexus: ${old.message}. Until then, only deploy, release, doctor and connect run against it`;
+}
+
+/** The health read before a command's first request. A control plane too old fails it unless `anyVersion` is set. */
+export async function checked(endpoint: Endpoint, anyVersion: boolean, note: Note): Promise<{ endpoint: Endpoint; versions: Versions }> {
+  const versions = versionsOf(await call(endpoint, "GET", "/v1/health"));
+  const old = outdated(endpoint.url, versions);
+  if (old !== null && !anyVersion) throw old;
+  const line = skewNote(endpoint.url, versions);
+  if (line !== undefined) note(line);
+  return { endpoint, versions };
 }
 
 export function socksOf(v: Values, config: Config, env: Io["env"]): HostPort | null {

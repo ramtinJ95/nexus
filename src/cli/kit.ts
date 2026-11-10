@@ -26,8 +26,12 @@ export interface Io {
   readonly stderr: Writable & { readonly isTTY?: boolean };
   readonly env: Readonly<Record<string, string | undefined>>;
 }
+/** This CLI's version, and the one its control plane's health reports, null when it reports none. */
+export interface Versions { cli: string; control: string | null }
 interface Local {
   connect(path: string): Promise<WebSocket>;
+  /** The versions the health read before the command's first request found. */
+  versions(): Promise<Versions>;
   io: Io;
 }
 export interface Command {
@@ -36,6 +40,11 @@ export interface Command {
   args: readonly [min: number, max: number];
   /** Its first argument names a thread, which a prefix of the ID or `@last` may give. */
   thread?: true;
+  /**
+   * It runs against a control plane older than `minControlVersion`, with a warning, since it is how a person
+   * upgrades or diagnoses one.
+   */
+  anyVersion?: true;
   options?: ParseArgsOptionsConfig;
   /** Nothing when the command printed its own output, as watch does, or the exit code it ends with then. */
   run(api: Api, args: readonly string[], values: Values, follow: Follow, local: Local): Promise<Result | number | void>;
