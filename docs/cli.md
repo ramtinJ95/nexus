@@ -317,7 +317,7 @@ interface Changes { base: ChangesBaseAt; files: ChangedFile[]; truncated: boolea
 interface Diff { base: ChangesBaseAt; diff: string; truncated: boolean }
 ```
 
-The control plane also serves `POST /v1/images`, which records the manifest of an image built outside it, such as a local stack's Docker image. The CLI leaves it out.
+The control plane also serves `POST /v1/images`, which records the manifest of an image built outside it, such as a local stack's Docker image. It records only a new image: the same manifest again answers 201 as the first time did, and another manifest under a recorded ID is refused with 409, because nodes verify the bytes they fetch against the recorded sha256. The CLI leaves it out.
 
 ## Failures
 
