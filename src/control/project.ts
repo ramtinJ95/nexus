@@ -36,7 +36,7 @@ export interface Project {
    * on whose behalf a landing merges and deploys and a yolo waiver waives.
    */
   autoReview?: AutoReview | null | undefined;
-  /** Which pull requests a review gives a second reviewer on another model. Absent or null is none, as for a project that never set it. */
+  /** Which pull requests a review gives an independent second reviewer on Claude Opus 5.5. Absent or null is none, as for a project that never set it. */
   secondReview?: SecondReview | null | undefined;
   /**
    * Whether the pipeline turns this project's items into queued threads, and whether it does so on its own or once the
