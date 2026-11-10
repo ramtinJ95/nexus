@@ -345,7 +345,7 @@ test("a Claude worker thread's page stream shows new entries during a turn, read
 async function convoRegion(s: Awaited<ReturnType<typeof withClaude>>, query = "") {
   const html = (await s.raw(`/threads/${s.thread.id}${query}`)).body.toString();
   const tag = /<div class="convo" id="convo" data-rendered-reply-at="(\d*)"(?: data-shows="([^"]+)")? data-live[^>]*>/.exec(html)!;
-  return { replyAt: tag[1], named: tag[2], inside: html.slice(tag.index + tag[0].length).split('<section class="file-view"')[0]!.replace(/<\/div><\/div>\s*$/, "") };
+  return { replyAt: tag[1], named: tag[2], inside: html.slice(tag.index + tag[0].length).split('<button type="button" class="btn btn-xs jump-end"')[0]!.replace(/<\/div>$/, "") };
 }
 
 test("a poll of a Claude worker's streaming page names the view its stream shows rather than render it, and names a reply's view only once a frame showed the reply", async (t) => {

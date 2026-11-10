@@ -11,7 +11,14 @@ import { grow, kept, storageKeys, unticked } from "./contract.ts";
 export const main = document.querySelector("main");
 export const pollMs = Number(main?.dataset.pollMs);
 export const scroller = document.getElementById("scroll");
-export const end = scroller === null ? null : endFollower(scroller, (resized) => new ResizeObserver(resized).observe(scroller));
+const jump = document.getElementById("jump-end");
+export const end = scroller === null ? null : endFollower(scroller, (resized) => new ResizeObserver(resized).observe(scroller), (following) => {
+  jump.hidden = following;
+  if (following) delete jump.dataset.fresh;
+});
+jump?.addEventListener("click", () => end.toEnd());
+/** Tells a reader who left the end that the conversation changed below them. */
+const arrived = () => { if (end !== null && !end.following) jump.dataset.fresh = ""; };
 
 export function showError(id, err) {
   const el = document.getElementById(id);
@@ -58,6 +65,21 @@ export function tick() {
 // What the server last sent for each region. Comparing against it rather than the live DOM means a tool the
 // reader opened or the ticking run clock is not a change, so an unchanged region is never swapped.
 const served = new Map([...document.querySelectorAll("[data-live]")].map((el) => [el.id, unticked(el.innerHTML)]));
+// The conversation is swapped block by block, each compared with what the server last sent for it, so a block that did
+// not change stays the same element and a selection in it survives the run's updates.
+const blockKey = (node) => node.nodeType === Node.ELEMENT_NODE ? unticked(node.outerHTML) : node.textContent;
+let servedBlocks = [...(document.getElementById("convo")?.childNodes ?? [])].map(blockKey);
+function patchBlocks(region, fresh) {
+  const live = [...region.childNodes];
+  const next = [...fresh.childNodes];
+  const keys = next.map(blockKey);
+  for (const [i, node] of next.entries()) {
+    if (live[i] === undefined) region.append(node);
+    else if (servedBlocks[i] !== keys[i]) live[i].replaceWith(node);
+  }
+  for (const node of live.slice(next.length)) node.remove();
+  servedBlocks = keys;
+}
 // The folds the reader opened or closed. The rest follow the server, so a fold that opened for a running step
 // closes once the step is done.
 export const toggled = new Map();
@@ -94,6 +116,12 @@ function anchor() {
   };
 }
 
+function parsed(html) {
+  const fresh = document.createElement("template");
+  fresh.innerHTML = html;
+  return fresh.content;
+}
+
 const keepers = [];
 const settlers = [];
 /** `keep(regions)` runs before a swap replaces the regions, and the function it returns runs after. */
@@ -112,12 +140,11 @@ export function swap(regions) {
   const kept = keepers.map((keep) => keep(changed.map(([el]) => el)));
   const restoreScroll = anchor();
   for (const [el, html, key] of changed) {
-    if (el.querySelector("[data-keep]") === null) el.innerHTML = html;
-    else {
-      const fresh = document.createElement("template");
-      fresh.innerHTML = html;
-      swapKeeping(el, fresh.content);
-    }
+    if (el.id === "convo") {
+      patchBlocks(el, parsed(html));
+      arrived();
+    } else if (el.querySelector("[data-keep]") !== null) swapKeeping(el, parsed(html));
+    else el.innerHTML = html;
     served.set(el.id, key);
   }
   for (const restore of kept) restore?.();
@@ -191,6 +218,7 @@ export function follow(url) {
         if (stick) slot.scrollTop = slot.scrollHeight;
       }
       restoreScroll();
+      arrived();
     }
     if (frame.shows !== undefined) shows = frame.shows;
   });
