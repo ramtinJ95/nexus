@@ -280,9 +280,10 @@ test("a rolled-back install stays quarantined by its journal after its report is
   const drains: any[] = [];
   const calls: string[] = [];
   let requestedAt = 0;
+  let busy = false;
   const api = async (path: string, body?: any) => {
     if (path === "release") return { desired: { commit, requestedBy: "nMac", requestedAt }, nodes: [] };
-    if (path === "drain") { drains.push(body); return { idle: true, expiresAt: 0 }; }
+    if (path === "drain") { drains.push(body); return { idle: !busy, expiresAt: 0 }; }
     if (path === "report") { reports.push(body); return { ok: true }; }
     assert.fail(path);
   };
@@ -296,8 +297,14 @@ test("a rolled-back install stays quarantined by its journal after its report is
   assert.deepEqual(drains, [{ commit, release: true }]);
   assert.deepEqual(reports.map((r) => [r.state, r.target, r.reason]), [["rolled-back", commit, "candidate API failed"]]);
   assert.equal(calls.length, 0);
-  assert.equal(JSON.parse(await readFile(join(dir, "control-deploy-report.json"), "utf8")).requestedAt, 0, "a journal from before requestedAt is held for the request desired when it was read");
+  assert.equal(JSON.parse(await readFile(join(dir, "control-deploy.json"), "utf8")).requestedAt, 0, "a journal from before requestedAt is held for the request desired when it was read");
   requestedAt = 1;
+  busy = true;
+  for (let poll = 0; poll < 2; poll++) {
+    await reconcileRole("control", config, api, boundary);
+    assert.equal(reports.at(-1).state, "waiting-for-idle", "a new request is not held by the old journal, even once a report names the new request");
+  }
+  busy = false;
   await reconcileRole("control", config, api, boundary);
   assert.ok(calls.includes("checkout"), "a new request for the commit tries it again");
 });

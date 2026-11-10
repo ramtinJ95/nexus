@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
-import { command, checkoutMerged, type Command, type InstallBoundary, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
+import { command, checkoutMerged, type Command, type InstallBoundary, NotSwitched, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
 import { controlReady, planDeploy, prepareTries, quarantined, retryAfter, schemaStep, type Attempt, type DeployStep, type ReleaseHealth, type SchemaVersions } from "./plan.ts";
 import { digestPattern, type DrainBody, type DrainReply, type ReleaseReport, type ReleaseView, type ReportBody, type Role } from "../protocol/deploy.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
@@ -399,13 +399,13 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   const view = await readView();
   desired = view.desired?.commit ?? null;
   const prior = await readJson(files.report, null) as SavedReport | null;
-  const journal = await installer.observed();
-  // A journal from before requestedAt counts as made for the report's request, so the request that clears one clears both.
   const priorAt = prior?.requestedAt ?? view.desired?.requestedAt ?? 0;
+  // A journal from before requestedAt counts as made for the report's request, so the request that clears one clears both.
+  const journal = await installer.observedAt(priorAt);
   // The report also holds failures that never reached the journal, such as a failed build or a drain refusal.
   const attempts: Attempt[] = [
     ...prior === null ? [] : [{ commit: prior.target, requestedAt: priorAt, state: prior.state, reason: prior.reason, ...prior.retryAt === undefined ? {} : { retryAt: prior.retryAt } }],
-    ...journal === null ? [] : [{ commit: journal.commit, requestedAt: journal.requestedAt ?? priorAt, state: journal.state, reason: journal.reason }],
+    ...journal === null ? [] : [{ commit: journal.commit, requestedAt: journal.requestedAt, state: journal.state, reason: journal.reason }],
   ];
   request = view.desired === null ? null : {
     commit: view.desired.commit, requestedAt: view.desired.requestedAt,
@@ -430,22 +430,22 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   if (step.kind === "retry") { await report("pending", desired, step.attempt.reason, step.attempt.retryAt); return; }
   if (step.kind !== "install") { await report("waiting-for-control", desired); return; }
   try {
-    if (!await steps.admit(plan, view.desired!.requestedAt)) return;
+    if (!await steps.admit(plan, view.desired!.requestedAt).catch((error: unknown) => { throw new NotSwitched(error); })) return;
     await report("installing", desired);
     const result = await installer.install(step.commit, view.desired!.requestedAt);
     await settled(result);
     if (result.state === "healthy") await promoteWorker(step.commit, repo, prefix, run);
   } catch (error) {
-    if (error instanceof WaitingForControl) await report("waiting-for-control", desired, String(error).slice(-20_000));
-    else if (error instanceof SchemaRefused) await report("failed", desired, String(error).slice(-20_000));
+    const cause = error instanceof NotSwitched ? error.cause : error;
+    if (cause instanceof WaitingForControl) await report("waiting-for-control", desired, String(cause).slice(-20_000));
+    else if (!(error instanceof NotSwitched) || cause instanceof SchemaRefused) await report("failed", desired, String(cause).slice(-20_000));
     else {
-      // install() returns every outcome past the link switch, so what it throws left the running release as it was.
       const failed = ++request!.failed;
       const at = retryAfter(failed, now());
       const said = at === null
         ? `${failed} tries failed before the link switch, so this request is quarantined until the commit is requested again. The last: `
         : `try ${failed} of ${prepareTries} failed before the link switch, so it runs again after ${new Date(at).toISOString()}: `;
-      await report(at === null ? "failed" : "pending", desired, said + String(error).slice(-(20_000 - said.length)), at ?? undefined);
+      await report(at === null ? "failed" : "pending", desired, said + String(cause).slice(-(20_000 - said.length)), at ?? undefined);
     }
   } finally {
     await steps.release();

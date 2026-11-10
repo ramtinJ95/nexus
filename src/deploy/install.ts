@@ -60,6 +60,11 @@ export interface Transaction {
   /** The backup taken before the switch, which a restore needs once the target has changed stored data. */
   backup?: string;
 }
+/** A failure of an install before it moved the link, so the running release is as it was. `cause` is what failed. */
+export class NotSwitched extends Error {
+  constructor(cause: unknown) { super(cause instanceof Error ? cause.message : String(cause), { cause }); }
+}
+
 const journalPath = (prefix: string, role: Role) => join(prefix, deployJournal(role));
 
 /** The role's last install, from its journal, or null before its first. */
@@ -105,6 +110,15 @@ export class ReleaseInstaller {
     return readJournal(this.prefix, this.role);
   }
 
+  /** The journal, with `requestedAt` recorded as `inferred` once when it is from before the field, so it stays fixed. */
+  async observedAt(inferred: number): Promise<(Transaction & { requestedAt: number }) | null> {
+    const transaction = await this.observed();
+    if (transaction === null) return null;
+    const { requestedAt = inferred } = transaction;
+    if (transaction.requestedAt === undefined) await this.record({ ...transaction, requestedAt });
+    return { ...transaction, requestedAt };
+  }
+
   private async record(value: Transaction): Promise<Transaction> {
     await saveJson(journalPath(this.prefix, this.role), value);
     return value;
@@ -112,14 +126,17 @@ export class ReleaseInstaller {
 
   async install(commit: string, requestedAt?: number): Promise<Transaction> {
     if ((await this.observed())?.state === "installing") throw new Error("an unfinished install must be recovered first");
-    // Automatic deployment needs a bootstrapped, recoverable release.
-    const previous = await readlink(this.link);
-    const target = await this.boundary.prepare(commit);
-    await this.boundary.beforeSwitch?.();
-    const backup = await this.boundary.readyData?.(target) ?? null;
-    const transaction = await this.record({ commit, previous, target, state: "installing", reason: null, ...requestedAt === undefined ? {} : { requestedAt }, ...backup === null ? {} : { backup } });
+    let transaction: Transaction;
     try {
-      await pointLink(this.link, target);
+      // Automatic deployment needs a bootstrapped, recoverable release.
+      const previous = await readlink(this.link);
+      const target = await this.boundary.prepare(commit);
+      await this.boundary.beforeSwitch?.();
+      const backup = await this.boundary.readyData?.(target) ?? null;
+      transaction = await this.record({ commit, previous, target, state: "installing", reason: null, ...requestedAt === undefined ? {} : { requestedAt }, ...backup === null ? {} : { backup } });
+    } catch (error) { throw new NotSwitched(error); }
+    try {
+      await pointLink(this.link, transaction.target);
       await this.boundary.activate?.();
       await this.boundary.restart();
       if (!await this.boundary.healthy()) throw new Error("release health check failed");
