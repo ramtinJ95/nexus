@@ -6,7 +6,7 @@ import type { ClaudeConversation } from "../claude-transcript.ts";
 import type { AgentView } from "../../contract/threads.ts";
 import { isOpen } from "../questions.ts";
 import { dialogWaits, freshVm, limitText, parkedText } from "../wording.ts";
-import { Html, html, act, dot, icon, unseen, ago, grows, growing, since, type Tone } from "./view.ts";
+import { Html, html, act, dot, icon, shortcut, unseen, ago, grows, growing, since, type Tone } from "./view.ts";
 import { prose } from "./markdown.ts";
 import { promptLabel, type Item, type ToolItem, type AskItem, type UserItem } from "./items.ts";
 import { shotsView, stepsView } from "./tools.ts";
@@ -72,9 +72,9 @@ export function stateBar(t: Thread, run: Run, now: number): Html {
 const runTone: Record<Run["kind"], Tone> = { idle: "idle", working: "work", waiting: "busy", parked: "bad" };
 
 /**
- * What the composer's buttons send in each state of the run, the same for both agents: ⌘↵ sends, or steers a run
- * that works, and ⌥↵ queues a message after the run. A Claude worker takes a message at its next step whatever the
- * mode, so only a Nexus agent's run can be queued after.
+ * What the composer's buttons send in each state of the run, the same for both agents: ⌘↵, or Ctrl+↵ off a Mac,
+ * sends, or steers a run that works, and ⌥↵, or Alt+↵, queues a message after the run. A Claude worker takes a
+ * message at its next step whatever the mode, so only a Nexus agent's run can be queued after.
  */
 function sends(run: Run, claude: boolean): { primary: "send" | "steer"; queue: boolean } {
   const steers = run.kind === "working";
@@ -114,7 +114,7 @@ ${asOf !== null && html`<p class="comp-note">${asOf} Sending a message wakes it 
 ${d.pylon.notAnswering !== undefined && html`<p class="comp-note" role="alert">The pylon's guest has not answered its commands since ${ago(Date.parse(d.pylon.notAnswering.since), now)}, so a message may fail. ${freshVm()}</p>`}
 <div class="comp-box">
 <textarea id="prompt-text" data-keep name="text" rows="2" required aria-label="${claude === null ? "Message the agent" : "Message Claude"}" placeholder="${placeholder}"></textarea>
-<div class="comp-foot">${model !== null && html`<span class="chip chip-model">${model}</span>`}${hint !== null && html`<span class="dim small comp-hint">${hint}</span>`}<span class="comp-sends">${queue && html`<button type="submit" class="btn btn-ghost send-alt" id="queue" name="mode" value="followUp" title="Queue after this run (⌥↵)">Queue <kbd>⌥↵</kbd></button>`}<button type="submit" class="send send-${primary}" id="send" name="mode" value="${look.mode}" title="${look.label} (⌘↵)">${icon("up")}<span class="send-label">${look.label}</span> <kbd>⌘↵</kbd></button></span></div>
+<div class="comp-foot">${model !== null && html`<span class="chip chip-model">${model}</span>`}${hint !== null && html`<span class="dim small comp-hint">${hint}</span>`}<span class="comp-sends">${queue && html`<button type="submit" class="btn btn-ghost send-alt" id="queue" name="mode" value="followUp" title="Queue after this run">Queue ${shortcut("queue")}</button>`}<button type="submit" class="send send-${primary}" id="send" name="mode" value="${look.mode}" title="${look.label}">${icon("up")}<span class="send-label">${look.label}</span> ${shortcut("send")}</button></span></div>
 </div>
 </form>`;
 }
@@ -136,11 +136,11 @@ export function blockView(block: Block, now: number): Html {
     case "user": {
       const { from } = block;
       const named = from === "command" || from === "other";
-      return html`<div class="msg user${block.queued !== null && " queued"}">${!named && unseen(promptLabel[from])}${(named || block.queued !== null) && html`<div class="msg-who">${named && html`<span class="chip chip-from">${promptLabel[from]}</span>`}${block.queued !== null && html`<span class="chip chip-queued">queued, ${block.queued}</span>`}</div>`}<div class="text">${prose(block.text)}</div>${shotsView(block.images)}</div>`;
+      return html`<div class="msg user${block.queued !== null && " queued"}"${block.at !== 0 && html` data-at="${block.at}"`}>${!named && unseen(promptLabel[from])}${(named || block.queued !== null) && html`<div class="msg-who">${named && html`<span class="chip chip-from">${promptLabel[from]}</span>`}${block.queued !== null && html`<span class="chip chip-queued">queued, ${block.queued}</span>`}</div>`}<div class="text">${prose(block.text)}</div>${shotsView(block.images)}</div>`;
     }
     case "agent": return block.streaming
       ? html`<div class="msg agent streaming"><div class="text"${growing}>${grows(prose(block.text, html`<span class="caret" aria-hidden="true"></span>`))}</div></div>`
-      : html`<div class="msg agent"><div class="text">${prose(block.text)}</div>${shotsView(block.images)}</div>`;
+      : html`<div class="msg agent"${block.at !== 0 && html` data-at="${block.at}"`}><div class="text">${prose(block.text)}</div>${shotsView(block.images)}</div>`;
     case "notice": return html`<p class="notice notice-${block.tone}"><span class="notice-mark" aria-hidden="true">!</span>${block.text}</p>`;
     case "note": return html`<p class="note">${block.text}</p>`;
     case "link": return html`<p class="note"><a class="link" href="${block.url}" target="_blank" rel="noopener">${block.text} ↗</a></p>`;

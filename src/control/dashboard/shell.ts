@@ -8,10 +8,10 @@ import { defaultClaudeModel } from "../../protocol/models.ts";
 import type { NodeRecord } from "../node-store.ts";
 import type { Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
-import type { QueuedThread } from "../../contract/threads.ts";
+import { queuedState, type QueuedThread } from "../../contract/threads.ts";
 import type { Status } from "../doctor-model.ts";
 import { span } from "./elapsed.ts";
-import { themeScript, Html, html, dot, icon, menu, threadState, dims, workingFor, type Tone } from "./view.ts";
+import { themeScript, Html, html, dot, icon, menu, shortcut, threadState, dims, workingFor, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
 import { clonedIcons, findText, type Page } from "./contract.ts";
 import { assetUrl } from "./assets.ts";
@@ -94,8 +94,7 @@ export function threadsOf(c: Context, project: string) {
 }
 /** A blocked thread waits for the person, as a review that ended for them does. */
 export function queuedLook(q: QueuedThread): [label: string, tone: Tone] {
-  if (q.status !== "queued") return [q.status === "archived" ? "cancelled" : "deleted", "muted"];
-  return q.blocked ? ["blocked", "bad"] : ["queued", "idle"];
+  return [queuedState(q), q.status !== "queued" ? "muted" : q.blocked ? "bad" : "idle"];
 }
 
 export const quietLabel = (threads: readonly Thread[]) => `${threads.length} quiet for over ${quietAfterMs / 3_600_000} hours`;
@@ -207,7 +206,7 @@ ${nodeOptions(nodes)}
 </div>
 <p class="hint" id="start-hint" data-image="${image ?? ""}"></p>
 <p id="start-error" class="error" role="alert" hidden></p>
-<footer><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">Start thread<kbd>⌘↵</kbd></button></footer>
+<footer><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">Start thread${shortcut("send")}</button></footer>
 </form>`}
 </div>
 </dialog>`;
@@ -247,7 +246,7 @@ ${nodeOptions(nodes)}
 <label class="check"><input type="checkbox" name="github"> GitHub access</label>
 <p class="hint">Threads clone the repository at this branch, or in a scratch project start an empty repository on it, and boot on this node unless they pick another. With auto, each boots on the node with the most room left among those that hold the image and the project's secrets. A scratch pylon keeps nothing once its thread is deleted, so its agent publishes what is worth keeping. GitHub access sends the node's <code>${githubTokenGrant.name}</code> to ${githubTokenGrant.hosts.join(" and ")}, so agents can create repositories and push. Each pylon gets ${cpus} CPUs, ${memoryGiB} GiB of memory and ${diskGiB} GiB of disk. <code>nexus project add</code> can set those, allowed hosts, logins and other secrets.</p>
 <p id="project-error" class="error" role="alert" hidden></p>
-<footer><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">Add project<kbd>⌘↵</kbd></button></footer>
+<footer><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">Add project${shortcut("send")}</button></footer>
 </form>`}
 </dialog>`;
 }

@@ -4,10 +4,11 @@ import { isOpenStatus, type ActualState, type DesiredPhase } from "../reconcile.
 import type { HerdrStatus } from "../../protocol/observations.ts";
 import type { ThreadRow } from "../wire.ts";
 import { needsPerson, type Attention } from "../attention.ts";
-import { attentionLabels } from "../plain-wording.ts";
+import { agentIdle, attentionLabels } from "../plain-wording.ts";
 import type { Output, Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
 import { limitText } from "../wording.ts";
+import { utc } from "../../contract/usage.ts";
 import { agoText, clock } from "./elapsed.ts";
 import { storageKeys } from "./contract.ts";
 import { grow, type Action } from "./contract.ts";
@@ -16,9 +17,10 @@ interface Page { status: number; headers: Record<string, string>; body: string }
 
 /**
  * Sets the stored theme, or the device's light or dark, before the first paint, as theme.js does after it. A browser
- * that refuses the page its storage throws on reading it, and the device's theme stands.
+ * that refuses the page its storage throws on reading it, and the device's theme stands. It names the platform too,
+ * as find.js tells a Mac, so each shortcut shows the keys of the device it is on from the first paint.
  */
-export const themeScript = `{ let theme = null; try { theme = localStorage.getItem(${JSON.stringify(storageKeys.theme)}); } catch {} document.documentElement.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }`;
+export const themeScript = `{ let theme = null; try { theme = localStorage.getItem(${JSON.stringify(storageKeys.theme)}); } catch {} const root = document.documentElement; root.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); root.dataset.platform = /^(Mac|iP)/.test(navigator.platform) ? "mac" : "other"; }`;
 
 const pageHeaders = {
   "content-type": "text/html; charset=utf-8",
@@ -46,8 +48,12 @@ export function html(strings: TemplateStringsArray, ...parts: Part[]): Html {
   return new Html(strings.reduce((out, s, i) => out + render(parts[i - 1]) + s));
 }
 
-/** The colour of a status dot. `work` is an agent mid-turn, `busy` a pylon changing phase, `reply` a reply the person has not read. */
-export type Tone = "ok" | "work" | "reply" | "review" | "busy" | "idle" | "bad" | "muted";
+/**
+ * The look of a status dot, its colour and shape. `work` is an agent mid-turn, `busy` a pylon changing phase, `reply` a
+ * reply the person has not read. `bad`, `decide`, `stuck` and `limit` share the red of a thread held up, and their
+ * shapes tell failed, needs your decision, parked and stopped on its usage limit apart without a hover.
+ */
+export type Tone = "ok" | "work" | "reply" | "review" | "busy" | "idle" | "bad" | "decide" | "stuck" | "limit" | "muted";
 export const actualBadge: Record<ActualState, [label: string, tone: Tone]> = {
   running: ["running", "ok"], spawning: ["spawning", "busy"], pausing: ["pausing", "busy"], deleting: ["deleting", "busy"],
   paused: ["paused", "idle"], absent: ["not on its node", "muted"], failed: ["failed", "bad"], unknown: ["unknown", "muted"],
@@ -87,32 +93,41 @@ type IconName = keyof typeof iconPaths;
 export const icon = (name: IconName) => html`<svg class="i i-${name}" viewBox="0 0 16 16" aria-hidden="true"><path d="${iconPaths[name]}"/></svg>`;
 /** Every page's way to the sidebar, and on a phone, where the sidebar is a drawer, to what waits on the person. */
 export const menu = html`<button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button><a class="icon-btn phone-only" href="/#needs-you" aria-label="Needs you" title="Needs you">${icon("inbox")}</a>`;
+/** Each shortcut's keys on a Mac and elsewhere, as dialogs.js takes them. style.css shows the platform's by `data-platform`. */
+const shortcuts = { send: ["⌘↵", "Ctrl+↵"], queue: ["⌥↵", "Alt+↵"] } as const;
+export const shortcut = (name: keyof typeof shortcuts) => html`<kbd><span class="k-mac">${shortcuts[name][0]}</span><span class="k-other">${shortcuts[name][1]}</span></kbd>`;
 /** Text a screen reader says that the page shows another way, such as with an icon or a bubble's side. */
 export const unseen = (text: string) => html`<span class="vh">${text}</span>`;
 
 
-export const attentionTone: Record<NonNullable<Attention>, Tone> = { failed: "bad", decision: "bad", parked: "bad", limited: "bad", reply: "reply", working: "work", waiting: "idle" };
+export const attentionTone: Record<NonNullable<Attention>, Tone> = { failed: "bad", decision: "decide", parked: "stuck", limited: "limit", reply: "reply", working: "work", waiting: "idle" };
 
-/** What a thread is doing, most urgent first: the agent mid-turn hides a running pylon, never a failed one. */
+/**
+ * What a thread is doing, most urgent first, as its row, the home table and its page's header all say it: the agent
+ * mid-turn hides a running pylon, never a failed one. A running pylon with nothing to say of its agent is up and ready
+ * for a message, so it reads as the agent's state, not the pylon's.
+ */
 export function threadState(t: ThreadRow, now: number): [label: string, tone: Tone] {
   const { attention, pylon } = t;
   if (attention === "limited") return [limitText(t, now), attentionTone.limited];
   if (attention === "waiting") return [t.sessionWaitingMessage ?? attentionLabels.waiting, attentionTone.waiting];
   if (attention !== null) return [attentionLabels[attention], attentionTone[attention]];
   if (!isOpenStatus(t.status)) return [t.status, "muted"];
-  return actualBadge[pylon.actualState];
+  return pylon.actualState === "running" ? [agentIdle, "ok"] : actualBadge[pylon.actualState];
 }
 
 /** The open thread's row never dims, nor a closed thread's, which its fold already sets apart. */
 export const dims = (t: ThreadRow, active?: ThreadId) =>
   t.id !== active && isOpenStatus(t.status) && !needsPerson(t.attention);
 
-/** "5 min ago", which client.js ticks with the same format. */
+/** "5 min ago", which client.js ticks with the same format, and titles with the moment in the reader's zone. */
 export function ago(at: number, now: number): Html {
   if (at === 0) return html`never`;
-  const iso = new Date(at).toISOString();
-  return html`<time datetime="${iso}" title="${iso}" data-ago>${agoText(at, now)}</time>`;
+  return html`<time datetime="${new Date(at).toISOString()}" title="${utc(at)}" data-ago>${agoText(at, now)}</time>`;
 }
+
+/** A moment, which client.js shows in the reader's zone. The server does not know that zone, so it sends UTC. */
+export const localAt = (at: number) => html`<time datetime="${new Date(at).toISOString()}" data-local>${utc(at)}</time>`;
 
 /** A run clock from `at`, which client.js ticks. contract.ts `unticked` reads this markup. */
 export const since = (at: number, now: number) => html`<time data-since="${at}">${clock(now - at)}</time>`;

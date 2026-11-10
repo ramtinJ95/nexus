@@ -24,7 +24,7 @@ import { pylonRoutes, type ImageSource } from "../../contract/pylon.ts";
  */
 export type Item =
   | { kind: "user"; text: string; queued: string | null; at: number; from: PromptFrom; images?: readonly Shot[] }
-  | { kind: "agent"; text: string; streaming: boolean; images?: readonly Shot[] }
+  | { kind: "agent"; text: string; streaming: boolean; at: number; images?: readonly Shot[] }
   | { kind: "tool"; call: { id: string; name: string; arguments: Readonly<Record<string, unknown>> }; result: ToolResult; ms: number | null; task?: Pick<Extract<ClaudeEntry, { kind: "task" }>, "status" | "summary" | "result">; images?: readonly Shot[] }
   /** A Claude worker's AskUserQuestion call, with its question while one was asked for it. */
   | { kind: "ask"; id: string; questions: readonly AskedQuestion[]; result: ToolResult; question: Question | null }
@@ -103,7 +103,7 @@ export function conversationItems(view: ConversationView, thread: ThreadId): Ite
   const tools = new Map<string, ToolItem>();
   const answer = (message: AssistantMessage, streaming: boolean) => {
     for (const part of message.content) {
-      if (part.type === "text" && part.text !== "") items.push({ kind: "agent", text: part.text, streaming, ...(streaming ? {} : { images: fileShots(thread, imagePaths(part.text)) }) });
+      if (part.type === "text" && part.text !== "") items.push({ kind: "agent", text: part.text, streaming, at: message.timestamp, ...(streaming ? {} : { images: fileShots(thread, imagePaths(part.text)) }) });
       // A streaming call's arguments are not whole yet. Its committed answer shows it.
       if (part.type === "toolCall" && !streaming) {
         const tool: ToolItem = { kind: "tool", call: part, result: { state: "none" }, ms: null, images: fileShots(thread, writtenImages(part.name, part.arguments)) };
@@ -167,7 +167,7 @@ export function claudeItems({ entries, working }: ClaudeConversation, questions:
   for (const entry of entries) {
     switch (entry.kind) {
       case "prompt": items.push({ kind: "user", text: entry.text, queued: null, at: entry.at, from: entry.from === "person" ? from(entry.text) : entry.from, images: [...transcriptShots(thread, entry.images), ...fileShots(thread, imagePaths(entry.text))] }); break;
-      case "reply": items.push({ kind: "agent", text: entry.text, streaming: false, images: fileShots(thread, imagePaths(entry.text)) }); break;
+      case "reply": items.push({ kind: "agent", text: entry.text, streaming: false, at: entry.at, images: fileShots(thread, imagePaths(entry.text)) }); break;
       case "tool": {
         const asked = askedIn(entry);
         if (asked !== null) {

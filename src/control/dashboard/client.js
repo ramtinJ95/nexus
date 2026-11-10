@@ -45,6 +45,7 @@ addEventListener("hashchange", writeTo);
 if (location.hash === "#terminal" && tabsBar?.querySelector('[data-tab="term"]')?.hidden === false) showTab(terminalTab);
 if (dialog?.dataset.autoopen !== undefined) void openStart(null);
 if (projectDialog?.dataset.autoopen !== undefined) openProject();
+tick();
 setInterval(tick, 1000);
 setInterval(() => { if (document.visibilityState === "visible") void refreshNow(); }, pollMs);
 recordVisit();
