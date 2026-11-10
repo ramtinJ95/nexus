@@ -94,5 +94,5 @@ const listed = (rows, now) => {
   listRows(rows);
   return notifications(rows, now);
 };
-const { markSeen, askRows } = startRows({ api, notifications: listed, health, caughtUp, currentThread, focused, activeTab: () => activeTab });
+const { markSeen, askRows } = startRows({ api, notifications: listed, health, caughtUp, changed: () => { if (document.visibilityState === "visible") void refreshNow(); }, currentThread, focused, activeTab: () => activeTab });
 setInterval(markSeen, 1000);

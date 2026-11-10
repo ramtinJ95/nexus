@@ -34,10 +34,12 @@ export const grown = new RegExp(`${grow.open}([\\s\\S]*?)${grow.close}`, "g");
 export const growParts = (region: string) => ({ shape: region.replace(grown, grow.open), parts: [...region.matchAll(grown)].map((m) => m[1]!) });
 
 /**
- * A region as the client compares it with what the server sent before: without the text of each run clock, which the
- * client ticks, as view.ts `since` writes it.
+ * A region as the client compares it with what the server sent before: without the text of each run clock and each
+ * time ago, which the client ticks, as view.ts `since` and `ago` write them. A browser serializes `data-ago` as
+ * `data-ago=""`.
  */
-export const unticked = (region: string) => region.replace(/(<time data-since="\d+">)[^<]*/g, "$1");
+export const unticked = (region: string) =>
+  region.replace(/(<time data-since="\d+">)[^<]*/g, "$1").replace(/(<time [^>]*\bdata-ago(?:="")?>)[^<]*/g, "$1");
 
 /** What a notice is for: an attention that waits on the person. A reply's notice opens its thread instead. */
 export type NoticeAttention = Exclude<NonNullable<Attention>, "reply" | "working">;
