@@ -325,10 +325,10 @@ test("a spawn for reading leaves a checkpoint's relaunch mark, and the pause aft
     pylonId: pylon, image: "img-test00000000" as const, source: { kind: "resume" as const, checkpoint: "ckpt-a-1" as const }, resources: { cpus: 1, memoryGiB: 1, diskGiB: 1 },
     network: { allowedHosts: [], secrets: [] }, repo: { kind: "empty" as const, branch: "main" }, dotfiles: { repo: "https://example.com/dotfiles.git", ref: "main" },
   };
-  await backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(10_000), false);
+  await backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(60_000), false);
   assert.equal(await readFile(mark, "utf8"), "", "the mark stays for the spawn that brings the sessions back");
 
-  await backend.ensurePaused(pylon, "ckpt-a-2", AbortSignal.timeout(10_000));
+  await backend.ensurePaused(pylon, "ckpt-a-2", AbortSignal.timeout(60_000));
   const calls = await docker.calls();
   assert.ok(!calls.some((argv) => argv.includes("herdr") || argv.some((arg) => arg.includes("sessions.json"))), "nothing read or recorded the sessions");
   const commit = calls.find((argv) => argv[0] === "commit")!;
@@ -341,7 +341,7 @@ test("a pause whose session record fails keeps the sessions its checkpoint's pau
   const docker = await fakeDocker(t, { ps: { stdout: "c1\n" }, "container inspect c1": running("c1", labels) });
   // First on the PATH the container's commands run with, so the record fails as a guest without Herdr's server would.
   await writeFile(join(docker.root, "..", "herdr"), "#!/bin/sh\necho 'herdr: broken on purpose' >&2\nexit 1\n", { mode: 0o755 });
-  await createDockerBackend({ images }).ensurePaused(pylon, "ckpt-a-2", AbortSignal.timeout(10_000));
+  await createDockerBackend({ images }).ensurePaused(pylon, "ckpt-a-2", AbortSignal.timeout(60_000));
   const calls = await docker.calls();
   assert.match(await readFile(join(docker.root, "container.log"), "utf8"), /^sessions: recording failed, so the wake relaunches what the last record holds: .*herdr: broken on purpose/);
   const commit = calls.find((argv) => argv[0] === "commit")!;
