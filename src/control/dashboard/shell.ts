@@ -56,9 +56,10 @@ export function layout(c: Context, page: Shell): Html {
 <script type="module" src="${assetUrl("client.js")}"></script>
 </head>
 <body>
+<a class="skip" href="#main">Skip to the page</a>
 <div class="app${page.inspector !== undefined && " has-inspect"}">
 ${sidebar(c, page.active, page.nav)}
-<main class="main" data-poll-ms="${pollMs}"${page.page !== undefined && html` data-page="${page.page}"`}${page.activity !== undefined && html` data-activity="${page.activity}"`}>
+<main class="main" id="main" tabindex="-1" data-poll-ms="${pollMs}"${page.page !== undefined && html` data-page="${page.page}"`}${page.activity !== undefined && html` data-activity="${page.activity}"`}>
 ${page.main}
 </main>
 ${page.inspector}
@@ -69,6 +70,7 @@ ${page.inspector}
 ${startDialog(c, page.start)}
 ${projectDialog(c, page.addProject === true)}
 <dialog id="switcher" class="modal switcher" aria-label="Go to a thread"><input id="switcher-q" type="search" placeholder="Go to a thread" aria-label="Go to a thread" role="combobox" aria-controls="switcher-list" aria-expanded="true" aria-autocomplete="list" autocomplete="off"><ul id="switcher-list" role="listbox" aria-label="Threads"></ul><p class="switcher-hint dim"><kbd>↑</kbd><kbd>↓</kbd> pick, <kbd>Enter</kbd> open, <kbd>Esc</kbd> close</p></dialog>
+<dialog id="keys" class="modal keys" aria-labelledby="keys-h"><header><h2 id="keys-h">Keyboard shortcuts</h2><button type="button" class="btn btn-xs btn-ghost" data-close>Close</button></header><dl id="keys-list"></dl></dialog>
 <noscript><p class="noscript">Adding projects, starting, archiving and deleting threads, sending messages and live updates need JavaScript.</p></noscript>
 </body>
 </html>

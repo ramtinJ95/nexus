@@ -16,6 +16,7 @@ import "./file-view.js";
 import "./terminal-tab.js";
 import "./composer.js";
 import "./actions.js";
+import "./keys.js";
 import { startRows } from "./rows.js";
 import { pageModules } from "./pages.js";
 import { kept, storageKeys } from "./contract.ts";
