@@ -1,13 +1,12 @@
 /** Renders the Health page: the latest pass of `nexus doctor`'s checks, each problem open, and the changes kept. */
 import { checkKey, healthView, worst, type Check, type DoctorReport } from "../doctor-model.ts";
-import { utc } from "../../contract/usage.ts";
-import { Html, html, dot, menu, state } from "./view.ts";
+import { Html, html, dot, localAt, menu, state } from "./view.ts";
 import type { Context } from "./context.ts";
 import { layout, statusTone as tone } from "./shell.ts";
 import { checkName, problemsText } from "../plain-wording.ts";
 import { changesKept, doctorSchedule } from "../wording.ts";
 
-const at = (iso: string) => html`<time datetime="${iso}">${utc(Date.parse(iso))}</time>`;
+const at = (iso: string) => localAt(Date.parse(iso));
 
 /**
  * The latest pass's checks grouped by the control plane and each node, or before a start's first pass the problems

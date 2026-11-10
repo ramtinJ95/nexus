@@ -8,6 +8,42 @@ import { notify, refreshAfter, whenRunning } from "./page.js";
 import { setOpen } from "./nav.js";
 import { showSession } from "./terminal-tab.js";
 
+/** How long a published port has to be served, and how often it is asked, as `nexus preview --wait` waits. */
+const servedWithinMs = 120_000;
+const askEveryMs = 1_000;
+
+/**
+ * Publishes a port, as `nexus preview --wait` does, and opens its preview once the node serves it. The tab opens
+ * before the first await, while the browser still counts the click as the person's and lets it open, and its opener
+ * is cut, as rel="noopener" cuts a link's. A browser that blocks the tab still gets the port published.
+ */
+export function publishOpening({ request, refresh, open, wait, now }) {
+  return async (thread, { port }) => {
+    const tab = open();
+    if (tab !== null) tab.opener = null;
+    try {
+      await request(pylonRoutes.preview, { thread, body: { port: Number(port) } });
+      if (tab === null) return;
+      await refresh();
+      const deadline = now() + servedWithinMs;
+      let preview;
+      while (true) {
+        preview = (await request(threadRoutes.show, { thread })).ports?.find((l) => l.port === Number(port))?.preview;
+        if (preview?.ready === true) {
+          tab.location.href = preview.url;
+          return;
+        }
+        if (now() >= deadline) break;
+        await wait(askEveryMs);
+      }
+      throw new Error(`Port ${port} was not served within ${servedWithinMs / 1000} s${preview?.failed ? `, because ${preview.failed}` : ""}. Its preview opens from Previews once it is.`);
+    } catch (err) {
+      tab?.close();
+      throw err;
+    }
+  };
+}
+
 /** What each `data-action` in contract.ts does. */
 export const handlers = {
   archive: (thread) => request(threadRoutes.archive, { thread }),
@@ -21,8 +57,12 @@ export const handlers = {
   abort: (thread) => request(threadRoutes.abort, { thread }),
   retry: (thread) => request(threadRoutes.retry, { thread }),
   "retry-pylon": (thread) => request(threadRoutes.retryPylon, { thread }),
-  // Publishes the port. The next refresh shows its preview, which links once the node serves it.
-  "link-port": (thread, { port }) => request(pylonRoutes.preview, { thread, body: { port: Number(port) } }),
+  "link-port": publishOpening({
+    request, refresh: refreshAfter,
+    open: () => window.open("about:blank", "_blank"),
+    wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    now: Date.now,
+  }),
   // As `nexus unpreview`.
   unpublish: (thread, { port }) => whenRunning(thread, () => request(pylonRoutes.unpreview, { thread, port })),
   // As `nexus review --cancel`.

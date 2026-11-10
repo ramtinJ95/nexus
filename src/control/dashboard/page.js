@@ -1,6 +1,6 @@
 // The page core every dashboard page runs: its regions and the poll and stream that swap them, the folds the reader
 // toggled, its visit, and the markup the features build. Features hook into a swap through `onSwap` and `afterSwap`.
-import { agoText, clock } from "./elapsed.ts";
+import { agoText, clock, localTime } from "./elapsed.ts";
 import { atEnd, endFollower } from "./scroll.js";
 import { refusalAt, request } from "./request.js";
 import { threadRoutes } from "../../contract/threads.ts";
@@ -39,9 +39,15 @@ const focusKey = (el) => el.id !== "" ? `#${CSS.escape(el.id)}`
   : el instanceof HTMLAnchorElement ? `a[href="${CSS.escape(el.getAttribute("href"))}"]`
   : null;
 
+/** Ticks the run clocks and the times ago, and puts each moment the server sent in UTC in the reader's zone. */
 export function tick() {
   for (const time of document.querySelectorAll("time[data-since]")) time.textContent = clock(Date.now() - Number(time.dataset.since));
-  for (const time of document.querySelectorAll("time[data-ago]")) time.textContent = agoText(Date.parse(time.dateTime), Date.now());
+  for (const time of document.querySelectorAll("time[data-ago]")) {
+    time.textContent = agoText(Date.parse(time.dateTime), Date.now());
+    time.title = localTime(Date.parse(time.dateTime));
+  }
+  for (const time of document.querySelectorAll("time[data-local]")) time.textContent = localTime(Date.parse(time.dateTime));
+  for (const at of document.querySelectorAll("[data-at]")) at.title = localTime(Number(at.dataset.at));
 }
 
 // What the server last sent for each region. Comparing against it rather than the live DOM means a tool the

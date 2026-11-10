@@ -1,4 +1,4 @@
-import { usageLimitText, type Placement, type QueuedThread, type Room, type ThreadDetail, type ThreadRow, type ThreadSetup, type Wait } from "../contract/threads.ts";
+import { queuedState, usageLimitText, type Placement, type QueuedThread, type Room, type ThreadDetail, type ThreadRow, type ThreadSetup, type Wait } from "../contract/threads.ts";
 import type { Question } from "../contract/reviews.ts";
 import { reservedNames } from "../contract/reserved.ts";
 import type { Changes, Listing } from "../contract/pylon.ts";
@@ -124,7 +124,6 @@ export function changesText(c: Changes): string {
   ].join("\n");
 }
 
-const queuedState = (q: QueuedThread) => q.status === "archived" ? "cancelled" : q.status === "deleted" ? "deleted" : q.blocked ? "blocked" : "queued";
 const waitText = (w: Wait) => `${w.state === "waiting" ? "waits for" : w.state === "landed" ? "landed" : "blocked by"} ${w.thread}: ${w.why}`;
 export const queuedRow = (q: QueuedThread) => {
   const next = q.waits.find((w) => w.state === "blocked") ?? q.waits.find((w) => w.state === "waiting");

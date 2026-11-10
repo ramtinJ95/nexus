@@ -40,8 +40,8 @@ test("the sidebar counts the problems the person has not seen, which opening the
   pass = latest;
   const shown = (await page("/health")).text;
   assert.match(shown, /aria-current="page"/);
-  assert.match(shown, /<h2>Control plane<\/h2>[\s\S]*data-check="backup" data-status="fail"[\s\S]*the newest backup is 27 h old[\s\S]*fail since <time datetime="2026-11-02T00:25:00.000Z">2026-11-02 00:25 UTC<\/time> <em>new<\/em>[\s\S]*<h2>rj-firebat<\/h2>[\s\S]*data-check="disk" data-status="warn"[\s\S]*this pass only, so it alerts if the next agrees/);
-  assert.match(shown, /1 open problem<\/span> Checked at <time datetime="2026-11-02T00:30:00.000Z">/);
+  assert.match(shown, /<h2>Control plane<\/h2>[\s\S]*data-check="backup" data-status="fail"[\s\S]*the newest backup is 27 h old[\s\S]*fail since <time datetime="2026-11-02T00:25:00.000Z" data-local>2026-11-02 00:25 UTC<\/time> <em>new<\/em>[\s\S]*<h2>rj-firebat<\/h2>[\s\S]*data-check="disk" data-status="warn"[\s\S]*this pass only, so it alerts if the next agrees/);
+  assert.match(shown, /1 open problem<\/span> Checked at <time datetime="2026-11-02T00:30:00.000Z" data-local>/, "the page puts each time the server sends in UTC in the reader's zone");
   assert.match(shown, new RegExp(`<li data-change="${backup!.id}" data-status="fail"><time[^>]*>2026-11-02 00:25 UTC</time> Control plane backup <span class="state">.*ok</span> to <span class="state">.*fail</span>: the newest backup is 27 h old</li>`));
   assert.equal(await through(), String(backup!.id));
 
