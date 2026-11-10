@@ -336,6 +336,7 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
     "  nexus project edit <id> [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]\n"
     + "    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...\n"
     + "    [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]\n"
+    + "    [--template-input PATH]... [--clear-template-inputs]   repository files, such as package-lock.json, that key the project's templates with .nexus/setup\n"
     + "    [--auto-review off|review|land|yolo]   review each builder's PR on its own, land it too, and with yolo waive the holds you may; land and yolo need a deployer\n"
     + "    [--pipeline off|approve|start]    turn pipeline items into threads, once the person approves each or on their own\n"
     + "    [--second-reviewer off|on|always|reserved,lines=N]   a second reviewer on another model for the PRs the rule names\n");
@@ -1128,7 +1129,7 @@ const claudeRecords = {
   call: { type: "assistant", timestamp: at(2), message: { model: "claude-opus-5-5", content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "wc -l hello.py" } }] } },
   failed: { type: "user", timestamp: at(3), message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "wc: hello.py: No such file", is_error: true }] } },
   reply: { type: "assistant", timestamp: at(4), message: { model: "claude-opus-5-5", content: [{ type: "text", text: "There is no hello.py." }] } },
-  pr: { type: "pr-link", sessionId: "s1", prNumber: 7, prUrl: "https://github.com/acme/shop/pull/7", prRepository: "acme/shop", timestamp: at(5) },
+  pr: { type: "pr-link", sessionId: "s1", prNumber: 7, prUrl: "https://github.com/octocat/Spoon-Knife/pull/7", prRepository: "octocat/Spoon-Knife", timestamp: at(5) },
 };
 const jsonl = (...records: object[]) => records.map((r) => `${JSON.stringify(r)}\n`).join("");
 
@@ -1167,7 +1168,7 @@ test("watch follows a Claude worker's transcript: the entries whole, then each n
     if (line.type === "claude-entry") texts.push(line.text);
     idle ||= line.type === "state" && line.run === "idle";
   }
-  assert.deepEqual(texts, ["[tool error] wc: hello.py: No such file", "There is no hello.py.", "[pull request] Opened pull request #7: https://github.com/acme/shop/pull/7", ""],
+  assert.deepEqual(texts, ["[tool error] wc: hello.py: No such file", "There is no hello.py.", "[pull request] Opened pull request #7: https://github.com/octocat/Spoon-Knife/pull/7", ""],
     "a pull request Claude Code names again prints nothing the second time");
 
   const restart = await s.stop();
@@ -1962,6 +1963,19 @@ test("project edit sets which pull requests get a second reviewer on another mod
   assert.doesNotMatch((await s.nexus(["project", "show", "second"])).stdout, /second reviewer/);
 });
 
+test("project edit sets the files that key the project's templates, project show lists them, and a path outside the repository is refused", async (t) => {
+  const s = await setup(t);
+  await s.nexus(["project", "add", "keyed", "https://github.com/example/repo.git", "--node", node]);
+  assert.deepEqual((await s.json(["project", "edit", "keyed", "--template-input", "package-lock.json", "--template-input", "web/package-lock.json"])).templateInputs, ["package-lock.json", "web/package-lock.json"]);
+  assert.match((await s.nexus(["project", "show", "keyed"])).stdout, /^template inputs: package-lock\.json, web\/package-lock\.json$/m);
+  assert.deepEqual((await s.json(["project", "edit", "keyed", "--node", node])).templateInputs, ["package-lock.json", "web/package-lock.json"], "an edit that does not name them keeps them");
+  for (const bad of ["/etc/passwd", "../x", "a//b", "a/", "./a"]) assert.equal((await s.nexus(["project", "edit", "keyed", "--template-input", bad])).code, 64, bad);
+  assert.equal((await s.nexus(["project", "edit", "keyed", "--template-input", "a", "--template-input", "a"])).code, 64, "a path listed twice");
+  assert.equal((await s.nexus(["project", "edit", "keyed", "--template-input", "a", "--clear-template-inputs"])).code, 64);
+  assert.deepEqual((await s.json(["project", "edit", "keyed", "--clear-template-inputs"])).templateInputs, []);
+  assert.doesNotMatch((await s.nexus(["project", "show", "keyed"])).stdout, /template inputs/);
+});
+
 test("project add and edit set standing rules from a file or stdin, edit clears them, and project show and show print them", async (t) => {
   const s = await setup(t);
   const dir = await mkdtemp(join(tmpdir(), "nexus-rules-"));
@@ -2259,8 +2273,8 @@ test("conversation prints a Claude worker's transcript, and send types into its 
     { kind: "notice", at: 8, tone: "error", text: "The model failed" },
     { kind: "turn", at: 9, durationMs: 72_000 },
     { kind: "record", at: null, type: "mystery", summary: '{"type":"mystery"}' },
-    { kind: "pull-request", at: 10, number: 7, url: "https://github.com/acme/shop/pull/7", repository: "acme/shop" },
-    { kind: "pull-request", at: 10, number: 7, url: "https://github.com/acme/shop/pull/7", repository: "acme/shop" },
+    { kind: "pull-request", at: 10, number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", repository: "octocat/Spoon-Knife" },
+    { kind: "pull-request", at: 10, number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", repository: "octocat/Spoon-Knife" },
     { kind: "prompt", at: 10, text: "/compact", from: "command" },
     { kind: "queue", at: 11, op: "enqueue", text: "and then deploy" },
     { kind: "tool", at: 12, id: "t3", name: "Read", input: { file_path: "hello.py" } },
@@ -2278,7 +2292,7 @@ test("conversation prints a Claude worker's transcript, and send types into its 
     "[error] The model failed",
     "[turn] 72s",
     '[record] mystery: {"type":"mystery"}',
-    "[pull request] Opened pull request #7: https://github.com/acme/shop/pull/7",
+    "[pull request] Opened pull request #7: https://github.com/octocat/Spoon-Knife/pull/7",
     "> [slash command] /compact",
   ];
   assert.equal((await s.nexus(["conversation", thread.id])).stdout, [...transcript, '[tool] Read {"file_path":"hello.py"} (no result)', "(queued) > and then deploy"].join("\n\n") + "\n");

@@ -479,9 +479,14 @@ h4.md-h { font-size: 1.07em; }
 .main[data-view="file"] .dock { display: none; }
 /* a Claude worker's terminal is its prompt, so under the terminal the composer gives way to it */
 .main[data-view="term"] #composer { display: none; }
-.refresh-state { position: fixed; left: 50%; top: 56px; transform: translateX(-50%); z-index: 40; max-width: calc(100vw - 24px); margin: 0; padding: 6px 12px; font-size: 12px; color: var(--warn); background: var(--bg); border: 1px solid var(--line); border-radius: 999px; box-shadow: var(--pop); }
+/* What failed where the person acted, and why the page is not updating, over every view of every page, the dock's included, which a diff hides. */
+.notices { position: fixed; left: 50%; top: 56px; transform: translateX(-50%); z-index: 40; width: max-content; max-width: min(640px, calc(100vw - 24px)); display: grid; justify-items: center; gap: 6px; }
+.refresh-state { margin: 0; padding: 6px 12px; font-size: 12px; color: var(--warn); background: var(--bg); border: 1px solid var(--line); border-radius: 999px; box-shadow: var(--pop); }
 .refresh-state:empty { display: none; }
 .refresh-reload { padding: 0; font: inherit; color: var(--accent); background: none; border: 0; cursor: pointer; text-decoration: underline; }
+.alert { display: flex; align-items: baseline; gap: 10px; box-shadow: var(--pop); }
+.alert-text { flex: 1; min-width: 0; }
+.alert .btn { flex: none; }
 #run:empty { display: none; }
 /* the agent's state, one line above the composer, with the attach command at its end */
 .state-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-size: 12.5px; border-radius: 10px; padding: 4px 4px 4px 12px; min-height: 32px; color: var(--text-2); background: var(--raised); }
@@ -577,6 +582,7 @@ h4.md-h { font-size: 1.07em; }
 .tv-status { flex: 1 1 10em; min-width: 0; }
 .tv-head .btn { background: var(--term-raised); color: var(--term-text); border-color: var(--term-line); box-shadow: none; }
 .tv-head .btn-ghost { background: transparent; border-color: transparent; }
+.tv-clip { margin: 0; padding: 4px 12px; font-size: 12px; color: var(--term-text); background: var(--term-raised); border-bottom: 1px solid var(--term-line); overflow-wrap: anywhere; }
 .tv-host { flex: 1; min-height: 0; font-family: var(--mono); }
 /* xterm.css paints the viewport black, which shows around the rows in a terminal of another colour. */
 .tv-host .xterm .xterm-viewport { background-color: var(--term-bg); }
@@ -755,9 +761,8 @@ h4.md-h { font-size: 1.07em; }
  * scrolling on its own, with the preview of a picked thread over the work in flight.
  */
 .home-seg { display: none; }
-.split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); grid-template-areas: "error error" "needs flight"; }
-.split.peeking { grid-template-rows: auto auto minmax(0, 1fr); grid-template-areas: "error error" "needs peek" "needs flight"; }
-.split-error { grid-area: error; margin: 0 22px 8px; }
+.split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); grid-template-areas: "needs flight"; }
+.split.peeking { grid-template-rows: auto minmax(0, 1fr); grid-template-areas: "needs peek" "needs flight"; }
 .split-needs { grid-area: needs; overflow-y: auto; padding: 14px 22px 32px 28px; }
 .split-flight { grid-area: flight; overflow-y: auto; padding: 14px 22px 32px; border-left: 1px solid var(--line-soft); }
 .split-peek { grid-area: peek; display: none; min-height: 0; padding: 14px 22px 4px; border-left: 1px solid var(--line-soft); }
@@ -1108,7 +1113,6 @@ meter:-moz-meter-sub-sub-optimum::-moz-meter-bar { background: var(--bad); }
   .split, .split.peeking { display: block; overflow-y: auto; }
   .split-needs, .split-flight { padding: 8px 12px 24px; border: 0; overflow: visible; }
   .main:has(#side-needs:checked) .split-flight, .main:has(#side-flight:checked) .split-needs { display: none; }
-  .split-error { margin: 0 12px 8px; }
   .split-peek, .split.peeking .split-peek:not(:empty) { position: fixed; left: 0; right: 0; bottom: 0; z-index: 15; padding: 0 8px max(8px, env(safe-area-inset-bottom)); border: 0; }
   .split:not(.peeking) .split-peek { display: none; }
   .peek { max-height: 70vh; box-shadow: var(--pop); border-radius: 14px; }

@@ -13,6 +13,8 @@ const foreignReads: Record<string, string[]> = {
   "usage-store.ts": ["threads"],
   // reconcileAsks reads each worker and its entries.
   "question-store.ts": ["claude_workers", "claude_entries"],
+  // claudeEntries reads the thread's project's repository, which a stored pull request must be of.
+  "claude-worker.ts": ["threads", "projects"],
 };
 
 const tableNames = (source: string, pattern: RegExp) => [...source.matchAll(pattern)].map((match) => match[1]!);
