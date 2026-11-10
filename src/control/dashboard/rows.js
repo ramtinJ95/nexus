@@ -7,7 +7,7 @@ import { streamRoutes } from "../../contract/streams.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { rowEvents } from "./contract.ts";
 
-export function startRows({ api, notifications, health = () => {}, caughtUp = () => {}, currentThread, focused, activeTab }, { window, navigator, document, BroadcastChannel, EventSource, Date, AbortSignal, setTimeout, clearTimeout, setInterval } = globalThis) {
+export function startRows({ api, notifications, health = () => {}, caughtUp = () => {}, changed = () => {}, currentThread, focused, activeTab }, { window, navigator, document, BroadcastChannel, EventSource, Date, AbortSignal, setTimeout, clearTimeout, setInterval } = globalThis) {
   const request = requestOver(api);
   // One tab of the browser holds the lock, follows those events and reads the thread list, and the other tabs show the
   // rows it hands them, so a hidden tab notifies without a request or a stream of its own. Every tab showing that one
@@ -18,7 +18,13 @@ export function startRows({ api, notifications, health = () => {}, caughtUp = ()
   const sharing = rowsChannel !== null;
   let following = false;
   let due;
+  let shownRows = null;
   function showRows(rows, now) {
+    // The page's regions show these rows too, so a change reads them now rather than at the next poll, which would
+    // leave the sidebar and Needs you behind the notice.
+    const text = JSON.stringify(rows);
+    if (shownRows !== null && text !== shownRows) changed();
+    shownRows = text;
     const held = notifications(rows, now);
     // A turn over an unread reply may stop with no event, and the reply notifies once a read finds it stopped.
     const next = rows.some((row) => row.attention === "reply" && row.working) ? Math.min(held ?? Infinity, now + 1000) : held;

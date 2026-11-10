@@ -23,7 +23,7 @@ import { checkCaller, mint, reviewerCaller, tokenBlocks, verifyCaller } from "./
 import { scopedFlight } from "../single-flight.ts";
 import type { SecretGrant } from "../protocol/secret-grants.ts";
 import { agentKinds } from "../protocol/agent-kinds.ts";
-import { defaultClaudeModel, modelFamily, secondReviewerModels } from "../protocol/models.ts";
+import { defaultClaudeModel } from "../protocol/models.ts";
 import type { ChangedFile, GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { Refusal } from "./refusal.ts";
 import type { Inbox } from "./inbox.ts";
@@ -165,13 +165,12 @@ export function reviewerFor(builder: { claude: boolean; model: string }, secrets
 }
 
 /**
- * The second reviewer's model, another than `taken`, the builder's and the first reviewer's, or why none can run. The
- * harness runs one model for every thread, which one of the two already runs, so the second is a Claude worker.
+ * The second reviewer is an independent Claude read on the default model, even when another participant runs it.
+ * `taken` serves only the no-token refusal message.
  */
 export function secondReviewerFor(taken: readonly string[], secrets: readonly SecretGrant[]): { model: string } | { why: string } {
-  if (!grantsClaude(secrets)) return { why: `the harness runs only ${taken.join(" and ")}, and the project grants no Claude token for a Claude worker on another model. Grant CLAUDE_CODE_OAUTH_TOKEN for api.anthropic.com to the project (\`nexus project edit\`)` };
-  const model = secondReviewerModels.find((m) => !taken.some((t) => modelFamily(t) === modelFamily(m)));
-  return model === undefined ? { why: `every Claude model Nexus offers a second reviewer, ${secondReviewerModels.join(", ")}, is the builder's or the first reviewer's` } : { model };
+  if (!grantsClaude(secrets)) return { why: `the harness runs only ${taken.join(" and ")}, and the project grants no Claude token for a Claude worker. Grant CLAUDE_CODE_OAUTH_TOKEN for api.anthropic.com to the project (\`nexus project edit\`)` };
+  return { model: defaultClaudeModel };
 }
 
 export function reviewLoop(deps: ReviewDeps) {
@@ -1076,7 +1075,7 @@ export function reviewLoop(deps: ReviewDeps) {
     }
     return { ...r, reviewerStarted: true };
   }
-  /** A second reviewer for `rule` on a model neither the builder nor the first reviewer runs, to start, or why none can run. */
+  /** An independent second reviewer for `rule` on the default Claude model, to start, or why none can run. */
   const secondFor = (rule: string, models: Review["models"], secrets: Project["secrets"]): SecondReviewer => {
     const model = secondReviewerFor([models.builder, models.reviewer], secrets);
     return "why" in model ? { kind: "none", rule, why: model.why } : starting(rule, model.model);

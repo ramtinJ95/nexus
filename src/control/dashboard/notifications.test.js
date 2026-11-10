@@ -132,7 +132,7 @@ test("a page owes a seen mark once for each reply it shows, so one marked unseen
  * One dashboard tab's attention code from rows.js, run on fakes of the browser. Tabs given the same `browser` share its
  * BroadcastChannel and its one Web Lock, which the first tab to ask holds.
  */
-function tab(browser, { fetch, now = () => 0, notify = () => {}, health = () => {}, caughtUp = () => {}, conversation = null, focused = true, timeout = (ms) => AbortSignal.timeout(ms), locks = true, visible = true }) {
+function tab(browser, { fetch, now = () => 0, notify = () => {}, health = () => {}, caughtUp = () => {}, changed = () => {}, conversation = null, focused = true, timeout = (ms) => AbortSignal.timeout(ms), locks = true, visible = true }) {
   const timers = [];
   const intervals = [];
   const favicon = { href: "/assets/favicon.svg?v=0123456789ab" };
@@ -158,7 +158,7 @@ function tab(browser, { fetch, now = () => 0, notify = () => {}, health = () => 
     navigator: locks ? { locks: { request: (_, hold) => { if (!browser.locked) { browser.locked = true; hold(); } return new Promise(() => {}); } } } : {},
     document: doc, fetch, Date: { now },
     AbortSignal: { timeout }, setTimeout: (f, ms) => timers.push({ f, at: now() + ms }), clearTimeout: () => timers.splice(0),
-    setInterval: (f, ms) => intervals.push({ f, ms }), notifications: coordinator(notify), health, caughtUp, owedSeen,
+    setInterval: (f, ms) => intervals.push({ f, ms }), notifications: coordinator(notify), health, caughtUp, changed, owedSeen,
     currentThread: () => "t1", focused: () => focused, activeTab: () => null, api: apiOver({ fetch }),
   };
   const code = startRows(context, context);
@@ -253,6 +253,25 @@ test("a hidden tab notifies from the rows the tab that follows the events read, 
   await settle();
   assert.deepEqual(notified, { leader: ["waiting", "reply"], hidden: ["waiting", "reply"] }, "every tab holds the reply back to the same moment");
   assert.equal(reads.hidden, 0, "the hidden tab read nothing");
+});
+
+test("every tab reads its page again once when the rows it shows change, and not for rows it showed already", async () => {
+  let listed = [{ id: "t1", title: "Fix", attention: null, working: false, lastReplyAt: null }];
+  const shared = browser();
+  const changes = { leader: 0, hidden: 0 };
+  const page = (name) => tab(shared, { changed: () => { changes[name] += 1; }, fetch: async () => json(listed) });
+  const leader = page("leader");
+  page("hidden");
+  await settle();
+  assert.deepEqual(changes, { leader: 0, hidden: 0 }, "the rows the page loaded with are no change");
+  await leader.readRows();
+  assert.deepEqual(changes, { leader: 0, hidden: 0 }, "a read that finds the same rows reads no page");
+  listed = [{ ...listed[0], attention: "failed" }];
+  shared.streams[0].onmessage({});
+  await settle();
+  assert.deepEqual(changes, { leader: 1, hidden: 1 }, "a changed row reads each tab's page once");
+  await leader.readRows();
+  assert.deepEqual(changes, { leader: 1, hidden: 1 });
 });
 
 test("the tab that follows the events reads every second while a turn runs over an unread reply, as its stop sends no event", async () => {
