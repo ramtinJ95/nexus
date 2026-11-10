@@ -20,7 +20,7 @@ interface Page { status: number; headers: Record<string, string>; body: string }
  * that refuses the page its storage throws on reading it, and the device's theme stands. It names the platform too,
  * as find.js tells a Mac, so each shortcut shows the keys of the device it is on from the first paint.
  */
-export const themeScript = `{ let theme = null; try { theme = localStorage.getItem(${JSON.stringify(storageKeys.theme)}); } catch {} const root = document.documentElement; root.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); root.dataset.platform = /^(Mac|iP)/.test(navigator.platform) ? "mac" : "other"; }`;
+export const themeScript = `{ let theme = null, side = null; try { theme = localStorage.getItem(${JSON.stringify(storageKeys.theme)}); side = localStorage.getItem(${JSON.stringify(storageKeys.side)}); } catch {} const root = document.documentElement; root.dataset.theme = theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); root.dataset.platform = /^(Mac|iP)/.test(navigator.platform) ? "mac" : "other"; if (side === "folded") root.dataset.side = side; }`;
 
 const pageHeaders = {
   "content-type": "text/html; charset=utf-8",

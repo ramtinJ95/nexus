@@ -57,7 +57,7 @@ export function layout(c: Context, page: Shell): Html {
 </head>
 <body>
 <a class="skip" href="#main">Skip to the page</a>
-<div class="app${page.inspector !== undefined && " has-inspect"}">
+<div class="app">
 ${sidebar(c, page.active, page.nav)}
 <main class="main" id="main" tabindex="-1" data-poll-ms="${pollMs}"${page.page !== undefined && html` data-page="${page.page}"`}${page.activity !== undefined && html` data-activity="${page.activity}"`}>
 ${page.main}
