@@ -40,7 +40,8 @@ export type ClaudeEntry =
   | { kind: "turn"; at: number; durationMs: number }
   /**
    * Claude opened a pull request. Claude Code writes the record again each time it saves the session's metadata, so
-   * one pull request gives many entries, which a client shows once. `url` is an https URL.
+   * one pull request gives many entries, which a client shows once. `repository` is the project's GitHub repository
+   * and `url` the pull request `number` of it there, since the guest writes the record.
    */
   | { kind: "pull-request"; at: number; number: number; url: string; repository: string }
   /** A record the parser does not know, kept visible. `summary` is a short, cut rendering of it. */
@@ -125,11 +126,12 @@ const readScript = onClaudeTranscript(`size=$(($(wc -c < "$f"))); start=$2; n=$(
 echo "$size $start $n"; tail -c +$((start - n + 1)) "$f" | head -c $((n + $3))`, noTranscript);
 
 /**
- * Reads the session's transcript from `cursor` over one raw pipe and parses the complete lines it gets. Null when the
- * session has no transcript yet (Claude writes none before its first prompt). `more` is true when the file holds
- * bytes past what this read took, so the caller reads again.
+ * Reads the session's transcript from `cursor` over one raw pipe and parses the complete lines it gets, for a thread
+ * of a project whose GitHub repository is `repo`, null for one on no GitHub repository. Null when the session has no
+ * transcript yet (Claude writes none before its first prompt). `more` is true when the file holds bytes past what
+ * this read took, so the caller reads again.
  */
-export async function readTranscript(open: OpenPipe, session: string, cursor: TranscriptCursor, projects = claudeProjects, deadlineMs = transcriptDeadlineMs): Promise<TranscriptRead | null> {
+export async function readTranscript(open: OpenPipe, session: string, cursor: TranscriptCursor, repo: string | null, projects = claudeProjects, deadlineMs = transcriptDeadlineMs): Promise<TranscriptRead | null> {
   checkSession(session);
   const stream = await open(["sh", "-c", readScript, session, projects, String(cursor.offset), String(maxRecordBytes), cursor.before, String(beforeBytes)]);
   const { code, out } = await pipeOutput(stream, { deadlineMs, maxBytes: maxReplyBytes, what: "the transcript", okCodes: [0, noTranscript] });
@@ -144,7 +146,7 @@ export async function readTranscript(open: OpenPipe, session: string, cursor: Tr
     throw new Error("the transcript reader's reply is malformed");
   }
   const reset = start !== cursor.offset;
-  const next = consumed(body, { offset: start, skipping: !reset && cursor.skipping });
+  const next = consumed(body, { offset: start, skipping: !reset && cursor.skipping }, repo);
   const before = sha256(Buffer.concat([preceding, body.subarray(0, next.cursor.offset - start)]).subarray(-beforeBytes));
   return { entries: next.entries, cursor: { ...next.cursor, before }, more: size > start + body.length, reset };
 }
@@ -201,7 +203,7 @@ function recordImages(record: unknown): { item: number; block: Fields }[] {
  * partial line waits for the next read. A full read with no newline is the middle of a record too long to read, so
  * the cursor skips it, and the newline that ends it gives one `record` entry in its place.
  */
-function consumed(body: Buffer, cursor: Omit<TranscriptCursor, "before">): { entries: ClaudeEntry[]; cursor: Omit<TranscriptCursor, "before"> } {
+function consumed(body: Buffer, cursor: Omit<TranscriptCursor, "before">, repo: string | null): { entries: ClaudeEntry[]; cursor: Omit<TranscriptCursor, "before"> } {
   const last = body.lastIndexOf(0x0a);
   if (last < 0) {
     const skipping = cursor.skipping || body.length === maxRecordBytes;
@@ -215,7 +217,7 @@ function consumed(body: Buffer, cursor: Omit<TranscriptCursor, "before">): { ent
     const bytes = body.subarray(start, end);
     const line = bytes.toString("utf8");
     if (line.trim() !== "") {
-      const read = entriesOf(line, at, { offset: cursor.offset + start, line: bytes });
+      const read = entriesOf(line, at, { offset: cursor.offset + start, line: bytes, repo });
       entries.push(...read.entries);
       at = read.at ?? at;
     }
@@ -229,7 +231,20 @@ function consumed(body: Buffer, cursor: Omit<TranscriptCursor, "before">): { ent
  * images are located as if the line were the file's first.
  */
 export function parseRecord(line: string): ClaudeEntry[] {
-  return entriesOf(line, 0, { offset: 0, line: Buffer.from(line) }).entries;
+  return entriesOf(line, 0, { offset: 0, line: Buffer.from(line), repo: null }).entries;
+}
+
+/** Whether `url` is pull request `number` of the GitHub repository `repo`, whose names ignore case. */
+const ofRepo = (url: string, number: number, repo: string | null): repo is string => repo !== null && url.toLowerCase() === `https://github.com/${repo}/pull/${number}`.toLowerCase();
+
+/**
+ * A stored entry as a client sees it, for a thread of a project on the GitHub repository `repo`. A pull request
+ * stored before the reader checked its repository, and not of `repo`, becomes a `record` entry in its place, so the
+ * stored entries keep their numbers.
+ */
+export function storedEntry(entry: ClaudeEntry, repo: string | null): ClaudeEntry {
+  if (entry.kind !== "pull-request" || ofRepo(entry.url, entry.number, repo)) return entry;
+  return { kind: "record", at: entry.at, type: "pr-link", summary: "a pull request link that is not of the project's repository" };
 }
 
 /**
@@ -255,8 +270,11 @@ function entriesOf(line: string, lastAt: number, where: Where): { entries: Claud
 }
 
 type Fields = Readonly<Record<string, unknown>>;
-/** Where a record's line starts in the file, and its bytes, which only a record with images hashes. */
-interface Where { offset: number; line: Uint8Array }
+/**
+ * Where a record's line starts in the file, and its bytes, which only a record with images hashes. `repo` is the
+ * project's GitHub repository, which a pull request must be of.
+ */
+interface Where { offset: number; line: Uint8Array; repo: string | null }
 type Parse = (r: Fields, at: number, where: Where) => ClaudeEntry[];
 /** Parses a string-content form, keyed in `forms` by its leading tag. */
 type Form = (text: string, r: Fields, at: number) => ClaudeEntry[];
@@ -282,12 +300,12 @@ const records = table<Parse>({
     const type = str(fields(r.attachment, "attachment").type, "attachment.type");
     return (attachments.get(type) ?? shown(`attachment/${type}`))(r, at, where);
   },
-  "pr-link": (r, at) => {
+  "pr-link": (r, at, { repo }) => {
     if (typeof r.prNumber !== "number" || !Number.isSafeInteger(r.prNumber) || r.prNumber < 1) throw new Error("prNumber is not a pull request's number");
     const url = str(r.prUrl, "prUrl");
-    // The URL becomes a link, so nothing but a whole https URL may pass.
-    if (!URL.canParse(url) || new URL(url).protocol !== "https:" || url.length > textLimits.summary) throw new Error("prUrl is not an https URL");
-    return [{ kind: "pull-request", at, number: r.prNumber, url, repository: cut(str(r.prRepository, "prRepository"), textLimits.summary) }];
+    // The guest writes the record and a client shows it as Nexus's own note, so it names only the project's pull request.
+    if (!ofRepo(url, r.prNumber, repo)) return [];
+    return [{ kind: "pull-request", at, number: r.prNumber, url: `https://github.com/${repo}/pull/${r.prNumber}`, repository: repo }];
   },
   "queue-operation": (r, at) => [{ kind: "queue", at, op: cut(str(r.operation, "operation"), textLimits.summary), text: r.content === undefined ? null : cut(str(r.content, "content"), textLimits.prompt) }],
 });
