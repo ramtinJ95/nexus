@@ -53,7 +53,8 @@ const node: Command = {
 
 export const nodesCommands: Readonly<Record<string, Command>> = {
   node,
-  "node show": node,
+  // A node may be named show, and `nexus node show` has always read its health.
+  "node show": { ...node, args: [0, 1], run: (api, [name = "show"], ...rest) => node.run(api, [name], ...rest) },
   nodes: {
     help: ["  nexus nodes"],
     args: [0, 0],

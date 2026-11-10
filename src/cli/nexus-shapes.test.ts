@@ -35,6 +35,10 @@ test("images, node show and thread show print what image list, node and show pri
   }
   assert.match((await s.nexus(["node", "--help"])).stdout, /nexus node \[show\] <name>/, "node's help names both spellings");
   assert.equal((await s.nexus(["node"])).code, 64, "node alone still wants a name");
+
+  const bare = await s.nexus(["node", "show"]);
+  assert.deepEqual([bare.code, bare.stderr], [4, "nexus: no node show\n"], "node show alone still asks for the node named show, as it always has");
+  assert.deepEqual(await s.nexus(["node", "show", "show"]), bare);
 });
 
 test("archive, unarchive, delete and seen take several threads, and one that fails stops none of the rest", async (t) => {
