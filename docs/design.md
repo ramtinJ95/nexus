@@ -625,7 +625,12 @@ reach every one of them: the image build starts no agent, and the hook writes
 only in a pylon a thread owns, which has the overlay's `~/.nexus/pylon.json`, so
 neither an image nor a template carries one. Running session state is a 30-minute lease independent of
 the retained log and of harness activity. Throttled PostToolUse heartbeats renew
-it; a dead or silent worker cannot keep its pylon awake indefinitely. At most 16
+it; a dead or silent worker cannot keep its pylon awake indefinitely. Claude Code
+waits for a command hook after every tool call, and the Node hook's start and
+imports took 86 ms of each in a 2-vCPU pylon, so `nexus-claude-hook` is a POSIX sh
+script that ends a heartbeat itself while the session's stamp is younger than the
+throttle, and runs `nexus-claude-hook.mjs` in Node for everything else, including
+AskUserQuestion's PostToolUse and any input whose first key is not `session_id`. At most 16
 session states per thread are kept, and ended or expired working rows are removed.
 Waiting persists without refreshing activity. Hook timestamps and bounded durable
 ordering cursors reject stale reports after an end; heartbeats renew existing

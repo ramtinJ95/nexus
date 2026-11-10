@@ -48,6 +48,7 @@ test("the Dockerfile copies each image file to where the contract says, and noth
   assert.deepEqual(copies, {
     "nexus": contract.nexusCli,
     "nexus-claude-hook": contract.claudeHook,
+    "nexus-claude-hook.mjs": helper("nexus-claude-hook.mjs"),
     "nexus-ask.ts": helper("nexus-ask.ts"),
     "nexus-contract.ts": helper("nexus-contract.ts"),
     "nexus-heartbeat.ts": helper("nexus-heartbeat.ts"),
@@ -88,5 +89,5 @@ test("the guest PATH reaches the helpers, and the agent setup runs with the flag
 });
 
 test("the Claude hook snapshots turns of the checkout the contract names", () => {
-  assert.ok(image("nexus-claude-hook").includes("snapshotTurn(checkoutDir, "));
+  assert.ok(image("nexus-claude-hook.mjs").includes("snapshotTurn(checkoutDir, "));
 });
