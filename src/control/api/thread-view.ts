@@ -12,6 +12,9 @@ import { judgmentView } from "../judgment.ts";
 import { reviewView } from "../review-view.ts";
 import { linkedName } from "../../services-file.ts";
 import type { BootInputs } from "../../protocol/spawn.ts";
+import type { PylonObservation } from "../../protocol/observations.ts";
+import type { NodeRecord } from "../node-store.ts";
+import type { NodeName, PylonId } from "../../ids.ts";
 import type { Project } from "../project.ts";
 import { observedPylon } from "../observed.ts";
 import { watchStopped } from "../pr-watch-model.ts";
@@ -33,15 +36,20 @@ function networkGrantsKey(network: BootInputs["network"]): string {
   });
 }
 
+/** The planner deletes a failed pylon all the same, so a deleted thread's pylon shows the delete. */
+const gaveUp = (t: Pick<Thread, "status">, failed: string | null) => failed !== null && t.status !== "deleted";
+
+function observedOn(node: NodeRecord): { online: boolean; pylons: ReadonlyMap<PylonId, PylonObservation> } {
+  return { online: node.state === "online", pylons: new Map(node.observation?.pylons.map((p) => [p.pylonId, p])) };
+}
+
 export function threadViews(registry: Registry, agents: ThreadAgents, options: { prWatchEnabled?: boolean | undefined }) {
   /** The thread's pylon, its node, what that node last reported of it, and what it is doing, from one read of each. */
   function pylonState(t: Pick<Thread, "pylonId" | "status">) {
     const pylon = registry.threads.pylon(t.pylonId)!;
     const node = registry.nodes.node(pylon.node)!;
     const observed = observedPylon({ nodes: { node: () => node } }, pylon) ?? "absent";
-    // The planner deletes a failed pylon all the same, so a deleted thread's pylon shows the delete.
-    const gaveUp = pylon.failed !== null && t.status !== "deleted";
-    return { pylon, node, observed, actualState: actualState(observed, registry.threads.job(pylon.pylonId) ?? null, node.state === "online", gaveUp) };
+    return { pylon, node, observed, actualState: actualState(observed, registry.threads.job(pylon.pylonId) ?? null, node.state === "online", gaveUp(t, pylon.failed)) };
   }
 
   function pylonOf({ pylon, node, observed, actualState }: ReturnType<typeof pylonState>, project: Project): ThreadDetail["pylon"] {
@@ -64,9 +72,18 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
     });
   }
 
-  function row(t: Thread): ThreadRow {
-    const { pylon, actualState } = pylonState(t);
-    return { ...t, attention: registry.threads.attention(t.id), desired: desiredPhase(t, Date.now()), pylon: { node: pylon.node, actualState, failed: pylon.failed } };
+  /** The threads' rows, which read each node's observation once however many of its pylons they list. */
+  function rows(threads: readonly Thread[]): ThreadRow[] {
+    const listed = registry.threads.listedPylons(threads.map((t) => t.pylonId));
+    const nodes = new Map<NodeName, ReturnType<typeof observedOn>>();
+    const nodeOf = (name: NodeName) => nodes.get(name) ?? nodes.set(name, observedOn(registry.nodes.node(name)!)).get(name)!;
+    const now = Date.now();
+    const prs = registry.prWatches.prNumbers(threads.map((t) => t.id));
+    return threads.map((t) => {
+      const { node, failed, job, attention } = listed.get(t.pylonId)!;
+      const { online, pylons } = nodeOf(node);
+      return { ...t, attention, desired: desiredPhase(t, now), pylon: { node, actualState: actualState(pylons.get(t.pylonId) ?? "absent", job, online, gaveUp(t, failed)), failed }, pullRequestNumbers: prs.get(t.id) ?? [] };
+    });
   }
 
   function detail(t: Thread): ServerDetail {
@@ -114,6 +131,6 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
     return view === null ? null : agentView(view);
   }
 
-  return { pylonState, row, detail, shown, conversation };
+  return { pylonState, rows, row: (t: Thread) => rows([t])[0]!, detail, shown, conversation };
 }
 export type ThreadViews = ReturnType<typeof threadViews>;

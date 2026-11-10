@@ -1,5 +1,5 @@
 import { afterSend, emptyReview, formatReview, kinds, linesLabel, noteOn, place, rangeOf, readReview, rowsOf } from "./review.js";
-import { el, present, showError } from "./page.js";
+import { el, holdReload, notify, present } from "./page.js";
 import { kept, storageKeys } from "./contract.ts";
 import { thread } from "./checkout.js";
 import { activeTab, fileView, showTab } from "./tab-bar.js";
@@ -9,6 +9,7 @@ import { activeTab, fileView, showTab } from "./tab-bar.js";
 // After t3code's AnnotatableCodeView and DiffCommentAnnotation. Copyright (c) 2026 T3 Tools Inc., MIT licence; see THIRD_PARTY_NOTICES.md.
 const reviewKey = storageKeys.review(thread);
 export let review = readReview(kept.read(reviewKey));
+holdReload(() => review.notes.length > 0 || review.draft !== null);
 const saveReview = () => kept.write(reviewKey, JSON.stringify(review));
 const newNoteId = () => `note:${Date.now().toString(36)}${[...crypto.getRandomValues(new Uint8Array(4))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 /** The diff on show, `{ view, path, rows }` with each entry's rows, or null when no diff's lines are drawn. */
@@ -239,11 +240,12 @@ function decorate() {
 /** Puts the review in the composer, in place of the review put there before if the composer still holds it. */
 function composeReview() {
   const prompt = document.getElementById("prompt-text");
-  if (prompt === null) return showError("action-error", new Error("This thread takes no messages now, so the review can't go to the composer."));
+  if (prompt === null) return notify(new Error("This thread takes no messages now, so the review can't go to the composer."));
   const text = formatReview(review.notes);
   const before = review.composed?.text;
   prompt.value = before !== undefined && prompt.value.includes(before) ? prompt.value.replace(before, () => text)
     : prompt.value.trim() === "" ? text : `${prompt.value.trimEnd()}\n\n${text}`;
+  prompt.dispatchEvent(new Event("input", { bubbles: true }));
   review.composed = { text, ids: review.notes.map((n) => n.id) };
   saveReview();
   decorate();

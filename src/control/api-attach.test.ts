@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout as sleep } from "node:timers/promises";
 import { PassThrough } from "node:stream";
-import { maxStreams } from "./api/sse.ts";
+import { maxStreams, maxStreamsPerCaller } from "./api/sse.ts";
 import type { AttachTiming } from "./attach.ts";
 import type { Thread } from "./thread-store.ts";
 import { processStream } from "../process-stream.ts";
@@ -13,7 +13,7 @@ import { terminalSize } from "../guest-terminal.ts";
 import { runningPylon, testObservation, until } from "../test-support/kit.ts";
 import type { TailnetNodeId } from "../ids.ts";
 import type { ByteStream, StreamEnd } from "../protocol/streams.ts";
-import { node, laptop, claudeSession, withThread, observeRunning, attachTo, attachPathOf } from "../test-support/api-kit.ts";
+import { node, laptop, phone, streamsAs, claudeSession, withThread, observeRunning, attachTo, attachPathOf } from "../test-support/api-kit.ts";
 import { attachScript } from "../guest-contract.ts";
 
 const fastAttach: AttachTiming = { pingMs: 60_000, waitMs: 5_000, pollMs: 20, hangUpMs: 5_000 };
@@ -220,13 +220,24 @@ test("a closing API drops an upgrade whose whois never returns after its wait", 
   assert.equal(await stalled, "dropped", "the upgrade's socket was dropped, not answered");
 });
 
-test("a terminal takes a place among the streams", async (t) => {
+test("a terminal takes a place among the streams, and among its caller's share of them", async (t) => {
   const s = await withThread(t, { attachTiming: fastAttach });
-  const open = Array.from({ length: maxStreams }, () => s.events(`/v1/threads/${s.thread.id}/events`));
-  for (const stream of open) await stream.next();
-  const extra = await attachTo(s.port, attachPathOf(s.thread.id));
-  assert.ok("status" in extra && extra.status === 503, JSON.stringify(extra));
-  for (const stream of open) stream.close();
+  const [mine, theirs] = [await streamsAs(s, [laptop], `/v1/threads/${s.thread.id}/events`), await streamsAs(s, [phone], `/v1/threads/${s.thread.id}/events`)];
+  t.after(() => { for (const stream of mine) stream.close(); });
+  const refusal = async () => {
+    const extra = await attachTo(s.port, attachPathOf(s.thread.id));
+    assert.ok("status" in extra && extra.status === 503, JSON.stringify(extra));
+    return extra.body.error;
+  };
+  assert.equal(await refusal(), `${maxStreams} streams are open, the most this control plane serves at once`);
+  for (const stream of theirs) stream.close();
+  await until("the phone's streams gave their places back", () => s.fake.watching(s.thread.id) === maxStreamsPerCaller);
+  assert.equal(await refusal(), `${maxStreamsPerCaller} streams of ${laptop} are open, the most one caller holds at once`);
+  s.callAs(phone);
+  const a = await attachTo(s.port, attachPathOf(s.thread.id));
+  assert.ok("ws" in a, "another caller's terminal opens");
+  a.ws.close();
+  await a.closed;
 });
 
 test("an upgrade the API serves no WebSocket for is handled as an ordinary request", async (t) => {
@@ -234,5 +245,23 @@ test("an upgrade the API serves no WebSocket for is handled as an ordinary reque
   const upgrade = { connection: "upgrade", upgrade: "websocket", "sec-websocket-version": "13", "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==" };
   assert.equal((await s.call("GET", "/v1/projects", undefined, upgrade)).status, 200);
   const other = await s.call("GET", attachPathOf(s.thread.id), undefined, { connection: "upgrade", upgrade: "h2c" });
-  assert.deepEqual(other, { status: 404, body: { error: `no route /v1/threads/${s.thread.id}/attach`, code: "no-route", retryable: false } });
+  assert.deepEqual(other, { status: 426, body: { error: "the attach route answers only a WebSocket upgrade", code: null, retryable: false } });
+});
+
+test("a GET of the attach route that does not upgrade answers the refusal the upgrade gets, which a browser's WebSocket cannot read", async (t) => {
+  const s = await withThread(t, { attachTiming: fastAttach });
+  const [mine, theirs] = [await streamsAs(s, [laptop], `/v1/threads/${s.thread.id}/events`), await streamsAs(s, [phone], `/v1/threads/${s.thread.id}/events`)];
+  t.after(() => { for (const stream of mine) stream.close(); });
+  const refusedAlike = async (error: string) => {
+    const refusal = { error, code: null, retryable: false };
+    assert.deepEqual(await attachTo(s.port, attachPathOf(s.thread.id)), { status: 503, body: refusal });
+    assert.deepEqual(await s.call("GET", attachPathOf(s.thread.id)), { status: 503, body: refusal });
+  };
+  await refusedAlike(`${maxStreams} streams are open, the most this control plane serves at once`);
+  for (const stream of theirs) stream.close();
+  await until("the phone's streams gave their places back", () => s.fake.watching(s.thread.id) === maxStreamsPerCaller);
+  await refusedAlike(`${maxStreamsPerCaller} streams of ${laptop} are open, the most one caller holds at once`);
+  mine.pop()!.close();
+  await until("a closed stream frees its place", async () => (await s.call("GET", attachPathOf(s.thread.id))).status === 426);
+  assert.equal((await s.call("GET", `/v1/threads/${s.thread.id}/attach?cols=0&rows=30`)).status, 400, "a bad query is refused as the upgrade refuses it");
 });

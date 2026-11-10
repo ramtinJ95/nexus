@@ -71,6 +71,7 @@ function projectText(p: Project): string {
     `node ${p.defaultNode}, branch ${p.defaultBranch}, ${cpus} CPUs, ${memoryGiB} GiB memory, ${diskGiB} GiB disk`,
     `hosts: ${listText(p.allowedHosts)}. logins: ${listText(p.logins)}. secrets: ${listText(p.secrets.map((grant) => grant.name))}`,
     ...p.gitIdentity == null ? [] : [`git identity: ${p.gitIdentity.name} <${p.gitIdentity.email}>`],
+    ...p.templateInputs === undefined || p.templateInputs.length === 0 ? [] : [`template inputs: ${listText(p.templateInputs)}`],
     `${autoReviewText(p)}, ${pipelineText(p)}`,
     ...p.secondReview == null ? [] : [secondReviewText(p)],
     "",
@@ -105,6 +106,7 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
       "  nexus project edit <id> [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]",
       "    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...",
       "    [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]",
+      "    [--template-input PATH]... [--clear-template-inputs]   repository files, such as package-lock.json, that key the project's templates with .nexus/setup",
       "    [--auto-review off|review|land|yolo]   review each builder's PR on its own, land it too, and with yolo waive the holds you may; land and yolo need a deployer",
       "    [--pipeline off|approve|start]    turn pipeline items into threads, once the person approves each or on their own",
       "    [--second-reviewer off|on|always|reserved,lines=N]   a second reviewer on another model for the PRs the rule names",
@@ -114,6 +116,7 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
       node: { type: "string" }, branch: { type: "string" }, ...resourceOptions,
       "allow-host": { type: "string", multiple: true }, login: { type: "string", multiple: true }, secret: { type: "string", multiple: true },
       "clear-hosts": { type: "boolean" }, "clear-logins": { type: "boolean" }, "clear-secrets": { type: "boolean" },
+      "template-input": { type: "string", multiple: true }, "clear-template-inputs": { type: "boolean" },
       "git-name": { type: "string" }, "git-email": { type: "string" }, "clear-git-identity": { type: "boolean" },
       "auto-review": { type: "string" }, pipeline: { type: "string" }, "rules-file": { type: "string" }, "clear-rules": { type: "boolean" },
       "second-reviewer": { type: "string" },
@@ -125,7 +128,7 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
       }
       const resources = resourcesOf(v);
       if (resources !== undefined) patch.resources = resources;
-      for (const [flag, clear, field] of [["allow-host", "clear-hosts", "allowedHosts"], ["login", "clear-logins", "logins"], ["secret", "clear-secrets", "secrets"]] as const) {
+      for (const [flag, clear, field] of [["allow-host", "clear-hosts", "allowedHosts"], ["login", "clear-logins", "logins"], ["secret", "clear-secrets", "secrets"], ["template-input", "clear-template-inputs", "templateInputs"]] as const) {
         if (v[clear] && v[flag] !== undefined) throw new CliError("invalid", `--${clear} conflicts with --${flag}`);
         if (v[clear] || v[flag] !== undefined) patch[field] = flag === "secret" ? strs(v, flag).map(secretGrantOf) : strs(v, flag);
       }

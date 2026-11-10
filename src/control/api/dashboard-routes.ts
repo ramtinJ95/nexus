@@ -29,7 +29,7 @@ import { ok } from "../dashboard/view.ts";
 import type { ClusterView, Context, FoldView, Latest, NodeReading, Peek, ThreadView } from "../dashboard/context.ts";
 import { needsOf } from "../work.ts";
 import { asset } from "../dashboard/assets.ts";
-import { peekParam } from "../dashboard/contract.ts";
+import { findText, peekParam } from "../dashboard/contract.ts";
 import { notFound } from "../dashboard/shell.ts";
 import { home, foldPage } from "../dashboard/home.ts";
 import { usagePage } from "../dashboard/usage-page.ts";
@@ -52,7 +52,7 @@ import { readHealth } from "./node-routes.ts";
 type Caller = { caller: TailnetNodeId; roles: ReadonlySet<Role> };
 
 /** The thread as the list would report it, from its detail, so its state agrees with the rest of the detail. */
-const rowOf = (d: ThreadDetail): ThreadRow => ({ ...d.thread, attention: d.attention, desired: d.desired, pylon: d.pylon });
+const rowOf = (d: ThreadDetail): ThreadRow => ({ ...d.thread, attention: d.attention, desired: d.desired, pylon: d.pylon, pullRequestNumbers: d.pullRequests.map((pr) => pr.number) });
 
 function latestOf(d: ThreadDetail, items: readonly Item[]): Latest {
   const reply = items.findLast((i) => i.kind === "agent" && i.text.trim() !== "");
@@ -79,6 +79,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
     // The sidebar and the home table show the same threads.
     const rows = new Map<ThreadId, ThreadRow>();
     let reviews: readonly Review[] | undefined;
+    let prs: ReadonlyMap<ThreadId, number[]> | undefined;
     const threads = registry.threads.threads();
     // registry.threads() is in the order registry.threads(project) is, so each project's keeps its order.
     const byProject: ReadonlyMap<string, readonly Thread[]> = Map.groupBy(threads, (t) => t.project);
@@ -93,6 +94,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
       needs: needsOf({ registry, now, threads: () => threads, queuedIn }, detail),
       reviews: () => reviews ??= registry.reviews.reviews(),
       row: (t) => rows.get(t.id) ?? rows.set(t.id, kit.row(t)).get(t.id)!,
+      find: (t) => findText(t, (prs ??= registry.prWatches.prNumbers()).get(t.id)),
       thread: (id) => registry.threads.thread(id),
       title: (id) => registry.threads.thread(id)?.title ?? registry.queue.queuedThread(id)?.title ?? id,
       stage: (id) => threadStage(registry, id, now),
@@ -179,8 +181,8 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
       if (project === undefined) return { ...ok(notFound(c, `No project ${id!}.`)), status: 404 };
       const page = Number(r.query.get("page"));
       const cancelled = kind === "quiet" ? [] : registry.queue.queuedThreads().filter((q) => q.status === "archived" || q.status === "deleted").toSorted((a, b) => b.createdAt - a.createdAt).map((q) => queuedView(registry, q));
-      const fold: FoldView = { projects: project === null ? registry.projects.projects() : [project], offline: offline(), cancelled };
-      return ok(foldPage(c, kind, fold, Number.isInteger(page) && page > 0 ? page : 1));
+      const fold: FoldView = { project: project?.id ?? null, projects: project === null ? registry.projects.projects() : [project], offline: offline(), cancelled };
+      return ok(foldPage(c, kind, fold, Number.isInteger(page) && page > 0 ? page : 1, r.query.get("q")?.trim() ?? ""));
     }]),
     ["GET", /^\/threads\/([^/]+)$/, anyAllowed, async (m, r) => {
       const thread = registry.threads.thread(m[1]! as ThreadId);
@@ -207,11 +209,11 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
       };
       return ok(threadPage(c, page, r.query.has("streaming")));
     }],
-    ["GET", /^\/threads\/([^/]+)\/stream$/, anyAllowed, ([, id]) => {
+    ["GET", /^\/threads\/([^/]+)\/stream$/, anyAllowed, ([, id], { caller }) => {
       const t = kit.thread(id!, { status: "kept" });
       const agent = kit.agentOf(t);
       const reader = live(t, registry.threads.claudeWorker(t.id)?.model ?? null, itemsOf(t.id));
-      return { stream: (res) => kit.stream(res, t, () => agent.watch(t), reader.frames, reader.leave) };
+      return { stream: (res) => kit.stream(res, caller, t, () => agent.watch(t), reader.frames, reader.leave) };
     }],
     ["GET", /^\/nodes\/([^/]+)$/, anyAllowed, async (m, r) => {
       const name = m[1]! as NodeName;

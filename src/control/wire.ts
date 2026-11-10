@@ -93,7 +93,8 @@ export interface ThreadSaid {
 export interface ListeningPort { port: number; service: string | null; preview: Preview | null }
 
 /** A thread as the list reports it, with what the planner wants of its pylon and what its node last reported. */
-export type ThreadRow = Thread & { attention: Attention; desired: DesiredPhase; pylon: Pick<ThreadDetail["pylon"], "node" | "actualState" | "failed"> };
+/** `pullRequestNumbers` are the numbers of the pull requests linked to the thread, in the order they were linked. */
+export type ThreadRow = Thread & { attention: Attention; desired: DesiredPhase; pylon: Pick<ThreadDetail["pylon"], "node" | "actualState" | "failed">; pullRequestNumbers: number[] };
 
 /** What `GET /v1/whoami` tells a caller about itself: its tailnet node, and what this control plane lets it do. */
 export interface Whoami { node: TailnetNodeId; allowed: boolean; person: boolean; deployer: boolean }

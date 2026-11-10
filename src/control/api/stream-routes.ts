@@ -8,7 +8,7 @@ export function streamRoutes(kit: ApiKit): readonly RouteEntry[] {
   const { thread, stream, followEvents, registry, agents } = kit;
 
   return [
-    on(routes.events, anyAllowed, (_, { query }) => {
+    on(routes.events, anyAllowed, (_, { query, caller }) => {
       const since = query.since === "latest" ? registry.threads.newestEvent() : query.since ?? "0";
       try { eventCursor(since); } catch { throw new HttpError(400, "invalid event cursor"); }
       if (query.kinds.some((k) => !(eventKinds as readonly string[]).includes(k))) throw new HttpError(400, "unknown event kind");
@@ -16,15 +16,15 @@ export function streamRoutes(kit: ApiKit): readonly RouteEntry[] {
       const read = (from: string) => registry.threads.eventBatch(from, filter);
       const first = read(since);
       if (!query.follow) return ok(first.events);
-      return { stream: (res) => followEvents(res, first, read) };
+      return { stream: (res) => followEvents(res, caller, first, read) };
     }),
-    on(routes.threadEvents, anyAllowed, ({ thread: id }) => {
+    on(routes.threadEvents, anyAllowed, ({ thread: id }, { caller }) => {
       const t = thread(id, { status: "kept", agent: "harness" });
-      return { stream: (res) => stream(res, t, () => agents.harness.watch(t), agents.harness.frames()) };
+      return { stream: (res) => stream(res, caller, t, () => agents.harness.watch(t), agents.harness.frames()) };
     }),
-    on(routes.claudeEvents, anyAllowed, ({ thread: id }) => {
+    on(routes.claudeEvents, anyAllowed, ({ thread: id }, { caller }) => {
       const t = thread(id, { status: "kept", agent: "claude" });
-      return { stream: (res) => stream(res, t, () => agents.claude.watch(t), agents.claude.frames()) };
+      return { stream: (res) => stream(res, caller, t, () => agents.claude.watch(t), agents.claude.frames()) };
     }),
   ];
 }

@@ -329,6 +329,66 @@ test("legacy statuses use the latest context and missing detail URLs still link 
   assert.equal((await client.poll("acme/repo", 1)).pr.checks, "passing");
 });
 
+test("the client keeps what GitHub's answers say of its token, and asks the rate limit only when none answered yet", async () => {
+  const asked: string[] = [];
+  let reply = (): Response => Response.json({}, { headers: { "github-authentication-token-expiration": "2026-12-01 12:00:00 UTC" } });
+  const fake: typeof fetch = async (input) => {
+    asked.push(new URL(String(input)).pathname);
+    return reply();
+  };
+  const client = githubClient("secret", fake);
+  assert.deepEqual(await client.token(), { kind: "accepted", expiresAt: "2026-12-01T12:00:00.000Z" });
+  assert.deepEqual(asked, ["/rate_limit"], "with no answer yet, it asks the rate limit");
+  reply = () => Response.json({ behind_by: 0 }, { headers: { "github-authentication-token-expiration": "2026-11-20 08:00:00 +0100" } });
+  await client.behind("acme/repo", "main", "abc");
+  assert.deepEqual(await client.token(), { kind: "accepted", expiresAt: "2026-11-20T07:00:00.000Z" }, "a call's own answer");
+  reply = () => new Response("nope", { status: 404 });
+  await client.has("acme/repo", "abc", "README.md");
+  assert.deepEqual(await client.token(), { kind: "accepted", expiresAt: "2026-11-20T07:00:00.000Z" }, "an error without the header leaves the expiry");
+  reply = () => Response.json({ message: "Bad credentials" }, { status: 401 });
+  await assert.rejects(client.behind("acme/repo", "main", "def"));
+  assert.deepEqual(await client.token(), { kind: "refused" });
+  reply = () => Response.json({ behind_by: 0 });
+  await client.behind("acme/repo", "main", "ghi");
+  assert.deepEqual(await client.token(), { kind: "accepted", expiresAt: null }, "a success without the header has no expiry");
+  assert.deepEqual(asked.filter((p) => p === "/rate_limit"), ["/rate_limit"], "every later answer came from the client's own calls");
+
+  const down = githubClient("secret", async () => new Response("oops", { status: 502 }));
+  await assert.rejects(down.token(), { message: "GitHub rate limit: HTTP 502", code: "HTTP-502" });
+
+  let sent = 0;
+  const limitedClient = githubClient("secret", async () => {
+    sent++;
+    return new Response("slow down", { status: 429, headers: { "retry-after": "3600" } });
+  });
+  await assert.rejects(limitedClient.token(), /HTTP 429/);
+  await assert.rejects(limitedClient.find("acme/repo", "feature"), /waiting for its rate limit/);
+  assert.equal(sent, 1, "a rate limit on the token's probe holds the client's later calls too");
+});
+
+test("the client asks GitHub about its token again once its last answer is an hour old, and keeps that answer when GitHub cannot say", async () => {
+  let now = Date.parse("2026-11-10T00:00:00Z");
+  const probes: number[] = [];
+  let reply = (): Response => Response.json({}, { headers: { "github-authentication-token-expiration": "2026-12-01 12:00:00 UTC" } });
+  const client = githubClient("secret", async (input) => {
+    if (new URL(String(input)).pathname === "/rate_limit") probes.push(now);
+    return reply();
+  }, () => now);
+  const first = await client.token();
+  now += 60 * 60_000 - 1;
+  assert.deepEqual(await client.token(), first);
+  assert.equal(probes.length, 1, "an answer under an hour old is kept");
+  now += 1;
+  reply = () => new Response("oops", { status: 502 });
+  assert.deepEqual(await client.token(), { kind: "accepted", expiresAt: "2026-12-01T12:00:00.000Z" }, "a 502 says nothing of the token, so the last answer stands");
+  assert.equal(probes.length, 2, "an hour-old answer is asked again");
+  reply = () => { throw new TypeError("fetch failed"); };
+  assert.deepEqual(await client.token(), first, "and so does a network error");
+  reply = () => Response.json({ message: "Bad credentials" }, { status: 401 });
+  assert.deepEqual(await client.token(), { kind: "refused" }, "a token revoked while nothing else called GitHub is found on the next probe");
+  assert.equal(probes.length, 4);
+});
+
 /** A GitHub whose statuses answer 500 while `state.failing` holds, with one check run and the owner's comments `state.comments`. */
 function statusesDown(url: string) {
   const state = { failing: true, conclusion: "success", comments: [] as string[] };

@@ -203,7 +203,7 @@ test("the CLI runs a thread's life through the SOCKS proxy, and --json prints th
   const stable = ({ lastHumanActivityAt: _, ...rest }: Thread) => rest;
   assert.deepEqual(stable(s.registry.threads.thread(thread.id)!), stable(thread));
   assert.deepEqual(s.fake.calls.at(-1), ["send", thread.id, "\n  Fix the build  \nand run the tests", `brief:${thread.id}`, "followUp"]);
-  assert.deepEqual((await s.json(["threads"])).map(stable), [{ ...stable(thread), attention: null, desired: "running", pylon: { node, actualState: "unknown", failed: null } }],
+  assert.deepEqual((await s.json(["threads"])).map(stable), [{ ...stable(thread), attention: null, desired: "running", pylon: { node, actualState: "unknown", failed: null }, pullRequestNumbers: [] }],
     "a row carries what the planner wants of the pylon and what its node last reported");
   assert.deepEqual(await s.json(["threads", "--project", "other"]), []);
 
@@ -224,6 +224,8 @@ test("the CLI runs a thread's life through the SOCKS proxy, and --json prints th
   assert.equal(human.stdout, "> \n>   Fix the build  \n> and run the tests\n\n> now the lint\n\n> stop that\n");
 
   assert.equal((await s.json(["archive", thread.id])).status, "archived");
+  assert.deepEqual((await s.json(["threads"])).map((r: Thread) => r.status), ["archived"], "threads lists archived threads");
+  assert.deepEqual(await s.json(["threads", "--open"]), [], "--open leaves them out");
   assert.equal((await s.nexus(["send", thread.id, "x"])).code, 5, "an archived thread takes no messages");
   assert.doesNotMatch((await s.nexus(["show", thread.id])).stdout, /^attach:/m, "nor an attach, since its pylon stays paused");
   assert.equal((await s.json(["unarchive", thread.id])).status, "active");
@@ -334,6 +336,7 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
     "  nexus project edit <id> [--node N|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB]\n"
     + "    [--allow-host HOST]... [--login claude|chatgpt]... [--secret NAME:HOST[,HOST]...]...\n"
     + "    [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL | --clear-git-identity]\n"
+    + "    [--template-input PATH]... [--clear-template-inputs]   repository files, such as package-lock.json, that key the project's templates with .nexus/setup\n"
     + "    [--auto-review off|review|land|yolo]   review each builder's PR on its own, land it too, and with yolo waive the holds you may; land and yolo need a deployer\n"
     + "    [--pipeline off|approve|start]    turn pipeline items into threads, once the person approves each or on their own\n"
     + "    [--second-reviewer off|on|always|reserved,lines=N]   a second reviewer on another model for the PRs the rule names\n");
@@ -1126,7 +1129,7 @@ const claudeRecords = {
   call: { type: "assistant", timestamp: at(2), message: { model: "claude-opus-5-5", content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "wc -l hello.py" } }] } },
   failed: { type: "user", timestamp: at(3), message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "wc: hello.py: No such file", is_error: true }] } },
   reply: { type: "assistant", timestamp: at(4), message: { model: "claude-opus-5-5", content: [{ type: "text", text: "There is no hello.py." }] } },
-  pr: { type: "pr-link", sessionId: "s1", prNumber: 7, prUrl: "https://github.com/acme/shop/pull/7", prRepository: "acme/shop", timestamp: at(5) },
+  pr: { type: "pr-link", sessionId: "s1", prNumber: 7, prUrl: "https://github.com/octocat/Spoon-Knife/pull/7", prRepository: "octocat/Spoon-Knife", timestamp: at(5) },
 };
 const jsonl = (...records: object[]) => records.map((r) => `${JSON.stringify(r)}\n`).join("");
 
@@ -1165,7 +1168,7 @@ test("watch follows a Claude worker's transcript: the entries whole, then each n
     if (line.type === "claude-entry") texts.push(line.text);
     idle ||= line.type === "state" && line.run === "idle";
   }
-  assert.deepEqual(texts, ["[tool error] wc: hello.py: No such file", "There is no hello.py.", "[pull request] Opened pull request #7: https://github.com/acme/shop/pull/7", ""],
+  assert.deepEqual(texts, ["[tool error] wc: hello.py: No such file", "There is no hello.py.", "[pull request] Opened pull request #7: https://github.com/octocat/Spoon-Knife/pull/7", ""],
     "a pull request Claude Code names again prints nothing the second time");
 
   const restart = await s.stop();
@@ -1386,15 +1389,24 @@ test("connect fails without saving when no control plane answers, or one does no
   await assert.rejects(readFile(config), { code: "ENOENT" });
 });
 
-/** A control plane whose health answers `health`, and every other GET an empty list. Answers the paths it was sent. */
-async function versioned(t: TestContext, health: unknown) {
+/** A control plane whose health answers `health`, the thread list `threads`, and every other GET an empty list. Answers the paths it was sent. */
+async function versioned(t: TestContext, health: unknown, threads: unknown[] = []) {
   const paths: string[] = [];
   const server = createHttpServer((req, res) => {
     paths.push(req.url!);
-    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(req.url === "/v1/health" ? health : []));
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(req.url === "/v1/health" ? health : req.url!.split("?")[0] === "/v1/threads" ? threads : []));
   });
   return { url: `http://127.0.0.1:${await listening(t, server)}`, paths };
 }
+
+test("threads --open asks for the open threads, and leaves out the others a control plane that ignores status=open answers", async (t) => {
+  const rows = ["active", "idle", "archived"].map((status, i) => ({ id: `th-00000000000${i}`, status, project: "acme", title: "t", pylon: { actualState: "paused" }, createdAt: 0 }));
+  const old = await versioned(t, { commit: null, version: "0.76.0" }, rows);
+  const res = await bare(t, ["threads", "--open", "--json"], { NEXUS_URL: old.url });
+  assert.equal(res.code, 0, res.stderr);
+  assert.deepEqual(JSON.parse(res.stdout).map((r: Thread) => r.status), ["active", "idle"]);
+  assert.ok(old.paths.includes("/v1/threads?deleted=false&status=open"), old.paths.join(" "));
+});
 
 /** The CLI with a home of its own and no proxy. */
 async function bare(t: TestContext, args: readonly string[], env: Record<string, string> = {}) {
@@ -1695,6 +1707,9 @@ test("deploy and release use the shared release view and wait for both roles", a
   for (const role of ["control", "probe"] as const) s.registry.releases.reportRelease({ node, role, commit: requested.desired.commit, target: requested.desired.commit, state: "healthy", reason: null, observedAt: Date.now() });
   assert.equal((await s.json(["deploy", "main", "--wait"])).nodes.every((r: { state: string }) => r.state === "healthy"), true);
   assert.equal((await s.json(["release"])).desired.commit, requested.desired.commit);
+  s.registry.releases.reportRelease({ node, role: "probe", commit: requested.desired.commit, target: requested.desired.commit, state: "healthy", reason: null, worker: "bootstrap", observedAt: Date.now() });
+  assert.match((await s.nexus(["release"])).stdout, new RegExp(`^${node} probe: ${requested.desired.commit} healthy \\(worker bootstrap\\)$`, "m"));
+  assert.equal((await s.json(["release"])).nodes.find((r: { role: string }) => r.role === "probe").worker, "bootstrap");
   s.registry.releases.reportRelease({ node, role: "control", commit: "b".repeat(40), target: requested.desired.commit, state: "rolled-back", reason: "failed to bind", observedAt: Date.now() });
   const failed = await s.nexus(["deploy", "main", "--wait", "--json"]);
   assert.equal(failed.code, 1);
@@ -1946,6 +1961,19 @@ test("project edit sets which pull requests get a second reviewer on another mod
   assert.deepEqual((await s.json(["project", "edit", "second", "--node", node])).secondReview, { always: true }, "an edit that does not name it keeps it");
   assert.equal((await s.json(["project", "edit", "second", "--second-reviewer", "off"])).secondReview, undefined);
   assert.doesNotMatch((await s.nexus(["project", "show", "second"])).stdout, /second reviewer/);
+});
+
+test("project edit sets the files that key the project's templates, project show lists them, and a path outside the repository is refused", async (t) => {
+  const s = await setup(t);
+  await s.nexus(["project", "add", "keyed", "https://github.com/example/repo.git", "--node", node]);
+  assert.deepEqual((await s.json(["project", "edit", "keyed", "--template-input", "package-lock.json", "--template-input", "web/package-lock.json"])).templateInputs, ["package-lock.json", "web/package-lock.json"]);
+  assert.match((await s.nexus(["project", "show", "keyed"])).stdout, /^template inputs: package-lock\.json, web\/package-lock\.json$/m);
+  assert.deepEqual((await s.json(["project", "edit", "keyed", "--node", node])).templateInputs, ["package-lock.json", "web/package-lock.json"], "an edit that does not name them keeps them");
+  for (const bad of ["/etc/passwd", "../x", "a//b", "a/", "./a"]) assert.equal((await s.nexus(["project", "edit", "keyed", "--template-input", bad])).code, 64, bad);
+  assert.equal((await s.nexus(["project", "edit", "keyed", "--template-input", "a", "--template-input", "a"])).code, 64, "a path listed twice");
+  assert.equal((await s.nexus(["project", "edit", "keyed", "--template-input", "a", "--clear-template-inputs"])).code, 64);
+  assert.deepEqual((await s.json(["project", "edit", "keyed", "--clear-template-inputs"])).templateInputs, []);
+  assert.doesNotMatch((await s.nexus(["project", "show", "keyed"])).stdout, /template inputs/);
 });
 
 test("project add and edit set standing rules from a file or stdin, edit clears them, and project show and show print them", async (t) => {
@@ -2245,8 +2273,8 @@ test("conversation prints a Claude worker's transcript, and send types into its 
     { kind: "notice", at: 8, tone: "error", text: "The model failed" },
     { kind: "turn", at: 9, durationMs: 72_000 },
     { kind: "record", at: null, type: "mystery", summary: '{"type":"mystery"}' },
-    { kind: "pull-request", at: 10, number: 7, url: "https://github.com/acme/shop/pull/7", repository: "acme/shop" },
-    { kind: "pull-request", at: 10, number: 7, url: "https://github.com/acme/shop/pull/7", repository: "acme/shop" },
+    { kind: "pull-request", at: 10, number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", repository: "octocat/Spoon-Knife" },
+    { kind: "pull-request", at: 10, number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", repository: "octocat/Spoon-Knife" },
     { kind: "prompt", at: 10, text: "/compact", from: "command" },
     { kind: "queue", at: 11, op: "enqueue", text: "and then deploy" },
     { kind: "tool", at: 12, id: "t3", name: "Read", input: { file_path: "hello.py" } },
@@ -2264,7 +2292,7 @@ test("conversation prints a Claude worker's transcript, and send types into its 
     "[error] The model failed",
     "[turn] 72s",
     '[record] mystery: {"type":"mystery"}',
-    "[pull request] Opened pull request #7: https://github.com/acme/shop/pull/7",
+    "[pull request] Opened pull request #7: https://github.com/octocat/Spoon-Knife/pull/7",
     "> [slash command] /compact",
   ];
   assert.equal((await s.nexus(["conversation", thread.id])).stdout, [...transcript, '[tool] Read {"file_path":"hello.py"} (no result)', "(queued) > and then deploy"].join("\n\n") + "\n");

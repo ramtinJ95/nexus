@@ -2,9 +2,10 @@
 // toggled, its visit, and the markup the features build. Features hook into a swap through `onSwap` and `afterSwap`.
 import { agoText, clock } from "./elapsed.ts";
 import { atEnd, endFollower } from "./scroll.js";
-import { request } from "./request.js";
+import { refusalAt, request } from "./request.js";
 import { threadRoutes } from "../../contract/threads.ts";
 import { toggledBy } from "./folds.js";
+import { swapKeeping } from "./keep.js";
 import { grow, kept, storageKeys, unticked } from "./contract.ts";
 
 export const main = document.querySelector("main");
@@ -17,6 +18,21 @@ export function showError(id, err) {
   if (el === null) return;
   el.textContent = err === null ? "" : err.message;
   el.hidden = err === null;
+}
+
+/**
+ * Says what failed where the person acted, in the notices every view of every page shows, or clears it when `err` is
+ * null. `retry`, when given, is what its Try again does.
+ */
+export function notify(err, retry = null) {
+  const region = document.getElementById("action-error");
+  if (region === null) return;
+  region.hidden = err === null;
+  region.replaceChildren(...(err === null ? [] : present([
+    el("span", { className: "alert-text", textContent: err.message }),
+    retry !== null && el("button", { type: "button", className: "btn btn-xs", textContent: "Try again", onclick: () => { notify(null); retry(); } }),
+    el("button", { type: "button", className: "btn btn-xs btn-ghost", textContent: "Dismiss", onclick: () => notify(null) }),
+  ])));
 }
 
 const focusKey = (el) => el.id !== "" ? `#${CSS.escape(el.id)}`
@@ -76,7 +92,7 @@ export function afterSwap(settle) { settlers.push(settle); }
 /**
  * Swaps in each region whose inside, as the browser serializes it, differs from what the server last sent for it.
  * Regions hold buttons, links, the prompt box and tool output, so focus, the draft, what the reader opened or
- * closed, and their place in the conversation survive the swap.
+ * closed, and their place in the conversation survive the swap. A `data-keep` element stays the same element.
  */
 export function swap(regions) {
   const changed = regions.map(([el, html]) => [el, html, unticked(html)]).filter(([el, , key]) => el !== null && served.get(el.id) !== key);
@@ -85,7 +101,12 @@ export function swap(regions) {
   const kept = keepers.map((keep) => keep(changed.map(([el]) => el)));
   const restoreScroll = anchor();
   for (const [el, html, key] of changed) {
-    el.innerHTML = html;
+    if (el.querySelector("[data-keep]") === null) el.innerHTML = html;
+    else {
+      const fresh = document.createElement("template");
+      fresh.innerHTML = html;
+      swapKeeping(el, fresh.content);
+    }
     served.set(el.id, key);
   }
   for (const restore of kept) restore?.();
@@ -94,6 +115,14 @@ export function swap(regions) {
   restoreScroll();
   tick();
   for (const settle of settlers) settle();
+}
+
+// Why the control plane refused the conversation's stream, which the page says while it polls in its place.
+let refusedStream = null;
+function sayUpdated() {
+  const state = document.getElementById("refresh-state");
+  // A page that offers the reload keeps saying so.
+  if (state !== null && !outdated) state.textContent = refusedStream === null ? "" : `Live updates are off, so this page updates every ${pollMs / 1000} s: ${refusedStream}.`;
 }
 
 // While the stream is open it alone writes the conversation, so a poll that started before a frame cannot put
@@ -105,12 +134,31 @@ let shows = null;
 const streaming = () => stream?.readyState === EventSource.OPEN;
 export function follow(url) {
   // A hidden page keeps none of the control plane's few streams, even when a refresh it began finishes later.
+  // A page that no longer streams forgets a refused stream, and a reason still being read for it.
+  if (url === undefined && stream?.readyState === EventSource.CLOSED) {
+    stream = null;
+    refusedStream = null;
+    sayUpdated();
+  }
   if (url === undefined || document.visibilityState !== "visible" || (stream !== null && stream.readyState !== EventSource.CLOSED)) return;
   // EventSource reconnects by itself after a dropped connection. A refused one is closed for good, so the next
   // poll opens another.
-  stream = new EventSource(url);
+  const source = stream = new EventSource(url);
   shows = null;
-  stream.addEventListener("message", (event) => {
+  source.addEventListener("open", () => {
+    refusedStream = null;
+    sayUpdated();
+  });
+  source.addEventListener("error", () => {
+    if (source.readyState !== EventSource.CLOSED) return;
+    refusalAt(url).then((reason) => {
+      // A poll may have opened another stream while the reason was read.
+      if (stream !== source) return;
+      refusedStream = reason;
+      sayUpdated();
+    }, () => {});
+  });
+  source.addEventListener("message", (event) => {
     frames += 1;
     const frame = JSON.parse(event.data);
     const convo = document.getElementById("convo");
@@ -144,6 +192,31 @@ export async function readPage(url) {
   return new DOMParser().parseFromString(await res.text(), "text/html");
 }
 
+// The client this page runs. A deploy serves another, and removes the chunks of this one it has not loaded yet.
+const clientOf = (doc) => doc.querySelector("script[src]")?.getAttribute("src");
+const client = clientOf(document);
+const holds = [];
+/** `held()` says whether a reload now would lose what the reader is doing, so a new client waits until it would not. */
+export function holdReload(held) { holds.push(held); }
+// A draft is text typed in a field. The page checks radios and boxes by itself, and a box with no value reads "on",
+// so those are no draft.
+const reloadLoses = () => document.querySelector("dialog[open]") !== null
+  || [...document.querySelectorAll("textarea, input")].some((f) => f.type !== "checkbox" && f.type !== "radio" && f.value !== f.defaultValue)
+  || holds.some((held) => held());
+let outdated = false;
+/** Says the page runs an older client than the control plane serves, as when a chunk it asked for did not load. */
+export function offerReload() {
+  if (outdated) return;
+  outdated = true;
+  document.getElementById("refresh-state")?.replaceChildren("Dashboard updated — ",
+    el("button", { type: "button", className: "refresh-reload", textContent: "Reload", onclick: () => location.reload() }));
+}
+/** A chunk loads, or the page offers the reload that brings the chunks the control plane serves now. */
+export const chunk = (loading) => loading.catch((err) => {
+  offerReload();
+  throw err;
+});
+
 /** The page the address names. A jump within it, as to a hash, is the same page. */
 const addressed = () => location.pathname + location.search;
 
@@ -159,6 +232,10 @@ async function refresh() {
     // The reader went to another page in place while this one was read, as the Cluster page goes to another node, so
     // its regions are not the page's any more.
     if (addressed() !== at) return;
+    if (clientOf(next) !== client) {
+      if (!reloadLoses()) return void location.reload();
+      offerReload();
+    }
     // A queued thread that started has a thread page, whose regions the queued page has none of.
     if ((next.getElementById("queued") === null) !== (document.getElementById("queued") === null)) return void location.reload();
     const freshConvo = next.getElementById("convo");
@@ -176,9 +253,9 @@ async function refresh() {
     const activity = next.querySelector("main")?.dataset.activity;
     if (activity === undefined) delete main.dataset.activity;
     else main.dataset.activity = activity;
-    if (state !== null) state.textContent = "";
+    sayUpdated();
   } catch (err) {
-    if (state !== null && addressed() === at) state.textContent = `Not updated: ${err.message}. Retrying.`;
+    if (state !== null && addressed() === at && !outdated) state.textContent = `Not updated: ${err.message}. Retrying.`;
   }
 }
 export const refreshNow = () => (refreshing ??= refresh().finally(() => { refreshing = null; }));
@@ -190,7 +267,7 @@ export function recordVisit() {
   if (thread === undefined) return;
   // A visit wakes a paused pylon, so a failed record is worth saying.
   request(threadRoutes.activity, { thread, body: { kind: "human" } }).catch((err) => {
-    showError("action-error", new Error(`This visit was not recorded, so a paused pylon stays paused: ${err.message}`));
+    notify(new Error(`This visit was not recorded, so a paused pylon stays paused: ${err.message}`));
   });
 }
 

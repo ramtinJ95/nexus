@@ -20,7 +20,7 @@ import type { ImageId, NodeName, ProjectId, TemplateId } from "../ids.ts";
  *      nexus-kvm.
  *   3. `user`, UID 1000, passwordless sudo, /home/user/workspace.
  *   4. Node from the checksum-verified official tarball into /usr/local.
- *   5. Claude Code and pi from npm, Herdr from its official installer into /usr/local/bin,
+ *   5. Claude Code and pi from npm, Herdr from its checksum-verified release binary into /usr/local/bin,
  *      `herdr integration install` for pi and Claude Code as user (the sessions stream reads harness session
  *      IDs through them), the pi-env daemon at /usr/local/libexec/nexus/pi-env, the in-pylon `nexus` CLI,
  *      nexus-kvm at /usr/local/libexec/nexus/nexus-kvm, and
@@ -61,6 +61,7 @@ export interface ImageRecipe {
     claudeCode: string;
     pi: string;
     herdr: string;
+    herdrSha256?: string; // of herdr-linux-x86_64, that release asset's digest on GitHub. An image built before the pin has none
     piEnv: string; // the pi-env daemon, which must speak the protocol of the harness's pi-env client (1)
     piEnvSha256: string; // of package/bin/pi-env-linux-x64/pi-env in that npm tarball
     gondolin: string; // "0.13.0". The module seed workaround is tied to it
@@ -81,6 +82,7 @@ export const pinsSchema = z.strictObject({
   claudeCode: z.string().min(1),
   pi: z.string().min(1),
   herdr: z.string().min(1),
+  herdrSha256: z.string().regex(/^[0-9a-f]{64}$/).exactOptional(),
   piEnv: z.string().min(1),
   piEnvSha256: z.string().regex(/^[0-9a-f]{64}$/),
   gondolin: z.string().min(1),
@@ -91,6 +93,10 @@ export const pinsSchema = z.strictObject({
   neovim: z.string().regex(/^\d+\.\d+\.\d+$/),
   neovimSha256: z.string().regex(/^[0-9a-f]{64}$/),
 }) satisfies z.ZodType<ImageRecipe["pins"]>;
+
+/** The pins of a recipe to build: an image built before herdrSha256 was pinned may lack it, a build may not. */
+export const buildPinsSchema = pinsSchema.extend({ herdrSha256: z.string().regex(/^[0-9a-f]{64}$/) });
+export type BuildPins = z.infer<typeof buildPinsSchema>;
 
 /** File order does not change the ID. Two files at one path are a broken recipe and throw. */
 export function imageIdOf(recipe: ImageRecipe): ImageId {

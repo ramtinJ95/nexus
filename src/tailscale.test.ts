@@ -7,7 +7,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseTailscaleStatus, selfDnsName, tailscaleCli } from "./tailscale.ts";
-import { localApiWhois, localApiWhoisNode, PeerRefused, tailnetNodeIdPattern, verifyPeer } from "./node-base/tailscaled.ts";
+import { localApiStatus, localApiWhois, localApiWhoisNode, PeerRefused, tailnetNodeIdPattern, verifyPeer } from "./node-base/tailscaled.ts";
 import { tailnetDevices, tailnetMisses } from "./deploy/setup.ts";
 import { tailnetNodeIdSchema } from "./protocol/fields.ts";
 import type { Whois } from "./protocol/http.ts";
@@ -184,4 +184,28 @@ test("every reader of tailscale status reads the recorded fixtures as its own pa
 test("install.sh's check reads text that is not JSON as a tailscale that is not running", () => {
   assert.deepEqual(tailnetMisses(""), ["not-running"]);
   assert.deepEqual(tailnetMisses("null"), ["not-running"]);
+});
+
+test("each device's key expiry is read from tailscaled's status over LocalAPI, and is null where key expiry is off", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "nexus-status-"));
+  const socketPath = join(dir, "tailscaled.sock");
+  let status = 200;
+  const server = createServer((req, res) => {
+    assert.deepEqual([req.url, req.headers.host], ["/localapi/v0/status", "local-tailscaled.sock"]);
+    res.writeHead(status).end(JSON.stringify({
+      BackendState: "Running",
+      Self: { ID: "nCONTROL", DNSName: "rj-firebat.example.ts.net.", TailscaleIPs: ["100.64.0.1"], KeyExpiry: "2027-05-01T12:00:00Z" },
+      Peer: { "nodekey:a": { ID: "nPEER", DNSName: "infra-testbench.example.ts.net.", TailscaleIPs: ["100.64.0.2"] } },
+    }));
+  });
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(dir, { recursive: true });
+  });
+  const parsed = parseTailscaleStatus(await localApiStatus(socketPath));
+  assert.equal(parsed.self?.keyExpiry, "2027-05-01T12:00:00.000Z");
+  assert.deepEqual(parsed.peers.map((p) => [p.id, p.keyExpiry]), [["nPEER", null]]);
+  status = 403;
+  await assert.rejects(localApiStatus(socketPath), { message: "tailscaled status: HTTP 403" });
 });

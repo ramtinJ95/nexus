@@ -2,6 +2,14 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.78.0
+
+Adds `templateInputs` to `Project`, a list of repository paths whose git object IDs at the thread's commit join the template key beside `.nexus/setup`'s, as [Templates at thread start](cli.md#templates-at-thread-start) describes. `project edit --template-input PATH` sets it, and `--clear-template-inputs` empties it. `PATCH /v1/projects/<id>` and `POST /v1/projects` accept it. A project that lists none keeps the template keys it had. A control plane older than 0.78.0 answers an edit that sets it with 400, so `project edit --template-input` fails there with exit code 64.
+
+## 0.77.0
+
+Adds `status=open` to `GET /v1/threads`, which lists only active and idle threads, and answers 400 to any other `status`. The dashboard reads it for its notifications. `threads --open` asks for it, and prints only the active and idle threads. A control plane older than 0.77.0 ignores `status` and answers every thread but the deleted ones, so `--open` leaves out the archived ones itself. Every other query answers as before.
+
 ## 0.76.0
 
 `POST /v1/threads/<thread>/review` answers once the review is recorded, and the loop starts its reviewer threads after, so `Review` gains `reviewerStarted`, false until then, and `reviewer` names a thread that appears once it starts. A refused reviewer start holds the review for the person instead of refusing the request. `Review` gains `earlierRounds`, the rounds the PR's earlier reviews spent: a later review of a PR gets what they left of the 5, `review` fails with exit code 5 once none are left unless `--rounds N` grants more, and `ReviewView.round` and `maxRounds` count the PR's reviews, so `maxRounds` may be above 5. A review of a PR that another builder's unsettled review holds fails with exit code 5. `POST /v1/threads` answers 409 to a request ID whose thread is archived or deleted, or whose queued start was cancelled. The CLI says a change whose answer timed out after it went out may have gone through.

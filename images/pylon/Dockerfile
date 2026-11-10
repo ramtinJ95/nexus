@@ -35,11 +35,6 @@ RUN cd /tmp \
  && tar -xJf "node-v${NODE_VERSION}-linux-x64.tar.xz" -C /usr/local --strip-components=1 --no-same-owner \
  && rm "node-v${NODE_VERSION}-linux-x64.tar.xz"
 
-ARG CLAUDE_CODE_VERSION
-ARG PI_VERSION
-RUN npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "@earendil-works/pi-coding-agent@${PI_VERSION}" \
- && npm cache clean --force
-
 # The pi-env daemon the harness runs tools through, baked instead of uploaded over SSH at each start. It is a
 # static binary, so only its pinned version and checksum matter.
 ARG PI_ENV_VERSION
@@ -51,14 +46,14 @@ RUN cd /tmp \
  && install -D -o root -g root -m 0755 package/bin/pi-env-linux-x64/pi-env /usr/local/libexec/nexus/pi-env \
  && rm -r pi-env.tgz package
 
-# The installer only installs Herdr's latest release, so a pin that is no longer latest fails here rather than
-# building a different Herdr under the same image ID.
+# Herdr's release binary, checked like Node. herdr.dev's installer would fetch only the latest release.
 ARG HERDR_VERSION
-RUN curl -fsSL https://herdr.dev/install.sh -o /tmp/herdr-install.sh \
- && HERDR_INSTALL_DIR=/usr/local/bin sh /tmp/herdr-install.sh \
- && rm /tmp/herdr-install.sh \
- && installed="$(herdr --version)" \
- && if [ "$installed" != "herdr ${HERDR_VERSION}" ]; then echo "Herdr's installer installed '$installed', but pins.json pins ${HERDR_VERSION}. Update the herdr pin" >&2; exit 1; fi
+ARG HERDR_SHA256
+RUN cd /tmp \
+ && curl -fsSLo herdr "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-x86_64" \
+ && echo "${HERDR_SHA256}  herdr" | sha256sum -c - \
+ && install -m 0755 herdr /usr/local/bin/herdr \
+ && rm herdr
 
 # gh from its release tarball, checked like Node. git asks gh for github.com credentials, and gh reads GH_TOKEN
 # when git asks, so the placeholder that Gondolin mints on each boot is never stored. The helper lives in
@@ -86,9 +81,17 @@ RUN cd /tmp \
  && tar -xzf nvim.tgz -C /usr/local --strip-components=1 --no-same-owner \
  && rm nvim.tgz
 
+# Claude Code and pi are the pins that move most, so they come after the downloads above, which a bump of
+# either then takes from Docker's cache.
+ARG CLAUDE_CODE_VERSION
+ARG PI_VERSION
+RUN npm install --global "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "@earendil-works/pi-coding-agent@${PI_VERSION}" \
+ && npm cache clean --force
+
 # COPY keeps each file's mode, which the recipe carries from git.
 COPY nexus /usr/local/bin/nexus
 COPY nexus-claude-hook /usr/local/bin/nexus-claude-hook
+COPY nexus-claude-hook.mjs /usr/local/bin/nexus-claude-hook.mjs
 COPY nexus-ask.ts /usr/local/bin/nexus-ask.ts
 COPY nexus-contract.ts /usr/local/bin/nexus-contract.ts
 COPY nexus-heartbeat.ts /usr/local/bin/nexus-heartbeat.ts

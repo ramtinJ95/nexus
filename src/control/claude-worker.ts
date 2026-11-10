@@ -6,7 +6,8 @@
 import { claudeTurn } from "../../images/pylon/nexus-contract.ts";
 import type { ThreadId } from "../ids.ts";
 import type { Sender } from "./agent-protocol.ts";
-import { errorStop, transcriptStart, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
+import { errorStop, storedEntry, transcriptStart, type ClaudeEntry, type TranscriptCursor } from "./claude-transcript.ts";
+import { githubRepo } from "./github.ts";
 import { maxEntries } from "../contract/streams.ts";
 import { json, jsonOrNull, type Db, type Holding } from "./db.ts";
 import type { EventKind } from "./events.ts";
@@ -213,7 +214,10 @@ export function claudeWorkerStore(db: Db, on: ClaudeWorkerThread) {
     },
     claudeTranscript,
     /** The stored entries from the one numbered `from`, where the oldest kept is numbered as the transcript's `dropped`. */
-    claudeEntries: (thread: ThreadId, from = 0): ClaudeEntry[] => sql("SELECT entry FROM claude_entries WHERE thread = ? AND seq >= ? ORDER BY seq").all(thread, from).map((r) => json<ClaudeEntry>(r.entry)),
+    claudeEntries(thread: ThreadId, from = 0): ClaudeEntry[] {
+      const repo = githubRepo(sql("SELECT json_extract(p.record, '$.repoUrl') AS url FROM threads t JOIN projects p ON p.id = t.project WHERE t.id = ?").get(thread)?.url as string | null ?? null);
+      return sql("SELECT entry FROM claude_entries WHERE thread = ? AND seq >= ? ORDER BY seq").all(thread, from).map((r) => storedEntry(json<ClaudeEntry>(r.entry), repo));
+    },
     /**
      * Appends what a read found and keeps the newest maxEntries. A read of another session than the stored one, or of
      * a file that was replaced, replaces the stored entries. A read that did not start where the stored reader stands, such

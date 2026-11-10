@@ -11,6 +11,9 @@ export function attachUrl(location, thread, { cols, rows }, pane = null) {
   return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${path}`;
 }
 
+/** The attach route at `url` as a plain request, which answers the refusal its upgrade got. */
+export const refusalUrl = (url) => url.replace(/^ws/, "http");
+
 /**
  * The terminal's status for each message of the route: `attached` clears it, and `exit` and `error` end the terminal.
  * A type this end does not know is ignored, as the route's contract asks.
@@ -25,17 +28,22 @@ function statusOf(message) {
   }
 }
 
-/** A close before any message is a refusal, which a browser's WebSocket cannot read, such as an archived thread's. */
+/**
+ * A close before any message is a refusal, such as an archived thread's, which a browser's WebSocket cannot read, so
+ * the terminal asks for its reason over a plain request.
+ */
 const refused = { text: "The terminal could not attach. The thread may be archived, or the control plane unreachable.", over: true, why: "refused" };
+const refusedFor = (reason) => reason === null ? refused : { ...refused, text: `The terminal could not attach: ${reason}.` };
 const dropped = { text: "The connection dropped. Herdr keeps the session, so attach again.", over: true, why: "dropped" };
 const detached = { text: "Detached. Herdr keeps its sessions running.", over: true, why: "detached" };
 
 /**
  * Joins `term` to the attach route over `socket`: keys go as binary messages once it is attached, each resize as a
  * resize message, and the pylon's output is written to `term`. `status` hears each change, and once with `over` and
- * `why` it ended: `exit`, `error` with the error's `kind`, `refused`, `dropped` or `detached`. Returns its detach.
+ * `why` it ended: `exit`, `error` with the error's `kind`, `refused`, with the reason `whyRefused(socket)` reads when
+ * it is given, `dropped` or `detached`. Returns its detach.
  */
-export function joinTerminal(term, socket, status) {
+export function joinTerminal(term, socket, status, whyRefused = null) {
   let heard = false;
   let attached = false;
   let over = false;
@@ -68,7 +76,11 @@ export function joinTerminal(term, socket, status) {
     attached = true;
     term.focus();
   });
-  socket.addEventListener("close", () => end(heard ? dropped : refused));
+  socket.addEventListener("close", () => {
+    if (heard) return end(dropped);
+    if (whyRefused === null) return end(refused);
+    whyRefused(socket).catch(() => null).then((reason) => end(refusedFor(reason)));
+  });
   const typed = term.onData((data) => sendKeys(encoder.encode(data)));
   const binary = term.onBinary((data) => sendKeys(Uint8Array.from(data, (c) => c.charCodeAt(0))));
   const resized = term.onResize(({ cols, rows }) => send(encodeMessage({ type: "resize", size: { cols, rows } })));
@@ -89,17 +101,60 @@ export function keyFor(event) {
   return undefined;
 }
 
+/** The longest text OSC 52 may copy, far more than a selection of a full screen holds. */
+export const maxClipboardChars = 256 << 10;
+const clipStartChars = 60;
+
 /**
- * The clipboard OSC 52 reaches, as @xterm/addon-clipboard asks for one. It writes the browser's one clipboard for
- * every selection but X11's primary, which would clobber it, and never reads it, so output in the pylon cannot see
- * what the person copied: a query gets empty data.
+ * The clipboard OSC 52 reaches, as @xterm/addon-clipboard asks for one. Herdr's mouse selection copies through it, so
+ * it writes the browser's one clipboard for every selection but X11's primary, which would clobber it. A write lands
+ * only while `focused()` says the terminal has focus and only up to maxClipboardChars, and `told` hears what each
+ * write did, as clipboardNotice words it, and whether it landed, so output in the pylon never sets the clipboard
+ * unseen. It never reads the
+ * clipboard, so output in the pylon cannot see what the person copied: a query gets empty data.
  */
-export function clipboardOf(clipboard) {
+export function clipboardOf(clipboard, focused, told) {
   return {
     readText: () => "",
-    // A browser refuses a write from a page without focus, and has no clipboard outside a secure context.
-    writeText: async (selection, text) => { if (selection !== "p") await clipboard?.writeText(text).catch(() => {}); },
+    writeText: async (selection, text) => {
+      if (selection === "p") return;
+      if (!focused()) return told(clipboardNotice("unfocused", text), false);
+      if (text.length > maxClipboardChars) return told(clipboardNotice("too long", text), false);
+      // A browser refuses a write from a page without focus, and has no clipboard outside a secure context.
+      const wrote = clipboard === undefined ? false : await clipboard.writeText(text).then(() => true, () => false);
+      told(clipboardNotice(wrote ? "copied" : "refused", text), wrote);
+    },
   };
+}
+
+/** What the terminal says about a clipboard write from the pylon: what became of it, its length and how it starts. */
+export function clipboardNotice(outcome, text) {
+  const chars = `${text.length.toLocaleString("en-US")} character${text.length === 1 ? "" : "s"}`;
+  const start = text.slice(0, clipStartChars).replace(/\r?\n/g, "⏎").replace(/[\x00-\x1f\x7f-\x9f\p{Cf}]/gu, "�");
+  const shown = `“${start}${text.length > clipStartChars ? "…" : ""}”`;
+  switch (outcome) {
+    case "copied": return `The pylon copied ${chars} to your clipboard: ${shown}`;
+    case "refused": return `The browser did not let the pylon copy ${chars}: ${shown}`;
+    case "unfocused": return `Not copied, as the terminal did not have focus: the pylon's ${chars}, ${shown}`;
+    case "too long": return `Not copied, as it is more than ${maxClipboardChars.toLocaleString("en-US")} characters: the pylon's ${chars}, ${shown}`;
+  }
+}
+
+/**
+ * The text an OSC 8 link shows, from the cells of `range` in `buffer`, as xterm.js hands a link handler both. xterm.js
+ * gives each row of a link its own range, whose points count from 1 and whose end is the link's last cell, so a link
+ * that wraps asks before it opens even when its text is its target.
+ */
+export function linkText(buffer, { start, end }) {
+  return buffer.getLine(start.y - 1)?.translateToString(true, start.x - 1, end.x) ?? "";
+}
+
+/**
+ * Whether to open an OSC 8 link to `uri` whose text is `text`. A link whose text is its target opens. Any other asks
+ * `ask` first, naming the target, since its text may name another.
+ */
+export function opensLink(uri, text, ask) {
+  return text.trim() === uri || ask(`Open this link from the pylon?\n\n${uri}\n\nIts text is “${text.trim()}”.`);
 }
 
 /** How long a page stays attached while hidden, short of the 20 minutes without a human that pause a pylon. */
@@ -120,7 +175,7 @@ const transient = (s, retry) => s.why === "dropped" || (s.why === "error" && s.k
  * pause, and attaches again when it shows. `status` hears what joinTerminal says, and the waits between. Returns the
  * person's detach.
  */
-export function keepAttached(term, open, status, page = document) {
+export function keepAttached(term, open, status, page = document, whyRefused = null) {
   let state = { kind: "over" };
   let tries = 0;
   const enter = (next) => {
@@ -146,7 +201,7 @@ export function keepAttached(term, open, status, page = document) {
   const join = (retry) => {
     const joined = { kind: "joined", retry, hiding: undefined, steady: undefined, detach: () => {} };
     enter(joined);
-    joined.detach = joinTerminal(term, open(), (s) => { if (state === joined) heard(joined, s); });
+    joined.detach = joinTerminal(term, open(), (s) => { if (state === joined) heard(joined, s); }, whyRefused);
   };
   const heard = (joined, s) => {
     if (!s.over) {
