@@ -93,7 +93,7 @@ async function openSource(path: string): Promise<{ file: FileHandle; facts: Stat
 }
 
 /** Whether a descriptor other than `own` holds the file `facts` states, as SQLite's does once it has opened that file by its path. */
-async function heldElsewhere(own: number, facts: Stats): Promise<boolean> {
+export async function heldElsewhere(own: number, facts: Stats): Promise<boolean> {
   for (const fd of await readdir("/dev/fd")) {
     if (Number(fd) === own) continue;
     const held = await stat(join("/dev/fd", fd)).catch(() => undefined);

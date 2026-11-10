@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { test, type TestContext } from "node:test";
 import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { constants, createReadStream } from "node:fs";
 import { chmod, mkdir, open, readdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -10,7 +10,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import type { NodeName, ProjectId } from "../ids.ts";
 import { tempDir } from "../test-support/kit.ts";
-import { backup, check, failedRun, nameOf, restore, runBackup, verify } from "./backup.ts";
+import { backup, check, failedRun, heldElsewhere, nameOf, restore, runBackup, verify } from "./backup.ts";
 import { backedUpAt, readBackupStatus } from "./backup-status.ts";
 import { parseConfig } from "./main.ts";
 import { openRegistry } from "./registry.ts";
@@ -226,6 +226,32 @@ test("a source that is a link or a FIFO is refused, as a database or as a file, 
   await symlink(join(m.dir, "another.db"), m.paths.db);
   await assert.rejects(m.run(m.day(3)), /registry\.db is not a regular file/);
   assert.deepEqual(await readdir(m.root), []);
+});
+
+test("a database is copied only when SQLite opened the file the backup opened without following a link", async (t) => {
+  const dir = await tempDir("nexus-backup-held-", t);
+  const path = join(dir, "registry.db");
+  const rootOnly = join(dir, "root-only.db");
+  for (const file of [path, rootOnly]) new DatabaseSync(file).close();
+  const held = async () => {
+    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const db = new DatabaseSync(path, { readOnly: true });
+      try { return await heldElsewhere(file.fd, await file.stat()); } finally { db.close(); }
+    } finally {
+      await file.close();
+    }
+  };
+  assert.equal(await held(), true, "SQLite holds the file that was opened");
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    await rename(path, join(dir, "moved.db"));
+    await symlink(rootOnly, path);
+    const db = new DatabaseSync(path, { readOnly: true });
+    try { assert.equal(await heldElsewhere(file.fd, await file.stat()), false, "a link swapped in after the open is not the opened file"); } finally { db.close(); }
+  } finally {
+    await file.close();
+  }
 });
 
 test("a file past the 2 GiB readFile refuses is backed up with its SHA-256, verifies, and is restored", async (t) => {
