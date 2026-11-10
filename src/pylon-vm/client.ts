@@ -167,10 +167,10 @@ async function abandoned(lock: string): Promise<boolean> {
 	const text = await read();
 	if (text === null) {
 		const names = await readdir(lock).catch((error: unknown) =>
-			// Released since.
 			existsError(error, "ENOENT") ? null : Promise.reject(error));
-		if (names === null) return false;
-		if (!names.includes("owner") && names.some((name) => /^owner\.\d+\.\d+\.tmp$/.test(name))) return true;
+		// Released since, and perhaps taken again by a launch that published its owner whole.
+		if (names === null || names.includes("owner")) return false;
+		if (names.some((name) => /^owner\.\d+\.\d+\.tmp$/.test(name))) return true;
 		throw new Error("Sandbox start ownership is unavailable. Read controller logs before retrying");
 	}
 	// An owner is renamed in whole, so only a power loss leaves one unreadable, and its process died with the host.

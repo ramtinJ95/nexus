@@ -360,8 +360,8 @@ for (const [crash, leave] of Object.entries(crashes))
 	});
 
 /**
- * Stops a caller's code at a point it reaches: as it reads `lock`'s owner, once it has read it, as it reads the lock's
- * release, as it renames its aside directory onto a lock to take it, or as it writes status.json once it holds the lock. `arrival` settles once it does, and `open` lets it go on.
+ * Stops a caller's code at a point it reaches: as it reads `lock`'s owner, once it has read it, as it lists the lock, as
+ * it reads the lock's release, as it renames its aside directory onto a lock to take it, or as it writes status.json once it holds the lock. `arrival` settles once it does, and `open` lets it go on.
  */
 function gates(t: TestContext, lock: string) {
 	const stops = new Map<string, { reached: () => void; opened: Promise<void> }>();
@@ -373,7 +373,11 @@ function gates(t: TestContext, lock: string) {
 		stop.reached();
 		await stop.opened;
 	};
-	const { readFile, rename } = fs;
+	const { readdir, readFile, rename } = fs;
+	t.mock.method(fs, "readdir", async (path: string, ...rest: unknown[]) => {
+		if (path === lock) await at("lists the lock");
+		return (readdir as (...args: unknown[]) => Promise<unknown>)(path, ...rest);
+	});
 	t.mock.method(fs, "readFile", async (path: string, ...rest: unknown[]) => {
 		if (path === join(lock, "owner")) await at("reads the owner");
 		if (path === join(lock, "release")) await at("reads the release");
@@ -453,6 +457,37 @@ test("a recovery that read an owner which released the lock to a live launch and
 	owner.kill("SIGKILL");
 	await once(owner, "exit");
 	rOwner.open();
+	const rResult = await r;
+	bHolds.open();
+	const bResult = await b;
+	assert.equal(most(), 1);
+	assert.match(rResult, /already in progress/);
+	assert.match(bResult, /EISDIR/);
+});
+
+test("a recovery that finds the lock released, and taken again before it lists the lock, leaves the new launch's lock alone", async (t) => {
+	const { root, lock } = await unlaunchable(t, "pylon-retaken");
+	await privateDirectory(lock);
+	await publishIdentity(join(lock, "owner"));
+	await writeFile(join(lock, "release"), "launch.lock-live01");
+	await privateDirectory(`${lock}-live01`);
+	const most = holders(t);
+	const gate = gates(t, lock);
+	const start = () => run(root, { action: "start", name: "pylon-retaken", boot: spec });
+
+	const rOwner = gate("R", "reads the owner");
+	const rLists = gate("R", "lists the lock");
+	const bHolds = gate("B", "holds the lock");
+	const r = settled(caller.run("R", start));
+	await rOwner.arrival;
+	// The live owner releases.
+	await rm(lock, { recursive: true, force: true });
+	await rm(`${lock}-live01`, { recursive: true, force: true });
+	rOwner.open();
+	await Promise.race([rLists.arrival, r]);
+	const b = settled(caller.run("B", start));
+	await Promise.race([bHolds.arrival, b]);
+	rLists.open();
 	const rResult = await r;
 	bHolds.open();
 	const bResult = await b;
