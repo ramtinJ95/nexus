@@ -87,6 +87,20 @@ A rerun installs no release over one a role already runs, such as one `nexus dep
 
 Each role installer reads its link under the deployer's lock, so a deploy that lands during a rerun is kept too. To install the checkout's release over the one a role runs, rerun with `--upgrade`. This path has none of the deployer's drain, backup or rollback, so use it for recovery, when `nexus deploy` cannot reach a control plane that answers. An install of the control plane refuses, after the configs are written and before its link moves, when the registry's schema version is newer than the migrations the checkout's `src/control/schema.ts` applies, since that control plane would refuse to start, as [A failed deploy past a registry migration](#a-failed-deploy-past-a-registry-migration) describes. A release cut from a checkout with uncommitted changes records no commit in its `release-commit`, so the deployer installs the desired commit over it on its next poll rather than report it healthy at `HEAD`.
 
+### Uninstall
+
+`sudo deploy/uninstall.sh` from a checkout prints what it would remove and changes nothing. `--yes` removes it. Stopping the probe leaves every pylon's controller running, by design (`KillMode=process` in `nexus-probe.service`), so the uninstall refuses while one runs, and changes nothing. Delete the machine's threads first, or pass `--stop-pylons`, which sends each controller SIGTERM, so it stops its VM and saves its disk as a pause does, and waits up to 180 s for them. In this order, it:
+
+1. Stops, disables and removes the 7 units: `nexus-deployer.path`, `.timer` and `.service` first, so the deployer starts nothing again, then `nexus-backup.timer` and `.service`, `nexus-control.service` and `nexus-probe.service`.
+2. Stops the pylons' controllers, with `--stop-pylons`.
+3. Removes each `tailscale serve` entry whose only handler proxies `/` to the probe's preview gateway, the `previews.gatewayPort` in `/etc/nexus/probe.json`, and leaves every other entry. It unsets tailscaled's operator when that is `nexus`.
+4. Removes `/etc/systemd/system/tailscaled.service.d/nexus-cert.conf`. tailscaled keeps letting `nexus-control` fetch certificates until it next restarts, which the uninstall leaves to you, since a restart drops tailnet connections for a moment.
+5. Removes `/opt/nexus`, the users and groups `nexus` and `nexus-control`, and with them `nexus`'s membership of `kvm` and `docker`, then `/etc/nexus`, `/var/lib/nexus`, `/var/lib/nexus-control` and `/var/lib/nexus-backup`.
+
+`--keep-state` keeps `/etc/nexus`, the three state directories and the two users. The state's files carry the users' numeric IDs, so a reinstall finds its registry, credentials and pylon disks as they were. The backups in `/var/backups/nexus` go only with `--remove-backups`. Their owners are numeric too, as [Restore a backup](#restore-a-backup) says, so a restore suits a reinstall that kept the users.
+
+A tailscaled that does not answer leaves the serve entries and the operator as they are, and the rest goes. The uninstall is safe to rerun, and removes only what is still there. It ends with what remains of Nexus, such as the backups. Node, QEMU, Docker and Tailscale stay installed, and the machine stays on the tailnet. Pylons of the `docker` backend, which only local development uses, are containers the uninstall does not look for.
+
 ### Add a node
 
 Mint a join token on the control plane's machine:
