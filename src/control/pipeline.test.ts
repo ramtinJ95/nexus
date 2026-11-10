@@ -175,6 +175,8 @@ test("an archived thread, a cancelled queued thread and a PR merged outside any 
   f.review(tc, { kind: "cancelled", who: "builder", status: "deleted" });
   r.threads.setThreadStatus(tc, "deleted");
   assert.equal(phase(r, c), "archived: its thread is deleted");
+  r.threads.purgeThread(tc);
+  assert.equal(phase(r, c), "archived: its thread was deleted and purged from the registry", "a thread purged since it started still ends its item");
   assert.throws(() => f.items.cancel(b, laptop), (err: { kind?: string; message: string }) => err.kind === "conflict" && err.message.includes(`is thread ${tb} now`));
 });
 

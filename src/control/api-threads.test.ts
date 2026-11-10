@@ -422,6 +422,27 @@ test("a start repeated under its request ID answers the same thread and delivers
   assert.equal(s.calls.filter((c) => c[0] === "send").length, 2, "an archived thread is not sent its brief again");
 });
 
+test("a thread purged from the registry answers as unknown, and a start repeated under its request ID is refused, whether it started at once or from the queue", async (t) => {
+  const s = await withQueue(t);
+  const now = { project: "acme", title: "Now", requestId: "start:now" };
+  const later = { project: "acme", title: "Later", after: [s.first.id], requestId: "start:later" };
+  const started = (await s.call("POST", "/v1/threads", now)).body as Thread;
+  const queued = (await s.call("POST", "/v1/threads", later)).body as QueuedThread;
+  assert.equal((await s.call("POST", `/v1/threads/${queued.id}/start`)).status, 201);
+  for (const id of [started.id, queued.id]) {
+    assert.equal((await s.call("DELETE", `/v1/threads/${id}`)).status, 200);
+    s.registry.threads.purgeThread(id);
+    assert.equal((await s.call("GET", `/v1/threads/${id}`)).status, 404);
+    assert.equal((await s.call("POST", `/v1/threads/${id}/unarchive`)).status, 404);
+  }
+  for (const [body, id] of [[now, started.id], [later, queued.id]] as const) {
+    assert.deepEqual(await s.call("POST", "/v1/threads", body), {
+      status: 409, body: { error: `request ID ${body.requestId} started thread ${id}, which is purged from the registry, so it starts nothing. Start a new thread under a new request ID`, code: null, retryable: false },
+    });
+  }
+  assert.deepEqual((await s.call("GET", "/v1/threads")).body.map((r: ThreadRow) => r.id), [s.first.id], "nothing started again");
+});
+
 test("a start repeated under the request ID of a queued start that was cancelled is refused, naming the queued thread", async (t) => {
   const s = await withQueue(t);
   const body = { project: "acme", title: "Then", after: [s.first.id], requestId: "start:queued" };

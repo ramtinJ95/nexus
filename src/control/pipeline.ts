@@ -79,8 +79,10 @@ function unqueued(registry: PipelineRegistry, item: ItemRecord): ItemPhase | nul
   return null;
 }
 
+/** The phase of a thread with no row: queued, cancelled or deleted while queued, or one that started and was purged since. */
 function queuedPhase(registry: PipelineRegistry, id: ThreadId): ItemPhase {
-  const queued = registry.queue.queuedThread(id)!;
+  const queued = registry.queue.queuedThread(id);
+  if (queued === undefined || queued.status === "started") return phase("archived", "its thread was deleted and purged from the registry");
   if (queued.status !== "queued") return phase("cancelled", `its queued thread was ${queued.status === "archived" ? "cancelled" : "deleted"}`);
   const view = queuedView(registry, queued);
   const name = (thread: ThreadId) => registry.threads.thread(thread)?.title ?? registry.queue.queuedThread(thread)?.title ?? thread;

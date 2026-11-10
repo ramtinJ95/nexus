@@ -92,11 +92,14 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
     return answer;
   }
 
-  /** A repeat that answered an archived, deleted or cancelled thread would read as a start that went through. */
+  /**
+   * A repeat that answered an archived, deleted or cancelled thread would read as a start that went through. A thread
+   * retention purged from the registry has no row left to answer.
+   */
   function refuseEnded(requestId: string, id: ThreadId) {
     const queued = registry.queue.queuedThread(id);
-    const status = queued !== undefined && queued.status !== "started" ? (queued.status === "archived" ? "cancelled" : queued.status) : registry.threads.thread(id)!.status;
-    if (status === "archived" || status === "deleted" || status === "cancelled") {
+    const status = queued !== undefined && queued.status !== "started" ? (queued.status === "archived" ? "cancelled" : queued.status) : registry.threads.threadStatus(id) ?? "purged from the registry";
+    if (status === "archived" || status === "deleted" || status === "cancelled" || status === "purged from the registry") {
       throw new HttpError(409, `request ID ${requestId} started thread ${id}, which is ${status}, so it starts nothing. Start a new thread under a new request ID`);
     }
   }

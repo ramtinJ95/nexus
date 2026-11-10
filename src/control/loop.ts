@@ -193,9 +193,9 @@ export function startLoop(options: LoopOptions): Loop {
     // Each record is read just before its tick, because an API retry may change it while earlier ticks wait on
     // the probe, and saving an older copy would undo it.
     for (const pylonId of registry.threads.pylonIdsToTick(node, present)) {
-      const found = registry.threads.pylon(pylonId)!;
-      // A failed pylon a judgment moved meanwhile is its new node's to tick.
-      if (found.node !== node) continue;
+      const found = registry.threads.pylon(pylonId);
+      // A failed pylon a judgment moved meanwhile is its new node's to tick, and one retention purged meanwhile is gone.
+      if (found === undefined || found.node !== node) continue;
       const thread = registry.threads.thread(found.thread)!;
       let stored = withLive(found, thread, link);
       const nodeObservation = observation(node);
