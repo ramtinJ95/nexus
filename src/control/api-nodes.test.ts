@@ -6,7 +6,7 @@ import type { Thread } from "./thread-store.ts";
 import { stoppedPylon, testCapacity, testObservation } from "../test-support/kit.ts";
 import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { NodeHealth } from "../protocol/client.ts";
-import { node, laptop, phone, image, testApi, withThread, observeNode, withImage, deployment } from "../test-support/api-kit.ts";
+import { node, laptop, phone, image, testApi, withThread, observeNode, withImage, deployment, admitStep } from "../test-support/api-kit.ts";
 
 test("nodes are listed with their state and capacity, without the observation", async (t) => {
   const s = await testApi(t);
@@ -55,7 +55,7 @@ test("only a deployer reads a node's health, which the node's probe answers, and
   s.nodeHealth(async () => { reads++; return health; });
   assert.deepEqual(await s.call("GET", `/v1/nodes/${node}/health`), { status: 200, body: health });
   s.callAs(phone);
-  assert.deepEqual(await s.call("GET", `/v1/nodes/${node}/health`), { status: 403, body: { error: "caller may not read a node's health: only deployers may, never infrastructure nodes or pylons", code: null, retryable: false } });
+  assert.deepEqual(await s.call("GET", `/v1/nodes/${node}/health`), { status: 403, body: { error: `caller may not read a node's health: only deployers may, never infrastructure nodes or pylons${admitStep(phone, "deploy")}`, code: null, retryable: false } });
   s.callAs("nFIREBAT" as TailnetNodeId);
   assert.equal((await s.call("GET", `/v1/nodes/${node}/health`)).status, 403, "the control node is never a deployer, though listed");
   s.callAs(laptop);

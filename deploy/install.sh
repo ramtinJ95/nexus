@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs or upgrades Nexus on this machine from the checkout this script is in: the control plane, a probe and the
 # deployer, or with --node only a probe and the deployer. Run as root:
-#   sudo deploy/install.sh --admit <your Mac's tailnet name> --dotfiles <git URL>
+#   sudo deploy/install.sh --admit <your Mac's tailnet name> [--dotfiles <git URL>]
 #   sudo deploy/install.sh --join-token                                  on the control plane's machine, which prints:
 #   sudo deploy/install.sh --join <token> --node <the control plane's tailnet name>     on the new node
 #   sudo deploy/install.sh --rotate claude|github                         replaces this machine's stored token
@@ -67,7 +67,7 @@ miss() {
 # Records every prerequisite this machine misses for the role, control or node, and changes nothing. $3 is the command
 # line to rerun. Tailscale's settings are read by src/deploy/setup.ts, so a machine without Node 26 has them checked on the rerun.
 check_prerequisites() {
-  local role=$1 dotfiles=$2 rerun=$3 major qemu packages status off
+  local role=$1 rerun=$2 major qemu packages status off
   [ "$(uid)" = 0 ] || miss "The installer changes the system, so it runs as root." "$rerun"
   if [ "$(kernel)" != Linux ] || ! systemd_booted; then
     miss "Nexus runs as systemd services, and this machine is not a Linux booted with systemd." "Install on a Linux that boots with systemd, such as Debian 12, Ubuntu 24.04 or Fedora 42."
@@ -129,13 +129,10 @@ check_prerequisites() {
       "printf '[Service]\\nEnvironment=TS_PERMIT_CERT_UID=nexus-control\\n' | sudo tee /etc/systemd/system/tailscaled.service.d/nexus-cert.conf >/dev/null" \
       "sudo systemctl daemon-reload && sudo systemctl restart tailscaled"
   fi
-  if [ -z "$dotfiles" ] && ! control_config_exists; then
-    miss "A first control plane install needs the dotfiles repository every pylon pulls on boot." "$rerun --dotfiles https://github.com/<you>/dotfiles.git"
-  fi
 }
 
 main() {
-  local role=control dotfiles="" i
+  local role=control i
   local args=("$@")
   if [ "${1:-}" = --join-token ]; then
     [ $# = 1 ] || fail "--join-token takes no other argument. $usage"
@@ -153,13 +150,11 @@ main() {
     case ${args[i]} in
       --rotate|--rotate=*) fail "--rotate comes first: sudo deploy/install.sh --rotate claude|github [--non-interactive]" ;;
       --node|--node=*|--join|--join=*) role=node ;;
-      --dotfiles) dotfiles=${args[i + 1]:-} ;;
-      --dotfiles=*) dotfiles=${args[i]#*=} ;;
       -h|--help) echo "$usage"; exit 0 ;;
     esac
   done
 
-  check_prerequisites "$role" "$dotfiles" "sudo deploy/install.sh${args[*]:+ ${args[*]}}"
+  check_prerequisites "$role" "sudo deploy/install.sh${args[*]:+ ${args[*]}}"
   if [ ${#misses[@]} -gt 0 ]; then
     echo "This machine is missing ${#misses[@]} prerequisite(s). Nothing was changed. Fix each, then rerun:" >&2
     printf '%s\n' "${misses[@]}" >&2

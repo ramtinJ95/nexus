@@ -21,7 +21,7 @@ import { call, CliError, follow } from "./transport.ts";
 import { whenRunning, type Api } from "./kit.ts";
 import { commandGroups, commands, sections } from "./commands/index.ts";
 import { version } from "../version.ts";
-import { cli, node, apiName, project, withHealth, listening, socksProxy, setup, versioned, bare } from "../test-support/cli-kit.ts";
+import { cli, node, phone, apiName, project, withHealth, listening, socksProxy, setup, versioned, bare } from "../test-support/cli-kit.ts";
 
 /**
  * A control plane whose pylon runs from the second read of its checkout, which `files` waits for without riding
@@ -263,7 +263,7 @@ test("each failure has its own exit code, and with --json its error is one JSON 
   await fails(["show"], 64, { kind: "invalid", status: null });
 
   const down = await fails(["threads"], 2, { kind: "unreachable", status: null }, { NEXUS_SOCKS: `127.0.0.1:${await freePort()}` });
-  assert.match(down, /nothing is listening on the SOCKS proxy .*ts-home/);
+  assert.match(down, /nothing is listening on the SOCKS proxy at \S+\. Start the proxy, such as a userspace tailscaled, or give the one this device uses with --socks HOST:PORT or NEXUS_SOCKS, or none to connect directly$/);
   const refusing = await socksProxy(t, 4);
   const offline = await fails(["threads"], 2, { kind: "unreachable", status: null }, { NEXUS_SOCKS: `127.0.0.1:${refusing.port}` });
   assert.match(offline, /could not reach nexus\.test:\d+: host unreachable\. The node may be offline/);
@@ -271,11 +271,21 @@ test("each failure has its own exit code, and with --json its error is one JSON 
   const closed = await fails(["threads"], 2, { kind: "unreachable", status: null }, { NEXUS_SOCKS: `127.0.0.1:${hangingUp.port}` });
   assert.match(closed, /closed the connection before answering the CONNECT/);
 
+  const unresolved = await fails(["threads"], 2, { kind: "unreachable", status: null }, { NEXUS_URL: "http://a..b:7470", NEXUS_SOCKS: "none" });
+  assert.equal(unresolved, "a..b does not resolve. If this device reaches the tailnet only through a SOCKS5 proxy, such as a userspace tailscaled, give it with --socks HOST:PORT or NEXUS_SOCKS. Otherwise `tailscale status` shows whether this device is on the tailnet");
+
+  await s.json(["archive", id]);
+  await fails(["preview", id, "3000"], 5, { kind: "conflict", status: 409, error: `thread ${id} is archived, so its pylon stays paused. \`nexus unarchive ${id}\` opens it again` });
+
+  s.callAs(phone);
+  const admit = "If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it";
+  await fails(["deploy", "main"], 3, { kind: "refused", status: 403, code: null, error: `caller may not deploy: only deployers may, never infrastructure nodes or pylons. ${admit} deploy: sudo deploy/install.sh --admit ${phone}` });
+
   s.callAs("nSTRANGER" as TailnetNodeId);
-  await fails(["threads"], 3, { kind: "refused", status: 403 });
+  await fails(["threads"], 3, { kind: "refused", status: 403, code: null });
 
   const human = await s.spawned(["threads"]);
-  assert.deepEqual([human.code, human.stderr], [3, "nexus: caller is not a tailnet node this control plane allows\n"], "without --json the error is plain text");
+  assert.deepEqual([human.code, human.stderr], [3, `nexus: caller is not a tailnet node this control plane allows. ${admit} use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER\n`], "without --json the error is plain text");
 });
 
 test("the URL and the proxy come from the flags, then the environment, then the config file", async (t) => {
@@ -464,7 +474,7 @@ test("whenRunning tries a retryable refusal again and fails at once on any other
       if (tries++ === 0) throw refusal;
       return Promise.resolve("sent");
     };
-    assert.equal(await whenRunning(api, "th-0123456789ab", waking, "nothing was sent"), "sent", refusal.code!);
+    assert.equal(await whenRunning(api, process, "th-0123456789ab", waking, "nothing was sent"), "sent", refusal.code!);
     assert.equal(tries, 2, refusal.code!);
   }
   for (const refusal of [
@@ -472,7 +482,7 @@ test("whenRunning tries a retryable refusal again and fails at once on any other
     new CliError("conflict", "pylon-x is stopped, not running", 409, "not-running"),
   ]) {
     let refusals = 0;
-    await assert.rejects(whenRunning(api, "th-0123456789ab", () => { refusals++; throw refusal; }, "nothing was sent"), refusal);
+    await assert.rejects(whenRunning(api, process, "th-0123456789ab", () => { refusals++; throw refusal; }, "nothing was sent"), refusal);
     assert.equal(refusals, 1, `${refusal.code}: a refusal that is not retryable is not tried again, whatever its code`);
   }
 });

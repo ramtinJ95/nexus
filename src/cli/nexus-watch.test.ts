@@ -18,7 +18,12 @@ import { cli, node, setup, at, claudeWatched } from "../test-support/cli-kit.ts"
 
 /** The JSON lines a watch prints, one at a time. */
 function watchLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: readonly string[], interval = 50) {
-  const child = spawn(process.execPath, [cli, "watch", ...args, "--json", "--interval", String(interval)], { env: s.env() });
+  return jsonLines(t, s, ["watch", ...args, "--json", "--interval", String(interval)]);
+}
+
+/** The JSON lines a run of the CLI prints, one at a time, or its text lines with `parse` as given. */
+function jsonLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: readonly string[], parse: (line: string) => any = JSON.parse) {
+  const child = spawn(process.execPath, [cli, ...args], { env: s.env() });
   t.after(() => { child.kill(); });
   let stderr = "";
   child.stderr.on("data", (chunk) => { stderr += chunk; });
@@ -28,9 +33,15 @@ function watchLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: 
     async next(): Promise<any> {
       // The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone.
       const timeout = AbortSignal.timeout(60_000);
-      const line = await Promise.race([lines.next(), once(timeout, "abort").then(() => assert.fail(`no line from watch. stderr: ${stderr}`))]);
-      assert.ok(!line.done, `watch ended early. stderr: ${stderr}`);
-      return JSON.parse(line.value);
+      const line = await Promise.race([lines.next(), once(timeout, "abort").then(() => assert.fail(`no line from ${args[0]}. stderr: ${stderr}`))]);
+      assert.ok(!line.done, `${args[0]} ended early. stderr: ${stderr}`);
+      return parse(line.value);
+    },
+    /** Every line left until the output ends. */
+    async rest(): Promise<any[]> {
+      const left = [];
+      for (let line = await lines.next(); !line.done; line = await lines.next()) left.push(parse(line.value));
+      return left;
     },
   };
 }
@@ -383,4 +394,269 @@ test("a watch whose reader closed the pipe exits 0 when the thread's deletion en
   watch.child.stdout.destroy();
   await s.json(["delete", thread.id]);
   assert.deepEqual(await exited, [0, null]);
+});
+
+/** The agent's answer, as pi-durable commits it once its run ends. */
+const answered = (s: Awaited<ReturnType<typeof setup>>, id: string, text: string) => {
+  s.fake.transcript(id).messages.push({ role: "assistant", content: [{ type: "text", text }], stopReason: "stop", timestamp: 0 } as never);
+  delete s.fake.transcript(id).docs["pi.live"];
+  s.fake.commit(id);
+};
+
+test("send --watch --json prints the send's reply as one line, then the watch stream, and exits 0 once the run that took the message replied", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--message", "hi"]);
+  const sending = jsonLines(t, s, ["send", thread.id, "Count the lines", "--watch", "--json", "--interval", "50"]);
+  const exited = once(sending.child, "exit");
+  const next = () => sending.next();
+
+  assert.equal((await next()).type, undefined, "the send's reply comes first, as one line");
+  const reset = await next();
+  assert.deepEqual([reset.type, reset.entries.map((e: any) => e.text)], ["reset", ["> hi", "> Count the lines"]], "the stream is the watch's, backlog and all");
+  assert.equal((await next()).run, "idle");
+  await next();
+
+  s.fake.transcript(thread.id).docs["pi.live"] = streaming("Counting");
+  s.fake.commit(thread.id);
+  for (let line = await next(); line.type !== "state" || line.run !== "working"; line = await next());
+  answered(s, thread.id, "hello.py has 3 lines.");
+  for (let line = await next(); line.type !== "entry"; line = await next());
+  s.registry.threads.recordReply(thread.id, Date.UTC(2026, 10, 9));
+  assert.deepEqual(await exited, [0, null]);
+});
+
+test("send --watch prints the run from the sent message on, though the reply came before the watch opened", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--message", "hi"]);
+  const release = s.fake.holdWatches();
+  const sent = s.nexus(["send", thread.id, "Count the lines", "--watch", "--interval", "50"]);
+  await until("the message reached the agent", async () => s.fake.transcript(thread.id).messages.length === 2);
+  answered(s, thread.id, "hello.py has 3 lines.");
+  s.registry.threads.recordReply(thread.id, Date.UTC(2026, 10, 9));
+  release();
+  const res = await sent;
+  assert.equal(res.code, 0, res.stderr);
+  assert.equal(res.stdout, `Sent to ${thread.id}.\n> Count the lines\nhello.py has 3 lines.\n-- active, pylon unknown\n-- It replied.\n`);
+});
+
+test("watch --until-idle exits 10 when the run parks, 12 when the thread asks the person, and 11 when the worker fails", async (t) => {
+  const s = await setup(t);
+  const firstState = async (watch: ReturnType<typeof watchLines>) => {
+    for (let line = await watch.next(); line.type !== "state"; line = await watch.next());
+  };
+
+  const parks: Thread = await s.json(["start", "--project", "acme", "--message", "hi"]);
+  const parking = watchLines(t, s, [parks.id, "--until-idle"]);
+  const parked = once(parking.child, "exit");
+  await firstState(parking);
+  s.fake.park(parks.id, 2);
+  assert.deepEqual(await parked, [10, null]);
+
+  const asks: Thread = await s.json(["start", "--project", "acme", "--message", "hi"]);
+  s.registry.questions.askQuestion({ kind: "judgment", id: "qn-before", thread: asks.id, text: "Asked before the watch", options: ["Yes"], reserved: null, answerer: "person", askedAt: 1, failure: 0 });
+  const asking = watchLines(t, s, [asks.id, "--until-idle"]);
+  const asked = once(asking.child, "exit");
+  await firstState(asking);
+  s.registry.questions.askQuestion({ kind: "judgment", id: "qn-new", thread: asks.id, text: "Start the next brief?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: 2, failure: 0 });
+  assert.deepEqual(await asked, [12, null], "a question asked since the watch began ends it at once, while an older one ends it only at the run's end");
+
+  const c = await claudeWatched(t, s, false);
+  const failing = watchLines(t, s, [c.thread.id, "--until-idle"]);
+  const failed = once(failing.child, "exit");
+  await firstState(failing);
+  claudeWorkerAt(s.registry, c.thread.id, "failed", { message: "claude exited" });
+  assert.deepEqual(await failed, [11, null]);
+});
+
+test("conversation --last prints only the newest reply, and --last N the newest N entries", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--message", "hi"]);
+  answered(s, thread.id, "First answer.");
+  s.fake.transcript(thread.id).messages.push(
+    { role: "user", content: "And the tests?", timestamp: 0 } as never,
+    { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "bash", arguments: { command: "npm test" } }], stopReason: "toolUse", timestamp: 0 } as never,
+  );
+  s.fake.commit(thread.id);
+  answered(s, thread.id, "They pass.");
+
+  const reply = await s.nexus(["conversation", thread.id, "--last"]);
+  assert.deepEqual([reply.code, reply.stdout], [0, "They pass.\n"]);
+  const three = await s.nexus(["conversation", thread.id, "--last", "3"]);
+  assert.deepEqual([three.code, three.stdout], [0, '> And the tests?\n\n[tool] bash {"command":"npm test"}\n\nThey pass.\n']);
+  assert.deepEqual((await s.json(["conversation", thread.id, "--last"])).entries.map((e: any) => e.id), [5], "--json keeps the view's shape, with only the entries picked");
+  assert.equal((await s.nexus(["conversation", thread.id, "3"])).code, 64, "a count needs --last");
+});
+
+test("start --watch follows the first message's run until it replies, and needs a first message to wait for", async (t) => {
+  const s = await setup(t);
+  assert.equal((await s.nexus(["start", "--project", "acme", "--title", "quiet", "--watch"])).code, 64);
+  assert.equal((await s.nexus(["start", "--project", "acme", "--message", "hi", "--interval", "50"])).code, 64);
+  assert.deepEqual(await s.json(["threads"]), [], "a bad flag starts nothing");
+  const release = s.fake.holdWatches();
+  const started = s.nexus(["start", "--project", "acme", "--message", "Count the lines", "--watch", "--interval", "50"]);
+  let id = "";
+  await until("the thread started", async () => {
+    id = (await s.json(["threads"]))[0]?.id ?? "";
+    return id !== "" && s.fake.transcript(id).messages.length === 1;
+  });
+  answered(s, id, "hello.py has 3 lines.");
+  s.registry.threads.recordReply(id as never, Date.UTC(2026, 10, 9));
+  release();
+  const res = await started;
+  assert.equal(res.code, 0, res.stderr);
+  assert.match(res.stdout, /^Started th-[0-9a-f]+ on acme: Count the lines\nSent the first message\.\n> Count the lines\nhello\.py has 3 lines\.\n-- active, pylon unknown\n-- It replied\.\n$/);
+});
+
+const apiErrors = (await readFile(new URL("../fixtures/claude-api-errors.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").map((line) => JSON.parse(line));
+/** The first fixture record stops a turn on its usage limit, and the fourth on an overloaded model, at `at(3)` here. */
+const usageStop = { ...apiErrors[0], timestamp: at(3) };
+const modelError = { ...apiErrors[3], timestamp: at(3) };
+
+/**
+ * A Claude worker's turn from `at(2)` to `at(4)`, which writes `records`, watched with --until-idle from before it
+ * starts. The pylon's reads are held from the turn's records until the stream says the turn ended. `before` runs
+ * before the watch starts, and `then` once the reads go on. Answers the text of each entry printed and the exit code.
+ */
+async function claudeTurn(t: TestContext, s: Awaited<ReturnType<typeof setup>>, records: object[], before = (_: string) => {}, then = async (_: Awaited<ReturnType<typeof claudeWatched>>) => {}) {
+  const c = await claudeWatched(t, s);
+  await writeFile(c.transcript, jsonl(claudeRecords.prompt));
+  assert.equal((await s.json(["conversation", c.thread.id])).entries.length, 1);
+  before(c.thread.id);
+  const watch = watchLines(t, s, [c.thread.id, "--until-idle"]);
+  const exited = once(watch.child, "exit");
+  for (let line = await watch.next(); line.type !== "live"; line = await watch.next());
+  c.report("session.turn-started", Date.parse(at(2)));
+  for (let line = await watch.next(); line.type !== "state" || line.run !== "working"; line = await watch.next());
+
+  const release = c.holdReads();
+  await appendFile(c.transcript, jsonl(...records));
+  c.report("session.turn-ended", Date.parse(at(4)));
+  const lines = [];
+  for (let line = await watch.next(); line.type !== "state" || line.run !== "idle"; line = await watch.next()) lines.push(line);
+  release();
+  await then(c);
+  lines.push(...await watch.rest());
+  return { texts: lines.flatMap((l) => l.type === "claude-entry" && l.text !== "" ? [l.text] : []), code: (await exited)[0] };
+}
+
+test("watch --until-idle prints the reply a Claude turn wrote before it exits, though the stream says the turn ended before the transcript is read", async (t) => {
+  const s = await setup(t);
+  assert.deepEqual(await claudeTurn(t, s, [claudeRecords.reply]), { texts: ["There is no hello.py."], code: 0 });
+});
+
+test("watch --until-idle prints a Claude reply before it exits 12 on a decision the person owes from before the wait", async (t) => {
+  const s = await setup(t);
+  const asked = (thread: string) => s.registry.questions.askQuestion({ kind: "judgment", id: "qn-old", thread: thread as never, text: "Start the next brief?", options: ["Yes"], reserved: null, answerer: "person", askedAt: 1, failure: 0 });
+  assert.deepEqual(await claudeTurn(t, s, [claudeRecords.reply], asked), { texts: ["There is no hello.py."], code: 12 });
+});
+
+test("watch --until-idle exits 12 when a Claude turn stops on its usage limit, since the person resumes it after the reset", async (t) => {
+  const s = await setup(t);
+  assert.equal((await claudeTurn(t, s, [usageStop])).code, 12);
+});
+
+/**
+ * A Claude worker's turn from `at(2)` to `at(4)` that dies on a model error, watched in text with --until-idle.
+ * `before` runs before the watch starts, and `act` once the watch says it waits for Nexus to resume the turn.
+ * Answers the watch's lines and its exit code.
+ */
+async function claudeDeath(t: TestContext, s: Awaited<ReturnType<typeof setup>>, before: (thread: string) => void, act: (c: Awaited<ReturnType<typeof claudeWatched>>) => Promise<void>) {
+  const c = await claudeWatched(t, s);
+  await writeFile(c.transcript, jsonl(claudeRecords.prompt));
+  assert.equal((await s.json(["conversation", c.thread.id])).entries.length, 1);
+  before(c.thread.id);
+  const watch = jsonLines(t, s, ["watch", c.thread.id, "--until-idle", "--interval", "50"], (line) => line);
+  const exited = once(watch.child, "exit");
+  const printed: string[] = [];
+  const upTo = async (wanted: (line: string) => boolean) => {
+    for (let line = await watch.next(); ; line = await watch.next()) {
+      printed.push(line);
+      if (wanted(line)) return;
+    }
+  };
+  await upTo((line) => line.includes("pylon running"));
+  c.report("session.turn-started", Date.parse(at(2)));
+  await upTo((line) => line.endsWith("agent working"));
+  await appendFile(c.transcript, jsonl(modelError));
+  c.report("session.turn-ended", Date.parse(at(4)));
+  await upTo((line) => line.startsWith("-- Its turn died:") && line.endsWith("Waiting for Nexus to resume it"));
+  await act(c);
+  printed.push(...await watch.rest());
+  return { printed, code: (await exited)[0] };
+}
+
+test("watch --until-idle waits on a Claude turn that died before Nexus records its resume, and exits 0 on the resumed turn's reply", async (t) => {
+  const s = await setup(t);
+  const { printed, code } = await claudeDeath(t, s, () => {}, async (c) => {
+    s.registry.threads.saveClaudeResume(c.thread.id, { state: "waiting", turn: Date.parse(at(3)), count: 1, due: 0 });
+    c.report("session.turn-started", Date.parse(at(5)));
+    await appendFile(c.transcript, jsonl({ ...claudeRecords.reply, timestamp: at(6), message: { model: "claude-opus-5-5", content: [{ type: "text", text: "Done." }] } }));
+    c.report("session.turn-ended", Date.parse(at(7)));
+  });
+  assert.equal(code, 0, printed.join("\n"));
+  assert.deepEqual(printed.slice(-2), ["Done.", "-- It replied."]);
+});
+
+test("watch --until-idle exits 12 when Nexus gives the resume it waits on to the person, with no turn since", async (t) => {
+  const s = await setup(t);
+  const resuming = (thread: string) => s.registry.threads.saveClaudeResume(thread as never, { state: "waiting", turn: Date.parse(at(3)), count: 1, due: 0 });
+  const { printed, code } = await claudeDeath(t, s, resuming, async (c) => {
+    s.registry.threads.saveClaudeResume(c.thread.id, { state: "person", turn: Date.parse(at(3)), count: 3, why: "it died three times in a row" });
+  });
+  assert.equal(code, 12, printed.join("\n"));
+  assert.equal(printed.at(-1), "-- Its turn died, and Nexus stopped resuming it: it died three times in a row");
+});
+
+test("watch --until-idle exits 11 when Nexus leaves the dead turn it waits on to the person", async (t) => {
+  const s = await setup(t);
+  const { printed, code } = await claudeDeath(t, s, () => {}, async (c) => {
+    s.registry.threads.saveClaudeResume(c.thread.id, { state: "left-alone" });
+  });
+  assert.equal(code, 11, printed.join("\n"));
+});
+
+test("watch --until-idle exits 12 when a Claude turn died and Nexus gave its resume to the person", async (t) => {
+  const s = await setup(t);
+  const handed = (thread: string) => s.registry.threads.saveClaudeResume(thread as never, { state: "person", turn: Date.parse(at(3)), count: 3, why: "it died three times in a row" });
+  assert.equal((await claudeTurn(t, s, [modelError], handed)).code, 12);
+});
+
+test("watch --until-idle waits through a Claude turn that died while Nexus resumes it, and exits 0 on the resumed turn's reply", async (t) => {
+  const s = await setup(t);
+  const resuming = (thread: string) => s.registry.threads.saveClaudeResume(thread as never, { state: "waiting", turn: Date.parse(at(3)), count: 1, due: 0 });
+  const resumed = async (c: Awaited<ReturnType<typeof claudeWatched>>) => {
+    c.report("session.turn-started", Date.parse(at(5)));
+    await appendFile(c.transcript, jsonl({ ...claudeRecords.reply, timestamp: at(6), message: { model: "claude-opus-5-5", content: [{ type: "text", text: "Done." }] } }));
+    c.report("session.turn-ended", Date.parse(at(7)));
+  };
+  const { texts, code } = await claudeTurn(t, s, [modelError], resuming, resumed);
+  assert.equal(code, 0);
+  assert.equal(texts.at(-1), "Done.");
+});
+
+test("watch --until-idle prints a pi reply whose commits its stream missed before it exits", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--message", "hi"]);
+  const watch = watchLines(t, s, [thread.id, "--until-idle"]);
+  const exited = once(watch.child, "exit");
+  for (let line = await watch.next(); line.type !== "live"; line = await watch.next());
+  s.fake.holdCommits();
+  s.fake.transcript(thread.id).docs["pi.live"] = streaming("Counting");
+  s.fake.commit(thread.id);
+  answered(s, thread.id, "hello.py has 3 lines.");
+  s.registry.threads.recordReply(thread.id, Date.UTC(2026, 10, 9));
+  const entries = (await watch.rest()).filter((l) => l.type === "entry").map((l) => l.text);
+  assert.deepEqual(entries, ["hello.py has 3 lines."]);
+  assert.deepEqual(await exited, [0, null]);
+});
+
+test("watch --until-idle ends on what the thread's detail says, though the conversation's stream never opens", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--message", "hi"]);
+  s.fake.holdWatches();
+  const watch = s.nexus(["watch", thread.id, "--until-idle", "--interval", "50"]);
+  await until("the watch asked for the stream", async () => s.fake.calls.some(([call, id]) => call === "watch" && id === thread.id));
+  s.fake.park(thread.id, 1);
+  const res = await watch;
+  assert.deepEqual([res.code, res.stdout], [10, `-- 1 parked tasks hold the run, which \`nexus retry ${thread.id}\` retries\n`]);
 });

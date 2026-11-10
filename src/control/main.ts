@@ -93,8 +93,8 @@ const configSchema = z.strictObject({
   callers: z.array(tailnetNodeIdSchema),
   deployers: z.array(tailnetNodeIdSchema).optional(),
   deployKeys: z.record(tailnetNodeIdSchema, z.string().regex(digestPattern)).optional(),
-  /** The common dotfiles layer every new pylon pulls on boot. */
-  dotfiles: z.strictObject({ repo: gitUrl, ref: z.string().min(1) }),
+  /** The common dotfiles layer every new pylon pulls on boot. Absent, pylons keep the image's baked layer. */
+  dotfiles: z.strictObject({ repo: gitUrl, ref: z.string().min(1) }).optional(),
   harness: z.strictObject({
     /** pi-durable's storage, such as /var/lib/nexus-control/harness.sqlite. Only this process may open it. */
     storage: absolutePath,

@@ -193,6 +193,7 @@ test("files, changes and diff read the pylon's checkout, and wait for a paused p
   const listed = await s.nexus(["files", thread.id]);
   assert.equal(listed.code, 0, listed.stderr);
   assert.equal(listed.stdout, ".git/\nmain.txt  24\nsrc/\n", "a paused pylon is woken and asked again until it runs");
+  assert.equal(listed.stderr, "", "off a terminal the wait writes nothing to stderr");
   assert.deepEqual((await s.json(["files", thread.id, "src"])).entries, [{ name: "x.ts", kind: "file", size: 2 }]);
 
   assert.equal((await s.nexus(["changes", thread.id])).stdout, [
@@ -256,6 +257,30 @@ test("changes and diff of a scratch thread are against the empty tree, before it
   assert.equal(await output(["changes", thread.id]), sinceBoot, "the agent's commit is a change since the start too");
   assert.equal(await output(["diff", thread.id]), firstDiff);
   assert.equal(await output(["changes", thread.id, "--uncommitted"]), `No changes since HEAD, ${head.slice(0, 12)}.\n`);
+});
+
+test("preview --wait and a read of a paused pylon on a terminal say what they wait for", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "ports"]);
+  observeRunning(s, thread, [], [3000]);
+  const { url } = await s.json(["preview", thread.id, "3000"]);
+  const previewing = s.onTerminal(["preview", thread.id, "3000", "--wait"]);
+  await until("the wait says the preview is not served", () => previewing.stderr().includes(`${url} is published, and not served yet\n`));
+  s.registry.threads.apply({ record: "preview", pylonId: thread.pylonId, service: "port-3000", httpsPort: 10200, ready: true });
+  const served = await previewing.exited;
+  assert.deepEqual([served.code, served.stdout, served.stderr], [0, `${url}\n`, `${url} is published, and not served yet\n`]);
+
+  let paused = true;
+  s.probeAnswers(async () => {
+    if (paused) throw Object.assign(new Error("rj-firebat: pylon-x is stopped, not running"), { code: "not-running" });
+    return { kind: "unlink-port", refused: null };
+  });
+  const unpreviewing = s.onTerminal(["unpreview", thread.id, "3000"]);
+  const waking = `Waiting up to 120 s for the pylon of ${thread.id} to run: pylon ${thread.pylonId} is not running yet. This request wakes it, so ask again once it runs\n`;
+  await until("the wait says the pylon wakes", () => unpreviewing.stderr().includes(waking));
+  paused = false;
+  const unpublished = await unpreviewing.exited;
+  assert.deepEqual([unpublished.code, unpublished.stderr], [0, waking]);
 });
 
 test("unpreview unpublishes a port, waits for a paused pylon to run, and fails with the contract's exit codes", async (t) => {

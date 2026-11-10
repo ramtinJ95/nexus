@@ -14,11 +14,13 @@ import type { Question } from "../control/questions.ts";
 import { testReview } from "../test-support/registry-kit.ts";
 import type { ReviewLoop } from "../control/review.ts";
 import type { ImageManifest } from "../protocol/images.ts";
+import type { ImageOperation } from "../contract/release.ts";
+import { commands } from "./commands/index.ts";
 import type { ImageId, JobId, NodeName, ThreadId } from "../ids.ts";
 import type { ImageFetch } from "../control/image-store.ts";
 import { testCapacity, testObservation, until } from "../test-support/kit.ts";
 import { CliError } from "./transport.ts";
-import type { Api } from "./kit.ts";
+import type { Api, Result } from "./kit.ts";
 import { answeredText, pressOf } from "./commands/release.ts";
 import { version } from "../version.ts";
 import { node, laptop, image, setup } from "../test-support/cli-kit.ts";
@@ -62,6 +64,40 @@ test("deploy and release use the shared release view and wait for both roles", a
   assert.match(failed.stderr, /failed to bind again/);
 });
 
+test("deploy --wait on a terminal writes each change of the release to stderr, and Ctrl-C says the deployment carries on", async (t) => {
+  const s = await setup(t);
+  const target = (await s.json(["deploy", "main"])).desired.commit as string;
+  const waiting = s.onTerminal(["deploy", "main", "--wait"]);
+  await until("the wait shows the release it waits for", () => waiting.stderr().includes(`Desired: ${target}`));
+  s.registry.releases.reportRelease({ node, role: "control", commit: "b".repeat(40), target, state: "installing", reason: null, observedAt: Date.now() });
+  await until("the wait shows the release's change", () => waiting.stderr().includes(`${node} control: ${"b".repeat(40)} installing`));
+  waiting.child.kill("SIGINT");
+  const stopped = await waiting.exited;
+  assert.deepEqual([stopped.code, stopped.stdout], [130, ""], stopped.stderr);
+  assert.equal(stopped.stderr.split("\n").filter((line) => line.startsWith("Desired: ")).length, 2, "each state is written once, when it changes");
+  assert.ok(stopped.stderr.endsWith("Stopped waiting. The deployment carries on, and `nexus release` shows where it is\n"), stopped.stderr);
+
+  const asked = s.requests();
+  const quiet = s.nexus(["deploy", "main", "--wait"]);
+  await until("the wait off a terminal polls", () => s.requests() >= asked + 3);
+  for (const role of ["control", "probe"] as const) s.registry.releases.reportRelease({ node, role, commit: target, target, state: "healthy", reason: null, observedAt: Date.now() });
+  const done = await quiet;
+  assert.deepEqual([done.code, done.stderr], [0, ""], "off a terminal the wait writes nothing to stderr");
+});
+
+test("image build --wait ends with the rollout to run next, which stays a command of its own", async () => {
+  const built: ImageOperation = { kind: "build", release: null, image: image.id, requestedBy: laptop, requestedAt: 1, steps: [{ node, state: "running", job: null, reason: null }], state: "running" };
+  const asked: string[] = [];
+  const api: Api = async (method, path) => {
+    asked.push(`${method} ${path}`);
+    if (method === "POST") return built;
+    return { current: image.id, previous: null, images: [], operation: { ...built, steps: [{ node, state: "done", job: null, reason: null }], state: "done", finishedAt: 2 } };
+  };
+  const result = await commands["image build"]!.run(api, [], { wait: true }, null as never, { connect: null as never, versions: null as never, io: process });
+  assert.deepEqual(asked, ["POST /v1/images/build", "GET /v1/images"], "it rolls nothing out");
+  assert.equal((result as Result).text, `No images.\nbuild ${image.id}: done\n  ${node}: done\nRoll it out to every online node with: nexus image rollout ${image.id} --wait`);
+});
+
 test("image list and current print each image's role, build, release and nodes, and rollout --wait follows the rollout until it is done", async (t) => {
   const s = await setup(t);
   const older: ImageManifest = { ...image, id: "img-00000000000a" as ImageId, builtAt: "2026-12-01T00:00:00Z" };
@@ -93,6 +129,7 @@ test("image list and current print each image's role, build, release and nodes, 
 
   const rolled = await s.nexus(["image", "rollout", older.id, "--wait"]);
   assert.equal(rolled.code, 0, rolled.stderr);
+  assert.equal(rolled.stderr, "", "off a terminal the wait writes nothing to stderr");
   assert.equal(rolled.stdout, [
     "img-0123456789ab  previous  built 2027-01-01T00:00:00Z on rj-firebat  release unknown       on rj-firebat",
     "img-00000000000a  current   built 2026-12-01T00:00:00Z on rj-firebat  release ffffffffffff  on rj-firebat",

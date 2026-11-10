@@ -8,7 +8,7 @@ You need:
 
 - a Linux machine that boots with systemd, such as Debian 12 or Ubuntu 24.04, with hardware virtualization (`/dev/kvm`), at least 8 GiB of memory, and SSH as a sudoer;
 - [Tailscale](https://tailscale.com) on that machine and on your Mac, in one tailnet, with MagicDNS and HTTPS certificates turned on in its admin console;
-- git and Node 26 on the Mac, and a dotfiles repository every pylon pulls on boot;
+- git and Node 26 on the Mac;
 - the agents' credentials: a ChatGPT subscription or an OpenAI API key, a Claude token from `claude setup-token` or an Anthropic API key, and a GitHub token.
 
 On the Linux machine, over SSH:
@@ -16,8 +16,10 @@ On the Linux machine, over SSH:
 ```sh
 sudo apt-get install -y git
 git clone https://github.com/ramtinJ95/nexus.git && cd nexus
-sudo deploy/install.sh --admit <your Mac's tailnet name> --dotfiles <dotfiles git URL>
+sudo deploy/install.sh --admit <your Mac's tailnet name>
 ```
+
+A pylon boots with the image's baked dotfiles layer. To give pylons your own, add `--dotfiles <git URL>` to the first install, naming a repository whose `main` branch every pylon pulls on boot and whose executable `install` at the root, if it has one, then runs as `user`. The installer checks the URL with `git ls-remote` and refuses one it cannot reach.
 
 The first run checks every prerequisite, prints the command that fixes each one it misses, and changes nothing. Run those, then run the installer again. It installs the control plane, asks for each credential, and ends with a list of what is left. Do the Linux machine's part of that list, Docker for image builds among it, before you build the first image below.
 

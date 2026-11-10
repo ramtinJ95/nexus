@@ -32,7 +32,7 @@ test("a path that does not decode is a 400 to an allowed caller and a 403 to any
   assert.equal(bad.status, 400);
   assert.equal(typeof bad.body.error, "string");
   s.callAs("nSTRANGER" as TailnetNodeId);
-  assert.deepEqual(await s.call("GET", "/v1/%zz"), { status: 403, body: { error: "caller is not a tailnet node this control plane allows", code: null, retryable: false } });
+  assert.deepEqual(await s.call("GET", "/v1/%zz"), { status: 403, body: { error: `caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER`, code: null, retryable: false } });
   s.callAs(laptop);
   for (const host of ["[zz", "a b"]) {
     assert.deepEqual(await s.call("GET", "/v1/projects", undefined, { host }), { status: 403, body: { error: `the API does not answer to host ${host}`, code: null, retryable: false } }, host);
@@ -55,7 +55,7 @@ test("any tailnet node may ask who it is and what it may do, under the API's nam
     { node: "nSTRANGER", allowed: false, person: false, deployer: false },
   ], asks.map(([, who]) => who).join(", "));
   assert.deepEqual(await s.call("GET", "/v1/whoami", undefined, { host: "evil.example" }), { status: 403, body: { error: "the API does not answer to host evil.example", code: null, retryable: false } });
-  assert.deepEqual(await s.call("GET", "/v1/projects"), { status: 403, body: { error: "caller is not a tailnet node this control plane allows", code: null, retryable: false } }, "it opens no other route to a stranger");
+  assert.deepEqual(await s.call("GET", "/v1/projects"), { status: 403, body: { error: "caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER", code: null, retryable: false } }, "it opens no other route to a stranger");
   s.callAs(null);
   assert.deepEqual(await s.call("GET", "/v1/whoami"), { status: 403, body: { error: "caller is not a tailnet node", code: null, retryable: false } });
 });
@@ -481,12 +481,12 @@ test("the health, release, deployer and event routes answer each caller and meth
     "DELETE /v1/events 403 caller is not a tailnet node this control plane allows",
   ];
   const stranger = [
-    "GET /v1/health?past=admission 403 caller is not a tailnet node this control plane allows",
-    "POST /v1/health 403 caller is not a tailnet node this control plane allows",
-    "GET /v1/release 403 caller is not a tailnet node this control plane allows",
-    "PUT /v1/release 403 caller is not a tailnet node this control plane allows",
-    "PUT /v1/release 403 caller is not a tailnet node this control plane allows",
-    "POST /v1/release 403 caller is not a tailnet node this control plane allows",
+    "GET /v1/health?past=admission 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER",
+    "POST /v1/health 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER",
+    "GET /v1/release 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER",
+    "PUT /v1/release 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER",
+    "PUT /v1/release 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER",
+    "POST /v1/release 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER",
     "GET /v1/deployer/release 403 caller is not a tailnet node this control plane allows",
     "POST /v1/deployer/release 403 caller is not a tailnet node this control plane allows",
     "POST /v1/deployer/report 403 caller is not a tailnet node this control plane allows",
@@ -496,17 +496,18 @@ test("the health, release, deployer and event routes answer each caller and meth
     "POST /v1/deployer/drain 403 caller is not a tailnet node this control plane allows",
     "POST /v1/deployer/drain 403 caller is not a tailnet node this control plane allows",
     "GET /v1/deployer/drain 403 caller is not a tailnet node this control plane allows",
-    "POST /v1/deployer/nothing 403 caller is not a tailnet node this control plane allows",
-    "GET /v1/deployer/nothing 403 caller is not a tailnet node this control plane allows",
-    "GET /v1/events?kind=release.changed 403 caller is not a tailnet node this control plane allows",
-    "GET /v1/events?since=-1 403 caller is not a tailnet node this control plane allows",
-    "GET /v1/events?kind=unknown 403 caller is not a tailnet node this control plane allows",
-    "DELETE /v1/events 403 caller is not a tailnet node this control plane allows",
+    "POST /v1/deployer/nothing 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER",
+    "GET /v1/deployer/nothing 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER",
+    "GET /v1/events?kind=release.changed 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER",
+    "GET /v1/events?since=-1 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER",
+    "GET /v1/events?kind=unknown 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER",
+    "DELETE /v1/events 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER",
   ];
+  const person = allowed.map((line) => line.startsWith("PUT /v1/release 403") ? `${line}. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit ${laptop}` : line);
   assert.deepEqual(answers, {
     "a deployer": deployer,
-    "an allowed caller who is not a deployer": allowed,
-    "an allowed caller while deploys are off": allowed,
+    "an allowed caller who is not a deployer": person,
+    "an allowed caller while deploys are off": person,
     "the control node": allowed,
     "the control node with its deployer key": controlKey,
     "the control node with another key": allowed,
