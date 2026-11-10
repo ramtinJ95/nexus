@@ -90,3 +90,12 @@ export const maxAsksBytes = 1 << 20;
 
 /** The control plane expects this ID for the latest session.turn-started it recorded, so the hook stamps both with `at`. */
 export const claudeTurn = (session: string, at: number): string => `claude:${session}:${at}`;
+
+/**
+ * The text inside a prompt Claude Code took as a paste, which it hands its hooks and records as one
+ * `<pasted_content id="…">` block between newlines, or `text` as it is. Tags anywhere else are the text's own.
+ */
+export function unpasted(text: string): string {
+  const match = /^\n*<pasted_content id="([^"\n]+)">\n([\s\S]*)\n<\/pasted_content id="\1">\n*$/.exec(text);
+  return match === null || match[2]!.includes(`</pasted_content id="${match[1]}">`) ? text : match[2]!;
+}

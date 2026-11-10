@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { pipeOutput, type OpenPipe } from "../pipe.ts";
 import { claudeSessionId } from "../protocol/agent-kinds.ts";
 import { onClaudeTranscript } from "../guest-contract.ts";
-import { claudeProjects } from "../../images/pylon/nexus-contract.ts";
+import { claudeProjects, unpasted } from "../../images/pylon/nexus-contract.ts";
 
 /**
  * Who a prompt came from: the person, a slash command, or something else, such as a plugin. A finished background
@@ -491,15 +491,6 @@ function partsText(parts: unknown): string {
 function inner(text: string, name: string): string | null {
   const match = new RegExp(`<${name}>([\\s\\S]*?)(?:</${name}>|$)`).exec(text);
   return match === null ? null : match[1]!;
-}
-
-/**
- * The text inside a message Claude Code took as a paste, which it records as one `<pasted_content id="…">` block
- * between newlines, or `text` as it is. Tags anywhere else are the text's own.
- */
-function unpasted(text: string): string {
-  const match = /^\n*<pasted_content id="([^"\n]+)">\n([\s\S]*)\n<\/pasted_content id="\1">\n*$/.exec(text);
-  return match === null || match[2]!.includes(`</pasted_content id="${match[1]}">`) ? text : match[2]!;
 }
 
 const leadingTag = (text: string): string => /^\s*<([a-z_-]+)>/.exec(text)?.[1] ?? "";
