@@ -5196,13 +5196,13 @@ test("a review whose rule asks for a second reviewer that no other model can run
   const review = await loop.start(f.builder, { land: "nLAPTOP" });
   await loop.poll();
   assert.equal(f.started.length, 1, "the same model is never started twice");
-  assert.deepEqual(review.second, { kind: "none", rule: "the project gives every pull request one", why: "the harness runs only claude-opus-5-5 and gpt-6-astra, and the project grants no Claude token for a Claude worker on another model. Grant CLAUDE_CODE_OAUTH_TOKEN for api.anthropic.com to the project (`nexus project edit`)" });
+  assert.deepEqual(review.second, { kind: "none", rule: "the project gives every pull request one", why: "the harness runs only claude-opus-5-5 and gpt-6-astra, and the project grants no Claude token for a Claude worker. Grant CLAUDE_CODE_OAUTH_TOKEN for api.anthropic.com to the project (`nexus project edit`)" });
   assert.match(reviewSaidText(review), /No second reviewer runs, though the project gives every pull request one: the harness runs only/);
   await loop.poll();
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
   assert.deepEqual(f.merges, []);
-  const hold = `The project asks for a second reviewer on another model, since the project gives every pull request one, and none could run: ${review.second!.kind === "none" && review.second!.why}.`;
+  const hold = `The project asks for an independent second reviewer on Claude Opus 5.5, since the project gives every pull request one, and none could run: ${review.second!.kind === "none" && review.second!.why}.`;
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [hold] });
   assert.deepEqual(holdRule("no-second-reviewer"), { holdsAgain: true, waivable: true, why: "Landing on one reviewer's approval where the project asks for two is yours to accept, and pressing Land here is you accepting it." });
   loop.land(f.builder, "nLAPTOP", head1, [hold]);
@@ -5425,7 +5425,7 @@ test("a second reviewer whose thread does not start yet is tried again each minu
   await refused.poll();
   assert.deepEqual(g.review().second, { kind: "none", rule: "the project gives every pull request one", why: "its thread did not start within 30 minutes: no node has room for this pylon" });
   assert.deepEqual(g.merges, []);
-  assert.deepEqual(shown(g.review().phase), { kind: "needs-person", reasons: ["The project asks for a second reviewer on another model, since the project gives every pull request one, and none could run: its thread did not start within 30 minutes: no node has room for this pylon."] });
+  assert.deepEqual(shown(g.review().phase), { kind: "needs-person", reasons: ["The project asks for an independent second reviewer on Claude Opus 5.5, since the project gives every pull request one, and none could run: its thread did not start within 30 minutes: no node has room for this pylon."] });
 });
 
 test("a second reviewer is archived once both approve and the review waits on the person, and a new round starts it again", async (t) => {
