@@ -116,6 +116,15 @@ test("every command whose help takes a <thread> resolves its first argument as o
   assert.deepEqual(unresolved, []);
 });
 
+test("nexus --help and nexus alone name the config file in the HOME the CLI runs with", async (t) => {
+  const s = await setup(t);
+  const config = `then NEXUS_URL and NEXUS_SOCKS, then ${join(s.home, ".config", "nexus", "cli.json")}, which`;
+  assert.ok((await s.nexus(["--help"])).stdout.includes(config));
+  const bare = await s.nexus([]);
+  assert.equal(bare.code, 64);
+  assert.ok(bare.stderr.includes(config), "a run without a command prints the same usage");
+});
+
 test("--help or -h after a command prints its lines of nexus --help and exits 0 without a request", async (t) => {
   const s = await setup(t);
   const all = new Set((await s.nexus(["--help"])).stdout.split("\n"));

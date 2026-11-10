@@ -61,7 +61,7 @@ export async function main(argv: readonly string[], io: Io = process): Promise<n
     return 0;
   }
   if (argv[0] === "--help" || argv[0] === "help") {
-    io.stdout.write(usage);
+    io.stdout.write(usage(io.env));
     return 0;
   }
   try {
@@ -70,7 +70,7 @@ export async function main(argv: readonly string[], io: Io = process): Promise<n
     if (!(err instanceof CliError)) throw err;
     const json = argv.includes("--json");
     io.stderr.write(json ? `${JSON.stringify({ error: err.message, kind: err.kind, status: err.status, code: err.code })}\n`
-      : argv.length === 0 ? usage : `nexus: ${err.message}${err.kind === "invalid" && err.status === null ? ". Run nexus --help for usage" : ""}\n`);
+      : argv.length === 0 ? usage(io.env) : `nexus: ${err.message}${err.kind === "invalid" && err.status === null ? ". Run nexus --help for usage" : ""}\n`);
     return exitCodes[err.kind];
   }
 }
