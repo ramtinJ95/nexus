@@ -3,18 +3,14 @@
  * Claude Code and pi integrations, which shell out to it. docs/cli.md is the contract: the commands, their JSON, the
  * exit codes and the watch stream. --json prints the API's reply as it is, except where docs/cli.md says otherwise.
  */
-import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
+import { parseArgs } from "node:util";
 import { call, CliError, exitCodes, follow, upgrade, UsageError, type Endpoint } from "./transport.ts";
 import { version } from "../version.ts";
-import { noteTo, ridingRestarts, type Api, type Io, type Values } from "./kit.ts";
+import { globalOptions, noteTo, ridingRestarts, type Api, type Io, type Values } from "./kit.ts";
 import { threadOf } from "./refs.ts";
 import { settings, checked } from "./config.ts";
 import { groups, nearest, subcommandsOf, usage, usageOf } from "./help.ts";
 import { commands } from "./commands/index.ts";
-
-const globalOptions: ParseArgsOptionsConfig = {
-  json: { type: "boolean" }, url: { type: "string" }, socks: { type: "string" }, help: { type: "boolean", short: "h" },
-};
 
 /**
  * What a run asks for, read from its words before a command parses its flags. `help` with `asked` false is a run

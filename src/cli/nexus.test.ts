@@ -111,8 +111,11 @@ test("each command's help names every flag it takes", () => {
   }
 });
 
-test("every command whose help takes a <thread> resolves its first argument as one", () => {
-  const unresolved = Object.entries(commands).filter(([, command]) => command.help.join("\n").includes("<thread>") !== (command.thread === true)).map(([name]) => name);
+test("every command whose help takes a <thread> resolves its first argument as one, and one that takes <thread...> each", () => {
+  const unresolved = Object.entries(commands).filter(([, command]) => {
+    const help = command.help.join("\n");
+    return help.includes("<thread>") !== (command.thread === true) || help.includes("<thread...>") !== (command.thread === "each");
+  }).map(([name]) => name);
   assert.deepEqual(unresolved, []);
 });
 

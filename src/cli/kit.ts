@@ -47,8 +47,13 @@ export interface Command {
   /** Commands that share an entry share the array. */
   help: readonly string[];
   args: readonly [min: number, max: number];
-  /** Its first argument names a thread, which a prefix of the ID or `@last` may give. */
-  thread?: true;
+  /**
+   * Its first argument names a thread, which a prefix of the ID or `@last` may give, and main resolves it. With `each`,
+   * every argument names one, and the command resolves each itself, so one that names no thread fails only itself.
+   */
+  thread?: true | "each";
+  /** Its first argument names a project, which shell completion offers from `projects --json`. */
+  project?: true;
   /**
    * It runs against a control plane older than `minControlVersion`, with a warning, since it is how a person
    * upgrades or diagnoses one.
@@ -60,6 +65,11 @@ export interface Command {
   /** Nothing when the command printed its own output, as watch does, or the exit code it ends with then. */
   run(api: Api, args: readonly string[], values: Values, follow: Follow, local: Local): Promise<Result | number | void>;
 }
+
+/** The flags every command takes, before or after its name. */
+export const globalOptions: ParseArgsOptionsConfig = {
+  json: { type: "boolean" }, url: { type: "string" }, socks: { type: "string" }, help: { type: "boolean", short: "h" },
+};
 
 export const str = (v: Values, key: string) => v[key] as string | undefined;
 export const strs = (v: Values, key: string) => (v[key] as string[] | undefined) ?? [];

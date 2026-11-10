@@ -88,6 +88,7 @@ const statusHelp = ["  nexus archive|unarchive|delete <thread...>"];
 const statusChange = (route: typeof routes.archive | typeof routes.unarchive | typeof routes.delete, done: string, queued: string): Command => ({
   help: statusHelp,
   args: [1, Infinity],
+  thread: "each",
   run: (api, given) => eachThread(api, given, async (id) => {
     const t = await request(api, route, { thread: id });
     return { json: t, text: `${done} ${t.id}.${"waits" in t ? ` ${queued}` : ""}` };
@@ -326,6 +327,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
       "    mark the latest reply seen, or unread, or only up to the reply at MS, as captured with what the client showed",
     ],
     args: [1, Infinity],
+    thread: "each",
     options: { unread: { type: "boolean" }, "last-reply-at": { type: "string" } },
     async run(api, given, v) {
       const shown = str(v, "last-reply-at");
