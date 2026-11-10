@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { NodeName, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
+import type { ImageId, JobId, NodeName, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { ReleaseReport } from "../protocol/deploy.ts";
 import type { DiskFact } from "../protocol/observations.ts";
 import { testCapacity } from "../test-support/kit.ts";
 import { doctorReport, type DoctorFacts } from "./doctor.ts";
 import type { Check, Status } from "./doctor-model.ts";
+import type { ImageFetch } from "./image-store.ts";
 import type { NodeSummary } from "./wire.ts";
 
 const now = Date.parse("2026-11-01T12:00:00Z");
@@ -19,6 +20,7 @@ const peer = "infra-testbench" as NodeName;
 const none = { pylons: 0, cpus: 0, memoryGiB: 0 };
 const pylonsDisk = { paths: ["/var/lib/nexus/pylons", "/var/lib/nexus"], totalGiB: 500, freeGiB: 300, pylons: true as const };
 const controlDisk = { paths: ["/var/lib/nexus-control"], totalGiB: 100, freeGiB: 60 };
+const current = "img-0123456789ab" as ImageId;
 
 function nodeOf(name: NodeName, over: Partial<NodeSummary> = {}): NodeSummary {
   return {
@@ -45,6 +47,7 @@ function healthy(over: Partial<DoctorFacts> = {}): DoctorFacts {
     github: { kind: "accepted", expiresAt: iso(now + 90 * day) },
     tailnet: [device(node, iso(now + 120 * day)), device(peer, null)],
     keptArchives: [],
+    image: { current, holders: [node, peer], fetches: [] },
     ...over,
   };
 }
@@ -67,8 +70,8 @@ test("a healthy install passes every check, the control plane's first and then e
   assert.equal(r.status, "ok");
   assert.deepEqual(r.checks.map((c) => [c.node, c.name, c.status]), [
     [null, "release", "ok"], [null, "backup", "ok"], [null, "login", "ok"], [null, "github-token", "ok"], [null, "certificate", "ok"], [null, "archived-disks", "ok"],
-    [node, "online", "ok"], [node, "release", "ok"], [node, "disk", "ok"], [node, "pylons", "ok"], [node, "tailnet-key", "ok"],
-    [peer, "online", "ok"], [peer, "release", "ok"], [peer, "disk", "ok"], [peer, "pylons", "ok"], [peer, "tailnet-key", "ok"],
+    [node, "online", "ok"], [node, "release", "ok"], [node, "disk", "ok"], [node, "pylons", "ok"], [node, "tailnet-key", "ok"], [node, "image", "ok"],
+    [peer, "online", "ok"], [peer, "release", "ok"], [peer, "disk", "ok"], [peer, "pylons", "ok"], [peer, "tailnet-key", "ok"], [peer, "image", "ok"],
   ]);
 });
 
@@ -219,4 +222,24 @@ test("each node's tailnet key is ok with weeks left or expiry off, warns under 1
   expect(keys(null, iso(now - hour)), peer, "tailnet-key", "fail", /expired at 2026-11-01T11:00:00\.000Z, so it is off the tailnet\. .*tailscale up --force-reauth/);
   expect(healthy({ tailnet: [device(node, null)] }), peer, "tailnet-key", "warn", /does not list tailnet node ninfra-testbench, so its key expiry is unknown\. Check that infra-testbench\.example\.ts\.net is in the tailnet/);
   expect(healthy({ tailnet: { unreadable: "ECONNREFUSED" } }), node, "tailnet-key", "warn", /status .* could not be read, with a ECONNREFUSED error/);
+});
+
+test("a node's image check is ok while it holds the current image or none is current, and warns while it is online and lacks it, saying what the control plane does about it", () => {
+  const lacking = (fetches: ImageFetch[], holders = [node]) => healthy({ image: { current, holders, fetches } });
+  const fetch = (over: Partial<ImageFetch>): ImageFetch => ({ node: peer, image: current, state: "waiting", job: null, failures: 0, failedAt: null, reason: null, ...over });
+  const reason = "backend: the copy hashes to 0000, so it was thrown away\ntar: short read";
+  const lacks = `^lacks the current image ${current}, so auto placement passes over it\\. `;
+  expect(healthy(), peer, "image", "ok", new RegExp(`^holds the current image ${current}$`));
+  expect(healthy({ image: { current: null, holders: [], fetches: [] } }), peer, "image", "ok", /^no image is current$/);
+  for (const offline of [nodeOf(peer, { state: "offline" }), nodeOf(peer, { state: "offline", observedAt: null })]) {
+    expect(healthy({ nodes: [nodeOf(node), offline], image: { current, holders: [node], fetches: [] } }), peer, "image", "ok", /^offline, which the online check reports, and the control plane sends it the current image img-0123456789ab once it is back online$/);
+  }
+  expect(lacking([]), peer, "image", "warn", new RegExp(`${lacks}The control plane sends it a fetch-artifact job on its next pass$`));
+  expect(lacking([fetch({ state: "running", job: { id: "j-1" as JobId, notAfter: iso(now) } })]), peer, "image", "warn", new RegExp(`${lacks}A fetch-artifact job copies it there now$`));
+  expect(lacking([fetch({ failures: 2, failedAt: now, reason })]), peer, "image", "warn", new RegExp(`${lacks}The last of 2 fetches of it failed with backend: the copy hashes to 0000, so it was thrown away, and another is sent after the backoff$`));
+  expect(lacking([fetch({ reason: "no other online node holds it" })], []), peer, "image", "warn", new RegExp(`${lacks}No other online node holds it to copy it from$`));
+  expect(healthy({ nodes: [nodeOf(node, { state: "offline" }), nodeOf(peer)], image: { current, holders: [node], fetches: [fetch({ failures: 1, reason: "no other online node holds it" })] } }), peer, "image", "warn", /No other online node holds it to copy it from$/);
+  expect(lacking([fetch({ state: "failed", failures: 3, failedAt: now, reason })]), peer, "image", "warn", new RegExp(`${lacks}3 fetches of it in a row failed, the last with backend: the copy hashes to 0000, so it was thrown away\\. nexus image rollout ${current} tries again$`));
+  expect(lacking([fetch({ state: "failed", failures: 1, failedAt: now, reason: "sha256 is not 64 hex digits" })]), peer, "image", "warn", new RegExp(`${lacks}Its probe refused the fetch of it as invalid: sha256 is not 64 hex digits\\. nexus image rollout ${current} tries again$`));
+  expect(lacking([fetch({ image: "img-000000000001" as ImageId, state: "failed", failures: 3, reason })]), peer, "image", "warn", /The control plane sends it a fetch-artifact job on its next pass$/);
 });
