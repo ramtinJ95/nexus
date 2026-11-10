@@ -41,6 +41,8 @@ export const node = "rj-firebat" as NodeName;
 export const laptop = "nLAPTOP" as TailnetNodeId;
 /** An allowed person's device that is not a deployer. */
 export const phone = "nPHONE" as TailnetNodeId;
+/** The step a refusal names that lets a person's device `caller` do `what`. */
+export const admitStep = (caller: TailnetNodeId, what: string) => `. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it ${what}: sudo deploy/install.sh --admit ${caller}`;
 export const project = {
   id: "acme", repoUrl: "git@example.com:acme.git", defaultBranch: "main", defaultNode: node,
   resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: ["registry.npmjs.org"],

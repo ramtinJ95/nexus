@@ -6,7 +6,7 @@
  */
 import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer as createHttpServer, type RequestListener } from "node:http";
@@ -45,6 +45,20 @@ export async function inProcess(args: readonly string[], env: Io["env"]): Promis
   const sink = (stream: keyof typeof printed) => new Writable({ decodeStrings: false, write(chunk, _encoding, done) { printed[stream] += chunk; done(); } });
   const code = await main(args, { stdin: Readable.from([]), stdout: sink("stdout"), stderr: sink("stderr"), env });
   return { code, ...printed };
+}
+
+/**
+ * The CLI as a process of its own whose stderr claims a terminal, as a person's shell gives one, while the test reads
+ * what it wrote so far and may send it a signal.
+ */
+export function onTerminal(args: readonly string[], env: Io["env"]) {
+  const child = spawn(process.execPath, ["--import", 'data:text/javascript,Object.defineProperty(process.stderr, "isTTY", { value: true })', cli, ...args], { env });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk: Buffer) => { stdout += chunk; });
+  child.stderr.on("data", (chunk: Buffer) => { stderr += chunk; });
+  const exited = once(child, "exit").then(([code]): Run => ({ code: code as number, stdout, stderr }));
+  return { child, stderr: () => stderr, exited };
 }
 
 /** The CLI as a process of its own, with `env` as its whole environment, in `cwd` if given. */
@@ -166,13 +180,14 @@ export async function setup(t: TestContext, setupOptions: { queue?: boolean; htt
    * checkout `cwd` names, whose origin a start without --project reads.
    */
   const spawned = (args: readonly string[], overrides?: Record<string, string>, cwd?: string) => inChild(args, env(overrides), cwd);
+  const terminal = (args: readonly string[]) => onTerminal(args, env());
   async function json(args: readonly string[], overrides?: Record<string, string>, run = nexus): Promise<any> {
     const res = await run([...args, "--json"], overrides);
     assert.equal(res.code, 0, res.stderr);
     return JSON.parse(res.stdout);
   }
   return {
-    registry, fake, proxy, home, get api() { return control.api; }, env, nexus, spawned, json, commands, startThread,
+    registry, fake, proxy, home, get api() { return control.api; }, env, nexus, spawned, onTerminal: terminal, json, commands, startThread,
     requests: control.requests,
     callAs: control.callAs,
     probeAnswers(next: typeof answer) { answer = next; },
