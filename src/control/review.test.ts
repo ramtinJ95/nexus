@@ -1999,6 +1999,7 @@ test("a check held behind another review's wait has no deadline, and starts once
   f.reply(reviewOf(f, earlier).reviewer, verdict(reviewOf(f, earlier), {}));
   await loop.poll();
   assert.equal(reviewOf(f, earlier).phase.kind, "verifying");
+  f.tick(1_000);
   await loop.start(f.builder, { land: "nLAPTOP" });
   await loop.poll();
   f.reply(f.review().reviewer, verdict(f.review(), {}));
@@ -2044,6 +2045,48 @@ test("a gate's wait holds neither its own review's steps, nor the person's revie
   await loop.poll();
   assert.equal(reviewOf(f, auto).reviewerStarted, true, "a check refused for what room cannot end is no wait, so nothing waits behind it");
   assert.equal(reviewOf(f, person).second?.kind, "claude");
+});
+
+test("a live check held before it tried keeps its place, so a later one the loop steps first does not pass it", async (t) => {
+  const f = fixture(t);
+  f.verifies = true;
+  f.live = { kind: "running" };
+  f.liveRoom = false;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  const later = await otherBuilder(f, loop, "th-builder-2", 8, "person");
+  const earlier = await otherBuilder(f, loop, "th-builder-3", 9, "person");
+  await loop.poll();
+  await loop.poll();
+  for (const builder of [f.builder, earlier, later]) {
+    f.reply(reviewOf(f, builder).reviewer, verdict(reviewOf(f, builder), {}));
+    await loop.poll();
+    assert.equal(reviewOf(f, builder).phase.kind, "verifying");
+  }
+  assert.match(reviewSaidText(reviewOf(f, later)), new RegExp(`its live check ${behindVerify(f.builder, 7)}`));
+  f.liveRoom = true;
+  f.freeGiB = 16;
+  f.placed.length = 0;
+  await loop.poll();
+  assert.deepEqual(f.placed, [`verify pylon of ${f.builder}`, `verify pylon of ${earlier}`]);
+});
+
+test("a second reviewer held with its review's first keeps its 30 minutes for after the hold", async (t) => {
+  const f = fixture(t, { secondReview: { always: true }, secrets: claudeToken, autoReview: { mode: "review", enabledBy: "nLAPTOP" } });
+  f.checkRoom = false;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const auto = await otherBuilder(f, loop, "th-builder-2", 8, "auto");
+  await loop.poll();
+  assert.equal(reviewOf(f, auto).reviewerStarted, false);
+  f.tick(31 * 60_000);
+  f.checkRoom = true;
+  f.failStart = (request) => request.model === "claude-opus-5-5" && request.title.startsWith("Second review of #8") ? "the harness is unreachable" : null;
+  await loop.poll();
+  await loop.poll();
+  assert.equal(reviewOf(f, auto).reviewerStarted, true);
+  assert.equal(reviewOf(f, auto).second?.kind, "starting", "a failed start right after the hold is tried again");
 });
 
 test("a live check its pylon cannot run goes to the person, and a verify pylon no review holds is archived", async (t) => {

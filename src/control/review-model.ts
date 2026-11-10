@@ -472,12 +472,15 @@ export function waitsForRoom(phase: Phase): boolean {
 export const gateRun = (phase: Phase): GateRun | null => phase.kind === "checking" || phase.kind === "verifying" ? phase : phase.kind === "reviewing" ? phase.check ?? null : null;
 /**
  * The review whose gate pylon gets the room that frees before a start of `r`'s, or null when none does: of the gates
- * that wait for room, the one whose run began first, unless that is `r`'s own. So waiting gates start oldest first, and
- * a review's own wait never holds its own steps. With no `r`, the oldest wait, which every queued builder waits behind.
+ * in line, those that wait for room and those held behind such a wait before they tried, the one whose run began
+ * first, unless that is `r`'s own. So waiting gates start oldest first, and a review's own wait never holds its own
+ * steps. A held run keeps its `startedAt` until its start, so it keeps its place. With no `r`, the oldest wait, which
+ * every queued builder waits behind.
  */
 export function gateAhead(reviews: readonly Review[], r?: Pick<Review, "builder">): Review | null {
   const since = (w: Review) => gateRun(w.phase)!.startedAt;
-  const oldest = reviews.filter((w) => waitsForRoom(w.phase)).sort((a, b) => since(a) - since(b) || (a.builder < b.builder ? -1 : 1))[0];
+  const inLine = (w: Review) => waitsForRoom(w.phase) || (gateRun(w.phase)?.thread === null && gateRun(w.phase)!.behind !== undefined);
+  const oldest = reviews.filter(inLine).sort((a, b) => since(a) - since(b) || (a.builder < b.builder ? -1 : 1))[0];
   return oldest === undefined || oldest.builder === r?.builder ? null : oldest;
 }
 export const behindOf = (ahead: Review): Behind => ({ builder: ahead.builder, pr: ahead.pr.number, pylon: ahead.phase.kind === "verifying" ? "verify pylon" : "check thread" });

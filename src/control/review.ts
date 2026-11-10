@@ -397,20 +397,22 @@ export function reviewLoop(deps: ReviewDeps) {
     const runs = kind === "live" ? live : checks;
     const { head } = r.rounds.at(-1)!;
     if (run.thread === null) {
-      // A held run keeps its place among the waits for room, and one that was no wait starts its deadline once let through.
+      // A held run keeps its `startedAt`, and with it its place in the line `gateAhead` reads, until the start it waits
+      // for, which a refusal for room alone leaves in line.
       const behind = heldBehind(r);
       if (behind !== null) return { kind: "run", run: sameBehind(run.behind, behind) ? run : { ...run, behind } };
-      if (run.behind !== undefined) {
-        const { behind: _, ...freed } = run;
-        return { kind: "run", run: run.room === true ? freed : { ...freed, startedAt: now() } };
-      }
       const gone = await endedOnGitHub(r);
       if (gone !== null) return { kind: "ended", review: gone };
+      const held = run.behind !== undefined;
       const started = await runs.start(builder, r.pr.branch, head, kind === "beside" || undefined);
-      const startedAt = run.room === true && !("room" in started && started.room) ? now() : run.startedAt;
+      const startedAt = (run.room === true || held) && !("room" in started && started.room) ? now() : run.startedAt;
       if ("thread" in started) return { kind: "run", run: { startedAt, thread: started.thread } };
-      if (kind === "check") throw new Error(started.refused);
-      if (run.refused === started.refused && (run.room === true) === started.room) return { kind: "run", run };
+      // Saved rather than thrown once, so the check's deadline counts from the end of its hold.
+      if (kind === "check") {
+        if (held) return { kind: "run", run: { startedAt, thread: null } };
+        throw new Error(started.refused);
+      }
+      if (!held && run.refused === started.refused && (run.room === true) === started.room) return { kind: "run", run };
       const { room: _, behind: __, ...kept } = run;
       return { kind: "run", run: { ...kept, startedAt, refused: started.refused, ...started.room && { room: true as const } } };
     }
@@ -1097,9 +1099,10 @@ export function reviewLoop(deps: ReviewDeps) {
     if (registry.threads.thread(r.reviewer) === undefined) {
       const behind = r.auto ? heldBehind(r) : null;
       if (behind !== null) return sameBehind(r.behind, behind) ? r : { ...r, behind };
+      // The second reviewer's 30 minutes, which start with the review, count from the end of the hold too.
       if (r.behind !== undefined) {
         const { behind: _, ...freed } = r;
-        return { ...freed, since: now() };
+        return { ...freed, since: now(), ...freed.second?.kind === "starting" && { second: { ...freed.second, since: now() } } };
       }
       try {
         await startReviewer(builder, `Review of #${r.pr.number}: ${r.pr.title}`, r.pr.branch, r.models.reviewer, r.reviewerKind === "claude", r.asked, r.reviewer);
