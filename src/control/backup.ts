@@ -9,7 +9,8 @@
  */
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, lstat, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { constants, createReadStream, type Stats } from "node:fs";
+import { chmod, lstat, mkdir, open, readdir, readFile, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
@@ -65,7 +66,42 @@ export async function sources(config: ControlPlaneConfig, etc: string): Promise<
   ];
 }
 
-const sha256 = async (path: string) => createHash("sha256").update(await readFile(path)).digest("hex");
+/** Streamed, since a database grows past the 2 GiB that readFile refuses. */
+async function sha256(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return hash.digest("hex");
+}
+
+/**
+ * Opens a source as the regular file it is, never a link, and states it from the open file. A service user owns most
+ * sources, so a link it swaps in after a check by path would land a file only root may read in the backup. O_NONBLOCK
+ * keeps a FIFO swapped in from holding the open.
+ */
+async function openSource(path: string): Promise<{ file: FileHandle; facts: Stats }> {
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch((err: NodeJS.ErrnoException) => {
+    throw new Error(err.code === "ENOENT" ? `${path} is missing` : err.code === "ELOOP" ? `${path} is not a regular file` : `${path} does not open: ${err.message}`);
+  });
+  try {
+    const facts = await file.stat();
+    if (!facts.isFile()) throw new Error(`${path} is not a regular file`);
+    return { file, facts };
+  } catch (err) {
+    await file.close();
+    throw err;
+  }
+}
+
+/** Whether a descriptor other than `own` holds the file `facts` states, as SQLite's does once it has opened that file by its path. */
+export async function heldElsewhere(own: number, facts: Stats): Promise<boolean> {
+  for (const fd of await readdir("/dev/fd")) {
+    if (Number(fd) === own) continue;
+    const held = await stat(join("/dev/fd", fd)).catch(() => undefined);
+    if (held !== undefined && held.dev === facts.dev && held.ino === facts.ino) return true;
+  }
+  return false;
+}
+
 const quoted = (path: string) => `'${path.replaceAll("'", "''")}'`;
 
 function integrity(path: string): string | undefined {
@@ -92,19 +128,28 @@ export async function backup(options: { config: ControlPlaneConfig; root: string
   try {
     const entries: Manifest["entries"] = [];
     for (const source of await sources(options.config, options.etc)) {
-      const facts = await lstat(source.path).catch(() => { throw new Error(`${source.path} is missing`); });
-      if (!facts.isFile()) throw new Error(`${source.path} is not a regular file`);
+      const { file, facts } = await openSource(source.path);
       const copy = join(dir, source.name);
-      await mkdir(dirname(copy), { recursive: true, mode: 0o700 });
-      if (source.kind === "sqlite") {
-        // A read-only connection reads one snapshot through the live WAL, which a copy of the file would miss. On a stopped
-        // database it leaves a -wal and -shm behind, which SQLite, run as root, gives the database's owner.
-        const db = new DatabaseSync(source.path, { readOnly: true });
-        try { db.exec(`VACUUM INTO ${quoted(copy)}`); } finally { db.close(); }
-        const broken = integrity(copy);
-        if (broken !== undefined) throw new Error(`the copy of ${source.path} fails integrity_check: ${broken}`);
-      } else {
-        await writeFile(copy, await readFile(source.path), { flag: "wx", mode: 0o600 });
+      try {
+        await mkdir(dirname(copy), { recursive: true, mode: 0o700 });
+        if (source.kind === "sqlite") {
+          // A read-only connection reads one snapshot through the live WAL, which a copy of the file would miss. On a stopped
+          // database it leaves a -wal and -shm behind, which SQLite, run as root, gives the database's owner.
+          const db = new DatabaseSync(source.path, { readOnly: true });
+          try {
+            // SQLite opens by path and follows a link, so it must hold the file that was opened without one.
+            if (!await heldElsewhere(file.fd, facts)) throw new Error(`${source.path} changed as it was opened, so it is not copied`);
+            db.exec(`VACUUM INTO ${quoted(copy)}`);
+          } finally {
+            db.close();
+          }
+          const broken = integrity(copy);
+          if (broken !== undefined) throw new Error(`the copy of ${source.path} fails integrity_check: ${broken}`);
+        } else {
+          await writeFile(copy, file.createReadStream({ autoClose: false }), { flag: "wx", mode: 0o600 });
+        }
+      } finally {
+        await file.close();
       }
       await chmod(copy, 0o600);
       entries.push({ ...source, size: (await stat(copy)).size, sha256: await sha256(copy), mode: facts.mode & 0o7777, uid: facts.uid, gid: facts.gid });
@@ -244,7 +289,7 @@ export async function restore(options: { root: string; name: string; unitState: 
       const file = await open(partial, "wx", 0o600);
       staged.push({ entry, partial });
       try {
-        await file.writeFile(await readFile(join(dir, entry.name)));
+        await file.writeFile(createReadStream(join(dir, entry.name)));
         await file.chown(entry.uid, entry.gid);
         await file.chmod(entry.mode);
         await file.sync();

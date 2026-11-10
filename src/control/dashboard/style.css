@@ -25,7 +25,7 @@
   --line-soft: #ececec;
   --text: #1d1d1f;
   --text-2: #5f5f64;
-  --text-3: #86868b;
+  --text-3: #646469;
   --accent: #2f6fdf;
   --on-accent: #ffffff;
   --ok: #2f9e55;
@@ -69,7 +69,7 @@
   --line-soft: #2f2f32;
   --text: #ececef;
   --text-2: #aeaeb3;
-  --text-3: #77777d;
+  --text-3: #9f9fa5;
   --accent: #6aa2ff;
   --on-accent: #1c1c1e;
   --ok: #4cc072;
@@ -102,7 +102,10 @@
  * The named themes are macarchy's (github.com/ramtinJ95/macarchy, Themes/<id>/theme.toml at 5246510), which takes
  * them from Omarchy's. Its semantic colours map onto these by name, and its terminal block is the terminal's. The
  * sidebar and code are its background and surface mixed half and half, a hover its surface and overlay, the second
- * text level 70% text and 30% muted text, and a diff line's tint 15% of its status colour over the background.
+ * text level 70% text and 30% muted text, and a diff line's tint 15% of its status colour over the background. The
+ * third text level is its muted text, mixed with the least text that reads at 4.5:1 on every surface and on a hover
+ * over one: 61% in Tokyo Night, 43% in Kanagawa, none in Catppuccin. Kanagawa's deleted text is its peach red, as its own red is too dark
+ * on the tint.
  */
 :root[data-theme="tokyo-night"] {
   color-scheme: dark;
@@ -118,7 +121,7 @@
   --line-soft: #292e42;
   --text: #a9b1d6;
   --text-2: #9098bf;
-  --text-3: #565f89;
+  --text-3: #8991b8;
   --accent: #7aa2f7;
   --on-accent: #1a1b26;
   --ok: #9ece6a;
@@ -202,7 +205,7 @@
   --line-soft: #363646;
   --text: #dcd7ba;
   --text-2: #bcb8a2;
-  --text-3: #727169;
+  --text-3: #a09d8c;
   --accent: #dcd7ba;
   --on-accent: #1f1f28;
   --ok: #76946a;
@@ -214,7 +217,7 @@
   --add-bg: #2c3132;
   --add-text: #76946a;
   --del-bg: #38242c;
-  --del-text: #c34043;
+  --del-text: #ff5d62;
   --code-bg: #212939;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   --pop: 0 16px 50px rgba(0, 0, 0, 0.55);
@@ -237,7 +240,7 @@ code, kbd, pre { font-family: var(--mono); }
 time[data-since] { font-variant-numeric: tabular-nums; }
 code { font-size: 0.92em; overflow-wrap: anywhere; }
 a { color: inherit; text-decoration: none; }
-a.link { color: var(--accent); }
+a.link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 [hidden] { display: none !important; }
 .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .dim { color: var(--text-3); }
@@ -324,14 +327,16 @@ a.link { color: var(--accent); }
 .row.active { background: var(--selected); color: var(--accent); }
 .row-icon { position: relative; display: inline-flex; flex: none; color: var(--text-3); }
 .row.active .row-icon { color: var(--accent); }
+/* The selected row's tint is too dark under the third text level, so its metadata takes the second. */
+.row.active .row-at, .fl-row[aria-current] :is(.fl-why, .fl-when) { color: var(--text-2); }
 .row-icon .i { width: 16px; height: 16px; }
 .row-icon .dot { position: absolute; right: -3px; bottom: -2px; width: 8px; height: 8px; box-shadow: 0 0 0 1.5px var(--side); }
 .row-icon .dot-busy, .row-icon .dot-idle { background: var(--side); }
 .row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .row-at { flex: none; font-size: 11px; color: var(--text-3); white-space: nowrap; }
-/* A row whose thread needs no one recedes until it is pointed at or focused. */
-.row.dim > .row-title, .row.dim > .row-at, .ov tr.dim td { opacity: 0.6; transition: opacity 0.15s; }
-.row.dim:hover > *, .row.dim:focus-visible > *, .ov tr.dim:hover td, .ov tr.dim:focus-within td { opacity: 1; }
+/* A row whose thread needs no one recedes to the third text level, which still reads, until it is pointed at or focused. */
+.row.dim:not(:hover, :focus-visible) > .row-title, .ov tr.dim:not(:hover, :focus-within) :is(td, .ov-title, .ov-title a) { color: var(--text-3); }
+.row-title, .ov td, .ov-title, .ov-title a, .fl-title { transition: color 0.15s; }
 .archived > summary { list-style: none; cursor: pointer; padding: 4px 8px 4px 47px; font-size: 12px; color: var(--text-3); border-radius: 8px; }
 .archived > summary::-webkit-details-marker { display: none; }
 .archived > summary:hover { color: var(--text-2); }
@@ -400,7 +405,6 @@ a.link { color: var(--accent); }
 :is(.msg .text, .t-text) :where(ul, ol) { padding-left: 1.4em; }
 :is(.msg .text, .t-text) blockquote { padding-left: 12px; border-left: 3px solid var(--line); color: var(--text-2); }
 :is(.msg .text, .t-text) hr { border: 0; border-top: 1px solid var(--line); }
-:is(.msg .text, .t-text) a.link { text-decoration: underline; text-underline-offset: 2px; }
 .md-h { font-size: 1em; font-weight: 600; line-height: 1.4; }
 h3.md-h { font-size: 1.15em; }
 h4.md-h { font-size: 1.07em; }
@@ -507,7 +511,7 @@ h4.md-h { font-size: 1.07em; }
 .attach-line code { color: var(--text-2); padding: 2px 6px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line-soft); white-space: nowrap; }
 .spin { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--work) 25%, transparent); border-top-color: var(--work); animation: spin 0.8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spin, .caret { animation: none; } .row.dim > *, .ov tr.dim td { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .spin, .caret { animation: none; } .row-title, .ov td, .ov-title, .ov-title a, .fl-title { transition: none; } }
 .comp-box { padding: 2px 0 0; }
 .comp-box textarea { all: unset; display: block; width: 100%; font: 15px/1.5 var(--sans); color: var(--text); min-height: 46px; max-height: 40vh; overflow: auto; field-sizing: content; white-space: pre-wrap; overflow-wrap: anywhere; }
 .comp-box textarea::placeholder { color: var(--text-3); }
@@ -848,8 +852,7 @@ a.need-thread:hover { color: var(--accent); }
 .fl-title { flex: 0 1 auto; max-width: 55%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fl-why { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-3); }
 .fl-when { flex: none; font-size: 11px; color: var(--text-3); white-space: nowrap; }
-.fl-row.dim > :not(.dot) { opacity: 0.6; }
-.fl-row.dim:hover > *, .fl-row.dim:focus-visible > * { opacity: 1; }
+.fl-row.dim:not(:hover, :focus-visible, [aria-current]) > .fl-title { color: var(--text-3); }
 
 /* the preview of the picked work: where it is, what moves it on, and its latest reply */
 .peek { display: grid; gap: 12px; padding: 12px 14px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); box-shadow: var(--shadow); max-height: 60vh; overflow-y: auto; }
