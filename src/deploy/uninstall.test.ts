@@ -15,7 +15,7 @@ const gateway = `http://127.0.0.1:${ports.gateway}`;
  * outside the file system: systemd, the users and groups, the pylons' controllers and tailscaled. Each shim keeps its
  * state in a file under `state` and logs each change it makes to `log`.
  */
-async function machine(t: TestContext, { controllers = [] as number[] } = {}) {
+async function machine(t: TestContext, { controllers = [] as number[], booting = [] as number[], hiddenFor = 0, stopWait = 180 } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "nexus-uninstall-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const root = join(dir, "root");
@@ -42,7 +42,12 @@ async function machine(t: TestContext, { controllers = [] as number[] } = {}) {
   await mkdir(state);
   await writeFile(join(state, "users"), `${users.probe}\n${users.control}\n`);
   await writeFile(join(state, "groups"), `${users.probe}\n${users.control}\n`);
-  await writeFile(join(state, "controllers"), controllers.map((pid) => `${pid}\n`).join(""));
+  await writeFile(join(state, "controllers"), [...controllers, ...booting].map((pid) => `${pid}\n`).join(""));
+  await writeFile(join(state, "pgrep-calls"), "");
+  for (const pid of controllers) {
+    await mkdir(join(state, "instances", String(pid)), { recursive: true });
+    await writeFile(join(state, "instances", String(pid), "control.sock"), "");
+  }
   await writeFile(join(state, "prefs.json"), JSON.stringify({ OperatorUser: users.probe }));
   await writeFile(join(state, "serve.json"), JSON.stringify({
     TCP: { 443: { HTTPS: true }, 3001: { HTTPS: true }, 8443: { HTTPS: true } },
@@ -63,7 +68,7 @@ async function machine(t: TestContext, { controllers = [] as number[] } = {}) {
   await shim("getent", `[ "$1" = group ] && grep -qx "$2" "$state/groups"`);
   await shim("userdel", `echo "userdel $*" >> "$log"\nNAME=$1\n${drop("users")}`);
   await shim("groupdel", `echo "groupdel $*" >> "$log"\nNAME=$1\n${drop("groups")}`);
-  await shim("pgrep", `[ "$1 $2" = "-u nexus" ] && cat "$state/controllers"`);
+  await shim("pgrep", `echo >> "$state/pgrep-calls"\n[ "$(wc -l < "$state/pgrep-calls")" -gt ${hiddenFor} ] || exit 1\n[ "$1 $2" = "-u nexus" ] && cat "$state/controllers"`);
   await shim("systemctl", `case $1 in show|is-active|is-enabled) exit 0 ;; esac\necho "systemctl $*" >> "$log"`);
   await shim("tailscale", `case "$1 $2" in
 "serve status") cat "$state/serve.json" ;;
@@ -79,10 +84,12 @@ esac`);
 
   const overrides = `prefix="${at(prefix)}"; etc="${at(etc)}"; unit_dir="${at(unitDir)}"; dropin="${at(unitDir)}/tailscaled.service.d/nexus-cert.conf"
 state_dirs=("${at(stateDirs.probe)}" "${at(stateDirs.control)}" "${at(stateDirs.backup)}"); backups="${at(backupRoot)}"; service_path="${shims}:$PATH"
+controller_dir() { echo "${state}/instances/$1"; }
 kill() { [ "$1" = -TERM ] || return 1; echo "kill $*" >> "${log}"; grep -vx "$2" "${state}/controllers" > "${state}/controllers.new" || true; mv "${state}/controllers.new" "${state}/controllers"; }`;
-  const tailscaledDown = () => writeFile(join(shims, "tailscale"), `#!/bin/sh\necho "failed to connect to local tailscaled" >&2\nexit 1\n`);
+  const tailscaleShim = await readFile(join(shims, "tailscale"), "utf8");
+  const tailscaled = (up: boolean) => writeFile(join(shims, "tailscale"), up ? tailscaleShim : `#!/bin/sh\necho "failed to connect to local tailscaled" >&2\nexit 1\n`);
   const run = (...args: string[]) => new Promise<{ code: number; stdout: string; stderr: string }>((done) => {
-    execFile("bash", ["-c", `. "$1/deploy/uninstall.sh"; ${overrides}; shift; main "$@"`, "uninstall", repo, ...args], { env: { PATH: `${shims}:${process.env.PATH}` } },
+    execFile("bash", ["-c", `. "$1/deploy/uninstall.sh"; ${overrides}; stop_wait=${stopWait}; shift; main "$@"`, "uninstall", repo, ...args], { env: { PATH: `${shims}:${process.env.PATH}` } },
       (err, stdout, stderr) => done({ code: err === null ? 0 : (err.code as number), stdout, stderr }));
   });
   const tree = async () => (await readdir(root, { recursive: true, withFileTypes: true }))
@@ -90,7 +97,7 @@ kill() { [ "$1" = -TERM ] || return 1; echo "kill $*" >> "${log}"; grep -vx "$2"
   const machineState = async () => Object.fromEntries(await Promise.all(["users", "groups", "controllers", "prefs.json", "serve.json"].map(async (name) => [name, await readFile(join(state, name), "utf8")])));
   const changes = async () => (await readFile(log, "utf8").catch(() => "")).split("\n").filter((line) => line !== "");
   const serve = async () => Object.keys((JSON.parse(await readFile(join(state, "serve.json"), "utf8")) as { Web: object }).Web);
-  return { run, tailscaledDown, tree, machineState, changes, serve, files };
+  return { run, tailscaled, root, state, tree, machineState, changes, serve, files };
 }
 
 const everyUnit = Object.values(unitNames);
@@ -148,15 +155,45 @@ test("--yes --stop-pylons removes each thing once, in order, and a rerun finds o
   assert.match(backups.stdout, /What remains of Nexus here:\n- nothing\n/);
 });
 
-test("a tailscaled that does not answer leaves its serve entries and operator, and the rest goes", async (t) => {
+test("a tailscaled that does not answer keeps its serve entries, its operator and /etc/nexus, and a rerun once it answers removes them", async (t) => {
   const m = await machine(t);
-  await m.tailscaledDown();
-  const run = await m.run("--yes", "--remove-backups");
-  assert.equal(run.code, 0, run.stderr);
-  assert.deepEqual(await m.tree(), []);
+  const moved = "http://127.0.0.1:9000";
+  await writeFile(join(m.root, etc, "probe.json"), JSON.stringify({ previews: { gatewayPort: 9000 } }));
+  await writeFile(join(m.state, "serve.json"), JSON.stringify({
+    TCP: { 443: { HTTPS: true }, 3001: { HTTPS: true } },
+    Web: { "firebat.tail1234.ts.net:443": { Handlers: { "/": { Proxy: moved } } }, "firebat.tail1234.ts.net:3001": { Handlers: { "/": { Proxy: gateway } } } },
+  }));
+  await m.tailscaled(false);
+  const down = await m.run("--yes", "--remove-backups");
+  assert.equal(down.code, 0, down.stderr);
+  assert.deepEqual(await m.tree(), [join(etc, "control.json"), join(etc, "probe.json")].sort());
   assert.ok(!(await m.changes()).some((line) => line.startsWith("tailscale ")));
-  assert.match(run.stdout, /^- leave tailscale's serve entries and operator, which could not be read\. Rerun once tailscaled runs$/m);
-  assert.match(run.stdout, /What remains of Nexus here:\n- unread tailscale's serve entries and operator, which could not be read\n/);
+  assert.match(down.stdout, /^- leave tailscale's serve entries and operator, which could not be read\. Rerun once tailscaled runs$/m);
+  assert.match(down.stdout, /What remains of Nexus here:\n- unread tailscale's serve entries and operator, which could not be read\n- dir \S+\/etc\/nexus, kept until tailscaled answers/);
+
+  await m.tailscaled(true);
+  const up = await m.run("--yes", "--remove-backups");
+  assert.equal(up.code, 0, up.stderr);
+  assert.deepEqual(await m.tree(), []);
+  assert.deepEqual(await m.serve(), ["firebat.tail1234.ts.net:3001"], "only the entry to the gateway probe.json names was Nexus's");
+  assert.match(up.stdout, /What remains of Nexus here:\n- nothing\n/);
+});
+
+test("--stop-pylons waits for a controller that still boots, and signals none until every one listens", async (t) => {
+  const m = await machine(t, { controllers: [4242], booting: [4343], stopWait: 0 });
+  const run = await m.run("--yes", "--stop-pylons");
+  assert.equal(run.code, 1);
+  assert.match(run.stderr, /the controllers 4343 still boot after 0 s, and SIGTERM would end them before they can save their disks\. Rerun once they run/);
+  assert.ok(!(await m.changes()).some((line) => line.startsWith("kill ")));
+  assert.ok((await m.tree()).includes(join(stateDirs.probe, "pylons", "instances", "pyl-1", "disk.qcow2")));
+});
+
+test("a controller that starts after the check is not stopped without --stop-pylons", async (t) => {
+  const m = await machine(t, { controllers: [4242], hiddenFor: 1 });
+  const run = await m.run("--yes");
+  assert.equal(run.code, 1);
+  assert.match(run.stderr, /the pylons' controllers 4242 started after the check\. Rerun with --stop-pylons/);
+  assert.ok(!(await m.changes()).some((line) => line.startsWith("kill ")));
 });
 
 test("--keep-state keeps the state directories, /etc/nexus and the users that own them, and removes the rest", async (t) => {

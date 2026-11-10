@@ -89,7 +89,7 @@ Each role installer reads its link under the deployer's lock, so a deploy that l
 
 ### Uninstall
 
-`sudo deploy/uninstall.sh` from a checkout prints what it would remove and changes nothing. `--yes` removes it. Stopping the probe leaves every pylon's controller running, by design (`KillMode=process` in `nexus-probe.service`), so the uninstall refuses while one runs, and changes nothing. Delete the machine's threads first, or pass `--stop-pylons`, which sends each controller SIGTERM, so it stops its VM and saves its disk as a pause does, and waits up to 180 s for them. In this order, it:
+`sudo deploy/uninstall.sh` from a checkout prints what it would remove and changes nothing. `--yes` removes it. Stopping the probe leaves every pylon's controller running, by design (`KillMode=process` in `nexus-probe.service`), so the uninstall refuses while one runs, and changes nothing. Delete the machine's threads first, or pass `--stop-pylons`. A controller saves its VM's disk on SIGTERM, as a pause does, only once it listens on its `control.sock`, so `--stop-pylons` waits for each controller still booting, then sends each SIGTERM and waits for them to stop, within 180 s in all. A controller that starts after the check stops the run unless `--stop-pylons` was given. In this order, it:
 
 1. Stops, disables and removes the 7 units: `nexus-deployer.path`, `.timer` and `.service` first, so the deployer starts nothing again, then `nexus-backup.timer` and `.service`, `nexus-control.service` and `nexus-probe.service`.
 2. Stops the pylons' controllers, with `--stop-pylons`.
@@ -99,7 +99,7 @@ Each role installer reads its link under the deployer's lock, so a deploy that l
 
 `--keep-state` keeps `/etc/nexus`, the three state directories and the two users. The state's files carry the users' numeric IDs, so a reinstall finds its registry, credentials and pylon disks as they were. The backups in `/var/backups/nexus` go only with `--remove-backups`. Their owners are numeric too, as [Restore a backup](#restore-a-backup) says, so a restore suits a reinstall that kept the users.
 
-A tailscaled that does not answer leaves the serve entries and the operator as they are, and the rest goes. The uninstall is safe to rerun, and removes only what is still there. It ends with what remains of Nexus, such as the backups. Node, QEMU, Docker and Tailscale stay installed, and the machine stays on the tailnet. Pylons of the `docker` backend, which only local development uses, are containers the uninstall does not look for.
+A tailscaled that does not answer leaves the serve entries, the operator and `/etc/nexus`, whose `probe.json` names the gateway, and the rest goes. A rerun once it answers removes them. The uninstall is safe to rerun, and removes only what is still there. It ends with what remains of Nexus, such as the backups. Node, QEMU, Docker and Tailscale stay installed, and the machine stays on the tailnet. Pylons of the `docker` backend, which only local development uses, are containers the uninstall does not look for.
 
 ### Add a node
 
