@@ -12,7 +12,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Project | `projects` | [`Project`](../src/control/project.ts) | You |
 | Image | `images` | [`RecordedImage`](../src/control/image-store.ts) | `nexus image build`: the manifest the build node's probe wrote, and the control plane release whose recipe it built. `release` is null for an image recorded by hand |
 | Template | `templates` | [`TemplateRecord`](../src/control/templates.ts) | Thread starts, which record a build, and the results of its `build-template` job |
-| Thread | `threads` | [`Thread`](../src/control/thread-store.ts) | You, and the harness |
+| Thread | `threads` | [`Thread`](../src/control/thread-store.ts) | You, and the harness. [Retention](#retention) deletes an archived thread idle for 7 days and purges a deleted one 7 days later |
 | Queued thread | `queued_threads` | [`QueuedThread`](../src/contract/threads.ts) | `nexus start --after`, until the thread starts. [Queued thread records](#queued-thread-records) describes it |
 | Claude transcript | `claude_transcripts` and `claude_entries` |  | Reads of the Claude worker's transcript in the pylon |
 | Pylon | `pylons` | [`StoredPylon`](../src/control/thread-store.ts) | Thread start |
@@ -22,7 +22,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | NexusEvent | `events` | [`NexusEvent`](../src/control/events.ts) | Accepted pylon lifecycle reports and control-plane changes |
 | Question | `questions` | [`Question`](../src/control/questions.ts) | A failure judgment that leaves its failure to the person, one item a planning thread proposed, a Claude worker's AskUserQuestion call while its dialog waits, or the holds at a review's head that the person may waive, and the person's answer. [Question records](#question-records) describes it |
 | Judgment | `judgments` | [`Judgment`](../src/control/judgment-store.ts) | The judgment pass, for a builder's failed pylon. [Judgment records](#judgment-records) describes it |
-| Aborted conversation | `aborted_conversations` |  | The harness, once it aborts a deleted thread's conversation at a delete or at open. Open aborts only the deleted threads' conversations without one, which a delete that crashed partway left running |
+| Aborted conversation | `aborted_conversations` |  | The harness, once it aborts a deleted thread's conversation at a delete or at open. Open aborts only the deleted threads' conversations without one, which a delete that crashed partway left running. A purge removes it with its thread |
 | Usage record | `usage_records` |  | Reads of the harness and of the agents' transcripts in each pylon. [Token usage records](#token-usage-records) describes it |
 
 Three settings sit beside the records. `current` is the image every new pylon uses, and only `nexus image rollout` or `rollback` changes it, once every online node holds the image. `previous-image` is the image current before the last change, which `rollback` makes current again. `image-operation` is the running image build or rollout, or the last one, with each node's step and the probe job it last sent.
@@ -87,8 +87,8 @@ The desired phase is `running`, `reading`, `paused`, or `deleted`. It follows th
 | Thread state | Desired phase |
 |---|---|
 | `active` or `idle` | `running` while a harness or reported session turn runs, or the agent was active in the last 5 minutes, or a human in the last 20, or a review awaits the agent (`Thread.awaitedUntil`). Otherwise `paused` |
-| `archived` | `deleted` once the thread has been archived `archivedDiskMs` (24 hours), its usage is settled (`Thread.usageSettledAt`) and the newest verified backup began after that (`Thread.backedUpAt`), as `diskKept` in `src/control/reconcile.ts` says. Before then `reading` while the usage backfill or the archive's settle reads its pylon (`Thread.readingUsage`), and `paused` otherwise, at once |
-| `deleted` | `deleted` |
+| `archived` | `deleted` once the thread has been archived `archivedDiskMs` (24 hours), its usage is settled (`Thread.usageSettledAt`) and the newest verified backup began after that (`Thread.backedUpAt`), as `diskKept` in `src/control/reconcile.ts` says. Before then `reading` while the usage backfill or the archive's settle reads its pylon (`Thread.readingUsage`), and `paused` otherwise, at once. [Retention](#retention) deletes the thread after 7 days with no activity, so its pylon goes then, whatever its usage |
+| `deleted` | `deleted`, until [retention](#retention) purges the thread, once its pylon is gone |
 
 A message, an attached terminal, a dashboard visit or a preview hit counts as human activity, so each one wakes a paused pylon.
 
@@ -111,7 +111,46 @@ The actual state comes from the probe's last observation and the job in flight:
 
 ## Reconciling desired and actual state
 
-On every observation and every 5 seconds, the control plane's planner compares each pylon's desired phase with what its probe reports. It sends the probe only the next job that closes the difference, from the desired phase read again after any wait on the probe, so a change during the wait, such as an unarchive, is what the plan acts on. Every job gives the same end state when it runs twice, or after an earlier run stopped partway. A deleted thread's pylon is gone once its node has neither the VM nor a preview routed to it, so a pylon whose VM was removed by hand still gets a `delete` that unpublishes its previews. Once it is gone, with no job, preview port, retry or Claude launch left to settle, the planner skips it, until its node lists or routes it again. A checkpoint is removed only by `delete` of a pylon the registry knows, so a wiped registry never deletes a pylon's disk.
+On every observation and every 5 seconds, the control plane's planner compares each pylon's desired phase with what its probe reports. It sends the probe only the next job that closes the difference, from the desired phase read again after any wait on the probe, so a change during the wait, such as an unarchive, is what the plan acts on. Every job gives the same end state when it runs twice, or after an earlier run stopped partway. A deleted thread's pylon is gone once its node has neither the VM nor a preview routed to it, so a pylon whose VM was removed by hand still gets a `delete` that unpublishes its previews. Once it is gone, with no job, preview port, retry or Claude launch left to settle, the planner skips it, until its node lists or routes it again. A checkpoint is removed only by `delete` of a pylon the registry knows, so a wiped registry never deletes a pylon's disk, and retention purges a deleted thread only once its pylon is gone.
+
+## Retention
+
+The control plane removes closed threads in two steps, on a pass every 10 minutes (`src/control/retention.ts`, `src/control/retention-pass.ts`). Each delete and purge is logged with why.
+
+1. An archived thread with no activity for 7 days is deleted, as `nexus delete` deletes it: its status becomes `deleted`, its streams and attached terminals end, its agent is deleted, and the planner deletes its pylon. Its 7 days count from the latest of its archive (`Thread.archivedAt`), its human and agent activity, its last reply, and the `retention-since` setting. The delete goes whether or not its token usage was read off its disk, so `diskKept` keeps no disk past it. The person decided so on 2026-11-09, as they did for a failed pylon's disk on 2026-11-02.
+2. A deleted thread is purged from the registry 7 days after its delete, which `threads.deleted_at` records, once a verified backup began after it (`backed-up-at`). So a backup still holds every purged thread, as backups are kept 7 days. The purge removes the thread's row and every row tied to it, in one transaction.
+
+Until then an archived thread keeps every record, and only its pylon's disk goes, as the [pylon states](#pylon-states) say. A deleted thread keeps its row, its pylon's row, its outputs, questions, review, PR watch, nudge, judgments and token usage records. Its delete clears its archive row, its session order, its Claude transcript, the messages typed into its Claude worker and its disk cleanup, and its pylon's sessions and previews go once the planner has deleted the pylon.
+
+A thread stays past its 7 days while something still reads it. Each pass logs why once, for each thread it keeps.
+
+- A queued thread whose status is `queued` names it in its `after`.
+- A pipeline item became it, by its request ID. Items are never removed, so neither is such a thread.
+- One of its pull requests is open, as its PR watch last read it.
+- One of its questions is open.
+- A review that has not ended names it, as its builder, a reviewer, its check thread or a verify pylon.
+- The usage backfill or an archive's settle holds its pylon.
+
+A deleted thread also stays in the registry while any of these holds.
+
+- A stored review names it as a reviewer, check thread or verify pylon. Its builder's purge takes the review, which frees them.
+- Its pylon is not gone: its node's last observation lists or routes it, or a job, preview port, retry or Claude launch of it is left to settle, as the planner reads it. Only a pylon the registry knows is ever deleted, so purging its row first would leave its disk on the node for good. A node no longer in the registry has nothing of it, and one never observed keeps it.
+- Its harness conversation's abort is not recorded in `aborted_conversations`, which a start reads to abort a conversation a delete left running.
+
+The migration that added retention stamped every thread already deleted with its own time, and wrote that time to `retention-since`, so retention deletes and purges nothing until 7 days after that deploy. The person has that week to unarchive what they want to keep. After it, each pass deletes at most 20 threads and purges at most 50, oldest first, so a registry full of old threads empties gradually.
+
+Each store's holding (`Holding` in `src/control/db.ts`) says what a purge does with each table whose rows name a thread or its pylon. `purge` is the condition of the rows it deletes, over the thread's ID, its pylon's and its harness conversation's, and `keptOnPurge` says why the table keeps them. A table whose rows a delete clears (`deletedWithThread`) is purged by its `thread` column too. The purge checks foreign keys at its commit and deletes the thread's row last, so a row left behind that names the thread fails the whole purge. `src/control/table-ownership.test.ts` fails for any table with a `thread` or `pylon` column, or a foreign key to `threads` or `pylons`, whose holding says neither.
+
+A purge never removes these.
+
+- `events`. The log keeps its newest 10,000 events on its own, and deleting a thread's from among them could move the oldest past a client's cursor, which would then read as expired.
+- `start_requests`. A start repeated under a purged thread's request ID still finds the thread, and answers 409 that it was purged rather than starting it again, and a pipeline item still finds the thread it became.
+- `queued_threads`, which holds a queued start as it was asked for.
+- `usage_days`, whose daily sums keep a purged thread's calls, though its `usage_records` go. `reviewed_prs` and `review_rounds` keep what each pull request's reviews read and spent.
+- `usage_backfill`, the backfill's one run, which names a thread only while it holds its pylon.
+- The conversations in the harness's `harness.sqlite`. pi-durable has no way to delete one, so a purged harness thread's conversation stays there, aborted.
+
+A purged thread answers 404 to `GET /v1/threads/<thread>` and every other route, as a thread that never existed does.
 
 ## PR watch records
 
