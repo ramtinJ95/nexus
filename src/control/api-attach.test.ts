@@ -250,14 +250,18 @@ test("an upgrade the API serves no WebSocket for is handled as an ordinary reque
 
 test("a GET of the attach route that does not upgrade answers the refusal the upgrade gets, which a browser's WebSocket cannot read", async (t) => {
   const s = await withThread(t, { attachTiming: fastAttach });
-  const open = Array.from({ length: maxStreams }, () => s.events(`/v1/threads/${s.thread.id}/events`));
-  for (const stream of open) await stream.next();
-  const refusal = { error: `${maxStreams} streams are open, the most this control plane serves at once`, code: null, retryable: false };
-  const upgrade = await attachTo(s.port, attachPathOf(s.thread.id));
-  assert.deepEqual(upgrade, { status: 503, body: refusal });
-  assert.deepEqual(await s.call("GET", attachPathOf(s.thread.id)), { status: 503, body: refusal });
-  open.pop()!.close();
+  const [mine, theirs] = [await streamsAs(s, [laptop], `/v1/threads/${s.thread.id}/events`), await streamsAs(s, [phone], `/v1/threads/${s.thread.id}/events`)];
+  t.after(() => { for (const stream of mine) stream.close(); });
+  const refusedAlike = async (error: string) => {
+    const refusal = { error, code: null, retryable: false };
+    assert.deepEqual(await attachTo(s.port, attachPathOf(s.thread.id)), { status: 503, body: refusal });
+    assert.deepEqual(await s.call("GET", attachPathOf(s.thread.id)), { status: 503, body: refusal });
+  };
+  await refusedAlike(`${maxStreams} streams are open, the most this control plane serves at once`);
+  for (const stream of theirs) stream.close();
+  await until("the phone's streams gave their places back", () => s.fake.watching(s.thread.id) === maxStreamsPerCaller);
+  await refusedAlike(`${maxStreamsPerCaller} streams of ${laptop} are open, the most one caller holds at once`);
+  mine.pop()!.close();
   await until("a closed stream frees its place", async () => (await s.call("GET", attachPathOf(s.thread.id))).status === 426);
-  for (const stream of open) stream.close();
   assert.equal((await s.call("GET", `/v1/threads/${s.thread.id}/attach?cols=0&rows=30`)).status, 400, "a bad query is refused as the upgrade refuses it");
 });
