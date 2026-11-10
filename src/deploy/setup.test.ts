@@ -15,7 +15,7 @@ import { parseProbeConfig } from "../probe/config.ts";
 import { parseControlPlane } from "./control-plane.ts";
 import { parseTailscaleStatus } from "../tailscale.ts";
 import type { FollowUp } from "./credentials.ts";
-import { checkDotfiles, dotfilesGained, probeGitSsh, formatLeft, holdsImage, install, left, paths, parseFlags, report, tailnetDevices, setup, type Existing, type Facts, type FileWrite, type InstallSteps, type Json, type Setup } from "./setup.ts";
+import { checkDotfiles, dotfilesStep, withoutDotfiles, formatLeft, holdsImage, install, left, paths, parseFlags, report, tailnetDevices, setup, type Existing, type Facts, type FileWrite, type InstallSteps, type Json, type Setup } from "./setup.ts";
 
 const status = JSON.stringify({
   Version: "1.90.0",
@@ -245,17 +245,27 @@ test("--dotfiles is checked with git ls-remote, as a pylon would pull it", async
   assert.equal(existsSync(ran), false, "a URL starting with a dash is a repository, not an option");
 });
 
-test("only a write that adds dotfiles to control.json checks them, with the git SSH key probe.json names once the key exists", () => {
-  const first = files(run(["--dotfiles", "git@github.com:example/dotfiles.git"]));
-  assert.equal(dotfilesGained([...first.values()]), "git@github.com:example/dotfiles.git");
-  assert.equal(probeGitSsh([...first.values()]), null, "before the credentials step makes the key");
-  const afterCredentials = [...files(run(["--dotfiles", "git@github.com:example/dotfiles.git"], { ...onDisk(first), gitKey: true })).values()];
-  assert.equal(dotfilesGained(afterCredentials), undefined, "the write after the credentials step keeps the URL, which GitHub cannot know the new key for yet");
-  assert.deepEqual(probeGitSsh(afterCredentials), { key: paths.gitKey, knownHosts: paths.gitKnownHosts });
-  assert.equal(dotfilesGained([...files(run(["--dotfiles", "https://github.com/example/other.git"], onDisk(first))).values()]), undefined, "a URL control.json does not take is not checked");
-  const { dotfiles: _, ...without } = onDisk(first).control as Record<string, Json>;
-  const added = [...files(run(["--dotfiles", dotfiles], { ...onDisk(first), control: without })).values()];
-  assert.equal(dotfilesGained(added), dotfiles, "a control.json without dotfiles gains the flag's");
+test("a write checks the --dotfiles URL control.json holds, with the git SSH key probe.json names once it exists, and a rerun after the key checks it again", async (t) => {
+  const ssh = "git@github.com:example/dotfiles.git";
+  const first = files(run(["--dotfiles", ssh]));
+  assert.deepEqual(dotfilesStep(ssh, [...first.values()]), { kind: "check", url: ssh, ssh: null }, "before the credentials step makes the key");
+  assert.equal((await checkDotfiles(ssh, "main", null)).kind, "unchecked");
+  const rerun = [...files(run(["--dotfiles", ssh], { ...onDisk(first), gitKey: true })).values()];
+  assert.deepEqual(dotfilesStep(ssh, rerun), { kind: "check", url: ssh, ssh: { key: paths.gitKey, knownHosts: paths.gitKnownHosts } }, "the rerun the unchecked message names checks it with the key");
+  assert.deepEqual(dotfilesStep(undefined, rerun), { kind: "none" }, "the write after the credentials step, which install runs without --dotfiles, checks nothing");
+  assert.deepEqual(dotfilesStep("https://github.com/example/other.git", rerun), { kind: "kept", held: ssh }, "a URL control.json does not take is not checked");
+
+  const dir = await tempDir("nexus-dotfiles-ssh-", t);
+  const key = { key: join(dir, "git_ed25519"), knownHosts: join(dir, "git_known_hosts") };
+  const typo = await checkDotfiles("ssh://git@127.0.0.1:1/example/typo.git", "main", key);
+  assert.ok(typo.kind === "refused", "an SSH URL the key cannot reach is refused on the rerun");
+  assert.match(typo.reason, /^git ls-remote failed: .*ssh: connect to host 127\.0\.0\.1 port 1/);
+  assert.doesNotMatch(typo.reason, /private/, "the HTTPS hint is for HTTPS URLs");
+});
+
+test("the config write after the credentials step drops --dotfiles in either form, and keeps what follows --", () => {
+  assert.deepEqual(withoutDotfiles(["--admit", "mac", "--dotfiles", dotfiles, "--upgrade"]), ["--admit", "mac", "--upgrade"]);
+  assert.deepEqual(withoutDotfiles([`--dotfiles=${dotfiles}`, "--", "--dotfiles", "x"]), ["--", "--dotfiles", "x"]);
 });
 
 test("a node cannot become a control plane by accident", () => {
@@ -437,7 +447,7 @@ async function installing(args: readonly string[], next: readonly FollowUp[] = [
   }
 }
 const lockDir = "install -d -o root -g root -m 0700 /opt/nexus/deployer";
-const write = (args: string) => `flock -x /opt/nexus/deployer/lock node ./src/deploy/setup.ts write ${args}`;
+const write = (args: string) => `flock -x /opt/nexus/deployer/lock node ./src/deploy/setup.ts write ${args}`.trimEnd();
 
 test("install writes the configs under the deployer's lock, runs each role's installer, gives the agents their credentials, then says what is left", async () => {
   const args = ["--admit", "macbook", "--dotfiles", dotfiles];
@@ -456,11 +466,11 @@ test("after the credentials, a new git key rewrites the configs and reinstalls t
     assert.equal(code, 0);
     return ran.slice(ran.indexOf("credentials") + 1, -1);
   };
-  assert.deepEqual(await after(["config", "probe", "control"]), [lockDir, write(`--dotfiles ${dotfiles}`), "bash ./deploy/install-probe.sh", "bash ./deploy/install-control.sh"]);
+  assert.deepEqual(await after(["config", "probe", "control"]), [lockDir, write(""), "bash ./deploy/install-probe.sh", "bash ./deploy/install-control.sh"], "the write after the credentials step leaves --dotfiles out, so it never checks a URL with a key GitHub does not know yet");
   assert.deepEqual(await after(["watch", "probe", "control"]), [
-    lockDir, write(`--github-watch --dotfiles ${dotfiles}`), "systemctl try-restart nexus-probe.service", "bash ./deploy/install-control.sh",
+    lockDir, write("--github-watch"), "systemctl try-restart nexus-probe.service", "bash ./deploy/install-control.sh",
   ], "control.json gains github.tokenFile under the deployer's lock, from the file as it is then");
-  assert.deepEqual(await after(["config", "watch"]), [lockDir, write(`--github-watch --dotfiles ${dotfiles}`), "bash ./deploy/install-probe.sh"], "one config write does both");
+  assert.deepEqual(await after(["config", "watch"]), [lockDir, write("--github-watch"), "bash ./deploy/install-probe.sh"], "one config write does both");
   assert.deepEqual(await after(["probe"]), ["systemctl try-restart nexus-probe.service"]);
   assert.deepEqual(await after([]), [], "a run that changed no credential restarts nothing");
 });

@@ -216,7 +216,7 @@ export type DotfilesCheck =
  */
 export async function checkDotfiles(url: string, ref: string, ssh: { key: string; knownHosts: string } | null): Promise<DotfilesCheck> {
   const https = url.startsWith("https://");
-  if (!https && ssh === null) return { kind: "unchecked", reason: "pylons reach an SSH URL with this machine's git SSH key, which the credentials step makes. Rerun the installer with --dotfiles after it to check the URL" };
+  if (!https && ssh === null) return { kind: "unchecked", reason: "pylons reach an SSH URL with this machine's git SSH key, which the credentials step makes. Once its public key is on GitHub, rerun the installer with the same --dotfiles to check the URL" };
   const inherited = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_") && name !== "SSH_ASKPASS"));
   const env = {
     ...inherited, GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CEILING_DIRECTORIES: "/",
@@ -482,33 +482,38 @@ async function write(flags: Flags): Promise<number> {
     for (const error of result.errors) console.error(`install: ${error}`);
     return 1;
   }
-  const gained = dotfilesGained(result.files);
-  if (gained !== undefined) {
-    const check = await checkDotfiles(gained, dotfilesRef, probeGitSsh(result.files));
+  const step = dotfilesStep(flags.dotfiles, result.files);
+  if (step.kind === "kept") console.log(`--dotfiles ${flags.dotfiles}: control.json keeps ${step.held}, so the URL is not checked. Edit the file to change it`);
+  if (step.kind === "check") {
+    const check = await checkDotfiles(step.url, dotfilesRef, step.ssh);
     if (check.kind === "refused") {
-      console.error(`install: --dotfiles ${gained}: ${check.reason}`);
+      console.error(`install: --dotfiles ${step.url}: ${check.reason}`);
       return 1;
     }
-    if (check.kind === "unchecked") console.log(`--dotfiles ${gained} is not checked yet: ${check.reason}`);
+    if (check.kind === "unchecked") console.log(`--dotfiles ${step.url} is not checked yet: ${check.reason}`);
   }
   for (const f of result.files) if (f.state !== "unchanged") await saveJson(f.path, f.value, { mode: f.mode, mkdir: true });
   console.log(report(result.files));
   return 0;
 }
 
-/**
- * The dotfiles URL this write adds to control.json, the only one worth checking. A later write keeps the URL already
- * there, as the write after the credentials step does, before the person has added the new git SSH key to GitHub.
- */
-export function dotfilesGained(files: readonly FileWrite[]): string | undefined {
-  const control = files.find((f) => f.path === paths.control);
-  if (control === undefined || !isObject(control.value) || !isObject(control.value.dotfiles)) return undefined;
-  const added = control.state === "new" || control.changes.some((c) => c.kind === "added" && c.at === "dotfiles");
-  return added && typeof control.value.dotfiles.repo === "string" ? control.value.dotfiles.repo : undefined;
+/** What a write does about --dotfiles: check the URL control.json holds, with the probe's git SSH key, or say control.json keeps another. */
+export type DotfilesStep =
+  | { kind: "none" }
+  | { kind: "check"; url: string; ssh: { key: string; knownHosts: string } | null }
+  | { kind: "kept"; held: string };
+
+export function dotfilesStep(flag: string | undefined, files: readonly FileWrite[]): DotfilesStep {
+  if (flag === undefined) return { kind: "none" };
+  const control = files.find((f) => f.path === paths.control)?.value;
+  const dotfiles = isObject(control) ? control.dotfiles : undefined;
+  const held = isObject(dotfiles) && typeof dotfiles.repo === "string" ? dotfiles.repo : undefined;
+  if (held === undefined) return { kind: "none" };
+  return held === flag ? { kind: "check", url: flag, ssh: probeGitSsh(files) } : { kind: "kept", held };
 }
 
 /** The git SSH key and known hosts the probe.json being written names, which the probe hands its pylons. */
-export function probeGitSsh(files: readonly FileWrite[]): { key: string; knownHosts: string } | null {
+function probeGitSsh(files: readonly FileWrite[]): { key: string; knownHosts: string } | null {
   const probe = files.find((f) => f.path === paths.probe)?.value;
   const backend = isObject(probe) ? probe.backend : undefined;
   const gitSsh = isObject(backend) ? backend.gitSsh : undefined;
@@ -615,7 +620,18 @@ class Exit extends Error {
 
 const repo = resolvePath(import.meta.dirname, "../..");
 
-/** `args` are install's own, which each config write gets again. */
+/**
+ * `args` without --dotfiles, for the config write after the credentials step. That write would check an SSH URL with the
+ * key the step just made, before the person has added it to GitHub, and control.json keeps the URL without the flag.
+ */
+export function withoutDotfiles(args: readonly string[]): string[] {
+  const end = args.indexOf("--");
+  const flags = end === -1 ? args : args.slice(0, end);
+  const kept = flags.filter((arg, i) => arg !== "--dotfiles" && flags[i - 1] !== "--dotfiles" && !arg.startsWith("--dotfiles="));
+  return end === -1 ? kept : [...kept, ...args.slice(end)];
+}
+
+/** `args` are install's own, which each config write gets again, less --dotfiles after the first. */
 export async function install(flags: Flags, args: readonly string[], steps: InstallSteps): Promise<number> {
   const run = async (program: string, ...rest: string[]) => {
     const code = await steps.run(program, rest);
@@ -625,10 +641,10 @@ export async function install(flags: Flags, args: readonly string[], steps: Inst
   // The deployer's lock, which every installer and the deployer's worker take, keeps two runs from merging at once.
   // A write holds it alone, because each installer takes it itself.
   const lock = join(prefix, deployerFiles.lock);
-  const write = async (more: readonly string[]) => {
+  const write = async (more: readonly string[], person: readonly string[] = args) => {
     await run("install", "-d", "-o", "root", "-g", "root", "-m", "0700", dirname(lock));
     // Before the person's arguments, which may end with `--`.
-    await run("flock", "-x", lock, process.execPath, join(repo, "src/deploy/setup.ts"), "write", ...more, ...args);
+    await run("flock", "-x", lock, process.execPath, join(repo, "src/deploy/setup.ts"), "write", ...more, ...person);
   };
   if (flags.githubWatch) throw new Error("--github-watch is for setup.ts write. install names the GitHub token file once the credentials step has written it");
   if (args.filter((arg) => arg.startsWith("--package-manager")).length > 1) throw new Error("--package-manager is install.sh's, which names the one it found");
@@ -650,7 +666,7 @@ export async function install(flags: Flags, args: readonly string[], steps: Inst
       console.error(`install: ${(err as Error).message}`);
       return true;
     });
-    if (next.has("watch") || next.has("config")) await write(next.has("watch") ? ["--github-watch"] : []);
+    if (next.has("watch") || next.has("config")) await write(next.has("watch") ? ["--github-watch"] : [], withoutDotfiles(args));
     if (next.has("config")) await installer("probe");
     else if (next.has("probe")) await run("systemctl", "try-restart", unitNames.probe);
     if (next.has("control")) await installer("control");
