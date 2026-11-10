@@ -210,13 +210,15 @@ export type DotfilesCheck =
 /**
  * Whether git here reaches `ref` of `url` as a pylon would: an HTTPS URL without credentials, and any other with the
  * node's git SSH key and known hosts. The credentials step makes that key after the configs are written, so a first
- * install cannot check an SSH URL yet.
+ * install cannot check an SSH URL yet. No git config of this machine applies, so no credential helper of root's
+ * passes a repository that pylons cannot fetch.
  */
 export async function checkDotfiles(url: string, ref: string, ssh: { key: string; knownHosts: string } | null): Promise<DotfilesCheck> {
   const https = url.startsWith("https://");
   if (!https && ssh === null) return { kind: "unchecked", reason: "pylons reach an SSH URL with this machine's git SSH key, which the credentials step makes. Rerun the installer with --dotfiles after it to check the URL" };
+  const { GIT_ASKPASS: _, SSH_ASKPASS: __, ...inherited } = process.env;
   const env = {
-    ...process.env, GIT_TERMINAL_PROMPT: "0",
+    ...inherited, GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null",
     ...https || ssh === null ? {} : { GIT_SSH_COMMAND: `ssh -i ${shellQuote(ssh.key)} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${shellQuote(ssh.knownHosts)}` },
   };
   try {
@@ -480,7 +482,7 @@ async function write(flags: Flags): Promise<number> {
     return 1;
   }
   if (flags.dotfiles !== undefined) {
-    const check = await checkDotfiles(flags.dotfiles, dotfilesRef, existing.gitKey ? { key: paths.gitKey, knownHosts: paths.gitKnownHosts } : null);
+    const check = await checkDotfiles(flags.dotfiles, dotfilesRef, probeGitSsh(result.files));
     if (check.kind === "refused") {
       console.error(`install: --dotfiles ${flags.dotfiles}: ${check.reason}`);
       return 1;
@@ -490,6 +492,15 @@ async function write(flags: Flags): Promise<number> {
   for (const f of result.files) if (f.state !== "unchanged") await saveJson(f.path, f.value, { mode: f.mode, mkdir: true });
   console.log(report(result.files));
   return 0;
+}
+
+/** The git SSH key and known hosts the probe.json being written names, which the probe hands its pylons. */
+function probeGitSsh(files: readonly FileWrite[]): { key: string; knownHosts: string } | null {
+  const probe = files.find((f) => f.path === paths.probe)?.value;
+  const backend = isObject(probe) ? probe.backend : undefined;
+  const gitSsh = isObject(backend) ? backend.gitSsh : undefined;
+  if (!isObject(gitSsh) || typeof gitSsh.privateKeyFile !== "string" || typeof gitSsh.knownHostsFile !== "string") return null;
+  return { key: gitSsh.privateKeyFile, knownHosts: gitSsh.knownHostsFile };
 }
 
 /** Whether Docker's own docker-ce-cli package is installed or the distribution's Docker is. */

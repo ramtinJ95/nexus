@@ -220,6 +220,15 @@ test("--dotfiles is checked with git ls-remote, as a pylon would pull it", async
   assert.match(missing.reason, /^git ls-remote failed: .*does not appear to be a git repository/);
   const before = await checkDotfiles("git@github.com:example/dotfiles.git", "main", null);
   assert.equal(before.kind, "unchecked", "an SSH URL waits for the git SSH key the credentials step makes");
+
+  const rewrite = join(dir, "gitconfig");
+  const url = "https://example.invalid/dotfiles.git";
+  await writeFile(rewrite, `[url "${repo}"]\n\tinsteadOf = ${url}\n`);
+  const global = process.env.GIT_CONFIG_GLOBAL;
+  process.env.GIT_CONFIG_GLOBAL = rewrite;
+  t.after(() => { if (global === undefined) delete process.env.GIT_CONFIG_GLOBAL; else process.env.GIT_CONFIG_GLOBAL = global; });
+  assert.equal((await git("ls-remote", url)).stdout === "", false, "this machine's git config reaches the URL");
+  assert.equal((await checkDotfiles(url, "main", null)).kind, "refused", "the check reaches it as a pylon would, without this machine's git config");
 });
 
 test("a node cannot become a control plane by accident", () => {
