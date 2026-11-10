@@ -1103,7 +1103,9 @@ test("an ordinary resume reuses a healthy controller and its boot time", async (
 
 /**
  * A stuck controller ignores SIGTERM, so waiting out the 10 s grace changes nothing a test can observe, and neither does
- * the 30 s stop deadline for one that never answers stop. One whose stop answers an error keeps that deadline, so its error arrives.
+ * the 30 s stop deadline for one that never answers stop. A 0 ms stop deadline can abort before the request connects, so
+ * such a controller may never see the stop, and a test of it cannot assert stop-seen. One whose stop answers an error keeps
+ * the deadline, so its error arrives.
  */
 const noGrace = { retryStop: { ...retryStopDeadlines, termGraceMs: 0 } };
 const noWait = { retryStop: { stopMs: 0, termGraceMs: 0 } };
@@ -1175,7 +1177,7 @@ for (const stop of ["silent", "error"] as const) test(`retry kills the controlle
   assert.deepEqual((await groupMembers(controller.pid)).sort((a, b) => a - b), [controller.pid, qemu].sort((a, b) => a - b));
   const started = Date.now();
   await backend.ensurePaused(id, "ckpt-forced-1", AbortSignal.timeout(60_000), true);
-  assert.ok(Date.now() - started < 55_000, "the stop deadline and SIGTERM grace bound the wait, plus at most 10 s after SIGKILL");
+  assert.ok(Date.now() - started < 20_000, "the injected stop deadline and SIGTERM grace bound the wait, not the 30 s and 10 s a probe uses");
   await controller.exited;
   assert.deepEqual(await groupMembers(controller.pid), [], "neither controller nor QEMU stand-in can still run");
   assert.equal(await readFile(join(dir, "disk.qcow2"), "utf8"), "last completed disk");
