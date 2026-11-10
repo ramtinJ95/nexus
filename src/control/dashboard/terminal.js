@@ -89,17 +89,60 @@ export function keyFor(event) {
   return undefined;
 }
 
+/** The longest text OSC 52 may copy, far more than a selection of a full screen holds. */
+export const maxClipboardChars = 256 << 10;
+const clipStartChars = 60;
+
 /**
- * The clipboard OSC 52 reaches, as @xterm/addon-clipboard asks for one. It writes the browser's one clipboard for
- * every selection but X11's primary, which would clobber it, and never reads it, so output in the pylon cannot see
- * what the person copied: a query gets empty data.
+ * The clipboard OSC 52 reaches, as @xterm/addon-clipboard asks for one. Herdr's mouse selection copies through it, so
+ * it writes the browser's one clipboard for every selection but X11's primary, which would clobber it. A write lands
+ * only while `focused()` says the terminal has focus and only up to maxClipboardChars, and `told` hears what each
+ * write did, as clipboardNotice words it, and whether it landed, so output in the pylon never sets the clipboard
+ * unseen. It never reads the
+ * clipboard, so output in the pylon cannot see what the person copied: a query gets empty data.
  */
-export function clipboardOf(clipboard) {
+export function clipboardOf(clipboard, focused, told) {
   return {
     readText: () => "",
-    // A browser refuses a write from a page without focus, and has no clipboard outside a secure context.
-    writeText: async (selection, text) => { if (selection !== "p") await clipboard?.writeText(text).catch(() => {}); },
+    writeText: async (selection, text) => {
+      if (selection === "p") return;
+      if (!focused()) return told(clipboardNotice("unfocused", text), false);
+      if (text.length > maxClipboardChars) return told(clipboardNotice("too long", text), false);
+      // A browser refuses a write from a page without focus, and has no clipboard outside a secure context.
+      const wrote = clipboard === undefined ? false : await clipboard.writeText(text).then(() => true, () => false);
+      told(clipboardNotice(wrote ? "copied" : "refused", text), wrote);
+    },
   };
+}
+
+/** What the terminal says about a clipboard write from the pylon: what became of it, its length and how it starts. */
+export function clipboardNotice(outcome, text) {
+  const chars = `${text.length.toLocaleString("en-US")} character${text.length === 1 ? "" : "s"}`;
+  const start = text.slice(0, clipStartChars).replace(/\r?\n/g, "⏎").replace(/[\x00-\x1f\x7f-\x9f\p{Cf}]/gu, "�");
+  const shown = `“${start}${text.length > clipStartChars ? "…" : ""}”`;
+  switch (outcome) {
+    case "copied": return `The pylon copied ${chars} to your clipboard: ${shown}`;
+    case "refused": return `The browser did not let the pylon copy ${chars}: ${shown}`;
+    case "unfocused": return `Not copied, as the terminal did not have focus: the pylon's ${chars}, ${shown}`;
+    case "too long": return `Not copied, as it is more than ${maxClipboardChars.toLocaleString("en-US")} characters: the pylon's ${chars}, ${shown}`;
+  }
+}
+
+/**
+ * The text an OSC 8 link shows, from the cells of `range` in `buffer`, as xterm.js hands a link handler both. xterm.js
+ * gives each row of a link its own range, whose points count from 1 and whose end is the link's last cell, so a link
+ * that wraps asks before it opens even when its text is its target.
+ */
+export function linkText(buffer, { start, end }) {
+  return buffer.getLine(start.y - 1)?.translateToString(true, start.x - 1, end.x) ?? "";
+}
+
+/**
+ * Whether to open an OSC 8 link to `uri` whose text is `text`. A link whose text is its target opens. Any other asks
+ * `ask` first, naming the target, since its text may name another.
+ */
+export function opensLink(uri, text, ask) {
+  return text.trim() === uri || ask(`Open this link from the pylon?\n\n${uri}\n\nIts text is “${text.trim()}”.`);
 }
 
 /** How long a page stays attached while hidden, short of the 20 minutes without a human that pause a pylon. */

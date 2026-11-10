@@ -137,15 +137,27 @@ test("the session metadata Claude Code writes again on each save gives no entrie
   for (const record of metadata) assert.deepEqual(parseRecord(JSON.stringify(record)), [], record.type);
 });
 
-test("a pull request Claude opened is an entry with its number, URL and repository, and a link only to an https URL", () => {
+test("a pull request Claude opened is an entry only when it is the record's number of the project's repository", async (t) => {
   // The record Claude Code 2.1.308 wrote when it opened this change's pull request.
   const line = '{"type":"pr-link","sessionId":"3c79b34a-6040-4332-a067-4e29168431dc","prNumber":92,"prUrl":"https://github.com/ramtinJ95/nexus/pull/92","prRepository":"ramtinJ95/nexus","timestamp":"2026-10-26T02:27:33.565Z"}';
   const record = JSON.parse(line);
-  assert.deepEqual(parseRecord(line), [
-    { kind: "pull-request", at: Date.parse("2026-10-26T02:27:33.565Z"), number: 92, url: "https://github.com/ramtinJ95/nexus/pull/92", repository: "ramtinJ95/nexus" },
-  ]);
-  for (const broken of [{ prUrl: "javascript:alert(1)" }, { prUrl: "http://github.com/a/b/pull/1" }, { prUrl: `https://github.com/${"a".repeat(600)}` }, { prNumber: "91" }, { prNumber: 0 }, { prRepository: undefined }]) {
-    const got = parseRecord(JSON.stringify({ ...record, ...broken }));
+  const p = await projects(t);
+  const read = async (records: readonly object[], repo: string | null) => {
+    await writeFile(p.file, records.map((r) => `${JSON.stringify(r)}\n`).join(""));
+    return (await p.read(start, session, repo))!.entries;
+  };
+  const opened = { kind: "pull-request", at: Date.parse("2026-10-26T02:27:33.565Z"), number: 92, url: "https://github.com/ramtinJ95/nexus/pull/92", repository: "ramtinJ95/nexus" };
+  assert.deepEqual(await read([record], "ramtinJ95/nexus"), [opened]);
+  assert.deepEqual(await read([{ ...record, prUrl: "https://github.com/RamtinJ95/Nexus/pull/92" }], "ramtinJ95/nexus"), [opened], "GitHub's names ignore case, and the entry names the project's");
+  const forged = [
+    { prUrl: "https://evil.example/ramtinJ95/nexus/pull/92" }, { prUrl: "https://github.com/someone/else/pull/92", prRepository: "someone/else" },
+    { prUrl: "https://github.com/ramtinJ95/nexus/pull/93" }, { prUrl: "https://github.com/ramtinJ95/nexus/pull/92/../../../../evil" },
+    { prUrl: "https://github.com/ramtinJ95/nexus/pull/92?x=1" }, { prUrl: "http://github.com/ramtinJ95/nexus/pull/92" }, { prUrl: "javascript:alert(1)" },
+  ];
+  for (const broken of forged) assert.deepEqual(await read([{ ...record, ...broken }], "ramtinJ95/nexus"), [], JSON.stringify(broken));
+  assert.deepEqual(await read([record], null), [], "a project on no GitHub repository has no pull request of its own");
+  for (const broken of [{ prNumber: "92" }, { prNumber: 0 }, { prUrl: 92 }]) {
+    const got = await read([{ ...record, ...broken }], "ramtinJ95/nexus");
     assert.deepEqual(got.map((e) => [e.kind, e.kind === "record" && e.type]), [["record", "pr-link"]], JSON.stringify(broken));
   }
 });
@@ -203,7 +215,7 @@ async function projects(t: TestContext) {
   await mkdir(join(root, "-other-project"));
   const file = join(root, "-home-user-workspace-repo", `${session}.jsonl`);
   const pipes = localPipes();
-  return { root, file, ...pipes, read: (cursor: TranscriptCursor, id = session) => readTranscript(pipes.open, id, cursor, root) };
+  return { root, file, ...pipes, read: (cursor: TranscriptCursor, id = session, repo: string | null = null) => readTranscript(pipes.open, id, cursor, repo, root) };
 }
 
 /** Reads until the file holds nothing past the cursor, as a caller does when `more` is set. */
@@ -294,7 +306,7 @@ test("a pylon that does not answer fails the read at its deadline and drops the 
     abort: () => { aborted = true; },
     done: new Promise(() => undefined),
   };
-  await assert.rejects(readTranscript(async () => silent, session, start, "/nowhere", 50), /did not read the transcript within 0.05 s/);
+  await assert.rejects(readTranscript(async () => silent, session, start, null, "/nowhere", 50), /did not read the transcript within 0.05 s/);
   assert.equal(aborted, true);
 });
 
