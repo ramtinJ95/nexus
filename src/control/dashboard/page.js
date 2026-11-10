@@ -5,6 +5,7 @@ import { atEnd, endFollower } from "./scroll.js";
 import { request } from "./request.js";
 import { threadRoutes } from "../../contract/threads.ts";
 import { toggledBy } from "./folds.js";
+import { swapKeeping } from "./keep.js";
 import { grow, kept, storageKeys, unticked } from "./contract.ts";
 
 export const main = document.querySelector("main");
@@ -76,7 +77,7 @@ export function afterSwap(settle) { settlers.push(settle); }
 /**
  * Swaps in each region whose inside, as the browser serializes it, differs from what the server last sent for it.
  * Regions hold buttons, links, the prompt box and tool output, so focus, the draft, what the reader opened or
- * closed, and their place in the conversation survive the swap.
+ * closed, and their place in the conversation survive the swap. A `data-keep` element stays the same element.
  */
 export function swap(regions) {
   const changed = regions.map(([el, html]) => [el, html, unticked(html)]).filter(([el, , key]) => el !== null && served.get(el.id) !== key);
@@ -85,7 +86,12 @@ export function swap(regions) {
   const kept = keepers.map((keep) => keep(changed.map(([el]) => el)));
   const restoreScroll = anchor();
   for (const [el, html, key] of changed) {
-    el.innerHTML = html;
+    if (el.querySelector("[data-keep]") === null) el.innerHTML = html;
+    else {
+      const fresh = document.createElement("template");
+      fresh.innerHTML = html;
+      swapKeeping(el, fresh.content);
+    }
     served.set(el.id, key);
   }
   for (const restore of kept) restore?.();

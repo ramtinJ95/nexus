@@ -1,10 +1,18 @@
-// The thread's composer, which sends a message and keeps its draft across a swap, and the forms that answer an ask.
+// The thread's composer, which sends a message and keeps its draft per thread, and the forms that answer an ask.
 import { request } from "./request.js";
 import { answerFinal } from "../plain-wording.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { questionRoutes } from "../../contract/reviews.ts";
 import { end, onSwap, refreshAfter, showError, whenRunning } from "./page.js";
 import { review, reviewSent } from "./review-notes.js";
+import { kept } from "./contract.ts";
+import { composerDraft } from "./draft.js";
+
+const draft = composerDraft({ kept });
+draft.restore();
+document.addEventListener("input", (event) => {
+  if (event.target.id === "prompt-text") draft.save(event.target);
+});
 
 // crypto.randomUUID needs a secure context, and the dashboard is plain HTTP on the tailnet.
 const newRequestId = () => `msg:${[...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
@@ -49,10 +57,7 @@ document.addEventListener("submit", async (event) => {
     showStatus(null);
     outgoing = null;
     reviewSent(composed, text);
-    // The poll may have swapped in a new prompt box meanwhile, or none if the thread was archived. Text typed
-    // since the send is the next message, so it stays.
-    const prompt = document.getElementById("prompt-text");
-    if (prompt?.value === text) prompt.value = "";
+    draft.sent(thread, text);
     showError("action-error", null);
     await refreshAfter();
     end?.toEnd();
@@ -69,15 +74,11 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
+// A swap keeps the prompt box, so only a box that was not there before, as on unarchiving, takes the draft.
 onSwap(() => {
-  const draft = document.getElementById("prompt-text");
-  const saved = draft === null ? null : { value: draft.value, start: draft.selectionStart, end: draft.selectionEnd };
+  const before = document.getElementById("prompt-text");
   return () => {
-    const prompt = document.getElementById("prompt-text");
-    if (saved !== null && prompt !== null && prompt !== draft) {
-      prompt.value = saved.value;
-      prompt.setSelectionRange(saved.start, saved.end);
-    }
+    if (document.getElementById("prompt-text") !== before) draft.restore();
     for (const send of document.querySelectorAll("#prompt button[type=submit]")) send.disabled = outgoing?.inFlight === true;
   };
 });
