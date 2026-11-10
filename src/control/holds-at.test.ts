@@ -17,7 +17,7 @@ const sameModel = (review: Review): Hold[] => review.models.reviewer === review.
 
 const recordedHolds = (review: Review): Hold[] => [
   ...review.reviewerKind === "claude" ? [hold("claude-approved", "A Claude reviewer approved it. Its verdict is read from its transcript in its pylon, where code it runs could write, so only the person can land what it approved.")] : [],
-  ...review.second?.kind === "none" ? [hold("no-second-reviewer", `The project asks for a second reviewer on another model, since ${review.second.rule}, and none could run: ${review.second.why}.`)] : [],
+  ...review.second?.kind === "none" ? [hold("no-second-reviewer", `The project asks for an independent second reviewer on Claude Opus 5.5, since ${review.second.rule}, and none could run: ${review.second.why}.`)] : [],
   ...(review.rounds.at(-1)!.verdict?.reserved ?? []).map((r) => hold(`reserved:${r.case}`, `${personOnly}${reservedNames[r.case]}, by the reviewer's reading (${r.why}).`)),
   ...(review.rounds.at(-1)!.secondVerdict?.reserved ?? []).map((r) => hold(`reserved:${r.case}`, `${personOnly}${reservedNames[r.case]}, by the second reviewer's reading (${r.why}).`)),
 ];

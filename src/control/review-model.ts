@@ -200,8 +200,8 @@ interface Outbox { id: string; text: string; attempted: number | null }
 export interface Talk<O extends Outbox = Outbox> { expect: string; asked: string; since: number; nudges: number; outbox: O | null }
 
 /**
- * The second reviewer the project's rule gave a review for `rule`'s reason: a Claude worker on another model than the
- * builder's and the first reviewer's, in `thread`, with its own conversation. `starting` until its thread starts,
+ * The second reviewer the project's rule gave a review for `rule`'s reason: a Claude worker on Claude Opus 5.5, even when the
+ * builder or the first reviewer also runs it, in `thread`, with its own conversation. `starting` until its thread starts,
  * tried since `since` and last at `tried`, which failed for `why`. `none` when no such model could run or its thread
  * did not start in time, for `why`, which holds the landing for the person.
  */
