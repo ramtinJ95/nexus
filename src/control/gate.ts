@@ -29,10 +29,10 @@ type GateRegistry = Pick<Registry, "nodes" | "projects" | "threads">;
 /** Nexus's live check runs dockerd, the verify-nexus stack and its Docker pylon in it, and has passed only at 4 CPUs and 8 GiB (nexus#388). */
 const verifySize = { cpus: 4, memoryGiB: 8 };
 /**
- * node --test runs one file fewer at once than the pylon has CPUs, so at the default 2 CPUs the suite ran file by file
- * in 574 s. At 2 CPUs, 3 files at once took 257 s and 4 took 246 to 254 s, bound by src/cli/nexus.test.ts, which takes
- * 187 s on one core by itself. At 4 CPUs the runner runs 3, and more CPUs cannot shorten that one file. A project
- * sized over that keeps its own CPUs.
+ * node --test runs one file fewer at once than the pylon has CPUs, so at the default 2 CPUs the suite runs file by file,
+ * in 575 s. At 2 CPUs, 3 files at once took 239 s, bound by src/backends/pylon-vm/pylon-vm-backend.test.ts, which takes
+ * 188 s by itself. At 4 CPUs the runner runs 3, and more CPUs cannot shorten that one file. A project sized over that
+ * keeps its own CPUs.
  */
 const checkCpus = 4;
 const tailBytes = 6_000;
