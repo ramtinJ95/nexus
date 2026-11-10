@@ -2,7 +2,7 @@ import { request } from "./request.js";
 import { pylonRoutes } from "../../contract/pylon.ts";
 import { chunk, el, present } from "./page.js";
 import { bases } from "./checkout-text.js";
-import { kept, narrow, storageKeys } from "./contract.ts";
+import { kept, keptForTab, narrow, storageKeys } from "./contract.ts";
 import { badge, canRead, checkout, counts, factsNow, thread, unreadable } from "./checkout.js";
 import { changedFiles, isViewed, markViewed, readChanges } from "./changes-tree.js";
 import { activeTab, fileView, openFile, openTabs, tabShows } from "./tab-bar.js";
@@ -18,6 +18,15 @@ const phone = matchMedia(narrow);
 let openDiff = null;
 /** The path of a file stepped to, whose diff takes the keyboard once drawn, so the reader can go on with the keys. */
 let focusOnDraw = null;
+/**
+ * The file tab open as the page last went, with the rows the reader loaded and the scroll, which its first draw after
+ * a reload goes back to. The first draw of any file uses it up, so it never moves a diff the reader opened afterwards.
+ */
+const placeKey = storageKeys.tabPlace(thread);
+let place = JSON.parse(keptForTab.read(placeKey) ?? "null");
+addEventListener("pagehide", () => {
+  keptForTab.write(placeKey, typeof activeTab === "string" ? JSON.stringify({ path: activeTab, more: openDiff?.path === activeTab ? openDiff.more : 0, top: fileView.scrollTop }) : null);
+});
 
 function layoutPicker() {
   const picker = el("span", { className: "fv-layout" }, ...["unified", "split"].map((layout) => {
@@ -80,6 +89,8 @@ async function drawDiff({ read, head, shown, truncated, more }) {
       view?.node ?? ((shown.kind === "binary" && imagePair(openTabs.find((f) => f.path === fileView.dataset.path), checkout.base, thread))
         || el("p", { className: "empty fv-note", textContent: shown.kind === "binary" ? "The file is binary, so there is no diff to show." : shown.kind === "meta" ? "No lines changed." : "The file has no changes now." }))]));
     annotate(view, fileView.dataset.path, shown.files);
+    if (place?.path === fileView.dataset.path) fileView.scrollTop = place.top;
+    place = null;
     if (focusOnDraw === fileView.dataset.path) view?.node.focus({ preventScroll: true });
     focusOnDraw = null;
     const text = typing === null ? null : fileView.querySelector(".note-text");
@@ -164,8 +175,8 @@ export async function readDiff(path) {
   try {
     const [{ diff, truncated }, { diffOf, maxDiffRows }] = await Promise.all([request(pylonRoutes.diff, { thread, query: { base: checkout.base, paths } }), chunk(import("./diff.js"))]);
     if (read !== diffRead) return;
-    // A read of the same file again, as after a turn, keeps the rows the reader loaded.
-    const more = openDiff?.path === path ? openDiff.more : 0;
+    // A read of the same file again, as after a turn or the first after a reload, keeps the rows the reader loaded.
+    const more = openDiff?.path === path ? openDiff.more : place?.path === path ? place.more : 0;
     openDiff = { read, head, path, text: diff, more, shown: diffOf(diff, maxDiffRows * (more + 1)), truncated };
     await drawDiff(openDiff);
   } catch (err) {
