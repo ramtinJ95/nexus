@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { createServer, request } from "node:http";
+import { connect, createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, type TestContext } from "node:test";
@@ -32,13 +33,32 @@ export function watch(promise: Promise<unknown>): () => Promise<boolean> {
   return async () => { await new Promise((resolve) => setImmediate(resolve)); return settled; };
 }
 
-/** A loopback port nothing listens on. */
+/**
+ * A loopback port nothing listened on a moment ago. Nothing holds it once this returns, so a parallel test can take it
+ * before the caller listens there. Listen on port 0 instead where the code allows it, and take a port nothing may
+ * answer on from `deadPort`.
+ */
 export async function freePort(): Promise<number> {
   const server = createServer().listen(0, "127.0.0.1");
   await once(server, "listening");
   const { port } = server.address() as { port: number };
   await new Promise((resolve) => server.close(resolve));
   return port;
+}
+
+/**
+ * A port on 127.0.0.1 that refuses each connection until `t` ends. It is the local end of a connection this process
+ * holds open, which has no listener. On Linux it is bound without SO_REUSEADDR, so a listen there fails with
+ * EADDRINUSE. macOS lets a listener that names the port take it anyway. Other connections may share the port, since
+ * none of them listens. It holds nothing on ::1.
+ */
+export async function deadPort(t: Pick<TestContext, "after">): Promise<number> {
+  const anchor = createTcpServer((socket) => socket.on("error", () => {})).listen(0, "127.0.0.1");
+  await once(anchor, "listening");
+  const holder = connect((anchor.address() as { port: number }).port, "127.0.0.1").on("error", () => {});
+  t.after(() => { holder.destroy(); return new Promise((resolve) => anchor.close(resolve)); });
+  await once(holder, "connect");
+  return holder.localPort!;
 }
 
 /** A new directory under the system's temporary one, removed with all it holds once `t` ends. Without `t`, it goes once the test that makes it ends, or the file's tests when made outside any test. */

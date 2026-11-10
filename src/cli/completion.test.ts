@@ -8,7 +8,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { freePort, tempDir } from "../test-support/kit.ts";
+import { deadPort, tempDir } from "../test-support/kit.ts";
 import { project, setup } from "../test-support/cli-kit.ts";
 import { commands } from "./commands/index.ts";
 import { shells } from "./completion.ts";
@@ -61,7 +61,7 @@ test("bash completes commands, subcommands, flags, and the threads and projects 
   assert.deepEqual((await complete("nexus threads --project ")).words, [project.id]);
   assert.deepEqual((await complete("nexus events --thread ")).words, [id]);
 
-  const down = s.env({ NEXUS_URL: `http://127.0.0.1:${await freePort()}`, NEXUS_SOCKS: "none" });
+  const down = s.env({ NEXUS_URL: `http://127.0.0.1:${await deadPort(t)}`, NEXUS_SOCKS: "none" });
   assert.deepEqual(await complete("nexus show ", down), { words: ["@last"], stderr: "" }, "an unreachable control plane completes no IDs, silently");
   assert.deepEqual((await complete("nexus sh", down)).words, ["show"]);
   const { NEXUS_URL: url, NEXUS_SOCKS: socks } = s.env();

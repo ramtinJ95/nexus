@@ -13,7 +13,7 @@ import { dockerServiceGuest } from "./docker-service-guest.ts";
 import { GuestServices } from "../pylon-vm/services.ts";
 import { checkedIn } from "../pylon-vm/guest.ts";
 import type { PylonId } from "../ids.ts";
-import { freePort } from "../test-support/kit.ts";
+import { deadPort, freePort } from "../test-support/kit.ts";
 import { checkoutDir, servicesFile, workspaceDir } from "../../images/pylon/nexus-contract.ts";
 import { bootHooks, diskSetup, resumeCommands } from "./pylon-boot.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
@@ -176,7 +176,7 @@ test("the ingress sends each request to its longest matching route's port, witho
   const guest = dockerServiceGuest(pylon);
   t.after(() => guest.close());
   const base = await guest.ingress();
-  guest.setIngressRoutes([{ prefix: "/web/", port: 1, stripPrefix: true }, { prefix: "/web/api/", port, stripPrefix: true }, { prefix: "/down/", port: await freePort(), stripPrefix: true }]);
+  guest.setIngressRoutes([{ prefix: "/web/", port: 1, stripPrefix: true }, { prefix: "/web/api/", port, stripPrefix: true }, { prefix: "/down/", port: await deadPort(t), stripPrefix: true }]);
   const body = await new Promise<string>((accept, reject) => {
     request(new URL("/web/api/x?y=1", base), { headers: { host: "pylon.example:8443" } }, (res) => {
       let text = "";

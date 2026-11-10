@@ -16,7 +16,7 @@ import type { DeclaredOutput, ServiceFact } from "../protocol/observations.ts";
 import { listenHostBridge } from "../host-bridge.ts";
 import { createServer } from "node:http";
 import { createPylonApi, type PylonApiDeps } from "../probe/pylon-api.ts";
-import { freePort } from "../test-support/kit.ts";
+import { deadPort, freePort } from "../test-support/kit.ts";
 import { pylonInfoFile, sessionKinds } from "../../images/pylon/nexus-contract.ts";
 
 const cli = fileURLToPath(new URL("../../images/pylon/nexus", import.meta.url));
@@ -234,7 +234,7 @@ test("under --json every failure is one JSON line on stderr with the probe's sta
   assert.equal(usage.code, 64);
   assert.equal(JSON.parse(usage.stderr).status, null);
   assert.match(JSON.parse(usage.stderr).error, /^the port must be a whole number, got abc\./);
-  const port = await freePort();
+  const port = await deadPort(t);
   const gone = await run(`http://127.0.0.1:${port}`, ["info", "--json"]);
   assert.equal(gone.code, 1);
   assert.deepEqual({ ...JSON.parse(gone.stderr), error: "" }, { error: "", status: null });

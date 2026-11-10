@@ -4,6 +4,7 @@ import { once } from "node:events";
 import { createServer, request, type IncomingMessage, type Server } from "node:http";
 import type { Socket } from "node:net";
 import type { PylonId } from "../ids.ts";
+import { deadPort } from "../test-support/kit.ts";
 import { startGateway, warmHeader, type GatewayOptions, type PreviewHit, type PreviewRoute } from "./gateway.ts";
 
 const pylonId = "pylon-gw" as PylonId;
@@ -209,9 +210,7 @@ test("an origin that is no URL is a fault too, and the gateway keeps serving", a
 });
 
 test("a service that is not listening gets 502", async (t) => {
-  const closed = createServer();
-  const port = await listen(t, closed);
-  closed.close();
+  const port = await deadPort(t);
   const { call } = await setup(t, () => `http://127.0.0.1:${port}`);
   assert.equal((await call("/")).status, 502);
 });
