@@ -5,7 +5,7 @@
 import { desiredPhase, isOpenStatus } from "../reconcile.ts";
 import { linkedPort } from "../../services-file.ts";
 import { harnessNamed, type SessionHarness } from "../../protocol/agent-kinds.ts";
-import type { ServerDetail, ThreadDetail, ThreadRow } from "../wire.ts";
+import type { ServerDetail, ThreadDetail } from "../wire.ts";
 import type { NodeRecord } from "../node-store.ts";
 import type { Preview, Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
@@ -13,12 +13,12 @@ import { freshVm, liveNote, plannerGaveUp, prWatchText, reviewersNote, reviewLin
 import type { QueuedThread, Wait } from "../../contract/threads.ts";
 import { tokenCount, type UsageTotals } from "../../contract/usage.ts";
 import { factsData } from "./contract.ts";
-import { attentionLabels } from "../plain-wording.ts";
-import { Html, html, act, dataset, attentionTone, actualBadge, desiredTone, sessionTone, outputLabel, dot, state, icon, menu, threadState, ago, workingFor, type Part, type Tone } from "./view.ts";
+import { Html, html, act, dataset, actualBadge, desiredTone, sessionTone, outputLabel, dot, state, icon, menu, threadState, ago, workingFor, type Part, type Tone } from "./view.ts";
 import type { Context, ThreadView } from "./context.ts";
 import { prose } from "./markdown.ts";
 import { modelOf } from "./items.ts";
 import { runOf, stateBar, composer, type Run } from "./conversation.ts";
+import { isOpen } from "../questions.ts";
 import { convo, shownKey } from "./live-frames.ts";
 import { judgmentCards, questionCards, landing, cancelReview, nudgeCard, resumeCard } from "./cards.ts";
 import { layout, queuedLook } from "./shell.ts";
@@ -63,8 +63,8 @@ export function threadPage(c: Context, page: ThreadView, streaming = false): Htm
   const shows = streaming && read !== null ? shownKey(read, model) : null;
   const open = isOpenStatus(t.status);
   const life = role === "builder" ? lifeOfThread(c, t.id) : null;
-  const bar = threadBar(t, headState(d, row, run, c.now), [
-    t.status !== "deleted" && archiveButton(t.id, t.status === "archived"),
+  const bar = threadBar(t, threadState(row, c.now), [
+    t.status !== "deleted" && archiveButton(t.id, t.status === "archived", archiveLoses(d, run)),
     t.status !== "deleted" && html`<button type="button" class="btn btn-ghost danger" id="delete"${act("delete")} data-thread="${t.id}" data-confirm="Delete &quot;${t.title}&quot;? Its pylon and disk are removed.">Delete</button>`,
   ], d.planning === true && html` <span class="tag" id="planning" title="Its proposed items become cards you accept or reject">planning</span>`);
   return layout(c, {
@@ -81,7 +81,6 @@ ${life !== null && html`<section class="timeline-view" id="timeline-view" role="
 <section class="file-view" id="file-view" role="tabpanel" aria-label="File diff" hidden></section>
 ${t.status !== "deleted" && termView(t)}
 <div class="dock">
-<p id="action-error" class="error" role="alert" hidden></p>
 <p id="action-status" class="comp-note" role="status" hidden></p>
 <div id="judgments" data-live>${judgmentCards(c, d)}</div>
 <div id="questions" data-live>${questionCards(c, d)}</div>
@@ -104,23 +103,15 @@ ${t.status !== "deleted" && termView(t)}
 function termView(t: Thread): Html {
   return html`<section class="term-view" id="term-view" role="tabpanel" aria-label="Terminal" hidden>
 <div class="tv-head"><span class="tv-where">The pylon's Herdr session</span><span class="tv-status" id="term-status" role="status"></span><button type="button" class="btn btn-xs" id="term-again" hidden>Attach again</button><button type="button" class="btn btn-xs btn-ghost" id="term-detach" hidden>Detach</button></div>
+<p class="tv-clip" id="term-copied" role="status" hidden></p><p class="tv-clip" id="term-refused" role="status" hidden></p>
 <div class="tv-host" id="term-host"></div>
 </section>`;
 }
 
 /**
- * The header's state never contradicts the dock's. While the pylon runs and nothing outranks the agent, it is the
- * agent's state, in the dock's words, since a running pylon above an idle agent reads as a contradiction. Otherwise it
- * is the thread's attention, its archive or its pylon's state, which the dock either agrees with or does not say.
+ * The bar atop a thread's page or a queued thread's: where it is, its state, and its actions, which a phone folds under
+ * ⋯. A thread's state is its row's, so the sidebar, the home table and the header say it the same way.
  */
-function headState(d: ThreadDetail, row: ThreadRow, run: Run, now: number): readonly [string, Tone] {
-  const own = threadState(row, now);
-  const open = isOpenStatus(d.thread.status);
-  if (!open || d.pylon.actualState !== "running" || (d.attention !== null && d.attention !== "working")) return own;
-  return run.kind === "working" ? [attentionLabels.working, attentionTone.working] : run.kind === "idle" ? ["agent idle", "idle"] : own;
-}
-
-/** The bar atop a thread's page or a queued thread's: where it is, its state, and its actions, which a phone folds under ⋯. */
 function threadBar(t: { project: string; title: string }, [label, tone]: readonly [string, Tone], actions: readonly Part[], tag: Part = null): Html {
   const shown = actions.filter((a) => a !== false);
   return html`<header class="bar" id="bar" data-live>
@@ -131,9 +122,26 @@ ${shown.length > 0 && html`<div class="bar-actions" id="thread-actions">${shown}
 </header>`;
 }
 
-const archiveButton = (id: ThreadId, archived: boolean) => archived
-  ? html`<button type="button" class="btn btn-ghost" id="unarchive"${act("unarchive")} data-thread="${id}">Unarchive</button>`
-  : html`<button type="button" class="btn btn-ghost" id="archive"${act("archive")} data-thread="${id}">Archive</button>`;
+/** What the archive and unarchive buttons say: archiving a queued thread cancels it, and unarchiving queues it again. */
+const archiveLabels = { thread: ["Archive", "Unarchive"], queued: ["Cancel", "Queue again"] } as const;
+/** Archive asks first only when `confirm` says what it loses. */
+const archiveButton = (id: ThreadId, archived: boolean, confirm: string | null = null, of: keyof typeof archiveLabels = "thread") => archived
+  ? html`<button type="button" class="btn btn-ghost" id="unarchive"${act("unarchive")} data-thread="${id}">${archiveLabels[of][1]}</button>`
+  : html`<button type="button" class="btn btn-ghost" id="archive"${act("archive")} data-thread="${id}"${confirm !== null && html` data-confirm="${confirm}"`}>${archiveLabels[of][0]}</button>`;
+
+/**
+ * What archiving the thread loses, or null when nothing: the open questions an archive withdraws, a failed pylon's
+ * judgment and a Claude worker's asks, and the turn its agent is in, whose pylon goes to sleep at once.
+ */
+function archiveLoses(d: ThreadDetail, run: Run): string | null {
+  const questions = d.questions.filter((q) => (q.kind === "judgment" || q.kind === "ask") && isOpen(q));
+  const named = questions.map((q) => `"${q.text.split("\n")[0]}"`).join(", ");
+  const lost = [
+    questions.length > 0 && (questions.length === 1 ? `Its open question ${named} is withdrawn.` : `Its ${questions.length} open questions ${named} are withdrawn.`),
+    (run.kind === "working" || (run.kind === "parked" && run.busy)) && "Its agent is in a turn, and its pylon goes to sleep at once.",
+  ].filter((part) => part !== false);
+  return lost.length === 0 ? null : `Archive "${d.thread.title}"? ${lost.join(" ")}`;
+}
 
 /**
  * A thread that has not started: what it waits for, what it will start with, and the actions a queued thread has. It
@@ -146,13 +154,13 @@ export function queuedPage(c: Context, q: QueuedThread): Html {
     active: q.id,
     main: html`${threadBar(q, queuedLook(q), [
       q.status === "queued" && html`<button type="button" class="btn" id="start-queued"${act("start-queued")} data-thread="${q.id}">Start now</button>`,
-      q.status !== "deleted" && archiveButton(q.id, q.status === "archived"),
+      q.status !== "deleted" && archiveButton(q.id, q.status === "archived", null, "queued"),
     ])}
 <nav class="life-bar" id="life" data-live aria-label="Stages">${lifeTrack(lifeOfThread(c, q.id), false)}</nav>
 <div class="scroll"><div class="page queued" id="queued" data-live>
 <section aria-labelledby="waits-h"><h2 id="waits-h">Starts once these threads' pull requests merge</h2>
 <ul class="list">${q.waits.map((w) => html`<li>${state(w.state, waitTone[w.state])} <a class="link" href="/threads/${w.thread}">${c.title(w.thread)}</a>: ${w.why}</li>`)}</ul>
-${q.status === "queued" && q.blocked && html`<p class="dim">A blocked thread stays queued. Start it now, or archive it to cancel it.</p>`}
+${q.status === "queued" && q.blocked && html`<p class="dim">A blocked thread stays queued. Start it now, or cancel it.</p>`}
 ${q.startNow !== null && html`<p class="dim">Start now was asked ${ago(q.startNow.at, c.now)}, so it starts without waiting once it can.</p>`}
 </section>
 <section aria-labelledby="start-h"><h2 id="start-h">What it starts with</h2>
@@ -167,8 +175,7 @@ ${q.commit !== null && html`<dt>Commit</dt><dd><code>${q.commit}</code></dd>`}
 <code class="id">${q.id}</code>
 ${q.lastError !== null && html`<p class="error">The last start attempt failed: ${q.lastError}</p>`}
 </section>
-</div></div>
-<div class="dock"><p id="action-error" class="error" role="alert" hidden></p></div>`,
+</div></div>`,
   });
 }
 
@@ -224,7 +231,7 @@ function inspectorPanes(d: ServerDetail, node: NodeRecord, now: number, usage: U
   const count = (n: number) => html`<span class="count">${n}</span>`;
   const desired = desiredPhase(t, now);
   const outputs = outputsOf(d);
-  // A port with a preview is listed under Previews. Ports lists the rest, which are published only when someone opens one.
+  // A port with a preview is listed under Previews. Ports lists the rest, which are published only when someone publishes one.
   const unpublished = d.ports?.filter((l) => l.preview === null) ?? null;
   const host = (url: string) => url.replace(/^https:\/\//, "").replace(/\/$/, "");
   // Only a linked port's preview can be unpublished. A service's preview is part of its declaration.
@@ -235,7 +242,7 @@ ${d.previews.length === 0 ? html`<p class="empty">No previews.</p>` : html`<ul c
   const look = lookOf(d, p);
   return html`<li class="pv pv-${look.tone}">
 <div class="pv-top">${dot(look.tone)}<span class="pv-name">${p.service}</span>${look.label !== null && html`<span class="pv-note">${look.label}</span>`}${look.linked && html`<a class="btn btn-xs" href="${p.url}" target="_blank" rel="noopener" aria-label="Open ${p.service}">Open ↗</a>`}${open && linkedPort(p.service) !== null && html`<button type="button" class="btn btn-xs btn-ghost"${act("unpublish")} data-thread="${t.id}" data-port="${linkedPort(p.service)}" aria-label="Unpublish ${p.service}">Unpublish</button>`}</div>
-<div class="pv-url">${host(p.url)}</div>
+<div class="pv-url" title="${p.url}">${host(p.url)}</div>
 ${look.hint !== null && html`<div class="pv-hint">${look.hint}</div>`}
 </li>`;
 })}</ul>`}
@@ -244,7 +251,7 @@ ${look.hint !== null && html`<div class="pv-hint">${look.hint}</div>`}
 ${unpublished === null ? html`<p class="empty">The pylon's ports could not be read.</p>`
   : unpublished.length > 0 ? html`<ul class="list">${unpublished.map((l) => html`<li class="pv pv-muted">
 <div class="pv-top">${dot("muted")}<span class="pv-name">${l.port}</span>${l.service === null
-  ? html`<button type="button" class="btn btn-xs"${act("link-port")} data-thread="${t.id}" data-port="${l.port}" aria-label="Open port ${l.port}">Open</button>`
+  ? html`<button type="button" class="btn btn-xs"${act("link-port")} data-thread="${t.id}" data-port="${l.port}" aria-label="Publish port ${l.port}">Publish</button>`
   : html`<span class="pv-note">${l.service}</span>`}</div>
 </li>`)}</ul>`
   : pylon.actualState !== "running" ? html`<p class="empty">Ports show while the pylon runs.</p>`

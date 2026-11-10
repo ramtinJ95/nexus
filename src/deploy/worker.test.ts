@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { command, ReleaseInstaller } from "./install.ts";
 import { parseWorkerConfig } from "./control-plane.ts";
+import { prepareTries, retryBaseMs } from "./plan.ts";
 import { releaseOutcome } from "../protocol/deploy.ts";
 
 const commit = "a".repeat(40);
@@ -25,6 +26,8 @@ test("wait outcome trusts the view's health from every role, whatever the caller
   assert.equal(releaseOutcome({ desired, nodes: [report, { ...report, role: "probe", state: "pending", reason: "deployer report is stale" }] }, commit), "pending");
   assert.equal(releaseOutcome({ desired, nodes: [{ ...report, state: "rolled-back" }] }, commit), "failed");
   assert.equal(releaseOutcome({ desired: null, nodes: [report] }, commit), "superseded");
+  const again = { ...desired, requestedAt: report.observedAt + 1 };
+  assert.equal(releaseOutcome({ desired: again, nodes: [{ ...report, state: "rolled-back" }] }, commit), "pending", "a deploy of the same commit again waits for a report of its own");
 });
 
 test("the bootstrap that install-deployer.sh copies loads without the repo's node_modules", async (t) => {
@@ -45,25 +48,120 @@ test("the bootstrap that install-deployer.sh copies loads without the repo's nod
   await command(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(join(dir, "src/deploy/worker.ts"))})`], dir);
 });
 
-test("fixed supervisor falls back after a worker crashes or hangs, and accepts a later worker", { skip: supervisorLacks.length > 0 && `the supervisor runs on Linux nodes, and its PATH here lacks ${supervisorLacks.join(" and ")}` }, async (t) => {
-  const dir = await mkdtemp(join(tmpdir(), "nexus-supervisor-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const workerDir = (name: string) => join(dir, name, "src/deploy");
-  for (const name of ["deployer/bootstrap", "releases/broken", "releases/fixed"]) await mkdir(workerDir(name), { recursive: true });
-  const marker = join(dir, "ran");
-  await writeFile(join(workerDir("deployer/bootstrap"), "worker.ts"), `require('node:fs').appendFileSync(${JSON.stringify(marker)}, 'fallback\\n');`);
-  await writeFile(join(workerDir("releases/fixed"), "worker.ts"), `require('node:fs').appendFileSync(${JSON.stringify(marker)}, 'fixed\\n');`);
-  const script = (await readFile(new URL("../../deploy/supervise-deployer.sh", import.meta.url), "utf8")).replace("prefix=/opt/nexus", `prefix=${JSON.stringify(dir)}`).replaceAll("900s", "1s");
-  await writeFile(join(dir, "supervise.sh"), script);
-  for (const broken of ["process.exit(1)", "setInterval(() => {}, 1000)"]) {
-    await writeFile(join(workerDir("releases/broken"), "worker.ts"), broken);
-    await symlink("releases/broken", join(dir, "deployer-current"));
-    await command("bash", [join(dir, "supervise.sh")], dir);
-    assert.equal((await readFile(join(dir, "deployer/rejected"), "utf8")).trim(), "releases/broken");
+test("the supervisor rejects a worker that crashes, fails to load or hangs, and keeps one whose poll could not reach the control plane", { skip: supervisorLacks.length > 0 && `the supervisor runs on Linux nodes, and its PATH here lacks ${supervisorLacks.join(" and ")}` }, async (t) => {
+  const { spawnSync } = await import("node:child_process");
+  const { controlCallFailedExit } = await import("./worker.ts");
+  const script = (await readFile(new URL("../../deploy/supervise-deployer.sh", import.meta.url), "utf8")).replace("900s", "${deadline:-900s}");
+  const supervise = async (promoted: string) => {
+    const dir = await mkdtemp(join(tmpdir(), "nexus-supervisor-"));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const marker = join(dir, "ran");
+    for (const [name, code] of [["deployer/bootstrap", "'bootstrap'"], ["releases/promoted", promoted]] as const) {
+      await mkdir(join(dir, name, "src/deploy"), { recursive: true });
+      await writeFile(join(dir, name, "src/deploy/worker.ts"), name === "deployer/bootstrap" ? `require('node:fs').appendFileSync(${JSON.stringify(marker)}, 'bootstrap\\n');` : code);
+    }
+    await symlink("releases/promoted", join(dir, "deployer-current"));
+    // Only a worker that never exits meets the shortened deadline, so the bootstrap after it keeps the real one.
+    const promotedDeadline = promoted.startsWith("setInterval") ? 'deadline=1s run_worker "$worker"' : 'run_worker "$worker"';
+    await writeFile(join(dir, "supervise.sh"), script.replace("prefix=/opt/nexus", `prefix=${JSON.stringify(dir)}`).replace('run_worker "$worker"', promotedDeadline));
+    const { status } = spawnSync("bash", [join(dir, "supervise.sh")], { cwd: dir });
+    return { status, ran: existsSync(marker) ? await readFile(marker, "utf8") : "", rejected: existsSync(join(dir, "deployer/rejected")) ? (await readFile(join(dir, "deployer/rejected"), "utf8")).trim() : null, current: existsSync(join(dir, "deployer-current")) };
+  };
+  for (const [worker, code] of [["succeeds", "process.exit(0)"], ["could not reach the control plane", `process.exit(${controlCallFailedExit})`]]) {
+    assert.deepEqual(await supervise(code!), { status: code === "process.exit(0)" ? 0 : controlCallFailedExit, ran: "", rejected: null, current: true }, `a worker that ${worker} stays promoted and the bootstrap does not run`);
   }
-  await symlink("releases/fixed", join(dir, "deployer-current"));
-  await command("bash", [join(dir, "supervise.sh")], dir);
-  assert.equal(await readFile(marker, "utf8"), "fallback\nfallback\nfixed\n");
+  for (const [worker, code] of [["exits 1", "process.exit(1)"], ["fails to load", "import './missing.ts';"], ["exits as a timeout does", "process.exit(124)"], ["hangs", "setInterval(() => {}, 1000)"]]) {
+    assert.deepEqual(await supervise(code!), { status: 0, ran: "bootstrap\n", rejected: "releases/promoted", current: false }, `a worker that ${worker} is rejected and the bootstrap runs`);
+  }
+});
+
+test("a poll whose call to the control plane fails or is refused exits with the code the supervisor keeps the worker on, and a crash exits 1", async (t) => {
+  const { createServer } = await import("node:http");
+  const { once } = await import("node:events");
+  const { reconcileRoles, controlApi, exitCode, controlCallFailedExit } = await import("./worker.ts");
+  const dir = await mkdtemp(join(tmpdir(), "nexus-exit-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  for (const path of ["etc", "units", "deployer", `releases/${commit}`]) await mkdir(join(dir, path), { recursive: true });
+  await writeFile(join(dir, `releases/${commit}/release-commit`), commit);
+  await symlink(`releases/${commit}`, join(dir, "current"));
+  await writeFile(join(dir, "etc/probe.json"), JSON.stringify({ listen: { host: "127.0.0.1", port: 1 } }));
+  const refusing = createServer((_req, res) => { res.statusCode = 503; res.end("control plane is restarting"); }).listen(0, "127.0.0.1");
+  const closed = createServer().listen(0, "127.0.0.1");
+  await Promise.all([once(refusing, "listening"), once(closed, "listening")]);
+  t.after(() => { refusing.closeAllConnections(); refusing.close(); });
+  const url = (server: typeof closed) => `http://127.0.0.1:${(server.address() as { port: number }).port}/`;
+  const down = url(closed);
+  closed.close();
+  await once(closed, "close");
+  const boundary = { prefix: dir, etc: join(dir, "etc"), units: join(dir, "units"), async checkout() {}, async run() { return ""; } };
+  const poll = (controlUrl: string) => {
+    const config = { controlUrl, controlNodeId: "nControl", token: "a".repeat(64), healthTimeoutMs: 1000, drainTimeoutMs: 0 };
+    return reconcileRoles(["probe"], config, controlApi(config), boundary).then(() => assert.fail("the poll fails"), (error: unknown) => error);
+  };
+  for (const [control, controlUrl] of [["unreachable", down], ["refusing the call", url(refusing)]]) {
+    const error = await poll(controlUrl!);
+    assert.equal(exitCode(error), controlCallFailedExit, `a control plane ${control}: ${String(error)}`);
+  }
+  await rm(join(dir, "etc/probe.json"));
+  assert.equal(exitCode(await poll(url(refusing))), 1, "a poll that fails before it calls the control plane is the worker's fault");
+  assert.equal(exitCode(new Error("crash")), 1);
+});
+
+test("a report says which worker sent it, and goes again without that to a control plane from before the field", async (t) => {
+  const { createServer } = await import("node:http");
+  const { once } = await import("node:events");
+  const { reconcileRole, controlApi } = await import("./worker.ts");
+  const { reportSchema } = await import("../contract/release-parse.ts");
+  const dir = await mkdtemp(join(tmpdir(), "nexus-worker-report-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  for (const path of ["etc", "units", "deployer", `releases/${commit}`]) await mkdir(join(dir, path), { recursive: true });
+  await writeFile(join(dir, `releases/${commit}/release-commit`), commit);
+  await symlink(`releases/${commit}`, join(dir, "current"));
+  let older = false;
+  const received: unknown[] = [];
+  const server = createServer(async (req, res) => {
+    let text = "";
+    for await (const chunk of req) text += chunk;
+    if (req.url === "/v1/health") return res.end(JSON.stringify({ commit }));
+    if (req.url === "/v1/deployer/release") return res.end(JSON.stringify({ desired: { commit, requestedBy: "nMac", requestedAt: 0 }, nodes: [] }));
+    assert.equal(req.url, "/v1/deployer/report");
+    const parsed = (older ? reportSchema.omit({ worker: true }) : reportSchema).safeParse(JSON.parse(text));
+    if (!parsed.success) { res.statusCode = 400; return res.end(parsed.error.message); }
+    received.push(parsed.data);
+    res.end(JSON.stringify({ ok: true }));
+  }).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const port = (server.address() as { port: number }).port;
+  await writeFile(join(dir, "etc/probe.json"), JSON.stringify({ listen: { host: "127.0.0.1", port } }));
+  const config = { controlUrl: `http://127.0.0.1:${port}/`, controlNodeId: "nControl", token: "a".repeat(64), healthTimeoutMs: 60_000, drainTimeoutMs: 0 };
+  const boundary = { prefix: dir, etc: join(dir, "etc"), units: join(dir, "units"), worker: "bootstrap", async checkout() {}, async run() { return ""; } };
+  const healthy = { role: "probe", commit, target: commit, state: "healthy", reason: null };
+  await reconcileRole("probe", config, controlApi(config), boundary);
+  older = true;
+  await reconcileRole("probe", config, controlApi(config), boundary);
+  assert.deepEqual(received, [{ ...healthy, worker: "bootstrap" }, healthy]);
+  const { observedAt: _, ...saved } = JSON.parse(await readFile(join(dir, "probe-deploy-report.json"), "utf8"));
+  assert.deepEqual(saved, { ...healthy, worker: "bootstrap", requestedAt: 0 });
+});
+
+test("a worker loaded through deployer-current names the release it was promoted from, and the bootstrap names itself", async (t) => {
+  const repo = new URL("../../", import.meta.url).pathname;
+  const dir = await mkdtemp(join(tmpdir(), "nexus-worker-name-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  for (const copy of [`releases/${commit}`, "deployer/bootstrap"]) {
+    for (const source of ["src/deploy", "src/node-base", "src/protocol"]) await cp(join(repo, source), join(dir, copy, source), { recursive: true });
+    await writeFile(join(dir, copy, "package.json"), '{"type":"module"}\n');
+  }
+  await writeFile(join(dir, `releases/${commit}/release-commit`), commit);
+  await symlink(`releases/${commit}`, join(dir, "deployer-current"));
+  const linked = `${dir}-link`;
+  await symlink(dir, linked);
+  t.after(() => rm(linked, { force: true }));
+  const name = async (copy: string) => ((await import(join(dir, copy, "src/deploy/worker.ts"))) as typeof import("./worker.ts")).workerName(linked);
+  assert.equal(await name("deployer-current"), commit, "a prefix reached through a symlink still names the release");
+  assert.equal(await name("deployer/bootstrap"), "bootstrap");
+  assert.equal(await (await import("./worker.ts")).workerName(dir), undefined, "a worker run from a checkout names no release");
 });
 
 test("activation failure rolls back through fake service executables in a temporary prefix", async (t) => {
@@ -181,9 +279,11 @@ test("a rolled-back install stays quarantined by its journal after its report is
   const reports: any[] = [];
   const drains: any[] = [];
   const calls: string[] = [];
+  let requestedAt = 0;
+  let busy = false;
   const api = async (path: string, body?: any) => {
-    if (path === "release") return { desired: { commit, requestedBy: "nMac", requestedAt: 0 }, nodes: [] };
-    if (path === "drain") { drains.push(body); return { idle: true, expiresAt: 0 }; }
+    if (path === "release") return { desired: { commit, requestedBy: "nMac", requestedAt }, nodes: [] };
+    if (path === "drain") { drains.push(body); return { idle: !busy, expiresAt: 0 }; }
     if (path === "report") { reports.push(body); return { ok: true }; }
     assert.fail(path);
   };
@@ -196,7 +296,17 @@ test("a rolled-back install stays quarantined by its journal after its report is
   await reconcileRole("control", config, api, boundary);
   assert.deepEqual(drains, [{ commit, release: true }]);
   assert.deepEqual(reports.map((r) => [r.state, r.target, r.reason]), [["rolled-back", commit, "candidate API failed"]]);
-  assert.deepEqual(calls, []);
+  assert.equal(calls.length, 0);
+  assert.equal(JSON.parse(await readFile(join(dir, "control-deploy.json"), "utf8")).requestedAt, 0, "a journal from before requestedAt is held for the request desired when it was read");
+  requestedAt = 1;
+  busy = true;
+  for (let poll = 0; poll < 2; poll++) {
+    await reconcileRole("control", config, api, boundary);
+    assert.equal(reports.at(-1).state, "waiting-for-idle", "a new request is not held by the old journal, even once a report names the new request");
+  }
+  busy = false;
+  await reconcileRole("control", config, api, boundary);
+  assert.ok(calls.includes("checkout"), "a new request for the commit tries it again");
 });
 
 test("a poll leaves its report as JSON private to its owner, with no temporary file beside it, and a role without its local config is refused", async (t) => {
@@ -228,7 +338,7 @@ test("a poll leaves its report as JSON private to its owner, with no temporary f
   const start = Date.now();
   await reconcileRole("probe", config, api, boundary);
   const { observedAt, ...report } = JSON.parse(await readFile(join(dir, "probe-deploy-report.json"), "utf8"));
-  assert.deepEqual(report, { role: "probe", commit, target: commit, state: "healthy", reason: null });
+  assert.deepEqual(report, { role: "probe", commit, target: commit, state: "healthy", reason: null, requestedAt: 0 });
   assert.ok(observedAt >= start && observedAt <= Date.now());
   assert.equal((await stat(join(dir, "probe-deploy-report.json"))).mode & 0o777, 0o600);
   assert.deepEqual((await readdir(dir)).filter((name) => !before.has(name)), ["probe-deploy-report.json"]);
@@ -386,7 +496,7 @@ test("a probe a release behind reads the view again when control's unchanged rep
   await symlink(`releases/${commit}`, join(m.dir, "control-current"));
   m.running.control = commit;
   const report = { role: "control", commit, target: commit, state: "healthy", reason: null };
-  await writeFile(join(m.dir, "control-deploy-report.json"), JSON.stringify({ ...report, observedAt: 0 }));
+  await writeFile(join(m.dir, "control-deploy-report.json"), JSON.stringify({ ...report, requestedAt: 0, observedAt: 0 }));
   m.control.reports.set("control", { ...report, observedAt: Date.now() - 90_001 });
   await reconcileRoles(["control", "probe"], m.config, m.api, m.boundary);
   assert.deepEqual(m.control.posted, ["control healthy", "probe installing", "probe healthy"]);
@@ -415,8 +525,9 @@ test("busy turns outlast the old timeout across polls without quarantine, then a
   const calls: string[] = [];
   const drains: { commit: string; release?: boolean; hold?: boolean }[] = [];
   let busy = true;
+  let requestedAt = 0;
   const api = async (path: string, body?: any) => {
-    if (path === "release") return { desired: { commit, requestedBy: "nMac", requestedAt: 0 }, nodes: [] };
+    if (path === "release") return { desired: { commit, requestedBy: "nMac", requestedAt }, nodes: [] };
     if (path === "drain") { drains.push(body); return { idle: !busy, threads: busy ? ["th-builder"] : [] }; }
     if (path === "report") { reports.push(body); return { ok: true }; }
     assert.fail(path);
@@ -458,6 +569,69 @@ test("busy turns outlast the old timeout across polls without quarantine, then a
   calls.length = 0;
   await reconcileRole("control", config, api, boundary);
   assert.equal(calls.length, 0, "bad commits remain quarantined, including across polling cycles");
+  requestedAt = 1;
+  reports.length = 0;
+  await reconcileRole("control", config, api, boundary);
+  assert.ok(calls.includes("checkout"), "running nexus deploy for the commit again tries it again");
+  assert.deepEqual(reports.map((r) => r.state), ["installing", "rolled-back"]);
+  calls.length = 0;
+  await reconcileRole("control", config, api, boundary);
+  assert.equal(calls.length, 0, "the rollback at the new request is quarantined too");
+});
+
+test("a failure before the link switch is tried again after a doubling wait and then installs, and the last allowed try quarantines until the commit is requested again", async (t) => {
+  const { reconcileRole } = await import("./worker.ts");
+  const old = "b".repeat(40);
+  const m = await bothRoles(t, old);
+  let clock = 1_000;
+  let fetches = 0;
+  let offline = true;
+  const boundary = { ...m.boundary, now: () => clock, async checkout() { fetches++; if (offline) throw new Error("git fetch: Could not resolve host: github.com"); } };
+  const saved = async () => JSON.parse(await readFile(join(m.dir, "control-deploy-report.json"), "utf8"));
+  const poll = async () => { m.control.posted.length = 0; await reconcileRole("control", m.config, m.api, boundary); return m.control.reports.get("control"); };
+
+  let report = await poll();
+  assert.deepEqual(m.control.posted, ["control installing", "control pending"]);
+  assert.equal(report.reason, `try 1 of ${prepareTries} failed before the link switch, so it runs again after ${new Date(clock + retryBaseMs).toISOString()}: Error: git fetch: Could not resolve host: github.com`);
+  assert.equal(await readlink(join(m.dir, "control-current")), `releases/${old}`, "the running release is left as it was");
+  clock += retryBaseMs - 1;
+  report = await poll();
+  assert.equal(fetches, 1, "a poll inside the wait does not try again");
+  assert.deepEqual(m.control.posted, ["control pending"]);
+  assert.match(report.reason, /^try 1 of/);
+  clock += 1;
+  report = await poll();
+  assert.equal(fetches, 2);
+  assert.match(report.reason, /^try 2 of/);
+  assert.equal((await saved()).retryAt, clock + 2 * retryBaseMs, "the wait doubles");
+  clock = (await saved()).retryAt;
+  offline = false;
+  await poll();
+  assert.deepEqual(m.control.posted, ["control installing", "control healthy"]);
+  assert.equal(await readlink(join(m.dir, "control-current")), `releases/${commit}`);
+
+  await rm(join(m.dir, "control-current"));
+  await symlink(`releases/${old}`, join(m.dir, "control-current"));
+  m.running.control = old;
+  m.control.desired = { commit, requestedBy: "nMac", requestedAt: 1 };
+  offline = true;
+  fetches = 0;
+  for (let tries = 1; tries <= prepareTries; tries++) {
+    report = await poll();
+    clock = (await saved()).retryAt ?? clock;
+  }
+  assert.equal(fetches, prepareTries);
+  assert.equal(report.state, "failed");
+  assert.match(report.reason, new RegExp(`^${prepareTries} tries failed before the link switch, so this request is quarantined until the commit is requested again\\. The last: Error: git fetch`));
+  clock += 24 * 60 * 60_000;
+  offline = false;
+  await poll();
+  assert.equal(fetches, prepareTries, "the quarantined request is not tried again");
+  assert.deepEqual(m.control.posted, ["control failed"]);
+  m.control.desired = { commit, requestedBy: "nMac", requestedAt: 2 };
+  await poll();
+  assert.deepEqual(m.control.posted, ["control installing", "control healthy"], "a new request for the commit clears the quarantine");
+  assert.equal((await saved()).failed, undefined, "the new request starts its count again");
 });
 
 test("the node's registry reads give the registry's version and a release's migrations, and null only for what does not exist yet", async (t) => {
@@ -514,7 +688,7 @@ test("a backup before a migration counts only a successful run that began after 
   assert.ok(starts[0]! <= 50, "each start is bounded by what is left of the budget");
 });
 
-test("a target whose schema.ts fails to load fails its install with that error, rather than reading as a release from before schema.ts", async (t) => {
+test("a target whose schema.ts fails to load fails its try with that error before the link switch, rather than reading as a release from before schema.ts", async (t) => {
   const { reconcileRole, nodeRegistry } = await import("./worker.ts");
   const dir = await mkdtemp(join(tmpdir(), "nexus-broken-schema-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -548,8 +722,8 @@ test("a target whose schema.ts fails to load fails its install with that error, 
     registry: nodeRegistry({ config: join(dir, "etc/control.json"), home: join(dir, "home"), prefix: dir, status: join(dir, "status.json") }),
   };
   await reconcileRole("control", config, api, boundary);
-  assert.deepEqual(reports.map((r) => r.state), ["installing", "failed"]);
-  assert.match(reports.at(-1).reason, /SyntaxError/);
+  assert.deepEqual(reports.map((r) => r.state), ["installing", "pending"], "a failure before the link switch is tried again");
+  assert.match(reports.at(-1).reason, /^try 1 of 5 failed before the link switch, .*SyntaxError/s);
   assert.doesNotMatch(reports.at(-1).reason, /has no src\/control\/schema\.ts/);
   assert.deepEqual(calls, [], "the target never activates or restarts");
   assert.equal(await readlink(join(dir, "control-current")), `releases/${old}`);

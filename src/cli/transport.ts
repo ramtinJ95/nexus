@@ -34,6 +34,13 @@ export class CliError extends Error {
   }
 }
 
+/** A command given wrong words or flags, which its own help shows how to give. */
+export class UsageError extends CliError {
+  constructor(message: string) {
+    super("invalid", message);
+  }
+}
+
 export interface HostPort { host: string; port: number }
 export interface Endpoint {
   url: URL;

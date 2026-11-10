@@ -7,6 +7,7 @@ import { coordinator, notificationChannel, noticeText, noticeUrl } from "./notif
 import { api } from "./request.js";
 import { chunk, el, end, follow, main, pollMs, recordVisit, refreshNow, stream, tick, toggled } from "./page.js";
 import { pickPane, setOpen } from "./nav.js";
+import { applyFilter, listRows } from "./find.js";
 import { dialog, openProject, openStart, projectDialog } from "./dialogs.js";
 import { canRead, changesPane, checkout, factsNow } from "./checkout.js";
 import { changesUnreadable, readChanges } from "./changes-tree.js";
@@ -22,6 +23,7 @@ const pageModule = pageModules[main?.dataset.page];
 if (pageModule !== undefined) void chunk(pageModule());
 
 for (const d of document.querySelectorAll("details[id]")) if (toggled.has(d.id)) d.open = toggled.get(d.id);
+applyFilter();
 const savedPane = kept.read(storageKeys.pane);
 if (savedPane !== null) pickPane(savedPane);
 if (changesPane !== null) {
@@ -43,6 +45,7 @@ addEventListener("hashchange", writeTo);
 if (location.hash === "#terminal" && tabsBar?.querySelector('[data-tab="term"]')?.hidden === false) showTab(terminalTab);
 if (dialog?.dataset.autoopen !== undefined) void openStart(null);
 if (projectDialog?.dataset.autoopen !== undefined) openProject();
+tick();
 setInterval(tick, 1000);
 setInterval(() => { if (document.visibilityState === "visible") void refreshNow(); }, pollMs);
 recordVisit();
@@ -86,5 +89,9 @@ if (window.isSecureContext && "Notification" in window) {
 document.querySelector("aside")?.append(permission);
 // After the button, which shortens the list it joins.
 document.querySelector(".row.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
-const { markSeen, askRows } = startRows({ api, notifications, health, caughtUp, currentThread, focused, activeTab: () => activeTab });
+const listed = (rows, now) => {
+  listRows(rows);
+  return notifications(rows, now);
+};
+const { markSeen, askRows } = startRows({ api, notifications: listed, health, caughtUp, currentThread, focused, activeTab: () => activeTab });
 setInterval(markSeen, 1000);

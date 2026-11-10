@@ -68,6 +68,9 @@ export interface QueuedThread {
   lastError: string | null;
 }
 
+/** A queued thread's state as the dashboard and `nexus threads --queued` say it. */
+export const queuedState = (q: Pick<QueuedThread, "status" | "blocked">) => q.status === "archived" ? "cancelled" : q.status === "deleted" ? "deleted" : q.blocked ? "blocked" : "queued";
+
 /** `deleted: false` leaves out deleted threads, and `status: "open"` lists only active and idle ones. */
 export interface ThreadsQuery { project?: string | undefined; deleted?: false; status?: "open" }
 const threadsQuery: QueryCodec<ThreadsQuery, Omit<ThreadsQuery, "status"> & { status?: string }> = {

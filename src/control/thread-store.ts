@@ -704,10 +704,46 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       const row = sql("SELECT thread, body FROM start_requests WHERE request_id = ?").get(requestId);
       return row === undefined ? undefined : { thread: row.thread as ThreadId, body: row.body as string };
     },
-    /** The threads of `project` with any of the statuses, all of them by default. */
-    threads: (filter: { project?: ProjectId | undefined; status?: readonly ThreadStatus[] | undefined } = {}) => withSessions(sql(`SELECT * FROM threads
-      WHERE ($project IS NULL OR project = $project) AND ($statuses IS NULL OR status IN (SELECT value FROM json_each($statuses))) ORDER BY created_at, id`)
-      .all({ $project: filter.project ?? null, $statuses: filter.status === undefined ? null : JSON.stringify(filter.status) })),
+    /** The thread each of the request IDs started, in one read, leaving out a request that started none. */
+    startedThreads: (requestIds: readonly string[]): Map<string, ThreadId> => new Map(sql("SELECT request_id, thread FROM start_requests WHERE request_id IN (SELECT value FROM json_each(?))")
+      .all(JSON.stringify(requestIds)).map((r) => [r.request_id as string, r.thread as ThreadId])),
+    /**
+     * The threads of `project` with any of the statuses, all of them by default, oldest first. `archivedSince` adds the
+     * archived ones archived at or after it, and those whose usage is not read yet, whose disk may still wait on the person.
+     */
+    threads: (filter: { project?: ProjectId | undefined; status?: readonly ThreadStatus[] | undefined; archivedSince?: number | undefined } = {}) => withSessions(sql(`SELECT * FROM threads
+      WHERE ($project IS NULL OR project = $project) AND (($statuses IS NULL OR status IN (SELECT value FROM json_each($statuses)))
+        OR ($since IS NOT NULL AND status = 'archived' AND id IN (SELECT thread FROM thread_archives WHERE archived_at >= $since OR (usage_settled_at IS NULL AND usage_unread IS NULL))))
+      ORDER BY created_at, id`)
+      .all({ $project: filter.project ?? null, $statuses: filter.status === undefined ? null : JSON.stringify(filter.status), $since: filter.archivedSince ?? null })),
+    /**
+     * One page of the threads of `project` with any of the statuses that `match` takes, all of them by default, newest
+     * first, with how many there are in all. `match` reads only a thread's ID, title and project, so only the page's
+     * threads are read whole. A page past the last lists none, however far past.
+     */
+    newestThreads(filter: { project: ProjectId; status: readonly ThreadStatus[]; match?: (t: { id: ThreadId; title: string; project: ProjectId }) => boolean },
+      page: { size: number; index: number }): { shown: Thread[]; total: number } {
+      const statuses = JSON.stringify(filter.status);
+      const from = page.size * page.index;
+      if (filter.match === undefined) {
+        const total = Number(sql("SELECT count(*) AS n FROM threads WHERE project = ? AND status IN (SELECT value FROM json_each(?))").get(filter.project, statuses)!.n);
+        return { total, shown: from >= total ? [] : withSessions(sql(`SELECT * FROM threads WHERE project = ? AND status IN (SELECT value FROM json_each(?))
+          ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`).all(filter.project, statuses, page.size, from)) };
+      }
+      const matched = sql("SELECT id, title, project FROM threads WHERE project = ? AND status IN (SELECT value FROM json_each(?)) ORDER BY created_at DESC, id DESC")
+        .all(filter.project, statuses).filter((r) => filter.match!({ id: r.id as ThreadId, title: r.title as string, project: r.project as ProjectId }));
+      const ids = JSON.stringify(matched.slice(from, from + page.size).map((r) => r.id));
+      return { total: matched.length, shown: withSessions(sql(`SELECT * FROM threads WHERE id IN (SELECT value FROM json_each(?)) ORDER BY created_at DESC, id DESC`).all(ids)) };
+    },
+    /** How many archived and how many deleted threads each project has. */
+    closedCounts(): Map<ProjectId, { archived: number; deleted: number }> {
+      const counts = new Map<ProjectId, { archived: number; deleted: number }>();
+      for (const r of sql("SELECT project, status, count(*) AS n FROM threads WHERE status IN ('archived', 'deleted') GROUP BY project, status").all()) {
+        const of = counts.get(r.project as ProjectId) ?? counts.set(r.project as ProjectId, { archived: 0, deleted: 0 }).get(r.project as ProjectId)!;
+        of[r.status as "archived" | "deleted"] = Number(r.n);
+      }
+      return counts;
+    },
     thread,
     /** The threads with any of the statuses and started by `startedBy`, each as its row holds it, without what its sessions say. */
     storedThreads(filter: { status?: readonly ThreadStatus[]; startedBy?: string } = {}): StoredThread[] {

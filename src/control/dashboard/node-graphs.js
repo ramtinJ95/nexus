@@ -4,6 +4,7 @@
 import uPlot from "uplot";
 import css from "uplot/dist/uPlot.min.css";
 import { afterSwap, el } from "./page.js";
+import { clockOf, dayNames, localTime, monthNames } from "./elapsed.ts";
 import { request } from "./request.js";
 import { nodeRoutes } from "../../contract/reports.ts";
 import { onThemeChange, themeValue } from "./theme.js";
@@ -39,21 +40,12 @@ const colourOf = (look) => "ref" in look ? ink.ref : ink.series[look.slot % ink.
 const dashOf = (look) => "ref" in look ? [5, 4] : look.slot >= 8 ? [8, 3] : undefined;
 const translucent = (colour, alpha) => `color-mix(in srgb, ${colour} ${alpha * 100}%, transparent)`;
 
-const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const two = (n) => String(n).padStart(2, "0");
-const clockOf = (d, seconds) => `${two(d.getHours())}:${two(d.getMinutes())}${seconds ? `:${two(d.getSeconds())}` : ""}`;
-/** A time as the legend shows it, in the person's own zone, such as Sun 1 Nov 14:05:20. */
-const timeText = (t, seconds) => {
-  const d = new Date(t);
-  return `${days[d.getDay()]} ${d.getDate()} ${months[d.getMonth()]} ${clockOf(d, seconds)}`;
-};
 /** The x-axis's ticks: the time of day, and the date where a day starts or the ticks are days apart. */
 function timeTicks(u, splits, axisIdx, space, incr) {
   return splits.map((t) => {
     const d = new Date(t);
-    if (incr >= 86_400_000) return `${d.getDate()} ${months[d.getMonth()]}`;
-    if (d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0) return `${days[d.getDay()]} ${d.getDate()}`;
+    if (incr >= 86_400_000) return `${d.getDate()} ${monthNames[d.getMonth()]}`;
+    if (d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0) return `${dayNames[d.getDay()]} ${d.getDate()}`;
     return clockOf(d, incr < 60_000);
   });
 }
@@ -172,7 +164,7 @@ function view(chart, figure) {
     const x = hovering ? u.posToVal(u.cursor.left, "x") : Math.max(-Infinity, ...v.lines.map((l) => l.points.t.at(-1) ?? -Infinity));
     const gap = gapMs(history.bucketMs);
     const seconds = history.bucketMs < 60_000;
-    at.textContent = Number.isFinite(x) ? timeText(x, seconds) : "";
+    at.textContent = Number.isFinite(x) ? localTime(x, seconds) : "";
     let shown = null;
     legend.querySelectorAll(".graph-value").forEach((out, i) => {
       const { points } = v.lines[i];
@@ -181,7 +173,7 @@ function view(chart, figure) {
       shown ??= points.t[j];
       out.textContent = reading(chart, points.avg[j], points.min[j], points.max[j]);
     });
-    if (hovering && shown !== null) at.textContent = timeText(shown, seconds);
+    if (hovering && shown !== null) at.textContent = localTime(shown, seconds);
   }
 
   function draw() {

@@ -16,12 +16,13 @@ import type { PylonAccess } from "./pylon-access.ts";
 import type { EventStreams } from "./sse.ts";
 import type { ThreadViews } from "./thread-view.ts";
 import type { ApiRoute, EventStream, FileBytes, RawQueryOf, ReplyOf } from "../../contract/route.ts";
+import type { Encode } from "./encoding.ts";
 import { matchedParams, pathPattern, type ParamsOf } from "../../util/route-path.ts";
 
 /** A file is served as its bytes, a page as its text under its own headers, everything else as JSON. */
 export type Reply =
   | { status: number; body?: unknown; headers?: never; file?: never; stream?: never }
-  | { status: number; headers: Record<string, string>; body: string; file?: never; stream?: never }
+  | { status: number; headers: Record<string, string>; body: string | Buffer; encode?: Encode; file?: never; stream?: never }
   | { status: number; file: Buffer; type: string; cache?: string; stream?: never }
   | { stream(res: ServerResponse): Promise<void> | void; status?: never; file?: never };
 /** `roles` are what roleOf gives the caller, and `host` its MagicDNS name, which only the join's whois gives. */

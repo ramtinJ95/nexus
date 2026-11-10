@@ -1,7 +1,7 @@
 /**
  * Where `nexus doctor`'s facts come from, and the passes that turn its checks into health alerts. The checks in
- * src/control/doctor.ts are pure; this reads the registry, the backup unit's status file, the harness's login and the
- * certificate the dashboard serves.
+ * src/control/doctor.ts are pure; this reads the registry, the backup unit's status file, the harness's login, the
+ * certificate the dashboard serves, GitHub's last answer about its token and tailscaled's status.
  */
 import { connect } from "node:tls";
 import type { TailnetNodeId } from "../ids.ts";
@@ -15,13 +15,19 @@ import { nodeSummary } from "./placement.ts";
 import { releaseView } from "./releases.ts";
 import type { Registry } from "./registry.ts";
 import type { NewHealthChange } from "./health-store.ts";
+import type { TokenAnswer } from "./github.ts";
+import type { TailscaleStatus } from "../tailscale.ts";
 
 export interface DoctorSources {
-  registry: Pick<Registry, "nodes" | "now" | "threads" | "placement" | "releases">;
+  registry: Pick<Registry, "nodes" | "now" | "threads" | "placement" | "releases" | "images">;
   self: TailnetNodeId;
   backupStatus(): Promise<BackupStatusRead>;
   login(): Promise<LoginState>;
   certificate(): Promise<CertificateFact>;
+  /** What GitHub last said of the control plane's token, `none` without one. */
+  githubToken(): Promise<TokenAnswer | { kind: "none" }>;
+  /** tailscaled's status on the control plane's machine. */
+  tailnet(): Promise<TailscaleStatus>;
   startedAt: number;
   clock?: () => number;
 }
@@ -34,23 +40,32 @@ const codeOf = (err: unknown): string => {
 
 /** Each source that throws fails only its own check, so the others still report. */
 export async function runDoctor(s: DoctorSources): Promise<DoctorReport> {
-  const [backup, login, certificate] = await Promise.all([
+  const [backup, login, certificate, github, tailnet] = await Promise.all([
     s.backupStatus().catch((err: unknown) => ({ unreadable: `${codeOf(err)} reading it` })),
     s.login().catch((err: unknown) => ({ unreadable: codeOf(err) })),
     s.certificate().catch((err: unknown): CertificateFact => ({ kind: "unreachable", hostname: "the dashboard", error: `${codeOf(err)} reading it` })),
+    s.githubToken().catch((err: unknown) => ({ kind: "unread" as const, error: codeOf(err) })),
+    s.tailnet().then((t) => [...t.self === null ? [] : [t.self], ...t.peers], (err: unknown) => ({ unreadable: codeOf(err) })),
   ]);
   const now = (s.clock ?? Date.now)();
+  const records = s.registry.nodes.nodes();
+  const current = s.registry.images.currentImage();
   return doctorReport({
     now, upSince: s.startedAt,
-    nodes: s.registry.nodes.nodes().map((record) => nodeSummary(s.registry, record)),
+    nodes: records.map((record) => nodeSummary(s.registry, record)),
     release: releaseView(s.registry, s.self, now),
     controlNode: s.registry.nodes.nodeByTailnetId(s.self)?.name ?? null,
-    backup, login, certificate,
+    backup, login, certificate, github, tailnet,
     // A pylon its node does not list has no disk to keep, as one whose disk was deleted before disks waited for their usage.
     keptArchives: s.registry.threads.keptArchives().filter((t) => {
       const p = s.registry.threads.pylon(t.pylonId);
       return p !== undefined && observedPylon(s.registry, p) !== "absent";
     }),
+    image: {
+      current,
+      holders: current === null ? [] : records.filter((r) => r.observation?.artifacts.includes(current) === true).map((r) => r.name),
+      fetches: s.registry.images.imageFetches(),
+    },
   });
 }
 

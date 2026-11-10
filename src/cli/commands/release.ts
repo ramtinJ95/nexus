@@ -2,7 +2,7 @@ import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type { ImageId } from "../../ids.ts";
 import { fullCommit, releaseOutcome, type ReleaseView } from "../../protocol/deploy.ts";
-import { CliError } from "../transport.ts";
+import { CliError, UsageError } from "../transport.ts";
 import { type Api, type Result, type Command, str, request, int, table, pollUntil } from "../kit.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { deployWaitMs, imageRoutes, releaseRoutes, type ImageEntry, type ImageOperation, type ImagesView } from "../../contract/release.ts";
@@ -10,7 +10,7 @@ import { landOption, questionRoutes, reviewRoutes, type ReviewView } from "../..
 
 function releaseText(view: ReleaseView): string {
   return [`Desired: ${view.desired === null ? "none" : `${view.desired.commit} by ${view.desired.requestedBy} at ${new Date(view.desired.requestedAt).toISOString()}`}`,
-    ...view.nodes.map((r) => `${r.node} ${r.role}: ${r.commit ?? "unknown"} ${r.state}${r.reason === null ? "" : `: ${r.reason}`}`)].join("\n");
+    ...view.nodes.map((r) => `${r.node} ${r.role}: ${r.commit ?? "unknown"} ${r.state}${r.worker === undefined ? "" : ` (worker ${r.worker})`}${r.reason === null ? "" : `: ${r.reason}`}`)].join("\n");
 }
 
 const imageRow = (image: ImageEntry, role: string): string[] => [
@@ -25,14 +25,20 @@ function operationText(o: ImageOperation): string {
 function imagesText(view: ImagesView): string {
   const role = (id: string) => id === view.current ? "current" : id === view.previous ? "previous" : "-";
   const images = view.images.length === 0 ? "No images." : table(view.images.map((image) => imageRow(image, role(image.id))));
-  return view.operation === null ? images : `${images}\n${operationText(view.operation)}`;
+  // A control plane older than 0.79.0 sends no fetches.
+  const fetches = view.fetches ?? [];
+  return [
+    images,
+    ...fetches.length === 0 ? [] : [`Fetches of the current image ${view.current}:`, ...fetches.map((f) => `  ${f.node}: ${f.state}${f.failures > 0 ? `, ${f.failures} failed` : ""}${f.reason === null ? "" : `: ${f.reason}`}`)],
+    ...view.operation === null ? [] : [operationText(view.operation)],
+  ].join("\n");
 }
 
 /**
  * Each change of a running step goes to stderr, so a build of minutes shows where it is and stdout stays one value
  * for --json.
  */
-async function imageWait(api: Api, started: ImageOperation): Promise<Result> {
+async function imageWait(api: Api, started: ImageOperation, progress: Writable): Promise<Result> {
   let operation = started;
   let view: ImagesView | null = null;
   const settled = async (): Promise<Result | undefined> => {
@@ -49,7 +55,7 @@ async function imageWait(api: Api, started: ImageOperation): Promise<Result> {
     if (now === null || now.kind !== started.kind || now.image !== started.image || now.requestedAt !== started.requestedAt) {
       throw new CliError("conflict", `another image operation replaced the ${started.kind} of ${started.image}${now === null ? "" : `\n${operationText(now)}`}`);
     }
-    if (now.state === "running" && operationText(now) !== operationText(operation)) process.stderr.write(`${operationText(now)}\n`);
+    if (now.state === "running" && operationText(now) !== operationText(operation)) progress.write(`${operationText(now)}\n`);
     operation = now;
     return settled();
   });
@@ -57,9 +63,9 @@ async function imageWait(api: Api, started: ImageOperation): Promise<Result> {
 
 const imageCommand = (help: Command["help"], args: Command["args"], start: (api: Api, positionals: readonly string[]) => Promise<ImageOperation>): Command => ({
   help, args, options: { wait: { type: "boolean" } },
-  async run(api, positionals, v) {
+  async run(api, positionals, v, _follow, { io }) {
     const operation = await start(api, positionals);
-    return v.wait === true ? imageWait(api, operation) : { json: operation, text: operationText(operation) };
+    return v.wait === true ? imageWait(api, operation, io.stderr) : { json: operation, text: operationText(operation) };
   },
 });
 
@@ -127,7 +133,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
     args: [1, 1], thread: true, options: { pr: { type: "string" }, rounds: { type: "string" }, land: { type: "boolean" }, cancel: { type: "boolean" } },
     async run(api, [id], v) {
       if (v.cancel === true) {
-        if (v.pr !== undefined || v.rounds !== undefined || v.land !== undefined) throw new CliError("invalid", "--cancel takes no --pr, --rounds or --land");
+        if (v.pr !== undefined || v.rounds !== undefined || v.land !== undefined) throw new UsageError("--cancel takes no --pr, --rounds or --land");
         const r = await request(api, reviewRoutes.cancel, { thread: id! });
         return { json: r, text: `Cancelled ${r.said.join("\n")}` };
       }
@@ -144,8 +150,8 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
       "    land an approved review under the merge policy, or try a held landing again; --waive answers Land to the review's question about the holds reserved for you",
     ],
     args: [1, 1], thread: true, options: { waive: { type: "boolean" } },
-    async run(api, [id], v) {
-      const { question, running, ...press } = v.waive === true ? await pressOf(api, id!, { input: process.stdin, output: process.stderr }) : {};
+    async run(api, [id], v, _follow, { io }) {
+      const { question, running, ...press } = v.waive === true ? await pressOf(api, id!, { input: io.stdin, output: io.stderr }) : {};
       if (question !== undefined) {
         await request(api, questionRoutes.answer, { question, body: { option: landOption } });
         const { reviewView: view, said } = await request(api, threadRoutes.show, { thread: id! });
@@ -159,7 +165,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
     help: ["  nexus deploy <commit|main> [--wait]"],
     args: [1, 1], options: { wait: { type: "boolean" } },
     async run(api, [commit], values) {
-      if (commit !== "main" && !fullCommit.test(commit!)) throw new CliError("invalid", "deploy takes main or a full lower-case commit hash");
+      if (commit !== "main" && !fullCommit.test(commit!)) throw new UsageError("deploy takes main or a full lower-case commit hash");
       let view = await request(api, releaseRoutes.deploy, { body: { commit: commit! } });
       const target = view.desired!.commit;
       const settled = (): ReleaseView | undefined => {

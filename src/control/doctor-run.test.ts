@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { lstat, mkdir, symlink, writeFile } from "node:fs/promises";
 import { createServer, TLSSocket } from "node:tls";
 import { join } from "node:path";
-import type { NodeName, TailnetNodeId, ThreadId } from "../ids.ts";
-import { stoppedPylon, tempDir, testCapacity, testObservation } from "../test-support/kit.ts";
+import type { JobId, NodeName, TailnetNodeId, ThreadId } from "../ids.ts";
+import { stoppedPylon, tempDir, testCapacity, testImage, testObservation } from "../test-support/kit.ts";
 import { testCertificate } from "../test-certificate.ts";
 import { ModelsError, type Models } from "@earendil-works/pi-ai/models";
 import { harnessModels, loginState, openCredentials } from "./harness/credentials.ts";
@@ -12,6 +12,7 @@ import { readBackupStatus, writeBackupStatus } from "./backup-status.ts";
 import { changesKeptMs, checkEveryMs, healthPasses, runDoctor, servedCertificate } from "./doctor-run.ts";
 import { healthView, type Check, type DoctorReport, type Status } from "./doctor-model.ts";
 import { addThread, observeNode, seedRegistry, testRegistry } from "../test-support/registry-kit.ts";
+import { parseTailscaleStatus } from "../tailscale.ts";
 
 const day = 24 * 60 * 60_000;
 const start = Date.parse("2026-11-01T00:00:00Z");
@@ -170,18 +171,29 @@ test("the doctor reads each node, the release and the control node from the regi
   registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity({ disks: [{ paths: ["/var/lib/nexus/pylons"], totalGiB: 500, freeGiB: 5, pylons: true }] }) });
   registry.threads.ingested(testObservation(node, { observedAt: new Date(now - 10_000).toISOString() }), []);
   registry.releases.setDesiredRelease({ commit: "c".repeat(40), requestedBy: "nLAPTOP", requestedAt: now - day });
-  const r = await runDoctor({
+  const image = testImage();
+  registry.images.saveImage(image, null);
+  registry.images.setCurrentImage(image.id);
+  registry.images.saveImageFetches([{ node, image: image.id, state: "running", job: { id: "j-fetch" as JobId, notAfter: new Date(now).toISOString() }, failures: 0, failedAt: null, reason: null }]);
+  const doctor = () => runDoctor({
     registry, self: "nFIREBAT" as TailnetNodeId, clock: () => now, startedAt: now - 3 * day,
     backupStatus: async () => "missing",
     login: async () => ({ provider: "openai", modelId: "gpt-6-astra", credential: null, offered: [], refresh: { ok: true } }),
     certificate: async () => ({ kind: "none" }),
+    githubToken: async () => ({ kind: "accepted", expiresAt: new Date(now + 3 * day).toISOString() }),
+    tailnet: async () => parseTailscaleStatus(JSON.stringify({ Self: { ID: "nFIREBAT", KeyExpiry: new Date(now - day).toISOString() }, Peer: {} })),
   });
+  const r = await doctor();
   const status = Object.fromEntries(r.checks.map((c) => [`${c.node ?? "control"} ${c.name}`, c.status]));
   assert.deepEqual(status, {
-    "control release": "warn", "control backup": "fail", "control login": "fail", "control certificate": "ok", "control archived-disks": "ok",
-    "rj-firebat online": "ok", "rj-firebat release": "warn", "rj-firebat disk": "fail", "rj-firebat pylons": "ok",
-  }, "no deployer has reported, so both roles are pending, and the pylons' filesystem is under its reserve");
+    "control release": "warn", "control backup": "fail", "control login": "fail", "control github-token": "warn", "control certificate": "ok", "control archived-disks": "ok",
+    "rj-firebat online": "ok", "rj-firebat release": "warn", "rj-firebat disk": "fail", "rj-firebat pylons": "ok", "rj-firebat tailnet-key": "fail", "rj-firebat image": "warn",
+  }, "no deployer has reported, so both roles are pending, the pylons' filesystem is under its reserve, the token expires in 3 days, the control node's own key, tailscaled's Self, expired, and the node lacks the current image");
   assert.match(r.checks.find((c) => c.node === null && c.name === "release")!.text, /control on rj-firebat .* no deployer report/);
+  const imageCheck = async () => (await doctor()).checks.find((c) => c.node === node && c.name === "image")!.text;
+  assert.equal(await imageCheck(), `lacks the current image ${image.id}, so auto placement passes over it. A fetch-artifact job copies it there now`);
+  registry.threads.ingested(testObservation(node, { observedAt: new Date(now - 5_000).toISOString(), artifacts: [image.id] }), []);
+  assert.equal(await imageCheck(), `holds the current image ${image.id}`);
 });
 
 test("the doctor counts each archived disk kept past its 24 hours for its usage that its node still has", async (t) => {
@@ -195,7 +207,7 @@ test("the doctor counts each archived disk kept past its 24 hours for its usage 
   observeNode(registry, { node: "rj-firebat" as NodeName, pylons: [stoppedPylon(kept!.pylonId), stoppedPylon(young!.pylonId)] });
   const doctor = () => runDoctor({
     registry, self: "nFIREBAT" as TailnetNodeId, startedAt: clock - 3 * day,
-    backupStatus: async () => "missing", certificate: async () => ({ kind: "none" }),
+    backupStatus: async () => "missing", certificate: async () => ({ kind: "none" }), githubToken: async () => ({ kind: "none" }), tailnet: async () => ({ running: true, magicDns: true, certificates: true, self: null, peers: [] }),
     login: async () => ({ provider: "openai", modelId: "gpt-6-astra", credential: "oauth", offered: ["gpt-6-astra"], refresh: { ok: true } }),
   });
   const verdict = async () => (await doctor()).checks.find((c) => c.node === null && c.name === "archived-disks")!;
@@ -288,13 +300,15 @@ test("a source that throws fails only its own check, with the error's code and n
   const failing = (code: string) => async () => { throw Object.assign(new Error("the file holds sk-secret"), { code }); };
   const r = await runDoctor({
     registry, self: "nFIREBAT" as TailnetNodeId, clock: () => start, startedAt: start,
-    backupStatus: failing("EIO"), login: failing("EACCES"), certificate: failing("ECONNRESET"),
+    backupStatus: failing("EIO"), login: failing("EACCES"), certificate: failing("ECONNRESET"), githubToken: failing("ETIMEDOUT"), tailnet: failing("ENOENT"),
   });
   const of = (name: string) => r.checks.find((c) => c.node === null && c.name === name)!;
-  assert.deepEqual([of("backup").status, of("login").status, of("certificate").status], ["fail", "fail", "fail"]);
+  assert.deepEqual([of("backup").status, of("login").status, of("certificate").status, of("github-token").status], ["fail", "fail", "fail", "warn"]);
+  assert.match(of("github-token").text, /with a ETIMEDOUT error, so its expiry is unknown/);
+  assert.match(r.checks.find((c) => c.name === "tailnet-key")!.text, /could not be read, with a ENOENT error/);
   assert.match(of("login").text, /could not be read, with a EACCES error/);
   assert.match(of("backup").text, /EIO reading it/);
   assert.match(of("certificate").text, /ECONNRESET reading it/);
   assert.doesNotMatch(JSON.stringify(r), /sk-secret/);
-  assert.deepEqual(r.checks.filter((c) => c.node !== null).map((c) => c.name), ["online", "release", "disk", "pylons"], "the node's checks still report");
+  assert.deepEqual(r.checks.filter((c) => c.node !== null).map((c) => c.name), ["online", "release", "disk", "pylons", "tailnet-key", "image"], "the node's checks still report");
 });

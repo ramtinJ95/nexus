@@ -1,8 +1,8 @@
 // The page core every dashboard page runs: its regions and the poll and stream that swap them, the folds the reader
 // toggled, its visit, and the markup the features build. Features hook into a swap through `onSwap` and `afterSwap`.
-import { agoText, clock } from "./elapsed.ts";
+import { agoText, clock, localTime } from "./elapsed.ts";
 import { atEnd, endFollower } from "./scroll.js";
-import { request } from "./request.js";
+import { refusalAt, request } from "./request.js";
 import { threadRoutes } from "../../contract/threads.ts";
 import { toggledBy } from "./folds.js";
 import { swapKeeping } from "./keep.js";
@@ -20,13 +20,39 @@ export function showError(id, err) {
   el.hidden = err === null;
 }
 
+/**
+ * Says what failed where the person acted, in the notices every view of every page shows, or clears it when `err` is
+ * null. `retry`, when given, is what its Try again does.
+ */
+export function notify(err, retry = null) {
+  const region = document.getElementById("action-error");
+  if (region === null) return;
+  region.hidden = err === null;
+  region.replaceChildren(...(err === null ? [] : present([
+    el("span", { className: "alert-text", textContent: err.message }),
+    retry !== null && el("button", { type: "button", className: "btn btn-xs", textContent: "Try again", onclick: () => { notify(null); retry(); } }),
+    el("button", { type: "button", className: "btn btn-xs btn-ghost", textContent: "Dismiss", onclick: () => notify(null) }),
+  ])));
+}
+
 const focusKey = (el) => el.id !== "" ? `#${CSS.escape(el.id)}`
   : el instanceof HTMLAnchorElement ? `a[href="${CSS.escape(el.getAttribute("href"))}"]`
   : null;
 
+/** Ticks the run clocks and the times ago, and puts each moment the server sent in UTC in the reader's zone. */
 export function tick() {
   for (const time of document.querySelectorAll("time[data-since]")) time.textContent = clock(Date.now() - Number(time.dataset.since));
-  for (const time of document.querySelectorAll("time[data-ago]")) time.textContent = agoText(Date.parse(time.dateTime), Date.now());
+  for (const time of document.querySelectorAll("time[data-ago]")) {
+    time.textContent = agoText(Date.parse(time.dateTime), Date.now());
+    const title = localTime(Date.parse(time.dateTime));
+    if (time.title !== title) time.title = title;
+  }
+  for (const time of document.querySelectorAll("time[data-local]")) time.textContent = localTime(Date.parse(time.dateTime));
+  // A title rewritten under the pointer resets its tooltip, so only a new one is written.
+  for (const at of document.querySelectorAll("[data-at]")) {
+    const title = localTime(Number(at.dataset.at));
+    if (at.title !== title) at.title = title;
+  }
 }
 
 // What the server last sent for each region. Comparing against it rather than the live DOM means a tool the
@@ -102,6 +128,14 @@ export function swap(regions) {
   for (const settle of settlers) settle();
 }
 
+// Why the control plane refused the conversation's stream, which the page says while it polls in its place.
+let refusedStream = null;
+function sayUpdated() {
+  const state = document.getElementById("refresh-state");
+  // A page that offers the reload keeps saying so.
+  if (state !== null && !outdated) state.textContent = refusedStream === null ? "" : `Live updates are off, so this page updates every ${pollMs / 1000} s: ${refusedStream}.`;
+}
+
 // While the stream is open it alone writes the conversation, so a poll that started before a frame cannot put
 // older text back. Its frames come in order: the region whole, then the parts that grew since.
 export let stream = null;
@@ -111,12 +145,31 @@ let shows = null;
 const streaming = () => stream?.readyState === EventSource.OPEN;
 export function follow(url) {
   // A hidden page keeps none of the control plane's few streams, even when a refresh it began finishes later.
+  // A page that no longer streams forgets a refused stream, and a reason still being read for it.
+  if (url === undefined && stream?.readyState === EventSource.CLOSED) {
+    stream = null;
+    refusedStream = null;
+    sayUpdated();
+  }
   if (url === undefined || document.visibilityState !== "visible" || (stream !== null && stream.readyState !== EventSource.CLOSED)) return;
   // EventSource reconnects by itself after a dropped connection. A refused one is closed for good, so the next
   // poll opens another.
-  stream = new EventSource(url);
+  const source = stream = new EventSource(url);
   shows = null;
-  stream.addEventListener("message", (event) => {
+  source.addEventListener("open", () => {
+    refusedStream = null;
+    sayUpdated();
+  });
+  source.addEventListener("error", () => {
+    if (source.readyState !== EventSource.CLOSED) return;
+    refusalAt(url).then((reason) => {
+      // A poll may have opened another stream while the reason was read.
+      if (stream !== source) return;
+      refusedStream = reason;
+      sayUpdated();
+    }, () => {});
+  });
+  source.addEventListener("message", (event) => {
     frames += 1;
     const frame = JSON.parse(event.data);
     const convo = document.getElementById("convo");
@@ -143,11 +196,20 @@ export function follow(url) {
   });
 }
 
+/** The last page read, so a poll that finds it unchanged gets a 304 and no body. */
+let lastRead = null;
 export async function readPage(url) {
+  const href = String(url);
+  // Another read may replace lastRead before this one answers, as overlapping node picks do.
+  const cached = lastRead?.href === href ? lastRead : null;
   // A link that stalls mid-body would otherwise hold the refresh lock forever.
-  const res = await fetch(url, { headers: { accept: "text/html" }, cache: "no-store", signal: AbortSignal.timeout(pollMs * 2) });
+  const res = await fetch(url, { headers: { accept: "text/html", ...(cached && { "if-none-match": cached.etag }) }, cache: "no-store", signal: AbortSignal.timeout(pollMs * 2) });
+  if (res.status === 304 && cached !== null) return new DOMParser().parseFromString(cached.text, "text/html");
   if (!res.ok) throw new Error(`the control plane answered ${res.status}`);
-  return new DOMParser().parseFromString(await res.text(), "text/html");
+  const text = await res.text();
+  const etag = res.headers.get("etag");
+  lastRead = etag ? { href, etag, text } : null;
+  return new DOMParser().parseFromString(text, "text/html");
 }
 
 // The client this page runs. A deploy serves another, and removes the chunks of this one it has not loaded yet.
@@ -211,7 +273,7 @@ async function refresh() {
     const activity = next.querySelector("main")?.dataset.activity;
     if (activity === undefined) delete main.dataset.activity;
     else main.dataset.activity = activity;
-    if (state !== null && !outdated) state.textContent = "";
+    sayUpdated();
   } catch (err) {
     if (state !== null && addressed() === at && !outdated) state.textContent = `Not updated: ${err.message}. Retrying.`;
   }
@@ -225,7 +287,7 @@ export function recordVisit() {
   if (thread === undefined) return;
   // A visit wakes a paused pylon, so a failed record is worth saying.
   request(threadRoutes.activity, { thread, body: { kind: "human" } }).catch((err) => {
-    showError("action-error", new Error(`This visit was not recorded, so a paused pylon stays paused: ${err.message}`));
+    notify(new Error(`This visit was not recorded, so a paused pylon stays paused: ${err.message}`));
   });
 }
 

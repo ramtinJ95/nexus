@@ -97,7 +97,7 @@ async function answer(path, status = 200, node = path.slice("/nodes/".length)) {
   const at = reads.findIndex((r) => r.path === path);
   assert.notEqual(at, -1, `${path} was read`);
   const [read] = reads.splice(at, 1);
-  read.resolve({ ok: status < 400, status, text: async () => node });
+  read.resolve({ ok: status < 400, status, headers: new Headers(), text: async () => node });
   await settled();
 }
 const shows = () => ({

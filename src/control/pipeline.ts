@@ -62,6 +62,11 @@ export interface PipelineItem {
 }
 
 export const itemThread = (registry: PipelineRegistry, id: ItemId): ThreadId | null => registry.threads.startRequest(requestIds.pipeline(id))?.thread ?? null;
+/** The thread each of the items became, or null before it did, in one read however many items there are. */
+export function itemThreads(registry: PipelineRegistry, items: readonly ItemRecord[]): Map<ItemId, ThreadId | null> {
+  const started = registry.threads.startedThreads(items.map((i) => requestIds.pipeline(i.id)));
+  return new Map(items.map((i) => [i.id, started.get(requestIds.pipeline(i.id)) ?? null]));
+}
 
 const phase = (kind: ItemPhase["kind"], why: string): ItemPhase => ({ kind, why });
 

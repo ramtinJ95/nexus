@@ -14,7 +14,8 @@ import { isDeployer, threadWaker } from "./api/access.ts";
 import { gitIdentitySchema } from "../protocol/spawn.ts";
 import { gitUrl } from "./project.ts";
 import { ingest } from "./reconcile.ts";
-import { linuxTailscaledSocket, localApiWhois, localApiWhoisNode, localApiCertificate } from "../node-base/tailscaled.ts";
+import { linuxTailscaledSocket, localApiWhois, localApiWhoisNode, localApiCertificate, localApiStatus } from "../node-base/tailscaled.ts";
+import { parseTailscaleStatus } from "../tailscale.ts";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { chatgptToken, harnessModels, loginState, openCredentials, requireModel } from "./harness/credentials.ts";
 import { gateTurns, openHarnessHost, type ConversationId } from "./harness/host.ts";
@@ -260,6 +261,8 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     login: () => loginState(models, config.harness.model),
     // The API listens on one address, or on every one, where the loopback reaches it too.
     certificate: async () => config.https ? servedCertificate(config.listen.host === "0.0.0.0" ? "127.0.0.1" : config.listen.host === "::" ? "::1" : config.listen.host, ports.dashboard, config.https.hostname) : { kind: "none" },
+    githubToken: async () => github === null ? { kind: "none" } : github.token(),
+    tailnet: async () => parseTailscaleStatus(await localApiStatus(tailscaled)),
   });
   // An archived disk kept for its usage goes once a backup that began after its read verified.
   services.start({ everyMs: 60_000, poll: () => readBackupStatus(backupStatusFile).then((s) => {

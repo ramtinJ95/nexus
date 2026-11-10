@@ -1,7 +1,8 @@
 /** The integrations read the watch's events, whose types src/contract/watch.ts holds. */
+import type { Writable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { EntryRecord, LiveState } from "@earendil-works/pi-durable";
-import { CliError } from "../transport.ts";
+import { CliError, UsageError } from "../transport.ts";
 import { type Api, type Follow, type Command, str, request, int, clip, reconnectMs, untilConsumerGone } from "../kit.ts";
 import { transient } from "../config.ts";
 import { agentView, threadRoutes, type ClaudeEntry, type ListeningPort, type ThreadDetail } from "../../contract/threads.ts";
@@ -54,10 +55,10 @@ function stateText(s: ThreadStateEvent): string {
  * of the control plane. Ends after the state that says the thread is deleted, or once the process that started it
  * is gone.
  */
-async function watch(api: Api, follow: Follow, id: string, intervalMs: number, json: boolean): Promise<void> {
+async function watch(api: Api, follow: Follow, id: string, intervalMs: number, json: boolean, output: Writable): Promise<void> {
   const emit = (event: WatchEvent, text: string) => {
-    if (json) process.stdout.write(`${JSON.stringify(event)}\n`);
-    else if (text !== "") process.stdout.write(`${text}\n`);
+    if (json) output.write(`${JSON.stringify(event)}\n`);
+    else if (text !== "") output.write(`${text}\n`);
   };
   const rendered = (entry: EntryRecord): RenderedEntry => ({ entry, text: entryText(entry) });
   const joined = (entries: readonly { text: string }[]) => entries.map((e) => e.text).filter((text) => text !== "").join("\n");
@@ -227,10 +228,10 @@ export const watchCommands: Readonly<Record<string, Command>> = {
     args: [1, 1],
     thread: true,
     options: { interval: { type: "string" } },
-    async run(api, [id], v, follow) {
+    async run(api, [id], v, follow, { io }) {
       const interval = int(str(v, "interval"), "--interval", 2000);
-      if (interval === 0) throw new CliError("invalid", "--interval must be above 0");
-      await watch(api, follow, id!, interval, v.json === true);
+      if (interval === 0) throw new UsageError("--interval must be above 0");
+      await watch(api, follow, id!, interval, v.json === true, io.stdout);
     },
   },
 };

@@ -1,7 +1,7 @@
 import type { ThreadId } from "../../ids.ts";
 import { periods, type Period } from "../usage.ts";
-import { breakdownLook, breakdowns, tokenColumns, tokenCount, utc, type UsageBackfill, type UsageTotals } from "../../contract/usage.ts";
-import { Html, html, menu, type Part } from "./view.ts";
+import { breakdownLook, breakdowns, tokenColumns, tokenCount, type UsageBackfill, type UsageTotals } from "../../contract/usage.ts";
+import { Html, html, localAt, menu, type Part } from "./view.ts";
 import type { Context, UsageView } from "./context.ts";
 import { layout } from "./shell.ts";
 
@@ -29,7 +29,7 @@ function backfillNote(c: Context, b: UsageBackfill): Html {
     ? html`The calls archived threads made before then are counted once a deployer runs <code>nexus usage backfill</code>, which wakes their pylons one at a time to read them.`
     : run.state === "running" ? html`The backfill reads archived threads' pylons, one at a time: ${read}, ${recovered} so far.${doing}`
     : run.state === "stopped" ? html`The backfill stopped at ${read}, with ${recovered}. A deployer goes on with <code>nexus usage backfill</code>.`
-    : html`The backfill read archived threads' pylons and finished <time datetime="${new Date(run.finishedAt!).toISOString()}">${utc(run.finishedAt!)}</time>: ${read}, ${run.skipped.length} skipped, ${recovered}.`;
+    : html`The backfill read archived threads' pylons and finished ${localAt(run.finishedAt!)}: ${read}, ${run.skipped.length} skipped, ${recovered}.`;
   return html`<div id="usage-backfill" data-backfill-state="${b.state}"${run !== null && html` data-read="${run.read}" data-of="${run.of}" data-recovered-calls="${run.recovered.calls}" data-recovered-tokens="${run.recovered.tokens}"`}>
 <p>${said}</p>
 ${run !== null && run.skipped.length > 0 && html`<table class="ov" id="usage-backfill-skipped"><thead><tr><th>Skipped thread</th><th>Why</th></tr></thead>
@@ -53,7 +53,7 @@ export function usagePage(c: Context, { period, project, report }: UsageView): H
 <section aria-labelledby="usage-totals-h"><div class="ov-head"><h2 id="usage-totals-h">Tokens${project !== null && ` in ${project}`}</h2></div>
 ${usageTable("usage-totals", "Period", [{ key: periods[period], ...report.total }])}
 <div class="usage-notes">
-<p>Counting started <time datetime="${new Date(report.countingSince).toISOString()}">${utc(report.countingSince)}</time>. The calls of threads that ran then were counted from the transcripts their pylons had. Threads deleted before then are not counted, as their Claude and pi transcripts went with their pylons, except for the Nexus agent's calls, which the harness keeps.</p>
+<p>Counting started ${localAt(report.countingSince)}. The calls of threads that ran then were counted from the transcripts their pylons had. Threads deleted before then are not counted, as their Claude and pi transcripts went with their pylons, except for the Nexus agent's calls, which the harness keeps.</p>
 ${backfillNote(c, report.backfill)}
 <p>The summaries the Nexus agent's compactions write, and model calls its tools make, are not counted.</p>
 </div>

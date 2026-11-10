@@ -61,7 +61,7 @@ const requests: readonly (readonly [string, string, unknown?])[] = [
   ["POST", "/v1/images/build", {}], ["POST", "/v1/images/rollout", { bogus: 1 }], ["POST", "/v1/images/rollback", {}],
   ["GET", "/v1/doctor"], ["GET", "/v1/checks"], ["GET", "/v1/checks/changes"], ["POST", "/v1/checks/seen", { bogus: 1 }],
   ["GET", "/"], ["GET", "/threads/new"], ["GET", "/projects/new"], ["GET", "/usage"], ["GET", "/pipeline"], ["GET", "/cluster"], ["GET", "/health"], ["GET", "/threads/closed"], ["GET", "/threads/quiet"],
-  ["GET", `/threads/${t0}`], ["GET", `/threads/${t0}/stream`], ["GET", "/nodes/nosuch"], ["GET", "/assets/nosuch.js"],
+  ["GET", `/threads/${t0}`], ["GET", `/threads/${t0}/stream`], ["GET", `/v1/threads/${t0}/attach?cols=100&rows=30`], ["GET", "/nodes/nosuch"], ["GET", "/assets/nosuch.js"],
 ];
 
 /** One request from 127.0.0.2, which the API at 127.0.0.1 sees as another machine, or from its own address. */

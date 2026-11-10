@@ -123,7 +123,7 @@ test("a running pylon or a working agent keeps a thread listed however old its a
   const html = await s.page();
   assert.deepEqual(overviewOf(html).listed, ["Running", "Working"]);
   assert.deepEqual(overviewOf(html).folded, ["Idle"], "only the idle thread with its pylon absent folds");
-  assert.deepEqual(sidebarOf(html).listed, ["agent working Working working 30h 00m", "running Running 30 h"]);
+  assert.deepEqual(sidebarOf(html).listed, ["agent idle Running 30 h", "agent working Working working 30h 00m"]);
   assert.deepEqual(sidebarOf(html).folded, ["not on its node Idle 30 h"]);
 });
 

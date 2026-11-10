@@ -1,4 +1,5 @@
-import type { NodeName, ProjectId, TailnetNodeId, ThreadId } from "../../ids.ts";
+import type { ItemId, NodeName, ProjectId, TailnetNodeId, ThreadId } from "../../ids.ts";
+import type { ItemRecord } from "../pipeline-store.ts";
 import type { ServerDetail, ThreadRow } from "../wire.ts";
 import type { Thread, ThreadAgent } from "../thread-store.ts";
 import type { NodeRecord } from "../node-store.ts";
@@ -34,17 +35,29 @@ export interface Context {
   image: string | null;
   /** Each health check's latest state, and every change kept, newest first. */
   health: { states: readonly HealthChange[]; changes: readonly HealthChange[] };
-  /** Every thread, oldest first. */
+  /**
+   * The open threads, and the archived ones a page may still show: archived under a day ago, as the work in flight
+   * lists them, or with their usage not read yet, as Needs you may list them. Oldest first.
+   */
   threads: readonly Thread[];
+  /** A project's open threads, oldest first. */
   threadsIn(project: string): readonly Thread[];
+  /** How many archived and how many deleted threads a project has, which its fold's link counts. */
+  closedIn(project: string): { archived: number; deleted: number };
   /** A project's threads that wait in the queue, in the order they were queued. */
   queuedIn(project: string): readonly QueuedThread[];
   /** What waits on the person, which the sidebar and the phone's tab count and the home page lists. */
   needs: readonly InboxNeed[];
+  /** Every item of the pipeline, by ID, with the thread it became, or null before it did. */
+  pipeline: ReadonlyMap<ItemId, { record: ItemRecord; thread: ThreadId | null }>;
+  /** The pipeline's items not yet threads, in the order they were added. An item that became a thread is its thread's work. */
+  items: readonly PipelineItem[];
   /** Every review, read only by a render that shows what a reviewer, check or live check thread serves. */
   reviews(): readonly Review[];
   /** The list's row of a thread, read only for the threads a render shows, so the closed ones a fold hides cost nothing. */
   row(thread: Thread): ThreadRow;
+  /** What a search matches of a thread, as contract.ts `findText` writes it, with its pull requests read once per render. */
+  find(thread: Pick<Thread, "id" | "title" | "project">): string;
   thread(id: ThreadId): Thread | undefined;
   /** A thread's or a queued thread's title, or its ID once neither is known. */
   title(id: ThreadId): string;
@@ -54,11 +67,17 @@ export interface Context {
   review(id: ThreadId): Review | null;
 }
 
-/** `items` are in the order they were added. */
-export interface HomeView { offline: ReadonlySet<NodeName>; role(thread: Thread): Role; items: readonly PipelineItem[] }
+export interface HomeView { offline: ReadonlySet<NodeName>; role(thread: Thread): Role }
 
-/** `cancelled` is, for the closed fold, the queued threads cancelled or deleted before they started, newest first. */
-export interface FoldView { projects: readonly Project[]; offline: ReadonlySet<NodeName>; cancelled: readonly QueuedThread[] }
+/**
+ * `cancelled` is, for the closed fold, the queued threads cancelled or deleted before they started, newest first. `project`
+ * is the project the page names, or null for every project's. `closed` is a project's archived and deleted threads that
+ * match the page's search, the page's own newest first, with how many match in all.
+ */
+export interface FoldView {
+  project: ProjectId | null; projects: readonly Project[]; offline: ReadonlySet<NodeName>; cancelled: readonly QueuedThread[];
+  closed(project: string): { shown: readonly Thread[]; total: number };
+}
 
 export interface Latest { reply: { text: string; at: number | null } | null; asked: { text: string; at: number } | null }
 

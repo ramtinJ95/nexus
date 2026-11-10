@@ -4,8 +4,8 @@ import type { NodeName } from "../ids.ts";
 export const statuses = ["ok", "warn", "fail"] as const;
 export type Status = (typeof statuses)[number];
 
-export type NodeCheckName = "online" | "release" | "disk" | "pylons";
-export type ControlCheckName = "release" | "backup" | "login" | "certificate" | "archived-disks";
+export type NodeCheckName = "online" | "release" | "disk" | "pylons" | "tailnet-key" | "image";
+export type ControlCheckName = "release" | "backup" | "login" | "github-token" | "certificate" | "archived-disks";
 
 /** `text` is one line: what is wrong and what to do, or what was found when nothing is. */
 export interface Verdict { status: Status; text: string }

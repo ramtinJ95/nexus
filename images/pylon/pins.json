@@ -5,6 +5,7 @@
   "claudeCode": "2.1.321",
   "pi": "1.5.0",
   "herdr": "0.9.5",
+  "herdrSha256": "14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d",
   "piEnv": "1.5.0",
   "piEnvSha256": "55419f4fa1e7059f52540a2035ca68e90cc2c3ac49b637a7134c0200c2ab3381",
   "gondolin": "0.13.0",

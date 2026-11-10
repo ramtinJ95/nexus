@@ -8,12 +8,12 @@ import { defaultClaudeModel } from "../../protocol/models.ts";
 import type { NodeRecord } from "../node-store.ts";
 import type { Thread } from "../thread-store.ts";
 import type { ThreadId } from "../../ids.ts";
-import type { QueuedThread } from "../../contract/threads.ts";
+import { queuedState, type QueuedThread } from "../../contract/threads.ts";
 import type { Status } from "../doctor-model.ts";
 import { span } from "./elapsed.ts";
-import { themeScript, Html, html, dot, icon, menu, threadState, dims, workingFor, type Tone } from "./view.ts";
+import { themeScript, Html, html, dot, icon, menu, shortcut, threadState, dims, workingFor, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
-import { clonedIcons, type Page } from "./contract.ts";
+import { clonedIcons, findText, type Page } from "./contract.ts";
 import { assetUrl } from "./assets.ts";
 import { problemsText } from "../plain-wording.ts";
 import { tickMs } from "../loop.ts";
@@ -63,11 +63,12 @@ ${page.main}
 </main>
 ${page.inspector}
 </div>
-<p id="refresh-state" class="refresh-state" role="status"></p>
+<div class="notices"><p id="refresh-state" class="refresh-state" role="status"></p><div id="action-error" class="error alert" role="alert" hidden></div></div>
 <div class="scrim" data-close aria-hidden="true"></div>
 <template id="icons">${clonedIcons.map(icon)}</template>
 ${startDialog(c, page.start)}
 ${projectDialog(c, page.addProject === true)}
+<dialog id="switcher" class="modal switcher" aria-label="Go to a thread"><input id="switcher-q" type="search" placeholder="Go to a thread" aria-label="Go to a thread" role="combobox" aria-controls="switcher-list" aria-expanded="true" aria-autocomplete="list" autocomplete="off"><ul id="switcher-list" role="listbox" aria-label="Threads"></ul><p class="switcher-hint dim"><kbd>↑</kbd><kbd>↓</kbd> pick, <kbd>Enter</kbd> open, <kbd>Esc</kbd> close</p></dialog>
 <noscript><p class="noscript">Adding projects, starting, archiving and deleting threads, sending messages and live updates need JavaScript.</p></noscript>
 </body>
 </html>
@@ -79,36 +80,32 @@ const quietAfterMs = 8 * 60 * 60 * 1000;
 export const lastActive = (t: Thread) => Math.max(t.createdAt, t.lastHumanActivityAt, t.lastAgentActivityAt, t.lastReplyAt ?? 0);
 
 /**
- * A project's threads, newest first: the recent open ones, the open ones quiet for over `quietAfterMs` with their pylon
- * paused or absent and their agent not working, and the archived or deleted ones. The last two fold below the first.
+ * A project's open threads, newest first: the recent ones, and the ones quiet for over `quietAfterMs` with their pylon
+ * paused or absent and their agent not working, with how many are archived or deleted. The last two fold below the first.
  * An unread reply does not keep a thread out of the quiet fold, since Needs you does not list one either.
  */
 export function threadsOf(c: Context, project: string) {
-  const threads = c.threadsIn(project).toReversed();
-  const closed = (t: Thread) => !isOpenStatus(t.status);
+  const open = c.threadsIn(project).toReversed();
   const quiet = (t: Thread) => {
     const state = c.row(t).pylon.actualState;
     return (state === "paused" || state === "absent") && !t.working && c.now - lastActive(t) > quietAfterMs;
   };
-  const open = threads.filter((t) => !closed(t));
-  return { recent: open.filter((t) => !quiet(t)), quiet: open.filter(quiet), closed: threads.filter(closed) };
+  return { recent: open.filter((t) => !quiet(t)), quiet: open.filter(quiet), closed: c.closedIn(project) };
 }
 /** A blocked thread waits for the person, as a review that ended for them does. */
 export function queuedLook(q: QueuedThread): [label: string, tone: Tone] {
-  if (q.status !== "queued") return [q.status === "archived" ? "cancelled" : "deleted", "muted"];
-  return q.blocked ? ["blocked", "bad"] : ["queued", "idle"];
+  return [queuedState(q), q.status !== "queued" ? "muted" : q.blocked ? "bad" : "idle"];
 }
 
 export const quietLabel = (threads: readonly Thread[]) => `${threads.length} quiet for over ${quietAfterMs / 3_600_000} hours`;
-export function closedLabel(threads: readonly Thread[]): string {
-  const deleted = threads.filter((t) => t.status === "deleted").length;
-  const archived = threads.length - deleted;
-  return [archived > 0 && `${archived} archived`, deleted > 0 && `${deleted} deleted`].filter(Boolean).join(", ");
-}
+export const closedLabel = ({ archived, deleted }: { archived: number; deleted: number }): string =>
+  [archived > 0 && `${archived} archived`, deleted > 0 && `${deleted} deleted`].filter(Boolean).join(", ");
 
 /** How many threads a fold lists before it links to its own page, which keeps every page small however many threads close. */
 export const foldCap = 100;
-export const foldHref = (kind: "quiet" | "closed", project: string, page = 1) => `/threads/${kind}?project=${encodeURIComponent(project)}${page > 1 ? `&page=${page}` : ""}`;
+/** A fold's page of `project`'s threads, or of every project's when it is null, that match `query` when it is not empty. */
+export const foldHref = (kind: "quiet" | "closed", project: string | null, page = 1, query = "") =>
+  `/threads/${kind}?${new URLSearchParams([...project === null ? [] : [["project", project]], ...page > 1 ? [["page", String(page)]] : [], ...query === "" ? [] : [["q", query]]])}`;
 
 function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): Html {
   const { projects } = c;
@@ -116,16 +113,19 @@ function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): H
   const row = (t: Thread) => {
     const r = c.row(t);
     const [label, tone] = threadState(r, c.now);
-    return html`<li><a class="row${t.id === active && " active"}${dims(r, active) && " dim"}" href="/threads/${t.id}"${t.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${t.title}</span><span class="row-at">${workingFor(t, c.now) ?? span(lastActive(t), c.now) ?? "now"}</span></a></li>`;
+    return html`<li><a class="row${t.id === active && " active"}${dims(r, active) && " dim"}" href="/threads/${t.id}" title="${t.title}" data-find="${c.find(t)}"${t.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${t.title}</span><span class="row-at">${workingFor(t, c.now) ?? span(lastActive(t), c.now) ?? "now"}</span></a></li>`;
   };
   // A queued thread has no time of its own to show until it starts, so its row says what it is instead.
   const queuedRow = (q: QueuedThread) => {
     const [label, tone] = queuedLook(q);
-    return html`<li><a class="row${q.id === active && " active"}" href="/threads/${q.id}"${q.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${q.title}</span><span class="row-at">${label}</span></a></li>`;
+    return html`<li><a class="row${q.id === active && " active"}" href="/threads/${q.id}" title="${q.title}" data-find="${findText(q)}"${q.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${q.title}</span><span class="row-at">${label}</span></a></li>`;
   };
+  // The thread the page shows lists under its project's fold link once it is archived or deleted.
+  const picked = active === undefined ? undefined : c.thread(active);
+  const shown = picked !== undefined && !isOpenStatus(picked.status) ? picked : undefined;
   return html`<aside class="side" aria-label="Threads">
 <div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
-<label class="filter"><span aria-hidden="true">⌕</span><input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
+<form id="filter-form" action="/threads/closed" role="search"><label class="filter"><span aria-hidden="true">⌕</span><input id="filter" name="q" type="search" placeholder="Filter threads" aria-label="Filter threads" aria-keyshortcuts="/" autocomplete="off"><kbd>/</kbd></label></form>
 <nav class="side-nav" aria-label="Pages"><a class="side-link" href="/#needs-you">${icon("inbox")}Needs you<span class="side-count" id="needs-count" data-live>${c.needs.length || ""}</span></a>${([["cluster", "Cluster", "server"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}<div id="side-health" data-live>${healthLink(c, nav === "health")}</div></nav>
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
 ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>` : projects.map((p) => {
@@ -137,10 +137,11 @@ ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>`
 <a class="group-new" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}" aria-label="New thread in ${p.id}" title="New thread in ${p.id}">${icon("plus")}</a>
 ${recent.length + queued.length > 0 && html`<ul>${recent.map(row)}${queued.map(queuedRow)}</ul>`}
 ${quiet.length > 0 && html`<details class="archived" id="side-quiet-${p.id}"${quiet.some((t) => t.id === active) && " open"}><summary>${quietLabel(quiet)}</summary><ul>${quiet.filter((t, i) => i < foldCap || t.id === active).map(row)}</ul>${quiet.length > foldCap && html`<a class="archived-link" href="${foldHref("quiet", p.id)}">All ${quiet.length} quiet</a>`}</details>`}
-${closed.length > 0 && html`<a class="archived-link" id="archived-${p.id}" href="${foldHref("closed", p.id)}">${closedLabel(closed)}</a>${closed.filter((t) => t.id === active).map((t) => html`<ul class="archived">${row(t)}</ul>`)}`}
+${closed.archived + closed.deleted > 0 && html`<a class="archived-link" id="archived-${p.id}" href="${foldHref("closed", p.id)}">${closedLabel(closed)}</a>${shown?.project === p.id && html`<ul class="archived">${row(shown)}</ul>`}`}
 </details>`;
 })}
 </nav>
+<button type="submit" form="filter-form" class="archived-link" id="filter-closed">Search archived and deleted threads</button>
 <div class="side-theme"><label class="theme-pick" title="Theme">${icon("palette")}<span class="vh">Theme</span><select id="theme">${themes.map(([name, label]) => html`<option value="${name}">${label}</option>`)}</select></label><button type="button" class="icon-btn" id="theme-toggle" aria-label="Switch between light and dark" title="Switch between light and dark">${icon("contrast")}</button></div>
 <a class="btn side-add" href="/projects/new" data-new-project>New project</a>
 </aside>`;
@@ -205,7 +206,7 @@ ${nodeOptions(nodes)}
 </div>
 <p class="hint" id="start-hint" data-image="${image ?? ""}"></p>
 <p id="start-error" class="error" role="alert" hidden></p>
-<footer><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">Start thread<kbd>⌘↵</kbd></button></footer>
+<footer><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">Start thread${shortcut("send")}</button></footer>
 </form>`}
 </div>
 </dialog>`;
@@ -245,7 +246,7 @@ ${nodeOptions(nodes)}
 <label class="check"><input type="checkbox" name="github"> GitHub access</label>
 <p class="hint">Threads clone the repository at this branch, or in a scratch project start an empty repository on it, and boot on this node unless they pick another. With auto, each boots on the node with the most room left among those that hold the image and the project's secrets. A scratch pylon keeps nothing once its thread is deleted, so its agent publishes what is worth keeping. GitHub access sends the node's <code>${githubTokenGrant.name}</code> to ${githubTokenGrant.hosts.join(" and ")}, so agents can create repositories and push. Each pylon gets ${cpus} CPUs, ${memoryGiB} GiB of memory and ${diskGiB} GiB of disk. <code>nexus project add</code> can set those, allowed hosts, logins and other secrets.</p>
 <p id="project-error" class="error" role="alert" hidden></p>
-<footer><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">Add project<kbd>⌘↵</kbd></button></footer>
+<footer><button type="button" class="btn btn-ghost" data-close>Cancel</button><button type="submit" class="btn btn-primary">Add project${shortcut("send")}</button></footer>
 </form>`}
 </dialog>`;
 }

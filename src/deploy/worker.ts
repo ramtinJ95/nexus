@@ -1,9 +1,10 @@
-import { copyFile, readFile, readlink, stat, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { copyFile, readFile, readlink, realpath, stat, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
-import { command, checkoutMerged, type Command, type InstallBoundary, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
-import { controlReady, planDeploy, quarantined, schemaStep, type Attempt, type DeployStep, type ReleaseHealth, type SchemaVersions } from "./plan.ts";
+import { command, checkoutMerged, type Command, type InstallBoundary, NotSwitched, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
+import { controlReady, planDeploy, prepareTries, quarantined, retryAfter, schemaStep, type Attempt, type DeployStep, type ReleaseHealth, type SchemaVersions } from "./plan.ts";
 import { digestPattern, type DrainBody, type DrainReply, type ReleaseReport, type ReleaseView, type ReportBody, type Role } from "../protocol/deploy.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
 import { deleteReleases, readReleases } from "./release-cleanup.ts";
@@ -11,6 +12,7 @@ import { checkControlPlaneFile, parseWorkerConfig, readControlPlane, type Contro
 import { readJson, saveJson } from "../node-base/json-file.ts";
 import { controlFields, listenAddress } from "../node-base/node-config.ts";
 import { localApiWhois } from "../node-base/tailscaled.ts";
+import type { Whois } from "../protocol/http.ts";
 import { backupStatusFile, configFiles, deployerFiles, deployerLink, etc, prefix, readReleaseCommit, releasesDir, stateDirs, unitDir, unitNames } from "../node-base/node-layout.ts";
 
 export async function runWorker(check = false): Promise<void> {
@@ -19,21 +21,48 @@ export async function runWorker(check = false): Promise<void> {
   if (mode.uid !== 0 || (mode.mode & 0o077) !== 0) throw new Error("deployer.json must be root-owned mode 0600");
   await checkControlPlaneFile();
   const config = parseWorkerConfig(await readJson(configFiles.deployer, null), await readControlPlane());
-  const peer = { id: config.controlNodeId, whois: localApiWhois() };
-  const api = (path: string, body?: unknown) => jsonRequest(new URL(`/v1/deployer/${path}`, config.controlUrl), body === undefined ? "GET" : "POST", body, config.token, peer);
+  const api = controlApi(config, { id: config.controlNodeId, whois: localApiWhois() });
   if (check) { await api("release"); return; }
   const roles: Role[] = [];
   for (const role of ["control", "probe"] as const) {
     try { await stat(join(prefix, deployerFiles.roles, role)); roles.push(role); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   }
-  await reconcileRoles(roles, config, api);
+  await reconcileRoles(roles, config, api, { ...nodeBoundary, worker: await workerName(prefix) });
   if (roles.includes("probe")) await cleanReleases(prefix, api).catch((error: unknown) => {
-    if (!(error instanceof DeployHttpError && error.status === 404)) console.error(`release cleanup: ${String(error)}`);
+    if (!(error instanceof ControlCallFailed && error.cause instanceof DeployHttpError && error.cause.status === 404)) console.error(`release cleanup: ${String(error)}`);
   });
 }
 
+/** A call to the control plane that did not reach it, timed out, or that it answered with other than 200. */
+class ControlCallFailed extends Error {}
+
+/**
+ * The worker's exit code for a poll whose call to the control plane failed, which says nothing about the worker, so
+ * deploy/supervise-deployer.sh keeps the promoted worker on it. Any other failure exits 1, and the supervisor rejects it.
+ */
+export const controlCallFailedExit = 75;
+export const exitCode = (error: unknown): number => error instanceof ControlCallFailed ? controlCallFailedExit : 1;
+
+export function controlApi(config: WorkerConfig, peer?: { id: string; whois: Whois }): Api {
+  return (path, body) => jsonRequest(new URL(`/v1/deployer/${path}`, config.controlUrl), body === undefined ? "GET" : "POST", body, config.token, peer)
+    .catch((cause: unknown) => { throw new ControlCallFailed(cause instanceof Error ? cause.message : String(cause), { cause }); });
+}
+
+/**
+ * `bootstrap`, or the commit of the release the supervisor promoted the worker in `root` from, or undefined when it runs
+ * from neither. Node resolves deployer-current to the release it names when it loads the worker.
+ */
+export async function workerName(given: string, root = resolve(dirname(fileURLToPath(import.meta.url)), "../..")): Promise<string | undefined> {
+  // root is a real path, so a prefix reached through a symlink is compared as one too.
+  const prefix = await realpath(given).catch(() => given);
+  if (root === join(prefix, deployerFiles.bootstrap)) return "bootstrap";
+  return dirname(root) === join(prefix, releasesDir) ? await readReleaseCommit(root) ?? undefined : undefined;
+}
+
 class WaitingForControl extends Error {}
+/** A target the registry refuses, which no retry of the same commit can install. */
+class SchemaRefused extends Error {}
 
 /**
  * Tells the control plane which releases the node holds, and deletes those the person agreed to delete, then reports
@@ -105,7 +134,8 @@ export function nodeRegistry(paths: RegistryPaths, run: Command = command, budge
 }
 
 const nodeBoundary = { prefix, etc, units: unitDir, run: command, checkout: checkoutMerged, registry: nodeRegistry({ config: configFiles.control, home: stateDirs.control, prefix, status: backupStatusFile }) };
-type NodeBoundary = Omit<typeof nodeBoundary, "registry"> & { registry?: RegistrySchema };
+/** `worker` is what the role's reports say ran the poll, and `now` the clock a retry waits on. */
+type NodeBoundary = Omit<typeof nodeBoundary, "registry"> & { registry?: RegistrySchema; worker?: string | undefined; now?: () => number };
 
 const restoreSteps = `deploy/README.md's "A failed deploy past a registry migration"`;
 const applies = ({ release }: SchemaVersions) => release === null ? "has no src/control/schema.ts to say which migrations it applies" : `applies ${release} registry migrations`;
@@ -130,7 +160,21 @@ function roleFiles({ prefix, etc, units }: NodeBoundary, role: Role) {
   };
 }
 
-type Report = (state: ReleaseReport["state"], target: string | null, reason?: string | null) => Promise<void>;
+type Report = (state: ReleaseReport["state"], target: string | null, reason?: string | null, retryAt?: number) => Promise<void>;
+
+/**
+ * The role's report file: the last report it sent, and, at the request it was for, what the control plane is not told.
+ * A file from before `requestedAt` counts as made for the request desired when it is read.
+ */
+interface SavedReport extends ReportBody {
+  observedAt: number;
+  /** The requestedAt of the desired release the target was attempted for. */
+  requestedAt?: number;
+  /** How many tries of that request failed before the link switch. */
+  failed?: number;
+  /** When the next try may run, by the node's clock. */
+  retryAt?: number;
+}
 
 /** What a role's steps share with the poll that runs them. */
 interface RolePoll {
@@ -196,7 +240,7 @@ function controlSteps({ api, run, prefix, service, config, registry, desired, re
       const versions = await schemaAt(target);
       const step = schemaStep(versions);
       if (step === "refuses") {
-        throw new Error(`release ${desired()} ${applies(versions)}, but the registry is at schema version ${versions.registry}, so its control plane would refuse to start. Deploy a newer commit, or restore a backup from before the migration as ${restoreSteps} says`);
+        throw new SchemaRefused(`release ${desired()} ${applies(versions)}, but the registry is at schema version ${versions.registry}, so its control plane would refuse to start. Deploy a newer commit, or restore a backup from before the migration as ${restoreSteps} says`);
       }
       return step === "migrates" ? registry.backUp() : null;
     },
@@ -296,16 +340,25 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     console.error(`${role}: ${service} is not healthy at ${expected}: ${String(last)}`);
     return false;
   };
-  const report: Report = async (state, target, reason = null) => {
-    const wire: ReportBody = { role, commit: await readReleaseCommit(link), target, state, reason };
+  /** The request a report at its commit is for, and how many of its tries failed before the link switch. */
+  let request: { commit: string; requestedAt: number; failed: number } | null = null;
+  const report: Report = async (state, target, reason = null, retryAt) => {
+    const wire: ReportBody = { role, commit: await readReleaseCommit(link), target, state, reason, ...boundary.worker === undefined ? {} : { worker: boundary.worker } };
+    const local = request === null || target !== request.commit ? {} : { requestedAt: request.requestedAt, ...request.failed === 0 ? {} : { failed: request.failed }, ...retryAt === undefined ? {} : { retryAt } };
+    const record: Record<string, unknown> = { ...wire, ...local };
     const saved = await readJson(files.report, null).catch((error: unknown) => {
       console.error(`${role}: rewriting ${files.report}, which could not be read: ${String(error)}`);
       return null;
-    }) as ReleaseReport | null;
-    if (saved === null || (Object.keys(wire) as (keyof typeof wire)[]).some((key) => saved[key] !== wire[key])) {
-      await saveJson(files.report, { ...wire, observedAt: Date.now() });
+    }) as Record<string, unknown> | null;
+    if (saved === null || [...new Set([...Object.keys(record), ...Object.keys(saved)])].some((key) => key !== "observedAt" && saved[key] !== record[key])) {
+      await saveJson(files.report, { ...record, observedAt: Date.now() });
     }
-    await api("report", wire).catch((error: unknown) => { console.error(`could not report ${role} release; retained locally for the next poll: ${String(error)}`); });
+    // A control plane from before `worker` refuses a report that has it.
+    await api("report", wire).catch((error: unknown) => {
+      if (wire.worker === undefined || !(error instanceof ControlCallFailed && error.cause instanceof DeployHttpError && error.cause.status === 400)) throw error;
+      const { worker: _, ...older } = wire;
+      return api("report", older);
+    }).catch((error: unknown) => { console.error(`could not report ${role} release; retained locally for the next poll: ${String(error)}`); });
   };
   const settled = (result: Transaction) => report(result.state === "installing" ? "failed" : result.state, result.commit, result.reason);
   let desired: string | null = null;
@@ -339,13 +392,25 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   });
   // Recovery must not depend on the API whose failed upgrade may have stopped it.
   const recovered = await installer.recover();
-  if (recovered !== null) await settled(recovered);
+  if (recovered !== null) {
+    request = recovered.requestedAt === undefined ? null : { commit: recovered.commit, requestedAt: recovered.requestedAt, failed: 0 };
+    await settled(recovered);
+  }
   const view = await readView();
   desired = view.desired?.commit ?? null;
-  const prior = await readJson(files.report, null) as ReleaseReport | null;
-  const journal = await installer.observed();
+  const prior = await readJson(files.report, null) as SavedReport | null;
+  const priorAt = prior?.requestedAt ?? view.desired?.requestedAt ?? 0;
+  // A journal from before requestedAt counts as made for the report's request, so the request that clears one clears both.
+  const journal = await installer.observedAt(priorAt);
   // The report also holds failures that never reached the journal, such as a failed build or a drain refusal.
-  const attempts: Attempt[] = [...prior === null ? [] : [{ commit: prior.target, state: prior.state, reason: prior.reason }], ...journal === null ? [] : [journal]];
+  const attempts: Attempt[] = [
+    ...prior === null ? [] : [{ commit: prior.target, requestedAt: priorAt, state: prior.state, reason: prior.reason, ...prior.retryAt === undefined ? {} : { retryAt: prior.retryAt } }],
+    ...journal === null ? [] : [{ commit: journal.commit, requestedAt: journal.requestedAt, state: journal.state, reason: journal.reason }],
+  ];
+  request = view.desired === null ? null : {
+    commit: view.desired.commit, requestedAt: view.desired.requestedAt,
+    failed: prior?.target === view.desired.commit && priorAt === view.desired.requestedAt ? prior.failed ?? 0 : 0,
+  };
   const held = quarantined(view.desired, attempts);
   if (held !== null) {
     await report(held.state, desired, held.reason);
@@ -353,22 +418,35 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     return;
   }
   const current = { commit: await readReleaseCommit(link), healthy: await healthy() };
-  const plan = (turnRunning: boolean) => planDeploy({ desired: view.desired, role, current, control: controlHealth(view), attempts, turnRunning });
+  const now = boundary.now ?? Date.now;
+  const polledAt = now();
+  const plan = (turnRunning: boolean) => planDeploy({ desired: view.desired, role, current, control: controlHealth(view), attempts, turnRunning, now: polledAt });
   const step = plan(false);
   if (step.kind === "idle" || step.kind === "healthy") {
     await report(current.healthy ? "healthy" : "failed", desired, current.healthy ? null : "running release is not healthy");
     await steps.release();
     return;
   }
+  if (step.kind === "retry") { await report("pending", desired, step.attempt.reason, step.attempt.retryAt); return; }
   if (step.kind !== "install") { await report("waiting-for-control", desired); return; }
   try {
-    if (!await steps.admit(plan, view.desired!.requestedAt)) return;
+    if (!await steps.admit(plan, view.desired!.requestedAt).catch((error: unknown) => { throw new NotSwitched(error); })) return;
     await report("installing", desired);
-    const result = await installer.install(step.commit);
+    const result = await installer.install(step.commit, view.desired!.requestedAt);
     await settled(result);
     if (result.state === "healthy") await promoteWorker(step.commit, repo, prefix, run);
   } catch (error) {
-    await report(error instanceof WaitingForControl ? "waiting-for-control" : "failed", desired, String(error).slice(-20_000));
+    const cause = error instanceof NotSwitched ? error.cause : error;
+    if (cause instanceof WaitingForControl) await report("waiting-for-control", desired, String(cause).slice(-20_000));
+    else if (!(error instanceof NotSwitched) || cause instanceof SchemaRefused) await report("failed", desired, String(cause).slice(-20_000));
+    else {
+      const failed = ++request!.failed;
+      const at = retryAfter(failed, now());
+      const said = at === null
+        ? `${failed} tries failed before the link switch, so this request is quarantined until the commit is requested again. The last: `
+        : `try ${failed} of ${prepareTries} failed before the link switch, so it runs again after ${new Date(at).toISOString()}: `;
+      await report(at === null ? "failed" : "pending", desired, said + String(cause).slice(-(20_000 - said.length)), at ?? undefined);
+    }
   } finally {
     await steps.release();
   }
@@ -391,4 +469,4 @@ async function promoteWorker(commit: string, repo: string, prefix: string, run: 
   await pointLink(join(prefix, deployerLink), target);
 }
 
-if (import.meta.main) runWorker(process.argv.includes("--check")).catch((error: unknown) => { console.error(error); process.exitCode = 1; });
+if (import.meta.main) runWorker(process.argv.includes("--check")).catch((error: unknown) => { console.error(error); process.exitCode = exitCode(error); });

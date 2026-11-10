@@ -67,6 +67,7 @@ export const deployerFiles = {
   roles: "deployer/roles",
   repo: "deployer/repo",
   rejected: "deployer/rejected",
+  bootstrap: "deployer/bootstrap",
   releaseBytes: "deployer/release-bytes.json",
 } as const;
 /** Each role's install journal, relative to the prefix. */

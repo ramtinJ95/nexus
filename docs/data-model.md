@@ -25,7 +25,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Aborted conversation | `aborted_conversations` |  | The harness, once it aborts a deleted thread's conversation at a delete or at open. Open aborts only the deleted threads' conversations without one, which a delete that crashed partway left running. A purge removes it with its thread |
 | Usage record | `usage_records` |  | Reads of the harness and of the agents' transcripts in each pylon. [Token usage records](#token-usage-records) describes it |
 
-Three settings sit beside the records. `current` is the image every new pylon uses, and only `nexus image rollout` or `rollback` changes it, once every online node holds the image. `previous-image` is the image current before the last change, which `rollback` makes current again. `image-operation` is the running image build or rollout, or the last one, with each node's step and the probe job it last sent.
+Four settings sit beside the records. `current` is the image every new pylon uses, and only `nexus image rollout` or `rollback` changes it, once every online node holds the image. `previous-image` is the image current before the last change, which `rollback` makes current again. `image-operation` is the running image build or rollout, or the last one, with each node's step and the probe job it last sent. `image-fetches` holds the current image's copies the control plane sends outside a rollout, one per online node that lacks it, with the job it last sent and the failures in a row.
 
 ## Field values
 
@@ -304,7 +304,7 @@ The `settings` key `release` stores one desired release: the full commit, `reque
 
 The settings key `deploy-drain` holds `{commit, expiresAt, locked?}` or null. The control node alone acquires/renews/releases it with root-authenticated requests. It survives control process restart. Preparation leases expire without a live worker; the final idle fence sets `locked: true` before a link switch, holding admission through recovery until explicit release. One turn gate fences the API's turn-starting routes, the harness methods the control plane wraps and the queue's starts; idle additionally requires no entering submissions, committed live runs or queued inputs. The drain reply names busy harness thread IDs and whether submissions are entering. Workers keep waiting across bounded polls with the lease intact; the old drain timeout is not a release failure.
 
-On each node, root owns `/opt/nexus/<role>-deploy.json`: `{commit, previous, target, state, reason}`, where previous/target are symlink targets and state is installing, healthy, rolled-back or failed. Installing is recorded before activation. A restart recovers it before contacting control. `<role>-deploy.unit` saves the previous unit and `<role>-deploy-report.json` retains terminal failures for later reporting. A failed or rolled-back attempt at the desired commit, in the report or the journal, stops automatic retries of it. The journal and the report are each written as indented JSON with mode 0600, to a temporary file that is then renamed over it. The worker rewrites the report only when its role, commit, target, state or reason changes, and sends it to control on every poll. Those files are separate from service-user-writable state and are not registry records.
+On each node, root owns `/opt/nexus/<role>-deploy.json`: `{commit, previous, target, state, reason, requestedAt}`, where requestedAt is the desired release's request it installed, which the worker records once, as the report's request, in a journal from before the field, previous/target are symlink targets and state is installing, healthy, rolled-back or failed. Installing is recorded before activation. A restart recovers it before contacting control. `<role>-deploy.unit` saves the previous unit and `<role>-deploy-report.json` retains terminal failures for later reporting, with the request it reported for as `requestedAt`, and while a failure before the link switch waits to be tried again, the tries that failed as `failed` and the node's time of the next try as `retryAt`. None of these reach the control plane. A failed or rolled-back attempt at the desired request, the same commit and `requestedAt`, in the report or the journal, stops automatic retries of it, and a new request for the commit tries it again. The journal and the report are each written as indented JSON with mode 0600, to a temporary file that is then renamed over it. The worker rewrites the report only when one of its fields other than `observedAt` changes, and sends it to control on every poll. Those files are separate from service-user-writable state and are not registry records.
 
 ## Project edits and boot identity
 
@@ -383,15 +383,18 @@ owns, one with the overlay's `~/.nexus/pylon.json`, and the image build starts n
 disk carries events that every pylon booted from it would send. Neither
 wait holds up Claude, whose hook only writes the file.
 
-From probe to control, the production probe journals its last 100 session
-reports in `events.sqlite` under its state root, and answers the hook only after
+From probe to control, the production probe journals the newest 20 session
+reports of each pylon, and the newest 100 of the node, the most a snapshot
+carries, in `events.sqlite` under its state root. A pylon that reports in a loop
+then evicts only its own older reports; another pylon's go only once the node's
+100 newest are all newer. It answers the hook only after
 the journal commits. Every snapshot carries that journal, so it replays the
 reports a link or probe restart cut off; `event_receipts` deduplicates its
 sequence per node, and control reads the receipt once per snapshot and skips the
 reports at or below it without parsing them again. This is a bounded
 buffer for a control plane that is not following the probe, not an unbounded
-delivery guarantee: more than 100 reports on a node while control is away loses
-the oldest. A sender whose answer was lost posts the event again, and the probe
+delivery guarantee: more than 20 reports from one pylon, or 100 on the node,
+while control is away loses the oldest. A sender whose answer was lost posts the event again, and the probe
 journals it under a new sequence. Control keeps the IDs of the reports it applied
 at its session's latest stamp, and ignores a report that repeats one. A resend
 at an older stamp already fails the stamp check. A report without an ID, such as
@@ -540,7 +543,7 @@ record never changes an earlier entry:
 | `queue` | `op`, `text` | A `queue-operation`: a message typed during a turn joined or left Claude's queue |
 | `notice` | `tone`, `text`, optional `usageLimit` | An interruption, a compaction, a model error, a local command's output, or Claude Code's own `system/informational` message. `usageLimit` (`resetsAt`, Unix ms or null) marks the error an assistant record with `apiError: "usage_limit_reached"` gives, with `apiErrorParams.rate_limit_info.resetsAt` |
 | `turn` | `durationMs` | `system/turn_duration` |
-| `pull-request` | `number`, `url`, `repository` | A `pr-link`: Claude opened a pull request. Claude Code writes it again each time it saves the session's metadata, so clients show the first entry for each `url`. `url` is always an https URL |
+| `pull-request` | `number`, `url`, `repository` | A `pr-link`: Claude opened a pull request. Claude Code writes it again each time it saves the session's metadata, so clients show the first entry for each `url`. The guest writes the record, so the control plane keeps it only when its URL is `https://github.com/<the project's repository>/pull/<its number>`, ignoring case. `repository` is the project's GitHub repository and `url` that URL. An entry stored before the check, of another repository, reads as a `record` entry of type `pr-link` in its place |
 | `record` | `type`, `summary` | Any record shape the parser does not know, a malformed line, or a record over 4 MiB, which is skipped |
 
 Every entry has `at`, the record's time in Unix milliseconds. Records Claude Code keeps

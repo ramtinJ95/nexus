@@ -13,6 +13,8 @@ const foreignReads: Record<string, string[]> = {
   "usage-store.ts": ["threads"],
   // reconcileAsks reads each worker and its entries.
   "question-store.ts": ["claude_workers", "claude_entries"],
+  // claudeEntries reads the thread's project's repository, which a stored pull request must be of.
+  "claude-worker.ts": ["threads", "projects"],
 };
 
 const tableNames = (source: string, pattern: RegExp) => [...source.matchAll(pattern)].map((match) => match[1]!);
@@ -50,7 +52,7 @@ test("every table whose rows name a thread or its pylon says what a thread's pur
 
 test("no two stores hold one settings key", () => {
   const keys = [...holdings.values()].flatMap((h) => h.settings ?? []);
-  assert.deepEqual(keys.sort(), ["backed-up-at", "current", "deploy-drain", "image-operation", "previous-image", "release", "releases:", "retention-since"]);
+  assert.deepEqual(keys.sort(), ["backed-up-at", "current", "deploy-drain", "image-fetches", "image-operation", "previous-image", "release", "releases:", "retention-since"]);
 });
 
 test("every registry table has one owning file, the one whose holding names it, and only its owner writes it or names it, but for the listed reads", () => {

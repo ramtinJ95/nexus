@@ -1,11 +1,12 @@
 import { setTimeout as sleep } from "node:timers/promises";
+import type { Readable, Writable } from "node:stream";
 import type { ParseArgsOptionsConfig } from "node:util";
 import type { z } from "zod";
 import type { Project } from "../contract/projects.ts";
 import { brokenRule, startFields } from "../contract/threads-parse.ts";
 import type { itemSchema } from "../contract/projects-parse.ts";
 import type { WebSocket } from "ws";
-import { CliError, type ErrorKind } from "./transport.ts";
+import { CliError, UsageError, type ErrorKind } from "./transport.ts";
 import { callOf, type ApiRoute, type CallArgs, type ReplyOf } from "../contract/route.ts";
 import { threadRoutes } from "../contract/threads.ts";
 
@@ -18,8 +19,16 @@ export async function request<R extends ApiRoute>(api: Api, route: R, args: Call
 }
 /** With `exit`, the command prints its result and then exits as that kind of failure. */
 export interface Result { json: unknown; text: string; exit?: ErrorKind }
+/** The process's streams and environment, or a test's, which runs the CLI in its own process. */
+export interface Io {
+  readonly stdin: Readable & { readonly isTTY?: boolean };
+  readonly stdout: Writable;
+  readonly stderr: Writable & { readonly isTTY?: boolean };
+  readonly env: Readonly<Record<string, string | undefined>>;
+}
 interface Local {
   connect(path: string): Promise<WebSocket>;
+  io: Io;
 }
 export interface Command {
   /** Commands that share an entry share the array. */
@@ -38,7 +47,7 @@ export const strs = (v: Values, key: string) => (v[key] as string[] | undefined)
 export function int(value: string | undefined, flag: string, fallback: number): number {
   if (value === undefined) return fallback;
   const n = Number(value);
-  if (!Number.isInteger(n) || n < 0) throw new CliError("invalid", `${flag} takes a whole number, got ${value}`);
+  if (!Number.isInteger(n) || n < 0) throw new UsageError(`${flag} takes a whole number, got ${value}`);
   return n;
 }
 
@@ -63,7 +72,7 @@ const flagOf = (field: string) => `--${field === "planning" ? "plan" : field}`;
 /** `project` is --project, or what `projectOf` made of this checkout. */
 export function briefOf(v: Values, project: string, rules: Parameters<typeof brokenRule>[0]): z.input<typeof itemSchema> & { requestId?: string; planning?: true } {
   const after = str(v, "after")?.split(",").map((id) => id.trim()).filter((id) => id !== "");
-  if (after?.length === 0) throw new CliError("invalid", "--after needs a thread");
+  if (after?.length === 0) throw new UsageError("--after needs a thread");
   const resources = resourcesOf(v);
   const requestId = str(v, "request-id");
   const body = {
@@ -72,7 +81,7 @@ export function briefOf(v: Values, project: string, rules: Parameters<typeof bro
     ...requestId === undefined ? {} : { requestId }, ...v.plan === true ? { planning: true as const } : {},
   };
   const broken = brokenRule(rules, body, flagOf);
-  if (broken !== undefined) throw new CliError("invalid", broken);
+  if (broken !== undefined) throw new UsageError(broken);
   return body;
 }
 
@@ -138,14 +147,11 @@ export const reconnectMs = (failed: number, maxMs = 30_000) => Math.min(maxMs, 1
 
 /**
  * A consumer killed outright never closes the pipe, and a quiet stream writes nothing that would find it closed, so
- * the parent is checked every second. The pipe's handler stays, since a closed pipe fails the last write after the
- * stream ends.
+ * the parent is checked every second. A consumer that closes the pipe ends the CLI at its entry, nexus.ts.
  */
 export function untilConsumerGone(onEnd: () => void): () => void {
   const parent = process.ppid;
   const orphan = setInterval(() => { if (process.ppid !== parent) onEnd(); }, 1000);
-  const outputError = (err: NodeJS.ErrnoException) => { if (err.code === "EPIPE") onEnd(); else throw err; };
-  process.stdout.on("error", outputError);
   const signals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
   for (const signal of signals) process.once(signal, onEnd);
   return () => {

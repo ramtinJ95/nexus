@@ -2,18 +2,19 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
+import { StatementSync } from "node:sqlite";
 import { request } from "node:http";
 import { itemThread, type PipelineItem } from "../pipeline.ts";
 import type { QueuedThread } from "../../contract/threads.ts";
 import type { Thread } from "../thread-store.ts";
 import type { ThreadDetail } from "../wire.ts";
-import { addThread, observeNode, testPr, testReview, claudeWorkerAt } from "../../test-support/registry-kit.ts";
+import { addThread, observeNode, testPr, testReview, claudeWorkerAt, testThread, testPylon } from "../../test-support/registry-kit.ts";
 import { personPhase, type Review } from "../review-model.ts";
 import type { ReviewLoop } from "../review.ts";
 import type { HoldsQuestion } from "../questions.ts";
 import type { Judgment } from "../judgment-store.ts";
 import type { AgentCall } from "../agent-usage.ts";
-import type { ImageId, JobId, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../../ids.ts";
+import { requestIds, type ImageId, type ItemId, type JobId, type NodeName, type ProjectId, type PylonId, type TailnetNodeId, type ThreadId } from "../../ids.ts";
 import type { ServiceFact } from "../../protocol/observations.ts";
 import type { NodeHealth } from "../../protocol/client.ts";
 import { recordingHealth, sampleOf } from "../node-metrics.ts";
@@ -31,6 +32,7 @@ import { senders } from "../agent-protocol.ts";
 import { startHint, type HintPart } from "./start-hint.ts";
 import { agoText, clock } from "./elapsed.ts";
 import { bundle } from "./assets.ts";
+import { inlineSteps } from "./markdown.ts";
 import { imageTypes } from "../../image-types.ts";
 import { defaultClaudeModel } from "../../protocol/models.ts";
 import { testApi, type TestApiOptions } from "../../test-support/api-kit.ts";
@@ -188,6 +190,9 @@ test("the overview lists each project's open threads with their phases, node and
   assert.match(acme!, /<a href="\/threads\/closed\?project=acme">1 archived<\/a>/);
   const closed = sectionOf((await s.call("GET", "/threads/closed?project=acme")).text, "project-acme");
   assert.match(textOf(closed), /^acme 1 Thread Desired Observed Node Human Agent Old spike archived paused not on its node/, "the archived thread is listed on its fold's page");
+  const far = await s.call("GET", "/threads/closed?project=acme&page=1e100");
+  assert.equal(far.status, 200, "a page far past the last lists none");
+  assert.match(textOf(sectionOf(far.text, "project-acme")), /^acme 1 Newer$/);
 });
 
 test("an archived thread's timeline says why its disk is kept past its 24 hours, until its usage was read and backed up", async (t) => {
@@ -250,7 +255,7 @@ test("the sidebar lists every project's threads with their state, counts the arc
     const html = (await s.call("GET", path)).text;
     const sidebar = sidebarOf(html);
     // Threads started in the same millisecond have no order between them.
-    assert.deepEqual(sidebar.rows.toSorted(), ["agent working Write docs working 1m 03s", "running Fix checkout now"], `${path} lists the open threads`);
+    assert.deepEqual(sidebar.rows.toSorted(), ["agent idle Fix checkout now", "agent working Write docs working 1m 03s"], `${path} lists the open threads`);
     assert.match(sidebar.text, /^acme main Fix checkout now 1 archived, 1 deleted beta main Write docs working 1m 03s$/);
     assert.match(html, /<a class="archived-link" id="archived-acme" href="\/threads\/closed\?project=acme">1 archived, 1 deleted<\/a>/, `${path} links the closed threads' page`);
     assert.match(html, new RegExp(`<span class="row-at">working <time data-since="${started}">1m 03s</time></span>`), `${path} ticks the working thread's clock`);
@@ -298,6 +303,51 @@ test("thousands of closed threads leave the home page small, and their page list
   const oldest = sidebarOf((await s.call("GET", `/threads/${closed[0]!.id}`)).text);
   assert.equal(oldest.active, closed[0]!.id, "a closed thread's page marks its row in the sidebar");
   assert.equal(oldest.rows.filter((r) => r.includes("Closed")).length, 1, "and lists no other closed thread");
+});
+
+test("a thread's row names it in full and carries what a search matches, and ?q= searches the closed and quiet pages on the server", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const s = await seeded(t);
+  const cache = addThread(s.registry, { thread: { title: "Review of #88: feat(checkout) cache the cart", status: "archived" } });
+  const retries = addThread(s.registry, { thread: { title: "Review of #88: feat(checkout) retry the charge", status: "deleted" } });
+  const docs = addThread(s.registry, { thread: { title: "Write the docs", project: "beta" as ProjectId, status: "archived" } });
+  s.registry.prWatches.savePrWatch(docs.id, { links: [{ pr: testPr({ repo: "acme/nexus", number: 412 }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  const fix = await s.start("acme", "Fix checkout");
+  s.registry.prWatches.savePrWatch(fix.id, { links: [{ pr: testPr({ repo: "acme/nexus", number: 7 }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+
+  const listed = JSON.parse((await s.call("GET", "/v1/threads")).text) as { id: string; pullRequestNumbers: number[] }[];
+  assert.deepEqual(Object.fromEntries(listed.map((r) => [r.id, r.pullRequestNumbers])), { [cache.id]: [], [retries.id]: [], [docs.id]: [412], [fix.id]: [7] }, "the list's rows carry their linked pull requests' numbers, which the switcher matches");
+  const home = (await s.call("GET", "/")).text;
+  const row = new RegExp(`<a class="row[^"]*" href="/threads/${fix.id}" title="Fix checkout" data-find="fix checkout acme ${fix.id} #7"`);
+  assert.match(home, row, "the row's title names the thread in full, and its data-find holds its title, project, ID and pull request");
+  assert.match(home, /<form id="filter-form" action="\/threads\/closed" role="search"><label class="filter">.*?<input id="filter" name="q"/, "Enter in the filter searches the closed threads");
+
+  const closed = async (query: string) => {
+    const html = (await s.call("GET", `/threads/closed?${query}`)).text;
+    return { html, titles: [...html.split('id="fold-list"')[1]!.matchAll(/<a href="\/threads\/[^"]+">([^<]*)<\/a>/g)].map((m) => m[1]).toSorted() };
+  };
+  assert.deepEqual((await closed("q=")).titles, [cache.title, retries.title, docs.title].toSorted(), "an empty query lists every closed thread");
+  assert.deepEqual((await closed("q=checkout+retry")).titles, [retries.title], "each word of the query matches the title");
+  assert.deepEqual((await closed("q=%23412")).titles, [docs.title], "a pull request's number matches its thread");
+  assert.deepEqual((await closed("q=412")).titles, [docs.title], "and without its #");
+  assert.deepEqual((await closed("q=beta")).titles, [docs.title], "a project's name matches its threads");
+  assert.deepEqual((await closed(`q=${cache.id}`)).titles, [cache.title], "a thread's ID matches it");
+  assert.deepEqual((await closed("project=acme&q=88")).titles, [cache.title, retries.title].toSorted(), "the query narrows a project's page");
+  const none = await closed("project=acme&q=nothing+like+it");
+  assert.deepEqual(none.titles, []);
+  assert.match(textOf(sectionOf(none.html, "project-acme")), /No threads match “nothing like it”\./);
+  assert.match(none.html, /<form class="bar-end fold-search" method="get" action="\/threads\/closed" role="search"><input type="hidden" name="project" value="acme"><input type="search" name="q" value="nothing like it"/, "the search box holds the query and keeps the project");
+
+  const day = Date.now() - 24 * 60 * 60_000;
+  const quiet = (i: number, title: string) => addThread(s.registry, { thread: { title, createdAt: day + i, lastHumanActivityAt: day } });
+  const old = Array.from({ length: 101 }, (_, i) => quiet(i, `Quiet spike ${i}`));
+  quiet(200, "Quiet docs pass");
+  observeNode(s.registry);
+  const quietPage = (await s.call("GET", "/threads/quiet?project=acme&q=spike")).text.split('id="fold-list"')[1]!;
+  assert.equal([...quietPage.matchAll(/>Quiet spike \d+</g)].length, 100, "the quiet page matches on the server, a hundred to a page");
+  assert.doesNotMatch(quietPage, /Quiet docs pass/);
+  assert.match(quietPage, /<a class="link" href="\/threads\/quiet\?project=acme&amp;page=2&amp;q=spike">Show older<\/a>/, "its next page keeps the query");
+  assert.match((await s.call("GET", "/threads/quiet?project=acme&page=2&q=spike")).text.split('id="fold-list"')[1]!, new RegExp(`>${old[0]!.title}<`), "the oldest match is on the next page");
 });
 
 test("a quiet fold lists its newest hundred, and the open one past them, and links the rest", async (t) => {
@@ -1055,10 +1105,57 @@ test("a paused thread's unread reply has a dot of its own, so it never looks lik
     assert.ok(dot !== null, `a dot for ${thread.title}`);
     return `${dot[2]} ${dot[1]}`;
   });
-  const want = ["running ok", "new reply reply", "agent working work"];
+  const want = ["agent idle ok", "new reply reply", "agent working work"];
   assert.deepEqual(dots(home.split('id="overview"')[1]!.split("<tr")), want, "the home table, which the phone lists too");
   assert.deepEqual(dots(home.split('id="side-threads"')[1]!.split("</nav>")[0]!.split("<li>")), want, "the sidebar");
   assert.match((await s.call("GET", `/threads/${replied.id}`)).text, /<span class="chip chip-reply"><span class="dot dot-reply" aria-hidden="true"><\/span><span class="chip-label">new reply<\/span><\/span>/, "the thread page's header");
+});
+
+test("a thread's state reads the same in its sidebar row, the home table and its page's header, and each red state has a shape of its own", async (t) => {
+  const s = await seeded(t);
+  const now = Date.now();
+  const start = (title: string) => s.start("acme", title);
+  const [idle, working, replied, waiting, failed, decision, parked, paused, archived] = [
+    await start("Idle"), await start("Working"), await start("Replied"), await start("Waiting"), await start("Failed"),
+    await start("Decision"), await start("Parked"), await start("Paused"), await start("Archived"),
+  ];
+  const limited = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Limited", claude: "write them" })).text) as Thread;
+  claudeWorkerAt(s.registry, limited.id, "started", { session: "s1" });
+  const resetsAt = now + 3_600_000;
+  assert.ok(s.registry.threads.appendClaudeRead(limited.id, { session: "s1", from: transcriptStart, entries: [{ kind: "notice", at: now, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt } }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: now }));
+  const running = [idle, working, replied, waiting, decision, parked];
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity });
+  s.registry.threads.ingested(testObservation(node, { pylons: [...running.map((th) => runningPylon(th.pylonId)), stoppedPylon(paused.pylonId, { sessions: null })] }), []);
+  s.registry.threads.recordActivity(working.id, { agent: now, agentTurnRunning: true });
+  s.registry.threads.recordReply(replied.id, now);
+  s.registry.threads.reportSession(node, { sequence: 1, pylon: waiting.pylonId, time: now, event: { kind: "session.waiting", session: "s1" } });
+  s.registry.threads.savePylon({ ...s.registry.threads.pylon(failed.pylonId)!, failed: "setup exited 1" });
+  s.registry.nudges.saveNudge(decision.id, { state: "person", turn: now });
+  s.registry.threads.recordParked(parked.id, true);
+  assert.equal((await s.call("POST", `/v1/threads/${archived.id}/archive`)).status, 200);
+
+  const want: [Thread, string][] = [
+    [idle, "agent idle ok"], [working, "agent working work"], [replied, "new reply reply"], [waiting, "waiting for input idle"],
+    [failed, "failed bad"], [decision, "needs your decision decide"], [parked, "parked stuck"],
+    [limited, `stopped on its usage limit until ${new Date(resetsAt).toISOString().slice(11, 16)} UTC limit`],
+    [paused, "paused idle"], [archived, "archived muted"],
+  ];
+  const dotIn = (html: string, thread: Thread) => {
+    const dot = /class="dot dot-(\w+)" role="img" aria-label="([^"]+)"/.exec(html);
+    assert.ok(dot !== null, `a dot for ${thread.title}`);
+    return `${dot[2]} ${dot[1]}`;
+  };
+  const home = (await s.call("GET", "/")).text.split('id="overview"')[1]!.split("<tr");
+  for (const [thread, state] of want) {
+    const page = (await s.call("GET", `/threads/${thread.id}`)).text;
+    const chip = /<span class="chip chip-(\w+)"><span class="dot dot-(\w+)" aria-hidden="true"><\/span><span class="chip-label">([^<]*)<\/span>/.exec(page);
+    assert.ok(chip !== null && chip[1] === chip[2], `${thread.title}'s header has a chip`);
+    assert.equal(`${chip[3]} ${chip[1]}`, state, `${thread.title}'s header`);
+    const row = page.split('id="side-threads"')[1]!.split("<li>").find((li) => li.includes(`href="/threads/${thread.id}"`));
+    assert.equal(dotIn(row ?? "", thread), state, `${thread.title}'s sidebar row`);
+    const inHome = home.find((tr) => tr.includes(`href="/threads/${thread.id}"`));
+    if (thread !== archived) assert.equal(dotIn(inHome ?? "", thread), state, `${thread.title}'s row in the home table`);
+  }
 });
 
 test("the side nodes show each node's committed memory, mark an overcommitted one, and say what its paused pylons need to wake", async (t) => {
@@ -1208,7 +1305,8 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
   const previews = sectionOf(res.text, "previews-h");
   assert.ok(previews.includes('href="https://rj-firebat.tail.ts.net:8443/"'), "a ready preview links to its tailnet HTTPS URL");
   assert.equal(textOf(previews), "Previews 2 api starting rj-firebat.tail.ts.net:8444 web Open ↗ rj-firebat.tail.ts.net:8443");
-  assert.ok(!previews.includes(":8444/"), "a preview that is not ready has no link yet");
+  assert.ok(!previews.includes('href="https://rj-firebat.tail.ts.net:8444/"'), "a preview that is not ready has no link yet");
+  assert.ok(previews.includes('<div class="pv-url" title="https://rj-firebat.tail.ts.net:8444/">rj-firebat.tail.ts.net:8444</div>'), "the URL the inspector cuts is whole on hover");
 
   const outputs = sectionOf(res.text, "outputs-h");
   assert.equal(textOf(outputs), "Outputs 3 PR watch: off (no control-plane GitHub token configured). branch nexus/fix-checkout diff abc1234 file out-1", "web's preview is listed once, under Previews");
@@ -1238,7 +1336,7 @@ test("the inspector's tabs pick the changes, the previews or the pylon, and the 
   assert.match(page, /<div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="[^"]+"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">.*Fix checkout<\/span><\/button><button type="button" class="tab tab-tl" role="tab" aria-selected="false" aria-controls="timeline-view" data-tab="timeline">.*Timeline<\/span><\/button><button type="button" class="tab tab-term" role="tab" aria-selected="false" aria-controls="term-view" data-tab="term"[^>]*>.*Terminal<\/span><\/button><\/div>/, "the conversation is the first tab, and the terminal is one click away beside it");
 });
 
-test("the inspector lists each listening port once: under Ports with an Open button until it has a preview, then under Previews", async (t) => {
+test("the inspector lists each listening port once: under Ports with a Publish button until it has a preview, then under Previews", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   const page = async () => {
@@ -1249,11 +1347,11 @@ test("the inspector lists each listening port once: under Ports with an Open but
   s.observeWith({ services: [{ name: "web", state: "ready", port: 5173, declared: true, wantsPreview: true }, { name: "db", state: "ready", port: 5432, declared: true, wantsPreview: false }], listening: [3000, 5173, 5432] }, fix);
   s.registry.threads.allocatePreviews(fix.pylonId, ["web"], { first: 8443, last: 8443 });
   const before = await page();
-  assert.equal(textOf(before.ports), "Ports 2 3000 Open 5432 db", "web's port is under Previews, and db's has no preview to open");
-  assert.ok(before.ports.includes(`<button type="button" class="btn btn-xs" data-action="link-port" data-thread="${fix.id}" data-port="3000" aria-label="Open port 3000">Open</button>`), "a port no service owns offers to publish it");
+  assert.equal(textOf(before.ports), "Ports 2 3000 Publish 5432 db", "web's port is under Previews, and db's has no preview to publish");
+  assert.ok(before.ports.includes(`<button type="button" class="btn btn-xs" data-action="link-port" data-thread="${fix.id}" data-port="3000" aria-label="Publish port 3000">Publish</button>`), "a port no service owns offers to publish it");
   assert.equal(before.previews, "Previews 1 web starting rj-firebat.tail.ts.net:8443");
 
-  // Opening 3000 links it, and the node's next read lists its service.
+  // Publishing 3000 links it, and the node's next read lists its service.
   s.registry.threads.allocatePreviews(fix.pylonId, ["web", "port-3000"], { first: 8443, last: 8444 });
   s.observeWith({ services: [{ name: "web", state: "ready", port: 5173, declared: true, wantsPreview: true }, { name: "port-3000", state: "ready", port: 3000, declared: false, wantsPreview: true }], listening: [3000, 5173] }, fix);
   const after = await page();
@@ -1337,10 +1435,12 @@ test("a lone tool call is its own line, and a run of calls folds under a line th
     assistant([call("c4", "read", { path: "src/b.ts", offset: 10 })], "aborted"),
     assistant([], "error", "rate limited"),
     { role: "user", content: [{ type: "text", text: "Look at this " }, { type: "image", data: "", mimeType: "image/png" }], timestamp: 0 },
-    assistant([{ type: "text", text: "All 40 pass." }]),
+    { ...assistant([{ type: "text", text: "All 40 pass." }]), timestamp: 1_700_000_000_000 },
   );
 
-  const { rows, open } = conversationOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  const page = (await s.call("GET", `/threads/${fix.id}`)).text;
+  assert.match(page, /<div class="msg agent" data-at="1700000000000"><div class="text"><p>All 40 pass\.<\/p>/, "an answer carries its time, which the page titles in the reader's zone");
+  const { rows, open } = conversationOf(page);
   assert.deepEqual(rows, [
     "You Run the tests",
     "Running them with npm test .",
@@ -1429,7 +1529,7 @@ test("a running turn shows its tool's output so far, the partial answer, queued 
   ]);
   assert.deepEqual(open, [["tool-c1", true]]);
   assert.match(html, /<span class="t-mark run" role="img" aria-label="running" title="running"><span class="spin"><\/span><\/span>/, "its mark spins, and a screen reader hears it runs");
-  assert.match(dock, new RegExp(`^Working 1m 12s · 1 tool this turn Abort nexus attach ${fix.id} Copy gpt-test Steer joins the run after its current tool round\\. Queue ⌥↵ Steer ⌘↵$`));
+  assert.match(dock, new RegExp(`^Working 1m 12s · 1 tool this turn Abort nexus attach ${fix.id} Copy gpt-test Steer joins the run after its current tool round\\. Queue ⌥↵ Alt\\+↵ Steer ⌘↵ Ctrl\\+↵$`));
   assert.match(html, /placeholder="Steer the run…"/);
   assert.match(html, /<button type="submit" class="btn btn-ghost send-alt" id="queue" name="mode" value="followUp"[^>]*>/, "⌥↵ queues a follow-up after the run");
   assert.match(html, /<button type="submit" class="send send-steer" id="send" name="mode" value="steer"[^>]*>/, "⌘↵ steers the run that works");
@@ -1498,7 +1598,8 @@ test("each thread state offers only the actions and prompt box that apply", asyn
 
   const fresh = await state();
   assert.deepEqual([fresh.actions, fresh.prompt, fresh.running, fresh.visit, fresh.text], [["archive", "delete"], true, false, true, `${fix.id} · started just now No messages yet.`]);
-  assert.equal(fresh.dock, `Idle nexus attach ${fix.id} Copy Send ⌘↵`);
+  assert.equal(fresh.dock, `Idle nexus attach ${fix.id} Copy Send ⌘↵ Ctrl+↵`);
+  assert.match((await s.call("GET", `/threads/${fix.id}`)).text, /title="Send"><svg[^]*?<\/svg><span class="send-label">Send<\/span> <kbd><span class="k-mac">⌘↵<\/span><span class="k-other">Ctrl\+↵<\/span><\/kbd><\/button>/, "the send key shows as the device's platform names it");
   assert.match(fresh.dock, /^Idle /, "an idle agent says so");
 
   s.fake.transcript(fix.id).docs["pi.live"] = { run: { taskId: 1, inputs: [1] } };
@@ -1569,7 +1670,7 @@ test("a paused pylon's prompt box says a message wakes it", async (t) => {
   const fix = await s.start("acme", "Fix checkout");
   s.observe(fix);
   s.registry.threads.ingested(testObservation(node, { pylons: [stoppedPylon(fix.pylonId, { sessions: null })] }), []);
-  assert.equal(conversationOf((await s.call("GET", `/threads/${fix.id}`)).text).dock, `Idle the pylon is paused, and a message wakes it nexus attach ${fix.id} Copy Send ⌘↵`);
+  assert.equal(conversationOf((await s.call("GET", `/threads/${fix.id}`)).text).dock, `Idle the pylon is paused, and a message wakes it nexus attach ${fix.id} Copy Send ⌘↵ Ctrl+↵`);
 });
 
 test("a thread deleted while its conversation is read shows no conversation", async (t) => {
@@ -1639,6 +1740,25 @@ test("markdown nested past what a page shows renders the rest as escaped text in
   for (const word of ["quoted", "listed"]) assert.ok(res.text.includes(`&lt;x&gt;${word}&lt;/x&gt;`), `${word} shows, escaped`);
   assert.ok(!res.text.includes("<x>"));
   assert.ok((res.text.match(/<blockquote>/g)?.length ?? 0) < 100 && (res.text.match(/<li>/g)?.length ?? 0) < 100, "the nesting shown is bounded");
+});
+
+test("a reply's inline markdown renders in work linear in its length, whatever openers it leaves unclosed", async (t) => {
+  const s = await seeded(t);
+  const stepsFor = async (unit: string, size: number) => {
+    const fix = await s.start("acme", `Render ${unit} at ${size}`);
+    const reply = `${unit.repeat(Math.ceil(size / unit.length)).slice(0, size)}\n\nend of reply`;
+    s.fake.transcript(fix.id).messages.push(assistant([{ type: "text", text: reply }]));
+    const before = inlineSteps;
+    const res = await s.call("GET", `/threads/${fix.id}`);
+    assert.equal(res.status, 200);
+    assert.ok(res.text.includes("<p>end of reply</p>"), "the whole reply renders");
+    return inlineSteps - before;
+  };
+  for (const unit of ["*a ", "_a ", "**a ", "__a ", "`a ", "[a](", "[*a](", "[a](b(c)", "*_**__[`a ", "**a _b [*c*](https://x) `d`_** "]) {
+    const [half, full] = [await stepsFor(unit, 32 * 1024), await stepsFor(unit, 64 * 1024)];
+    assert.ok(half >= 32 * 1024 && full >= 64 * 1024, `${unit}: every character is scanned`);
+    assert.ok(full <= 2.2 * half && full <= 4 * 64 * 1024, `${unit}: doubling the reply about doubles the work (${half} then ${full} steps)`);
+  }
 });
 
 test("strings from humans and probes are escaped, never markup", async (t) => {
@@ -1901,6 +2021,42 @@ test("every page has somewhere to say a refresh failed", async (t) => {
   }
 });
 
+test("every page has one alert for what failed where the person acted, outside the dock a diff shrinks and every live region a swap replaces", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const alert = '<div class="notices"><p id="refresh-state" class="refresh-state" role="status"></p><div id="action-error" class="error alert" role="alert" hidden></div></div>';
+  for (const path of ["/", `/threads/${fix.id}`, "/cluster", "/usage"]) {
+    const page = (await s.call("GET", path)).text;
+    assert.equal(page.split('id="action-error"').length, 2, `${path} has one alert`);
+    assert.ok(page.split("</main>")[1]!.includes(alert), `${path} says it beside the page's refresh status, outside main`);
+  }
+  const css = await readFile(new URL("./style.css", import.meta.url), "utf8");
+  assert.match(css, /\.main\[data-view="file"\] \.dock > :not\(#run\) \{ display: none; \}/, "a diff shrinks the dock to the agent's state, where the alert was");
+  assert.match(css, /\n\.notices \{ position: fixed;/);
+});
+
+test("Archive asks first only when it loses something, and names the open questions and the running turn", async (t) => {
+  const s = await seeded(t);
+  const fix = await s.start("acme", "Fix checkout");
+  const archive = async () => /<button[^>]* id="archive"[^>]*>/.exec((await s.call("GET", `/threads/${fix.id}`)).text)![0];
+  const confirmOf = async () => {
+    const said = /data-confirm="([^"]*)"/.exec(await archive());
+    return said === null ? null : textOf(said[1]!);
+  };
+  assert.equal(await confirmOf(), null, "an idle thread with nothing open archives at once");
+  s.registry.questions.askQuestion({ kind: "holds", id: "qn-holds", thread: fix.id, text: "Land with these holds?", options: ["Land", "Leave it"], reserved: null, answerer: "person", askedAt: Date.now(), holds: { review: "rv-1", head: "h", base: null, holds: [] } });
+  assert.equal(await confirmOf(), null, "an archive leaves a holds question open");
+  s.registry.questions.askQuestion({ kind: "judgment", id: "judgment:7", thread: fix.id, failure: 7, text: "The pylon failed on rj-firebat.\n\nRetry it?", options: ["Retry", "Leave it failed"], reserved: null, answerer: "person", askedAt: Date.now() });
+  assert.equal(await confirmOf(), 'Archive "Fix checkout"? Its open question "The pylon failed on rj-firebat." is withdrawn.');
+  s.fake.transcript(fix.id).docs["pi.live"] = { run: { taskId: 1, inputs: [1] } };
+  s.registry.threads.recordActivity(fix.id, { agent: Date.now(), agentTurnRunning: true });
+  assert.equal(await confirmOf(), 'Archive "Fix checkout"? Its open question "The pylon failed on rj-firebat." is withdrawn. Its agent is in a turn, and its pylon goes to sleep at once.');
+  s.registry.questions.answerQuestion(s.registry.questions.question("judgment:7")!, { option: "Leave it failed", by: laptop, at: Date.now() });
+  assert.equal(await confirmOf(), 'Archive "Fix checkout"? Its agent is in a turn, and its pylon goes to sleep at once.', "an answered question is not lost");
+  s.fake.park(fix.id, 2);
+  assert.equal(await confirmOf(), 'Archive "Fix checkout"? Its agent is in a turn, and its pylon goes to sleep at once.', "parked tasks beside a turn still running");
+});
+
 test("an unknown thread page is a 404 page", async (t) => {
   const s = await setup(t);
   const res = await s.call("GET", "/threads/th-missing");
@@ -2049,6 +2205,8 @@ test("a Claude worker's transcript reads as its conversation: prompts by who sen
   ]);
 
   const html = (await s.call("GET", `/threads/${thread.id}`)).text;
+  assert.match(html, /<div class="msg user" data-at="1">/, "a prompt carries its time, which the page titles in the reader's zone");
+  assert.match(html, /<div class="msg agent" data-at="8"><div class="text"><p>Counting with/, "so does Claude's reply");
   const { rows, open, dock } = conversationOf(html);
   assert.deepEqual(rows, [
     "You Write hello.py, then count its lines",
@@ -2069,23 +2227,25 @@ test("a Claude worker's transcript reads as its conversation: prompts by who sen
   assert.match(textOf(html.split('<p class="convo-meta">')[1]!.split("</p>")[0]!), new RegExp(`^${thread.id} · started just now · Claude Code · claude-opus-5-5$`));
   assert.match(html, /<form id="prompt" class="composer composer-send" data-thread="[^"]+" data-claude>/);
   assert.match(html, /placeholder="Message Claude…"/);
-  assert.equal(dock, `Idle nexus attach ${thread.id} Copy The pylon is not running, so the transcript is as of its last read, just now . Sending a message wakes it and resumes Claude. claude-opus-5-5 Send ⌘↵`);
+  assert.equal(dock, `Idle nexus attach ${thread.id} Copy The pylon is not running, so the transcript is as of its last read, just now . Sending a message wakes it and resumes Claude. claude-opus-5-5 Send ⌘↵ Ctrl+↵`);
   assert.match(html, new RegExp(`data-stream="/threads/${thread.id}/stream"`));
 });
 
-test("a pull request Claude opened shows once, as an escaped link to it, however often its transcript names it", async (t) => {
+test("a pull request Claude opened shows once, as a link to it, however often its transcript names it, and one of another repository is no Nexus note", async (t) => {
   const s = await seeded(t);
-  const url = 'https://github.com/acme/shop/pull/7?x="><b>';
+  s.registry.projects.editProject("acme" as ProjectId, (p) => ({ ...p, repoUrl: "git@github.com:acme/shop.git" }));
+  const url = "https://github.com/acme/shop/pull/7";
   const thread = await claudeThread(s, [
     { kind: "pull-request", at: 1, number: 7, url, repository: "acme/shop" },
     { kind: "reply", at: 2, text: "Opened it." },
     { kind: "pull-request", at: 3, number: 7, url, repository: "acme/shop" },
     { kind: "pull-request", at: 4, number: 8, url: "https://github.com/acme/shop/pull/8", repository: "acme/shop" },
+    { kind: "pull-request", at: 5, number: 9, url: "https://evil.example/login", repository: "acme/shop" },
   ]);
   const html = (await s.call("GET", `/threads/${thread.id}`)).text;
-  assert.deepEqual(conversationOf(html).rows, ["Opened pull request #7 ↗", "Opened it.", "Opened pull request #8 ↗"]);
-  assert.ok(html.includes('<a class="link" href="https://github.com/acme/shop/pull/7?x=&quot;&gt;&lt;b&gt;" target="_blank" rel="noopener">Opened pull request #7 ↗</a>'), "the URL is escaped");
-  assert.ok(html.includes('<a class="link" href="https://github.com/acme/shop/pull/8" target="_blank" rel="noopener">'));
+  assert.deepEqual(conversationOf(html).rows, ["Opened pull request #7 ↗", "Opened it.", "Opened pull request #8 ↗", "! Claude Code wrote a pr-link record: a pull request link that is not of the project's repository"]);
+  assert.ok(html.includes(`<a class="link" href="${url}" target="_blank" rel="noopener">Opened pull request #7 ↗</a>`));
+  assert.ok(!html.includes("evil.example"), "a link of another repository shows nowhere");
 });
 
 test("a Claude worker that works shows its turn's call running, the turn's clock and calls, and a box that queues for Claude", async (t) => {
@@ -2113,7 +2273,7 @@ test("a Claude worker that works shows its turn's call running, the turn's clock
     "Slash command /compact",
     "Bash npm test › npm test No output yet.",
   ], "only a call of the running turn runs");
-  assert.match(dock, new RegExp(`^Claude is working 0s · 1 tool this turn Interrupt nexus attach ${thread.id} Copy claude-opus-5-5 Claude takes it at its next step\\. Steer ⌘↵$`),
+  assert.match(dock, new RegExp(`^Claude is working 0s · 1 tool this turn Interrupt nexus attach ${thread.id} Copy claude-opus-5-5 Claude takes it at its next step\\. Steer ⌘↵ Ctrl\\+↵$`),
     "the turn is timed from when control heard it start, and Interrupt stops it");
   const since = s.registry.threads.thread(thread.id)!.workingSince;
   assert.equal(html.split(`<time data-since="${since}">`).length - 1, 4, "the run bar, the sidebar row, the inspector and the timeline tick the same clock");
@@ -2347,7 +2507,7 @@ test("a queued and a blocked thread show in the sidebar and the overview as queu
   assert.equal(sidebarOf(page.text).active, stuck.id);
   assert.match(page.text, /<span class="chip chip-bad">.*?<span class="chip-label">blocked<\/span><\/span>/);
   assert.match(page.text, new RegExp(`<button type="button" class="btn" id="start-queued" data-action="start-queued" data-thread="${stuck.id}">Start now</button>`));
-  assert.match(page.text, new RegExp(`id="archive" data-action="archive" data-thread="${stuck.id}"`));
+  assert.match(page.text, new RegExp(`id="archive" data-action="archive" data-thread="${stuck.id}">Cancel</button>`), "archiving a queued thread cancels it, so its button says so");
   const body = textOf(page.text.split('id="queued"')[1]!.split('<div class="dock">')[0]!);
   assert.match(body, /Starts once these threads' pull requests merge blocked Spike : is archived and its pull request did not merge/, "each wait links its predecessor");
   assert.match(body, /Prompt Do it Worker Claude Code · claude-opus-5-5 Node auto Size 2 CPUs, 4 GiB memory, 10 GiB disk/);
@@ -2357,7 +2517,7 @@ test("a queued and a blocked thread show in the sidebar and the overview as queu
   assert.equal((await s.call("POST", `/v1/threads/${stuck.id}/archive`)).status, 200);
   const cancelled = (await s.call("GET", `/threads/${stuck.id}`)).text;
   assert.match(cancelled, /<span class="chip-label">cancelled<\/span>/);
-  assert.match(cancelled, /id="unarchive" data-action="unarchive"/);
+  assert.match(cancelled, new RegExp(`id="unarchive" data-action="unarchive" data-thread="${stuck.id}">Queue again</button>`));
   assert.doesNotMatch(cancelled, /id="start-queued"/);
   assert.ok(!sidebarOf((await s.call("GET", "/")).text).rows.some((r) => r.includes("Stuck step")), "a cancelled thread leaves the sidebar");
 
@@ -2642,6 +2802,7 @@ test("the work in flight lists each item at its phase, an item held for the pers
   const phaseOf = (key: string) => /<section class="phase[^"]*" id="phase-(\w+)"/.exec(flight.slice(0, flight.indexOf(`data-peek="${key}"`)).split("</section>").at(-1)!)?.[1];
   assert.equal(phaseOf(c.id), "planned", "an item waiting for the one it is after is planned");
   assert.match(flight, new RegExp(`<a class="fl-row" href="/\\?peek=${c.id}" data-peek="${c.id}">`));
+  assert.match(flight, new RegExp(`data-peek="${c.id}">.*?<span class="fl-why" title="([^"]+)">\\1</span>`), "a line's why, which the stack cuts, is whole on hover");
   assert.match(phaseOf(thread) ?? "", /^(queued|building)$/, "an item that became a thread shows as its thread");
   assert.doesNotMatch(flight, new RegExp(`data-peek="${a.id}"`), "nor as itself");
   assert.match(flight, new RegExp(`<a class="fl-row" href="/\\?peek=${b.id}" data-peek="${b.id}">.*<span class="tag tag-bad">needs you</span>`), "held work is in Needs you, and its line leads to its card");
@@ -2926,6 +3087,46 @@ test("a page reads the threads, the queue and the release reports as often whate
   assert.deepEqual(await reads(5, 4), one);
   assert.deepEqual(one["/"], { threads: 1, queuedThreads: 1, releaseReports: 0 }, "the home page shows no release, which the Cluster page does");
   assert.deepEqual(one["/cluster"], { threads: 1, queuedThreads: 1, releaseReports: 2 }, "the release view reads the reports again after the control node is found");
+});
+
+test("a page reads as often however many threads closed before it, and reads no transcript of a closed thread it does not show", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const reads = async (closed: number) => {
+    const s = await seeded(t);
+    // Each thread is a pipeline item's Claude worker with a transcript, as a builder is.
+    const claudeThread = (i: number) => {
+      const item = `it-${String(i).padStart(12, "0")}` as ItemId;
+      s.registry.pipeline.saveItem({ id: item, project: "acme" as ProjectId, title: `Item ${i}`, request: { project: "acme", title: `Item ${i}`, claude: "Build it" }, message: null,
+        after: [], addedBy: laptop, addedAt: Date.now(), approved: null, cancelled: null, lastError: null });
+      const thread = testThread({ title: `Item ${i}` });
+      s.registry.threads.createThread(thread, testPylon(thread), { claude: { prompt: "Build it" }, key: { requestId: requestIds.pipeline(item), body: "{}" } });
+      claudeWorkerAt(s.registry, thread.id, "started", { session: "s1" });
+      s.registry.threads.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries: [{ kind: "reply", at: Date.now(), text: "Done." }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: Date.now() });
+      return thread;
+    };
+    const gone = Array.from({ length: closed }, (_, i) => {
+      const thread = claudeThread(i);
+      s.registry.threads.setThreadStatus(thread.id, i % 2 === 0 ? "archived" : "deleted");
+      if (i % 2 === 0) s.registry.usage.finishSettle(thread.id, null, Date.now());
+      return thread.id;
+    });
+    t.mock.timers.setTime(Date.now() + 2 * 24 * 60 * 60_000);
+    const open = claudeThread(closed);
+    const executed = (["get", "all", "iterate"] as const).map((name) => t.mock.method(StatementSync.prototype, name));
+    const counts: Record<string, number> = {};
+    for (const path of ["/", `/threads/${open.id}`, "/threads/quiet?project=acme"]) {
+      for (const mock of executed) mock.mock.resetCalls();
+      assert.equal((await s.call("GET", path)).status, 200);
+      const calls = executed.flatMap((mock) => mock.mock.calls);
+      counts[path.replace(open.id, "<id>")] = calls.length;
+      const transcripts = calls.filter((c) => (c.this as StatementSync).sourceSQL.includes("claude_entries"));
+      assert.ok(transcripts.length > 0, `${path} reads the transcript of the thread it shows`);
+      assert.deepEqual(gone.filter((id) => transcripts.some((c) => c.arguments.some((a) => typeof a === "string" && a.includes(id)))), [], `${path} reads no closed thread's transcript`);
+    }
+    for (const mock of executed) mock.mock.restore();
+    return counts;
+  };
+  assert.deepEqual(await reads(12), await reads(2));
 });
 
 test("the sidebar's release lines read as the release view does: stale and missing reports pending, and a control line only for the node that reported one", async (t) => {

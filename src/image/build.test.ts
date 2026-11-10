@@ -23,6 +23,7 @@ const pins: ImageRecipe["pins"] = {
   claudeCode: "2.1.308",
   pi: "1.4.0",
   herdr: "0.9.5",
+  herdrSha256: "f".repeat(64),
   piEnv: "1.4.0",
   piEnvSha256: "c".repeat(64),
   gondolin: "0.13.0",
@@ -86,7 +87,8 @@ test("a recipe is its declared files under its directory, nested ones by posix p
 
 test("loading refuses pins with a missing or unknown field, a bad digest, and a symlink in the recipe", async (t) => {
   const { herdr: _, ...missing } = pins;
-  for (const bad of [missing, { ...pins, extra: "1" }, { ...pins, debianDigest: "bookworm-slim" }]) {
+  const { herdrSha256: __, ...unchecked } = pins;
+  for (const bad of [missing, unchecked, { ...pins, extra: "1" }, { ...pins, debianDigest: "bookworm-slim" }]) {
     await assert.rejects(loadImageRecipe(await recipeDir(t, { "pins.json": JSON.stringify(bad) }), []));
   }
   const dir = await recipeDir(t, { "pins.json": JSON.stringify(pins), "Dockerfile": "" });
@@ -105,6 +107,7 @@ test("buildImage refuses a recipe from a job whose paths, modes, pins, nexus scr
     { files: [{ ...manifest, mode: 0o600 as 0o644 }], pins },
     { files: [{ path: manifest.path, content: manifest.content } as ImageRecipe["files"][number]], pins },
     { files: [], pins: { ...pins, nodeSha256: "not-a-digest" } },
+    { files: [manifest], pins: (({ herdrSha256: _, ...rest }) => rest)(pins) },
     { files: [manifest], pins: { ...pins, gh: "latest" } },
     { files: [manifest], pins: { ...pins, neovim: "stable" } },
     { files: [manifest, { path: "nexus", mode: 0o644, content: '#!/usr/bin/env node\nconst version = "dev";\n' }], pins },
@@ -144,6 +147,36 @@ test("a build job under the probe's 077 umask gives Docker each recipe file with
   for (const file of recipe.files) assert.equal(modes.get(file.path), file.mode.toString(8), file.path);
   for (const dir of ["agent-setup", "dotfiles"]) assert.equal(modes.get(dir), "755", dir);
   assert.equal(modes.size, recipe.files.length + 2);
+});
+
+test("every download in the Dockerfile is checked against a sha256 that buildImage passes from pins.json", async (t) => {
+  const root = await tempDir("nexus-image-args-", t);
+  await mkdir(join(root, "bin"));
+  await writeFile(join(root, "bin", "docker"), `#!/bin/sh\n[ "$1" = build ] || exit 0\nprintf '%s\\n' "$@" > ${root}/argv\nexit 1\n`, { mode: 0o755 });
+  const recipe = await loadImageRecipe();
+  const path = process.env.PATH;
+  process.env.PATH = `${join(root, "bin")}:${path}`;
+  try {
+    await assert.rejects(buildImage(recipe, "infra-testbench" as NodeName, artifactDirectory(join(root, "out"), tarCodec), AbortSignal.timeout(30_000)), /docker build exited 1/);
+  } finally {
+    process.env.PATH = path;
+  }
+  const argv = (await readFile(join(root, "argv"), "utf8")).split("\n");
+  const buildArgs = new Map(argv.flatMap((arg, i) => argv[i - 1] === "--build-arg" ? [arg.split("=", 2) as [string, string]] : []));
+  const dockerfile = await readFile(join(pylonRecipeDir, "Dockerfile"), "utf8");
+  for (const [, name] of dockerfile.matchAll(/^ARG (\w+)$/gm)) assert.ok(buildArgs.has(name!), `buildImage passes ${name}`);
+  const runs = dockerfile.replace(/\\\n/g, " ").split("\n").filter((line) => line.startsWith("RUN ") && /\bcurl -/.test(line));
+  assert.ok(runs.length >= 5, "the Dockerfile downloads Node, pi-env, Herdr, gh and Neovim");
+  for (const run of runs) {
+    const checked = /echo "\$\{(\w+_SHA256)\}  [^"]+" \| sha256sum -c -/.exec(run);
+    assert.ok(checked !== null, `a download is checked with sha256sum: ${run}`);
+    assert.match(buildArgs.get(checked[1]!) ?? "", /^[0-9a-f]{64}$/, `${checked[1]} is a sha256 from pins.json`);
+  }
+  assert.equal(buildArgs.get("HERDR_SHA256"), recipe.pins.herdrSha256);
+  assert.ok(runs.some((run) => run.includes("/releases/download/v${HERDR_VERSION}/herdr-linux-x86_64")), "Herdr is its pinned release");
+  const lines = dockerfile.split("\n");
+  const lastDownload = lines.findLastIndex((line) => /\bcurl -/.test(line));
+  assert.ok(lines.findIndex((line) => line.includes("@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}")) > lastDownload, "a Claude Code or pi bump reuses the download layers from cache");
 });
 
 test("an image.json in the store that names the recipe's image but is no manifest fails the build before any docker call", async (t) => {

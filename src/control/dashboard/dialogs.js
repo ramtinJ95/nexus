@@ -5,6 +5,7 @@ import { threadRoutes } from "../../contract/threads.ts";
 import { projectRoutes } from "../../contract/projects.ts";
 import { onSwap, refreshAfter, showError } from "./page.js";
 import { setOpen } from "./nav.js";
+import { typing } from "./find.js";
 import { startForm } from "./start-form.js";
 
 export const dialog = document.getElementById("start-dialog");
@@ -170,7 +171,6 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
-const typing = (el) => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || el?.isContentEditable === true;
 document.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
     const form = event.target instanceof Element ? event.target.closest("#prompt, #start, #project") : null;
