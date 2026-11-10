@@ -228,7 +228,8 @@ export function startLoop(options: LoopOptions): Loop {
           }
           registry.threads.savePylon(p);
         },
-        desired: () => desiredPhase(registry.threads.thread(found.thread)!, registry.now()),
+        // A thread retention purged during the tick keeps the phase the tick began with.
+        desired: () => { const now = registry.threads.thread(found.thread); return now === undefined ? pylon.desired : desiredPhase(now, registry.now()); },
         sealedBoot: () => registry.threads.sealedBoot(pylonId),
         uncountedFailed: (failure) => {
           registry.usage.failUsageRead(thread.id, failure);

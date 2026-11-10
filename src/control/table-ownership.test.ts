@@ -38,7 +38,7 @@ test("every table whose rows name a thread or its pylon says what a thread's pur
   const tied = tables.filter((table) => {
     const columns = (db.prepare("SELECT name FROM pragma_table_info(?)").all(table) as { name: string }[]).map((c) => c.name);
     const references = (db.prepare('SELECT "table" FROM pragma_foreign_key_list(?)').all(table) as { table: string }[]).map((f) => f.table);
-    return columns.includes("thread") || columns.includes("pylon") || references.includes("threads") || references.includes("pylons");
+    return columns.some((c) => /thread|pylon|builder|reviewer/.test(c)) || references.includes("threads") || references.includes("pylons");
   });
   const declared = new Map([...holdings.values()].flatMap((h) => Object.entries(h.tables)));
   const undecided = tied.filter((table) => {
