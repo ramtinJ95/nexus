@@ -1,6 +1,6 @@
 import { el, end, main, scroller } from "./page.js";
 import { keptForTab, storageKeys } from "./contract.ts";
-import { badge, thread } from "./checkout.js";
+import { badge, checkout, thread } from "./checkout.js";
 
 // The tabs beside the conversation: the terminal, and one per changed file the reader opened, kept for the tab's
 // session. `activeTab` is the open file's path, `terminalTab` for the terminal, `timelineTab` for the timeline, or null
@@ -58,7 +58,55 @@ export function renderTabs() {
   (controls.find((b) => b.dataset.key === focused) ?? controls.find((b) => b.dataset.key === replacement))?.focus();
 }
 
-export function showTab(path) {
+/**
+ * Each view as the address's hash names it, so a reload, Back and Forward keep the reader's place: `#timeline`, or
+ * `#tl-<step>` for a step of it, `#terminal`, `#file=<path>` for an open file's tab, and no hash or `#write` for the
+ * conversation. Any other hash, such as the skip link's, names no view.
+ */
+function viewOf(hash) {
+  if (hash === "" || hash === "#write") return { tab: null };
+  if (hash === "#timeline") return { tab: timelineTab };
+  if (hash.startsWith("#tl-")) return { tab: timelineTab, step: hash.slice(1) };
+  if (hash === "#terminal") return { tab: terminalTab };
+  if (!hash.startsWith("#file=")) return null;
+  try { return { tab: decodeURIComponent(hash.slice("#file=".length)) }; } catch { return null; }
+}
+const hashOf = (path) => path === null ? "" : path === timelineTab ? "#timeline" : path === terminalTab ? "#terminal"
+  : `#file=${encodeURIComponent(path).replaceAll("%2F", "/")}`;
+const shows = (path) => path === null || (path === timelineTab ? timelineView !== null
+  : path === terminalTab ? tabsBar.querySelector('[data-tab="term"]')?.hidden === false : openTabs.some((f) => f.path === path));
+
+/**
+ * Shows the view the hash names, as on load, Back and Forward. A changed file whose tab another took, as a step from
+ * file to file does, or one opened from a link, opens again in the open file's tab. A view the page cannot show shows the
+ * conversation. A read of the changes passes `onlyFile`, so it follows only a file's hash that waited on it.
+ */
+export function followHash(onlyFile = false) {
+  if (tabsBar === null) return;
+  const view = viewOf(location.hash);
+  if (view === null || (onlyFile && typeof view.tab !== "string")) return;
+  const closed = typeof view.tab === "string" && !shows(view.tab);
+  // Until the changes are read, a file whose tab is not open may yet be one of them, which their read follows the hash for.
+  if (closed && checkout.changes === null) return;
+  const changed = closed ? checkout.changes.files.find((f) => f.path === view.tab) : undefined;
+  if (changed !== undefined) return openFile(changed, typeof activeTab === "string" ? activeTab : null, "none");
+  const path = shows(view.tab) ? view.tab : null;
+  if (path !== activeTab || path !== view.tab) showTab(path, path === view.tab ? "none" : "replace");
+  // The browser's own jump found the step in a hidden panel.
+  if (view.step !== undefined) document.getElementById(view.step)?.scrollIntoView();
+}
+addEventListener("hashchange", () => followHash());
+
+/**
+ * Shows a tab. A change the reader makes adds an entry to the history, `"replace"` rewrites the current one, as for a
+ * tab the page takes away, and `"none"` leaves it, as when following the hash.
+ */
+export function showTab(path, history = "push") {
+  if (tabsBar !== null && history !== "none" && viewOf(location.hash)?.tab !== path) {
+    const url = `${location.pathname}${location.search}${hashOf(path)}`;
+    if (history === "push") globalThis.history.pushState(null, "", url);
+    else globalThis.history.replaceState(null, "", url);
+  }
   activeTab = path;
   main.dataset.view = typeof path === "string" ? "file" : Object.keys(fixedTabs).find((key) => fixedTabs[key] === path);
   scroller.hidden = path !== null;
@@ -75,14 +123,14 @@ export function showTab(path) {
  * Opens a changed file's tab. A step from file to file passes the path it steps from, whose tab the next file takes,
  * so a review of many files keeps one tab rather than pushing the reader's own tabs out.
  */
-export function openFile(file, from = null) {
+export function openFile(file, from = null, history = "push") {
   const at = openTabs.findIndex((f) => f.path === file.path);
   const stepped = openTabs.findIndex((f) => f.path === from);
   if (at !== -1) openTabs[at] = file;
   else if (stepped !== -1) openTabs = openTabs.with(stepped, file);
   else openTabs = [...openTabs, file].slice(-maxTabs);
   saveTabs();
-  showTab(file.path);
+  showTab(file.path, history);
 }
 
 function closeTab(path) {
@@ -102,6 +150,7 @@ export function refreshTabs(files) {
 // The fixed tabs, and the timeline's and the track's links to the conversation or to a step of the timeline.
 document.addEventListener("click", (event) => {
   const go = tabsBar === null || !(event.target instanceof Element) ? null : event.target.closest("#tabs > [data-tab], [data-tab-go]");
-  if (go !== null) showTab(fixedTabs[go.dataset.tabGo ?? go.dataset.tab]);
+  // A link to a step of the timeline changes the hash, which shows the timeline.
+  if (go !== null && go.localName !== "a") showTab(fixedTabs[go.dataset.tabGo ?? go.dataset.tab]);
   if (termView !== null && event.target instanceof Element && event.target.closest("[data-terminal]") !== null) showTab(terminalTab);
 });

@@ -10,7 +10,7 @@ function terminalFollows() {
   const facts = factsNow();
   if (tab == null || facts === null) return;
   tab.hidden = !facts.open;
-  if (tab.hidden && activeTab === terminalTab) showTab(null);
+  if (tab.hidden && activeTab === terminalTab) showTab(null, "replace");
 }
 afterSwap(terminalFollows);
 

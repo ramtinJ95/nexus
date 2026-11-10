@@ -4,7 +4,7 @@ import { afterSwap, el, present, retryShots } from "./page.js";
 import { bases } from "./checkout-text.js";
 import { kept, storageKeys } from "./contract.ts";
 import { badge, canRead, changesPane, checkout, counts, factsNow, thread, unreadable } from "./checkout.js";
-import { activeTab, openFile, refreshTabs } from "./tab-bar.js";
+import { activeTab, followHash, openFile, refreshTabs } from "./tab-bar.js";
 import { noteCount } from "./review-notes.js";
 
 // A template's icons are in its content, outside the document.
@@ -87,6 +87,7 @@ export async function readChanges(wake = false) {
       forgetChanged(changes.files);
       renderChanges();
       refreshTabs(changes.files);
+      followHash(true);
     } catch (err) {
       if (base !== checkout.base) return;
       // The thread closed while the read was out, so the closing, not the failure it caused, is what to show.
