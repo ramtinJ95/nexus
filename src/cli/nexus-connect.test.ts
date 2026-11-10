@@ -184,7 +184,7 @@ test("connect says what this device may do, and the line that admits it when it 
   ].join("\n"));
   assert.deepEqual(JSON.parse(await readFile(config, "utf8")), { url: s.localUrl, socks: "none" }, "the URL is saved for once the device is allowed, with the proxy setting kept");
   const refused = await s.nexus(["threads"], env);
-  assert.deepEqual([refused.code, refused.stderr], [3, "nexus: caller is not a tailnet node this control plane allows\n"]);
+  assert.deepEqual([refused.code, refused.stderr], [3, "nexus: caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER\n"], "every other command names the line connect prints");
 });
 
 test("connect fails without saving when no control plane answers, or one does not answer to the name", async (t) => {
@@ -197,6 +197,8 @@ test("connect fails without saving when no control plane answers, or one does no
   const down = await s.nexus(["connect", apiName, "--socks", `127.0.0.1:${proxy.port}`], env);
   assert.equal(down.code, 2);
   assert.match(down.stderr, new RegExp(`^nexus: no Nexus control plane answers at ${apiName} through the SOCKS proxy at 127\\.0\\.0\\.1:${proxy.port}:\n  https://${apiName}:7443: the SOCKS proxy .+\n  http://${apiName}:7470: the SOCKS proxy .+\n$`));
+  const refusedHere = await s.nexus(["connect", `http://127.0.0.1:${dead}`, "--socks", "none"], env);
+  assert.deepEqual([refusedHere.code, refusedHere.stderr], [2, `nexus: no Nexus control plane answers at http://127.0.0.1:${dead}:\n  http://127.0.0.1:${dead}: nothing is listening on 127.0.0.1:${dead}\nIf this device reaches the tailnet only through a SOCKS5 proxy, such as ts-home's userspace tailscaled, give it with --socks HOST:PORT\n`], "connect names each try's reason alone, and never itself");
   const direct = await s.nexus(["connect", "127.0.0.1"], env);
   assert.equal(direct.code, 2);
   assert.match(direct.stderr, /give it with --socks HOST:PORT\n$/);

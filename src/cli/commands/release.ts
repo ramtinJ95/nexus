@@ -3,7 +3,7 @@ import type { Readable, Writable } from "node:stream";
 import type { ImageId } from "../../ids.ts";
 import { fullCommit, releaseOutcome, type ReleaseView } from "../../protocol/deploy.ts";
 import { CliError, UsageError } from "../transport.ts";
-import { type Api, type Result, type Command, str, request, int, table, pollUntil } from "../kit.ts";
+import { type Api, type Io, type Result, type Command, str, request, int, table, pollUntil } from "../kit.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { deployWaitMs, imageRoutes, releaseRoutes, type ImageEntry, type ImageOperation, type ImagesView } from "../../contract/release.ts";
 import { landOption, questionRoutes, reviewRoutes, type ReviewView } from "../../contract/reviews.ts";
@@ -35,27 +35,32 @@ function imagesText(view: ImagesView): string {
 }
 
 /**
- * Each change of a running step goes to stderr, so a build of minutes shows where it is and stdout stays one value
- * for --json.
+ * A terminal sees each change of a running step, so a build of minutes shows where it is, and stdout stays one value
+ * for --json. A build's text ends with the rollout to run next, which stays a command of its own.
  */
-async function imageWait(api: Api, started: ImageOperation, progress: Writable): Promise<Result> {
+async function imageWait(api: Api, started: ImageOperation, progress: Io["stderr"]): Promise<Result> {
   let operation = started;
   let view: ImagesView | null = null;
   const settled = async (): Promise<Result | undefined> => {
     if (operation.state === "failed") throw new CliError("failed", operationText(operation));
     if (operation.state !== "done") return undefined;
     view ??= await request(api, imageRoutes.list, {});
-    return { json: view, text: imagesText(view) };
+    const next = started.kind === "build" ? `\nRoll it out to every online node with: nexus image rollout ${started.image} --wait` : "";
+    return { json: view, text: `${imagesText(view)}${next}` };
   };
   return await settled() ?? pollUntil({
     deadlineMs: 45 * 60_000, everyMs: 2_000, timedOut: () => new CliError("failed", `image wait timed out\n${operationText(operation)}`),
+    shown: {
+      to: progress,
+      state: () => operation.state === "running" ? operationText(operation) : undefined,
+      stopped: () => `Stopped waiting. The ${started.kind} of ${started.image} carries on, and \`nexus image list\` shows where it is`,
+    },
   }, async () => {
     view = await request(api, imageRoutes.list, {});
     const now = view.operation;
     if (now === null || now.kind !== started.kind || now.image !== started.image || now.requestedAt !== started.requestedAt) {
       throw new CliError("conflict", `another image operation replaced the ${started.kind} of ${started.image}${now === null ? "" : `\n${operationText(now)}`}`);
     }
-    if (now.state === "running" && operationText(now) !== operationText(operation)) progress.write(`${operationText(now)}\n`);
     operation = now;
     return settled();
   });
@@ -164,7 +169,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
   deploy: {
     help: ["  nexus deploy <commit|main> [--wait]"],
     args: [1, 1], options: { wait: { type: "boolean" } },
-    async run(api, [commit], values) {
+    async run(api, [commit], values, _follow, { io }) {
       if (commit !== "main" && !fullCommit.test(commit!)) throw new UsageError("deploy takes main or a full lower-case commit hash");
       let view = await request(api, releaseRoutes.deploy, { body: { commit: commit! } });
       const target = view.desired!.commit;
@@ -175,7 +180,10 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
         return outcome === "healthy" ? view : undefined;
       };
       if (values.wait === true) {
-        view = settled() ?? await pollUntil({ deadlineMs: deployWaitMs, everyMs: 1_000, timedOut: () => new CliError("failed", `deployment wait timed out\n${releaseText(view)}`) }, async () => {
+        view = settled() ?? await pollUntil({
+          deadlineMs: deployWaitMs, everyMs: 1_000, timedOut: () => new CliError("failed", `deployment wait timed out\n${releaseText(view)}`),
+          shown: { to: io.stderr, state: () => releaseText(view), stopped: () => "Stopped waiting. The deployment carries on, and `nexus release` shows where it is" },
+        }, async () => {
           view = await request(api, releaseRoutes.release, {});
           return settled();
         });
