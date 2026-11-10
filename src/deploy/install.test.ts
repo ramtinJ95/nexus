@@ -334,7 +334,7 @@ test("a rerun by hand keeps the release another commit installed, and starts it 
     const kept = await ranBy(role);
     assert.ok(kept.ran.includes(`start_unit nexus-${role}.service`), kept.ran.join("\n"));
     assert.deepEqual(kept.ran.filter((line) => /^(install_release|link_release|install_unit|make_state|usermod|tailscale)\b/.test(line)), [], "it installs nothing");
-    assert.match(kept.stdout, new RegExp(`^${link} runs ${deployed}, and this checkout holds uncommitted changes\\. This run changes the config and keeps that release`, "m"));
+    assert.match(kept.stdout, new RegExp(`^${link} runs ${deployed}, and this checkout holds uncommitted changes or no commit git can read\\. This run changes the config and keeps that release`, "m"));
     const upgraded = await ranBy(role, "--upgrade");
     assert.ok(upgraded.ran.includes("install_release") && upgraded.ran.includes(`link_release ${join(upgraded.opt, link)}`), upgraded.ran.join("\n"));
   }

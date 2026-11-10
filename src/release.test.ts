@@ -105,7 +105,7 @@ test("a release cut from a checkout records its commit only while the checkout h
   assert.equal(await recorded(), "", "a new file the release packages");
 });
 
-test("a role installer keeps the release its link runs when another commit cut it, and installs over one cut from the checkout's commit, none yet, or with --upgrade", async (t) => {
+test("a role installer keeps the release its link runs, even one cut from the checkout's own commit, and installs only when there is none yet or with --upgrade", async (t) => {
   const { repo, head } = await checkout(t);
   const opt = await tempDir("nexus-links-", t);
   const deployed = "d".repeat(40);
@@ -123,9 +123,9 @@ test("a role installer keeps the release its link runs when another commit cut i
   });
   assert.equal((await keeps("--upgrade")).code, 1, "--upgrade installs");
   await writeFile(join(opt, "releases", deployed, "release-commit"), `${head}\n`);
-  assert.equal((await keeps()).code, 1, "the checkout's own commit installs");
+  assert.match((await keeps()).stdout, new RegExp(`^control-current runs ${head}, and this checkout holds ${head}\\.[^\\n]*\\nrelease=${deployed}\\n$`), "the deployer's release of the checkout's commit, named by that commit, is kept rather than rebuilt under its content hash");
   await writeFile(join(repo, "src/a.ts"), "export {};\n");
-  assert.match((await keeps()).stdout, new RegExp(`^control-current runs ${head}, and this checkout holds uncommitted changes\\.`), "changes count as another commit");
+  assert.match((await keeps()).stdout, new RegExp(`^control-current runs ${head}, and this checkout holds uncommitted changes or no commit git can read\\.`));
   await writeFile(join(opt, "releases", deployed, "release-commit"), "");
   assert.match((await keeps()).stdout, new RegExp(`^control-current runs release ${deployed}, which records no commit, and this`));
   assert.equal((await keeps("--upgrade")).code, 1);

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Installs or upgrades the Nexus control plane on this machine from the checkout this script is in. deploy/install.sh
 # runs it after writing /etc/nexus/control.json, and the deployer runs it with NEXUS_PREPARE=1 from each release it
-# installs, by this name. When the control plane runs another commit than this checkout's, it installs nothing and
-# only starts that release on the config, unless --upgrade. An install refuses a registry newer than this checkout's
+# installs, by this name. Once the control plane runs a release, it installs nothing and only starts that release on
+# the config, unless --upgrade. An install refuses a registry newer than this checkout's
 # migrations.
 #
 # Safe to rerun. The release becomes /opt/nexus/releases/<content hash> (see deploy/release.sh), and

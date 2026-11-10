@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Installs or upgrades the Nexus probe on this node from the checkout this script is in. deploy/install.sh runs it
 # after writing /etc/nexus/probe.json, and the deployer runs it with NEXUS_PREPARE=1 from each release it installs,
-# by this name. When the probe runs another commit than this checkout's, it installs nothing and only starts that
-# release on the configs, unless --upgrade.
+# by this name. Once the probe runs a release, it installs nothing and only starts that release on the configs,
+# unless --upgrade.
 #
 # Safe to rerun. The release becomes /opt/nexus/releases/<content hash> (see deploy/release.sh), and
 # /opt/nexus/current points at the newest.

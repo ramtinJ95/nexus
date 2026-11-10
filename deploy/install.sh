@@ -10,8 +10,7 @@
 # runs the role installers, asks for the agents' credentials this machine lacks (src/deploy/credentials.ts), and ends
 # with what is left for the person. Without a terminal, or with --non-interactive, the credentials come from NEXUS_*
 # variables instead. Safe to rerun: an existing config keeps its values and secrets, and gains only what is missing,
-# an existing credential is left as it is, and a role that runs another commit than this checkout's keeps its release
-# unless --upgrade.
+# an existing credential is left as it is, and a role that already runs a release keeps it unless --upgrade.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

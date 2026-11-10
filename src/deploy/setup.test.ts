@@ -448,7 +448,7 @@ test("the watch's config write names --github-watch where parseFlags reads it, e
   assert.equal(parseFlags(rewrite.slice(rewrite.indexOf(" write ") + 1).split(" ")).flags.githubWatch, true, rewrite);
 });
 
-test("--upgrade reaches each role's installer, which installs this checkout's release over one another commit runs, and never the deployer's", async () => {
+test("--upgrade reaches each role's installer, which installs this checkout's release over the one a role runs, and never the deployer's", async () => {
   const args = ["--upgrade", "--admit", "macbook"];
   assert.deepEqual((await installing(args, ["control"])).ran.filter((line) => line.startsWith("bash")), [
     "bash ./deploy/install-control.sh --upgrade", "bash ./deploy/install-probe.sh --upgrade", "bash ./deploy/install-deployer.sh control probe", "bash ./deploy/install-control.sh --upgrade",

@@ -2,7 +2,7 @@
  * The installer once `deploy/install.sh` has checked the prerequisites: `node src/deploy/setup.ts install --package-manager
  * apt|dnf|other [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]...
  * [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--upgrade]` writes /etc/nexus/{control,control-plane,probe,deployer}.json,
- * runs the role installers, which keep a release another commit runs unless --upgrade, joins a node to its control
+ * runs the role installers, which keep the release a role runs unless --upgrade, joins a node to its control
  * plane with a join token, gives the agents their credentials (src/deploy/credentials.ts) and says what is left for the person. `write`, with the same flags and `--github-watch`, writes
  * the configs alone, which `install` runs under the deployer's lock.
  * `node src/deploy/setup.ts signed-in <control.json>` exits 0 when the harness that config names is signed in.
@@ -86,7 +86,7 @@ export interface Flags {
   nonInteractive: boolean;
   /** Names the control plane's GitHub token file as github.tokenFile, which the credentials step wrote. */
   githubWatch: boolean;
-  /** Installs the checkout's release over one that another commit runs. */
+  /** Installs the checkout's release over the one a role runs. */
   upgrade: boolean;
   /** install.sh's, which it needs before Node is installed. */
   packageManager?: PackageManager;

@@ -25,18 +25,18 @@ checkout_commit() {
   git -C "$1" rev-parse HEAD 2>/dev/null || true
 }
 
-# Keeps the release the link $1 runs and points $release at it, unless there is none yet, it was cut from the commit
-# the checkout at $2 holds, or $3 is --upgrade. A rerun from a person's checkout then only configures a role that
-# `nexus deploy` moved on. Callers hold the deployer's lock, so the link cannot move after this reads it.
+# Keeps the release the link $1 runs and points $release at it, and names the commit the checkout at $2 holds, unless
+# there is no release yet or $3 is --upgrade. A rerun then only configures, even from a checkout at the running commit,
+# whose release the deployer named by that commit and the checkout would name by its content. Callers hold the
+# deployer's lock, so the link cannot move after this reads it.
 keeps_release() {
   local link=$1 target running checkout
   [ "${3:-}" != --upgrade ] || return 1
   target=$(readlink "$link") || return 1
   running=$(tr -d '[:space:]' < "$link/release-commit" 2>/dev/null || true)
   checkout=$(checkout_commit "$2")
-  if [ -n "$checkout" ] && [ "$running" = "$checkout" ]; then return 1; fi
   release=$(basename "$target")
-  echo "$(basename "$link") runs ${running:-release $release, which records no commit}, and this checkout holds ${checkout:-uncommitted changes}. This run changes the config and keeps that release. nexus deploy installs another, or --upgrade installs this checkout's"
+  echo "$(basename "$link") runs ${running:-release $release, which records no commit}, and this checkout holds ${checkout:-uncommitted changes or no commit git can read}. This run changes the config and keeps that release. nexus deploy installs another, or --upgrade installs this checkout's"
 }
 
 # Installs the checkout at $1 as a release, unless an identical one exists, and sets $release to its hash.
