@@ -9,7 +9,6 @@ import type { WebSocket } from "ws";
 import { CliError, UsageError, type ErrorKind } from "./transport.ts";
 import { callOf, type ApiRoute, type CallArgs, type ReplyOf } from "../contract/route.ts";
 import { threadRoutes } from "../contract/threads.ts";
-import type { Versions } from "./config.ts";
 
 export type Values = Record<string, string | boolean | string[] | undefined>;
 export type Api = (method: string, path: string, body?: unknown, idleMs?: number) => Promise<unknown>;
@@ -27,6 +26,8 @@ export interface Io {
   readonly stderr: Writable & { readonly isTTY?: boolean };
   readonly env: Readonly<Record<string, string | undefined>>;
 }
+/** This CLI's version, and the one its control plane's health reports, null when it reports none. */
+export interface Versions { cli: string; control: string | null }
 interface Local {
   connect(path: string): Promise<WebSocket>;
   /** The versions the health read before the command's first request found. */

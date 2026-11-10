@@ -4,8 +4,8 @@ import type { Whoami } from "../../contract/threads.ts";
 import { saveJson } from "../../node-base/json-file.ts";
 import { version } from "../../version.ts";
 import { call, CliError, UsageError } from "../transport.ts";
-import { type Command, type Io, noteTo, str } from "../kit.ts";
-import { controlPorts, configFile, readConfig, socksOf, controlUrl, skewNote, versionsOf, versionsText, type Versions } from "../config.ts";
+import { type Command, type Io, type Versions, noteTo, str } from "../kit.ts";
+import { controlPorts, configFile, readConfig, socksOf, controlUrl, skewNote, versionsOf, versionsText } from "../config.ts";
 
 function candidatesOf(host: string): URL[] {
   if (host.includes("://")) return [controlUrl(host)];
@@ -21,7 +21,7 @@ function connectText(url: string, file: string, caller: Whoami, versions: Versio
   const admit = (why: string) => `To let it ${why}, run this on the control plane's machine, in its nexus checkout after git pull. It changes the config and keeps the release that runs: sudo deploy/install.sh --admit ${caller.node}`;
   return [
     head,
-    versions === null ? "The control plane does not tell this device its version until it admits it." : versionsText(versions),
+    versions === null ? `This CLI runs Nexus ${version}. The control plane does not tell this device its version until it admits it.` : versionsText(versions),
     `This device is tailnet node ${caller.node}. It`,
     may(caller.allowed, "read threads, projects and nodes"),
     may(caller.person, "start and message threads"),

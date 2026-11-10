@@ -85,7 +85,7 @@ test("a control plane newer than the CLI gets a terminal one line to pull the ch
   const closed = await control(t, null);
   const unread = await inProcess(["connect", closed.url], env);
   assert.equal(unread.code, 0, unread.stderr);
-  assert.match(unread.stdout, /^The control plane does not tell this device its version until it admits it\.$/m, "a control plane that refuses health is not asked again");
+  assert.match(unread.stdout, new RegExp(`^This CLI runs Nexus ${pattern(version)}\\. The control plane does not tell this device its version until it admits it\\.$`, "m"), "a control plane that refuses health is not asked again");
 });
 
 test("the config lives under XDG_CONFIG_HOME, and a file already at ~/.config stays the one read and written", async (t) => {

@@ -5,7 +5,7 @@ import { z } from "zod";
 import { readJson } from "../node-base/json-file.ts";
 import { parse } from "../parse.ts";
 import { call, CliError, type Endpoint, type HostPort } from "./transport.ts";
-import { type Io, type Note, type Values, str } from "./kit.ts";
+import { type Io, type Note, type Values, type Versions, str } from "./kit.ts";
 import { version } from "../version.ts";
 import { ports } from "../node-base/node-layout.ts";
 
@@ -63,9 +63,6 @@ function atLeast(parts: readonly number[], min: readonly number[]): boolean {
   const i = parts.findIndex((n, j) => n !== min[j]);
   return i === -1 || parts[i]! > min[i]!;
 }
-
-/** This CLI's version, and the one its control plane's health reports, null when it reports none. */
-export interface Versions { cli: string; control: string | null }
 
 export function versionsOf(health: unknown): Versions {
   const reported = (health as { version?: unknown } | null)?.version;
