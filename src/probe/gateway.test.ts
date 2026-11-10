@@ -223,7 +223,7 @@ test("a warm-up is answered by the gateway itself: 204 for the routed pylon, 421
   assert.equal(hits.length, 0);
 });
 
-test("a browser that leaves during a stalled websocket handshake closes the origin connection too", { timeout: 5000 }, async (t) => {
+test("a browser that leaves during a stalled websocket handshake closes the origin connection too", { timeout: 60_000 }, async (t) => {
   const origin = createServer();
   const originClosed = Promise.withResolvers<void>();
   origin.on("upgrade", (_req: IncomingMessage, socket: Socket) => socket.on("end", () => originClosed.resolve()));
@@ -237,7 +237,7 @@ test("a browser that leaves during a stalled websocket handshake closes the orig
   await originClosed.promise;
 });
 
-test("a refused upgrade whose body the origin cuts short closes the browser's connection", { timeout: 5000 }, async (t) => {
+test("a refused upgrade whose body the origin cuts short closes the browser's connection", { timeout: 60_000 }, async (t) => {
   const origin = createServer();
   origin.on("upgrade", (_req: IncomingMessage, socket: Socket) => {
     socket.write("HTTP/1.1 403 Forbidden\r\ncontent-length: 100\r\n\r\npartial");

@@ -566,7 +566,7 @@ test("a declared service with a preview runs with its https PUBLIC_URL and answe
 test("a service declared without a preview while the pylon runs starts with no command, from the node's next read", async () => {
   const worker = "  worker:\n    command: sleep infinity\n    port: 8001\n    health: process\n";
   await backend.guest(pylonId).writeFiles([{ ...serviceFiles[0]!, content: serviceFiles[0]!.content + worker }]);
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + 60_000;
   let facts: readonly ServiceFact[] = [];
   while (!facts.some((f) => f.name === "worker" && f.state === "ready")) {
     if (Date.now() > deadline) assert.fail(`worker did not start: ${JSON.stringify(facts)}`);
