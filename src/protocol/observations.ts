@@ -215,9 +215,12 @@ const pylonSchema = z.discriminatedUnion("phase", [
   }),
 ]) satisfies z.ZodType<PylonObservation>;
 
+/** The most reports a snapshot carries, so the probe's journal keeps no more than this. */
+export const maxSnapshotEvents = 100;
+
 const observationSchema = z.looseObject({
   node: unchecked<NodeName>(), observedAt: unchecked<string>(), probeBootId: unchecked<string>(),
-  events: z.array(reportedEventSchema).max(100),
+  events: z.array(reportedEventSchema).max(maxSnapshotEvents),
   capacity: unchecked<NodeCapacity>(),
   artifacts: z.array(unchecked<ArtifactId>()),
   jobs: z.array(jobStatusSchema),

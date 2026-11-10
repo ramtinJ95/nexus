@@ -1,4 +1,5 @@
 import { imagesView } from "../image-rollout.ts";
+import { HttpError } from "../http-error.ts";
 import { feature, type Features } from "../features.ts";
 import type { ImageOperation } from "../image-store.ts";
 import type { ImageId } from "../../ids.ts";
@@ -16,7 +17,7 @@ export function imageRoutes(kit: ApiKit, features: Features): readonly RouteEntr
 
   function recordImage(body: unknown): ImageManifest {
     const manifest: ImageManifest = parse(imageSchema, body);
-    registry.images.saveImage(manifest, null);
+    if (!registry.images.addImage(manifest)) throw new HttpError(409, `image ${manifest.id} is recorded with another manifest. Record the new image under a new ID`);
     return manifest;
   }
 

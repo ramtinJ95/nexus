@@ -4,7 +4,7 @@ import { pylonRoutes } from "../../contract/pylon.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { itemRoutes, projectRoutes } from "../../contract/projects.ts";
 import { questionRoutes, reviewRoutes } from "../../contract/reviews.ts";
-import { refreshAfter, showError, whenRunning } from "./page.js";
+import { notify, refreshAfter, whenRunning } from "./page.js";
 import { setOpen } from "./nav.js";
 import { showSession } from "./terminal-tab.js";
 
@@ -56,10 +56,13 @@ document.addEventListener("click", async (event) => {
   setOpen(null);
   try {
     await handlers[action](thread, button.dataset);
-    showError("action-error", null);
+    notify(null);
     await refreshAfter();
   } catch (err) {
-    showError("action-error", err);
-    button.disabled = false;
+    notify(err.timedOut ? new Error(`This may not have happened: ${err.message}. Press it again to try again.`) : err);
+  } finally {
+    // A swap replaced the button of an action that changed its region. One that changed none, such as Show in
+    // terminal, is still in the page and takes another press.
+    if (button.isConnected) button.disabled = false;
   }
 });

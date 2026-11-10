@@ -20,6 +20,7 @@ import { readTranscript, transcriptDeadlineMs, transcriptStart, type ClaudeConve
 import { pipeOutput, type OpenPipe } from "../pipe.ts";
 import type { NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
+import { githubRepo } from "./github.ts";
 import { runningProbe } from "./locator.ts";
 import { logOnce, type Log, type LogOnce } from "./log-once.ts";
 import { reportedAsks, type WaitingAsk } from "./questions.ts";
@@ -27,7 +28,7 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import type { Watch } from "./conversation-view.ts";
 
-type ClaudeConversationRegistry = Pick<Registry, "threads" | "nodes" | "questions">;
+type ClaudeConversationRegistry = Pick<Registry, "threads" | "nodes" | "questions" | "projects">;
 
 export interface ClaudeConversations {
   /** From the registry alone, so it never reaches the pylon. */
@@ -147,7 +148,7 @@ export function claudeConversations(options: { registry: ClaudeConversationRegis
       const from = stored?.session === session ? stored.cursor : transcriptStart;
       let found: TranscriptRead | null;
       try {
-        found = await readTranscript((argv) => probe.stream(t.pylonId, argv), session, from);
+        found = await readTranscript((argv) => probe.stream(t.pylonId, argv), session, from, githubRepo(registry.projects.project(t.project)?.repoUrl ?? null));
       } catch (err) {
         r.failures.failed("transcript", `${t.pylonId}: reading Claude's transcript failed, so it shows the last read: ${(err as Error).message}`);
         return;

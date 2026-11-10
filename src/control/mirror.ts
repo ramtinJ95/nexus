@@ -23,8 +23,10 @@ const keptCommits = 1024;
  */
 export function projectMirror(options: { githubToken: string | null }): ProjectMirror {
   const kept = new Map<string, SetupInputs>();
-  const keep = (url: string, inputs: SetupInputs) => {
-    const key = `${url} ${inputs.commit}`;
+  // The paths are in the key, so an edit of a project's templateInputs never gets a read made for the old list.
+  const keyOf = (url: string, commit: string, paths: readonly string[]) => `${url} ${commit} ${JSON.stringify(paths)}`;
+  const keep = (url: string, paths: readonly string[], inputs: SetupInputs) => {
+    const key = keyOf(url, inputs.commit, paths);
     kept.delete(key);
     kept.set(key, inputs);
     if (kept.size > keptCommits) kept.delete(kept.keys().next().value!);
@@ -40,10 +42,11 @@ export function projectMirror(options: { githubToken: string | null }): ProjectM
         bounded.throwIfAborted();
         const commit = "commit" in ref ? ref.commit : await tipOf(project.repoUrl, ref.branch, env, bounded);
         if (commit === null) return null;
-        const known = kept.get(`${project.repoUrl} ${commit}`);
-        if (known !== undefined) return keep(project.repoUrl, known);
-        const read = await fetchInputs(project.repoUrl, ref, env, bounded);
-        return read === null ? null : keep(project.repoUrl, read);
+        const paths = project.templateInputs ?? [];
+        const known = kept.get(keyOf(project.repoUrl, commit, paths));
+        if (known !== undefined) return keep(project.repoUrl, paths, known);
+        const read = await fetchInputs(project.repoUrl, ref, paths, env, bounded);
+        return read === null ? null : keep(project.repoUrl, paths, read);
       } catch (err) {
         if (deadline.aborted) throw new Error(`git did not read ${project.repoUrl} within ${readTimeoutMs / 1000} s`);
         throw err;
@@ -64,7 +67,7 @@ async function tipOf(url: string, branch: string, env: NodeJS.ProcessEnv, signal
 }
 
 /** Fetches the branch itself rather than the tip ls-remote saw, so a force-push that drops that tip cannot fail the read. */
-async function fetchInputs(url: string, ref: { branch: string } | { commit: string }, env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<SetupInputs | null> {
+async function fetchInputs(url: string, ref: { branch: string } | { commit: string }, paths: readonly string[], env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<SetupInputs | null> {
   const dir = await mkdtemp(join(tmpdir(), "nexus-mirror-"));
   const git = (args: readonly string[]) => exit("git", [`--git-dir=${dir}`, ...args], { env, signal });
   const ok = async (args: readonly string[]) => {
@@ -82,10 +85,18 @@ async function fetchInputs(url: string, ref: { branch: string } | { commit: stri
     }
     const commit = await ok(["rev-parse", "--verify", "FETCH_HEAD^{commit}"]);
     // A `<rev>:<path>` name takes no peel suffix, and the ID comes from the tree, so the blob is never fetched.
-    const setup = ["rev-parse", "-q", "--verify", "FETCH_HEAD:.nexus/setup"];
-    const found = await git(setup);
-    if (found.code !== 0 && found.code !== 1) throw failed(setup, found);
-    return { commit, setupBlob: found.code === 0 ? found.stdout.trim() : null };
+    const objectAt = async (path: string): Promise<string | null> => {
+      const read = ["rev-parse", "-q", "--verify", `FETCH_HEAD:${path}`];
+      const found = await git(read);
+      if (found.code !== 0 && found.code !== 1) throw failed(read, found);
+      return found.code === 0 ? found.stdout.trim() : null;
+    };
+    const setupBlob = await objectAt(".nexus/setup");
+    if (paths.length === 0) return { commit, setupBlob };
+    const entries: [string, string | null][] = [];
+    for (const path of paths) entries.push([path, await objectAt(path)]);
+    // fromEntries defines each key, where assignment would call Object.prototype's setter for a path named __proto__.
+    return { commit, setupBlob, inputBlobs: Object.fromEntries(entries) };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

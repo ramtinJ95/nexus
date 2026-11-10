@@ -344,15 +344,18 @@ owns, one with the overlay's `~/.nexus/pylon.json`, and the image build starts n
 disk carries events that every pylon booted from it would send. Neither
 wait holds up Claude, whose hook only writes the file.
 
-From probe to control, the production probe journals its last 100 session
-reports in `events.sqlite` under its state root, and answers the hook only after
+From probe to control, the production probe journals the newest 20 session
+reports of each pylon, and the newest 100 of the node, the most a snapshot
+carries, in `events.sqlite` under its state root. A pylon that reports in a loop
+then evicts only its own older reports; another pylon's go only once the node's
+100 newest are all newer. It answers the hook only after
 the journal commits. Every snapshot carries that journal, so it replays the
 reports a link or probe restart cut off; `event_receipts` deduplicates its
 sequence per node, and control reads the receipt once per snapshot and skips the
 reports at or below it without parsing them again. This is a bounded
 buffer for a control plane that is not following the probe, not an unbounded
-delivery guarantee: more than 100 reports on a node while control is away loses
-the oldest. A sender whose answer was lost posts the event again, and the probe
+delivery guarantee: more than 20 reports from one pylon, or 100 on the node,
+while control is away loses the oldest. A sender whose answer was lost posts the event again, and the probe
 journals it under a new sequence. Control keeps the IDs of the reports it applied
 at its session's latest stamp, and ignores a report that repeats one. A resend
 at an older stamp already fails the stamp check. A report without an ID, such as
@@ -501,7 +504,7 @@ record never changes an earlier entry:
 | `queue` | `op`, `text` | A `queue-operation`: a message typed during a turn joined or left Claude's queue |
 | `notice` | `tone`, `text`, optional `usageLimit` | An interruption, a compaction, a model error, a local command's output, or Claude Code's own `system/informational` message. `usageLimit` (`resetsAt`, Unix ms or null) marks the error an assistant record with `apiError: "usage_limit_reached"` gives, with `apiErrorParams.rate_limit_info.resetsAt` |
 | `turn` | `durationMs` | `system/turn_duration` |
-| `pull-request` | `number`, `url`, `repository` | A `pr-link`: Claude opened a pull request. Claude Code writes it again each time it saves the session's metadata, so clients show the first entry for each `url`. `url` is always an https URL |
+| `pull-request` | `number`, `url`, `repository` | A `pr-link`: Claude opened a pull request. Claude Code writes it again each time it saves the session's metadata, so clients show the first entry for each `url`. The guest writes the record, so the control plane keeps it only when its URL is `https://github.com/<the project's repository>/pull/<its number>`, ignoring case. `repository` is the project's GitHub repository and `url` that URL. An entry stored before the check, of another repository, reads as a `record` entry of type `pr-link` in its place |
 | `record` | `type`, `summary` | Any record shape the parser does not know, a malformed line, or a record over 4 MiB, which is skipped |
 
 Every entry has `at`, the record's time in Unix milliseconds. Records Claude Code keeps

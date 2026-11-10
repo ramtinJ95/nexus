@@ -1,5 +1,5 @@
 import { afterSend, emptyReview, formatReview, kinds, linesLabel, noteOn, place, rangeOf, readReview, rowsOf } from "./review.js";
-import { el, holdReload, present, showError } from "./page.js";
+import { el, holdReload, notify, present } from "./page.js";
 import { kept, storageKeys } from "./contract.ts";
 import { thread } from "./checkout.js";
 import { activeTab, fileView, showTab } from "./tab-bar.js";
@@ -240,7 +240,7 @@ function decorate() {
 /** Puts the review in the composer, in place of the review put there before if the composer still holds it. */
 function composeReview() {
   const prompt = document.getElementById("prompt-text");
-  if (prompt === null) return showError("action-error", new Error("This thread takes no messages now, so the review can't go to the composer."));
+  if (prompt === null) return notify(new Error("This thread takes no messages now, so the review can't go to the composer."));
   const text = formatReview(review.notes);
   const before = review.composed?.text;
   prompt.value = before !== undefined && prompt.value.includes(before) ? prompt.value.replace(before, () => text)
