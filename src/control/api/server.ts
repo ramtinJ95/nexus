@@ -165,7 +165,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   const sse = eventStreams(streamStallMs);
-  const { open } = sse;
+  const { open, noRoom } = sse;
 
   const draining = () => isDraining(registry.releases.drain(), registry.now());
   const { gate } = options;
@@ -234,6 +234,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     });
     const match = atPath.find(({ entry }) => entry[0] === req.method);
     const { caller, roles, host } = await admitted(req, (match ?? atPath[0])?.entry[2]);
+    const foreign = foreignSite(req);
+    if (foreign !== null && !(path !== null && opensPage(req, path))) throw new Refusal("forbidden", `${path ?? "the API"} does not answer pages from ${foreign}`);
     if (req.method !== "GET") requireJson(req);
 
     if (path === null) throw new Refusal("invalid", `the request path ${JSON.stringify(req.url)} is not a valid URL path`);
@@ -244,7 +246,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const url = new URL(req.url ?? "/", "http://nexus");
     const run = () => route(m, { query: url.searchParams, caller, roles, host, body: (empty) => readJson(req, empty) });
     const reply = policy.startsTurn ? await gate.run(async () => run()) : await run();
-    if (reply.stream !== undefined) return reply.stream(res);
+    if (reply.stream !== undefined) {
+      if (foreign !== null) throw new Refusal("forbidden", `${path} streams to no page from ${foreign}`);
+      return reply.stream(res);
+    }
     if (reply.file !== undefined) sendFile(res, reply.file, reply.type, reply.cache);
     else if (reply.headers !== undefined) res.writeHead(reply.status, reply.headers).end(reply.body);
     else if (reply.body === undefined) res.writeHead(reply.status).end();
@@ -295,12 +300,13 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    * as it maps any route's. A terminal takes a place among the streams, so a delete ends it too.
    */
   async function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
-    demand((await admitted(req, attach)).roles, attach);
+    const { caller, roles } = await admitted(req, attach);
+    demand(roles, attach);
     if (stopping) throw new Refusal("unavailable", "the control plane is stopping");
-    // CORS does not guard a WebSocket handshake, and previews are served under the API's hostname on other ports, so
-    // a preview's page could open a terminal from the browser of anyone allowed. A browser always sends Origin.
-    const origin = req.headers.origin;
-    if (origin !== undefined && origin !== `${req.socket instanceof TLSSocket ? "https" : "http"}://${req.headers.host}`) throw new Refusal("forbidden", `the attach route does not answer pages from ${origin}`);
+    // CORS does not guard a WebSocket handshake, so without this a preview's page could open a terminal from the
+    // browser of anyone allowed.
+    const foreign = foreignSite(req);
+    if (foreign !== null) throw new Refusal("forbidden", `the attach route does not answer pages from ${foreign}`);
     const t = thread(attachRoute.exec(pathOf(req.url)!)![1]!);
     let request: ReturnType<typeof parseAttachQuery>;
     try {
@@ -312,10 +318,11 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const pylon = registry.threads.pylon(t.pylonId)!;
     const probe = probes.get(pylon.node);
     if (probe === undefined) throw new Refusal("unavailable", `no probe is configured for ${pylon.node}`);
-    if (open.size >= maxStreams) throw new Refusal("unavailable", `${maxStreams} streams are open, the most this control plane serves at once`);
+    const full = noRoom(caller, `${maxStreams} streams are open, the most this control plane serves at once`);
+    if (full !== null) throw new Refusal("unavailable", full);
     if (socket.destroyed) return;
     const stop = new AbortController();
-    const handle = { thread: t.id, end: () => stop.abort("deleted" satisfies Ending) };
+    const handle = { thread: t.id, caller, end: () => stop.abort("deleted" satisfies Ending) };
     open.add(handle);
     try {
       // ws answers a malformed handshake with a 400 itself and never calls back, so the socket's close ends the wait.
@@ -428,6 +435,27 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 }
 
 const attach = { role: "person", action: "attach to a thread's pylon" } satisfies Policy;
+
+/**
+ * Where a request a browser sent comes from, when that is not one of the API's own pages: another site, another
+ * origin of this one, or the Origin it names. whois names the machine, so a page of another app, or a preview, which
+ * is the API's hostname on another port, could otherwise wake a pylon or hold a stream from the person's browser with
+ * a GET it cannot read. A browser sends Sec-Fetch-Site only to HTTPS and loopback addresses, and Origin over plain HTTP
+ * too on a non-GET, a CORS request such as an EventSource, and a WebSocket. The CLI and the client extensions send
+ * neither.
+ */
+function foreignSite(req: IncomingMessage): string | null {
+  const site = req.headers["sec-fetch-site"];
+  if (site === "cross-site") return "another site";
+  if (site === "same-site") return "another origin of this site";
+  const origin = req.headers.origin;
+  return origin === undefined || origin === `${req.socket instanceof TLSSocket ? "https" : "http"}://${req.headers.host}` ? null : origin;
+}
+
+/** A link from any page still opens the dashboard's pages, though nothing it loads in a frame or by script does. */
+function opensPage(req: IncomingMessage, path: string): boolean {
+  return req.method === "GET" && req.headers["sec-fetch-mode"] === "navigate" && req.headers["sec-fetch-dest"] === "document" && !path.startsWith("/v1/");
+}
 
 function requireJson(req: IncomingMessage) {
   if (req.headers["content-type"]?.split(";")[0]?.trim() !== "application/json") throw new Refusal("unsupported", "requests that change state must have content-type application/json");
