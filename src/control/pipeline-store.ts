@@ -1,6 +1,6 @@
 /** An item's phase is derived, so it is not stored. */
 import { json, type Db, type Holding } from "./db.ts";
-import type { ItemId, ProjectId } from "../ids.ts";
+import { requestIds, type ItemId, type ProjectId, type ThreadId } from "../ids.ts";
 import type { StartRequest } from "./start-request.ts";
 
 export interface ItemRecord {
@@ -25,11 +25,24 @@ export interface ItemRecord {
 
 export const holding = { tables: { pipeline_items: { record: "id" } } } as const satisfies Holding;
 
-export function pipelineStore(db: Db) {
+/** `startRequest` is the thread store's, which finds the thread an item became by the item's request ID. */
+export function pipelineStore(db: Db, startRequest: (requestId: string) => { thread: ThreadId } | undefined) {
   const { sql } = db;
   const items = db.hold(holding).records<ItemRecord>("pipeline_items");
+  const all = (): ItemRecord[] => sql("SELECT record FROM pipeline_items ORDER BY rowid").all().map((r) => json<ItemRecord>(r.record));
+  const threadOf = (id: ItemId) => startRequest(requestIds.pipeline(id))?.thread;
   return {
-    items: (): ItemRecord[] => sql("SELECT record FROM pipeline_items ORDER BY rowid").all().map((r) => json<ItemRecord>(r.record)),
+    participant: {
+      /** An item not queued yet is queued after the threads of the items it is after, which its queued thread then reads. */
+      keeps(threads: ReadonlyMap<ThreadId, unknown>): ReadonlyMap<ThreadId, string> {
+        return new Map(all().flatMap((item): [ThreadId, string][] => item.cancelled !== null || threadOf(item.id) !== undefined ? []
+          : item.after.flatMap((id): [ThreadId, string][] => {
+            const thread = threadOf(id);
+            return thread !== undefined && threads.has(thread) ? [[thread, `pipeline item ${item.id}, not queued yet, comes after it`]] : [];
+          })));
+      },
+    },
+    items: all,
     item: (id: ItemId): ItemRecord | undefined => items.get(id) ?? undefined,
     saveItem(record: ItemRecord) { items.save(record.id, record); },
   };

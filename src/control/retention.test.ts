@@ -156,6 +156,14 @@ test("an archived thread a feature still reads stays past its week, and the pass
     request: { project: "acme", title: "Next", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued",
     startNow: null, lastError: null, startedAt: null, firstMessage: null,
   });
+  const [ahead, behind] = ["it-000000000001", "it-000000000002"] as [ItemId, ItemId];
+  const built = testThread();
+  r.threads.createThread(built, testPylon(built), { key: { requestId: requestIds.pipeline(ahead), body: "{}" } });
+  r.threads.setThreadStatus(built.id, "archived");
+  const aheadThread = built.id;
+  const item = (id: ItemId, after: ItemId[]) => r.pipeline.saveItem({ id, project: "acme" as ProjectId, title: id, request: { project: "acme", title: id }, message: "Build it.", after, addedBy: "nLAPTOP", addedAt: w.now, approved: null, cancelled: null, lastError: null });
+  item(ahead, []);
+  item(behind, [ahead]);
   const withPr = w.closed("archived");
   r.prWatches.savePrWatch(withPr, { links: [{ pr: testPr({ number: 4, state: "open" }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   const asking = w.closed("archived");
@@ -171,7 +179,7 @@ test("an archived thread a feature still reads stays past its week, and the pass
   await w.passes();
   assert.equal(w.status(free), "deleted", "a thread nothing reads goes");
   const reasons: [ThreadId, string][] = [
-    [waitedFor, `queued thread ${queuedId} waits for it`], [withPr, "its pull request #4 is open"],
+    [waitedFor, `queued thread ${queuedId} waits for it`], [aheadThread, `pipeline item ${behind}, not queued yet, comes after it`], [withPr, "its pull request #4 is open"],
     [asking, "its question qn-open is open"], [builder, "its review rv-1 has not ended"], [reviewer, `review rv-1 of ${builder}, whose reviewer it is, has not ended`],
     [read, "the usage backfill holds its pylon"],
   ];

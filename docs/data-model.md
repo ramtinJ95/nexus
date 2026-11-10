@@ -125,7 +125,8 @@ Until then an archived thread keeps every record, and only its pylon's disk goes
 A thread stays past its 7 days while something still reads it. Each pass logs why once, for each thread it keeps.
 
 - A queued thread whose status is `queued` names it in its `after`.
-- One of its pull requests is open, as its PR watch last read it.
+- A pipeline item not queued yet comes after the item it became, so the item's queued thread will wait for it.
+- One of its pull requests is open, as its PR watch last read it. The watch keeps reading the state of an open pull request of an archived or deleted thread, sending nothing, so a merge after the archive frees the thread.
 - One of its questions is open.
 - A review that has not ended names it, as its builder, a reviewer, its check thread or a verify pylon.
 - The usage backfill or an archive's settle holds its pylon.

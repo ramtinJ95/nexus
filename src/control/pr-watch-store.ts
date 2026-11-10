@@ -43,6 +43,9 @@ export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: Thre
       },
     },
     prWatch: (thread: ThreadId): PrWatchState | null => watches.get(thread),
+    /** The threads with a pull request the watch last read open. */
+    withOpenPr: (): ThreadId[] => sql(`SELECT DISTINCT w.thread FROM pr_watches w, json_each(w.record, '$.links') l WHERE json_extract(l.value, '$.pr.state') = 'open'`)
+      .all().map((r) => r.thread as ThreadId),
     /**
      * Replaces the thread's PR watch, and tells the event log of new feedback, of each PR linked since the last save, and
      * of an error that starts or clears.

@@ -129,15 +129,18 @@ for (const state of ["merged", "closed"] as const) test(`${state} is recorded an
   assert.equal(f.messages.length, 0);
 });
 
-for (const status of ["archived", "deleted"] as const) test(`${status} threads neither discover nor poll or send`, async (t) => {
+for (const status of ["archived", "deleted"] as const) test(`${status} threads send nothing, and read only the state of a PR still open, which retention waits for`, async (t) => {
   const f = fixture(); t.after(() => f.registry.close()); await f.watcher.poll();
   f.registry.threads.setThreadStatus(f.id, status); f.calls.length = 0;
   f.snapshot.comments.push({ id: "new", text: "new comment" });
-  await f.watcher.poll(); assert.deepEqual(f.calls, []); assert.equal(f.messages.length, 0);
+  await f.watcher.poll(); assert.deepEqual(f.calls, ["find:acme/repo:feature:all", "poll"]); assert.equal(f.messages.length, 0);
   if (status === "archived") {
     f.registry.threads.setThreadStatus(f.id, "active"); await f.watcher.poll(); assert.equal(f.messages.length, 1);
     f.registry.threads.setThreadStatus(f.id, "archived"); await f.watcher.poll();
     f.registry.threads.setThreadStatus(f.id, "active"); await f.watcher.poll(); assert.equal(f.messages.length, 1);
+  } else {
+    f.snapshot.pr.state = "merged"; await f.watcher.poll(); f.calls.length = 0;
+    await f.watcher.poll(); assert.deepEqual(f.calls, [], "once its PR merged, nothing of it is read");
   }
 });
 
@@ -674,13 +677,21 @@ test("a thread a queued thread waits for has its PR's merge seen when archived, 
   f.registry.threads.setThreadStatus(f.id, "archived");
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
   await f.watcher.poll();
-  assert.equal(merged(f.id), "open", "an archived thread nothing waits for is not polled");
-  queued([f.id], "archived");
+  assert.equal(merged(f.id), "merged", "an archived thread whose PR the watch last read open has its merge seen, which retention waits for");
+
+  const closed = f.add("th-closed");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "closed" } };
+  f.registry.prWatches.savePrWatch(closed, { links: [{ pr: { ...f.snapshot.pr }, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  f.registry.threads.setThreadStatus(closed, "archived");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
   await f.watcher.poll();
-  assert.equal(merged(f.id), "open", "a cancelled queued thread waits for nothing");
-  queued([f.id]);
+  assert.equal(merged(closed), "closed", "an archived thread with no open PR that nothing waits for is not polled");
+  queued([closed], "archived");
   await f.watcher.poll();
-  assert.equal(merged(f.id), "merged", "an archived predecessor's merge is seen");
+  assert.equal(merged(closed), "closed", "a cancelled queued thread waits for nothing");
+  queued([closed]);
+  await f.watcher.poll();
+  assert.equal(merged(closed), "merged", "an archived predecessor's merge is seen");
 
   const capped = f.add("th-capped");
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "open" } };
