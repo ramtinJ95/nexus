@@ -27,8 +27,6 @@ export function raiser(tabs, thread) {
   return first(tabs.filter((tab) => tab.thread === thread)) ?? first(tabs.filter((tab) => tab.leading)) ?? first(tabs) ?? null;
 }
 
-
-
 /** Returns a function that takes the latest rows and returns when a reply it holds back comes due, or null. */
 export function coordinator(notify) {
   let previous = null;

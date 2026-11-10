@@ -160,7 +160,7 @@ function tab(browser, { fetch, now = () => 0, notify = () => {}, shown = () => {
     constructor(url) { browser.streams.push(this); this.url = url; this.closed = false; }
     close() { this.closed = true; }
   }
-  const win = { BroadcastChannel: Channel, listeners: [], addEventListener: (kind, listener) => win.listeners.push({ kind, listener }) };
+  const win = { BroadcastChannel: Channel, listeners: [], focuses: 0, focus: () => { win.focuses += 1; }, addEventListener: (kind, listener) => win.listeners.push({ kind, listener }) };
   const fire = (kind, event) => { for (const l of win.listeners) if (l.kind === kind) l.listener(event); };
   let code;
   let holds = false;
@@ -204,7 +204,7 @@ function tab(browser, { fetch, now = () => 0, notify = () => {}, shown = () => {
   close.channel = browser.channels.at(-1);
   // As a crashed tab does, it stops hearing the channel and says nothing.
   const freeze = () => browser.channels.splice(browser.channels.indexOf(close.channel), 1);
-  return { ...code, doc, favicon, timers, intervals, show, focus, close, freeze };
+  return { ...code, doc, favicon, timers, intervals, show, focus, close, freeze, win };
 }
 const browser = () => ({ channels: [], streams: [], locked: false, waiting: [], posts: 0, tabs: 0 });
 const json = (body) => ({ ok: true, text: async () => JSON.stringify(body) });
@@ -676,4 +676,44 @@ test("the notifications control reads the browser's permission, and asks for it 
   unasked.Notification.permission = "denied";
   for (const l of unasked.status.listeners) l();
   assert.deepEqual(read(unasked.button), ["System notifications blocked in the browser's site settings", true], "a change in the site settings shows too");
+});
+
+test("a click on a notice raised while no tab showed its thread brings forward a tab that has shown it since, and opens nothing", async (t) => {
+  const notifications = [];
+  class Notification {
+    constructor(title, options) { Object.assign(this, { title, options }); notifications.push(this); }
+    close() {}
+  }
+  const assigned = [];
+  let focuses = 0;
+  const globals = { location: { assign: (url) => assigned.push(url) }, window: { focus: () => { focuses += 1; } }, Notification };
+  const before = Object.fromEntries(Object.keys(globals).map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  for (const [k, v] of Object.entries(globals)) Object.defineProperty(globalThis, k, { value: v, configurable: true, writable: true });
+  t.after(() => { for (const [k, d] of Object.entries(before)) d === undefined ? delete globalThis[k] : Object.defineProperty(globalThis, k, d); });
+
+  let listed = [{ id: "t1", title: "Fix", attention: null, working: false, lastReplyAt: null }];
+  const shared = browser();
+  const shown = [];
+  const leader = tab(shared, { focused: false, visible: false, thread: null, shown: (n) => { if (n.channel !== null) shown.push(n); }, fetch: async () => json(listed) });
+  await settle();
+  const click = async () => {
+    const n = shown.at(-1);
+    await notice(n.channel, n.title, n.body, n.url, n.tag, () => leader.elsewhere("t1"));
+    notifications.at(-1).onclick();
+    await settle();
+  };
+  listed = [{ ...listed[0], attention: "failed" }];
+  shared.streams[0].onmessage({});
+  await settle();
+  assert.equal(shown.at(-1).url, "/#needs-you:t1:failed");
+  await click();
+  assert.deepEqual([assigned, focuses], [["/#needs-you:t1:failed"], 1], "with no tab on the thread, the click opens the notice's page");
+
+  listed = [{ ...listed[0], attention: "decision" }];
+  shared.streams[0].onmessage({});
+  await settle();
+  const opened = tab(shared, { focused: false, visible: false, thread: "t1", fetch: async () => json(listed) });
+  await settle();
+  await click();
+  assert.deepEqual([assigned.length, focuses, opened.win.focuses], [1, 1, 1], "the tab now on the thread comes forward, and this tab keeps its page");
 });

@@ -53,15 +53,17 @@ export async function caughtUp(hand, wait = 1000) {
 
 /**
  * Shows a notice in `channel`. A system notification with a `tag` replaces the browser's one of that tag and alerts
- * again. Its click brings the tab forward, and opens `url` there unless it is null.
+ * again. Its click brings the tab forward, and opens `url` there unless it is null. `elsewhere` asks a tab that came
+ * to show the notice's thread since to come forward, and says whether one did, so the click leaves this page alone.
  */
-export async function notice(channel, title, body, url, tag) {
+export async function notice(channel, title, body, url, tag, elsewhere = () => false) {
   if (channel === "system") {
     const shown = new Notification(title, tag === undefined ? { body } : { body, tag, renotify: true });
     shown.onclick = () => {
+      shown.close();
+      if (url !== null && elsewhere()) return;
       window.focus();
       if (url !== null) location.assign(url);
-      shown.close();
     };
     return () => shown.close();
   }
@@ -93,7 +95,10 @@ export function rowNotice(row, { focused, current, secure, permission, raises })
   };
 }
 /** Shows a row's notice, as `rowNotice` says it, in this tab. */
-export const showRow = (row, tab) => { const n = rowNotice(row, tab); return notice(n.channel, n.title, n.body, n.url, n.tag); };
+export const showRow = (row, tab) => {
+  const n = rowNotice(row, tab);
+  return notice(n.channel, n.title, n.body, n.url, n.tag, () => tab.elsewhere(row.id));
+};
 
 const permissionStates = {
   default: { text: "Enable system notifications", ask: true },
