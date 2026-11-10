@@ -21,7 +21,8 @@ ln -sf "$repo/deploy/mac/nexus" "$bin/nexus"
 case ":$PATH:" in
   *":$bin:"*) ;;
   *)
-    case ${SHELL##*/}:$system in
+    shell=${SHELL:-}
+    case ${shell##*/}:$system in
       fish:*) add="fish_add_path $bin" ;;
       zsh:*) add="echo 'export PATH=\"$bin:\$PATH\"' >> ~/.zprofile" ;;
       bash:Darwin) add="echo 'export PATH=\"$bin:\$PATH\"' >> ~/.bash_profile" ;;

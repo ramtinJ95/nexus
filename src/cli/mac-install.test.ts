@@ -50,7 +50,8 @@ test("the shim says in one line that the node on PATH is too old, as in a projec
   const ran = await c.run(join(c.repo, "deploy", "mac", "nexus"), ["list"]);
   assert.equal(ran.code, 1);
   assert.equal(ran.stderr, "nexus: the CLI needs Node 26 or newer, and the node on PATH here is v22.11.0\n");
-  const none = await c.run(join(c.repo, "deploy", "mac", "nexus"), ["list"], {}, "/usr/bin:/bin");
+  await c.shim("node", "exit 127");
+  const none = await c.run(join(c.repo, "deploy", "mac", "nexus"), ["list"]);
   assert.equal(none.stderr, "nexus: the CLI needs Node 26 or newer, and the node on PATH here is missing\n");
 });
 
@@ -79,6 +80,10 @@ test("install stamps the packages it installed, so the shim it links runs, and i
     assert.match(ran.stdout, /^\["--version"\]$/m, "the linked shim ran the CLI");
     assert.ok(ran.stdout.includes(`is not on PATH. Add it to your shell's profile, such as with: echo 'export PATH="${bin}:$PATH"' >> ${profile}\n`), `${system} ${shell}: ${ran.stdout}`);
   }
+  const unset = await checkout(t);
+  const bare = await unset.run("/usr/bin/env", ["-u", "SHELL", join(unset.repo, "deploy", "mac", "install"), join(unset.dir, "bin")]);
+  assert.equal(bare.code, 0, bare.stderr);
+  assert.match(bare.stdout, /> ~\/\.profile\nNext: nexus connect/, "no SHELL gets the POSIX profile");
   const c = await checkout(t);
   const fish = await c.run(join(c.repo, "deploy", "mac", "install"), [join(c.dir, "bin")], { SHELL: "/usr/bin/fish" });
   assert.match(fish.stdout, new RegExp(`such as with: fish_add_path ${join(c.dir, "bin")}\n`));
