@@ -4,6 +4,7 @@
 #   sudo deploy/install.sh --admit <your Mac's tailnet name> --dotfiles <git URL>
 #   sudo deploy/install.sh --join-token                                  on the control plane's machine, which prints:
 #   sudo deploy/install.sh --join <token> --node <the control plane's tailnet name>     on the new node
+#   sudo deploy/install.sh --rotate claude|github                         replaces this machine's stored token
 #
 # It checks every prerequisite first, and stops before changing anything when one is missing. Then `src/deploy/setup.ts
 # install` writes /etc/nexus/control.json, control-plane.json, probe.json and deployer.json from `tailscale status --json`,
@@ -18,7 +19,8 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$repo/deploy/release.sh"
 
 usage="usage: sudo deploy/install.sh [--node <control plane device> [--join <token>]] [--admit <device>]... [--add-node <device>=<deploy key digest>]... [--peer <device>]... [--dotfiles <git URL>] [--non-interactive] [--upgrade]
-       sudo deploy/install.sh --join-token"
+       sudo deploy/install.sh --join-token
+       sudo deploy/install.sh --rotate claude|github [--non-interactive]"
 
 # The machine's facts, one function each, so the tests can fake a machine.
 uid() { id -u; }
@@ -138,6 +140,12 @@ main() {
   if [ "${1:-}" = --join-token ]; then
     [ $# = 1 ] || fail "--join-token takes no other argument. $usage"
     mint_join_token
+    return
+  fi
+  if [ "${1:-}" = --rotate ]; then
+    [ "$(uid)" = 0 ] || fail "only root replaces a stored credential: sudo deploy/install.sh --rotate ${2:-claude|github}"
+    [ $# -ge 2 ] || fail "--rotate names what to replace, claude or github. $usage"
+    PATH=$service_path:$PATH node "$repo/src/deploy/setup.ts" rotate "${@:2}"
     return
   fi
   # Only what the prerequisites depend on. setup.ts install refuses the arguments that are wrong.

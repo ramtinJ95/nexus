@@ -243,3 +243,18 @@ main --join-token ${more}`);
   }
   assert.match((await mint({ ...complete, controlConfig: true }, "--node firebat")).stderr, /--join-token takes no other argument/);
 });
+
+test("--rotate hands the kind to setup.ts rotate as root, with no prerequisite check, and refuses anyone else", async () => {
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(fresh)} uid() { echo 0; } ${steps}
+main --rotate github --non-interactive`);
+  assert.equal(run.code, 0, run.stderr);
+  assert.deepEqual(ran(run.stderr), ["node ./src/deploy/setup.ts rotate github --non-interactive"], "a machine that misses prerequisites still rotates");
+  const user = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} uid() { echo 1000; } ${steps}
+main --rotate claude`);
+  assert.notEqual(user.code, 0);
+  assert.match(user.stderr, /only root replaces a stored credential: sudo deploy\/install\.sh --rotate claude/);
+  const bare = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps}
+main --rotate`);
+  assert.match(bare.stderr, /--rotate names what to replace, claude or github/);
+  assert.doesNotMatch(user.stderr + bare.stderr, /^node /m);
+});

@@ -58,7 +58,9 @@ Next the installer asks for each credential the machine lacks, over SSH, and kee
 | The control plane's GitHub token, on its machine | Whether to give it the GitHub token in `secrets.env`, for the [PR watch](#control-plane-github-pr-watch) and the review loop, on every run while `control.json` names no `github.tokenFile` | `/etc/nexus/github-token`, `root:nexus-control`, mode 0640, then named as `github.tokenFile` in `control.json` under the deployer's lock |
 | A git SSH key | Whether to make one | `/etc/nexus/git_ed25519`, made on the machine, as [Clone over SSH](#clone-over-ssh) describes |
 
-Each further machine, installed with `--node`, asks for its own Claude token, GitHub token and git key, and copies nothing from the control plane's machine. A credential that is already in place is left as it is: the installer never asks for it, never rewrites or moves it, and never changes its mode or owner, and it says what it left alone. Where `control.json` names its own `harness.credentials` or `github.tokenFile`, or `probe.json` its own `secretsFile` or `gitSsh` key, the installer looks there rather than at the paths above. A failed ChatGPT login offers the choice again. Then it restarts the probe if it runs and `secrets.env` changed, installs the probe again with `gitSsh` once it made a git key, and installs the control plane again once the harness is signed in, which starts it.
+Each further machine, installed with `--node`, asks for its own Claude token, GitHub token and git key, and copies nothing from the control plane's machine. A credential that is already in place is left as it is: the installer never asks for it, never rewrites or moves it, and never changes its mode or owner, and it says what it left alone. Only `--rotate`, as [Replace a token](#replace-a-token) describes, replaces one. Where `control.json` names its own `harness.credentials` or `github.tokenFile`, or `probe.json` its own `secretsFile` or `gitSsh` key, the installer looks there rather than at the paths above. A failed ChatGPT login offers the choice again. Then it restarts the probe if it runs and `secrets.env` changed, installs the probe again with `gitSsh` once it made a git key, and installs the control plane again once the harness is signed in, which starts it.
+
+The installer asks GitHub about the GitHub token before it keeps it, with one `GET https://api.github.com/user`. It refuses a token GitHub answers 401, as a mistyped, expired or revoked one gets, and at a terminal asks again. Otherwise it prints the account GitHub names and the expiry GitHub's `github-authentication-token-expiration` header gives, or that the token has none. A token GitHub accepts may still lack a permission, which this does not check. When GitHub cannot be reached or answers anything else, the installer warns and keeps the token. It prints no token.
 
 Without a terminal, or with `--non-interactive`, the installer never prompts. It reads each answer from a variable, or from the file that the variable's name with `_FILE` appended names, and skips what is not given. A value that is not a token fails the run.
 
@@ -67,13 +69,27 @@ Without a terminal, or with `--non-interactive`, the installer never prompts. It
 | `NEXUS_HARNESS_LOGIN` | `api-key`, the default without a terminal, or `skip`. Sign in with ChatGPT needs a person in a terminal |
 | `NEXUS_OPENAI_API_KEY` | The harness's OpenAI API key |
 | `NEXUS_CLAUDE_TOKEN` | The Claude token or Anthropic API key |
-| `NEXUS_GH_TOKEN` | The GitHub token |
+| `NEXUS_GH_TOKEN` | The GitHub token. One GitHub answers 401 fails the run |
 | `NEXUS_GITHUB_WATCH` | `yes` or `no`. The default is `yes` for a GitHub token the run was given, and `no` for one already in `secrets.env` |
 | `NEXUS_GIT_KEY` | `yes`, the default, or `no` |
 
 ```sh
 sudo env NEXUS_CLAUDE_TOKEN_FILE=/root/claude-token NEXUS_GH_TOKEN_FILE=/root/gh-token deploy/install.sh --node <control> --non-interactive
 ```
+
+#### Replace a token
+
+`sudo deploy/install.sh --rotate claude` or `--rotate github` replaces the Claude or GitHub token this machine keeps. It asks for the new one with the input hidden, checks it as an install does, and without a terminal, or with `--non-interactive`, reads `NEXUS_CLAUDE_TOKEN` or `NEXUS_GH_TOKEN`, or the file the name with `_FILE` names. Enter, or no variable, changes nothing.
+
+- `claude` replaces the `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` line in `secrets.env`. It refuses a token of a kind the file does not hold, such as an Anthropic API key where it holds `CLAUDE_CODE_OAUTH_TOKEN`, because the projects grant the name.
+- `github` replaces the `GH_TOKEN` line in `secrets.env`. On the control plane's machine it also replaces the file `github.tokenFile` names when that held the same token, or when `secrets.env` has no `GH_TOKEN`. A token file that holds another token, such as a wider classic token for landings, is left alone and named.
+
+The installer writes the new file beside the old one, opened without following a link, as `root:nexus` mode 0640 for `secrets.env` and `root:nexus-control` mode 0640 for the token file, and renames it over the old one. Every other line of `secrets.env` stays byte for byte. Then it restarts the probe, and the control plane when the token file changed, each only if it runs. A machine that holds no such token is refused, since an install asks for one. The installer then lists what still holds the old value:
+
+- Each running pylon granted the secret. The probe reads `secrets.env` when it starts and hands a pylon its secrets only in its boot spec, and the pylon's controller, which a probe restart leaves running, keeps them in memory. So a running pylon keeps the old value until it boots again, on a wake after a pause or after `nexus archive` and `nexus unarchive`. A pylon booted after the restart gets the new one. If the old token is revoked first, the running pylons' requests with it fail until then.
+- Every other node, which keeps its own copy. `nexus nodes` lists them. Run `--rotate` on each.
+- On a node, the control plane's `github.tokenFile`, which only `--rotate github` on the control plane's machine replaces.
+- GitHub itself, which accepts the old GitHub token until it is revoked at https://github.com/settings/tokens.
 
 The deployer never runs this step. `nexus deploy` runs only the role installers, in preparation mode, which read no input and leave every credential alone.
 
@@ -290,7 +306,7 @@ This does not make arbitrary merged root code safe: merged release code and npm 
 
 ## The probe
 
-`deploy/install.sh` writes `/etc/nexus/probe.json`, and installs `/etc/nexus/secrets.env` from `secrets.example.env` on the first run. Later runs never overwrite secrets.env or change its owner or mode. Restart the probe yourself after you edit it: `sudo systemctl restart nexus-probe`.
+`deploy/install.sh` writes `/etc/nexus/probe.json`, and installs `/etc/nexus/secrets.env` from `secrets.example.env` on the first run. Later runs never overwrite secrets.env or change its owner or mode, except `--rotate`, which [replaces a token](#replace-a-token) and restarts the probe. Restart the probe yourself after you edit it: `sudo systemctl restart nexus-probe`.
 
 The probe runs as the system user `nexus`. These are its paths:
 
@@ -627,7 +643,7 @@ Path('/etc/nexus/github-token').write_text(values[0] + '\n')
 PY
 ```
 
-Add `"github": { "tokenFile": "/etc/nexus/github-token" }` to `/etc/nexus/control.json`, then restart the control plane during your normal deployment window. Rotation requires replacing the file and restarting. `nexus doctor`'s `github-token` check warns 14 days before this token expires and fails once GitHub refuses it. It cannot read the `GH_TOKEN` copy in each node's `/etc/nexus/secrets.env`, so renew that copy at the same time. Never put the value in JSON, logs or a pylon. A configured unreadable/empty/malformed file fails startup rather than silently disabling watching. With `github` omitted, watching is off and `nexus show` and the dashboard say so once per detail view.
+Add `"github": { "tokenFile": "/etc/nexus/github-token" }` to `/etc/nexus/control.json`, then restart the control plane during your normal deployment window. `sudo deploy/install.sh --rotate github` replaces the file and restarts the control plane when it holds the same token as `GH_TOKEN`, as [Replace a token](#replace-a-token) describes. Otherwise rotation requires replacing the file and restarting. `nexus doctor`'s `github-token` check warns 14 days before this token expires and fails once GitHub refuses it. It cannot read the `GH_TOKEN` copy in each node's `/etc/nexus/secrets.env`, so renew that copy at the same time. Never put the value in JSON, logs or a pylon. A configured unreadable/empty/malformed file fails startup rather than silently disabling watching. With `github` omitted, watching is off and `nexus show` and the dashboard say so once per detail view.
 
 Discovery watches `origin/` branch outputs for projects with a github.com repository. It does not infer a scratch project's published repository or another remote's identity. Network/authentication failures remain visible as a PR-watch error on the thread detail and are retried. The watcher stops a thread after ten consecutive comment-only wakes; archive/unarchive preserves that stop and all cursors. There is no reset command in this version.
 

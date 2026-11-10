@@ -7,7 +7,7 @@ import { test, type TestContext } from "node:test";
 import { promisify } from "node:util";
 import { parseConfig } from "../control/main.ts";
 import { harnessModels, openCredentials, requireModel } from "../control/harness/credentials.ts";
-import { claudeNames, harnessSignedIn, heldNames, provision, scripted, stores, system, type Answers, type FollowUp, type Host } from "./credentials.ts";
+import { claudeNames, harnessSignedIn, heldNames, provision, rotate, scripted, stores, system, type Answers, type FollowUp, type Host } from "./credentials.ts";
 import { agentKinds } from "../protocol/agent-kinds.ts";
 import { heldSecrets } from "../protocol/observations.ts";
 import { snapshot } from "../test-support/kit.ts";
@@ -24,8 +24,12 @@ const githubScan = [
   "",
 ].join("\n");
 
+const githubExpiry = "2027-02-01 09:00:00 UTC";
+/** GitHub's answer to `GET /user` for a token it knows, which names its account and its expiry. */
+const accepted = () => new Response(JSON.stringify({ login: "octo-person", id: 1 }), { status: 200, headers: { "content-type": "application/json", "github-authentication-token-expiration": githubExpiry } });
+
 /** A machine after the role installers ran, under a temporary directory: control.json and probe.json, and secrets.env from the example. */
-async function machine(t: TestContext, role: "control" | "node", scan = githubScan) {
+async function machine(t: TestContext, role: "control" | "node", scan = githubScan, github: (init: RequestInit) => Promise<Response> = async () => accepted()) {
   const root = await mkdtemp(join(tmpdir(), "nexus-credentials-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const at = (path: string) => join(root, path);
@@ -40,7 +44,12 @@ async function machine(t: TestContext, role: "control" | "node", scan = githubSc
 
   const owners: string[] = [];
   const runs: string[][] = [];
+  const fetches: { url: string; authorization: string | null }[] = [];
   const host: Host = {
+    async fetch(url, init) {
+      fetches.push({ url, authorization: new Headers(init.headers).get("authorization") });
+      return github(init);
+    },
     read: (path) => readFile(at(path), "utf8").catch(() => undefined),
     exists: (path) => access(at(path)).then(() => true, () => false),
     async write(path, text, { mode, owner }) {
@@ -56,6 +65,7 @@ async function machine(t: TestContext, role: "control" | "node", scan = githubSc
     async run(program, args, options) {
       runs.push([program, ...args]);
       if (program === "ssh-keyscan") return scan;
+      if (program === "systemctl") return "";
       if (program === "ssh-keygen") {
         const file = args.indexOf("-f") + 1;
         await exec("ssh-keygen", args.map((arg, i) => i === file ? at(arg) : arg));
@@ -69,7 +79,7 @@ async function machine(t: TestContext, role: "control" | "node", scan = githubSc
       return assert.fail(`ran ${program}`);
     },
   };
-  return { root, at, put, host, owners, runs };
+  return { root, at, put, host, owners, runs, fetches };
 }
 
 /** Answers from `given`, by each question's variable. A question it has no answer for fails the test. */
@@ -80,7 +90,7 @@ function answering(given: Record<string, string | undefined>) {
       asked.push(q.key);
       if (!(q.key in given)) assert.fail(`asked for ${q.key}`);
       const value = given[q.key];
-      if (value !== undefined) assert.equal(q.check(value), undefined, `${q.key} passes its check`);
+      if (value !== undefined) assert.equal(await q.check(value), undefined, `${q.key} passes its check`);
       return value;
     },
     async choose(q) {
@@ -320,6 +330,106 @@ test("a token the probe would refuse is refused before secrets.env is touched, a
   const holding = await snapshot(held.root);
   await assert.rejects(provision("node", held.host, scripted({ NEXUS_CLAUDE_TOKEN: claudeToken, NEXUS_GIT_KEY: "no" }), silent), /line 1 sets NEXUS_CHATGPT_TOKEN, which the control plane hands to this probe/);
   assert.deepEqual(await snapshot(held.root), holding);
+});
+
+test("the GitHub token is asked of GitHub at the prompt: a known one names its account and expiry, a refused one writes nothing, and one GitHub cannot answer is taken with a warning", async (t) => {
+  const known = await machine(t, "node");
+  const said: string[] = [];
+  await provision("node", known.host, scripted({ NEXUS_GH_TOKEN: ghToken, NEXUS_GIT_KEY: "no" }), (line) => said.push(line));
+  assert.deepEqual(known.fetches, [{ url: "https://api.github.com/user", authorization: `Bearer ${ghToken}` }]);
+  assert.ok(said.includes(`GitHub knows the token as octo-person, until ${githubExpiry}.`), said.join("\n"));
+  assert.match(await readFile(known.at(stores.claude.file), "utf8"), new RegExp(`\nGH_TOKEN=${ghToken}\n$`));
+  assert.ok(!said.some((line) => line.includes(ghToken)), "no token is printed");
+
+  const refused = await machine(t, "node", githubScan, async () => new Response(JSON.stringify({ message: "Bad credentials" }), { status: 401 }));
+  const before = await snapshot(refused.root);
+  await assert.rejects(provision("node", refused.host, scripted({ NEXUS_GH_TOKEN: ghToken, NEXUS_GIT_KEY: "no" }), silent),
+    (err: Error) => /^NEXUS_GH_TOKEN: GitHub refused it with 401/.test(err.message) && !err.message.includes(ghToken));
+  assert.deepEqual(await snapshot(refused.root), before);
+
+  for (const [github, reason] of [
+    [async () => { throw new TypeError("fetch failed"); }, "GitHub could not be reached: fetch failed"],
+    [async () => new Response("unicorn", { status: 503 }), "GitHub answered 503"],
+  ] as const) {
+    const away = await machine(t, "node", githubScan, github);
+    const warned: string[] = [];
+    await provision("node", away.host, scripted({ NEXUS_GH_TOKEN: ghToken, NEXUS_GIT_KEY: "no" }), (line) => warned.push(line));
+    assert.ok(warned.includes(`Took the GitHub token unchecked, because ${reason}. A thread that uses it fails if GitHub refuses it.`), warned.join("\n"));
+    assert.match(await readFile(away.at(stores.claude.file), "utf8"), /\nGH_TOKEN=/);
+  }
+});
+
+const rotatedToken = "github_pat_22ZYXWVU9876543210_zyxwvutsrqponmlkjihgfedcba";
+
+test("--rotate github replaces the one GH_TOKEN line and the control plane's copy of it, restarts both readers, and lists what still holds the old one", async (t) => {
+  const m = await machine(t, "control");
+  const secrets = `# by hand\nSTRIPE_KEY=sk_live_1\r\nGH_TOKEN=${ghToken}\n\nCLAUDE_CODE_OAUTH_TOKEN=${claudeToken}\n`;
+  await m.put(stores.claude.file, secrets, 0o640);
+  await m.put(stores.githubWatch.file, `${ghToken}\n`, 0o640);
+  const control = JSON.parse(await readFile(m.at("/etc/nexus/control.json"), "utf8")) as object;
+  await m.put("/etc/nexus/control.json", `${JSON.stringify({ ...control, github: { tokenFile: stores.githubWatch.file } })}\n`, 0o644);
+  const said: string[] = [];
+  await rotate("github", "control", m.host, scripted({ NEXUS_GH_TOKEN: rotatedToken }), (line) => said.push(line));
+
+  assert.equal(await readFile(m.at(stores.claude.file), "utf8"), secrets.replace(`GH_TOKEN=${ghToken}`, `GH_TOKEN=${rotatedToken}`), "only the GH_TOKEN line changed");
+  assert.equal(await readFile(m.at(stores.githubWatch.file), "utf8"), `${rotatedToken}\n`);
+  assert.deepEqual(m.owners, [`root:nexus ${stores.claude.file}`, `root:nexus-control ${stores.githubWatch.file}`]);
+  assert.deepEqual(m.fetches.map((f) => f.authorization), [`Bearer ${rotatedToken}`]);
+  assert.deepEqual(m.runs, [["systemctl", "try-restart", "nexus-probe.service"], ["systemctl", "try-restart", "nexus-control.service"]]);
+  const still = said.slice(said.indexOf("Still holding the old value:") + 1).join("\n");
+  assert.match(still, /running pylon on this node that was granted GH_TOKEN keeps the old value until it boots again/);
+  assert.match(still, /Every other node keeps its own GH_TOKEN.*sudo deploy\/install\.sh --rotate github on each/);
+  assert.match(still, /GitHub accepts the old token until you revoke it/);
+  assert.ok(!said.some((line) => line.includes(ghToken) || line.includes(rotatedToken)), "no token is printed");
+});
+
+test("--rotate github on a node leaves a control plane token file of another value alone, and a refused, skipped or missing token changes nothing", async (t) => {
+  const m = await machine(t, "control");
+  await m.put(stores.claude.file, `GH_TOKEN=${ghToken}\n`, 0o640);
+  await m.put(stores.githubWatch.file, "ghp_widerClassicToken\n", 0o640);
+  const control = JSON.parse(await readFile(m.at("/etc/nexus/control.json"), "utf8")) as object;
+  await m.put("/etc/nexus/control.json", `${JSON.stringify({ ...control, github: { tokenFile: stores.githubWatch.file } })}\n`, 0o644);
+  const said: string[] = [];
+  await rotate("github", "control", m.host, scripted({ NEXUS_GH_TOKEN: rotatedToken }), (line) => said.push(line));
+  assert.equal(await readFile(m.at(stores.githubWatch.file), "utf8"), "ghp_widerClassicToken\n");
+  assert.deepEqual(m.runs, [["systemctl", "try-restart", "nexus-probe.service"]]);
+  assert.ok(said.some((line) => line.includes(`github.tokenFile ${stores.githubWatch.file} holds a token other than GH_TOKEN, so it was left alone`)));
+
+  const node = await machine(t, "node");
+  await node.put(stores.claude.file, `GH_TOKEN=${ghToken}\n`, 0o640);
+  const nodeSaid: string[] = [];
+  await rotate("github", "node", node.host, scripted({ NEXUS_GH_TOKEN: rotatedToken }), (line) => nodeSaid.push(line));
+  assert.ok(nodeSaid.some((line) => line.includes("The control plane's github.tokenFile, if it holds the same token, is on the control plane's machine")));
+
+  const refused = await machine(t, "node", githubScan, async () => new Response("", { status: 401 }));
+  await refused.put(stores.claude.file, `GH_TOKEN=${ghToken}\n`, 0o640);
+  const before = await snapshot(refused.root);
+  await assert.rejects(rotate("github", "node", refused.host, scripted({ NEXUS_GH_TOKEN: rotatedToken }), silent), /NEXUS_GH_TOKEN: GitHub refused it with 401/);
+  await rotate("github", "node", refused.host, scripted({}), silent);
+  assert.deepEqual(await snapshot(refused.root), before);
+  assert.deepEqual(refused.runs, [], "nothing changed, so nothing restarts");
+
+  const empty = await machine(t, "node");
+  await assert.rejects(rotate("github", "node", empty.host, scripted({ NEXUS_GH_TOKEN: rotatedToken }), silent), /holds a GitHub token to replace\. deploy\/install\.sh asks for one/);
+});
+
+test("--rotate claude replaces the Claude token of the kind secrets.env holds, and refuses one of the other kind", async (t) => {
+  const m = await machine(t, "node");
+  const secrets = `GH_TOKEN=${ghToken}\nCLAUDE_CODE_OAUTH_TOKEN=${claudeToken}\n# after\n`;
+  await m.put(stores.claude.file, secrets, 0o640);
+  const before = await snapshot(m.root);
+  await assert.rejects(rotate("claude", "node", m.host, scripted({ NEXUS_CLAUDE_TOKEN: "sk-ant-api03-abcdef" }), silent),
+    /NEXUS_CLAUDE_TOKEN: it would be ANTHROPIC_API_KEY, and \/etc\/nexus\/secrets\.env holds CLAUDE_CODE_OAUTH_TOKEN, so give one of that kind/);
+  assert.deepEqual(await snapshot(m.root), before);
+
+  const fresh = "sk-ant-oat01-zyxwvutsrqponmlkjihgfedcba_9876543210-GFEDCBA";
+  const said: string[] = [];
+  await rotate("claude", "node", m.host, scripted({ NEXUS_CLAUDE_TOKEN: fresh }), (line) => said.push(line));
+  assert.equal(await readFile(m.at(stores.claude.file), "utf8"), secrets.replace(claudeToken, fresh));
+  assert.deepEqual(m.runs, [["systemctl", "try-restart", "nexus-probe.service"]]);
+  assert.deepEqual(m.fetches, [], "a Claude token is not sent to GitHub");
+  assert.ok(said.some((line) => line.includes("granted CLAUDE_CODE_OAUTH_TOKEN keeps the old value until it boots again")));
+  assert.ok(!said.some((line) => line.includes(claudeToken) || line.includes(fresh)));
 });
 
 test("the held names credentials refuses are the probe's", () => {
