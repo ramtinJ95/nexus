@@ -3,12 +3,15 @@
 # core (HC_SESSION=nexus-checks), so the person's own terminals and herdr-app are untouched. Claude Code runs on the
 # person's own login with Haiku, a few short prompts. Each check prints one RESULT line; evidence goes to $out.
 # Usage: spikes/herdr-core/check.sh [stack-thread]   (with a thread, also checks the core inside that pylon)
+#        spikes/herdr-core/check.sh --image <pylon-image>   (only the core-start checks, in a throwaway container)
+# HC_SESSION picks another isolated core, for a machine where another run uses nexus-checks.
 set -u
 # A clean environment, as in a pylon: a Claude Code session that runs this would otherwise hand its own session
 # variables to the Claude under test, which then keeps no transcript of its own.
-[ -n "${NEXUS_CHECK_CLEAN:-}" ] || exec env -i NEXUS_CHECK_CLEAN=1 HOME="$HOME" USER="$USER" PATH="$PATH" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" TERM=xterm-256color LANG=C.UTF-8 OUT="${OUT:-}" bash "$0" "$@"
+[ -n "${NEXUS_CHECK_CLEAN:-}" ] || exec env -i NEXUS_CHECK_CLEAN=1 HOME="$HOME" USER="$USER" PATH="$PATH" XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" TERM=xterm-256color LANG=C.UTF-8 OUT="${OUT:-}" HC_SESSION="${HC_SESSION:-}" DOCKER_HOST="${DOCKER_HOST:-}" bash "$0" "$@"
 unset HC_TERMINAL_ID HC_TERMINAL_SOCKET HC_SCOPE
-export HC_SESSION=nexus-checks
+export HC_SESSION=${HC_SESSION:-nexus-checks}
+[ -n "$DOCKER_HOST" ] || unset DOCKER_HOST
 hc=herdr-core
 out=${OUT:-}
 out=${out:-/tmp/nexus-core-checks}
@@ -30,7 +33,71 @@ until_status() { # terminal, jq predicate on .status, seconds
   return 1
 }
 
+api() { printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$1\",\"params\":$2}" | $hc connect; }
+# This core's processes, as pid and command line: those whose environment names this check's HC_SESSION, so the
+# person's own core and its viewers on the same machine are never counted.
+mine() {
+  local p
+  for p in $(pgrep -u "$(id -u)" -f 'herdr-core|hc'); do
+    tr '\0' '\n' < "/proc/$p/environ" 2>/dev/null | grep -qx "HC_SESSION=$HC_SESSION" && printf '%s %s\n' "$p" "$(tr '\0' ' ' < "/proc/$p/cmdline" | sed 's/ $//')"
+  done
+}
+# What Nexus counts as an attached viewer (src/guest-contract.ts coreViewer), and how it finds a running core.
+viewer='^([^ ]*/)?(herdr-core|hc)( attach( .*)?)?$'
+served='^([^ ]*/)?herdr-core serve$'
+
+if [ "${1:-}" = --image ]; then
+  # A throwaway container of a pylon image, where every exec runs as user, as in a pylon VM: the boot hook through
+  # `runuser -l` from root, the probe's execs as a login shell, and `nexus exec` over ssh as a plain process. Does
+  # each find the core the boot started, at the same socket? And does Nexus's guarded read start none?
+  img=$2 c=nexus-core-check-$$
+  docker run --detach --init --pull never --name "$c" "$img" sleep infinity >/dev/null || { result pylon-image FAIL "no container from $img"; exit 1; }
+  trap 'docker rm -f "$c" >/dev/null 2>&1' EXIT
+  as_login() { docker exec "$c" runuser -l user -c "$1"; }
+  as_plain() { docker exec -u user -e HOME=/home/user "$c" sh -c "$1"; }
+  guarded="pgrep -u \"\$(id -u)\" -x -f '$served' >/dev/null || exit 69; printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"terminal.list\",\"params\":{}}' | exec herdr-core connect"
+  as_login "$guarded" > "$out/guard.txt" 2>&1; code=$?
+  if [ $code = 69 ] && ! docker exec "$c" pgrep -f 'herdr-core serve' >/dev/null; then result guard-no-core PASS "a guarded read exited 69 and started no core"; else result guard-no-core FAIL "exit $code, cores: $(docker exec "$c" pgrep -af herdr-core | tr '\n' ';')"; fi
+  as_login 'cd ~ && setsid -f tini -s -- herdr-core serve </dev/null >/dev/null 2>&1; i=0; until pgrep -u "$(id -u)" -x -f '"'$served'"' >/dev/null; do i=$((i+1)); [ $i -lt 50 ] || exit 1; sleep 0.1; done; herdr-core run --bg --no-parent --keep --name persist -- sleep 10000 >/dev/null'
+  as_login "$guarded" > "$out/guard-login.json" 2>&1
+  as_plain "$guarded" > "$out/guard-plain.json" 2>&1
+  as_plain 'herdr-core ls --json' > "$out/ls-plain.txt" 2>&1
+  sockets=$(docker exec "$c" sh -c 'find / -xdev -name "*.sock" -path "*herdr-core*" 2>/dev/null' | tr '\n' ' ')
+  login_sees=$(tail -1 "$out/guard-login.json" | jq -r '[.result.terminals[]?.name] | join(",")' 2>/dev/null)
+  plain_sees=$(tail -1 "$out/guard-plain.json" | jq -r '[.result.terminals[]?.name] | join(",")' 2>/dev/null)
+  cores=$(docker exec "$c" pgrep -c -x -f "$served")
+  if [ "$login_sees" = persist ] && [ "$plain_sees" = persist ] && [ "$cores" = 1 ] && ! rg -q differs "$out/ls-plain.txt"; then
+    result pylon-socket PASS "the boot's core, at $sockets, is the one a login exec and a plain exec reach"
+  else
+    result pylon-socket FAIL "login sees [$login_sees], plain sees [$plain_sees], $cores cores, sockets $sockets: $(head -c 200 "$out/ls-plain.txt")"
+  fi
+  result pylon-env OBSERVED "login exec: $(as_login 'echo XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR-unset} HC_SOCKET=${HC_SOCKET-unset}'); plain exec: $(as_plain 'echo XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR-unset}')"
+  result pylon-core-cmdline OBSERVED "$(docker exec "$c" pgrep -a -f herdr-core | cut -d' ' -f2- | tr '\n' ';')"
+  echo "evidence in $out"
+  exit 0
+fi
+
+# Which calls start a core when none runs. Nexus must never start one from a read: a read that starts a core finds it
+# empty, and a recordSessions would then write that over the sessions file the last wake left.
+$hc server stop >/dev/null 2>&1
+started=()
+for call in 'ls --json' 'get t1 --json' 'connect' 'server status --json'; do
+  sleep 0.5
+  if [ "$call" = connect ]; then api terminal.list '{}' >/dev/null 2>&1; else $hc $call >/dev/null 2>&1; fi
+  sleep 0.5
+  mine | rg -q ' serve$' && started+=("$call")
+  $hc server stop >/dev/null 2>&1
+done
+result core-autostart OBSERVED "with no core, these started one: ${started[*]:-none}"
+
 $hc server start >/dev/null 2>&1
+
+# Core names are unique among live terminals, which a prompted launch's claim relies on.
+$hc run --bg --no-parent --name claimed -- sleep 600 >/dev/null
+api terminal.run '{"argv":["sleep","600"],"name":"claimed","no_parent":true}' > "$out/name-taken.json" 2>&1
+kind=$(jq -r '.error.data.kind // "none"' "$out/name-taken.json")
+if [ "$kind" = name_taken ]; then result name-taken PASS "a second run under a live name fails with kind name_taken"; else result name-taken FAIL "$(head -c 200 "$out/name-taken.json")"; fi
+$hc kill claimed >/dev/null 2>&1
 
 # argv with a newline reaches the program as one argument, so a prompted launch needs no typed shell line.
 $hc run --bg --no-parent --name argv --cwd "$work" -- printf '[%s]' $'line one\nline two' >/dev/null
@@ -44,6 +111,12 @@ $hc run --bg --no-parent --keep --name claude --cwd "$work" --label nexus.harnes
   env HOME="$HOME" PATH="$(dirname "$claude"):/usr/bin:/bin" "$claude" --model haiku --session-id "$sid" $'First line.\nSecond line: reply with exactly LAUNCH-OK' >/dev/null
 $hc wait claude --output 'trust' --timeout 30 >/dev/null 2>&1
 result trust-status OBSERVED "status at the trust dialog: $(field claude .status)"
+# A start's readiness wait: does a wait on a Claude that has reported nothing yet wait, or return at once?
+t0=$(date +%s%N)
+api terminal.wait '{"terminal":"claude","timeout":3}' > "$out/wait-unreported.json" 2>&1
+waited=$(( ($(date +%s%N) - t0) / 1000000 ))
+reason=$(jq -r '.result.reason // .error.data.kind' "$out/wait-unreported.json")
+if [ "$reason" = timeout ] && [ "$waited" -ge 2500 ]; then result wait-unreported PASS "waited ${waited} ms, then checked in: $(jq -c '.result | {ended,reason,status}' "$out/wait-unreported.json")"; else result wait-unreported FAIL "after ${waited} ms: $(head -c 200 "$out/wait-unreported.json")"; fi
 for _ in $(seq 1 50); do
   $hc read claude | rg -q '❯ Yes, I trust' && break
   $hc keys claude down >/dev/null; sleep 0.3
@@ -105,7 +178,16 @@ $hc run --bg --no-parent --keep --name target --cwd "$work" --label nexus.title=
 ( timeout 6 $hc events --json > "$out/events.jsonl" 2>&1 & )
 sleep 0.5
 $hc run --bg --no-parent --name viewer -- $hc attach target >/dev/null
+$hc run --bg --no-parent --name picker -- $hc >/dev/null
 sleep 1.5
+# Core counts no viewers, so Nexus counts their processes. The picker keeps its command line once it attaches.
+$hc keys picker enter >/dev/null
+( sleep 4 | $hc connect >/dev/null 2>&1 & )
+sleep 1
+mine > "$out/processes.txt"
+counted=$(cut -d' ' -f2- "$out/processes.txt" | rg -c "$viewer")
+if [ "$counted" = 2 ] && rg -q ' serve$' "$out/processes.txt" && rg -q ' hold ' "$out/processes.txt" && rg -q ' connect$' "$out/processes.txt"; then result viewer-cmdline PASS "the pattern counts the attach and the picker, not serve, hold or connect: $(cut -d' ' -f2- "$out/processes.txt" | tr '\n' ';')"; else result viewer-cmdline FAIL "counted $counted of: $(cut -d' ' -f2- "$out/processes.txt" | tr '\n' ';')"; fi
+$hc kill picker >/dev/null 2>&1
 $hc keys viewer 'ctrl+\' >/dev/null
 sleep 1.5
 result attach-detach OBSERVED "viewer after ctrl+\\: $(field viewer '{state,exit_code,reason}')"
