@@ -133,7 +133,7 @@ test("a page owes a seen mark once for each reply it shows, so one marked unseen
  * One dashboard tab's attention code from rows.js, run on fakes of the browser. Tabs given the same `browser` share its
  * BroadcastChannel and its one Web Lock, which the first tab to ask holds.
  */
-function tab(browser, { fetch, now = () => 0, notify = () => {}, shown = () => {}, health = () => {}, caughtUp = () => {}, changed = () => {}, conversation = null, focused = true, thread = "t1", shows = (show) => show(), timeout = (ms) => AbortSignal.timeout(ms), locks = true, visible = true }) {
+function tab(browser, { fetch, now = () => 0, notify = () => {}, shown = () => {}, closed = () => {}, health = () => {}, caughtUp = () => {}, changed = () => {}, conversation = null, focused = true, thread = "t1", shows = (show) => show(), timeout = (ms) => AbortSignal.timeout(ms), locks = true, visible = true }) {
   const timers = [];
   const clear = (timer) => { if (timers.includes(timer)) timers.splice(timers.indexOf(timer), 1); };
   const intervals = [];
@@ -185,10 +185,14 @@ function tab(browser, { fetch, now = () => 0, notify = () => {}, shown = () => {
       notify(row);
       const n = rowNotice(row, { focused, current: thread, secure: true, permission: "granted", raises: !focused && code.raises(row) });
       // As health.js's showRow keeps a notice that would open a page.
-      if (n.channel === "system" && n.url !== null) code.keep(row);
+      if (n.channel === "system" && n.url !== null) code.keep(row, () => closed(n.tag));
       shown(n);
     }),
-    raise: (row, quiet) => shows(() => shown({ ...rowNotice(row, { focused, current: thread, secure: true, permission: "granted", raises: true }), quiet })),
+    raise: (row, quiet) => shows(() => {
+      const n = rowNotice(row, { focused, current: thread, secure: true, permission: "granted", raises: true });
+      shown({ ...n, quiet });
+      return n.channel;
+    }),
     currentThread: () => thread, focused: () => focused, activeTab: () => null, api: apiOver({ fetch }),
   };
   code = startRows(context, context);
@@ -757,4 +761,38 @@ test("a notice raised again quietly replaces its tag without a new alert, and a 
   notifications[0].onclick();
   notifications[0].onclose();
   assert.equal(ended, 2);
+});
+
+test("a tab focused on the thread as it opens retires the notice another tab raised for it, which no later tab raises again", async () => {
+  let listed = [{ id: "t1", title: "Fix", attention: null, working: false, lastReplyAt: null }];
+  const { shared, raised, page } = hiddenTabs(() => listed);
+  const closed = [];
+  page("leader", null, { closed: (tag) => closed.push(tag) });
+  await settle();
+  listed = [{ ...listed[0], attention: "decision" }];
+  shared.streams[0].onmessage({});
+  await settle();
+  const looking = page("looking", "t1", { focused: true, visible: true });
+  await settle();
+  assert.deepEqual(closed, ["t1:decision"], "the person reads the thread, so its notice goes");
+  looking.focus(false);
+  page("later", "t1");
+  await settle();
+  assert.deepEqual(raised, [["leader", "t1:decision"]], "and neither the blur nor a later tab brings it back");
+});
+
+test("a notice whose thread's attention moved on is no longer handed to a tab that comes to show the thread", async () => {
+  let listed = [{ id: "t1", title: "Fix", attention: null, working: false, lastReplyAt: null }];
+  const { shared, raised, page } = hiddenTabs(() => listed);
+  page("leader", null);
+  await settle();
+  listed = [{ ...listed[0], attention: "decision" }];
+  shared.streams[0].onmessage({});
+  await settle();
+  listed = [{ ...listed[0], attention: "working" }];
+  shared.streams[0].onmessage({});
+  await settle();
+  page("opened", "t1");
+  await settle();
+  assert.deepEqual(raised, [["leader", "t1:decision"]]);
 });

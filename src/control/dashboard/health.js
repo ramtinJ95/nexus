@@ -99,13 +99,15 @@ export function rowNotice(row, { focused, current, secure, permission, raises })
     title: row.title, body: noticeText(row), url: current === row.id ? null : noticeUrl(row), tag: `${row.id}:${row.attention}`,
   };
 }
-/** Shows a row's notice, as `rowNotice` says it, in this tab. */
-export const showRow = (row, tab) => {
+/** Shows a row's notice, as `rowNotice` says it, in this tab, and resolves to the channel it showed it in. */
+export async function showRow(row, tab) {
   const n = rowNotice(row, tab);
+  let ended = () => {};
+  const close = await notice(n.channel, n.title, n.body, n.url, n.tag, { elsewhere: () => tab.elsewhere(row.id), quiet: tab.quiet, ended: () => ended() });
   // A notice that would open a page is kept, so a tab that comes to show its thread can take it over.
-  const ended = n.channel === "system" && n.url !== null ? tab.keep(row) : () => {};
-  return notice(n.channel, n.title, n.body, n.url, n.tag, { elsewhere: () => tab.elsewhere(row.id), quiet: tab.quiet, ended });
-};
+  if (n.channel === "system" && n.url !== null) ended = tab.keep(row, close);
+  return n.channel;
+}
 
 const permissionStates = {
   default: { text: "Enable system notifications", ask: true },

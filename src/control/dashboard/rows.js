@@ -26,6 +26,7 @@ export function startRows({ api, notifications, raise = () => {}, health = () =>
     if (shownRows !== null && text !== shownRows) changed();
     shownRows = text;
     const held = notifications(rows, now);
+    for (const [tag, notice] of kept) if (rows.find((row) => row.id === notice.row.id)?.attention !== notice.row.attention) kept.delete(tag);
     // A turn over an unread reply may stop with no event, and the reply notifies once a read finds it stopped.
     const next = rows.some((row) => row.attention === "reply" && row.working) ? Math.min(held ?? Infinity, now + 1000) : held;
     // A held-back reply notifies once a read at its time finds no turn running.
@@ -98,18 +99,21 @@ export function startRows({ api, notifications, raise = () => {}, health = () =>
   }
   /** Whether another tab shows `thread`. */
   const elsewhere = (thread) => [...tabs.values()].some((tab) => tab.thread === thread);
-  // The system notices this tab shows that would open a page, by tag, until clicked or closed. A tab that comes to show
-  // the thread takes each over, raising it again under the same tag without a new alert, so the click lands there.
+  // The system notices this tab shows that would open a page, by tag, until clicked or closed or their thread's
+  // attention moves on. A tab that comes to show the thread takes each over, raising it again under the same tag
+  // without a new alert, so the click lands there. One that shows nothing, as the person looks at the thread there,
+  // answers so, and this tab closes the notice. Until an answer comes this tab keeps it.
   const kept = new Map();
-  const keep = (row) => {
+  const keep = (row, close) => {
     const tag = JSON.stringify([row.id, row.attention]);
-    kept.set(tag, row);
-    return () => { if (kept.get(tag) === row) kept.delete(tag); };
+    const notice = { row, close, to: null };
+    kept.set(tag, notice);
+    return () => { if (kept.get(tag) === notice) kept.delete(tag); };
   };
   function handOver(to) {
-    for (const [tag, row] of kept) if (row.id === to.thread && to.id !== id) {
-      kept.delete(tag);
-      rowsChannel.postMessage({ raise: row, to: to.id, quiet: true });
+    for (const [tag, notice] of kept) if (notice.row.id === to.thread && to.id !== id && notice.to === null) {
+      notice.to = to.id;
+      rowsChannel.postMessage({ raise: notice.row, to: to.id, take: tag });
     }
   }
   rowsChannel?.addEventListener("message", ({ data }) => {
@@ -120,11 +124,17 @@ export function startRows({ api, notifications, raise = () => {}, health = () =>
     } else if (data.gone !== undefined) {
       tabs.delete(data.gone);
       for (const [key, notice] of handed) if (notice.to === data.gone) takeBack(key);
+      for (const notice of kept.values()) if (notice.to === data.gone) notice.to = null;
     } else if (data.raise !== undefined) {
       if (data.to !== id) return;
       // Answered once shown, so a tab that closes before then leaves the notice to the tab that handed it.
-      const shown = Promise.resolve(raise(data.raise, data.quiet === true));
+      const shown = Promise.resolve(raise(data.raise, data.take !== undefined));
       if (data.key !== undefined) void shown.then(() => rowsChannel.postMessage({ raised: data.key }));
+      if (data.take !== undefined) void shown.then((channel) => rowsChannel.postMessage({ taken: data.take, shown: channel !== null }));
+    } else if (data.taken !== undefined) {
+      const notice = kept.get(data.taken);
+      kept.delete(data.taken);
+      if (data.shown === false) notice?.close();
     } else if (data.raised !== undefined) {
       clearTimeout(handed.get(data.raised)?.timer);
       handed.delete(data.raised);
