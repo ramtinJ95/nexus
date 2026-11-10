@@ -96,6 +96,8 @@ export const storageKeys = {
   graphRange: "nexus.node-graphs.range",
   hiddenGraphs: "nexus.node-graphs.hidden",
   tabs: (thread: string) => `nexus.tabs.${thread}` as const,
+  /** The file tab open as the page went, and how far down its diff the reader was. */
+  tabPlace: (thread: string) => `nexus.tab-place.${thread}` as const,
   review: (thread: string) => `nexus.review.${thread}` as const,
   draft: (thread: string) => `nexus.draft.${thread}` as const,
   /** The changed files the reader marked viewed. */

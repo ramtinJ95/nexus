@@ -11,7 +11,7 @@ import { applyFilter, listRows } from "./find.js";
 import { dialog, openProject, openStart, projectDialog } from "./dialogs.js";
 import { canRead, changesPane, checkout, factsNow } from "./checkout.js";
 import { changesUnreadable, readChanges } from "./changes-tree.js";
-import { activeTab, renderTabs, showTab, tabsBar, terminalTab } from "./tab-bar.js";
+import { activeTab, followHash, renderTabs } from "./tab-bar.js";
 import "./file-view.js";
 import "./terminal-tab.js";
 import "./composer.js";
@@ -33,17 +33,16 @@ if (changesPane !== null) {
   if (canRead(checkout.facts)) void readChanges();
   else changesUnreadable(checkout.facts);
 }
+followHash();
 end?.toEnd();
 follow(document.getElementById("convo")?.dataset.stream);
 // The nudge card's Write to it, from Needs you or from the thread's own page.
 const writeTo = () => {
   if (location.hash !== "#write") return;
-  if (tabsBar !== null && activeTab !== null) showTab(null);
   document.getElementById("prompt-text")?.focus();
 };
 writeTo();
 addEventListener("hashchange", writeTo);
-if (location.hash === "#terminal" && tabsBar?.querySelector('[data-tab="term"]')?.hidden === false) showTab(terminalTab);
 if (dialog?.dataset.autoopen !== undefined) void openStart(null);
 if (projectDialog?.dataset.autoopen !== undefined) openProject();
 tick();
