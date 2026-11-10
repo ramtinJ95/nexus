@@ -410,8 +410,8 @@ export function reviewLoop(deps: ReviewDeps) {
         started = await runs.start(builder, r.pr.branch, head, kind === "beside" || undefined);
       } catch (err) {
         // A held run's failed start takes it out of line, or it would hold every other start with no deadline of its
-        // own. A wait for room keeps its place, as its next start may still be refused for room alone.
-        if (run.behind === undefined) throw err;
+        // own. A wait for room keeps its place, held or not, as its next start may still be refused for room alone.
+        if (run.behind === undefined || run.room === true) throw err;
         log(`review ${r.id} of ${r.builder}: a ${kind === "live" ? "live check" : "check"} that waited in line did not start and will be tried again (${(err as Error).name})`);
         return { kind: "run", run: { startedAt: now(), thread: null } };
       }

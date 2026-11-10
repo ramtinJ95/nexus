@@ -2076,6 +2076,17 @@ test("a verify pylon that waits for room keeps its place when a start fails othe
   assert.equal((reviewOf(f, earlier).phase as { room?: true }).room, true, "the wait keeps its room flag");
   await loop.poll();
   assert.deepEqual(f.placed, [`verify pylon of ${earlier}`], "and its place ahead of the later wait");
+
+  const held = f.review().phase as Extract<Review["phase"], { kind: "verifying" }>;
+  assert.ok(held.behind !== undefined, "the later wait was held behind the earlier one");
+  f.registry.reviews.saveReview({ ...f.review(), phase: { ...held, refused: "no node can run this pylon: node is overcommitted", room: true } });
+  f.freeGiB = 8;
+  f.liveStartFails = 1;
+  await loop.poll();
+  const after = f.review().phase as Extract<Review["phase"], { kind: "verifying" }>;
+  assert.deepEqual([after.room, after.startedAt], [true, held.startedAt], "a wait for room that was also held keeps its place when its start fails");
+  await loop.poll();
+  assert.deepEqual(f.placed, [`verify pylon of ${earlier}`, `verify pylon of ${f.builder}`]);
 });
 
 test("a live check held before it tried keeps its place, so a later one the loop steps first does not pass it", async (t) => {
