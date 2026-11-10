@@ -23,9 +23,12 @@ export function startRows({ api, notifications, health = () => {}, caughtUp = ()
     // The page's regions show these rows too, so a change reads them now rather than at the next poll, which would
     // leave the sidebar and Needs you behind the notice.
     const text = JSON.stringify(rows);
-    if (shownRows !== null && text !== shownRows) changed();
+    const first = shownRows === null;
+    if (!first && text !== shownRows) changed();
     shownRows = text;
     const held = notifications(rows, now);
+    // Until a tab shows rows it has none to notify a change against, so no tab leaves a notice to it before then.
+    if (first) tell();
     // A turn over an unread reply may stop with no event, and the reply notifies once a read finds it stopped.
     const next = rows.some((row) => row.attention === "reply" && row.working) ? Math.min(held ?? Infinity, now + 1000) : held;
     // A held-back reply notifies once a read at its time finds no turn running.
@@ -59,9 +62,18 @@ export function startRows({ api, notifications, health = () => {}, caughtUp = ()
   // shares nothing and is the only tab it knows.
   const id = sharing ? crypto.randomUUID() : "";
   const tabs = new Map();
-  const view = () => ({ id, thread: currentThread(), focused: focused(), leading: following });
-  const tell = (ask = false) => rowsChannel?.postMessage({ tab: view(), ask });
-  const gone = () => rowsChannel?.postMessage({ gone: id });
+  const view = () => ({ id, thread: currentThread(), focused: focused(), leading: following, ready: shownRows !== null });
+  // A tab that left says nothing more until it comes back, as the hide that follows its pagehide would list it again.
+  let left = false;
+  const tell = (ask = false) => { if (!left) rowsChannel?.postMessage({ tab: view(), ask }); };
+  const gone = () => {
+    left = true;
+    rowsChannel?.postMessage({ gone: id });
+  };
+  const back = () => {
+    left = false;
+    tell(true);
+  };
   const raises = (thread) => raiser([...tabs.values(), view()], thread) === id;
   rowsChannel?.addEventListener("message", ({ data }) => {
     if (data.tab !== undefined) {
@@ -123,8 +135,8 @@ export function startRows({ api, notifications, health = () => {}, caughtUp = ()
     // A tab the browser freezes, discards or keeps in its back-forward cache hears no rows, so it raises nothing.
     window.addEventListener("pagehide", gone);
     document.addEventListener("freeze", gone);
-    window.addEventListener("pageshow", ({ persisted }) => { if (persisted) tell(true); });
-    document.addEventListener("resume", () => tell(true));
+    window.addEventListener("pageshow", ({ persisted }) => { if (persisted) back(); });
+    document.addEventListener("resume", back);
     tell(true);
   }
   askRows();

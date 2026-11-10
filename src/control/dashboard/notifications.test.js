@@ -148,7 +148,12 @@ function tab(browser, { fetch, now = () => 0, notify = () => {}, shown = () => {
   class Channel {
     constructor() { browser.channels.push(this); this.listeners = []; }
     addEventListener(_, listener) { this.listeners.push(listener); }
-    postMessage(data) { browser.posts += 1; for (const other of browser.channels) if (other !== this) for (const l of other.listeners) l({ data }); }
+    // As a browser's channel does, each message reaches the other tabs in a task of its own, after the poster's own task.
+    postMessage(data) {
+      browser.posts += 1;
+      const to = browser.channels.filter((other) => other !== this);
+      setImmediate(() => { for (const other of to) if (browser.channels.includes(other)) for (const l of other.listeners) l({ data }); });
+    }
   }
   class Events {
     constructor(url) { browser.streams.push(this); this.url = url; this.closed = false; }
@@ -172,13 +177,19 @@ function tab(browser, { fetch, now = () => 0, notify = () => {}, shown = () => {
   code = startRows(context, context);
   const show = (state) => { doc.visibilityState = state; for (const l of doc.listeners) l(); };
   const focus = (on) => { focused = on; fire(on ? "focus" : "blur"); };
-  const close = () => { fire("pagehide", { persisted: false }); browser.channels.splice(browser.channels.indexOf(close.channel), 1); };
+  // As a browser unloads a page: pagehide, then the page goes hidden, and then its channel closes.
+  const close = () => {
+    fire("pagehide", { persisted: false });
+    doc.visibilityState = "hidden";
+    for (const l of doc.listeners) l();
+    browser.channels.splice(browser.channels.indexOf(close.channel), 1);
+  };
   close.channel = browser.channels.at(-1);
   return { ...code, doc, favicon, timers, intervals, show, focus, close };
 }
 const browser = () => ({ channels: [], streams: [], locked: false, posts: 0, tabs: 0 });
 const json = (body) => ({ ok: true, text: async () => JSON.stringify(body) });
-const settle = () => new Promise((resolve) => setImmediate(resolve));
+const settle = async () => { for (let i = 0; i < 10; i += 1) await new Promise((resolve) => setImmediate(resolve)); };
 
 test("stalled attention requests time out, release their lock and retry", async (t) => {
   for (const method of ["GET", "POST"]) for (const phase of ["headers", "body"]) {
@@ -409,6 +420,7 @@ test("a follower whose stream opens again hands every tab the changes it missed 
   shared.streams[1].onopen();
   assert.equal(catchUps.length, 1);
   catchUps[0]({ id: 7, node: null, name: "backup", from: "ok", status: "warn", text: "the run failed" });
+  await settle();
   assert.deepEqual(heard, { leader: [7], hidden: [7] });
 });
 
@@ -475,7 +487,9 @@ test("a tab that closes leaves its notices to the tabs still open", async () => 
   const raised = [];
   const page = (name, thread) => tab(shared, { focused: false, visible: false, thread, shown: (n) => { if (n.channel !== null) raised.push(n.name ?? name); }, fetch: async () => json(listed) });
   page("leader", null);
-  page("on-thread", "t1").close();
+  const leaving = page("on-thread", "t1");
+  await settle();
+  leaving.close();
   await settle();
   listed = [{ ...listed[0], attention: "waiting" }];
   shared.streams[0].onmessage({});
@@ -483,13 +497,32 @@ test("a tab that closes leaves its notices to the tabs still open", async () => 
   assert.deepEqual(raised, ["leader"]);
 });
 
+test("a tab that opens on the thread as it changes leaves that change's notice to a tab that saw the thread before", async () => {
+  let listed = [{ id: "t1", title: "Fix", attention: null, working: false, lastReplyAt: null }];
+  const shared = browser();
+  const raised = [];
+  const page = (name, thread) => tab(shared, { focused: false, visible: false, thread, shown: (n) => { if (n.channel !== null) raised.push([name, n.tag]); }, fetch: async () => json(listed) });
+  page("leader", null);
+  await settle();
+  listed = [{ ...listed[0], attention: "waiting" }];
+  page("newcomer", "t1");
+  await settle();
+  assert.deepEqual(raised, [["leader", "t1:waiting"]], "the newcomer reads the change as its first state, so the leader raises it");
+  listed = [{ ...listed[0], attention: "failed" }];
+  shared.streams[0].onmessage({});
+  await settle();
+  assert.deepEqual(raised.at(-1), ["newcomer", "t1:failed"], "and once it has shown rows, the tab on the thread raises the next");
+  assert.equal(raised.length, 2);
+});
+
 test("the tab that raises a thread's notice is the one on the thread, else the one that follows the events, and none while one has focus", () => {
-  const tabs = [{ id: "b", thread: null, focused: false, leading: true }, { id: "c", thread: "t2", focused: false, leading: false }, { id: "d", thread: "t1", focused: false, leading: false }];
+  const tabs = [{ id: "b", thread: null, focused: false, leading: true, ready: true }, { id: "c", thread: "t2", focused: false, leading: false, ready: true }, { id: "d", thread: "t1", focused: false, leading: false, ready: true }];
   assert.equal(raiser(tabs, "t1"), "d");
   assert.equal(raiser(tabs, "t3"), "b");
-  assert.equal(raiser([...tabs, { id: "a", thread: "t1", focused: false, leading: false }], "t1"), "a", "the first of the thread's tabs by ID");
+  assert.equal(raiser([...tabs, { id: "a", thread: "t1", focused: false, leading: false, ready: true }], "t1"), "a", "the first of the thread's tabs by ID");
+  assert.equal(raiser([...tabs, { id: "a", thread: "t1", focused: false, leading: false, ready: false }], "t1"), "d", "a tab that has shown no rows yet is passed over");
   assert.equal(raiser(tabs.filter((t) => !t.leading), "t3"), "c", "a tab that has not yet heard from the follower picks by ID");
-  assert.equal(raiser([...tabs, { id: "e", thread: "t2", focused: true, leading: false }], "t1"), null);
+  assert.equal(raiser([...tabs, { id: "e", thread: "t2", focused: true, leading: false, ready: false }], "t1"), null);
   assert.equal(notificationChannel(false, null, "t1", true, "granted", false), null, "a background tab that does not raise shows nothing");
   assert.deepEqual(rowNotice({ id: "t1", title: "Fix", attention: "reply" }, { focused: false, current: "t1", secure: true, permission: "granted", raises: true }),
     { channel: "system", title: "Fix", body: "new reply", url: null, tag: "t1:reply" });
