@@ -98,7 +98,7 @@ Every command takes `--json`, `--url` and `--socks`, before its name or after it
 
 `start` and `item add` without `--project` take the project whose `repoUrl` is the `origin` of the git checkout they run in, read from `GET /v1/projects`, and name it on stderr. The ssh and https spellings of a URL match, with or without a trailing `.git`. A port other than its scheme's default must match too, so `https://host:8443/o/r` and `https://host:9443/o/r` are different repositories. Without an `origin`, or unless exactly one project matches, they fail with exit code 64 as before.
 
-With `--json`, a command prints one JSON value on stdout, pretty-printed. The value is the API's reply, apart from the exceptions noted in the table. Without `--json`, output is plain text for people. Its format is not part of this contract.
+With `--json`, a command prints one JSON value on stdout, pretty-printed. The value is the API's reply, apart from the exceptions noted in the table. Without `--json`, output is plain text for people, and it is not part of this contract. Every table has a header row. A time prints as how long ago or how soon, then the local time it names, such as `3h ago (2026-11-10 14:05)` or `in 20m (2026-11-10 17:30)`. The usage report counts UTC days, and the usage-limit wording is the dashboard's too, so their times stay in UTC. `threads` colours a failed row red and a row whose attention waits on you yellow, only when stdout is a terminal and `NO_COLOR` is unset or empty. `--json` is never coloured. Its format is not part of this contract.
 
 | Command | Route | `--json` prints |
 |---|---|---|
@@ -114,8 +114,8 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `image rollback [--wait]` | `POST /v1/images/rollback` with `{}`, then `GET /v1/images` while waiting | `ImageOperation`, the rollout back to the previous image, or `ImagesView` with `--wait` |
 | `image list` | `GET /v1/images` | `ImagesView` |
 | `image current` | `GET /v1/images/current` | `{ current: ImageEntry \| null, previous: ImageEntry \| null }` |
-| `threads [--project P] [--all] [--open]` | `GET /v1/threads?deleted=false[&project=P]`, or `GET /v1/threads[?project=P]` with `--all`, or `GET /v1/threads?deleted=false&status=open[&project=P]` with `--open`, and `GET /v1/queued?status=queued[&project=P]`, or `GET /v1/queued[?project=P]` with `--all`, for the queued threads its text lists after the others | `ThreadRow[]`: each `Thread` with `desired` and `pylon: { node, actualState, failed }`, as in `ThreadDetail`. A thread whose harness or session turn runs carries `workingSince`, the earliest known start of those turns in Unix milliseconds, unless no start is known. Deleted threads are left out unless `--all` is given, and `--open` lists only active and idle threads. Queued threads are never in it |
-| `threads --queued [--project P] [--all]` | `GET /v1/queued?status=queued[&project=P]`, or `GET /v1/queued[?project=P]` with `--all` | `QueuedThread[]`, the threads that have not started. Cancelled and deleted ones are left out unless `--all` is given |
+| `threads [--project P] [--all] [--open] [--active] [--needs-me] [--limit N]` | `GET /v1/threads?deleted=false[&project=P]`, or `GET /v1/threads[?project=P]` with `--all`, or `GET /v1/threads?deleted=false&status=open[&project=P]` with `--open`, and `GET /v1/queued?status=queued[&project=P]`, or `GET /v1/queued[?project=P]` with `--all`, for the queued threads its text lists after the others | `ThreadRow[]`: each `Thread` with `desired` and `pylon: { node, actualState, failed }`, as in `ThreadDetail`. A thread whose harness or session turn runs carries `workingSince`, the earliest known start of those turns in Unix milliseconds, unless no start is known. Deleted threads are left out unless `--all` is given, and `--open` lists only active and idle threads. `--active` lists only active threads, and `--needs-me` only those whose `attention` waits on the person: `failed`, `decision`, `parked`, `limited`, `reply` or `waiting`. Either leaves the queued threads out of the text too. `--limit N` keeps the first N rows, the threads before the queued ones. Queued threads are never in it. The text heads its columns: the thread, its status, its attention, whether it works or stopped on its usage limit, the pylon's state, the project, when it last replied, and the title. The queued threads follow under a header of their own |
+| `threads --queued [--project P] [--all] [--limit N]` | `GET /v1/queued?status=queued[&project=P]`, or `GET /v1/queued[?project=P]` with `--all` | `QueuedThread[]`, the threads that have not started. Cancelled and deleted ones are left out unless `--all` is given |
 | `show <thread>` | `GET /v1/threads/<thread>`, then `GET /v1/queued/<thread>` when that answers 409 with code `queued` | `ThreadDetail`. Its `said` holds the sentences the text prints of the thread's state and review. Its `desired` is what the planner wants of the pylon now: `running`, `paused` or `deleted`. Its `attach` is the command that attaches to the pylon's Herdr sessions from a shell in the pylon. Without `--json`, it prints `attach: nexus attach <thread>`, the command that attaches from this Mac, unless the thread is archived or deleted, and `disk: kept past its 24 hours, as ...` with why for an archived thread whose disk is kept. For a thread that has not started, `QueuedThread` |
 | `ports <thread>` | `GET /v1/threads/<thread>` | `ListeningPort[] \| null`, the detail's `ports` |
 | `preview <thread> <port> [--wait]` | `POST /v1/threads/<thread>/previews` with `{"port": number}`, then with `--wait` polls `GET /v1/threads/<thread>` | `Preview`, the port's preview |
@@ -145,7 +145,7 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `retry <thread>` | `POST /v1/threads/<thread>/retry` | `null` |
 | `retry-pylon <thread>` | `POST /v1/threads/<thread>/pylon/retry` | `null` |
 | `seen <thread> [--unread \| --last-reply-at MS]` | `POST /v1/threads/<thread>/seen` with `{}`, or `{"lastReplyAt": MS}` with `--last-reply-at`, or `/unseen` with `--unread` | `null` |
-| `wake <thread>` | `POST /v1/threads/<thread>/activity` with `{"kind":"human"}` | `null` |
+| `wake <thread>` | `POST /v1/threads/<thread>/activity` with `{"kind":"human"}`, then `GET /v1/threads/<thread>` for the text, which says whether the activity wakes the pylon or keeps it awake, or that an archived thread's pylon stays paused until `unarchive` | `null` |
 | `archive <thread>` | `POST /v1/threads/<thread>/archive` | `Thread`, or `QueuedThread` with status `archived` for a thread that has not started, which cancels it. An archived thread with no activity for 7 days is deleted, as `delete` deletes it, unless something still reads it, as [Retention](data-model.md#retention) says |
 | `unarchive <thread>` | `POST /v1/threads/<thread>/unarchive` | `Thread`, or `QueuedThread` with status `queued` for a cancelled one, which queues it again. A thread whose disk the cleanup deleted, once it had been archived 24 hours and its usage was read and backed up, has no disk left, so its pylon boots fresh from the thread's recorded image and commit. A thread retention purged is not found, so it fails with exit code 4, as `show` of it does |
 | `delete <thread>` | `DELETE /v1/threads/<thread>` | `Thread`, with status `deleted`, or `QueuedThread` with status `deleted`. A deleted thread is purged from the registry 7 days after its delete, once a backup began since, and is then not found, the API's 404 |
@@ -619,7 +619,7 @@ type ThreadSetup =
   | { how: "fresh"; reason: string; building?: TemplateId }; // building: the build this start asked for or found running, for the next thread
 ```
 
-Plain `show` prints it after the placement line, such as `setup: from template tpl-3f2a9c1b0d4e, built 2h ago, then checked out 91ce5419faae`, or `setup: fresh boot runs .nexus/setup, because no template of this setup is on rj-firebat yet; tpl-3f2a9c1b0d4e builds for the next thread`. When a template's build failed, the reason ends in its log, of which plain `show` prints the first line and `--json` all.
+Plain `show` prints it after the placement line, such as `setup: from template tpl-3f2a9c1b0d4e, built 2h ago (2026-11-10 12:05), then checked out 91ce5419faae`, or `setup: fresh boot runs .nexus/setup, because no template of this setup is on rj-firebat yet; tpl-3f2a9c1b0d4e builds for the next thread`. When a template's build failed, the reason ends in its log, of which plain `show` prints the first line and `--json` all.
 
 ## Placement
 
@@ -1434,7 +1434,7 @@ turn that ends with a background task still running reports a heartbeat for its 
 or when the turn ends on a model error that is not its usage
 limit, an error notice that is the newest entry that is not bookkeeping, as for
 [usage-limit stops](#usage-limit-stops). Until a turn of a session starts after
-it, the thread has `turnDied` and `show` prints `turn died: <reason>, at <time>`, with
+it, the thread has `turnDied` and `show` prints `turn died: <reason>, <time>`, with
 what Nexus does next. Its attention stays what it was, often none, since a session
 that ends records no reply.
 
@@ -1568,7 +1568,7 @@ question qn-image: Rebuild the pylon image?
   needs a deployer
 ```
 
-The first line has only the text's first line. `reserved:` is printed only for a reserved case. The last line is `needs you` for a person question, `needs a deployer` for a deployer question, or `answered "<option>" by <node> at <ISO time>` once it is answered, or since 0.62.0 `withdrawn when the thread was archived at <ISO time>`.
+The first line has only the text's first line. `reserved:` is printed only for a reserved case. The last line is `needs you` for a person question, `needs a deployer` for a deployer question, or `answered "<option>" by <node> <time>` once it is answered, or since 0.62.0 `withdrawn when the thread was archived <time>`.
 
 ### A Claude worker's AskUserQuestion
 
@@ -1618,7 +1618,7 @@ An ordinary question answered with `{"choices": ...}` is refused with 400, `ques
 ```text
 question ask-toolu_01: Drink: Which drink?
   Extras: What goes in it?
-  answered "Drink: Tea; Extras: Milk, Oat cream" by nLAPTOP at 2026-10-28T09:00:00.000Z
+  answered "Drink: Tea; Extras: Milk, Oat cream" by nLAPTOP 13d ago (2026-10-28 10:00)
 ```
 
 ## Pipeline items
@@ -1799,7 +1799,7 @@ judgment of failure 812 on node-a: retry, by the judgment: The controller died w
 judgment of failure 813 on node-a: person, by the control plane: the judgment did not answer within 15 minutes
   waits for your answer to question judgment:813
 judgment of failure 814 on node-a: no verdict yet
-  judging since 2026-10-28T09:00:00.000Z
+  judging since 13d ago (2026-10-28 10:00)
 ```
 
 The second line is what Nexus did, the question it waits on, or `Nexus acts on it` for the moment between a verdict and its action. The thread page shows a card per judgment above the questions, with what failed, the verdict, who gave it and what Nexus did, and the brief and the reply under a fold. The question is the ordinary question card.
