@@ -158,7 +158,9 @@ export type PlanStep =
   | { kind: "submit"; job: Job; uncounted?: true }
   | { kind: "fail"; code: JobErrorCode; reason: string; uncounted?: true }; // the registry marks the pylon failed until a human retries
 
-const maxAttempts = 5;
+export const maxAttempts = 5;
+/** The job error codes the planner never retries, so a pylon whose last job failed with one fails on its next tick. */
+export const finalCodes = (Object.keys(retryable) as JobErrorCode[]).filter((code) => !retryable[code]);
 const backoffScheduleMs = [5_000, 15_000, 45_000, 120_000, 120_000] as const;
 /** Wait after the `attempt`th consecutive failure, counting from 1. */
 export function backoffMs(attempt: number): number {
@@ -332,8 +334,8 @@ export type SessionRow = { id: string; harness: SessionHarness; harnessSessionId
 
 /**
  * `node` is the probe the event came from. `known` maps each registry pylon on that node the pass would tick to the
- * last observation ingested for it, or "absent". A deleted thread's pylon that the node neither lists nor routes is
- * left out once nothing is left to tear down. Every write is an upsert, so ingesting an event twice is harmless.
+ * last observation ingested for it, or "absent". A deleted or archived thread's pylon that the node neither lists nor
+ * routes is left out once nothing is left to settle. Every write is an upsert, so ingesting an event twice is harmless.
  *
  * - Nothing is written for a pylon missing from `known`, an orphan, not even a preview hit.
  * - A snapshot is the whole node, so a known pylon it omits is ingested as "absent".
