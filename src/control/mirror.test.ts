@@ -73,8 +73,10 @@ test("git's stderr over several lines is told on one line, after the subcommand 
   });
 });
 
-test("an aborted read rejects", async () => {
+test("an aborted read rejects, though the commit was read before", async () => {
   await assert.rejects(mirror.setupInputs(project, { branch: "main" }, AbortSignal.abort()), { name: "AbortError" });
+  await mirror.setupInputs(project, { commit: first });
+  await assert.rejects(mirror.setupInputs(project, { commit: first }, AbortSignal.abort()), { name: "AbortError" });
 });
 
 /** Runs `read` with git tracing each process into a directory of its own, and counts the fetches git ran. */

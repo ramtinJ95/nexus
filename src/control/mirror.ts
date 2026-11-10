@@ -37,6 +37,7 @@ export function projectMirror(options: { githubToken: string | null }): ProjectM
       const bounded = signal === undefined ? deadline : AbortSignal.any([deadline, signal]);
       const env = gitEnv(project.repoUrl, options.githubToken);
       try {
+        bounded.throwIfAborted();
         const commit = "commit" in ref ? ref.commit : await tipOf(project.repoUrl, ref.branch, env, bounded);
         if (commit === null) return null;
         const known = kept.get(`${project.repoUrl} ${commit}`);
