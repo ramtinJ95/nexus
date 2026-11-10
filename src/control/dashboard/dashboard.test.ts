@@ -1435,10 +1435,12 @@ test("a lone tool call is its own line, and a run of calls folds under a line th
     assistant([call("c4", "read", { path: "src/b.ts", offset: 10 })], "aborted"),
     assistant([], "error", "rate limited"),
     { role: "user", content: [{ type: "text", text: "Look at this " }, { type: "image", data: "", mimeType: "image/png" }], timestamp: 0 },
-    assistant([{ type: "text", text: "All 40 pass." }]),
+    { ...assistant([{ type: "text", text: "All 40 pass." }]), timestamp: 1_700_000_000_000 },
   );
 
-  const { rows, open } = conversationOf((await s.call("GET", `/threads/${fix.id}`)).text);
+  const page = (await s.call("GET", `/threads/${fix.id}`)).text;
+  assert.match(page, /<div class="msg agent" data-at="1700000000000"><div class="text"><p>All 40 pass\.<\/p>/, "an answer carries its time, which the page titles in the reader's zone");
+  const { rows, open } = conversationOf(page);
   assert.deepEqual(rows, [
     "You Run the tests",
     "Running them with npm test .",
@@ -2204,6 +2206,7 @@ test("a Claude worker's transcript reads as its conversation: prompts by who sen
 
   const html = (await s.call("GET", `/threads/${thread.id}`)).text;
   assert.match(html, /<div class="msg user" data-at="1">/, "a prompt carries its time, which the page titles in the reader's zone");
+  assert.match(html, /<div class="msg agent" data-at="8"><div class="text"><p>Counting with/, "so does Claude's reply");
   const { rows, open, dock } = conversationOf(html);
   assert.deepEqual(rows, [
     "You Write hello.py, then count its lines",

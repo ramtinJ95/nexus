@@ -140,7 +140,7 @@ export function blockView(block: Block, now: number): Html {
     }
     case "agent": return block.streaming
       ? html`<div class="msg agent streaming"><div class="text"${growing}>${grows(prose(block.text, html`<span class="caret" aria-hidden="true"></span>`))}</div></div>`
-      : html`<div class="msg agent"><div class="text">${prose(block.text)}</div>${shotsView(block.images)}</div>`;
+      : html`<div class="msg agent"${block.at !== 0 && html` data-at="${block.at}"`}><div class="text">${prose(block.text)}</div>${shotsView(block.images)}</div>`;
     case "notice": return html`<p class="notice notice-${block.tone}"><span class="notice-mark" aria-hidden="true">!</span>${block.text}</p>`;
     case "note": return html`<p class="note">${block.text}</p>`;
     case "link": return html`<p class="note"><a class="link" href="${block.url}" target="_blank" rel="noopener">${block.text} ↗</a></p>`;

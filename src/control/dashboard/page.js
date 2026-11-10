@@ -44,10 +44,15 @@ export function tick() {
   for (const time of document.querySelectorAll("time[data-since]")) time.textContent = clock(Date.now() - Number(time.dataset.since));
   for (const time of document.querySelectorAll("time[data-ago]")) {
     time.textContent = agoText(Date.parse(time.dateTime), Date.now());
-    time.title = localTime(Date.parse(time.dateTime));
+    const title = localTime(Date.parse(time.dateTime));
+    if (time.title !== title) time.title = title;
   }
   for (const time of document.querySelectorAll("time[data-local]")) time.textContent = localTime(Date.parse(time.dateTime));
-  for (const at of document.querySelectorAll("[data-at]")) at.title = localTime(Number(at.dataset.at));
+  // A title rewritten under the pointer resets its tooltip, so only a new one is written.
+  for (const at of document.querySelectorAll("[data-at]")) {
+    const title = localTime(Number(at.dataset.at));
+    if (at.title !== title) at.title = title;
+  }
 }
 
 // What the server last sent for each region. Comparing against it rather than the live DOM means a tool the
