@@ -92,7 +92,10 @@ _nexus() {
   if [[ -n $skip ]]; then
     case $prev in
 ${Object.entries(valueNames).map(([flag, kind]) => `      ${flag}) COMPREPLY=( $(compgen -W "$(_nexus_ids ${kind}s \${conn[@]+"\${conn[@]}"})" -- "$cur") ) ;;`).join("\n")}
-      *) if type compopt >/dev/null 2>&1; then compopt -o default; else COMPREPLY=( $(compgen -f -- "$cur") ); fi ;;
+      *)
+        if type compopt >/dev/null 2>&1; then compopt -o default
+        else while IFS= read -r word; do COMPREPLY+=("$word"); done < <(compgen -f -- "$cur")
+        fi ;;
     esac
   elif [[ $cur == -* ]]; then COMPREPLY=( $(compgen -W "$flags" -- "$cur") )
   elif [[ -z $group ]]; then COMPREPLY=( $(compgen -W "${words(tops)}" -- "$cur") )
@@ -105,7 +108,8 @@ ${Object.entries(valueNames).map(([flag, kind]) => `      ${flag}) COMPREPLY=( $
     COMPREPLY=( $(compgen -W "$ids" -- "$cur") )
   fi
 }
-complete -F _nexus nexus
+# A bash without compopt, as macOS's 3.2, cannot ask for file names' quoting and slashes only where it completes them.
+if type compopt >/dev/null 2>&1; then complete -F _nexus nexus; else complete -o filenames -F _nexus nexus; fi
 `;
 }
 

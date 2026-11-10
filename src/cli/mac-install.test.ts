@@ -71,7 +71,7 @@ test("the shim says to run deploy/mac/install when the packages were installed f
 test("install stamps the packages it installed, so the shim it links runs, and its PATH and completion hints name the shell's profile", async (t) => {
   const generic = "Shell completion: nexus completion zsh|bash|fish prints a script for your shell's profile to load";
   const cases = [
-    ["Darwin", "/bin/zsh", "~/.zprofile", "Shell completion: add this line to ~/.zshrc: source <(nexus completion zsh)"],
+    ["Darwin", "/bin/zsh", "~/.zprofile", "Shell completion: add this line to ~/.zshrc, after any compinit: source <(nexus completion zsh)"],
     ["Linux", "/bin/bash", "~/.bashrc", `Shell completion: add this line to ~/.bashrc: eval "$(nexus completion bash)"`],
     ["Darwin", "/bin/bash", "~/.bash_profile", `Shell completion: add this line to ~/.bash_profile: eval "$(nexus completion bash)"`],
     ["Linux", "/bin/sh", "~/.profile", generic],

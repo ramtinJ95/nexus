@@ -34,7 +34,7 @@ esac
 shell=${SHELL:-}
 case ${shell##*/}:$system in
   fish:*) on="add this line to ~/.config/fish/config.fish: nexus completion fish | source" ;;
-  zsh:*) on="add this line to ~/.zshrc: source <(nexus completion zsh)" ;;
+  zsh:*) on="add this line to ~/.zshrc, after any compinit: source <(nexus completion zsh)" ;;
   bash:Darwin) on="add this line to ~/.bash_profile: eval \"\$(nexus completion bash)\"" ;;
   bash:*) on="add this line to ~/.bashrc: eval \"\$(nexus completion bash)\"" ;;
   *) on="nexus completion zsh|bash|fish prints a script for your shell's profile to load" ;;

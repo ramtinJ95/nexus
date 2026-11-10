@@ -4,8 +4,8 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { symlink, writeFile } from "node:fs/promises";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { freePort, tempDir } from "../test-support/kit.ts";
@@ -68,4 +68,8 @@ test("bash completes commands, subcommands, flags, and the threads and projects 
   assert.deepEqual((await complete(`nexus --url="${url}" --socks '${socks}' show `, down)).words, ["@last", id], "a quoted --url and --socks reach the lookup unquoted");
   assert.deepEqual((await complete(`nexus --url=${url} sh`, down)).words, ["show"]);
   assert.deepEqual((await complete(`nexus send --file ${dir}/nexus.b`, s.env(), "enable -n compopt;")).words, [script], "a bash without compopt, as macOS's 3.2, completes a file flag's path");
+  await mkdir(join(dir, "nexus review"));
+  assert.deepEqual((await complete(`nexus send --file ${dir}/nexus`, s.env(), "enable -n compopt;")).words, [join(dir, "nexus"), join(dir, "nexus review"), script], "a path with a space stays one candidate");
+  const registered = spawnSync("bash", ["-c", `enable -n compopt; source "$0"; complete -p nexus`, script], { encoding: "utf8" }).stdout;
+  assert.match(registered, /-o filenames/, "without compopt the candidates are quoted and marked as file names");
 });
