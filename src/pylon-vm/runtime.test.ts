@@ -188,9 +188,14 @@ test("a stop under a command's kill write that holds the file slot closes the VM
 	const killing = runtime.handle({ action: "exec-kill", name: "pylon-a", pid } as Action);
 	void killing.catch(() => {});
 	await fake.holding("/kill");
+	t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
 	const stop = runtime.stop();
-	void stop.catch(() => {});
-	assert.equal(await settles(stop, 2_000), "settled", "the stop's guest commands queued behind the write, for up to 40 s each");
+	let settled = false;
+	void stop.then(() => { settled = true; }, () => { settled = true; });
+	t.mock.timers.tick(300);
+	for (const deadline = performance.now() + 60_000; !settled && performance.now() < deadline;) await new Promise((resolve) => setImmediate(resolve));
+	assert.ok(settled, "the stop settled once its 300 ms settle wait ended, not behind the write for its guest commands' 40 s each, and the 60 s of real time only ends a hang");
+	assert.deepEqual(fake.closed, ["vm"]);
 	await assert.rejects(stop, /Stop failed before its checkpoint completed/);
 	assert.deepEqual(fake.checkpoints, []);
 	await assert.rejects(killing, /sandbox closed/);
