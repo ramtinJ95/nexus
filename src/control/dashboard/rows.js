@@ -98,9 +98,24 @@ export function startRows({ api, notifications, raise = () => {}, health = () =>
   }
   /** Whether another tab shows `thread`. */
   const elsewhere = (thread) => [...tabs.values()].some((tab) => tab.thread === thread);
+  // The system notices this tab shows that would open a page, by tag, until clicked or closed. A tab that comes to show
+  // the thread takes each over, raising it again under the same tag without a new alert, so the click lands there.
+  const kept = new Map();
+  const keep = (row) => {
+    const tag = JSON.stringify([row.id, row.attention]);
+    kept.set(tag, row);
+    return () => { if (kept.get(tag) === row) kept.delete(tag); };
+  };
+  function handOver(to) {
+    for (const [tag, row] of kept) if (row.id === to.thread && to.id !== id) {
+      kept.delete(tag);
+      rowsChannel.postMessage({ raise: row, to: to.id, quiet: true });
+    }
+  }
   rowsChannel?.addEventListener("message", ({ data }) => {
     if (data.tab !== undefined) {
       tabs.set(data.tab.id, data.tab);
+      handOver(data.tab);
       if (data.ask) tell();
     } else if (data.gone !== undefined) {
       tabs.delete(data.gone);
@@ -108,7 +123,8 @@ export function startRows({ api, notifications, raise = () => {}, health = () =>
     } else if (data.raise !== undefined) {
       if (data.to !== id) return;
       // Answered once shown, so a tab that closes before then leaves the notice to the tab that handed it.
-      void Promise.resolve(raise(data.raise)).then(() => rowsChannel.postMessage({ raised: data.key }));
+      const shown = Promise.resolve(raise(data.raise, data.quiet === true));
+      if (data.key !== undefined) void shown.then(() => rowsChannel.postMessage({ raised: data.key }));
     } else if (data.raised !== undefined) {
       clearTimeout(handed.get(data.raised)?.timer);
       handed.delete(data.raised);
@@ -188,5 +204,5 @@ export function startRows({ api, notifications, raise = () => {}, health = () =>
     } catch { /* The page's refresh reports connection failures. */ }
     finally { marking = false; }
   }
-  return { readRows, markSeen, askRows, raises, elsewhere };
+  return { readRows, markSeen, askRows, raises, elsewhere, keep };
 }

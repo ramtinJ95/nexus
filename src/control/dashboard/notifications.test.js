@@ -183,9 +183,12 @@ function tab(browser, { fetch, now = () => 0, notify = () => {}, shown = () => {
     setInterval: (f, ms) => intervals.push({ f, ms }), health, caughtUp, changed, owedSeen,
     notifications: coordinator((row) => {
       notify(row);
-      shown(rowNotice(row, { focused, current: thread, secure: true, permission: "granted", raises: !focused && code.raises(row) }));
+      const n = rowNotice(row, { focused, current: thread, secure: true, permission: "granted", raises: !focused && code.raises(row) });
+      // As health.js's showRow keeps a notice that would open a page.
+      if (n.channel === "system" && n.url !== null) code.keep(row);
+      shown(n);
     }),
-    raise: (row) => shows(() => shown(rowNotice(row, { focused, current: thread, secure: true, permission: "granted", raises: true }))),
+    raise: (row, quiet) => shows(() => shown({ ...rowNotice(row, { focused, current: thread, secure: true, permission: "granted", raises: true }), quiet })),
     currentThread: () => thread, focused: () => focused, activeTab: () => null, api: apiOver({ fetch }),
   };
   code = startRows(context, context);
@@ -678,7 +681,7 @@ test("the notifications control reads the browser's permission, and asks for it 
   assert.deepEqual(read(unasked.button), ["System notifications blocked in the browser's site settings", true], "a change in the site settings shows too");
 });
 
-test("a click on a notice raised while no tab showed its thread opens a new tab when one has shown the thread since, and keeps its own page", async (t) => {
+test("a click on a notice that a tab on its thread did not take over opens a new tab, and keeps the clicked tab's page", async (t) => {
   const notifications = [];
   class Notification {
     constructor(title, options) { Object.assign(this, { title, options }); notifications.push(this); }
@@ -699,7 +702,7 @@ test("a click on a notice raised while no tab showed its thread opens a new tab 
   await settle();
   const click = async () => {
     const n = shown.at(-1);
-    await notice(n.channel, n.title, n.body, n.url, n.tag, () => leader.elsewhere("t1"));
+    await notice(n.channel, n.title, n.body, n.url, n.tag, { elsewhere: () => leader.elsewhere("t1") });
     notifications.at(-1).onclick();
     await settle();
   };
@@ -717,4 +720,41 @@ test("a click on a notice raised while no tab showed its thread opens a new tab 
   await settle();
   await click();
   assert.deepEqual([assigned.length, opened, focuses], [1, [["/#needs-you:t1:decision", "_blank"]], 2], "the clicked tab comes forward, keeps its page and opens the notice's in a new tab");
+});
+
+test("a tab that comes to show a thread takes over the notice another tab raised for it, so the click lands on the thread", async () => {
+  let listed = [{ id: "t1", title: "Fix", attention: null, working: false, lastReplyAt: null }];
+  const { shared, raised, page } = hiddenTabs(() => listed);
+  const seen = [];
+  page("leader", null);
+  await settle();
+  listed = [{ ...listed[0], attention: "decision" }];
+  shared.streams[0].onmessage({});
+  await settle();
+  assert.deepEqual(raised, [["leader", "t1:decision"]]);
+  page("opened", "t1", { shown: (n) => { if (n.channel !== null) seen.push(n); } });
+  await settle();
+  assert.deepEqual(seen.map((n) => [n.channel, n.url, n.tag, n.quiet]), [["system", null, "t1:decision", true]],
+    "the tab on the thread raises it again under its tag, without a new alert, and its click opens no page");
+  page("again", "t1");
+  await settle();
+  assert.equal(seen.length, 1, "a notice is taken over once");
+});
+
+test("a notice raised again quietly replaces its tag without a new alert, and a click or close ends it", async (t) => {
+  const notifications = [];
+  class Notification {
+    constructor(title, options) { Object.assign(this, { title, options }); notifications.push(this); }
+    close() {}
+  }
+  const globals = { location: { assign: () => {} }, window: { focus: () => {} }, Notification };
+  const before = Object.fromEntries(Object.keys(globals).map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+  for (const [k, v] of Object.entries(globals)) Object.defineProperty(globalThis, k, { value: v, configurable: true, writable: true });
+  t.after(() => { for (const [k, d] of Object.entries(before)) d === undefined ? delete globalThis[k] : Object.defineProperty(globalThis, k, d); });
+  let ended = 0;
+  await notice("system", "Fix", "needs your decision", null, "t1:decision", { quiet: true, ended: () => { ended += 1; } });
+  assert.deepEqual(notifications[0].options, { body: "needs your decision", tag: "t1:decision", renotify: false });
+  notifications[0].onclick();
+  notifications[0].onclose();
+  assert.equal(ended, 2);
 });

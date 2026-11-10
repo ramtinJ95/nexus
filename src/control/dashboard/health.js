@@ -52,15 +52,18 @@ export async function caughtUp(hand, wait = 1000) {
 }
 
 /**
- * Shows a notice in `channel`. A system notification with a `tag` replaces the browser's one of that tag and alerts
- * again. Its click brings the tab forward, and opens `url` there unless it is null. When `elsewhere` says another tab
- * came to show the notice's thread since, the click opens `url` in a new tab instead, as a page cannot bring another
- * tab forward, and this one keeps its draft and terminal.
+ * Shows a notice in `channel`. A system notification with a `tag` replaces the browser's one of that tag, and alerts
+ * again unless `quiet`. Its click brings the tab forward, and opens `url` there unless it is null. When `elsewhere`
+ * says another tab came to show the notice's thread and did not take the notice over, the click opens `url` in a new
+ * tab instead, as a page cannot bring another tab forward, and this one keeps its draft and terminal. `ended` runs once
+ * the notification is clicked or closed.
  */
-export async function notice(channel, title, body, url, tag, elsewhere = () => false) {
+export async function notice(channel, title, body, url, tag, { elsewhere = () => false, quiet = false, ended = () => {} } = {}) {
   if (channel === "system") {
-    const shown = new Notification(title, tag === undefined ? { body } : { body, tag, renotify: true });
+    const shown = new Notification(title, tag === undefined ? { body } : { body, tag, renotify: !quiet });
+    shown.onclose = ended;
     shown.onclick = () => {
+      ended();
       shown.close();
       window.focus();
       if (url === null) return;
@@ -99,7 +102,9 @@ export function rowNotice(row, { focused, current, secure, permission, raises })
 /** Shows a row's notice, as `rowNotice` says it, in this tab. */
 export const showRow = (row, tab) => {
   const n = rowNotice(row, tab);
-  return notice(n.channel, n.title, n.body, n.url, n.tag, () => tab.elsewhere(row.id));
+  // A notice that would open a page is kept, so a tab that comes to show its thread can take it over.
+  const ended = n.channel === "system" && n.url !== null ? tab.keep(row) : () => {};
+  return notice(n.channel, n.title, n.body, n.url, n.tag, { elsewhere: () => tab.elsewhere(row.id), quiet: tab.quiet, ended });
 };
 
 const permissionStates = {

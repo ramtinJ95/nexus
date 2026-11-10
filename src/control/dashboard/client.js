@@ -73,9 +73,9 @@ const currentThread = () => /^\/threads\/([^/]+)$/.exec(location.pathname)?.[1] 
 const focused = () => document.visibilityState === "visible" && document.hasFocus();
 // Loaded now, before the page's first poll, so it reads the newest change the page showed.
 const checks = import("./health.js");
-const showRow = (row, raises) => {
+const showRow = (row, raises, quiet = false) => {
   const tab = { focused: focused(), current: currentThread(), secure: window.isSecureContext,
-    permission: window.isSecureContext && "Notification" in window ? Notification.permission : "unavailable", raises, elsewhere };
+    permission: window.isSecureContext && "Notification" in window ? Notification.permission : "unavailable", raises, quiet, elsewhere, keep };
   return checks.then((m) => m.showRow(row, tab));
 };
 // A focused tab shows its own notice, and the tab that follows the events says which tab raises a background one.
@@ -92,5 +92,5 @@ const listed = (rows, now) => {
   listRows(rows);
   return notifications(rows, now);
 };
-const { markSeen, askRows, raises, elsewhere } = startRows({ api, notifications: listed, raise: (row) => showRow(row, true), health, caughtUp, changed: () => { if (document.visibilityState === "visible") void refreshAfter(); }, currentThread, focused, activeTab: () => activeTab });
+const { markSeen, askRows, raises, elsewhere, keep } = startRows({ api, notifications: listed, raise: (row, quiet) => showRow(row, true, quiet), health, caughtUp, changed: () => { if (document.visibilityState === "visible") void refreshAfter(); }, currentThread, focused, activeTab: () => activeTab });
 setInterval(markSeen, 1000);
