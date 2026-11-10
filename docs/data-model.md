@@ -25,7 +25,7 @@ The control plane writes every record. Probes send facts in observations, and th
 | Aborted conversation | `aborted_conversations` |  | The harness, once it aborts a deleted thread's conversation at a delete or at open. Open aborts only the deleted threads' conversations without one, which a delete that crashed partway left running |
 | Usage record | `usage_records` |  | Reads of the harness and of the agents' transcripts in each pylon. [Token usage records](#token-usage-records) describes it |
 
-Three settings sit beside the records. `current` is the image every new pylon uses, and only `nexus image rollout` or `rollback` changes it, once every online node holds the image. `previous-image` is the image current before the last change, which `rollback` makes current again. `image-operation` is the running image build or rollout, or the last one, with each node's step and the probe job it last sent.
+Four settings sit beside the records. `current` is the image every new pylon uses, and only `nexus image rollout` or `rollback` changes it, once every online node holds the image. `previous-image` is the image current before the last change, which `rollback` makes current again. `image-operation` is the running image build or rollout, or the last one, with each node's step and the probe job it last sent. `image-fetches` holds the current image's copies the control plane sends outside a rollout, one per online node that lacks it, with the job it last sent and the failures in a row.
 
 ## Field values
 
