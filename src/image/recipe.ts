@@ -6,7 +6,7 @@ import { lstat, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compare } from "../util/compare.ts";
-import { buildPinsSchema, type ImageRecipe } from "../protocol/images.ts";
+import { buildPinsSchema, type BuildPins, type ImageRecipe } from "../protocol/images.ts";
 
 export const pylonRecipeDir = fileURLToPath(new URL("../../images/pylon/", import.meta.url));
 
@@ -35,7 +35,7 @@ export const recipePaths = [
 ];
 
 /** `paths` under `dir` sorted by path, each executable when its owner may execute it, as git checks it out, and pins.json parsed. */
-export async function loadImageRecipe(dir: string = pylonRecipeDir, paths: readonly string[] = recipePaths): Promise<ImageRecipe> {
+export async function loadImageRecipe(dir: string = pylonRecipeDir, paths: readonly string[] = recipePaths): Promise<ImageRecipe & { pins: BuildPins }> {
   const files: ImageRecipe["files"][number][] = [];
   for (const path of paths) {
     const from = join(dir, path);
