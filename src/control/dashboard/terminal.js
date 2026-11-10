@@ -118,7 +118,7 @@ export function clipboardOf(clipboard, focused, told) {
 /** What the terminal says about a clipboard write from the pylon: what became of it, its length and how it starts. */
 export function clipboardNotice(outcome, text) {
   const chars = `${text.length.toLocaleString("en-US")} character${text.length === 1 ? "" : "s"}`;
-  const start = text.slice(0, clipStartChars).replace(/\r?\n/g, "⏎").replace(/[\x00-\x1f\x7f]/g, "�");
+  const start = text.slice(0, clipStartChars).replace(/\r?\n/g, "⏎").replace(/[\x00-\x1f\x7f-\x9f\p{Cf}]/gu, "�");
   const shown = `“${start}${text.length > clipStartChars ? "…" : ""}”`;
   switch (outcome) {
     case "copied": return `The pylon copied ${chars} to your clipboard: ${shown}`;
@@ -130,7 +130,8 @@ export function clipboardNotice(outcome, text) {
 
 /**
  * The text an OSC 8 link shows, from the cells of `range` in `buffer`, as xterm.js hands a link handler both. xterm.js
- * gives each row of a link its own range, whose points count from 1 and whose end is the link's last cell.
+ * gives each row of a link its own range, whose points count from 1 and whose end is the link's last cell, so a link
+ * that wraps asks before it opens even when its text is its target.
  */
 export function linkText(buffer, { start, end }) {
   return buffer.getLine(start.y - 1)?.translateToString(true, start.x - 1, end.x) ?? "";

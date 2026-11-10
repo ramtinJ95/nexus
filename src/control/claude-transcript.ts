@@ -234,6 +234,19 @@ export function parseRecord(line: string): ClaudeEntry[] {
   return entriesOf(line, 0, { offset: 0, line: Buffer.from(line), repo: null }).entries;
 }
 
+/** Whether `url` is pull request `number` of the GitHub repository `repo`, whose names ignore case. */
+const ofRepo = (url: string, number: number, repo: string | null): repo is string => repo !== null && url.toLowerCase() === `https://github.com/${repo}/pull/${number}`.toLowerCase();
+
+/**
+ * A stored entry as a client sees it, for a thread of a project on the GitHub repository `repo`. A pull request
+ * stored before the reader checked its repository, and not of `repo`, becomes a `record` entry in its place, so the
+ * stored entries keep their numbers.
+ */
+export function storedEntry(entry: ClaudeEntry, repo: string | null): ClaudeEntry {
+  if (entry.kind !== "pull-request" || ofRepo(entry.url, entry.number, repo)) return entry;
+  return { kind: "record", at: entry.at, type: "pr-link", summary: "a pull request link that is not of the project's repository" };
+}
+
 /**
  * `at` is the record's timestamp, or `lastAt` for a record without one. Any record that breaks the shape its type
  * promises gives a `record` entry, so no input makes this throw.
@@ -291,9 +304,8 @@ const records = table<Parse>({
     if (typeof r.prNumber !== "number" || !Number.isSafeInteger(r.prNumber) || r.prNumber < 1) throw new Error("prNumber is not a pull request's number");
     const url = str(r.prUrl, "prUrl");
     // The guest writes the record and a client shows it as Nexus's own note, so it names only the project's pull request.
-    const own = `https://github.com/${repo}/pull/${r.prNumber}`;
-    if (repo === null || url.toLowerCase() !== own.toLowerCase()) return [];
-    return [{ kind: "pull-request", at, number: r.prNumber, url: own, repository: repo }];
+    if (!ofRepo(url, r.prNumber, repo)) return [];
+    return [{ kind: "pull-request", at, number: r.prNumber, url: `https://github.com/${repo}/pull/${r.prNumber}`, repository: repo }];
   },
   "queue-operation": (r, at) => [{ kind: "queue", at, op: cut(str(r.operation, "operation"), textLimits.summary), text: r.content === undefined ? null : cut(str(r.content, "content"), textLimits.prompt) }],
 });

