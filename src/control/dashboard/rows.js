@@ -7,7 +7,7 @@ import { streamRoutes } from "../../contract/streams.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { rowEvents } from "./contract.ts";
 
-export function startRows({ api, notifications, health = () => {}, caughtUp = () => {}, changed = () => {}, currentThread, focused, activeTab }, { window, navigator, document, crypto, BroadcastChannel, EventSource, Date, AbortSignal, setTimeout, clearTimeout, setInterval } = globalThis) {
+export function startRows({ api, notifications, raise = () => {}, health = () => {}, caughtUp = () => {}, changed = () => {}, currentThread, focused, activeTab }, { window, navigator, document, crypto, BroadcastChannel, EventSource, Date, AbortSignal, setTimeout, clearTimeout, setInterval } = globalThis) {
   const request = requestOver(api);
   // One tab of the browser holds the lock, follows those events and reads the thread list, and the other tabs show the
   // rows it hands them, so a hidden tab notifies without a request or a stream of its own. Every tab showing that one
@@ -23,12 +23,9 @@ export function startRows({ api, notifications, health = () => {}, caughtUp = ()
     // The page's regions show these rows too, so a change reads them now rather than at the next poll, which would
     // leave the sidebar and Needs you behind the notice.
     const text = JSON.stringify(rows);
-    const first = shownRows === null;
-    if (!first && text !== shownRows) changed();
+    if (shownRows !== null && text !== shownRows) changed();
     shownRows = text;
     const held = notifications(rows, now);
-    // Until a tab shows rows it has none to notify a change against, so no tab leaves a notice to it before then.
-    if (first) tell();
     // A turn over an unread reply may stop with no event, and the reply notifies once a read finds it stopped.
     const next = rows.some((row) => row.attention === "reply" && row.working) ? Math.min(held ?? Infinity, now + 1000) : held;
     // A held-back reply notifies once a read at its time finds no turn running.
@@ -62,7 +59,7 @@ export function startRows({ api, notifications, health = () => {}, caughtUp = ()
   // shares nothing and is the only tab it knows.
   const id = sharing ? crypto.randomUUID() : "";
   const tabs = new Map();
-  const view = () => ({ id, thread: currentThread(), focused: focused(), leading: following, ready: shownRows !== null });
+  const view = () => ({ id, thread: currentThread(), focused: focused(), leading: following });
   // A tab that left says nothing more until it comes back, as the hide that follows its pagehide would list it again.
   let left = false;
   const tell = (ask = false) => { if (!left) rowsChannel?.postMessage({ tab: view(), ask }); };
@@ -74,12 +71,45 @@ export function startRows({ api, notifications, health = () => {}, caughtUp = ()
     left = false;
     tell(true);
   };
-  const raises = (thread) => raiser([...tabs.values(), view()], thread) === id;
+  // The notices this tab handed to another, by that tab and the notice, until it says it raised them.
+  const handed = new Map();
+  const takeBack = (key) => {
+    const notice = handed.get(key);
+    if (notice === undefined) return;
+    handed.delete(key);
+    clearTimeout(notice.timer);
+    raise(notice.row);
+  };
+  /**
+   * Whether this tab raises a row's background notice now. The tab that follows the events decides for every tab, as
+   * each read reaches it first and it is open as long as any is. It hands the notice to a tab on the thread, and takes
+   * it back if that tab leaves or does not say within a second that it raised it.
+   */
+  function raises(row) {
+    if (!following) return false;
+    const to = raiser([...tabs.values(), view()], row.id);
+    if (to === null || to === id) return to === id;
+    const key = JSON.stringify([to, row.id, row.attention]);
+    clearTimeout(handed.get(key)?.timer);
+    handed.set(key, { to, row, timer: setTimeout(() => takeBack(key), 1000) });
+    rowsChannel.postMessage({ raise: row, to, key });
+    return false;
+  }
   rowsChannel?.addEventListener("message", ({ data }) => {
     if (data.tab !== undefined) {
       tabs.set(data.tab.id, data.tab);
       if (data.ask) tell();
-    } else if (data.gone !== undefined) tabs.delete(data.gone);
+    } else if (data.gone !== undefined) {
+      tabs.delete(data.gone);
+      for (const [key, notice] of handed) if (notice.to === data.gone) takeBack(key);
+    } else if (data.raise !== undefined) {
+      if (data.to !== id) return;
+      raise(data.raise);
+      rowsChannel.postMessage({ raised: data.key });
+    } else if (data.raised !== undefined) {
+      clearTimeout(handed.get(data.raised)?.timer);
+      handed.delete(data.raised);
+    }
     else if (data === "read") {
       if (following) void readRows();
     } else if (data.health !== undefined) health(data.health);

@@ -18,13 +18,11 @@ export function notificationChannel(focused, current, id, secure, permission, ra
 
 /**
  * Which of the browser's open tabs raises a thread's system notification, by ID, or null for none. A focused tab shows
- * the notice itself, so none raises one. Otherwise a tab that has shown rows raises it, as one that has not would
- * take the change for its first state. That is a tab on the thread, so a click shows it with no page left, or else
- * the tab that follows the events, which is open as long as any is.
+ * the notice itself, so none raises one. Otherwise a tab on the thread does, so a click shows it with no page left,
+ * or else the tab that follows the events, which is open as long as any is.
  */
-export function raiser(all, thread) {
-  if (all.some((tab) => tab.focused)) return null;
-  const tabs = all.filter((tab) => tab.ready);
+export function raiser(tabs, thread) {
+  if (tabs.some((tab) => tab.focused)) return null;
   const first = (list) => list.map((tab) => tab.id).sort()[0];
   return first(tabs.filter((tab) => tab.thread === thread)) ?? first(tabs.filter((tab) => tab.leading)) ?? first(tabs) ?? null;
 }
