@@ -190,6 +190,8 @@ test("a composer that holds the review keeps it composed, one that holds some en
   assert.deepEqual(heldBy(review, cut(review.composed.text, "line 1")).composed.ids, ["twelve"]);
   assert.equal(heldBy(review, "").composed, null);
   assert.equal(heldBy({ ...review, composed: null }, review.composed.text).composed, null);
+  const twins = composedReview([note("comment", at(11), at(12), "First.", "first"), note("comment", at(11), at(12), "Second.", "second")]).review;
+  assert.equal(heldBy(twins, twins.composed.text.split(/\n(?=2\. )/)[0]).composed, null, "one entry left of two that share a header holds neither");
 });
 
 test("a stored review reads back, and anything else reads as no review", () => {

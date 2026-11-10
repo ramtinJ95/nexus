@@ -484,9 +484,9 @@ h4.md-h { font-size: 1.07em; }
 
 /* composer: an open input over a hairline, with the model as a chip and a round send button */
 .dock { flex: none; padding: 10px 32px 16px; width: 100%; position: relative; display: grid; grid-template-columns: minmax(0, 780px); justify-content: center; gap: 6px; border-top: 1px solid var(--line-soft); }
-/* While a diff shows, the dock is one line: the agent's state, and an action's error. */
+/* While a diff shows, the dock is one line: the agent's state. */
 .main[data-view="file"] .dock { padding: 6px 32px; }
-.main[data-view="file"] .dock > :not(#run, #action-error) { display: none; }
+.main[data-view="file"] .dock > :not(#run) { display: none; }
 .main[data-view="file"] .state-bar { flex-wrap: nowrap; min-height: 28px; overflow: hidden; }
 .main[data-view="file"] .state-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .main[data-view="file"] .attach-line { display: none; }

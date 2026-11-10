@@ -11,33 +11,41 @@ import { noteCount } from "./review-notes.js";
 const iconOf = (name) => document.getElementById("icons").content.querySelector(`.i-${name}`).cloneNode(true);
 
 /**
- * The changed files the reader marked viewed, by path, each with the file's look then: its status, its old path and
- * its counts. A file whose look changed since reads as not viewed, as the agent changed it again.
+ * The changed files the reader marked viewed, by base and then by path, each with the file's look then: its status,
+ * its old path and its counts on that base. A file whose look changed since reads as not viewed, as the agent changed
+ * it again. A base keeps its own marks, as the same file has other counts on another base.
  */
 const viewedKey = thread === undefined ? null : storageKeys.viewed(thread);
 const lookOf = (file) => JSON.stringify([file.status, file.oldPath, file.additions, file.deletions]);
+const isLooks = (v) => typeof v === "object" && v !== null && !Array.isArray(v) && Object.values(v).every((look) => typeof look === "string");
 let viewed = (() => {
   try {
     const saved = JSON.parse(viewedKey === null ? "null" : kept.read(viewedKey) ?? "null");
-    return typeof saved === "object" && saved !== null && !Array.isArray(saved) ? saved : {};
+    return typeof saved === "object" && saved !== null && !Array.isArray(saved) ? Object.fromEntries(Object.entries(saved).filter(([, looks]) => isLooks(looks))) : {};
   } catch {
     return {};
   }
 })();
-export const isViewed = (file) => viewed[file.path] === lookOf(file);
-function keepViewed(next) {
-  viewed = next;
+export const isViewed = (file) => viewed[checkout.base]?.[file.path] === lookOf(file);
+/** Keeps `looks` as the current base's marks. */
+function keepViewed(looks) {
+  const { [checkout.base]: _, ...others } = viewed;
+  viewed = Object.keys(looks).length === 0 ? others : { ...others, [checkout.base]: looks };
   kept.write(viewedKey, Object.keys(viewed).length === 0 ? null : JSON.stringify(viewed));
 }
 export function markViewed(file, on) {
-  const { [file.path]: _, ...rest } = viewed;
+  const { [file.path]: _, ...rest } = viewed[checkout.base] ?? {};
   keepViewed(on ? { ...rest, [file.path]: lookOf(file) } : rest);
   if (checkout.changes !== null) renderChanges();
 }
-/** Drops the marks of files that changed since, or are no longer changed, so a file changed back is not viewed again. */
+/**
+ * Drops the current base's marks of files that changed since, or are no longer changed, so a file changed back is
+ * not viewed again. Another base's marks wait for a read of that base.
+ */
 function forgetChanged(files) {
-  const still = Object.fromEntries(files.filter(isViewed).map((file) => [file.path, viewed[file.path]]));
-  if (Object.keys(still).length !== Object.keys(viewed).length) keepViewed(still);
+  const looks = viewed[checkout.base] ?? {};
+  const still = Object.fromEntries(files.filter(isViewed).map((file) => [file.path, looks[file.path]]));
+  if (Object.keys(still).length !== Object.keys(looks).length) keepViewed(still);
 }
 
 function showChanges(...nodes) {

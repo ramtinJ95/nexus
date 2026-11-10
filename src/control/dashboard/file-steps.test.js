@@ -128,3 +128,24 @@ test("a viewed mark the agent's change cleared stays cleared once the file reads
   assert.equal(await read([a, { ...b, additions: 4 }, readme]), false, "the agent changed the file");
   assert.equal(await read([a, b, readme]), false, "its counts came back, but the reader has not viewed it since");
 });
+
+test("each base keeps its own viewed marks, so a switch of base and back finds them as they were", async () => {
+  const [a, b, readme] = [file("src/a.ts", 3), file("src/b.ts", 9), file("README.md", 1)];
+  viewedBox().checked = true;
+  viewedBox().fire("change");
+  const bViewed = () => treeFiles().find((el) => el.dataset.path === "src/b.ts").className.includes("viewed");
+  assert.equal(bViewed(), true);
+  const uncommitted = ids.get("changes-head");
+  listed = { ...checkout.changes, files: [a, { ...b, additions: 2 }, readme] };
+  uncommitted.checked = true;
+  uncommitted.fire("change");
+  await readChanges();
+  assert.equal(checkout.base, "head");
+  assert.equal(bViewed(), false, "on another base the file was not viewed");
+  listed = { ...checkout.changes, files: [a, b, readme] };
+  uncommitted.checked = false;
+  uncommitted.fire("change");
+  await readChanges();
+  assert.equal(checkout.base, "start");
+  assert.equal(bViewed(), true, "the boot's mark waited for its base");
+});

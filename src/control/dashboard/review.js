@@ -126,15 +126,15 @@ export function afterSend(review, sent, text) {
 
 /**
  * The review as the composer holding `text` leaves it, as when a page loads with the composer's draft: `composed`
- * keeps the notes whose entry's header line the composer still holds, and is null when it holds none of them.
+ * keeps the notes whose entry's header line the composer still holds, by afterSend's test, so notes that share a
+ * header stay only if it holds that line once for each. It is null when the composer holds none of them.
  */
 export function heldBy(review, text) {
   if (review.composed === null || text.includes(review.composed.text)) return review;
-  const headers = new Set(headersIn(text));
-  const ids = review.composed.ids.filter((id) => {
-    const note = review.notes.find((n) => n.id === id);
-    return note !== undefined && headers.has(noteHeader(note));
-  });
+  const headers = headersIn(text);
+  const composed = review.notes.filter((n) => review.composed.ids.includes(n.id));
+  const held = [...Map.groupBy(composed, noteHeader)].filter(([header, group]) => headers.filter((h) => h === header).length >= group.length);
+  const ids = held.flatMap(([, group]) => group.map((n) => n.id));
   if (ids.length === review.composed.ids.length) return review;
   return { ...review, composed: ids.length === 0 ? null : { ...review.composed, ids } };
 }

@@ -132,7 +132,7 @@ function stepFile(step) {
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "[" && event.key !== "]") return;
-  if (fileView === null || fileView.hidden || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (fileView === null || fileView.hidden || event.metaKey || event.ctrlKey || event.altKey || document.querySelector("dialog[open]") !== null) return;
   if (event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable]") !== null) return;
   event.preventDefault();
   stepFile(event.key === "[" ? -1 : 1);
