@@ -172,6 +172,7 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
         try {
           const response = await call("/rate_limit");
           await response.body?.cancel();
+          if (!response.ok) limited(response);
           if (answer === null) throw new Error(`GitHub rate limit: HTTP ${response.status}`);
         } catch (err) {
           if (answer === null) throw err;

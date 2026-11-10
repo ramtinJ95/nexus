@@ -355,6 +355,15 @@ test("the client keeps what GitHub's answers say of its token, and asks the rate
 
   const down = githubClient("secret", async () => new Response("oops", { status: 502 }));
   await assert.rejects(down.token(), /GitHub rate limit: HTTP 502/);
+
+  let sent = 0;
+  const limitedClient = githubClient("secret", async () => {
+    sent++;
+    return new Response("slow down", { status: 429, headers: { "retry-after": "3600" } });
+  });
+  await assert.rejects(limitedClient.token(), /HTTP 429/);
+  await assert.rejects(limitedClient.find("acme/repo", "feature"), /waiting for its rate limit/);
+  assert.equal(sent, 1, "a rate limit on the token's probe holds the client's later calls too");
 });
 
 /** A GitHub whose statuses answer 500 while `state.failing` holds, with one check run and the owner's comments `state.comments`. */
