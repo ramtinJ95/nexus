@@ -224,6 +224,8 @@ test("the CLI runs a thread's life through the SOCKS proxy, and --json prints th
   assert.equal(human.stdout, "> \n>   Fix the build  \n> and run the tests\n\n> now the lint\n\n> stop that\n");
 
   assert.equal((await s.json(["archive", thread.id])).status, "archived");
+  assert.deepEqual((await s.json(["threads"])).map((r: Thread) => r.status), ["archived"], "threads lists archived threads");
+  assert.deepEqual(await s.json(["threads", "--open"]), [], "--open leaves them out");
   assert.equal((await s.nexus(["send", thread.id, "x"])).code, 5, "an archived thread takes no messages");
   assert.doesNotMatch((await s.nexus(["show", thread.id])).stdout, /^attach:/m, "nor an attach, since its pylon stays paused");
   assert.equal((await s.json(["unarchive", thread.id])).status, "active");
@@ -1386,15 +1388,24 @@ test("connect fails without saving when no control plane answers, or one does no
   await assert.rejects(readFile(config), { code: "ENOENT" });
 });
 
-/** A control plane whose health answers `health`, and every other GET an empty list. Answers the paths it was sent. */
-async function versioned(t: TestContext, health: unknown) {
+/** A control plane whose health answers `health`, the thread list `threads`, and every other GET an empty list. Answers the paths it was sent. */
+async function versioned(t: TestContext, health: unknown, threads: unknown[] = []) {
   const paths: string[] = [];
   const server = createHttpServer((req, res) => {
     paths.push(req.url!);
-    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(req.url === "/v1/health" ? health : []));
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(req.url === "/v1/health" ? health : req.url!.split("?")[0] === "/v1/threads" ? threads : []));
   });
   return { url: `http://127.0.0.1:${await listening(t, server)}`, paths };
 }
+
+test("threads --open asks for the open threads, and leaves out the others a control plane that ignores status=open answers", async (t) => {
+  const rows = ["active", "idle", "archived"].map((status, i) => ({ id: `th-00000000000${i}`, status, project: "acme", title: "t", pylon: { actualState: "paused" }, createdAt: 0 }));
+  const old = await versioned(t, { commit: null, version: "0.76.0" }, rows);
+  const res = await bare(t, ["threads", "--open", "--json"], { NEXUS_URL: old.url });
+  assert.equal(res.code, 0, res.stderr);
+  assert.deepEqual(JSON.parse(res.stdout).map((r: Thread) => r.status), ["active", "idle"]);
+  assert.ok(old.paths.includes("/v1/threads?deleted=false&status=open"), old.paths.join(" "));
+});
 
 /** The CLI with a home of its own and no proxy. */
 async function bare(t: TestContext, args: readonly string[], env: Record<string, string> = {}) {

@@ -30,13 +30,13 @@ test("a project, an edit or a start that asks for less memory than a pylon VM bo
   assert.equal((await s.call("POST", "/v1/projects", { ...project, resources: { ...project.resources, memoryGiB: 3 } })).status, 201, "the floor itself boots");
   await refusedWith("PATCH", "/v1/projects/acme", { resources: { memoryGiB: 2 } });
   await refusedWith("POST", "/v1/threads", { project: "acme", title: "Small", resources: { memoryGiB: 2 } });
-  assert.equal(s.registry.threads.threads("acme" as Thread["project"]).length, 0, "no thread was created");
+  assert.equal(s.registry.threads.threads({ project: "acme" as Thread["project"] }).length, 0, "no thread was created");
 
   s.registry.projects.createProject({ ...project, id: "older" as ProjectId, resources: { ...project.resources, memoryGiB: 2 } } as never);
   const inherited = await s.call("POST", "/v1/threads", { project: "older", title: "Inherits 2 GiB" });
   assert.equal(inherited.status, 400, "a project stored before the floor cannot start a pylon at its size");
   assert.match(inherited.body.error, /^the pylon would get 2 GiB, but pylon VMs need at least 3 GiB: a 2 GiB Gondolin 0\.13\.0 guest hangs at boot/);
-  assert.equal(s.registry.threads.threads("older" as Thread["project"]).length, 0, "no thread was created");
+  assert.equal(s.registry.threads.threads({ project: "older" as Thread["project"] }).length, 0, "no thread was created");
 });
 
 test("a scratch project has no repository, and each of its threads starts an empty one on its branch", async (t) => {
@@ -63,7 +63,7 @@ test("a scratch project has no repository, and each of its threads starts an emp
   const pinned = await s.call("POST", "/v1/threads", { project: "sketch", title: "Pinned", commit: "abc123" });
   assert.equal(pinned.status, 400);
   assert.match(pinned.body.error, /sketch is a scratch project, so it has no commit to check out/);
-  assert.equal(s.registry.threads.threads("sketch" as Thread["project"]).length, 2, "no thread was created");
+  assert.equal(s.registry.threads.threads({ project: "sketch" as Thread["project"] }).length, 2, "no thread was created");
   assert.equal(s.calls.length, 2, "no conversation was started");
 });
 
