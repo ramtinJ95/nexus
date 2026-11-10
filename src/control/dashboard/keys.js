@@ -7,7 +7,7 @@ let shortcuts = null;
 
 document.addEventListener("keydown", (event) => {
   if (event.metaKey || event.ctrlKey || event.altKey) return;
-  const tab = event.target instanceof Element ? event.target.closest('[role="tab"]') : null;
+  const tab = event.target instanceof Element ? event.target.closest('[role="tablist"] [role="tab"]') : null;
   const tabs = tab === null ? [] : [...tab.closest('[role="tablist"]').querySelectorAll('[role="tab"]')].filter((t) => !t.hidden);
   const at = tabs.indexOf(tab);
   const to = tab === null ? undefined : { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: tabs.length - 1 }[event.key];

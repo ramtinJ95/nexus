@@ -236,6 +236,11 @@ test("the arrow keys, Home and End move between a tab list's tabs, past a hidden
   assert.equal(press("ArrowRight", document.activeElement, { altKey: true }).defaultPrevented, false, "a modified arrow is the browser's");
   button(".tab-close").focus();
   assert.equal(press("ArrowRight").defaultPrevented, false, "a file tab's close button is not a tab");
+  const loose = new HTMLButtonElement("button", [{ name: "role", value: "tab" }]);
+  document.body.append(loose);
+  loose.focus();
+  assert.equal(press("ArrowRight").defaultPrevented, false, "a tab outside a tab list is left alone");
+  document.body.replaceChildren(...document.body.children.filter((el) => el !== loose));
 });
 
 test("? lists the shortcuts the page has, and not while the person types or a dialog is open", async () => {
@@ -253,10 +258,25 @@ test("? lists the shortcuts the page has, and not while the person types or a di
     "? Show these shortcuts",
     "/ Filter threads",
     "Ctrl+K Go to a thread",
-    "←+→ Move between tabs",
+    "←+→+Home+End Move between tabs, or to the first or the last",
     "Esc Close a dialog, a panel or a preview",
   ], "only the shortcuts this page has: it has no start dialog, composer or diff");
 
   assert.equal(press("?", document.body).defaultPrevented, false, "a second ? with the overlay open does nothing");
   overlay.close();
+
+  const fileView = (new HTMLElement("section", [{ name: "id", value: "file-view" }, { name: "hidden", value: "" }]));
+  document.body.append(fileView);
+  press("?", document.body);
+  await settled();
+  const diffRows = [];
+  const shown = document.getElementById("keys-list").children;
+  for (let i = 0; i < shown.length; i += 2) diffRows.push(`${shown[i].children.map((k) => k.textContent).join("+")} ${shown[i + 1].textContent}`);
+  assert.deepEqual(diffRows.filter((row) => row.includes("diff")), [
+    "[+] In a diff, open the previous or the next changed file",
+    "J+K In a diff, move through its lines, with Shift to select them",
+    "C+Q+S+R In a diff, note the selected lines: comment, question, suggestion, requested change",
+  ], "a thread page, which has a diff view, lists the diff's keys");
+  overlay.close();
+  document.body.replaceChildren(...document.body.children.filter((el) => el !== fileView));
 });
