@@ -28,15 +28,17 @@ import type { Review } from "../review-model.ts";
 import { ok } from "../dashboard/view.ts";
 import type { ClusterView, Context, FoldView, Latest, NodeReading, Peek, ThreadView } from "../dashboard/context.ts";
 import { needsOf } from "../work.ts";
+import { isOpenStatus, openStatuses } from "../reconcile.ts";
+import { deployedForMs } from "../dashboard/lifecycle.ts";
 import { asset } from "../dashboard/assets.ts";
-import { findText, peekParam } from "../dashboard/contract.ts";
-import { notFound } from "../dashboard/shell.ts";
+import { findText, found, peekParam } from "../dashboard/contract.ts";
+import { foldCap, notFound } from "../dashboard/shell.ts";
 import { home, foldPage } from "../dashboard/home.ts";
 import { usagePage } from "../dashboard/usage-page.ts";
 import { clusterPage, liveReading, recentMs, recordedReading } from "../dashboard/cluster-page.ts";
 import { releaseView } from "../releases.ts";
 import { nodePylons } from "../placement.ts";
-import { itemView, threadStage } from "../pipeline.ts";
+import { itemThreads, itemView, threadStage } from "../pipeline.ts";
 import { promptSenders } from "../inbox.ts";
 import { claudeItems, conversationItems, type Item } from "../dashboard/items.ts";
 import { threadRole } from "../work-model.ts";
@@ -80,9 +82,15 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
     const rows = new Map<ThreadId, ThreadRow>();
     let reviews: readonly Review[] | undefined;
     let prs: ReadonlyMap<ThreadId, number[]> | undefined;
-    const threads = registry.threads.threads();
+    // The closed threads a page shows are few, so a render reads the rest of them only as counts.
+    const threads = registry.threads.threads({ status: openStatuses, archivedSince: now - deployedForMs });
     // registry.threads() is in the order registry.threads(project) is, so each project's keeps its order.
-    const byProject: ReadonlyMap<string, readonly Thread[]> = Map.groupBy(threads, (t) => t.project);
+    const byProject: ReadonlyMap<string, readonly Thread[]> = Map.groupBy(threads.filter((t) => isOpenStatus(t.status)), (t) => t.project);
+    const closed = registry.threads.closedCounts();
+    const records = registry.pipeline.items();
+    const started = itemThreads(registry, records);
+    const pipeline = new Map(records.map((record) => [record.id, { record, thread: started.get(record.id)! }]));
+    const items = records.filter((i) => started.get(i.id) === null).map((i) => itemView(registry, i, now));
     const queued: ReadonlyMap<string, readonly QueuedThread[]> = Map.groupBy(registry.queue.queuedThreads().filter((q) => q.status === "queued").map((q) => queuedView(registry, q)), (q) => q.project);
     const queuedIn = (project: string) => queued.get(project) ?? [];
     return {
@@ -90,8 +98,9 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
       answerRefusal: (question) => refusalOf(roles, question),
       projects: registry.projects.projects(), nodes: registry.nodes.nodes(), image: registry.images.currentImage(),
       health: { states: registry.health.healthStates(), changes: registry.health.healthChanges() },
-      threads, threadsIn: (project) => byProject.get(project) ?? [], queuedIn,
-      needs: needsOf({ registry, now, threads: () => threads, queuedIn }, detail),
+      threads, threadsIn: (project) => byProject.get(project) ?? [], queuedIn, pipeline, items,
+      closedIn: (project) => closed.get(project as ProjectId) ?? { archived: 0, deleted: 0 },
+      needs: needsOf({ registry, now, threads, items, queuedIn }, detail),
       reviews: () => reviews ??= registry.reviews.reviews(),
       row: (t) => rows.get(t.id) ?? rows.set(t.id, kit.row(t)).get(t.id)!,
       find: (t) => findText(t, (prs ??= registry.prWatches.prNumbers()).get(t.id)),
@@ -103,9 +112,13 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
   };
 
   const offline = () => new Set(registry.nodes.nodes().filter((n) => n.state === "offline").map((n) => n.name));
-  const itemsAt = (now: number) => registry.pipeline.items().map((i) => itemView(registry, i, now));
+  /** The item the thread started for, as of the render. */
+  const itemOf = (c: Context, thread: ThreadId) => {
+    const started = [...c.pipeline.values()].find((i) => i.thread === thread);
+    return started === undefined ? undefined : itemView(registry, started.record, c.now);
+  };
   const homePage = (c: Context, dialogs: Parameters<typeof home>[2], peek: Peek | null = null, card: string | null = null) =>
-    ok(home(c, { offline: offline(), role: (t) => threadRole(registry, t), items: itemsAt(c.now) }, dialogs, peek, card));
+    ok(home(c, { offline: offline(), role: (t) => threadRole(registry, t) }, dialogs, peek, card));
 
   /** A conversation's items. Only a Claude worker's transcript reads the thread's questions and who typed its prompts. */
   const itemsOf = (thread: ThreadId): ItemsOf => (view) =>
@@ -179,10 +192,14 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
       const id = r.query.get("project");
       const project = id === null ? null : registry.projects.project(id as ProjectId);
       if (project === undefined) return { ...ok(notFound(c, `No project ${id!}.`)), status: 404 };
-      const page = Number(r.query.get("page"));
+      const asked = Number(r.query.get("page"));
+      const page = Number.isInteger(asked) && asked > 0 ? asked : 1;
       const cancelled = kind === "quiet" ? [] : registry.queue.queuedThreads().filter((q) => q.status === "archived" || q.status === "deleted").toSorted((a, b) => b.createdAt - a.createdAt).map((q) => queuedView(registry, q));
-      const fold: FoldView = { project: project?.id ?? null, projects: project === null ? registry.projects.projects() : [project], offline: offline(), cancelled };
-      return ok(foldPage(c, kind, fold, Number.isInteger(page) && page > 0 ? page : 1, r.query.get("q")?.trim() ?? ""));
+      const query = r.query.get("q")?.trim() ?? "";
+      const closed = (of: string) => kind === "quiet" ? { shown: [], total: 0 } : registry.threads.newestThreads(
+        { project: of as ProjectId, status: ["archived", "deleted"], ...query === "" ? {} : { match: (t) => found(c.find(t), query) } }, { size: foldCap, index: page - 1 });
+      const fold: FoldView = { project: project?.id ?? null, projects: project === null ? registry.projects.projects() : [project], offline: offline(), cancelled, closed };
+      return ok(foldPage(c, kind, fold, page, query));
     }]),
     ["GET", /^\/threads\/([^/]+)$/, anyAllowed, async (m, r) => {
       const thread = registry.threads.thread(m[1]! as ThreadId);
@@ -205,7 +222,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
         d, row: rowOf(d), node: registry.nodes.node(d.pylon.node)!, role: threadRole(registry, t), agent: registry.threads.agent(t),
         usage: registry.usage.usageReport({ since: null, thread: t.id }).total, view: shown, items: itemsFor(t.id, shown), renderedReplyAt: repliedAt,
         nudged: registry.nudges.nudge(t.id)?.state === "person", lands: landsOnItsOwn(registry.projects.project(t.project)?.autoReview),
-        queuedAfter: registry.queue.queuedThread(t.id)?.after ?? null, item: itemsAt(c.now).find((i) => i.thread === t.id),
+        queuedAfter: registry.queue.queuedThread(t.id)?.after ?? null, item: itemOf(c, t.id),
       };
       return ok(threadPage(c, page, r.query.has("streaming")));
     }],
@@ -226,7 +243,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
       // Pages link each asset with its hash, and a chunk's name has its hash, so neither URL ever changes and the
       // phone keeps it.
       const cache = served.version === null || r.query.get("v") === served.version ? "public, max-age=31536000, immutable" : "no-cache";
-      return { status: 200, headers: { "content-type": served.type, "cache-control": cache, "x-content-type-options": "nosniff" }, body: served.body };
+      return { status: 200, headers: { "content-type": served.type, "cache-control": cache, "x-content-type-options": "nosniff" }, body: served.body, encode: served.encode };
     }],
   ];
 }

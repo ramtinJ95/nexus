@@ -10,9 +10,10 @@ import type { TemplateBuildInputs, TemplateKey } from "../protocol/images.ts";
  * plane's `imageBuildNode` setting (default infra-testbench, where S1 verified Docker access). A build that
  * passes its smoke boot is recorded, which changes nothing pylons use. `nexus image rollout` then sends
  * fetch-artifact to every online node that lacks the image, and makes it `current`, which every new pylon uses,
- * once each holds it. A node that was offline gets it from planPylon's missing-artifact rule on first use. The
- * image it replaces stays recorded as the previous one, which `nexus image rollback` rolls out again. Running and
- * paused pylons keep the image they booted from, because their disks depend on its rootfs.
+ * once each holds it. A node that was offline then, or joins later, gets it from the image worker once it is online,
+ * or from planPylon's missing-artifact rule if a pylon placed on it by name needs it first. The image it replaces
+ * stays recorded as the previous one, which `nexus image rollback` rolls out again. Running and paused pylons keep the
+ * image they booted from, because their disks depend on its rootfs.
  */
 export interface ImageSettings { imageBuildNode: NodeName; current: ImageId }
 
