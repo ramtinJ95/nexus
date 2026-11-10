@@ -1,3 +1,4 @@
+import { projectOf } from "../refs.ts";
 import { type Command, str, request, briefOptions, briefOf, ago, table, clip } from "../kit.ts";
 import { itemRules } from "../../contract/threads-parse.ts";
 import { itemRoutes, type PipelineItem } from "../../contract/projects.ts";
@@ -31,14 +32,14 @@ export const itemsCommands: Readonly<Record<string, Command>> = {
   },
   "item add": {
     help: [
-      "  nexus item add --project P [--title T] (--message M | --claude PROMPT [--model ID]) [--after ITEM[,ITEM...]]",
+      "  nexus item add [--project P] [--title T] (--message M | --claude PROMPT [--model ID]) [--after ITEM[,ITEM...]]",
       "                 [--node N|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB]",
       "    an item becomes a queued thread once the items it is after are, and starts once their pull requests merge",
     ],
     args: [0, 0],
     options: briefOptions,
     async run(api, _, v) {
-      const i = await request(api, itemRoutes.add, { body: briefOf(v, "item add", itemRules) });
+      const i = await request(api, itemRoutes.add, { body: briefOf(v, await projectOf(api, v, "item add"), itemRules) });
       return { json: i, text: `Added ${i.id} to ${i.project}: ${i.title}. It is ${i.phase.kind}: ${i.phase.why}.` };
     },
   },
