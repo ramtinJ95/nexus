@@ -1,6 +1,6 @@
 import { el, end, main, scroller } from "./page.js";
 import { keptForTab, storageKeys } from "./contract.ts";
-import { badge, thread } from "./checkout.js";
+import { badge, checkout, thread } from "./checkout.js";
 
 // The tabs beside the conversation: the terminal, and one per changed file the reader opened, kept for the tab's
 // session. `activeTab` is the open file's path, `terminalTab` for the terminal, `timelineTab` for the timeline, or null
@@ -76,11 +76,16 @@ const hashOf = (path) => path === null ? "" : path === timelineTab ? "#timeline"
 const shows = (path) => path === null || (path === timelineTab ? timelineView !== null
   : path === terminalTab ? tabsBar.querySelector('[data-tab="term"]')?.hidden === false : openTabs.some((f) => f.path === path));
 
-/** Shows the view the hash names, as on load, Back and Forward. One the page cannot show, such as a closed file's, shows the conversation. */
+/**
+ * Shows the view the hash names, as on load, Back and Forward. A changed file whose tab another took, as a step from
+ * file to file does, opens again in the open file's tab. A view the page cannot show shows the conversation.
+ */
 export function followHash() {
   if (tabsBar === null) return;
   const view = viewOf(location.hash);
   if (view === null) return;
+  const changed = typeof view.tab === "string" && !shows(view.tab) ? checkout.changes?.files.find((f) => f.path === view.tab) : undefined;
+  if (changed !== undefined) return openFile(changed, typeof activeTab === "string" ? activeTab : null, "none");
   const path = shows(view.tab) ? view.tab : null;
   if (path !== activeTab || path !== view.tab) showTab(path, path === view.tab ? "none" : "replace");
   // The browser's own jump found the step in a hidden panel.
@@ -114,14 +119,14 @@ export function showTab(path, history = "push") {
  * Opens a changed file's tab. A step from file to file passes the path it steps from, whose tab the next file takes,
  * so a review of many files keeps one tab rather than pushing the reader's own tabs out.
  */
-export function openFile(file, from = null) {
+export function openFile(file, from = null, history = "push") {
   const at = openTabs.findIndex((f) => f.path === file.path);
   const stepped = openTabs.findIndex((f) => f.path === from);
   if (at !== -1) openTabs[at] = file;
   else if (stepped !== -1) openTabs = openTabs.with(stepped, file);
   else openTabs = [...openTabs, file].slice(-maxTabs);
   saveTabs();
-  showTab(file.path);
+  showTab(file.path, history);
 }
 
 function closeTab(path) {

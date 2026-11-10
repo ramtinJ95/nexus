@@ -47,6 +47,7 @@ class Element {
   removeAttribute(name) { this.attributes.delete(name); }
   attachShadow() { const root = new Element("#shadow"); root.adoptedStyleSheets = []; this.shadowRoot = root; return root; }
   addEventListener(type, listener) { this.listeners.set(type, [...this.listeners.get(type) ?? [], listener]); }
+  fire(type) { for (const listener of this.listeners.get(type) ?? []) listener({ target: this }); }
   focus() {}
   scrollIntoView() { this.scrolledTo++; }
   getBoundingClientRect() { return { top: 0, bottom: 0, left: 0 }; }
@@ -59,7 +60,9 @@ const make = (tagName, attributes = {}, props = {}) => {
 const thread = "th-0123456789ab";
 const path = "src/a b.ts";
 const file = { path, oldPath: null, status: "added", additions: 3, deletions: 0 };
-const diff = `diff --git a/${path} b/${path}\nnew file mode 100644\n--- /dev/null\n+++ b/${path}\n@@ -0,0 +1,3 @@\n+one\n+two\n+three\n`;
+const long = { ...file, path: "src/long.ts", additions: 5_000 };
+const added = (name, n) => `diff --git a/${name} b/${name}\nnew file mode 100644\n--- /dev/null\n+++ b/${name}\n@@ -0,0 +1,${n} @@\n${Array.from({ length: n }, (_, i) => `+row ${i}`).join("\n")}\n`;
+const diffs = new Map([[path, added(path, 3)], [long.path, added(long.path, 5_000)]]);
 
 const session = new Map();
 const windowListeners = new Map();
@@ -120,15 +123,19 @@ async function load(hash) {
   tabs.renderTabs();
   tabs.followHash();
   const click = (target) => { for (const listener of documentListeners.get("click") ?? []) listener({ target }); };
+  const press = (key) => { for (const listener of documentListeners.get("keydown") ?? []) listener({ key, target: ids.get("file-view"), preventDefault() {} }); };
   const fileView = ids.get("file-view");
   page = {
-    tabs, ids, main, fileView, step,
+    tabs, ids, main, fileView, step, press,
+    checkout: (await import("./checkout.js")).checkout,
     click: (key) => click(tabsBar.querySelector(`[data-tab="${key}"]`)),
     clickStep: () => click(timelineView.querySelector("[data-tab-go]")),
     view: () => main.dataset.view ?? "convo",
-    drawn: async () => {
-      for (let i = 0; i < 2_000 && fileView.querySelector(".diff-view") === null; i++) await new Promise((resolve) => setImmediate(resolve));
-      return fileView.querySelector(".diff-view") !== null;
+    /** Waits until the file view drew `name`'s diff, and says how many rows it drew. */
+    drawn: async (name = path) => {
+      const rows = () => fileView.dataset.path === name ? fileView.querySelector(".diff-view")?.shadowRoot.querySelectorAll("[data-line-index]").length : undefined;
+      for (let i = 0; i < 2_000 && rows() === undefined; i++) await new Promise((resolve) => setImmediate(resolve));
+      return rows() ?? 0;
     },
   };
   return page;
@@ -148,7 +155,7 @@ Object.assign(globalThis, {
   CSSStyleSheet: class { replaceSync() {} },
   getComputedStyle: () => ({ getPropertyValue: () => "pierre-light" }),
   EventSource: { OPEN: 1, CLOSED: 2 },
-  fetch: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ base: { commit: null }, diff, truncated: false }) }),
+  fetch: async (url) => ({ ok: true, status: 200, text: async () => JSON.stringify({ base: { commit: null }, diff: diffs.get(new URL(url, "http://nexus.test/").searchParams.get("path")), truncated: false }) }),
   document: {
     activeElement: null,
     documentElement: make("html"),
@@ -196,13 +203,23 @@ test("a tab change adds an entry to the history, and Back and Forward go between
   assert.equal(view(), "convo", "Back again shows the conversation");
   travel(1);
   assert.equal(view(), "timeline", "Forward shows the timeline");
-  assert.equal(entries.length, 3, "going through the history adds no entry");
+
+  page.checkout.changes = { files: [file, { ...file, path: "src/c.ts" }], truncated: false, base: { commit: null } };
+  travel(1);
+  assert.equal(view(), "file", "Forward again shows the file");
+  page.press("]");
+  assert.deepEqual([page.tabs.activeTab, page.tabs.openTabs.map((f) => f.path)], ["src/c.ts", ["src/c.ts"]], "the step took the file's tab");
+  travel(-1);
+  assert.deepEqual([page.tabs.activeTab, page.tabs.openTabs.map((f) => f.path), location.hash], [path, [path], "#file=src/a%20b.ts"], "Back opens the file stepped from in that tab");
+  travel(1);
+  assert.equal(page.tabs.activeTab, "src/c.ts", "and Forward the file stepped to");
+  assert.equal(entries.length, 4, "going through the history adds no entry");
 
   click("convo");
   clickStep();
   assert.equal(view(), "convo", "the link to a step waits for its hash");
   follow("#tl-review");
-  assert.deepEqual([view(), step.scrolledTo, entries.length], ["timeline", 1, 4], "which shows the step in the timeline as one entry");
+  assert.deepEqual([view(), step.scrolledTo, entries.length], ["timeline", 1, 6], "which shows the step in the timeline as one entry");
   travel(-1);
   assert.equal(view(), "convo");
 });
@@ -211,18 +228,28 @@ test("after a reload, the open file's tab shows again where the reader left its 
   session.clear();
   const before = await load("");
   before.tabs.openFile(file);
-  assert.equal(await before.drawn(), true, "the diff drew");
+  assert.ok(await before.drawn() > 0, "the diff drew");
   before.fileView.scrollTop = 640;
   const after = await load(location.hash);
   assert.equal(after.view(), "file");
   assert.equal(after.tabs.activeTab, path);
-  assert.equal(await after.drawn(), true, "the diff drew again");
+  assert.ok(await after.drawn() > 0, "the diff drew again");
   assert.equal(after.fileView.scrollTop, 640, "at the reader's place");
 
-  after.fileView.scrollTop = 0;
-  after.tabs.showTab(null);
+  after.tabs.openFile(long);
+  const first = await after.drawn(long.path);
+  after.fileView.querySelectorAll("button").find((b) => b.textContent === "Load more rows").fire("click");
+  for (let i = 0; i < 2_000 && await after.drawn(long.path) === first; i++) await new Promise((resolve) => setImmediate(resolve));
+  const loaded = await after.drawn(long.path);
+  assert.ok(loaded > first, "Load more rows drew more of the long diff");
+  after.fileView.scrollTop = 90_000;
+  const again = await load(location.hash);
+  assert.equal(await again.drawn(long.path), loaded, "a reload draws the rows the reader loaded");
+  assert.equal(again.fileView.scrollTop, 90_000, "and goes back to the place among them");
+
+  again.tabs.showTab(null);
   const fromConvo = await load("");
   fromConvo.tabs.showTab(path);
-  assert.equal(await fromConvo.drawn(), true);
+  assert.ok(await fromConvo.drawn() > 0);
   assert.equal(fromConvo.fileView.scrollTop, 0, "a reload from the conversation keeps no file's place");
 });
