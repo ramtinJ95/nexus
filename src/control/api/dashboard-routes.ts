@@ -226,7 +226,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
       // Pages link each asset with its hash, and a chunk's name has its hash, so neither URL ever changes and the
       // phone keeps it.
       const cache = served.version === null || r.query.get("v") === served.version ? "public, max-age=31536000, immutable" : "no-cache";
-      return { status: 200, headers: { "content-type": served.type, "cache-control": cache, "x-content-type-options": "nosniff" }, body: served.body };
+      return { status: 200, headers: { "content-type": served.type, "cache-control": cache, "x-content-type-options": "nosniff" }, body: served.body, encode: served.encode };
     }],
   ];
 }
