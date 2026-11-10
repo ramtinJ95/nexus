@@ -2,11 +2,14 @@
  * The launch of a Claude worker thread's session, moved along before each tick of its pylon through the worker's
  * states (claude-worker.ts).
  *
+ * A launch waits up to 40 seconds on the probe, and longer across a probe restart, so it runs beside the node's pass,
+ * one per thread. The pass skips the pylon's tick while its launch runs, and the launch wakes the node when it ends.
+ *
  * A launch is fenced under its session before it is sent, so a launch sent again, after a lost probe or a control
  * plane restart, names the same session and the probe finishes that one instead of submitting the task twice.
  */
 import { randomUUID } from "node:crypto";
-import type { PylonId } from "../ids.ts";
+import type { PylonId, ThreadId } from "../ids.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { ProbeError } from "../protocol/http.ts";
@@ -24,33 +27,44 @@ export interface LaunchLink {
   readonly probe: Pick<ProbeClient, "command">;
   /** Settles true at the link's next snapshot, and false after `waitMs` without one or at shutdown. */
   snapshot(waitMs: number): Promise<boolean>;
+  /** Asks for a pass of the node. */
+  wake(): void;
 }
 
 export function claudeLaunch(options: { registry: ClaudeLaunchRegistry; log: (message: string) => void; retryMs: number; shutdown: AbortSignal }): {
   /**
-   * Moves the thread's Claude launch along before its pylon's tick. "skip" means this pass does not tick the pylon.
-   * It answers at once unless it sends a launch, so a pass that sends none reaches the probe without yielding first.
+   * Moves the thread's Claude launch along before its pylon's tick, and starts it beside the pass when it is due.
+   * "skip" means this pass does not tick the pylon, because its launch runs.
    */
-  step(thread: Thread, pylonId: PylonId, observation: NodeObservation | null, link: LaunchLink): "tick" | Promise<"tick" | "skip">;
+  step(thread: Thread, pylonId: PylonId, observation: NodeObservation | null, link: LaunchLink): "tick" | "skip";
+  /** Settles once no launch runs. */
+  settled(): Promise<void>;
 } {
   const { registry, log, retryMs: claudeLaunchRetryMs, shutdown } = options;
+  const running = new Map<ThreadId, Promise<void>>();
 
-  function step(thread: Thread, pylonId: PylonId, nodeObservation: NodeObservation | null, link: LaunchLink): "tick" | Promise<"tick" | "skip"> {
+  function step(thread: Thread, pylonId: PylonId, nodeObservation: NodeObservation | null, link: LaunchLink): "tick" | "skip" {
+    // Its worker stays starting until the launch ends, which the checks below would read as a launch cut off.
+    if (running.has(thread.id)) return "skip";
     const worker = registry.threads.claudeWorker(thread.id);
-    const running = listsRunning(registry, nodeObservation, pylonId, "work");
+    const listed = listsRunning(registry, nodeObservation, pylonId, "work");
     // A launch this process did not finish, as one a control plane restart cut off, goes again under the session it
     // recorded. It fails without one, and for a deleted thread, whose pylon does not run again.
     if (worker?.state === "starting" && nodeObservation !== null && (worker.session === null || thread.status === "deleted")) {
       registry.threads.moveClaudeWorker(thread.id, { to: "failed", message: "Claude launch was interrupted; attach to check before starting another session" });
-    } else if ((worker?.state === "pending" || worker?.state === "starting") && thread.status === "active" && running) {
+    } else if ((worker?.state === "pending" || worker?.state === "starting") && thread.status === "active" && listed) {
       const session = worker.state === "starting" ? worker.session! : randomUUID();
       registry.threads.moveClaudeWorker(thread.id, { to: "starting", session });
-      return send(thread, worker, session, pylonId, link);
+      running.set(thread.id, send(thread, worker, session, pylonId, link).finally(() => {
+        running.delete(thread.id);
+        link.wake();
+      }));
+      return "skip";
     }
     return "tick";
   }
 
-  async function send(thread: Thread, worker: ClaudeWorker, session: string, pylonId: PylonId, link: LaunchLink): Promise<"tick" | "skip"> {
+  async function send(thread: Thread, worker: ClaudeWorker, session: string, pylonId: PylonId, link: LaunchLink): Promise<void> {
     // A launch a shutdown cut off has not failed.
     const unfinished = (to: "stalled" | "failed", why: string) =>
       !shutdown.aborted && registry.threads.moveClaudeWorker(thread.id, { to, message: `Claude launch did not complete; attach to check before starting another session: ${why}` });
@@ -59,10 +73,8 @@ export function claudeLaunch(options: { registry: ClaudeLaunchRegistry; log: (me
       if (stalled === undefined) registry.threads.moveClaudeWorker(thread.id, { to: "started" });
       else unfinished("stalled", stalled);
     } catch (err) {
-      if (!unfinished("failed", (err as Error).message)) return "skip";
-      throw err;
+      if (unfinished("failed", (err as Error).message)) log(`${pylonId}: the Claude launch failed: ${(err as Error).message}`);
     }
-    return "tick";
   }
 
   /**
@@ -84,5 +96,5 @@ export function claudeLaunch(options: { registry: ClaudeLaunchRegistry; log: (me
     }
   }
 
-  return { step };
+  return { step, settled: async () => { await Promise.all(running.values()); } };
 }
