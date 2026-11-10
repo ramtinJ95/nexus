@@ -18,18 +18,21 @@ export const asUserIn = (script: string, cwd: string) => asUser(`cd ${q(cwd)} &&
 
 /**
  * Every boot, as user, before setup or resume. A failed or slow pull keeps what the disk has, which is the
- * image's baked copy until a pull succeeds. Then the layer's install runs and Herdr's integrations are
+ * image's baked copy until a pull succeeds. A boot without a dotfiles repository pulls nothing and keeps it too. Then the layer's install runs and Herdr's integrations are
  * reinstalled. Each step's outcome (pull, install, Herdr) is one `dotfiles:` or `herdr:` line in the pylon's log, and none fails the
  * boot. The fetch has its own limit, so the fork's 120 s hook deadline never cuts off what follows it.
  */
-function dotfilesPull({ repo, ref }: BootInputs["dotfiles"]): string {
+function dotfilesPull(dotfiles: BootInputs["dotfiles"]): string {
   const at = `$(git -C ${dotfilesDir} rev-parse --short HEAD 2>/dev/null || echo nothing)`;
+  const pull = dotfiles === undefined ? [`echo 'dotfiles: no repository is set, keeping' "${at}"`] : [
+    `if timeout 60 git -C ${dotfilesDir} fetch --quiet --depth 1 ${q(dotfiles.repo)} ${q(dotfiles.ref)} && git -C ${dotfilesDir} checkout --quiet --detach FETCH_HEAD`,
+    `then echo ${q(`dotfiles: pulled ${dotfiles.repo} ${dotfiles.ref} at`)} "${at}"`,
+    `else echo ${q(`dotfiles: the pull of ${dotfiles.repo} ${dotfiles.ref} failed, keeping`)} "${at}"`,
+    "fi",
+  ];
   return asUserIn([
     `test -d ${dotfilesDir}/.git || git clone --quiet ${bakedDotfilesDir} ${dotfilesDir} || git init --quiet ${dotfilesDir}`,
-    `if timeout 60 git -C ${dotfilesDir} fetch --quiet --depth 1 ${q(repo)} ${q(ref)} && git -C ${dotfilesDir} checkout --quiet --detach FETCH_HEAD`,
-    `then echo ${q(`dotfiles: pulled ${repo} ${ref} at`)} "${at}"`,
-    `else echo ${q(`dotfiles: the pull of ${repo} ${ref} failed, keeping`)} "${at}"`,
-    "fi",
+    ...pull,
     `if ! test -x ${dotfilesDir}/install; then echo 'dotfiles: no install script'`,
     `elif (cd ${dotfilesDir} && ./install); then echo 'dotfiles: installed'`,
     `else echo "dotfiles: install exited $?"; fi`,

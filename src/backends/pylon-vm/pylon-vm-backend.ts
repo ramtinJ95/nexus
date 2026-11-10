@@ -257,7 +257,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       secrets[grant.name] = { hosts: [...grant.hosts], value };
     }
     // A scratch pylon has no remote of its own, so a repository it creates later is reached over HTTPS only.
-    const remotes = [...bootRemotes(boot.repo), boot.dotfiles.repo].flatMap((url) => sshRemoteOf(url) ?? []);
+    const remotes = [...bootRemotes(boot.repo), ...boot.dotfiles === undefined ? [] : [boot.dotfiles.repo]].flatMap((url) => sshRemoteOf(url) ?? []);
     return {
       resources: { cpus: boot.resources.cpus, memoryGiB: boot.resources.memoryGiB, ...boot.resources.nestedVirtualization === true ? { nestedVirtualization: true as const } : {} },
       allowedHosts: [...boot.network.allowedHosts],

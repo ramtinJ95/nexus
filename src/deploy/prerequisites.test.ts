@@ -72,14 +72,14 @@ function bash(script: string): Promise<{ code: number; stdout: string; stderr: s
 }
 
 /** The misses check_prerequisites records for the machine, each a sentence and its fix. */
-async function misses(m: Machine, role: "control" | "node", dotfiles = ""): Promise<string[]> {
-  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(m)} check_prerequisites ${role} '${dotfiles}' 'sudo deploy/install.sh'; printf '%s\\0' "\${misses[@]}"`);
+async function misses(m: Machine, role: "control" | "node"): Promise<string[]> {
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(m)} check_prerequisites ${role} 'sudo deploy/install.sh'; printf '%s\\0' "\${misses[@]}"`);
   assert.equal(run.code, 0, run.stderr);
   return run.stdout.split("\0").filter((entry) => entry !== "");
 }
 
 test("a complete machine misses nothing, for the control plane and for a node", async () => {
-  assert.deepEqual(await misses(complete, "control", "https://github.com/example/dotfiles.git"), []);
+  assert.deepEqual(await misses(complete, "control"), [], "a first control install needs no dotfiles repository");
   assert.deepEqual(await misses({ ...complete, controlConfig: true }, "control"), []);
   assert.deepEqual(await misses({ ...complete, tailscaled: [] }, "node"), []);
 });
@@ -93,7 +93,6 @@ test("a fresh machine reports every miss at once, each with its fix", async () =
     "- /dev/kvm is missing, so QEMU cannot run pylons with KVM.",
     "- Tailscale is not installed in /usr/local/bin:/usr/bin. Nexus reaches its nodes and callers over the tailnet.",
     "- tailscaled does not let nexus-control fetch the dashboard's certificate. Restarting tailscaled drops tailnet connections for a moment.",
-    "- A first control plane install needs the dotfiles repository every pylon pulls on boot.",
   ]);
   const fixes = found.join("\n");
   for (const fix of [
@@ -103,11 +102,10 @@ test("a fresh machine reports every miss at once, each with its fix", async () =
     "sudo modprobe kvm_intel || sudo modprobe kvm_amd",
     "curl -fsSL https://tailscale.com/install.sh | sh",
     "printf '[Service]\\nEnvironment=TS_PERMIT_CERT_UID=nexus-control\\n' | sudo tee /etc/systemd/system/tailscaled.service.d/nexus-cert.conf >/dev/null",
-    "sudo deploy/install.sh --dotfiles https://github.com/<you>/dotfiles.git",
   ]) assert.ok(fixes.includes(fix), fix);
 });
 
-test("a node needs neither the certificate drop-in nor dotfiles", async () => {
+test("a node needs no certificate drop-in", async () => {
   const found = await misses(fresh, "node");
   assert.ok(!found.some((entry) => /nexus-control|dotfiles/.test(entry)), found.join("\n"));
 });
@@ -182,7 +180,7 @@ node() { echo "node $*" >&2; }
 bash() { echo "bash $*" >&2; }
 main --admit macbook`);
   assert.equal(run.code, 1);
-  assert.match(run.stderr, /^This machine is missing 7 prerequisite\(s\)\. Nothing was changed\. Fix each, then rerun:\n- The installer changes the system/);
+  assert.match(run.stderr, /^This machine is missing 6 prerequisite\(s\)\. Nothing was changed\. Fix each, then rerun:\n- The installer changes the system/);
   assert.match(run.stderr, /\n {4}sudo deploy\/install\.sh --admit macbook\n/);
   assert.doesNotMatch(run.stderr, /^(node|bash) /m);
 });
@@ -204,7 +202,7 @@ main --node firebat --non-interactive`);
   assert.deepEqual(ran(node.stderr), ["node ./src/deploy/setup.ts install --package-manager dnf --node firebat --non-interactive"], "a node needs no certificate drop-in");
 });
 
-test("the prerequisites read the role and the dotfiles from the arguments, in either form parseArgs takes", async () => {
+test("the prerequisites read the role from the arguments, in either form parseArgs takes", async () => {
   for (const args of ["--dotfiles https://github.com/example/dotfiles.git", "--dotfiles=https://github.com/example/dotfiles.git", "--node=firebat"]) {
     const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps}
 main ${args}`);
@@ -216,9 +214,8 @@ main --join tok3n`);
   assert.deepEqual(ran(join.stderr), ["node ./src/deploy/setup.ts install --package-manager apt --join tok3n"], "a join is a node's, so setup.ts says it needs --node");
   const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps}
 main --admit macbook`);
-  assert.equal(run.code, 1);
-  assert.match(run.stderr, /A first control plane install needs the dotfiles repository/);
-  assert.doesNotMatch(run.stderr, /setup\.ts install/);
+  assert.equal(run.code, 0, run.stderr);
+  assert.deepEqual(ran(run.stderr), ["node ./src/deploy/setup.ts install --package-manager apt --admit macbook"], "a first control install without --dotfiles reaches setup.ts");
 });
 
 test("only root on a machine with a control plane mints a join token, from the control plane's release", async (t) => {

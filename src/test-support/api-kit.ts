@@ -67,7 +67,8 @@ export type TestApiOptions = Omit<Partial<ApiOptions>, "deployment" | "features"
   pipeline?: boolean;
   /** Defaults to `pipeline`. */
   planning?: boolean;
-  dotfiles?: typeof dotfiles;
+  /** null is a control.json that names no dotfiles repository. */
+  dotfiles?: typeof dotfiles | null;
   gitIdentity?: { name: string; email: string };
   /** The registry's clock. */
   clock?: () => number;
@@ -119,7 +120,7 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
   }]]);
   const claude = claudeConversations({ registry, probes: apiOptions.probes ?? probes, log: (message) => { logged.push(message); } });
   const services = threadServices({
-    registry, harness, mirror, dotfiles: dots ?? dotfiles, gitIdentity, wake, gate: turnGate(() => false),
+    registry, harness, mirror, dotfiles: dots === null ? undefined : dots ?? dotfiles, gitIdentity, wake, gate: turnGate(() => false),
     queue: queued === true || piped === true, planning: planned === true ? { replies: agentReader(registry, harness, claude).replies } : null,
   });
   const { startThread, queue, pipeline, planning: plans } = services.api;
@@ -209,7 +210,7 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
   };
 }
 
-export async function withThread(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; deployment?: DeploymentOptions; reviews?: ReviewLoop; project?: typeof project; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number; clock?: () => number } = {}) {
+export async function withThread(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; deployment?: DeploymentOptions; reviews?: ReviewLoop; project?: typeof project; dotfiles?: typeof dotfiles | null; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number; clock?: () => number } = {}) {
   const s = await testApi(t, options);
   assert.equal((await s.call("POST", "/v1/projects", options.project ?? project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);

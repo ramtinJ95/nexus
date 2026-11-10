@@ -30,7 +30,7 @@ const pylonInfoSchema = z.strictObject({
   allowedHosts: z.array(z.string()),
   previews: z.array(z.strictObject({ service: z.string(), url: z.string() })),
   logins: z.array(z.enum(["claude", "chatgpt"])),
-  dotfiles: z.strictObject({ repo: z.string(), ref: z.string() }),
+  dotfiles: z.strictObject({ repo: z.string(), ref: z.string() }).exactOptional(),
 });
 true satisfies ParsesTo<typeof pylonInfoSchema, PylonInfo>;
 

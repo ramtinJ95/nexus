@@ -44,7 +44,8 @@ export interface BootInputs {
   resources: PylonResources & { nestedVirtualization?: true };
   network: { allowedHosts: readonly string[]; secrets: readonly SecretGrant[] };
   repo: RepoInit; // set up on template and fresh boots only
-  dotfiles: { repo: string; ref: string }; // pulled on every boot
+  /** Pulled on every boot. Absent, a boot keeps the image's baked layer. */
+  dotfiles?: { repo: string; ref: string } | undefined;
 }
 
 /** The image first, because a template or checkpoint is an overlay on it. */
