@@ -80,19 +80,17 @@ const quietAfterMs = 8 * 60 * 60 * 1000;
 export const lastActive = (t: Thread) => Math.max(t.createdAt, t.lastHumanActivityAt, t.lastAgentActivityAt, t.lastReplyAt ?? 0);
 
 /**
- * A project's threads, newest first: the recent open ones, the open ones quiet for over `quietAfterMs` with their pylon
- * paused or absent and their agent not working, and the archived or deleted ones. The last two fold below the first.
+ * A project's open threads, newest first: the recent ones, and the ones quiet for over `quietAfterMs` with their pylon
+ * paused or absent and their agent not working, with how many are archived or deleted. The last two fold below the first.
  * An unread reply does not keep a thread out of the quiet fold, since Needs you does not list one either.
  */
 export function threadsOf(c: Context, project: string) {
-  const threads = c.threadsIn(project).toReversed();
-  const closed = (t: Thread) => !isOpenStatus(t.status);
+  const open = c.threadsIn(project).toReversed();
   const quiet = (t: Thread) => {
     const state = c.row(t).pylon.actualState;
     return (state === "paused" || state === "absent") && !t.working && c.now - lastActive(t) > quietAfterMs;
   };
-  const open = threads.filter((t) => !closed(t));
-  return { recent: open.filter((t) => !quiet(t)), quiet: open.filter(quiet), closed: threads.filter(closed) };
+  return { recent: open.filter((t) => !quiet(t)), quiet: open.filter(quiet), closed: c.closedIn(project) };
 }
 /** A blocked thread waits for the person, as a review that ended for them does. */
 export function queuedLook(q: QueuedThread): [label: string, tone: Tone] {
@@ -101,11 +99,8 @@ export function queuedLook(q: QueuedThread): [label: string, tone: Tone] {
 }
 
 export const quietLabel = (threads: readonly Thread[]) => `${threads.length} quiet for over ${quietAfterMs / 3_600_000} hours`;
-export function closedLabel(threads: readonly Thread[]): string {
-  const deleted = threads.filter((t) => t.status === "deleted").length;
-  const archived = threads.length - deleted;
-  return [archived > 0 && `${archived} archived`, deleted > 0 && `${deleted} deleted`].filter(Boolean).join(", ");
-}
+export const closedLabel = ({ archived, deleted }: { archived: number; deleted: number }): string =>
+  [archived > 0 && `${archived} archived`, deleted > 0 && `${deleted} deleted`].filter(Boolean).join(", ");
 
 /** How many threads a fold lists before it links to its own page, which keeps every page small however many threads close. */
 export const foldCap = 100;
@@ -126,6 +121,9 @@ function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): H
     const [label, tone] = queuedLook(q);
     return html`<li><a class="row${q.id === active && " active"}" href="/threads/${q.id}" title="${q.title}" data-find="${findText(q)}"${q.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${q.title}</span><span class="row-at">${label}</span></a></li>`;
   };
+  // The thread the page shows lists under its project's fold link once it is archived or deleted.
+  const picked = active === undefined ? undefined : c.thread(active);
+  const shown = picked !== undefined && !isOpenStatus(picked.status) ? picked : undefined;
   return html`<aside class="side" aria-label="Threads">
 <div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
 <form id="filter-form" action="/threads/closed" role="search"><label class="filter"><span aria-hidden="true">⌕</span><input id="filter" name="q" type="search" placeholder="Filter threads" aria-label="Filter threads" aria-keyshortcuts="/" autocomplete="off"><kbd>/</kbd></label></form>
@@ -140,7 +138,7 @@ ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>`
 <a class="group-new" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}" aria-label="New thread in ${p.id}" title="New thread in ${p.id}">${icon("plus")}</a>
 ${recent.length + queued.length > 0 && html`<ul>${recent.map(row)}${queued.map(queuedRow)}</ul>`}
 ${quiet.length > 0 && html`<details class="archived" id="side-quiet-${p.id}"${quiet.some((t) => t.id === active) && " open"}><summary>${quietLabel(quiet)}</summary><ul>${quiet.filter((t, i) => i < foldCap || t.id === active).map(row)}</ul>${quiet.length > foldCap && html`<a class="archived-link" href="${foldHref("quiet", p.id)}">All ${quiet.length} quiet</a>`}</details>`}
-${closed.length > 0 && html`<a class="archived-link" id="archived-${p.id}" href="${foldHref("closed", p.id)}">${closedLabel(closed)}</a>${closed.filter((t) => t.id === active).map((t) => html`<ul class="archived">${row(t)}</ul>`)}`}
+${closed.archived + closed.deleted > 0 && html`<a class="archived-link" id="archived-${p.id}" href="${foldHref("closed", p.id)}">${closedLabel(closed)}</a>${shown?.project === p.id && html`<ul class="archived">${row(shown)}</ul>`}`}
 </details>`;
 })}
 </nav>
