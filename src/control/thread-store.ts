@@ -64,6 +64,8 @@ export type ThreadAgent = { kind: "harness"; conversationId: string } | { kind: 
 
 /** What the registry keeps of a pylon. The desired phase is derived from its thread on every tick. */
 export type StoredPylon = Omit<PylonRecord, "desired" | "thread"> & { thread: ThreadId };
+/** A pylon's node, its failure, its job in flight or last finished, and its thread's attention. */
+export interface ListedPylon { node: NodeName; failed: string | null; job: JobStatus | null; attention: Attention }
 
 /**
  * A session of a pylon. `id` names it, and is what closes it: its Herdr pane, or `failed-` and a hash for a failed
@@ -702,7 +704,10 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       const row = sql("SELECT thread, body FROM start_requests WHERE request_id = ?").get(requestId);
       return row === undefined ? undefined : { thread: row.thread as ThreadId, body: row.body as string };
     },
-    threads: (project?: ProjectId) => withSessions(project === undefined ? sql("SELECT * FROM threads ORDER BY created_at, id").all() : sql("SELECT * FROM threads WHERE project = ? ORDER BY created_at, id").all(project)),
+    /** The threads of `project` with any of the statuses, all of them by default. */
+    threads: (filter: { project?: ProjectId | undefined; status?: readonly ThreadStatus[] | undefined } = {}) => withSessions(sql(`SELECT * FROM threads
+      WHERE ($project IS NULL OR project = $project) AND ($statuses IS NULL OR status IN (SELECT value FROM json_each($statuses))) ORDER BY created_at, id`)
+      .all({ $project: filter.project ?? null, $statuses: filter.status === undefined ? null : JSON.stringify(filter.status) })),
     thread,
     /** The threads with any of the statuses and started by `startedBy`, each as its row holds it, without what its sessions say. */
     storedThreads(filter: { status?: readonly ThreadStatus[]; startedBy?: string } = {}): StoredThread[] {
@@ -879,6 +884,15 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     job(subject: Subject): JobStatus | undefined {
       const row = sql("SELECT status FROM jobs WHERE subject = ?").get(subject) as Row | undefined;
       return row && json<JobStatus>(row.status);
+    },
+
+    /** What a list row shows of each pylon and its thread, in one query that leaves the boot and live specs unread. */
+    listedPylons(pylons: readonly PylonId[]): Map<PylonId, ListedPylon> {
+      return new Map(sql(`SELECT p.id, p.node, p.failed, j.status AS job, a.attention FROM pylons p
+        LEFT JOIN jobs j ON j.subject = p.id LEFT JOIN thread_attention a ON a.thread = p.thread WHERE p.id IN (SELECT value FROM json_each(?))`)
+        .all(JSON.stringify(pylons)).map((r) => [r.id as PylonId, {
+          node: r.node as NodeName, failed: r.failed as string | null, job: jsonOrNull<JobStatus>(r.job), attention: (r.attention ?? null) as Attention,
+        }]));
     },
 
     /**

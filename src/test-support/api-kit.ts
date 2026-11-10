@@ -19,7 +19,8 @@ import type { AttachTiming } from "../control/attach.ts";
 import type { ReviewLoop } from "../control/review.ts";
 import { agentReader } from "../control/agent-conversation.ts";
 import { claudeConversations } from "../control/claude-conversation.ts";
-import { readEvents } from "./event-reader.ts";
+import { readEvents, type EventReader } from "./event-reader.ts";
+import { maxStreamsPerCaller } from "../control/api/sse.ts";
 import { fakeHarness } from "./fake-harness.ts";
 import { openRegistry, type Registry } from "../control/registry.ts";
 import type { JoinedNode } from "../control/node-store.ts";
@@ -198,7 +199,7 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
     probeAnswers(next: typeof answer) { answer = next; },
     probePipes(next: typeof pipe) { pipe = next; },
     remoteReads(next: typeof read) { read = next; },
-    events: (path: string) => readEvents(api.port, path),
+    events: (path: string, headers?: Record<string, string>) => readEvents(api.port, path, headers),
     /** Stops the control plane, which drops every connection, and returns a function that starts it again on its port. */
     async stop() {
       const { port } = api;
@@ -295,6 +296,22 @@ export function attached(ws: WebSocket) {
 }
 
 export const attachPathOf = (thread: string, query = "cols=100&rows=30") => `/v1/threads/${thread}/attach?${query}`;
+
+/**
+ * Opens `count` streams at `path` as each of `callers` in turn, each caller's share by default, since no caller holds
+ * more. Each caller's are open before the next caller's are asked for, and the laptop calls after.
+ */
+export async function streamsAs(s: { callAs(id: TailnetNodeId): void; events(path: string): EventReader }, callers: readonly TailnetNodeId[], path: string, count = maxStreamsPerCaller): Promise<EventReader[]> {
+  const opened: EventReader[] = [];
+  for (const caller of callers) {
+    s.callAs(caller);
+    const batch = Array.from({ length: count }, () => s.events(path));
+    for (const stream of batch) assert.equal((await stream.response).statusCode, 200, `${caller}'s streams open`);
+    opened.push(...batch);
+  }
+  s.callAs(laptop);
+  return opened;
+}
 
 export const deployCommit = "a".repeat(40);
 export const deployToken = "test-root-token";

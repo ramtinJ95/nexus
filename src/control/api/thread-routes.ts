@@ -7,15 +7,18 @@ import { Refusal } from "../refusal.ts";
 import { observedPylon } from "../observed.ts";
 import { queuedView } from "../queue.ts";
 import { feature, type Features } from "../features.ts";
-import { isOpenStatus, retryRefusal } from "../reconcile.ts";
+import { isOpenStatus, openStatuses, retryRefusal, type ThreadStatus } from "../reconcile.ts";
 import { startKey } from "../threads.ts";
 import { ok, created, noContent, parse, on, type RouteEntry, type ApiKit } from "./kit.ts";
 import { anyAllowed } from "./access.ts";
 import { threadRoutes as routes, type QueuedThread } from "../../contract/threads.ts";
 import { activitySchema, messageSchema, seenSchema, startSchema } from "../../contract/threads-parse.ts";
 
+/** What `deleted=false` lists. The record fails to typecheck when a status is added, so none is left out unseen. */
+const keptStatuses = Object.keys({ active: true, idle: true, archived: true } satisfies Record<Exclude<ThreadStatus, "deleted">, true>) as ThreadStatus[];
+
 export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEntry[] {
-  const { lookup, thread, guard, wakeThread, row, shown, registry, harness, startThread, agents, agentOf, deleteThread } = kit;
+  const { lookup, thread, guard, wakeThread, rows, shown, open, registry, harness, startThread, agents, agentOf, deleteThread } = kit;
 
   const queueOrRefuse = () => feature(features, "queue");
 
@@ -130,8 +133,10 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
 
   return [
     on(routes.list, anyAllowed, (_, r) => {
-      const threads = registry.threads.threads(r.query.project as ProjectId | undefined);
-      return ok((r.query.deleted === false ? threads.filter((t) => t.status !== "deleted") : threads).map(row));
+      const { project, deleted, status } = r.query;
+      if (status !== undefined && status !== "open") throw new HttpError(400, `status must be "open", not ${JSON.stringify(status)}`);
+      const statuses = status === "open" ? openStatuses : deleted === false ? keptStatuses : undefined;
+      return ok(rows(registry.threads.threads({ project: project as ProjectId | undefined, status: statuses })));
     }),
     on(routes.start, { role: "person", action: "start a thread", startsTurn: true }, async (_, r) => {
       return created(await start(await r.body(), r.caller));

@@ -1,6 +1,6 @@
 import { request } from "./request.js";
 import { pylonRoutes } from "../../contract/pylon.ts";
-import { afterSwap } from "./page.js";
+import { afterSwap, chunk, holdReload } from "./page.js";
 import { factsNow, thread } from "./checkout.js";
 import { activeTab, showTab, tabShows, tabsBar, terminalTab } from "./tab-bar.js";
 
@@ -21,6 +21,7 @@ let terminal = null;
 let lastTerminal = null;
 /** The pane the next attach lands in, in place of the Claude worker's. */
 let landing = null;
+holdReload(() => terminal !== null);
 
 /**
  * Shows `pane` in the terminal tab. A terminal that is not attached attaches there. An attached one has Herdr focus
@@ -48,7 +49,7 @@ export async function showTerminal() {
   shown({ text: "Attaching…", over: false });
   const pane = landing;
   landing = null;
-  terminal = import("./term-view.js").then(({ openTerminal }) => {
+  terminal = chunk(import("./term-view.js")).then(({ openTerminal }) => {
     lastTerminal?.close();
     document.getElementById("term-host").replaceChildren();
     lastTerminal = openTerminal(document.getElementById("term-host"), thread, shown, pane);

@@ -42,6 +42,7 @@
     "images/pylon/nexus: reserved-path:image-rebuild",
     "images/pylon/nexus-ask.ts: reserved-path:image-rebuild",
     "images/pylon/nexus-claude-hook: reserved-path:image-rebuild",
+    "images/pylon/nexus-claude-hook.mjs: reserved-path:image-rebuild",
     "images/pylon/nexus-contract.ts: reserved-path:image-rebuild",
     "images/pylon/nexus-heartbeat.ts: reserved-path:image-rebuild",
     "images/pylon/nexus-kvm: reserved-path:image-rebuild",
