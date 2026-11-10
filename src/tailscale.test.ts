@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { connect, createServer as createNetServer, type AddressInfo } from "node:net";
+import { deadPort } from "./test-support/kit.ts";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -106,8 +107,7 @@ test("verifyPeer asks whois once a connecting socket connects, and refuses a soc
   await assert.rejects(verifyPeer(connect(port, "127.0.0.1"), async () => null, () => true), { peer: { address: "127.0.0.1", port, id: null }, message: `127.0.0.1:${port} is tailnet node unknown` });
   await assert.rejects(verifyPeer(connect(port, "127.0.0.1"), async () => { throw new Error("tailscaled is down"); }, () => true), { message: "tailscaled is down" });
 
-  const closed = new Promise<number>((resolve) => { const probe = createNetServer().listen(0, "127.0.0.1", () => { const free = (probe.address() as AddressInfo).port; probe.close(() => resolve(free)); }); });
-  const unconnected = connect(await closed, "127.0.0.1").on("error", () => undefined);
+  const unconnected = connect(await deadPort(t), "127.0.0.1").on("error", () => undefined);
   asked.length = 0;
   await assert.rejects(verifyPeer(unconnected, whois, () => true), { peer: null, message: "the connection closed before whois" });
   assert.deepEqual(asked, [], "whois is not asked about a socket with no peer");

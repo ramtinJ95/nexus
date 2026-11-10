@@ -12,7 +12,7 @@ import type { PipelineItem } from "../control/pipeline.ts";
 import type { Thread } from "../control/thread-store.ts";
 import { defaultProjectResources, type Project } from "../control/project.ts";
 import type { ProjectId } from "../ids.ts";
-import { freePort } from "../test-support/kit.ts";
+import { deadPort } from "../test-support/kit.ts";
 import { cli, node, laptop, phone, project, setup } from "../test-support/cli-kit.ts";
 
 test("project add sizes a project at 2 CPUs, 4 GiB of memory and 10 GiB of disk, and each size flag overrides its own field", async (t) => {
@@ -83,7 +83,7 @@ test("project add --scratch makes a project with no repository, --secret grants 
   assert.deepEqual((({ kind, status, error }) => ({ kind, status, error }))(JSON.parse(pinned.stderr)), { kind: "invalid", status: 400, error: "project sketch is a scratch project, so it has no commit to check out" });
 
   // Through a proxy nothing listens on, so each of these fails before it sends a request.
-  const offline = { NEXUS_SOCKS: `127.0.0.1:${await freePort()}` };
+  const offline = { NEXUS_SOCKS: `127.0.0.1:${await deadPort(t)}` };
   const refused = async (args: readonly string[], error: string) => {
     const res = await s.nexus(["project", "add", "other", ...args, "--node", node, "--json"], offline);
     assert.deepEqual([res.code, res.stdout], [64, ""], `${args.join(" ")}: ${res.stderr}`);

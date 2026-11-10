@@ -15,7 +15,7 @@ import { notAnswering, parseStreamRequest } from "./streams.ts";
 import { probeErrorCodes, ProbeHttpError, verifyPeer, type ProbeError } from "./http.ts";
 import { parseArtifactManifest } from "./artifacts.ts";
 import { connectProbe } from "./client.ts";
-import { runningPylon, stoppedPylon, testCapacity, testImage, testObservation } from "../test-support/kit.ts";
+import { deadPort, runningPylon, stoppedPylon, testCapacity, testImage, testObservation } from "../test-support/kit.ts";
 
 const node = "test-node";
 const pylonId = "pylon-th-1";
@@ -447,6 +447,6 @@ test("a transport's peer check names who answered as a ProbeError, and passes on
   await assert.rejects(check(async () => "nOther" as TailnetNodeId), { code: "forbidden", message: `127.0.0.1:${port} is nOther` });
   await assert.rejects(check(async () => null), { code: "forbidden", message: `127.0.0.1:${port} is unknown` });
   await assert.rejects(check(async () => { throw new Error("tailscaled is down"); }), (err: Error) => err.message === "tailscaled is down" && !("code" in err));
-  const free = await new Promise<number>((resolve) => { const probe = createNetServer().listen(0, "127.0.0.1", () => { const at = (probe.address() as AddressInfo).port; probe.close(() => resolve(at)); }); });
-  await assert.rejects(check(async () => "nPeer" as TailnetNodeId, connect(free, "127.0.0.1").on("error", () => undefined)), { code: "unreachable", message: "the connection closed before whois" });
+  const dead = await deadPort(t);
+  await assert.rejects(check(async () => "nPeer" as TailnetNodeId, connect(dead, "127.0.0.1").on("error", () => undefined)), { code: "unreachable", message: "the connection closed before whois" });
 });
