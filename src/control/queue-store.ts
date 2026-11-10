@@ -48,6 +48,10 @@ export function queueStore(db: Db, saveStartKey: (key: StartKey, thread: ThreadI
 
   return {
     participant: {
+      /** A queued thread reads each thread it waits for until it starts. */
+      keeps: (threads: ReadonlyMap<ThreadId, unknown>): ReadonlyMap<ThreadId, string> => new Map(sql(`SELECT q.id, j.value AS thread FROM queued_threads q, json_each(q.record, '$.after') j
+        WHERE json_extract(q.record, '$.status') = 'queued' AND j.value IN (SELECT value FROM json_each(?))`).all(JSON.stringify([...threads.keys()]))
+        .map((r) => [r.thread as ThreadId, `queued thread ${r.id as string} waits for it`])),
       startQueued(id: ThreadId, at: number) {
         const record = queuedThread(id);
         if (record === undefined || record.status !== "queued") throw new Error(`thread ${id} is no longer queued`);

@@ -124,8 +124,15 @@ export function usageStore(db: Db, threads: {
   const sums = (calls: string) => `coalesce(sum(input), 0) AS input, coalesce(sum(output), 0) AS output, coalesce(sum(cache_write), 0) AS cache_write,
     coalesce(sum(cache_read), 0) AS cache_read, ${calls} AS calls, coalesce(sum(input + output + cache_write + cache_read), 0) AS total`;
 
-  /** Each held thread the planner wakes for reading, and why each archive's settle waits. */
+  /**
+   * Each held thread the planner wakes for reading, and why each archive's settle waits. A held thread stays, as the
+   * hold reads it until its next step lets go of one no longer archived.
+   */
   const participant: ThreadParticipant = {
+    keeps(threads) {
+      const hold = usageHold();
+      return new Map(hold !== null && threads.has(hold.thread) ? [[hold.thread, `the usage ${hold.by === "run" ? "backfill" : "settle"} holds its pylon`]] : []);
+    },
     facts(of: readonly Thread[]) {
       const reading = new Set([sql("SELECT thread FROM usage_backfill WHERE state = 'running' AND phase = 'reading'").get()?.thread, settle?.phase === "reading" ? settle.thread : undefined]);
       return new Map(of.map((t): [ThreadId, Pick<ArchiveFacts, "readingUsage" | "settleWaiting">] => {

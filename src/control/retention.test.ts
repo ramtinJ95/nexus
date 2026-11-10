@@ -3,11 +3,16 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { addThread, claudeWorkerAt, seedRegistry, testPr, testPylon, testRegistry, testReview, testThread } from "../test-support/registry-kit.ts";
-import { tempDir } from "../test-support/kit.ts";
-import type { Registry } from "./registry.ts";
-import type { JobId, NodeName, ThreadId } from "../ids.ts";
+import { addThread, claudeWorkerAt, observeNode, seedRegistry, testPr, testPylon, testRegistry, testReview, testThread, type PylonOptions } from "../test-support/registry-kit.ts";
+import { stoppedPylon, tempDir } from "../test-support/kit.ts";
+import { image, withThread } from "../test-support/api-kit.ts";
+import { openRegistry, type Registry } from "./registry.ts";
+import { retentionPass } from "./retention-pass.ts";
+import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
+import type { ItemId, JobId, NodeName, ProjectId, ThreadId } from "../ids.ts";
 import type { Judgment } from "./judgment-store.ts";
+import type { Thread } from "./thread-store.ts";
+import type { ThreadDetail } from "./wire.ts";
 
 const dir = await tempDir("nexus-retention-");
 const tempDb = () => join(dir, `${randomUUID()}.db`);
@@ -82,4 +87,179 @@ test("a purge leaves a thread that is not deleted as it is", (t) => {
   registry.threads.setThreadStatus(id, "archived");
   registry.threads.purgeThread(id);
   assert.equal(registry.threads.threadStatus(id), "archived");
+});
+
+const week = 7 * 24 * 60 * 60_000;
+const minute = 60_000;
+
+/** A registry on a clock the test moves, its node observed with no pylon, and a retention pass whose delete sets the status, as the API's does first. */
+function world(t: import("node:test").TestContext, path = tempDb(), start = Date.now()) {
+  let now = start;
+  const registry = seedRegistry(testRegistry(t, path, () => now));
+  observeNode(registry);
+  const logged: string[] = [];
+  const pass = retentionPass({ registry, deleteThread: async (thread) => registry.threads.setThreadStatus(thread.id, "deleted"), log: (m) => { logged.push(m); } });
+  const closed = (status: "archived" | "deleted", options: PylonOptions & { thread?: Partial<Thread> } = {}) => {
+    const { id } = addThread(registry, options);
+    registry.threads.setThreadStatus(id, "archived");
+    if (status === "deleted") registry.threads.setThreadStatus(id, "deleted");
+    return id;
+  };
+  return {
+    registry, logged, closed,
+    pass,
+    /** Two passes, so a reason logged once shows it is not logged again. */
+    async passes() { await pass.poll(); await pass.poll(); },
+    later(ms: number) { now += ms; },
+    get now() { return now; },
+    status: (id: ThreadId) => registry.threads.threadStatus(id) ?? "purged",
+    keeps: (id: ThreadId) => logged.filter((l) => l.startsWith(`retention: keeps ${id},`)),
+  };
+}
+
+test("an archived thread idle for a week is deleted as the API deletes it, and its pylon's disk goes though its usage was never read; one active in the week stays", async (t) => {
+  let now = Date.now();
+  const s = await withThread(t, { clock: () => now });
+  const idle = s.thread;
+  const active = (await s.call("POST", "/v1/threads", { project: "acme", title: "Active" })).body as Thread;
+  for (const { id } of [idle, active]) assert.equal((await s.call("POST", `/v1/threads/${id}/archive`)).status, 200);
+  const logged: string[] = [];
+  const pass = retentionPass({ registry: s.registry, deleteThread: s.api.deleteThread, log: (m) => { logged.push(m); } });
+  now += 5 * 24 * 60 * minute;
+  s.registry.threads.recordActivity(active.id, { human: now });
+  const detail = async (id: ThreadId) => (await s.call("GET", `/v1/threads/${id}`)).body as ThreadDetail;
+  assert.equal((await detail(idle.id)).desired, "paused", "an archive's disk stays while its usage is unread");
+
+  now += 2 * 24 * 60 * minute + minute;
+  await pass.poll();
+  assert.equal((await detail(idle.id)).thread.status, "deleted");
+  assert.equal((await detail(idle.id)).desired, "deleted", "its pylon is deleted, usage read or not");
+  assert.deepEqual(s.calls.filter((c) => c[0] === "delete"), [["delete", { threadId: idle.id, pylonId: idle.pylonId }]], "its conversation is deleted as nexus delete deletes it");
+  assert.equal(logged.length, 1);
+  assert.match(logged[0]!, new RegExp(`^retention: deleted ${idle.id}, archived and idle for a week from `));
+  assert.equal((await detail(active.id)).thread.status, "archived", "activity in the week keeps it");
+
+  now += 5 * 24 * 60 * minute;
+  await pass.poll();
+  assert.equal((await detail(active.id)).thread.status, "deleted", "a week after that activity it goes too");
+});
+
+test("an archived thread a feature still reads stays past its week, and the pass logs why once", async (t) => {
+  const w = world(t);
+  const r = w.registry;
+  const free = w.closed("archived");
+  const waitedFor = w.closed("archived");
+  const queuedId = "th-queued" as ThreadId;
+  r.queue.saveQueued({
+    id: queuedId, title: "Next", project: "acme" as ProjectId, startedBy: "nLAPTOP", createdAt: w.now, after: [waitedFor],
+    request: { project: "acme", title: "Next", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued",
+    startNow: null, lastError: null, startedAt: null, firstMessage: null,
+  });
+  const item = "it-000000000001" as ItemId;
+  const itemThread = testThread();
+  r.threads.createThread(itemThread, testPylon(itemThread), { key: { requestId: `pipeline:${item}`, body: "{}" } });
+  r.threads.setThreadStatus(itemThread.id, "archived");
+  r.pipeline.saveItem({ id: item, project: "acme" as ProjectId, title: "Item", request: { project: "acme", title: "Item" }, message: "Build it.", after: [], addedBy: "nLAPTOP", addedAt: w.now, approved: null, cancelled: null, lastError: null });
+  const withPr = w.closed("archived");
+  r.prWatches.savePrWatch(withPr, { links: [{ pr: testPr({ number: 4, state: "open" }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  const asking = w.closed("archived");
+  r.questions.askQuestion({ kind: "judgment", id: "qn-open", thread: asking, text: "Retry?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: w.now, failure: 0 });
+  const builder = w.closed("archived");
+  const reviewer = w.closed("archived");
+  r.reviews.saveReview(testReview({ builder, reviewer, phase: { kind: "reviewing" } }));
+  const read = w.closed("archived");
+  r.usage.startUsageBackfill([read], w.now);
+  r.usage.holdUsageBackfill(read, w.now);
+
+  w.later(week + minute);
+  await w.passes();
+  assert.equal(w.status(free), "deleted", "a thread nothing reads goes");
+  const reasons: [ThreadId, string][] = [
+    [waitedFor, `queued thread ${queuedId} waits for it`], [itemThread.id, `pipeline item ${item} became it`], [withPr, "its pull request #4 is open"],
+    [asking, "its question qn-open is open"], [builder, "its review rv-1 has not ended"], [reviewer, `review rv-1 of ${builder}, whose reviewer it is, has not ended`],
+    [read, "the usage backfill holds its pylon"],
+  ];
+  for (const [id, why] of reasons) {
+    assert.equal(w.status(id), "archived", why);
+    assert.deepEqual(w.keeps(id), [`retention: keeps ${id}, as ${why}`]);
+  }
+});
+
+test("a deleted thread is purged a week after its delete once a backup began since, but not while its pylon is on its node, its conversation's abort is unrecorded, or a stored review names it", async (t) => {
+  const w = world(t);
+  const r = w.registry;
+  const free = w.closed("deleted");
+  const listed = addThread(r);
+  r.threads.setThreadStatus(listed.id, "deleted");
+  observeNode(r, { pylons: [stoppedPylon(listed.pylonId)] });
+  const unaborted = w.closed("deleted", { thread: { conversationId: "conv-1" } });
+  const builder = addThread(r).id;
+  const reviewer = w.closed("deleted");
+  r.reviews.saveReview(testReview({ builder, reviewer, phase: { kind: "merged" } }));
+  r.usage.recordUsage(free, [{ id: "call-1", agent: "pi", model: "gpt-6-astra", at: w.now, input: 7, output: 3, cacheWrite: 0, cacheRead: 0 }]);
+  const usage = r.usage.usageReport({ since: null }).total;
+
+  w.later(week + minute);
+  await w.passes();
+  assert.equal(w.status(free), "deleted");
+  assert.deepEqual(w.keeps(free), [`retention: keeps ${free}, as it waits for a verified backup that began after its delete`]);
+
+  r.threads.recordBackedUp(w.now);
+  await w.passes();
+  assert.equal(w.status(free), "purged");
+  assert.ok(w.logged.some((l) => l.startsWith(`retention: purged ${free} from the registry`)));
+  assert.deepEqual(r.usage.usageReport({ since: null }).total, usage, "its calls stay in the day's sums");
+  for (const [id, why] of [
+    [listed.id, "its pylon is not gone from rj-firebat: the node lists or routes it, or a job, preview port, retry or Claude launch of it is left to settle"],
+    [unaborted, "the abort of its harness conversation is not recorded yet"],
+    [reviewer, `review rv-1 of ${builder} names it as its reviewer until ${builder} is purged`],
+  ] as const) {
+    assert.equal(w.status(id), "deleted", why);
+    assert.deepEqual(w.keeps(id).at(-1), `retention: keeps ${id}, as ${why}`);
+  }
+
+  observeNode(r);
+  r.threads.recordAborted("conv-1");
+  r.threads.setThreadStatus(builder, "deleted");
+  await w.passes();
+  assert.deepEqual([w.status(listed.id), w.status(unaborted)], ["purged", "purged"], "once its node no longer lists it, and once its abort is recorded");
+  assert.equal(w.status(reviewer), "deleted");
+  w.later(week + minute);
+  r.threads.recordBackedUp(w.now);
+  await w.pass.poll();
+  assert.deepEqual([w.status(builder), w.status(reviewer)], ["purged", "deleted"], "the builder's purge takes its review");
+  await w.pass.poll();
+  assert.equal(w.status(reviewer), "purged", "which frees its reviewer");
+});
+
+test("the first passes after retention's migration remove nothing for a week, then at most a pass's share of the old threads, oldest first", async (t) => {
+  const path = tempDb();
+  const old = Date.now() - 60 * 24 * 60 * minute;
+  const before = seedRegistry(openRegistry(path, () => old));
+  for (let i = 0; i < 80; i++) {
+    const { id } = addThread(before, { thread: { createdAt: old, lastHumanActivityAt: old } });
+    before.threads.setThreadStatus(id, "archived");
+    if (i >= 25) before.threads.setThreadStatus(id, "deleted");
+  }
+  before.close();
+  const raw = new DatabaseSync(path);
+  raw.exec("DELETE FROM settings WHERE key = 'retention-since'");
+  raw.close();
+  rewindTo(path, versionBefore(/ADD COLUMN deleted_at\b/));
+
+  const migrated = Date.now();
+  const w = world(t, path, migrated + week - minute);
+  const counts = () => {
+    const [archived, deleted] = (["archived", "deleted"] as const).map((status) => w.registry.threads.storedThreads({ status: [status] }).length);
+    return { archived, deleted, purged: 80 - archived! - deleted! };
+  };
+  w.registry.threads.recordBackedUp(migrated + 24 * 60 * minute);
+  await w.pass.poll();
+  assert.deepEqual(counts(), { archived: 25, deleted: 55, purged: 0 }, "a week after the migration has not passed, so nothing goes, however old the threads");
+
+  w.later(2 * minute);
+  await w.pass.poll();
+  assert.deepEqual(counts(), { archived: 5, deleted: 55 - 50 + 20, purged: 50 }, "one pass deletes 20 and purges 50");
+  await w.pass.poll();
+  assert.deepEqual(counts(), { archived: 0, deleted: 25, purged: 55 }, "the next takes the rest, and the threads it deleted wait their own week");
 });

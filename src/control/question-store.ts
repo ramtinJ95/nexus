@@ -54,8 +54,12 @@ export function questionStore(db: Db, clock: () => number, threadStatus: (id: Th
     sql(`UPDATE questions SET record = json_set(record, '$.withdrawn', json(?)) WHERE thread = ? AND json_extract(record, '$.kind') = 'judgment' AND ${openWhere}`).run(JSON.stringify({ by: "archive", at: clock() }), thread);
   }
 
+  /** An open question still waits for the person's answer. */
+  const keeps = (threads: ReadonlyMap<ThreadId, unknown>): ReadonlyMap<ThreadId, string> => new Map(sql(`SELECT thread, id FROM questions
+    WHERE thread IN (SELECT value FROM json_each(?)) AND ${openWhere} ORDER BY rowid DESC`).all(JSON.stringify([...threads.keys()])).map((r) => [r.thread as ThreadId, `its question ${r.id as string} is open`]));
+
   return {
-    participant: { needs, closed, reconcile: reconcileAsks },
+    participant: { needs, closed, reconcile: reconcileAsks, keeps },
     /** Stores the question unless one with its ID exists, and answers the stored one either way. */
     askQuestion<Q extends Unanswered>(question: Q): QuestionOf<Q["kind"]> {
       return transaction(() => {

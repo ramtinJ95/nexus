@@ -7,7 +7,8 @@ import type { ThreadId } from "../ids.ts";
 import type { ThreadStatus } from "./reconcile.ts";
 import type { EventFilter, EventKind, NexusEvent } from "./events.ts";
 import { reviewerCaller } from "./agent-protocol.ts";
-import { builderAwaited, kindsWhere, roundsSpent, waitsOnPerson, type Review, type Waiver } from "./review-model.ts";
+import { builderAwaited, ended, kindsWhere, reviewThreads, roundsSpent, waitsOnPerson, type Review, type Waiver } from "./review-model.ts";
+import type { Removal } from "./retention.ts";
 import { upgradeReview } from "./record-upgrade.ts";
 import type { Need } from "./attention.ts";
 
@@ -43,8 +44,26 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
     const at = changes.findLastIndex((e) => e.payload.review !== r.id || (e.payload.phase as Review["phase"] | undefined)?.kind !== r.phase.kind);
     return changes[at + 1]?.time ?? r.since;
   }
+  const allReviews = (): Review[] => sql("SELECT record FROM reviews ORDER BY builder").all().map((r) => json<Review>(r.record));
   return {
     participant: {
+      /**
+       * A review that has not ended reads every thread it names. A stored one names its reviewers and gate threads until
+       * its builder's purge takes it, so those stay in the registry until then, though they may be deleted.
+       */
+      keeps(threads: ReadonlyMap<ThreadId, Removal>): ReadonlyMap<ThreadId, string> {
+        const kept = new Map<ThreadId, string>();
+        for (const r of allReviews()) {
+          for (const [thread, part] of reviewThreads(r)) {
+            const removal = threads.get(thread);
+            if (removal === undefined || kept.has(thread)) continue;
+            const of = part === "builder" ? `its review ${r.id}` : `review ${r.id} of ${r.builder}, whose ${part} it is,`;
+            if (!ended(r)) kept.set(thread, `${of} has not ended`);
+            else if (removal === "purge" && part !== "builder") kept.set(thread, `review ${r.id} of ${r.builder} names it as its ${part} until ${r.builder} is purged`);
+          }
+        }
+        return kept;
+      },
       needs(thread: ThreadId): Need[] {
         const r = reviewOf(thread);
         return r !== null && waitsOnPerson(r) ? [{ kind: "review", review: r.id, since: heldSince(r) }] : [];
@@ -56,7 +75,7 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
     review: reviewOf,
     /** Whether `review` is the builder's review as stored, so no other save came since it was read. */
     isCurrentReview,
-    reviews: (): Review[] => sql("SELECT record FROM reviews ORDER BY builder").all().map((r) => json<Review>(r.record)),
+    reviews: allReviews,
     /** The reviews but those settled with no message left to send. */
     reviewsToStep: (): Review[] => sql(`SELECT record FROM reviews WHERE json_extract(record, '$.phase.kind') NOT IN (SELECT value FROM json_each(?))
       OR json_extract(record, '$.outbox') IS NOT NULL ORDER BY builder`).all(settledKinds).map((r) => json<Review>(r.record)),
