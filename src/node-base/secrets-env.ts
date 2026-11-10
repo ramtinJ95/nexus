@@ -44,3 +44,17 @@ export function appendSecret(path: string, text: string, name: string, value: st
   if (/[\r\n]/.test(value) || parseSecretsFile(path, text + line, held).value(name) !== value) throw new Error(`${path}: ${name} cannot be one NAME=value line`);
   return line;
 }
+
+/**
+ * The secrets.env at `path`, holding `text`, with the line that sets `name` setting it to `value` instead and every
+ * other byte as it was. Refused where `text` sets no `name`, or the result would not read back so.
+ */
+export function replaceSecret(path: string, text: string, name: string, value: string, held: readonly string[]): string {
+  const lines = text.split("\n");
+  const at = lines.findIndex((line) => line.startsWith(`${name}=`));
+  if (at === -1) throw new Error(`${path} sets no ${name}`);
+  lines[at] = `${name}=${value}${lines[at]!.endsWith("\r") ? "\r" : ""}`;
+  const result = lines.join("\n");
+  if (/[\r\n]/.test(value) || parseSecretsFile(path, result, held).value(name) !== value) throw new Error(`${path}: ${name} cannot be one NAME=value line`);
+  return result;
+}
