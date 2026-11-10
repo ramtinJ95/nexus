@@ -2,7 +2,10 @@
 # /etc/systemd/system/nexus-backup.service, and nexus-backup.timer runs it.
 #
 # It runs as root, because a backup holds /etc/nexus and the control plane's credentials. A failed run fails the unit,
-# and journalctl -u nexus-backup says why.
+# and journalctl -u nexus-backup says why. The sandbox leaves it two capabilities: CAP_DAC_OVERRIDE reads the control
+# plane's files and writes the -wal and -shm a read-only SQLite connection makes beside each database, and CAP_CHOWN
+# gives those to the database's owner, without which the control plane cannot open its own registry. It writes only
+# the backups, those files beside the databases, and its status for nexus doctor.
 
 [Unit]
 Description=Back up the Nexus control plane to /var/backups/nexus
@@ -14,3 +17,15 @@ Group=root
 Environment=PATH=/usr/local/bin:/usr/bin
 ExecStart=/usr/bin/env node /opt/nexus/control-current/src/control/backup.ts backup /etc/nexus/control.json
 UMask=0077
+# ReadWritePaths refuses a path that does not exist, so the directory is made outside the sandbox before the first run.
+ExecStartPre=+/usr/bin/env mkdir -p -m 0700 /var/backups/nexus
+StateDirectory=nexus-backup
+StateDirectoryMode=0755
+ReadWritePaths=/var/backups/nexus /var/lib/nexus-control
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE
