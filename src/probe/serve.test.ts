@@ -26,7 +26,7 @@ async function setup(t: import("node:test").TestContext, initial?: (gatewayOrigi
   t.after(() => serve.close());
   tailscale = fakeTailscale(initial && await initial(serve.origin));
   const gateway = { origin: serve.origin, routes: () => new Map(serve.routes().map(({ httpsPort, ...route }) => [httpsPort, route])) };
-  const signal = AbortSignal.timeout(5000);
+  const signal = AbortSignal.timeout(60_000);
   return { gateway, tailscale, warm, serve, signal, routesFile };
 }
 

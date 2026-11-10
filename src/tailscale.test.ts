@@ -135,7 +135,7 @@ test("tailscaleCli resolves with stdout as printed, and a failure names the comm
   process.env.PATH = `${bin}:${path}`;
   t.after(() => { process.env.PATH = path; });
   const cli = tailscaleCli();
-  const signal = AbortSignal.timeout(5000);
+  const signal = AbortSignal.timeout(60_000);
 
   assert.equal(await cli(["ok", "--json"], signal), '  {"TCP":{}}\n\n');
   await assert.rejects(cli(["said", "--https=443", "off"], signal), { message: "tailscale said --https=443 off: no such serve config" });

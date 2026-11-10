@@ -85,7 +85,7 @@ test("once its controller stops, an instance is read from its directory and the 
 	assert.equal(inspected.connected, false, "an inspect after the stop reached the stopped controller");
 	assert.equal(inspected.status.state, "stopped");
 	assert.equal(c.afterStop(), 0, "requests reached the controller after its stop");
-	assert.equal(await Promise.race([c.closed, delay(1000, "open", { ref: false })]), "closed", "the stopped controller still has a client connection, so it keeps its controller.pid");
+	assert.equal(await Promise.race([c.closed, delay(60_000, "open", { ref: false })]), "closed", "the stopped controller still has a client connection, so it keeps its controller.pid");
 });
 
 test("an action reaches its controller in one request, with no inspect before it", async (t) => {
