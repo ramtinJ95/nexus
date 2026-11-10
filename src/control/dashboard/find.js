@@ -41,8 +41,10 @@ export function listRows(next) {
   rows = next;
   void switcher?.then((m) => m?.switchOver(rows));
 }
+// A Mac's Ctrl+K deletes to the end of the line in a text field, and ⌘K is free there.
+const mac = /^(Mac|iP)/.test(navigator.platform);
 document.addEventListener("keydown", (event) => {
-  if (event.key.toLowerCase() === "k" && (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey) {
+  if (event.key.toLowerCase() === "k" && (mac ? event.metaKey : event.ctrlKey) && !event.altKey && !event.shiftKey) {
     event.preventDefault();
     switcher ??= import("./switcher.js").catch(() => { switcher = null; });
     void switcher.then((m) => m?.toggle(rows));
@@ -59,5 +61,7 @@ document.addEventListener("submit", (event) => {
   const form = event.target;
   if (!(form instanceof HTMLFormElement) || form.getAttribute("role") !== "search") return;
   event.preventDefault();
+  // An empty sidebar filter has no search to run, and hides its button.
+  if (form.id === "filter-form" && filter.value.trim() === "") return;
   location.assign(`${form.getAttribute("action")}?${new URLSearchParams(new FormData(form))}`);
 });

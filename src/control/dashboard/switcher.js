@@ -14,9 +14,7 @@ let picked = 0;
 
 const lastActive = (r) => Math.max(r.createdAt, r.lastAgentActivityAt ?? 0, r.lastHumanActivityAt ?? 0);
 function entriesFor(query) {
-  // A row read from the list has no pull requests, which the sidebar's row of the same thread holds.
-  const sidebar = new Map([...document.querySelectorAll("#side-threads a.row")].map((a) => [a.getAttribute("href"), a.dataset.find]));
-  const matched = rows.filter((r) => found(sidebar.get(`/threads/${r.id}`) ?? findText(r), query)).toSorted((a, b) => lastActive(b) - lastActive(a)).slice(0, shown)
+  const matched = rows.filter((r) => found(findText(r, r.pullRequestNumbers), query)).toSorted((a, b) => lastActive(b) - lastActive(a)).slice(0, shown)
     .map((r) => ({ href: `/threads/${r.id}`, title: r.title, note: r.project }));
   const q = query.trim();
   if (q === "") return matched;
@@ -47,6 +45,8 @@ export function switchOver(next) {
 }
 
 if (dialog !== null) {
+  // A click on the dialog itself is on its backdrop.
+  dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
   input.addEventListener("input", () => {
     picked = 0;
     draw();

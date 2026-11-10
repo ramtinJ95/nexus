@@ -52,7 +52,7 @@ import { readHealth } from "./node-routes.ts";
 type Caller = { caller: TailnetNodeId; roles: ReadonlySet<Role> };
 
 /** The thread as the list would report it, from its detail, so its state agrees with the rest of the detail. */
-const rowOf = (d: ThreadDetail): ThreadRow => ({ ...d.thread, attention: d.attention, desired: d.desired, pylon: d.pylon });
+const rowOf = (d: ThreadDetail): ThreadRow => ({ ...d.thread, attention: d.attention, desired: d.desired, pylon: d.pylon, pullRequestNumbers: d.pullRequests.map((pr) => pr.number) });
 
 function latestOf(d: ThreadDetail, items: readonly Item[]): Latest {
   const reply = items.findLast((i) => i.kind === "agent" && i.text.trim() !== "");

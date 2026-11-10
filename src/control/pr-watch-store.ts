@@ -39,9 +39,10 @@ export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: Thre
       },
     },
     prWatch: (thread: ThreadId): PrWatchState | null => watches.get(thread),
-    /** The number of each pull request linked to each thread, in one read. */
-    prNumbers(): ReadonlyMap<ThreadId, number[]> {
-      const rows = db.sql("SELECT thread, json_extract(link.value, '$.pr.number') AS number FROM pr_watches, json_each(pr_watches.record, '$.links') AS link").all() as { thread: ThreadId; number: number }[];
+    /** The number of each pull request linked to each of `threads`, or to every thread, in one read. */
+    prNumbers(threads?: readonly ThreadId[]): ReadonlyMap<ThreadId, number[]> {
+      const links = "SELECT thread, json_extract(link.value, '$.pr.number') AS number FROM pr_watches, json_each(pr_watches.record, '$.links') AS link";
+      const rows = (threads === undefined ? db.sql(links).all() : db.sql(`${links} WHERE thread IN (SELECT value FROM json_each(?))`).all(JSON.stringify(threads))) as { thread: ThreadId; number: number }[];
       return new Map([...Map.groupBy(rows, (r) => r.thread)].map(([thread, linked]) => [thread, linked.map((r) => r.number)]));
     },
     /**

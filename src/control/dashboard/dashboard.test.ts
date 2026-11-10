@@ -311,6 +311,8 @@ test("a thread's row names it in full and carries what a search matches, and ?q=
   const fix = await s.start("acme", "Fix checkout");
   s.registry.prWatches.savePrWatch(fix.id, { links: [{ pr: testPr({ repo: "acme/nexus", number: 7 }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
 
+  const listed = JSON.parse((await s.call("GET", "/v1/threads")).text) as { id: string; pullRequestNumbers: number[] }[];
+  assert.deepEqual(Object.fromEntries(listed.map((r) => [r.id, r.pullRequestNumbers])), { [cache.id]: [], [retries.id]: [], [docs.id]: [412], [fix.id]: [7] }, "the list's rows carry their linked pull requests' numbers, which the switcher matches");
   const home = (await s.call("GET", "/")).text;
   const row = new RegExp(`<a class="row[^"]*" href="/threads/${fix.id}" title="Fix checkout" data-find="fix checkout acme ${fix.id} #7"`);
   assert.match(home, row, "the row's title names the thread in full, and its data-find holds its title, project, ID and pull request");

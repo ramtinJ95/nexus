@@ -84,6 +84,7 @@ function page() {
 const stored = new Map();
 let phone = false;
 let assigned = [];
+Object.defineProperty(globalThis, "navigator", { value: { platform: "Linux x86_64" }, configurable: true, writable: true });
 Object.assign(globalThis, {
   HTMLInputElement: Input, HTMLTextAreaElement: TextArea, HTMLSelectElement: class extends El {}, HTMLFormElement: Form,
   FormData: class { constructor(form) { return form.querySelectorAll("input").map((input) => [input.getAttribute("name"), input.value]); } },
@@ -172,6 +173,9 @@ test("Enter in the filter searches the archived and deleted threads for it, thou
   type(p.filter, "checkout retry");
   assert.equal(p.doc.fire("submit", { target: p.form }).defaultPrevented, true, "the browser's submit, which form-action 'none' refuses, is not run");
   assert.deepEqual(assigned, ["/threads/closed?q=checkout+retry"]);
+  type(p.filter, " ");
+  assert.equal(p.doc.fire("submit", { target: p.form }).defaultPrevented, true);
+  assert.deepEqual(assigned, ["/threads/closed?q=checkout+retry"], "an empty filter searches nothing");
 });
 
 test("Ctrl/⌘K opens the switcher over the listed rows, and the keyboard picks a thread and opens it", async () => {
@@ -180,12 +184,14 @@ test("Ctrl/⌘K opens the switcher over the listed rows, and the keyboard picks 
   switcher.open = false;
   const p = page();
   const find = await load(p);
-  find.listRows(threads.map((t) => ({ id: t.id, title: t.title, project: t.project, createdAt: t.at, lastAgentActivityAt: 0, lastHumanActivityAt: 0 })));
+  // A quiet thread past the sidebar's cap is in the list's rows alone.
+  const older = { id: "th-quiet000001", title: "Tidy the logs", project: "acme", prs: [977], at: 0 };
+  find.listRows([...threads, older].map((t) => ({ id: t.id, title: t.title, project: t.project, createdAt: t.at, lastAgentActivityAt: 0, lastHumanActivityAt: 0, pullRequestNumbers: t.prs })));
   const opened = new Promise((resolve) => { switcher.opened = resolve; });
   assert.equal(p.doc.fire("keydown", { key: "k", ctrlKey: true, target: p.doc }).defaultPrevented, true, "the browser's own Ctrl+K is not run");
   await opened;
   const listed = () => switcherList.children.map((li) => [li.children[0].textContent, li.children[0].href, li.getAttribute("aria-selected")]);
-  assert.deepEqual(listed().map(([title]) => title), ["Write the docs", threads[0].title, threads[1].title, threads[2].title], "every listed thread, the last active first");
+  assert.deepEqual(listed().map(([title]) => title), ["Write the docs", threads[0].title, threads[1].title, threads[2].title, older.title], "every listed thread, the last active first");
   assert.equal(p.doc.activeElement, switcherInput);
 
   type(switcherInput, "88 charge");
@@ -203,10 +209,39 @@ test("Ctrl/⌘K opens the switcher over the listed rows, and the keyboard picks 
   switcherInput.fire("keydown", { key: "Enter" });
   assert.deepEqual(assigned, [`/threads/${threads[1].id}`], "Enter opens the picked thread");
   type(switcherInput, "412");
-  assert.equal(listed()[0][1], `/threads/${threads[3].id}`, "a pull request's number finds its thread, as the sidebar's row of it holds it");
+  assert.equal(listed()[0][1], `/threads/${threads[3].id}`, "a pull request's number finds its thread");
+  type(switcherInput, "#977");
+  assert.equal(listed()[0][1], `/threads/${older.id}`, "and finds a thread the sidebar does not list");
 
-  const closed = new Promise((resolve) => { switcher.closed = resolve; });
-  assert.equal(p.doc.fire("keydown", { key: "K", metaKey: true, target: switcherInput }).defaultPrevented, true);
+  let closed = new Promise((resolve) => { switcher.closed = resolve; });
+  assert.equal(p.doc.fire("keydown", { key: "K", ctrlKey: true, target: switcherInput }).defaultPrevented, true);
   await closed;
-  assert.equal(switcher.open, false, "⌘K again closes it");
+  assert.equal(switcher.open, false, "Ctrl+K again closes it");
+  const reopened = new Promise((resolve) => { switcher.opened = resolve; });
+  p.doc.fire("keydown", { key: "k", ctrlKey: true, target: p.doc });
+  await reopened;
+  switcherInput.fire("click", { target: switcherInput });
+  switcher.fire("click", { target: switcherInput });
+  assert.equal(switcher.open, true, "a click inside the dialog keeps it open");
+  closed = new Promise((resolve) => { switcher.closed = resolve; });
+  switcher.fire("click", { target: switcher });
+  await closed;
+  assert.equal(switcher.open, false, "a click on its backdrop closes it");
+});
+
+test("on a Mac, ⌘K opens the switcher and Ctrl+K is left to the text field, where it deletes to the end of the line", async () => {
+  switcher.open = false;
+  navigator.platform = "MacIntel";
+  const p = page();
+  try {
+    const find = await load(p);
+    find.listRows([]);
+    const ctrl = p.doc.fire("keydown", { key: "k", ctrlKey: true, target: p.textarea });
+    assert.equal(ctrl.defaultPrevented, false, "Ctrl+K is the text field's");
+    const opened = new Promise((resolve) => { switcher.opened = resolve; });
+    assert.equal(p.doc.fire("keydown", { key: "k", metaKey: true, target: p.textarea }).defaultPrevented, true);
+    await opened;
+    assert.equal(switcher.open, true, "⌘K opens it");
+    switcher.close();
+  } finally { navigator.platform = "Linux x86_64"; }
 });
