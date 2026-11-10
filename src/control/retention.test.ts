@@ -250,6 +250,22 @@ test("a deleted thread is purged a week after its delete once a backup began sin
   assert.equal(w.status(reviewer), "purged", "which frees its reviewer");
 });
 
+test("a purge that throws is logged once, and the pass still purges and deletes the rest", async (t) => {
+  const w = world(t);
+  const r = w.registry;
+  const stuck = w.closed("deleted");
+  w.later(minute);
+  const free = w.closed("deleted");
+  const idle = w.closed("archived");
+  const purge = r.threads.purgeThread;
+  r.threads.purgeThread = (id) => { if (id === stuck) throw new Error("FOREIGN KEY constraint failed"); purge(id); };
+  w.later(week + minute);
+  r.threads.recordBackedUp(w.now);
+  await w.passes();
+  assert.deepEqual([w.status(stuck), w.status(free), w.status(idle)], ["deleted", "purged", "deleted"]);
+  assert.deepEqual(w.logged.filter((l) => l.startsWith(`retention: purging ${stuck}`)), [`retention: purging ${stuck} failed: FOREIGN KEY constraint failed`]);
+});
+
 test("the first passes after retention's migration remove nothing for a week, then at most a pass's share of the old threads, oldest first", async (t) => {
   const path = tempDb();
   const old = Date.now() - 60 * 24 * 60 * minute;

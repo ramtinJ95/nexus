@@ -118,7 +118,7 @@ On every observation and every 5 seconds, the control plane's planner compares e
 The control plane removes closed threads in two steps, on a pass every 10 minutes (`src/control/retention.ts`, `src/control/retention-pass.ts`). Each delete and purge is logged with why.
 
 1. An archived thread with no activity for 7 days is deleted, as `nexus delete` deletes it: its status becomes `deleted`, its streams and attached terminals end, its agent is deleted, and the planner deletes its pylon. Its 7 days count from the latest of its archive (`Thread.archivedAt`), its human and agent activity, its last reply, and the `retention-since` setting. The delete goes whether or not its token usage was read off its disk, so `diskKept` keeps no disk past it. The person decided so on 2026-11-09, as they did for a failed pylon's disk on 2026-11-02.
-2. A deleted thread is purged from the registry 7 days after its delete, which `threads.deleted_at` records, once a verified backup began after it (`backed-up-at`). So a backup still holds every purged thread, as backups are kept 7 days. The purge removes the thread's row and every row tied to it, in one transaction.
+2. A deleted thread is purged from the registry 7 days after its delete, which `threads.deleted_at` records, once a verified backup began after it (`backed-up-at`). So a backup still holds every purged thread, as backups are kept 7 days. The purge removes the thread's row and every row tied to it, in one transaction. A purge that fails is logged once, and the pass goes on with the other threads and tries it again on the next.
 
 Until then an archived thread keeps every record, and only its pylon's disk goes, as the [pylon states](#pylon-states) say. A deleted thread keeps its row, its pylon's row, its outputs, questions, review, PR watch, nudge, judgments and token usage records. Its delete clears its archive row, its session order, its Claude transcript, the messages typed into its Claude worker and its disk cleanup, and its pylon's sessions and previews go once the planner has deleted the pylon.
 
@@ -144,7 +144,7 @@ Each store's holding (`Holding` in `src/control/db.ts`) says what a purge does w
 A purge never removes these.
 
 - `events`. The log keeps its newest 10,000 events on its own, and deleting a thread's from among them could move the oldest past a client's cursor, which would then read as expired.
-- `start_requests`. A start repeated under a purged thread's request ID still finds the thread, and answers 409 that it was purged rather than starting it again, and a pipeline item still finds the thread it became, whose phase then reads `archived`, as its thread was deleted and purged.
+- `start_requests`. A start repeated under a purged thread's request ID still finds the thread, and answers 409 that it was purged rather than starting it again, and a pipeline item still finds the thread it became, whose phase then reads `archived`, as its thread was deleted and purged. No record says whether that thread's pull request merged, so `item add` refuses, with 409, an item after such an item, and an item already after one is held.
 - `queued_threads`, which holds a queued start as it was asked for.
 - `usage_days`, whose daily sums keep a purged thread's calls, though its `usage_records` go. `reviewed_prs` and `review_rounds` keep what each pull request's reviews read and spent.
 - `usage_backfill`, the backfill's one run, which names a thread only while it holds its pylon.

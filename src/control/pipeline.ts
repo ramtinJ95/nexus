@@ -62,6 +62,9 @@ export interface PipelineItem {
 }
 
 export const itemThread = (registry: PipelineRegistry, id: ItemId): ThreadId | null => registry.threads.startRequest(requestIds.pipeline(id))?.thread ?? null;
+/** A thread with no row that started, so it was deleted and purged since, and no record holds whether it merged. */
+const purged = (registry: PipelineRegistry, id: ThreadId) => registry.threads.thread(id) === undefined && [undefined, "started"].includes(registry.queue.queuedThread(id)?.status);
+const purgedAhead = (title: string) => `${title}'s thread was deleted and purged from the registry, so whether its pull request merged is not known. Add it again after other items, or with none`;
 /** The thread each of the items became, or null before it did, in one read however many items there are. */
 export function itemThreads(registry: PipelineRegistry, items: readonly ItemRecord[]): Map<ItemId, ThreadId | null> {
   const started = registry.threads.startedThreads(items.map((i) => requestIds.pipeline(i.id)));
@@ -76,8 +79,10 @@ function unqueued(registry: PipelineRegistry, item: ItemRecord): ItemPhase | nul
   const setting = registry.projects.project(item.project)?.pipeline;
   if (setting == null) return phase("planned", `the pipeline does not run for project ${item.project}`);
   for (const id of item.after) {
-    if (itemThread(registry, id) !== null) continue;
+    const thread = itemThread(registry, id);
     const ahead = registry.pipeline.item(id)!;
+    if (thread !== null && purged(registry, thread)) return phase("held", purgedAhead(ahead.title));
+    if (thread !== null) continue;
     return ahead.cancelled === null ? phase("planned", `waits for ${ahead.title} to be queued`) : phase("held", `${ahead.title} was cancelled, so this never starts. Cancel it, or add it again after other items`);
   }
   if (!setting.autoStart && item.approved === null) return phase("held", `project ${item.project} waits for the person to approve each item: nexus item approve ${item.id}`);
@@ -218,6 +223,8 @@ export function pipeline(options: { registry: PipelineRegistry; queue: Pick<Thre
         const ahead = registry.pipeline.item(id);
         if (ahead === undefined) throw new Refusal("missing", `no item ${id}`);
         if (ahead.project !== project.id) throw new Refusal("invalid", `item ${id} is in project ${ahead.project}, not ${project.id}`);
+        const thread = itemThread(registry, id);
+        if (thread !== null && purged(registry, thread)) throw new Refusal("conflict", `item ${id}: ${purgedAhead(ahead.title)}`);
       }
       const record: ItemRecord = {
         id, project: project.id, title: request.title, request, message, after: ids, addedBy: caller, addedAt: Date.now(),

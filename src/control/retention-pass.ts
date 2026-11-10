@@ -26,7 +26,12 @@ export function retentionPass({ registry, deleteThread, log }: { registry: Pick<
     const from = (t: RetainedThread) => retainedFrom(t, at.since ?? 0);
     const oldest = (list: RetainedThread[], most: number) => list.sort((a, b) => from(a) - from(b)).slice(0, most);
     for (const t of oldest(due.purge, purgesPerPass)) {
-      registry.threads.purgeThread(t.id);
+      try {
+        registry.threads.purgeThread(t.id);
+      } catch (err) {
+        kept.failed(t.id, `retention: purging ${t.id} failed: ${(err as Error).message}`);
+        continue;
+      }
       kept.ok(t.id);
       log(`retention: purged ${t.id} from the registry, deleted for a week from ${new Date(from(t)).toISOString()} and backed up since`);
     }
