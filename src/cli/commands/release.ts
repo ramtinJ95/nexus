@@ -2,7 +2,7 @@ import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type { ImageId } from "../../ids.ts";
 import { fullCommit, releaseOutcome, type ReleaseView } from "../../protocol/deploy.ts";
-import { CliError } from "../transport.ts";
+import { CliError, UsageError } from "../transport.ts";
 import { type Api, type Result, type Command, str, request, int, table, pollUntil } from "../kit.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { deployWaitMs, imageRoutes, releaseRoutes, type ImageEntry, type ImageOperation, type ImagesView } from "../../contract/release.ts";
@@ -133,7 +133,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
     args: [1, 1], thread: true, options: { pr: { type: "string" }, rounds: { type: "string" }, land: { type: "boolean" }, cancel: { type: "boolean" } },
     async run(api, [id], v) {
       if (v.cancel === true) {
-        if (v.pr !== undefined || v.rounds !== undefined || v.land !== undefined) throw new CliError("invalid", "--cancel takes no --pr, --rounds or --land");
+        if (v.pr !== undefined || v.rounds !== undefined || v.land !== undefined) throw new UsageError("--cancel takes no --pr, --rounds or --land");
         const r = await request(api, reviewRoutes.cancel, { thread: id! });
         return { json: r, text: `Cancelled ${r.said.join("\n")}` };
       }

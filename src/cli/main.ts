@@ -4,38 +4,104 @@
  * exit codes and the watch stream. --json prints the API's reply as it is, except where docs/cli.md says otherwise.
  */
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
-import { call, CliError, exitCodes, follow, upgrade, type Endpoint } from "./transport.ts";
+import { call, CliError, exitCodes, follow, upgrade, UsageError, type Endpoint } from "./transport.ts";
 import { version } from "../version.ts";
 import type { Api, Io, Values } from "./kit.ts";
 import { threadOf } from "./refs.ts";
 import { settings, checked } from "./config.ts";
-import { usage, usageOf } from "./help.ts";
+import { groups, nearest, subcommandsOf, usage, usageOf } from "./help.ts";
 import { commands } from "./commands/index.ts";
 
 const globalOptions: ParseArgsOptionsConfig = {
   json: { type: "boolean" }, url: { type: "string" }, socks: { type: "string" }, help: { type: "boolean", short: "h" },
 };
 
-async function run(argv: readonly string[], io: Io): Promise<number> {
-  const twoWords = Object.hasOwn(commands, `${argv[0]} ${argv[1]}`);
-  const name = twoWords ? `${argv[0]} ${argv[1]}` : argv[0];
-  const rest = argv.slice(twoWords ? 2 : 1);
-  const command = Object.hasOwn(commands, name!) ? commands[name!]! : undefined;
-  if (command === undefined) throw new CliError("invalid", argv.length === 0 ? "no command given" : `unknown command ${name}`);
+/**
+ * What a run asks for, read from its words before a command parses its flags. `help` with `asked` false is a run
+ * that named no command, or only a group such as `image`, and gets that help on stderr as a failure.
+ */
+type Invocation =
+  | { to: "version" }
+  | { to: "help"; of: string | null; asked: boolean }
+  | { to: "command"; name: string; args: string[] }
+  | { to: "unknown"; name: string; group: string | null };
+
+const isHelp = (word: string) => word === "--help" || word === "-h";
+
+/** Global flags may come before the command, and then go to it as if they followed its name. */
+function invocationOf(argv: readonly string[]): Invocation {
+  const leading: string[] = [];
+  let at = 0;
+  for (; at < argv.length; at++) {
+    const word = argv[at]!;
+    if (word === "--url" || word === "--socks") {
+      leading.push(word, ...argv.slice(at + 1, at + 2));
+      at++;
+    } else if (word === "--json" || word === "--version" || isHelp(word) || /^--(url|socks)=/.test(word)) leading.push(word);
+    else break;
+  }
+  const words = argv.slice(at);
+  if (leading.includes("--version") || words[0] === "version") return { to: "version" };
+  if (words[0] === "help") return words.length === 1 ? { to: "help", of: null, asked: true } : invocationOf([...leading, ...words.slice(1), "--help"]);
+  const asked = leading.some(isHelp);
+  const [first, second] = words;
+  if (first === undefined) return { to: "help", of: null, asked };
+  for (const name of [`${first} ${second}`, first]) {
+    if (Object.hasOwn(commands, name)) return { to: "command", name, args: [...leading, ...words.slice(name.split(" ").length)] };
+  }
+  if (!groups.has(first)) return { to: "unknown", name: first, group: null };
+  if (second === undefined || second.startsWith("-")) return { to: "help", of: first, asked: asked || words.some(isHelp) };
+  return { to: "unknown", name: `${first} ${second}`, group: first };
+}
+
+function unknown({ name, group }: { name: string; group: string | null }): UsageError {
+  if (name.startsWith("-")) return new UsageError(`unknown flag ${name}, since before a command nexus takes only --json, --url, --socks, --help and --version`);
+  const near = group === null ? nearest(name, new Set(Object.keys(commands).map((other) => other.split(" ")[0]!))) : nearest(name.slice(group.length + 1), subcommandsOf(group));
+  return new UsageError(`unknown command ${name}${near === undefined ? "" : `. Did you mean ${group === null ? "" : `${group} `}${near}?`}`);
+}
+
+async function run(invocation: Invocation, io: Io, json: boolean): Promise<number> {
+  switch (invocation.to) {
+    case "version":
+      io.stdout.write(`nexus ${version}\n`);
+      return 0;
+    case "unknown":
+      throw unknown(invocation);
+    case "help": {
+      const text = invocation.of === null ? usage(io.env) : usageOf(invocation.of);
+      if (invocation.asked) {
+        io.stdout.write(text);
+        return 0;
+      }
+      if (json) throw new UsageError(invocation.of === null ? "no command given" : `${invocation.of} takes a command: ${subcommandsOf(invocation.of).join(", ")}`);
+      io.stderr.write(text);
+      return exitCodes.invalid;
+    }
+    case "command":
+      return await runCommand(invocation.name, invocation.args, io);
+  }
+}
+
+async function runCommand(name: string, args: readonly string[], io: Io): Promise<number> {
+  const command = commands[name]!;
+  const options = { ...command.options, ...globalOptions };
   let parsed: { values: Values; positionals: string[] };
   try {
-    parsed = parseArgs({ args: [...rest], options: { ...command.options, ...globalOptions }, allowPositionals: true, strict: true }) as typeof parsed;
+    parsed = parseArgs({ args: [...args], options, allowPositionals: true, strict: true }) as typeof parsed;
   } catch (err) {
-    throw new CliError("invalid", (err as Error).message);
+    const flag = (err as { code?: string }).code === "ERR_PARSE_ARGS_UNKNOWN_OPTION" ? /'([^']+)'/.exec((err as Error).message)?.[1] : undefined;
+    if (flag === undefined) throw new UsageError((err as Error).message);
+    const near = flag.startsWith("--") ? nearest(flag.slice(2), Object.keys(options)) : undefined;
+    throw new UsageError(`${name} takes no ${flag}${near === undefined ? "" : `. Did you mean --${near}?`}`);
   }
   const { values, positionals } = parsed;
   if (values.help === true) {
-    io.stdout.write(usageOf(name!));
+    io.stdout.write(usageOf(name));
     return 0;
   }
   const [min, max] = command.args;
   if (positionals.length < min || positionals.length > max) {
-    throw new CliError("invalid", `${name} takes ${min === max ? min : max === Infinity ? `at least ${min}` : `${min} to ${max}`} argument${max === 1 ? "" : "s"}, got ${positionals.length}`);
+    throw new UsageError(`${name} takes ${min === max ? min : max === Infinity ? `at least ${min}` : `${min} to ${max}`} argument${max === 1 ? "" : "s"}, got ${positionals.length}`);
   }
   // Only once a command calls the API, since connect sets the URL rather than reading it. A failed health read is
   // not kept, so a watch's next try reads it again.
@@ -56,22 +122,15 @@ async function run(argv: readonly string[], io: Io): Promise<number> {
  * --project the process's working directory.
  */
 export async function main(argv: readonly string[], io: Io = process): Promise<number> {
-  if (argv[0] === "--version" || argv[0] === "version") {
-    io.stdout.write(`nexus ${version}\n`);
-    return 0;
-  }
-  if (argv[0] === "--help" || argv[0] === "help") {
-    io.stdout.write(usage(io.env));
-    return 0;
-  }
+  const invocation = invocationOf(argv);
+  const json = argv.includes("--json");
   try {
-    return await run(argv, io);
+    return await run(invocation, io, json);
   } catch (err) {
     if (!(err instanceof CliError)) throw err;
-    const json = argv.includes("--json");
-    io.stderr.write(json ? `${JSON.stringify({ error: err.message, kind: err.kind, status: err.status, code: err.code })}\n`
-      : argv.length === 0 ? usage(io.env) : `nexus: ${err.message}${err.kind === "invalid" && err.status === null ? ". Run nexus --help for usage" : ""}\n`);
+    const of = invocation.to === "command" ? `${invocation.name} ` : invocation.to === "unknown" && invocation.group !== null ? `${invocation.group} ` : "";
+    const pointer = err instanceof UsageError ? `${/[.?]$/.test(err.message) ? "" : "."} Run nexus ${of}--help for usage` : "";
+    io.stderr.write(json ? `${JSON.stringify({ error: err.message, kind: err.kind, status: err.status, code: err.code })}\n` : `nexus: ${err.message}${pointer}\n`);
     return exitCodes[err.kind];
   }
 }
-
