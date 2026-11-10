@@ -460,12 +460,12 @@ async function create(
 		);
 	}
 }
-/** How long a retry stop gives the old controller's stop, then its process group's SIGTERM, before it moves on. */
+/** What ends a retry stop's wait on the old controller's stop, and how long its process group's SIGTERM then gets. */
 export interface RetryStopDeadlines {
-	stopMs: number;
+	stop: () => AbortSignal;
 	termGraceMs: number;
 }
-export const retryStopDeadlines: RetryStopDeadlines = { stopMs: 30_000, termGraceMs: killGraceMs };
+export const retryStopDeadlines: RetryStopDeadlines = { stop: () => AbortSignal.timeout(30_000), termGraceMs: killGraceMs };
 export async function run<I extends ActionInput>(
 	root: string,
 	input: I,
@@ -561,8 +561,8 @@ async function dispatch(root: string, action: Action, signal: AbortSignal | unde
 	if (action.action === "inspect") return offline(dir);
 	throw new Error(`${action.name} is not running. Use start first`);
 }
-/** Stop gets `stopMs`; group termination then gets `termGraceMs` before SIGKILL and 10 s to confirm exit. */
-async function stopForRetry(root: string, name: string, signal: AbortSignal | undefined, { stopMs, termGraceMs }: RetryStopDeadlines): Promise<void> {
+/** Stop gets until `stop` aborts, 30 s by default; group termination then gets `termGraceMs` before SIGKILL and 10 s to confirm exit. */
+async function stopForRetry(root: string, name: string, signal: AbortSignal | undefined, { stop, termGraceMs }: RetryStopDeadlines): Promise<void> {
 	const dir = directory(root, "instances", name);
 	signal?.throwIfAborted();
 	const lock = instanceFiles(dir).launchLock;
@@ -595,7 +595,8 @@ async function stopForRetry(root: string, name: string, signal: AbortSignal | un
 				throw new Error("The controller changed during retry stop; refusing to stop another boot");
 		}
 		try {
-			const reply = await send(dir, { action: "stop", name }, signal ? AbortSignal.any([signal, AbortSignal.timeout(stopMs)]) : AbortSignal.timeout(stopMs));
+			const deadline = stop();
+			const reply = await send(dir, { action: "stop", name }, signal ? AbortSignal.any([signal, deadline]) : deadline);
 			if (reply === absent && owner === null) await settle(dir);
 		} catch (error) {
 			if (owner === null) throw error;

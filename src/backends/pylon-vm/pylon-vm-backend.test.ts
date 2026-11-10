@@ -1103,12 +1103,18 @@ test("an ordinary resume reuses a healthy controller and its boot time", async (
 
 /**
  * A stuck controller ignores SIGTERM, so waiting out the 10 s grace changes nothing a test can observe, and neither does
- * the 30 s stop deadline for one that never answers stop. A 0 ms stop deadline can abort before the request connects, so
+ * the 30 s stop deadline for one that never answers stop. An expired stop deadline can abort before the request connects, so
  * such a controller may never see the stop, and a test of it cannot assert stop-seen. One whose stop answers an error keeps
  * the deadline, so its error arrives.
  */
 const noGrace = { retryStop: { ...retryStopDeadlines, termGraceMs: 0 } };
-const noWait = { retryStop: { stopMs: 0, termGraceMs: 0 } };
+const noWait = { retryStop: { stop: () => AbortSignal.abort(), termGraceMs: 0 } };
+/** A stop deadline that expires once the stand-in has recorded the stop, so that stop was delivered and never answered. */
+function expiresOnceSeen(file: string): AbortSignal {
+  const expired = new AbortController();
+  void until("the controller saw stop", () => existsSync(file)).then(() => expired.abort(), (error: unknown) => expired.abort(error));
+  return expired.signal;
+}
 
 /**
  * A detached controller and a child in its group. Neither cooperates with SIGTERM or shutdown, and a hung one answers no
@@ -1167,7 +1173,9 @@ async function stuckController(t: TestContext, dir: string, id: PylonId, stop: "
 }
 
 for (const stop of ["silent", "error"] as const) test(`retry kills the controller group when stop is ${stop}, preserves the completed disk and starts another controller`, async (t) => {
-  const { backend, instances } = await backendWith(stop === "silent" ? noWait : noGrace);
+  let stopsAsked = 0;
+  const silentStop = { retryStop: { stop: () => (stopsAsked++, expiresOnceSeen(join(dir, "stop-seen"))), termGraceMs: 0 } };
+  const { backend, instances } = await backendWith(stop === "silent" ? silentStop : noGrace);
   const id = `pylon-${stop}` as PylonId;
   const dir = await leftInstance(instances, id, "running");
   await writeFile(join(dir, "disk.qcow2"), "last completed disk");
@@ -1175,9 +1183,11 @@ for (const stop of ["silent", "error"] as const) test(`retry kills the controlle
   const controller = await stuckController(t, dir, id, stop);
   const qemu = Number(await readFile(join(dir, "qemu.pid"), "utf8"));
   assert.deepEqual((await groupMembers(controller.pid)).sort((a, b) => a - b), [controller.pid, qemu].sort((a, b) => a - b));
-  const started = Date.now();
   await backend.ensurePaused(id, "ckpt-forced-1", AbortSignal.timeout(60_000), true);
-  assert.ok(Date.now() - started < 20_000, "the injected stop deadline and SIGTERM grace bound the wait, not the 30 s and 10 s a probe uses");
+  if (stop === "silent") {
+    assert.equal(stopsAsked, 1, "the retry's stop waited on the deadline the backend was given");
+    assert.ok(existsSync(join(dir, "stop-seen")), "the stop reached the controller, which never answered it");
+  }
   await controller.exited;
   assert.deepEqual(await groupMembers(controller.pid), [], "neither controller nor QEMU stand-in can still run");
   assert.equal(await readFile(join(dir, "disk.qcow2"), "utf8"), "last completed disk");

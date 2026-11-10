@@ -67,7 +67,7 @@ export interface PylonVmBackendOptions {
   gitSsh?: { privateKeyFile: string; knownHostsFile: string };
   /** The node's tailnet DNS name, which previews are published on. Each previewed service's PUBLIC_URL is on it. */
   previewHost?: string;
-  /** A retry's stop deadline and SIGTERM grace for a stuck controller, 30 s and 10 s unless a test shortens them. */
+  /** A retry's stop deadline and SIGTERM grace for a stuck controller, 30 s and 10 s unless a test sets them. */
   retryStop?: RetryStopDeadlines;
 }
 
