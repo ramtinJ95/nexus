@@ -1,14 +1,7 @@
 import type { ThreadQuestion } from "./questions.ts";
+import type { Attention } from "../contract/attention.ts";
 
-export type Attention = "failed" | "decision" | "parked" | "limited" | "reply" | "working" | "waiting" | null;
-
-/**
- * Whether each attention waits on the person, which keeps a thread's row bright and notifies on a change to it. Waiting
- * ranks below working, but only waiting is blocked on the person.
- */
-const waitsOnPerson: Record<NonNullable<Attention>, boolean> = {
-  failed: true, decision: true, parked: true, limited: true, reply: true, working: false, waiting: true,
-};
+export { needsPerson, type Attention } from "../contract/attention.ts";
 
 /**
  * A thing of a thread's that waits on the person: its review, held for them or stopped at an approval only they land,
@@ -20,8 +13,6 @@ export type Need =
   | { kind: "question"; question: ThreadQuestion; since: number }
   | { kind: "nudge"; since: number }
   | { kind: "resume"; why: string; since: number };
-
-export const needsPerson = (attention: Attention) => attention !== null && waitsOnPerson[attention];
 
 /** What a thread's attention is read from. `waiting` is a dialog its session waits on, and `limited` its Claude session stopped on its usage limit. */
 export interface AttentionFacts {

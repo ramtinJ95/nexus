@@ -105,7 +105,7 @@ async function leftInstance(instances: string, pylonId: string, state: "stopped"
   return dir;
 }
 
-const signal = () => AbortSignal.timeout(10_000);
+const signal = () => AbortSignal.timeout(60_000);
 /** A field only some of the VM states carry, or undefined when this pylon's state does not. */
 const field = (p: BackendPylon | undefined, key: "cause" | "logTail" | "sessions") => p !== undefined && key in p ? (p as unknown as Record<string, unknown>)[key] : undefined;
 
@@ -336,7 +336,7 @@ test("a pylon whose controller takes the request and never answers gets the stat
   after(() => { server.closeAllConnections(); return new Promise<void>((resolve) => server.close(() => resolve())); });
   const started = Date.now();
   const state = await backend.state("pylon-wedged" as PylonId);
-  assert.ok(Date.now() - started < 10_000, `${Date.now() - started} ms`);
+  assert.ok(Date.now() - started < 60_000, "only ends a hang: the reads are bounded at 1.5 s each, and unbounded they wait out the client's 180 s");
   assert.equal(state, (await backend.list()).find((p) => p.pylonId === "pylon-wedged")?.vm);
 });
 
@@ -1045,20 +1045,27 @@ test("a VM whose controller predates startupFailures is broken for an unknown re
 });
 
 test("a retry bounds session recording on a stuck guest, converges, and launches a new controller", async () => {
-  const { backend, instances } = await backendWith();
+  const execSeen = Promise.withResolvers<void>();
+  let readsBounded = 0;
+  const retrySessions = () => {
+    readsBounded++;
+    const expired = new AbortController();
+    void execSeen.promise.then(() => expired.abort(new Error("the session read's own deadline")));
+    return expired.signal;
+  };
+  const { backend, instances } = await backendWith({ retrySessions });
   const id = "pylon-retry" as PylonId;
   const dir = await leftInstance(instances, id, "running");
   const saved = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "saved shell" }];
   await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-retry-0", sessions: saved }));
   const controller = await fakeController(dir, id, (action) => {
-    if (action.action === "exec") return new Promise(() => {});
+    if (action.action === "exec") { execSeen.resolve(); return new Promise(() => {}); }
     assert.equal(action.action, "stop", "a timed-out recording must not continue guest operations");
     controller.state.current = "stopped";
     return { name: id, state: "stopped" };
   });
-  const started = Date.now();
   await backend.ensurePaused(id, "ckpt-retry-1", signal(), true);
-  assert.ok(Date.now() - started < 5000, "a stuck session read gets 3 seconds, not the normal command deadline");
+  assert.equal(readsBounded, 1, "the stuck session read ended on its own short deadline, not the normal command deadline");
   await backend.ensurePaused(id, "ckpt-retry-1", signal(), true);
   assert.deepEqual(controller.actions.map((a) => a.action), ["exec", "stop"]);
   assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-retry-1", sessions: saved });

@@ -76,7 +76,7 @@ test("project add --scratch makes a project with no repository, --secret grants 
     id: "sketch", repoUrl: null, defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [],
     secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] }, { name: "EXA_API_KEY", hosts: ["api.exa.ai"] }], logins: [], preSetup: null,
   });
-  assert.match((await s.nexus(["projects"])).stdout, /^sketch +node rj-firebat +branch main +auto review off +pipeline off +scratch$/m);
+  assert.match((await s.nexus(["projects"])).stdout, /^Project +Node +Branch +Review +Pipeline +Repository$[^]*^sketch +rj-firebat +main +auto review off +pipeline off +scratch$/m);
 
   const pinned = await s.nexus(["start", "--project", "sketch", "--title", "x", "--commit", "abc123", "--json"]);
   assert.equal(pinned.code, 64);
@@ -113,7 +113,7 @@ test("project edit replaces supplied grants and preserves omitted settings", asy
   assert.equal(p.defaultNode, node);
   assert.equal((await s.nexus(["project", "edit", "editable", "--secret", "TOKEN:*.example.com"])).code, 64);
   assert.equal((await s.json(["project", "edit", "editable", "--node", "auto"])).defaultNode, "auto");
-  assert.match((await s.nexus(["projects"])).stdout, /^editable +node auto +branch main/m);
+  assert.match((await s.nexus(["projects"])).stdout, /^editable +auto +main/m);
   const cleared = await s.nexus(["project", "edit", "editable", "--clear-secrets", "--clear-git-identity", "--json"]);
   assert.equal(cleared.code, 0, cleared.stderr);
   assert.deepEqual(JSON.parse(cleared.stdout).secrets, []);
@@ -123,11 +123,11 @@ test("project edit replaces supplied grants and preserves omitted settings", asy
 test("project edit turns reviews of its own on and off, and projects shows who turned them on", async (t) => {
   const s = await setup(t);
   await s.nexus(["project", "add", "auto", "--scratch", "--node", node]);
-  assert.match((await s.nexus(["projects"])).stdout, new RegExp(`^auto +node ${node} +branch main +auto review off +pipeline off +scratch$`, "m"));
+  assert.match((await s.nexus(["projects"])).stdout, new RegExp(`^auto +${node} +main +auto review off +pipeline off +scratch$`, "m"));
   assert.equal((await s.nexus(["project", "edit", "auto", "--auto-review", "always"])).code, 64);
   const landing = await s.nexus(["project", "edit", "auto", "--auto-review", "land"]);
   assert.equal(landing.stdout, `Updated project auto, auto review and land, for ${laptop}, pipeline off. Existing threads keep their boot settings and grants; start a new thread to apply them.\n`);
-  assert.match((await s.nexus(["projects"])).stdout, new RegExp(`^auto +node ${node} +branch main +auto review and land, for ${laptop} +pipeline off +scratch$`, "m"));
+  assert.match((await s.nexus(["projects"])).stdout, new RegExp(`^auto +${node} +main +auto review and land, for ${laptop} +pipeline off +scratch$`, "m"));
   assert.deepEqual((await s.json(["project", "edit", "auto", "--auto-review", "review"])).autoReview, { mode: "review", enabledBy: laptop });
   const yolo = await s.nexus(["project", "edit", "auto", "--auto-review", "yolo"]);
   assert.equal(yolo.stdout, `Updated project auto, auto review and land, waiving holds, for ${laptop}, pipeline off. Existing threads keep their boot settings and grants; start a new thread to apply them.\n`);
@@ -269,7 +269,7 @@ test("item add lines up items behind each other, project edit --pipeline decides
   assert.equal((await s.nexus(["item", "add", "--project", "acme", "--title", "No brief"])).code, 64);
   assert.equal((await s.nexus(["project", "edit", "acme", "--pipeline", "sometimes"])).code, 64);
   assert.match((await s.nexus(["project", "edit", "acme", "--pipeline", "approve"])).stdout, /^Updated project acme, auto review off, pipeline waits for approval\./);
-  assert.match((await s.nexus(["projects"])).stdout, /^acme\s+node rj-firebat\s+branch main\s+auto review off\s+pipeline waits for approval\s/m);
+  assert.match((await s.nexus(["projects"])).stdout, /^acme\s+rj-firebat\s+main\s+auto review off\s+pipeline waits for approval\s/m);
 
   const added = await s.nexus(["item", "add", "--project", "acme", "--message", "Build A\nwith tests"]);
   assert.equal(added.code, 0, added.stderr);
@@ -289,7 +289,7 @@ test("item add lines up items behind each other, project edit --pipeline decides
   assert.equal((await s.nexus(["item", "cancel", a!.id])).code, 5, "an item that is a thread is cancelled by archiving its thread");
 
   const rows = (await s.nexus(["items"])).stdout;
-  assert.match(rows, new RegExp(`^${a!.id}\\s+(queued|building)\\s+.+\\s+${thread.id}\\s+acme\\s+\\S+ ago\\s+Build A$`, "m"));
+  assert.match(rows, new RegExp(`^${a!.id}\\s+(queued|building)\\s+.+\\s+${thread.id}\\s+acme\\s+\\S+ ago \\(.+\\)\\s+Build A$`, "m"));
   assert.doesNotMatch(rows, new RegExp(b.id), "a cancelled item is listed only with --all");
   assert.match((await s.nexus(["items", "--all"])).stdout, new RegExp(`^${b.id}\\s+cancelled\\s+cancelled by nLAPTOP\\s+no thread yet\\s`, "m"));
   assert.deepEqual((await s.json(["items", "--project", "other"])), []);
@@ -298,6 +298,6 @@ test("item add lines up items behind each other, project edit --pipeline decides
     `${b.id}  B`, "project: acme", "phase: cancelled, cancelled by nLAPTOP", "thread: none yet", "worker: Claude worker, model claude-sonnet-5-5", `after: ${a!.id}`, "brief: Build B",
     shown.split("\n")[7], "",
   ].join("\n"));
-  assert.match(shown.split("\n")[7]!, /^added by nLAPTOP \S+ ago$/);
+  assert.match(shown.split("\n")[7]!, /^added by nLAPTOP \S+ ago \(\d{4}-\d\d-\d\d \d\d:\d\d\)$/);
   assert.equal((await s.nexus(["item", "show", "it-000000000000"])).code, 4);
 });

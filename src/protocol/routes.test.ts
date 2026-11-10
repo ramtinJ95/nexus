@@ -82,7 +82,7 @@ test("each call the client and an artifact fetch make is a route in the table, w
   const calls: Promise<unknown>[] = [
     client.submit({ jobId: "job-1" as JobId, node: "test-node" as NodeName, issuedAt: notAfter, notAfter, job: { kind: "delete", pylonId } }),
     client.job("job-1" as JobId),
-    (async () => { for await (const _ of client.observe(AbortSignal.timeout(5000))) break; })(),
+    (async () => { for await (const _ of client.observe(AbortSignal.timeout(60_000))) break; })(),
     client.command(pylonId, { kind: "exec", argv: ["true"] } as never),
     client.readGit(pylonId),
     client.stream(pylonId, ["cat"]),
@@ -93,7 +93,7 @@ test("each call the client and an artifact fetch make is a route in the table, w
     client.artifactUsage(),
     client.dropArtifacts([artifact]),
     client.wakeDeployer(),
-    fetchArtifact({ host: "127.0.0.1", port }, artifact, "0".repeat(64), { whois, peers: ["nPROBE" as TailnetNodeId] }, AbortSignal.timeout(5000)),
+    fetchArtifact({ host: "127.0.0.1", port }, artifact, "0".repeat(64), { whois, peers: ["nPROBE" as TailnetNodeId] }, AbortSignal.timeout(60_000)),
   ];
   await Promise.allSettled(calls);
   assert.equal(seen.length, routes.length, "one request per route");

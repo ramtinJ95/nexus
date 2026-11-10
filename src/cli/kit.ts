@@ -22,7 +22,7 @@ export interface Result { json: unknown; text: string; exit?: ErrorKind }
 /** The process's streams and environment, or a test's, which runs the CLI in its own process. */
 export interface Io {
   readonly stdin: Readable & { readonly isTTY?: boolean };
-  readonly stdout: Writable;
+  readonly stdout: Writable & { readonly isTTY?: boolean };
   readonly stderr: Writable & { readonly isTTY?: boolean };
   readonly env: Readonly<Record<string, string | undefined>>;
 }
@@ -94,14 +94,36 @@ export function briefOf(v: Values, project: string, rules: Parameters<typeof bro
   return body;
 }
 
-export function ago(at: number, now = Date.now()): string {
-  const s = Math.max(0, Math.floor((now - at) / 1000));
-  return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`;
+const two = (n: number) => String(n).padStart(2, "0");
+/** The local date and clock time, such as `2026-11-07 09:12`. */
+export const localTime = (at: number) => {
+  const d = new Date(at);
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}`;
+};
+
+/** A time as how long ago, or how soon, then its local time: `3h ago (2026-11-10 14:05)`, `in 20m (2026-11-10 17:30)`. */
+export function when(at: number, now = Date.now()): string {
+  const s = Math.floor(Math.abs(now - at) / 1000);
+  const span = s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`;
+  return `${at > now && s > 0 ? `in ${span}` : `${span} ago`} (${localTime(at)})`;
 }
 
-export function table(rows: readonly (readonly string[])[]): string {
-  const widths = rows[0]!.map((_, i) => Math.max(...rows.map((r) => r[i]!.length)));
-  return rows.map((r) => r.map((cell, i) => i === r.length - 1 ? cell : cell.padEnd(widths[i]!)).join("  ")).join("\n");
+/** A row's colour, shown only on a terminal without NO_COLOR. */
+export type Tone = "failed" | "attention";
+const tones: Record<Tone, string> = { failed: "\x1b[31m", attention: "\x1b[33m" };
+
+/** Whether the text may be coloured: stdout is a terminal and NO_COLOR is unset or empty, as no-color.org says. */
+export const colourOf = (io: Io) => io.stdout.isTTY === true && (io.env.NO_COLOR ?? "") === "";
+
+/** Columns padded to their widest cell under a header. A row with a tone is coloured whole, after its padding. */
+export function table(head: readonly string[], rows: readonly (readonly string[])[], toneOf: (i: number) => Tone | null = () => null): string {
+  const all = [head, ...rows];
+  const widths = head.map((_, i) => Math.max(...all.map((r) => r[i]!.length)));
+  return all.map((r, n) => {
+    const line = r.map((cell, i) => i === r.length - 1 ? cell : cell.padEnd(widths[i]!)).join("  ");
+    const tone = n === 0 ? null : toneOf(n - 1);
+    return tone === null ? line : `${tones[tone]}${line}\x1b[0m`;
+  }).join("\n");
 }
 
 export const clip = (text: string, max: number) => text.length <= max ? text : `${text.slice(0, max)}...`;

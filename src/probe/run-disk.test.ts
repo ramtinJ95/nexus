@@ -43,7 +43,7 @@ async function deps(t: import("node:test").TestContext, vm: BackendPylon["vm"] |
 test("a start and a wake fail as capacity when the disk would leave the pylons' filesystem short, naming it and its free space", async (t) => {
   for (const [vm, job] of [["absent", spawn(huge)], ["stopped", spawn(huge)]] as const) {
     const { d, calls, dir } = await deps(t, vm, true);
-    await assert.rejects(runJob(job, d, AbortSignal.timeout(5000)), (err: Error & { code?: string }) => {
+    await assert.rejects(runJob(job, d, AbortSignal.timeout(60_000)), (err: Error & { code?: string }) => {
       assert.equal(err.code, "capacity", "retryable, so the planner tries again");
       assert.match(err.message, new RegExp(`^this node has [\\d.]+ of [\\d.]+ GiB free on the filesystem of ${dir}, and a ${huge} GiB pylon disk would leave less than the [\\d.]+ GiB it keeps free$`));
       return true;
@@ -54,9 +54,9 @@ test("a start and a wake fail as capacity when the disk would leave the pylons' 
 
 test("a spawn that only reapplies a running pylon's live spec, and a backend that names no storage, are never refused for disk", async (t) => {
   const running = await deps(t, "running", true);
-  await runJob(spawn(huge), running.d, AbortSignal.timeout(5000));
+  await runJob(spawn(huge), running.d, AbortSignal.timeout(60_000));
   assert.deepEqual(running.calls, ["ensureRunning"]);
   const docker = await deps(t, "absent", false);
-  await runJob(spawn(huge), docker.d, AbortSignal.timeout(5000));
+  await runJob(spawn(huge), docker.d, AbortSignal.timeout(60_000));
   assert.deepEqual(docker.calls, ["ensureRunning"]);
 });

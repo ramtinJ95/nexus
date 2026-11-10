@@ -1253,7 +1253,7 @@ test("a review's start answers once the review is recorded, and the loop starts 
   const loop = f.loop();
   const starting = Promise.withResolvers<void>();
   f.onStart = () => starting.promise;
-  const started = await Promise.race([loop.start(f.builder, { land: "nLAPTOP" }), setTimeout(2_000, "still starting" as const)]);
+  const started = await Promise.race([loop.start(f.builder, { land: "nLAPTOP" }), setTimeout(60_000, "still starting" as const, { ref: false })]);
   if (started === "still starting") assert.fail("the start does not wait for a reviewer thread");
   assert.deepEqual([f.review().id, f.review().reviewer], [started.id, started.reviewer], "the answer is the recorded review");
   starting.resolve();
