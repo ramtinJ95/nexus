@@ -25,6 +25,8 @@ export interface Command {
   /** Commands that share an entry share the array. */
   help: readonly string[];
   args: readonly [min: number, max: number];
+  /** Its first argument names a thread, which a prefix of the ID or `@last` may give. */
+  thread?: true;
   options?: ParseArgsOptionsConfig;
   /** Nothing when the command printed its own output, as watch does. */
   run(api: Api, args: readonly string[], values: Values, follow: Follow, local: Local): Promise<Result | void>;
@@ -58,14 +60,14 @@ const textFields = Object.keys(startFields.shape).filter((field) => !["resources
 export const briefOptions = { ...Object.fromEntries(textFields.map((field) => [field, { type: "string" }])), ...resourceOptions, after: { type: "string" } } as const satisfies ParseArgsOptionsConfig;
 const flagOf = (field: string) => `--${field === "planning" ? "plan" : field}`;
 
-export function briefOf(v: Values, verb: string, rules: Parameters<typeof brokenRule>[0]): z.input<typeof itemSchema> & { requestId?: string; planning?: true } {
-  if (v.project === undefined) throw new CliError("invalid", `${verb} needs --project`);
+/** `project` is --project, or what `projectOf` made of this checkout. */
+export function briefOf(v: Values, project: string, rules: Parameters<typeof brokenRule>[0]): z.input<typeof itemSchema> & { requestId?: string; planning?: true } {
   const after = str(v, "after")?.split(",").map((id) => id.trim()).filter((id) => id !== "");
   if (after?.length === 0) throw new CliError("invalid", "--after needs a thread");
   const resources = resourcesOf(v);
   const requestId = str(v, "request-id");
   const body = {
-    ...Object.fromEntries(textFields.flatMap((field) => v[field] === undefined ? [] : [[field, v[field]]])) as { project: string },
+    ...Object.fromEntries(textFields.flatMap((field) => v[field] === undefined ? [] : [[field, v[field]]])), project,
     ...resources === undefined ? {} : { resources }, ...after === undefined ? {} : { after },
     ...requestId === undefined ? {} : { requestId }, ...v.plan === true ? { planning: true as const } : {},
   };

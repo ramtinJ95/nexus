@@ -124,7 +124,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
       "    a reviewer on another model for the thread's open PR, round after round until it approves; --land merges and deploys under the merge policy",
       "  nexus review --cancel <thread>               end the thread's running review and archive its reviewer, unless it began merging or deploying",
     ],
-    args: [1, 1], options: { pr: { type: "string" }, rounds: { type: "string" }, land: { type: "boolean" }, cancel: { type: "boolean" } },
+    args: [1, 1], thread: true, options: { pr: { type: "string" }, rounds: { type: "string" }, land: { type: "boolean" }, cancel: { type: "boolean" } },
     async run(api, [id], v) {
       if (v.cancel === true) {
         if (v.pr !== undefined || v.rounds !== undefined || v.land !== undefined) throw new CliError("invalid", "--cancel takes no --pr, --rounds or --land");
@@ -143,7 +143,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
       "  nexus land <thread> [--waive]",
       "    land an approved review under the merge policy, or try a held landing again; --waive answers Land to the review's question about the holds reserved for you",
     ],
-    args: [1, 1], options: { waive: { type: "boolean" } },
+    args: [1, 1], thread: true, options: { waive: { type: "boolean" } },
     async run(api, [id], v) {
       const { question, running, ...press } = v.waive === true ? await pressOf(api, id!, { input: process.stdin, output: process.stderr }) : {};
       if (question !== undefined) {
