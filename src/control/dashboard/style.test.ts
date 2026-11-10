@@ -178,6 +178,64 @@ test("a dialog's number inputs look like its other fields and shrink to their co
   assert.match(rule.body, /min-width:\s*0;/);
 });
 
-test("the phone's layout rules switch at the width the client lays out a phone's", () => {
-  assert.deepEqual([...css.matchAll(/@media (\([^)]*width[^)]*\))/g)].map((m) => m[1]), [narrow]);
+/** A rule's declarations, by property, at the top level or inside the at-rules `at` names. */
+function rule(selector: string, at = ""): Map<string, string> {
+  const body = styleRules().filter((r) => r.at === at && r.selector.split(", ").includes(selector)).map((r) => r.body).join(";");
+  return new Map([...body.matchAll(/([\w-]+)\s*:\s*([^;]+);/g)].map(([, name, value]) => [name!, value!.trim()]));
+}
+const halfScreen = "@media (max-width: 1100px)";
+const phone = `@media ${narrow}`;
+
+test("the layout switches at the width the client lays out a phone's, above it, and at half a screen", () => {
+  assert.deepEqual([...css.matchAll(/@media (\([^)]*width[^)]*\))/g)].map((m) => m[1]), [narrow.replace("max-width: ", "width > "), "(max-width: 1100px)", narrow]);
+});
+
+test("the panes sit in a row, so a hidden, folded or drawn-out pane leaves its width to the conversation", () => {
+  assert.equal(rule(".app").get("display"), "flex");
+  assert.deepEqual([rule(".side").get("flex"), rule(".side").get("width")], ["none", "260px"]);
+  assert.deepEqual([rule(".inspect").get("flex"), rule(".inspect").get("width")], ["none", "320px"]);
+  assert.deepEqual([rule(".main").get("flex"), rule(".main").get("min-width")], ["1", "0"], "the conversation takes every width the panes leave");
+  assert.deepEqual(styleRules().filter((r) => r.selector.includes(".app") && /grid-template/.test(r.body)), [], "no width keeps a track for a pane");
+});
+
+test("a window 1100px wide or less shows the inspector as the drawer the strip opens, over a scrim that closes it", () => {
+  const drawer = rule(".inspect", halfScreen);
+  assert.deepEqual([drawer.get("display"), drawer.get("position"), drawer.get("right")], ["none", "fixed", "0"]);
+  assert.equal(rule('body[data-open="inspect"] .inspect', halfScreen).get("display"), "flex");
+  assert.equal(rule('body[data-open="inspect"] .scrim', halfScreen).get("display"), "block");
+  assert.equal(rule(".inspect-close", halfScreen).get("display"), "inline-flex");
+  assert.equal(rule(".strip", halfScreen).get("display"), "flex");
+  assert.equal(rule(".strip").get("display"), "none", "a wider window shows the inspector itself");
+  assert.equal(rule(".side", halfScreen).size, 0, "the sidebar stays a column until a phone's width");
+});
+
+test("the menu button shows on every bar, and above a phone's width folds the sidebar, which a phone's drawer ignores", () => {
+  assert.equal(styleRules().some((r) => r.selector.split(", ").includes(".bar .menu") && /display:\s*none/.test(r.body)), false);
+  assert.equal(rule(':root[data-side="folded"] .side', `@media ${narrow.replace("max-width: ", "width > ")}`).get("display"), "none");
+  assert.equal(styleRules().filter((r) => r.selector.includes("data-side")).length, 1);
+});
+
+test("the dock holds at most 55% of the window and scrolls past it, so the conversation keeps the rest however much waits", () => {
+  const dock = rule(".dock");
+  assert.equal(dock.get("max-height"), "55dvh");
+  assert.equal(dock.get("overflow-y"), "auto");
+  assert.match(css, /\.dock \{[^}]*max-height: 55vh; max-height: 55dvh;/, "with a vh fallback before it");
+});
+
+test("on a phone every field set under 16px is 16px, so iOS does not zoom the page when one takes focus", () => {
+  const size = (body: string) => /(?:font-size:\s*|font:\s*(?:\d+\s+)?)([\d.]+)px/.exec(body)?.[1];
+  const small = styleRules().filter((r) => r.at === "" && Number(size(r.body) ?? 16) < 16)
+    .flatMap((r) => r.selector.split(", ")).filter((s) => /\b(input|select|textarea)\b|\.note-text|#start-title/.test(s));
+  assert.ok(small.length >= 10, small.join(", "));
+  for (const field of small) assert.equal(rule(field, phone).get("font-size"), "16px", field);
+});
+
+test("a toast stays clear of the safe-area insets and takes its colours from the theme", () => {
+  const stack = rule(".toast-stack");
+  assert.match(stack.get("bottom")!, /env\(safe-area-inset-bottom\)/);
+  assert.match(stack.get("right")!, /env\(safe-area-inset-right\)/);
+  for (const selector of [".attention-toast", ".attention-toast a"]) {
+    const colours = [...rule(selector)].filter(([name]) => /color|background|border/.test(name)).map(([, value]) => value);
+    assert.ok(colours.length > 0 && colours.every((v) => !/#[0-9a-f]{3,8}\b|\bwhite\b|rgb/i.test(v)), `${selector}: ${colours.join(", ")}`);
+  }
 });

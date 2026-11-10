@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { narrow } from "./contract.ts";
 
 /** An element as page.js, actions.js and keys.js read one, whose innerHTML parses and serializes the markup these tests write. */
 class Element {
@@ -17,7 +18,11 @@ class Element {
   }
   get dataset() {
     const camel = (name) => name.slice(5).replace(/-(\w)/g, (_, c) => c.toUpperCase());
-    return Object.fromEntries(this.attributes.filter((a) => a.name.startsWith("data-")).map((a) => [camel(a.name), a.value]));
+    const attribute = (key) => `data-${key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`;
+    return new Proxy(Object.fromEntries(this.attributes.filter((a) => a.name.startsWith("data-")).map((a) => [camel(a.name), a.value])), {
+      set: (_, key, value) => { this.setAttribute(attribute(key), value); return true; },
+      deleteProperty: (_, key) => { this.removeAttribute(attribute(key)); return true; },
+    });
   }
   get isConnected() { let el = this; while (el.parentElement !== null) el = el.parentElement; return el === root; }
   getAttribute(name) { return this.attributes.find((a) => a.name === name)?.value ?? null; }
@@ -46,7 +51,7 @@ class Element {
 class HTMLElement extends Element {}
 class HTMLButtonElement extends HTMLElement {}
 class HTMLAnchorElement extends HTMLElement {}
-class HTMLInputElement extends HTMLElement {}
+class HTMLInputElement extends HTMLElement { select() {} }
 class HTMLTextAreaElement extends HTMLElement {}
 class HTMLDetailsElement extends HTMLElement {}
 class HTMLDialogElement extends HTMLElement {
@@ -92,7 +97,7 @@ function compound(el, selector) {
 }
 
 /** The regions of a page that swap, with what the server renders in each. */
-const page = (regions) => `<html><body><div id="needs-you" data-live>${regions.needs}</div><div id="sessions" data-live>${regions.sessions}</div><div id="projects" data-live>${regions.projects}</div><div id="strip" data-live>${regions.strip}</div><div id="tabs" role="tablist" aria-label="Open views">${regions.tabs ?? ""}</div><main data-poll-ms="60000"><input id="filter"></main><dialog id="keys"><dl id="keys-list"></dl></dialog><dialog id="switcher"></dialog></body></html>`;
+const page = (regions) => `<html><body><header class="bar" id="bar" data-live><button type="button" class="icon-btn menu" data-open="side" aria-label="Threads">☰</button>${regions.bar ?? ""}</header><div id="needs-you" data-live>${regions.needs}</div><div id="sessions" data-live>${regions.sessions}</div><div id="projects" data-live>${regions.projects}</div><div id="strip" data-live>${regions.strip}</div><div id="tabs" role="tablist" aria-label="Open views">${regions.tabs ?? ""}</div><main data-poll-ms="60000"><input id="filter"></main><dialog id="keys"><dl id="keys-list"></dl></dialog><dialog id="switcher"></dialog></body></html>`;
 const question = (asked) => `<section data-question="q-1"><p>Asked ${asked}</p><button type="button" class="btn" data-action="answer" data-thread="th-1" data-question="q-1" data-option="Rebuild">Rebuild</button><button type="button" class="btn" data-action="answer" data-thread="th-1" data-question="q-1" data-option="Not now">Not now</button></section>`;
 const sessions = (pane) => `<ul><li>${pane}<button type="button" class="btn btn-xs" data-action="show-session" data-thread="th-1" data-pane="w-1:p-1">Show in terminal</button><button type="button" class="btn btn-xs" data-action="close-session" data-thread="th-1" data-session="s-2">Close</button></li></ul><div class="s-new"><button type="button" class="btn btn-xs" data-action="open-session" data-thread="th-1" data-harness="shell">New shell</button></div>`;
 const autoReview = (current) => `<span class="auto-review" role="group">${["off", "review", "land"].map((mode) => `<button type="button" class="btn btn-xs" data-action="auto-review" data-project="acme" data-mode="${mode}" aria-pressed="${mode === current}"${mode === current ? " disabled" : ""}>${mode}</button>`).join("")}</span>`;
@@ -107,6 +112,8 @@ const body = root.querySelector("body");
 const keydowns = [];
 const clicks = [];
 const posts = [];
+const device = new Map();
+let phone = false;
 // Node has a navigator of its own, which says Mac on a Mac.
 Object.defineProperty(globalThis, "navigator", { value: { platform: "Linux x86_64" }, configurable: true });
 Object.assign(globalThis, {
@@ -114,10 +121,10 @@ Object.assign(globalThis, {
   CSS: { escape: (value) => value.replace(/["\\]/g, "\\$&") },
   EventSource: { OPEN: 1, CLOSED: 2 },
   location: { href: "http://nexus.test/", pathname: "/", search: "", hash: "" },
-  localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+  localStorage: { getItem: (k) => device.get(k) ?? null, setItem: (k, v) => void device.set(k, String(v)), removeItem: (k) => void device.delete(k) },
   sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
   addEventListener() {},
-  matchMedia: () => ({ matches: false, addEventListener() {} }),
+  matchMedia: (query) => ({ get matches() { return query === narrow && phone; }, addEventListener() {} }),
   MutationObserver: class { observe() {} },
   DOMParser: class { parseFromString(markup) { const doc = new Element("#document"); doc.innerHTML = markup; return Object.assign(doc, { getElementById: (id) => doc.querySelector(`#${id}`) }); } },
   fetch: async (url, init = {}) => {
@@ -126,6 +133,7 @@ Object.assign(globalThis, {
     return new Promise((resolve) => posts.push({ path: pathname, resolve }));
   },
   document: {
+    documentElement: root.querySelector("html"),
     body,
     activeElement: body,
     visibilityState: "visible",
@@ -139,6 +147,7 @@ Object.assign(globalThis, {
 const { refreshNow } = await import("./page.js");
 await import("./actions.js");
 await import("./keys.js");
+await import("./nav.js");
 // The first ? loads the overlay. Loading it here first lets a press show it within a turn of the event loop.
 await import("./shortcuts.js");
 
@@ -279,4 +288,43 @@ test("? lists the shortcuts the page has, and not while the person types or a di
   ], "a thread page, which has a diff view, lists the diff's keys");
   overlay.close();
   document.body.replaceChildren(...document.body.children.filter((el) => el !== fileView));
+});
+
+test("above a phone's width the menu button folds the sidebar away, the device keeps the fold, and / unfolds it for the filter", async () => {
+  const html = document.documentElement;
+  const click = (target) => { for (const listener of clicks) listener({ target }); };
+  const expanded = () => button(".bar .menu").getAttribute("aria-expanded");
+  assert.equal(expanded(), "true", "the threads show on a page loaded without a fold");
+
+  click(button(".bar .menu"));
+  assert.equal(html.dataset.side, "folded");
+  assert.equal(device.get("nexus.side"), "folded", "the device keeps the fold for the next page's head script");
+  assert.equal(document.body.dataset.open, undefined, "a wide window opens no drawer");
+  assert.equal(expanded(), "false");
+
+  const before = button(".bar .menu");
+  await poll({ bar: "<h1>Renamed</h1>" });
+  assert.notEqual(button(".bar .menu"), before, "the poll swapped the bar in");
+  assert.equal(expanded(), "false", "and the bar it swapped in says the threads are folded too");
+
+  document.activeElement = document.body;
+  assert.equal(press("/").defaultPrevented, true);
+  assert.equal(html.dataset.side, undefined, "/ unfolds the sidebar, whose filter it focuses");
+  assert.equal(device.has("nexus.side"), false);
+  assert.equal(document.activeElement, button("#filter"));
+  assert.equal(expanded(), "true");
+
+  phone = true;
+  click(button(".bar .menu"));
+  assert.equal(document.body.dataset.open, "side", "a phone's menu button opens the drawer");
+  assert.equal(html.dataset.side, undefined, "and folds nothing");
+  assert.equal(expanded(), "true");
+  phone = false;
+  click(button("#filter"));
+  assert.equal(html.dataset.side, undefined, "a click in a window widened past a phone's, with its drawer still named open, folds nothing");
+  phone = true;
+  click(button(".bar .menu"));
+  assert.equal(document.body.dataset.open, undefined);
+  assert.equal(expanded(), "false");
+  phone = false;
 });

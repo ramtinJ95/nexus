@@ -72,6 +72,7 @@ Object.assign(globalThis, {
     return fetchImpl(String(url), init);
   },
   document: {
+    documentElement: { dataset: {} },
     body: { dataset: {} },
     visibilityState: "visible",
     querySelector: (selector) => selector === "main" ? { dataset: { pollMs: "5000" } } : null,

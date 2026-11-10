@@ -11,7 +11,7 @@ Object.assign(globalThis, {
   addEventListener() {},
   matchMedia: () => ({ matches: false, addEventListener() {} }),
   MutationObserver: class { observe() {} },
-  document: { querySelector: none, getElementById: none, querySelectorAll: () => [], addEventListener() {}, createElement: node },
+  document: { documentElement: { dataset: {} }, querySelector: none, getElementById: none, querySelectorAll: () => [], addEventListener() {}, createElement: node },
 });
 const { handlers, publishOpening } = await import("./actions.js");
 const { pylonRoutes } = await import("../../contract/pylon.ts");
