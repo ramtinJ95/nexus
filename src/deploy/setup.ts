@@ -24,6 +24,7 @@ import { digestPattern, tokenDigest, tsNet } from "../protocol/deploy.ts";
 import { readJson, saveJson } from "../node-base/json-file.ts";
 import { controlFields } from "../node-base/node-config.ts";
 import { isImageId } from "../ids.ts";
+import { shellQuote } from "../shell.ts";
 import { parseTailscaleStatus, tailscaleCli, tailscaleStatus, type TailnetDevice, type TailscaleStatus } from "../tailscale.ts";
 import { localApiWhois } from "../node-base/tailscaled.ts";
 import { backupStatusFile, configFiles, deployerFiles, ports, prefix, rootPath, servicePath, stateDirs, unitNames, users } from "../node-base/node-layout.ts";
@@ -198,6 +199,42 @@ function file(path: string, mode: number, existing: Json | undefined, generated:
   return { path, mode, value, state: changes.some((c) => c.kind !== "kept") ? "updated" : "unchanged", changes, secrets };
 }
 
+/** The branch of --dotfiles that pylons pull. */
+const dotfilesRef = "main";
+
+/** What `git ls-remote` on this machine says of a dotfiles repository, before the installer names it in control.json. */
+export type DotfilesCheck =
+  | { kind: "reachable" }
+  | { kind: "refused" | "unchecked"; reason: string };
+
+/**
+ * Whether git here reaches `ref` of `url` as a pylon would: an HTTPS URL without credentials, and any other with the
+ * node's git SSH key and known hosts. The credentials step makes that key after the configs are written, so a first
+ * install cannot check an SSH URL yet. No git config of this machine applies, neither root's nor that of a
+ * repository around the installer's working directory, so no credential helper or URL rewrite passes a repository
+ * that pylons cannot fetch.
+ */
+export async function checkDotfiles(url: string, ref: string, ssh: { key: string; knownHosts: string } | null): Promise<DotfilesCheck> {
+  const https = url.startsWith("https://");
+  if (!https && ssh === null) return { kind: "unchecked", reason: "pylons reach an SSH URL with this machine's git SSH key, which the credentials step makes. Once its public key is on GitHub, rerun the installer with the same --dotfiles to check the URL" };
+  const inherited = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_") && name !== "SSH_ASKPASS"));
+  const env = {
+    ...inherited, GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CEILING_DIRECTORIES: "/",
+    ...https || ssh === null ? {} : { GIT_SSH_COMMAND: `ssh -i ${shellQuote(ssh.key)} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${shellQuote(ssh.knownHosts)}` },
+  };
+  try {
+    await exec("git", ["-c", "credential.helper=", "ls-remote", "--exit-code", "--", url, `refs/heads/${ref}`], { cwd: "/", env, timeout: 60_000 });
+    return { kind: "reachable" };
+  } catch (err) {
+    const failed = err as { code?: unknown; killed?: boolean; stderr?: string };
+    if (failed.code === 2) return { kind: "refused", reason: `the repository has no branch ${ref}, which pylons pull` };
+    if (failed.killed === true) return { kind: "refused", reason: "git ls-remote did not answer within 60 s" };
+    const said = (failed.stderr ?? "").trim().split("\n").filter((line) => line !== "").join(" ");
+    const hint = https ? ". When the repository is private, give its SSH URL, which pylons reach with the node's git SSH key" : "";
+    return { kind: "refused", reason: `git ls-remote failed${said === "" ? "" : `: ${said}`}${hint}` };
+  }
+}
+
 /** Every config this machine needs, merged over what is on disk. `newToken` is used only when deployer.json has none. */
 export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newToken: string): Setup {
   const errors: string[] = [];
@@ -238,7 +275,6 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
   }
 
   if (flags.node === undefined) {
-    if (existing.control === undefined && flags.dotfiles === undefined) errors.push("--dotfiles <git url> is needed on the first control install: the dotfiles repository every new pylon pulls on boot");
     const servedControl = isObject(existing.controlPlane) ? existing.controlPlane.tailnetNodeId : undefined;
     if (existing.control === undefined && typeof servedControl === "string" && servedControl !== self.id) {
       const known = tailnet.peers.find((p) => p.id === servedControl);
@@ -267,7 +303,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
       callers: admitted.map((d) => d.id),
       deployers: admitted.map((d) => d.id),
       deployKeys: Object.fromEntries([[self.id, tokenDigest(token)], ...addNodes.map((a) => [a.node.id, a.digest])]),
-      ...flags.dotfiles === undefined ? {} : { dotfiles: { repo: flags.dotfiles, ref: "main" } },
+      ...flags.dotfiles === undefined ? {} : { dotfiles: { repo: flags.dotfiles, ref: dotfilesRef } },
       ...flags.githubWatch ? { github: { tokenFile: stores.githubWatch.file } } : {},
       harness: {
         storage: `${stateDirs.control}/harness.sqlite`,
@@ -446,9 +482,45 @@ async function write(flags: Flags): Promise<number> {
     for (const error of result.errors) console.error(`install: ${error}`);
     return 1;
   }
+  const step = dotfilesStep(flags.dotfiles, result.files);
+  if (step.kind === "kept") console.log(`--dotfiles ${flags.dotfiles}: control.json keeps ${step.held}, so the URL is not checked. Edit the file to change it`);
+  if (step.kind === "check") {
+    const check = await checkDotfiles(step.url, step.ref, step.ssh);
+    if (check.kind === "refused") {
+      console.error(`install: --dotfiles ${step.url}: ${check.reason}`);
+      return 1;
+    }
+    if (check.kind === "unchecked") console.log(`--dotfiles ${step.url} is not checked yet: ${check.reason}`);
+  }
   for (const f of result.files) if (f.state !== "unchanged") await saveJson(f.path, f.value, { mode: f.mode, mkdir: true });
   console.log(report(result.files));
   return 0;
+}
+
+/**
+ * What a write does about --dotfiles: check the URL and branch control.json holds, which a rerun keeps as they are,
+ * with the probe's git SSH key, or say control.json keeps another URL.
+ */
+export type DotfilesStep =
+  | { kind: "none" }
+  | { kind: "check"; url: string; ref: string; ssh: { key: string; knownHosts: string } | null }
+  | { kind: "kept"; held: string };
+
+export function dotfilesStep(flag: string | undefined, files: readonly FileWrite[]): DotfilesStep {
+  if (flag === undefined) return { kind: "none" };
+  const control = files.find((f) => f.path === paths.control)?.value;
+  const dotfiles = isObject(control) ? control.dotfiles : undefined;
+  if (!isObject(dotfiles) || typeof dotfiles.repo !== "string" || typeof dotfiles.ref !== "string") return { kind: "none" };
+  return dotfiles.repo === flag ? { kind: "check", url: flag, ref: dotfiles.ref, ssh: probeGitSsh(files) } : { kind: "kept", held: dotfiles.repo };
+}
+
+/** The git SSH key and known hosts the probe.json being written names, which the probe hands its pylons. */
+function probeGitSsh(files: readonly FileWrite[]): { key: string; knownHosts: string } | null {
+  const probe = files.find((f) => f.path === paths.probe)?.value;
+  const backend = isObject(probe) ? probe.backend : undefined;
+  const gitSsh = isObject(backend) ? backend.gitSsh : undefined;
+  if (!isObject(gitSsh) || typeof gitSsh.privateKeyFile !== "string" || typeof gitSsh.knownHostsFile !== "string") return null;
+  return { key: gitSsh.privateKeyFile, knownHosts: gitSsh.knownHostsFile };
 }
 
 /** Whether Docker's own docker-ce-cli package is installed or the distribution's Docker is. */
@@ -550,7 +622,18 @@ class Exit extends Error {
 
 const repo = resolvePath(import.meta.dirname, "../..");
 
-/** `args` are install's own, which each config write gets again. */
+/**
+ * `args` without --dotfiles, for the config write after the credentials step. That write would check an SSH URL with the
+ * key the step just made, before the person has added it to GitHub, and control.json keeps the URL without the flag.
+ */
+export function withoutDotfiles(args: readonly string[]): string[] {
+  const end = args.indexOf("--");
+  const flags = end === -1 ? args : args.slice(0, end);
+  const kept = flags.filter((arg, i) => arg !== "--dotfiles" && flags[i - 1] !== "--dotfiles" && !arg.startsWith("--dotfiles="));
+  return end === -1 ? kept : [...kept, ...args.slice(end)];
+}
+
+/** `args` are install's own, which each config write gets again, less --dotfiles after the first. */
 export async function install(flags: Flags, args: readonly string[], steps: InstallSteps): Promise<number> {
   const run = async (program: string, ...rest: string[]) => {
     const code = await steps.run(program, rest);
@@ -560,10 +643,10 @@ export async function install(flags: Flags, args: readonly string[], steps: Inst
   // The deployer's lock, which every installer and the deployer's worker take, keeps two runs from merging at once.
   // A write holds it alone, because each installer takes it itself.
   const lock = join(prefix, deployerFiles.lock);
-  const write = async (more: readonly string[]) => {
+  const write = async (more: readonly string[], person: readonly string[] = args) => {
     await run("install", "-d", "-o", "root", "-g", "root", "-m", "0700", dirname(lock));
     // Before the person's arguments, which may end with `--`.
-    await run("flock", "-x", lock, process.execPath, join(repo, "src/deploy/setup.ts"), "write", ...more, ...args);
+    await run("flock", "-x", lock, process.execPath, join(repo, "src/deploy/setup.ts"), "write", ...more, ...person);
   };
   if (flags.githubWatch) throw new Error("--github-watch is for setup.ts write. install names the GitHub token file once the credentials step has written it");
   if (args.filter((arg) => arg.startsWith("--package-manager")).length > 1) throw new Error("--package-manager is install.sh's, which names the one it found");
@@ -585,7 +668,7 @@ export async function install(flags: Flags, args: readonly string[], steps: Inst
       console.error(`install: ${(err as Error).message}`);
       return true;
     });
-    if (next.has("watch") || next.has("config")) await write(next.has("watch") ? ["--github-watch"] : []);
+    if (next.has("watch") || next.has("config")) await write(next.has("watch") ? ["--github-watch"] : [], withoutDotfiles(args));
     if (next.has("config")) await installer("probe");
     else if (next.has("probe")) await run("systemctl", "try-restart", unitNames.probe);
     if (next.has("control")) await installer("control");

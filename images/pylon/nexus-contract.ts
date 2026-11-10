@@ -62,7 +62,7 @@ export interface PylonInfo {
   allowedHosts: readonly string[];
   previews: readonly { service: string; url: string }[];
   logins: readonly ("claude" | "chatgpt")[];
-  dotfiles: { repo: string; ref: string };
+  dotfiles?: { repo: string; ref: string };
 }
 
 /**

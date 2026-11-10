@@ -14,6 +14,7 @@ import { processStream } from "../process-stream.ts";
 import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../test-support/kit.ts";
 import { addThread, observeNode, seedRegistry } from "../test-support/registry-kit.ts";
 import type { JobId, NodeName, TailnetNodeId } from "../ids.ts";
+import { bootHooks } from "../backends/pylon-boot.ts";
 import { node, laptop, project, image, dotfiles, withThread, withImage, withQueue, localCheckout } from "../test-support/api-kit.ts";
 
 test("starting a thread creates its pylon, boots fresh from the current image, and wakes its node", async (t) => {
@@ -48,6 +49,14 @@ test("starting a thread creates its pylon, boots fresh from the current image, a
   });
   assert.equal(pylon.liveHash, liveHashOf(pylon.live));
   assert.equal(pylon.submitted, null);
+});
+
+test("a control plane without a dotfiles repository boots pylons that keep the image's baked layer", async (t) => {
+  const s = await withThread(t, { dotfiles: null });
+  const pylon = s.registry.threads.pylon(s.thread.pylonId)!;
+  assert.equal(pylon.boot.dotfiles, undefined);
+  assert.equal(JSON.parse(pylon.live.overlay[1]!.content).dotfiles, undefined, "nexus info names no dotfiles repository");
+  assert.match(bootHooks(pylon.boot)[0]!, /dotfiles: no repository is set, keeping/);
 });
 
 test("thread detail derives the actual state from the node's last observation", async (t) => {
