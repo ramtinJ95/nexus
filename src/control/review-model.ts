@@ -84,8 +84,16 @@ type LiveCheck = { kind: "absent" } | { kind: "ran"; thread: ThreadId; passed: b
  */
 export interface ModelFailure { count: number; last: string; retryAt: number }
 
-/** A run of a gate at a round's head, in `thread` once it started, the check thread or verify pylon. */
-export interface GateRun { startedAt: number; thread: ThreadId | null }
+/**
+ * A run of a gate at a round's head, in `thread` once it started, the check thread or verify pylon. `behind` while
+ * another review's gate pylon that waits for room holds its start (`gateAhead`).
+ */
+export interface GateRun { startedAt: number; thread: ThreadId | null; behind?: Behind }
+/**
+ * The review whose gate pylon waits for room ahead of a held start: its builder, its PR, and the pylon it waits to
+ * start, which the person reads as what the start waits for.
+ */
+export interface Behind { builder: ThreadId; pr: number; pylon: "check thread" | "verify pylon" }
 /**
  * Why no node took the run's pylon at its last start, with `room` when a node refused it for room alone. Such a run
  * waits for room with no deadline, and its deadline counts from the start that room let through.
@@ -202,12 +210,13 @@ export interface Talk<O extends Outbox = Outbox> { expect: string; asked: string
 /**
  * The second reviewer the project's rule gave a review for `rule`'s reason: a Claude worker on Claude Opus 5.5, even when the
  * builder or the first reviewer also runs it, in `thread`, with its own conversation. `starting` until its thread starts,
- * tried since `since` and last at `tried`, which failed for `why`. `none` when no such model could run or its thread
+ * tried since `since` and last at `tried`, which failed for `why`, and `behind` while another review's gate pylon
+ * that waits for room holds its start. `none` when no such model could run or its thread
  * did not start in time, for `why`, which holds the landing for the person.
  */
 export type SecondReviewer =
   | ({ kind: "claude"; rule: string; thread: ThreadId; model: string; failing?: ModelFailure } & Talk)
-  | { kind: "starting"; rule: string; model: string; since: number; tried: number | null; why: string | null }
+  | { kind: "starting"; rule: string; model: string; since: number; tried: number | null; why: string | null; behind?: Behind }
   | { kind: "none"; rule: string; why: string };
 /** Whether the review has a second reviewer whose verdict each round it reviews needs. */
 export const secondReads = (r: Pick<Review, "second">) => r.second !== undefined && r.second.kind !== "none";
@@ -247,6 +256,8 @@ export interface Review extends Talk<Outbox & { to: "builder" | "reviewer" }> {
   reviewer: ThreadId;
   /** False until the loop starts the reviewer's thread, under the ID the review was recorded with. */
   reviewerStarted: boolean;
+  /** While the reviewer has not started, the review whose gate pylon that waits for room holds its start. */
+  behind?: Behind;
   pr: { repo: string; number: number; url: string; title: string; branch: string };
   models: { builder: string; reviewer: string };
   /**
@@ -459,6 +470,18 @@ export function waitsForRoom(phase: Phase): boolean {
 }
 /** The gate run `phase` steps: a reviewing round's check beside the reviewer, the check, or the live check. */
 export const gateRun = (phase: Phase): GateRun | null => phase.kind === "checking" || phase.kind === "verifying" ? phase : phase.kind === "reviewing" ? phase.check ?? null : null;
+/**
+ * The review whose gate pylon gets the room that frees before a start of `r`'s, or null when none does: of the gates
+ * that wait for room, the one whose run began first, unless that is `r`'s own. So waiting gates start oldest first, and
+ * a review's own wait never holds its own steps. With no `r`, the oldest wait, which every queued builder waits behind.
+ */
+export function gateAhead(reviews: readonly Review[], r?: Pick<Review, "builder">): Review | null {
+  const since = (w: Review) => gateRun(w.phase)!.startedAt;
+  const oldest = reviews.filter((w) => waitsForRoom(w.phase)).sort((a, b) => since(a) - since(b) || (a.builder < b.builder ? -1 : 1))[0];
+  return oldest === undefined || oldest.builder === r?.builder ? null : oldest;
+}
+export const behindOf = (ahead: Review): Behind => ({ builder: ahead.builder, pr: ahead.pr.number, pylon: ahead.phase.kind === "verifying" ? "verify pylon" : "check thread" });
+export const sameBehind = (a: Behind | undefined, b: Behind) => a?.builder === b.builder && a.pr === b.pr && a.pylon === b.pylon;
 /**
  * Every thread the review names, with its part in it: its builder, its reviewers, the gate thread its phase runs, and
  * the verify pylon of each live check a round ran. One review may name a thread twice.

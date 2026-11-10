@@ -666,7 +666,7 @@ Since 0.45.0 `review --cancel` ends the thread's running review, and prints it. 
 
 `Review` is a builder's latest review as the control plane stores it, and as the review routes answer it. `GET /v1/threads/<thread>` sends none of it, and serves its public facts as `ThreadDetail.reviewView`, described below:
 
-<!-- types: src/control/review-model.ts Review Talk Outbox SecondReviewer LandRequest Round LiveCheck HeldAt Waiver Phase GateRun Refused HoldCause ModelFailure -->
+<!-- types: src/control/review-model.ts Review Talk Outbox SecondReviewer LandRequest Round LiveCheck HeldAt Waiver Phase GateRun Behind Refused HoldCause ModelFailure -->
 ```ts
 // src/control/review-model.ts
 /**
@@ -682,6 +682,8 @@ interface Review extends Talk<Outbox & { to: "builder" | "reviewer" }> {
   reviewer: ThreadId;
   /** False until the loop starts the reviewer's thread, under the ID the review was recorded with. */
   reviewerStarted: boolean;
+  /** While the reviewer has not started, the review whose gate pylon that waits for room holds its start. */
+  behind?: Behind;
   pr: { repo: string; number: number; url: string; title: string; branch: string };
   models: { builder: string; reviewer: string };
   /**
@@ -724,12 +726,13 @@ interface Outbox { id: string; text: string; attempted: number | null }
 /**
  * The second reviewer the project's rule gave a review for `rule`'s reason: a Claude worker on Claude Opus 5.5, even when the
  * builder or the first reviewer also runs it, in `thread`, with its own conversation. `starting` until its thread starts,
- * tried since `since` and last at `tried`, which failed for `why`. `none` when no such model could run or its thread
+ * tried since `since` and last at `tried`, which failed for `why`, and `behind` while another review's gate pylon
+ * that waits for room holds its start. `none` when no such model could run or its thread
  * did not start in time, for `why`, which holds the landing for the person.
  */
 type SecondReviewer =
   | ({ kind: "claude"; rule: string; thread: ThreadId; model: string; failing?: ModelFailure } & Talk)
-  | { kind: "starting"; rule: string; model: string; since: number; tried: number | null; why: string | null }
+  | { kind: "starting"; rule: string; model: string; since: number; tried: number | null; why: string | null; behind?: Behind }
   | { kind: "none"; rule: string; why: string };
 /**
  * A request to land a review's PR once approved: the person's; the project's setting's, which each landing reads again
@@ -828,8 +831,16 @@ type Phase =
   /** The person archived or deleted one of the review's threads, or, as `by`, cancelled the review itself. */
   | { kind: "cancelled"; who: "builder" | "reviewer"; status: "archived" | "deleted" }
   | { kind: "cancelled"; who: "person"; by: string };
-/** A run of a gate at a round's head, in `thread` once it started, the check thread or verify pylon. */
-interface GateRun { startedAt: number; thread: ThreadId | null }
+/**
+ * A run of a gate at a round's head, in `thread` once it started, the check thread or verify pylon. `behind` while
+ * another review's gate pylon that waits for room holds its start (`gateAhead`).
+ */
+interface GateRun { startedAt: number; thread: ThreadId | null; behind?: Behind }
+/**
+ * The review whose gate pylon waits for room ahead of a held start: its builder, its PR, and the pylon it waits to
+ * start, which the person reads as what the start waits for.
+ */
+interface Behind { builder: ThreadId; pr: number; pylon: "check thread" | "verify pylon" }
 /**
  * Why no node took the run's pylon at its last start, with `room` when a node refused it for room alone. Such a run
  * waits for room with no deadline, and its deadline counts from the start that room let through.
@@ -958,7 +969,7 @@ Once `.nexus/check` passes at the approved head, a head with an executable `.nex
 
 `Round.live` is the result once the checks passed: `ran`, with the verify pylon's `thread`, `passed` for exit status 0, and the output's tail, or `absent` for a head with no `.nexus/verify`. A live check that passed stands in for the pull request's statement of what it could not check live. One that failed goes back to the builder as a `LIVE` finding (P0), as a failed check does, and holds the landing. A head with no `.nexus/verify` goes from `checking` to `approved` or `merging` as before, and lands on the statement. A round with no `live`, such as one a control plane older than 0.37.0 approved, holds the landing until a landing runs its live check, so a landing in flight across the upgrade cannot skip it. A change to `.nexus/verify` holds the landing for the person, who may waive it on the dashboard.
 
-`show` prints one line under the `review` line for the latest round once its check passed: `live check running .nexus/verify at <commit> in verify pylon <thread>`, `live check waiting for a node to take its verify pylon: <why>`, `live check passed at <commit>`, `live check failed at <commit>` with the last 20 lines of its output indented under it, `no live check: <commit> has no .nexus/verify, ...`, or `no live check ran at <commit>` for a live check that gave no verdict, such as one that could not run. While the reviewer reads, or the builder answers changes it asked for, a check that passed beside it gives `no live check yet: it runs at <commit> once the reviewer approves it`. The dashboard's landing card has a Live check step between Check and Merge, skipped for a head with no `.nexus/verify`, and shows the script's output. A verify pylon the person unarchives stays open.
+`show` prints one line under the `review` line for the latest round once its check passed: `live check running .nexus/verify at <commit> in verify pylon <thread>`, `live check waiting for a node to take its verify pylon: <why>`, `live check passed at <commit>`, `live check failed at <commit>` with the last 20 lines of its output indented under it, `no live check: <commit> has no .nexus/verify, ...`, or `no live check ran at <commit>` for a live check that gave no verdict, such as one that could not run. While the reviewer reads, or the builder answers changes it asked for, a check that passed beside it gives `no live check yet: it runs at <commit> once the reviewer approves it`. While another review's check or verify pylon waits for room, this review starts no reviewer, second reviewer, check or live check, so the room that frees goes to that pylon first, and waiting gates start in the order their runs began. Its review line then ends with `its <reviewer|second reviewer|check|live check> waits for <builder>: PR #<n>'s <verify pylon|check thread> waits for a node to have room, which goes to it first`, the words a queued thread uses for the same wait, and the held start has no deadline until the wait ends. A review is never held by its own wait, and a review started with `nexus review` starts its first reviewer all the same. The dashboard's landing card has a Live check step between Check and Merge, skipped for a head with no `.nexus/verify`, and shows the script's output. A verify pylon the person unarchives stays open.
 
 ## Queued threads
 
@@ -993,7 +1004,7 @@ The PR watch reads a pull request every two minutes, so a queued thread starts u
 
 ### When it starts
 
-The control plane looks at the queue every 15 seconds, and right after a start is queued. A queued thread whose every wait is `landed`, or one `start-queued` asked for, starts exactly as `nexus start` would start it with the recorded request, under its recorded ID. Placement and capacity apply as for any start. An `auto` thread goes to the node with the most room then, and when no node has room the start fails with `no node can run this pylon: ...`, so the thread stays queued and the next pass tries again, until a node has room. A thread on a named node starts there, as any start does, which never waits for room. While a review's check or verify pylon waits for room, no queued thread starts on a pass, so the gate takes the room that frees first, and the threads queued after its pull request are not held up by a builder that took it. A `start-queued` starts the thread all the same. Any other refusal, such as no current image or a deploy's drain, also leaves it queued. Each failure is the record's `lastError` until a start clears it.
+The control plane looks at the queue every 15 seconds, and right after a start is queued. A queued thread whose every wait is `landed`, or one `start-queued` asked for, starts exactly as `nexus start` would start it with the recorded request, under its recorded ID. Placement and capacity apply as for any start. An `auto` thread goes to the node with the most room then, and when no node has room the start fails with `no node can run this pylon: ...`, so the thread stays queued and the next pass tries again, until a node has room. A thread on a named node starts there, as any start does, which never waits for room. While a review's check or verify pylon waits for room, no queued thread starts on a pass, so the gate takes the room that frees first, and the threads queued after its pull request are not held up by a builder that took it. A queued thread whose every other wait is `landed` then lists a `waiting` wait on that review's builder, `PR #<n>'s verify pylon waits for a node to have room, which goes to it first`, or its check thread's, the oldest such wait first. A `start-queued` starts the thread all the same. Any other refusal, such as no current image or a deploy's drain, also leaves it queued. Each failure is the record's `lastError` until a start clears it.
 
 A Nexus agent thread queued with `--message` gets it once it has started, as the person's message, under the request ID `queued:<id>`. The harness answers a repeated request ID with its first submission, so a send repeated after a crash is the same message. A Claude worker's prompt is its `--claude`, which starts it with `/poteto-mode` in front as any start does. `--message` with `--claude` is refused.
 
@@ -1027,7 +1038,7 @@ interface QueuedThread {
   createdAt: number;
   /** Archived means cancelled. */
   status: "queued" | "archived" | "deleted";
-  /** The threads it waits for, without repeats. */
+  /** The threads it waits for, without repeats, and once those landed, the builder of a review whose gate pylon waits for room. */
   after: readonly ThreadId[];
   /** One per predecessor, in `after` order. */
   waits: readonly Wait[];

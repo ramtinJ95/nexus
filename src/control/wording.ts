@@ -11,7 +11,7 @@ import { archivedDiskMs, keptPastDay } from "./reconcile.ts";
 import { maxNudges } from "./nudge.ts";
 import { commentCap, reviewedPr } from "./pr-watch-model.ts";
 import { changesKeptMs, checkEveryMs, settleMs } from "./doctor-run.ts";
-import { blocks, cannotLand, humanLabel, prRounds, reviewerApproved, type ModelFailure, type Review, type Verdict } from "./review-model.ts";
+import { blocks, cannotLand, ended, gateRun, humanLabel, prRounds, reviewerApproved, type Behind, type ModelFailure, type Review, type Verdict } from "./review-model.ts";
 
 const spelled = (n: number) => ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"][n] ?? String(n);
 const counted = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
@@ -86,6 +86,20 @@ export function reviewersNote(r: Review): string | null {
   if (r.second.kind === "starting") return `${first}, and the second reviewer on ${r.second.model} is starting${r.second.why === null ? "" : `, after a start that failed: ${r.second.why}`}. It reviews since ${r.second.rule}`;
   return `${first}, and the second reviewer ${r.second.thread} on ${r.second.model} ${verdictWord(round.secondVerdict)}. It reviews since ${r.second.rule}`;
 }
+/**
+ * Why a start waits behind another review's gate pylon, after `waits for <its builder>: `, as the queue says it of a
+ * builder and a review of its reviewer, second reviewer, check or live check.
+ */
+export const behindGate = (b: Behind) => `PR #${b.pr}'s ${b.pylon} waits for a node to have room, which goes to it first`;
+/** Which start of the review another review's waiting gate pylon holds, as its line says it, or "". */
+export function heldNote(r: Review): string {
+  if (ended(r)) return "";
+  const run = gateRun(r.phase);
+  const [start, b] = !r.reviewerStarted && r.behind !== undefined ? ["reviewer", r.behind]
+    : r.second?.kind === "starting" && r.second.behind !== undefined ? ["second reviewer", r.second.behind]
+    : run?.behind !== undefined ? [r.phase.kind === "verifying" ? "live check" : "check", run.behind] : [null, null];
+  return b === null ? "" : `, its ${start} waits for ${b.builder}: ${behindGate(b)}`;
+}
 /** What a reviewing round's check does beside the reviewer, which a review's line adds to its phase note, so it says whether the round waits on one or both. */
 export function checkBeside(r: Review): string {
   if (r.phase.kind !== "reviewing") return "";
@@ -148,7 +162,7 @@ export function reviewLine(r: Review): { lead: string; tail: string } {
   const phase = r.phase.kind === "landed" ? `landed as ${r.phase.commit}` : r.phase.kind === "deploying" ? `deploying ${r.phase.commit}` : r.phase.kind;
   return {
     lead: `review ${r.id} of PR #${r.pr.number}${r.auto ? ", started on its own" : ""}: ${phase}, ${roundOf(r)}, reviewer `,
-    tail: ` on ${r.models.reviewer}${r.land === null ? "" : ", landing when approved"}${phaseNote(r)}${checkBeside(r)}`,
+    tail: ` on ${r.models.reviewer}${r.land === null ? "" : ", landing when approved"}${phaseNote(r)}${checkBeside(r)}${heldNote(r)}`,
   };
 }
 
