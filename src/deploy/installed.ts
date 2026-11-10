@@ -8,7 +8,7 @@
 import { readdir, readlink, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { checkControlPlaneFile, parseWorkerConfig, readControlPlane, type WorkerConfig } from "./control-plane.ts";
+import { checkControlPlaneFile, parseWorkerConfig, readControlPlane, type ControlPlane, type WorkerConfig } from "./control-plane.ts";
 import { controlApi } from "./worker.ts";
 import { readJson } from "../node-base/json-file.ts";
 import { localApiWhois } from "../node-base/tailscaled.ts";
@@ -55,19 +55,25 @@ export async function installedProblems(prefix: string, etc: string, readDesired
     releases.set(link, dir);
   }
 
+  let control: ControlPlane | undefined;
+  try {
+    control = await readControlPlane(at("controlPlane"));
+    await checkControlPlaneFile(at("controlPlane"));
+  } catch (error) {
+    control = undefined;
+    problems.push({ what: `${named(at("controlPlane"), error)}.`, fix: correct(at("controlPlane")) });
+  }
   let worker: WorkerConfig | undefined;
   try {
-    const control = await readControlPlane(at("controlPlane"));
-    await checkControlPlaneFile(at("controlPlane"));
-    try {
-      const { uid, mode } = await stat(at("deployer"));
-      if (uid !== process.getuid?.() || (mode & 0o077) !== 0) throw new Error("must belong to root, mode 0600");
-      worker = parseWorkerConfig(await readJson(at("deployer"), null), control);
-    } catch (error) {
-      problems.push({ what: `${named(at("deployer"), error)}.`, fix: correct(at("deployer")) });
-    }
+    const { uid, mode } = await stat(at("deployer")).catch((error: unknown) => {
+      throw (error as NodeJS.ErrnoException).code === "ENOENT" ? new Error(`${at("deployer")} is missing. deploy/install.sh writes it`) : error;
+    });
+    if (uid !== process.getuid?.() || (mode & 0o077) !== 0) throw new Error("must belong to root, mode 0600");
+    // The deployer's half of the config parses alone, so a broken control-plane.json hides no problem of deployer.json.
+    const parsed = parseWorkerConfig(await readJson(at("deployer"), null), control ?? { tailnetNodeId: "", url: "" });
+    if (control !== undefined) worker = parsed;
   } catch (error) {
-    problems.push({ what: `${named(at("controlPlane"), error)}.`, fix: correct(at("controlPlane")) });
+    problems.push({ what: `${named(at("deployer"), error)}.`, fix: correct(at("deployer")) });
   }
 
   for (const parser of releaseParsers) {

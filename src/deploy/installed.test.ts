@@ -86,10 +86,13 @@ test("each config file that its release would refuse is a problem that names it"
   await chmod(join(etc, "deployer.json"), 0o644);
   const found = await lines(prefix, etc, wants(commitA));
   assert.equal(found.length, 4, found.join("\n"));
-  for (const [i, file] of ["deployer.json", "control.json", "probe.json", "secrets.env"].entries()) assert.ok(found[i]!.startsWith(`${join(etc, file)}: `), found[i]);
+  for (const [i, file] of ["deployer.json", "control.json", "probe.json", "secrets.env"].entries()) assert.ok(found[i]!.startsWith(`${join(etc, file)}: `), found[i]!);
   assert.match(found[3]!, /quotes the value of GH_TOKEN/);
   await writeFile(join(etc, "control-plane.json"), JSON.stringify({ tailnetNodeId: "nFirebat1CNTRL", url: "https://x/" }));
-  assert.match((await lines(prefix, etc, wants(commitA)))[0]!, /control-plane\.json: url must be the control plane's tailnet HTTP origin/, "and a deployer config that cannot be read reads no desired release");
+  const both = await lines(prefix, etc, wants(commitB));
+  assert.match(both[0]!, /control-plane\.json: url must be the control plane's tailnet HTTP origin/);
+  assert.ok(both[1]!.startsWith(`${join(etc, "deployer.json")}: `), "a broken control-plane.json hides no problem of deployer.json");
+  assert.ok(!both.some((line) => /desired release/.test(line)), "and without both configs no desired release is read");
 });
 
 test("a release without the parser a config needs says so, and a machine with no role installed has nothing to check", async (t) => {

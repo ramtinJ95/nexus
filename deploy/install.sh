@@ -35,7 +35,7 @@ package_manager() {
   if command -v apt-get >/dev/null; then echo apt; elif command -v dnf >/dev/null; then echo dnf; else echo other; fi
 }
 tailscale_status() { PATH=$service_path tailscale status --json 2>/dev/null; }
-memory_kib() { awk '/^MemTotal:/ { print $2 }' /proc/meminfo; }
+memory_kib() { awk '/^MemTotal:/ { print $2 }' /proc/meminfo 2>/dev/null; }
 # The free KiB and the mount point of the filesystem that would hold $1.
 free_space() {
   local path=$1
@@ -143,7 +143,7 @@ check_prerequisites() {
     || miss "Pylons run x86_64 images under KVM, and this machine is $(machine)." "Install on an x86_64 Linux machine."
 
   # A machine sold with 8 GiB reports a little less, since the firmware and the kernel keep some of it.
-  kib=$(memory_kib)
+  kib=$(memory_kib) || kib=0
   [ "${kib:-0}" -ge $((7680 * 1024)) ] \
     || miss "Nexus needs at least 8 GiB of memory, and this machine has $((${kib:-0} / 1024)) MiB." "Install on a machine, or give this VM, at least 8 GiB of memory."
 
@@ -273,8 +273,8 @@ check_machine() {
   if [ -n "$roles" ]; then
     check_units "$roles"
     mapfile -d '' -t found < <(installed_check)
-    wait $! || fail "src/deploy/installed.ts could not check the install. See what it says: sudo node $repo/src/deploy/installed.ts $prefix $etc"
     misses+=("${found[@]}")
+    wait $! || miss "src/deploy/installed.ts could not check the install's links and configs." "See what it says: sudo node $repo/src/deploy/installed.ts $prefix $etc"
   fi
   [ ${#warnings[@]} = 0 ] || { echo "Warnings:" >&2; printf '%s\n' "${warnings[@]}" >&2; }
   if [ ${#misses[@]} -gt 0 ]; then

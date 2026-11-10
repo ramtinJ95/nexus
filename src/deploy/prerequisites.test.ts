@@ -140,7 +140,15 @@ test("a node needs no certificate drop-in", async () => {
   assert.ok(!found.some((entry) => /nexus-control|dotfiles/.test(entry)), found.join("\n"));
 });
 
-test("a machine that is not a systemd Linux is told so", async () => {
+test("a machine that is not a systemd Linux is told so, and its memory that cannot be read is a miss, not a stop", async () => {
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs({ ...complete, kernel: "Darwin" })}
+memory_kib() { return 1; }
+check_prerequisites node 'sudo deploy/install.sh'; printf '%s\\0' "\${misses[@]}"`);
+  assert.equal(run.code, 0, run.stderr);
+  assert.deepEqual(run.stdout.split("\0").filter((entry) => entry !== "").map((entry) => entry.split("\n")[0]), [
+    "- Nexus runs as systemd services, and this machine is not a Linux booted with systemd.",
+    "- Nexus needs at least 8 GiB of memory, and this machine has 0 MiB.",
+  ]);
   for (const m of [{ ...complete, systemd: false }, { ...complete, kernel: "Darwin" }]) {
     assert.match((await misses(m, "node")).join("\n"), /^- Nexus runs as systemd services, and this machine is not a Linux booted with systemd\./);
   }
@@ -412,10 +420,16 @@ main --check --node firebat`);
   assert.deepEqual(run.stderr.split("\n").filter((line) => line.startsWith("- ")), [
     `- ${dir}/opt/current is missing, so the probe has no release.`,
     `- ${dir}/etc/control-plane.json is missing. deploy/install.sh writes it, and so does deploy/set-control-plane.sh.`,
+    `- ${dir}/etc/deployer.json is missing. deploy/install.sh writes it.`,
   ]);
-  const broken = await bash(`. "$1/deploy/install.sh"; ${stubs(installed)}
-installed_check() { echo "SyntaxError: broken checkout" >&2; return 1; }
+  const broken = await bash(`. "$1/deploy/install.sh"; ${stubs({ ...installed, node: "none", units: { ...installed.units, "nexus-probe.service": "failed" } })}
+installed_check() { echo "node: command not found" >&2; return 127; }
 main --check`);
   assert.equal(broken.code, 1);
-  assert.match(broken.stderr, /SyntaxError: broken checkout\ninstall: src\/deploy\/installed\.ts could not check the install\. See what it says: sudo node .*\/src\/deploy\/installed\.ts \/opt\/nexus \/etc\/nexus\n$/);
+  assert.deepEqual(broken.stderr.split("\n").filter((line) => line.startsWith("- ")), [
+    "- Node 26 or newer must be in /usr/local/bin:/usr/bin, found none.",
+    "- nexus-probe.service is failed, and should be running.",
+    "- src/deploy/installed.ts could not check the install's links and configs.",
+  ], "the misses found before it stay");
+  assert.match(broken.stderr, /\n {4}See what it says: sudo node .*\/src\/deploy\/installed\.ts \/opt\/nexus \/etc\/nexus\n$/);
 });
