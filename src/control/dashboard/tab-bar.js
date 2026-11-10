@@ -78,13 +78,17 @@ const shows = (path) => path === null || (path === timelineTab ? timelineView !=
 
 /**
  * Shows the view the hash names, as on load, Back and Forward. A changed file whose tab another took, as a step from
- * file to file does, opens again in the open file's tab. A view the page cannot show shows the conversation.
+ * file to file does, or one opened from a link, opens again in the open file's tab. A view the page cannot show shows the
+ * conversation.
  */
 export function followHash() {
   if (tabsBar === null) return;
   const view = viewOf(location.hash);
   if (view === null) return;
-  const changed = typeof view.tab === "string" && !shows(view.tab) ? checkout.changes?.files.find((f) => f.path === view.tab) : undefined;
+  const closed = typeof view.tab === "string" && !shows(view.tab);
+  // Until the changes are read, a file whose tab is not open may yet be one of them, which their read follows the hash for.
+  if (closed && checkout.changes === null) return;
+  const changed = closed ? checkout.changes.files.find((f) => f.path === view.tab) : undefined;
   if (changed !== undefined) return openFile(changed, typeof activeTab === "string" ? activeTab : null, "none");
   const path = shows(view.tab) ? view.tab : null;
   if (path !== activeTab || path !== view.tab) showTab(path, path === view.tab ? "none" : "replace");

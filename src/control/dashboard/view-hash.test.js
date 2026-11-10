@@ -64,6 +64,8 @@ const long = { ...file, path: "src/long.ts", additions: 5_000 };
 const added = (name, n) => `diff --git a/${name} b/${name}\nnew file mode 100644\n--- /dev/null\n+++ b/${name}\n@@ -0,0 +1,${n} @@\n${Array.from({ length: n }, (_, i) => `+row ${i}`).join("\n")}\n`;
 const diffs = new Map([[path, added(path, 3)], [long.path, added(long.path, 5_000)]]);
 
+/** The changed files the pylon lists, which the changes route answers with. */
+let listed = [];
 const session = new Map();
 const windowListeners = new Map();
 const fire = (type) => { for (const listener of windowListeners.get(type) ?? []) listener({}); };
@@ -106,7 +108,7 @@ async function load(hash) {
   timelineView.append(step, make("a", { href: "#tl-review", "data-tab-go": "timeline" }));
   const ids = new Map([
     ["tabs", tabsBar], ["timeline-view", timelineView], ["tl-review", step], ["term-view", make("section", {}, { hidden: true })],
-    ["file-view", make("section", {}, { hidden: true })], ["scroll", make("div")], ["pane-changes", make("section", { "data-thread": thread })],
+    ["file-view", make("section", {}, { hidden: true })], ["icons", { content: { querySelector: () => ({ cloneNode: () => make("svg") }) } }], ["scroll", make("div")], ["pane-changes", make("section", { "data-thread": thread })],
     ...["changes-head", "changes-turn", "changes-reload", "changes-base", "changes-body"].map((id) => [id, make("input")]),
   ]);
   const main = make("main", { "data-poll-ms": "60000" });
@@ -128,6 +130,7 @@ async function load(hash) {
   page = {
     tabs, ids, main, fileView, step, press,
     checkout: (await import("./checkout.js")).checkout,
+    readChanges: (await import("./changes-tree.js")).readChanges,
     click: (key) => click(tabsBar.querySelector(`[data-tab="${key}"]`)),
     clickStep: () => click(timelineView.querySelector("[data-tab-go]")),
     view: () => main.dataset.view ?? "convo",
@@ -155,7 +158,7 @@ Object.assign(globalThis, {
   CSSStyleSheet: class { replaceSync() {} },
   getComputedStyle: () => ({ getPropertyValue: () => "pierre-light" }),
   EventSource: { OPEN: 1, CLOSED: 2 },
-  fetch: async (url) => ({ ok: true, status: 200, text: async () => JSON.stringify({ base: { commit: null }, diff: diffs.get(new URL(url, "http://nexus.test/").searchParams.get("path")), truncated: false }) }),
+  fetch: async (url) => url.includes("/changes") ? { ok: true, status: 200, text: async () => JSON.stringify({ files: listed, truncated: false, base: { commit: null } }) } : ({ ok: true, status: 200, text: async () => JSON.stringify({ base: { commit: null }, diff: diffs.get(new URL(url, "http://nexus.test/").searchParams.get("path")), truncated: false }) }),
   document: {
     activeElement: null,
     documentElement: make("html"),
@@ -181,8 +184,15 @@ test("each view's hash on load shows that view", async () => {
   assert.equal(view(), "timeline", "a step's hash shows the timeline");
   assert.equal(step.scrolledTo, 1, "and brings the step into view");
 
+  const linked = await load("#file=src/c.ts");
+  assert.deepEqual([linked.view(), location.hash], ["convo", "#file=src/c.ts"], "a file whose tab is not open waits for the changes, with its hash");
+  listed = [file, { ...file, path: "src/c.ts" }];
+  await linked.readChanges();
+  assert.deepEqual([linked.view(), linked.tabs.activeTab, location.hash], ["file", "src/c.ts", "#file=src/c.ts"], "and opens once they show it changed");
+
   const closed = await load("#file=src/gone.ts");
-  assert.equal(closed.view(), "convo", "a file whose tab is closed shows the conversation");
+  await closed.readChanges();
+  assert.equal(closed.view(), "convo", "a file neither open nor changed shows the conversation");
   assert.equal(location.hash, "", "and the hash says so");
   assert.equal((await load("#main")).view(), "convo", "a hash that names no view, as the skip link's, changes nothing");
 });
