@@ -1,4 +1,19 @@
 #!/bin/sh
-# Runs the Mac nexus CLI from the checkout this file lives in. Installed as a symlink, so it follows its own real path.
-here=$(dirname "$(realpath "$0")")
-exec node "$here/../../src/cli/nexus.ts" "$@"
+# Runs the nexus CLI from the checkout this file lives in. Installed as a symlink, so it follows its own real path.
+# It checks the two things that otherwise fail as a syntax or module error: a node on PATH older than the CLI's, as in
+# a project that pins one, and packages installed for another package-lock.json, as after a git pull that changed it.
+# deploy/mac/install writes the stamp it compares, as .nexus/resume does.
+set -eu
+repo=$(cd "$(dirname "$(realpath "$0")")/../.." && pwd)
+version=$(node --version 2>/dev/null || true)
+major=$(echo "$version" | sed -n 's/^v\([0-9]*\)\..*/\1/p')
+if [ -z "$major" ] || [ "$major" -lt 26 ]; then
+  echo "nexus: the CLI needs Node 26 or newer, and the node on PATH here is ${version:-missing}" >&2
+  exit 1
+fi
+if command -v sha256sum >/dev/null 2>&1; then hash=sha256sum; else hash="shasum -a 256"; fi
+if [ "$(cat "$repo/node_modules/.nexus-lockfile-sha256" 2>/dev/null || true)" != "$(cat "$repo/package.json" "$repo/package-lock.json" | $hash | cut -d " " -f 1)" ]; then
+  echo "nexus: the checkout's packages are not installed for its package-lock.json, as after a git pull that changed it: run $repo/deploy/mac/install" >&2
+  exit 1
+fi
+exec node "$repo/src/cli/nexus.ts" "$@"

@@ -1,20 +1,33 @@
 #!/bin/sh
-# Installs the Mac nexus CLI from the checkout this file lives in: its packages, then `nexus` on PATH as a symlink to
+# Installs the nexus CLI from the checkout this file lives in: its packages, then `nexus` on PATH as a symlink to
 # deploy/mac/nexus, so a git pull updates it. The first argument is the directory for the link, ~/.local/bin by default.
+# It runs on macOS and Linux, and its hints name each one's way.
 set -eu
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 bin=${1:-$HOME/.local/bin}
+system=$(uname -s)
 
 if ! major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null) || [ "$major" -lt 26 ]; then
-  echo "install: the nexus CLI needs Node 26 or newer on PATH, such as from \`brew install node\`" >&2
+  if [ "$system" = Darwin ]; then from="\`brew install node\`"; else from="your distribution's packages, https://nodejs.org or mise"; fi
+  echo "install: the nexus CLI needs Node 26 or newer on PATH, such as from $from. mise and nvm install the version the checkout's .node-version and .nvmrc name" >&2
   exit 1
 fi
 (cd "$repo" && npm ci --no-audit --no-fund)
+if command -v sha256sum >/dev/null 2>&1; then hash=sha256sum; else hash="shasum -a 256"; fi
+cat "$repo/package.json" "$repo/package-lock.json" | $hash | cut -d " " -f 1 > "$repo/node_modules/.nexus-lockfile-sha256"
 mkdir -p "$bin"
 ln -sf "$repo/deploy/mac/nexus" "$bin/nexus"
 "$bin/nexus" --version
 case ":$PATH:" in
   *":$bin:"*) ;;
-  *) echo "$bin is not on PATH. Add it to your shell's profile, such as with: echo 'export PATH=\"$bin:\$PATH\"' >> ~/.zprofile" ;;
+  *)
+    case ${SHELL##*/}:$system in
+      fish:*) add="fish_add_path $bin" ;;
+      zsh:*) add="echo 'export PATH=\"$bin:\$PATH\"' >> ~/.zprofile" ;;
+      bash:Darwin) add="echo 'export PATH=\"$bin:\$PATH\"' >> ~/.bash_profile" ;;
+      bash:*) add="echo 'export PATH=\"$bin:\$PATH\"' >> ~/.bashrc" ;;
+      *) add="echo 'export PATH=\"$bin:\$PATH\"' >> ~/.profile" ;;
+    esac
+    echo "$bin is not on PATH. Add it to your shell's profile, such as with: $add" ;;
 esac
 echo "Next: nexus connect <host>, with the control plane's tailnet name"
