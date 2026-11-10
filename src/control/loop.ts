@@ -12,8 +12,10 @@
  * the planner sends it in a spawn. The ports go back once its node neither has the pylon of a deleted thread nor routes
  * a preview to it.
  *
- * A deleted thread's pylon that is gone, with nothing left to settle, is skipped, so passes do not grow with every
- * thread ever deleted. It is ticked again if its node lists or routes it again.
+ * A deleted or archived thread's pylon that is gone, with nothing left to settle, is skipped, so passes do not grow with
+ * every thread ever archived or deleted (pylonIdsToTick). It is ticked again once its node lists or routes it again, or
+ * once a job, preview, disk delete, retry, Claude launch, wake for reading, failure to record or unarchive gives it
+ * something to settle.
  */
 import { setTimeout as delay } from "node:timers/promises";
 import { desiredPhase, type RegistryWrite } from "./reconcile.ts";
@@ -235,7 +237,10 @@ export function startLoop(options: LoopOptions): Loop {
       };
       try {
         const launch = launches.step(thread, pylonId, nodeObservation, { probe: link.probe, snapshot: (waitMs) => snapshot(link, () => true, waitMs) });
-        if (launch !== "tick" && await launch === "skip") continue;
+        if (launch !== "tick") {
+          if (await launch === "skip") continue;
+          pylon.desired = ctx.desired();
+        }
         const step = await tick(pylon, ctx);
         if (step.kind === "fail" && stored.failed === null) log(`${pylon.pylonId}: the planner gave up: ${step.reason}`);
         // Done for a deleted thread means its node neither has the pylon nor routes a port to it, so nothing serves the ports.

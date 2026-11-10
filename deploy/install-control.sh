@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Installs or upgrades the Nexus control plane on this machine from the checkout this script is in. deploy/install.sh
 # runs it after writing /etc/nexus/control.json, and the deployer runs it with NEXUS_PREPARE=1 from each release it
-# installs, by this name.
+# installs, by this name. Once the control plane runs a release, it installs nothing and only starts that release on
+# the config, unless --upgrade. An install refuses a registry newer than this checkout's
+# migrations.
 #
 # Safe to rerun. The release becomes /opt/nexus/releases/<content hash> (see deploy/release.sh), and
 # /opt/nexus/control-current points at the newest, apart from the probe's /opt/nexus/current.
@@ -18,8 +20,11 @@ repo="$(cd "$(dirname "$0")/.." && pwd)"
 
 if [ "${NEXUS_PREPARE:-0}" = 1 ]; then prepare_control "$repo"; exit 0; fi
 take_deployer_lock
-prepare_control "$repo"
-link_release "$prefix/control-current"
+if ! keeps_release "$prefix/control-current" "$repo" "${1:-}"; then
+  check_registry "$repo"
+  prepare_control "$repo"
+  link_release "$prefix/control-current"
+fi
 
 # A credentials file that is not JSON also leaves the unit stopped, and says why on stderr.
 if PATH=$service_path node "$repo/src/deploy/setup.ts" signed-in "$etc/control.json"; then

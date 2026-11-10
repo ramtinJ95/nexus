@@ -42,7 +42,7 @@ This device is tailnet node nAbC123CNTRL. It
   may read threads, projects and nodes
   may start and message threads
   may not deploy, land reviews and build images
-To let it deploy, run this on the control plane's machine, in its nexus checkout: sudo deploy/install.sh --admit nAbC123CNTRL
+To let it deploy, run this on the control plane's machine, in its nexus checkout after git pull. It changes the config and keeps the release that runs: sudo deploy/install.sh --admit nAbC123CNTRL
 ```
 
 A device the control plane does not allow gets the same line, which admits it as a caller and a deployer. Its URL is saved all the same, so once the person reruns the installer with `--admit`, every command works without connecting again. The control plane's own node and the nodes it runs pylons on may read but never act as a person, and `connect` says to use the person's own device. When `NEXUS_URL` is set, `connect` says it overrides the saved URL.
@@ -85,7 +85,9 @@ The server sends exactly one `exit` or `error`, then closes with 1000, or 1001 w
 
 ## Commands
 
-Every command takes `--json`, `--url` and `--socks`. `--help` or `-h` after a command prints that command's lines of `nexus --help` and exits 0 without sending a request. `<thread>` is a thread ID such as `th-0123456789ab`.
+Every command takes `--json`, `--url` and `--socks`. `--help` or `-h` after a command prints that command's lines of `nexus --help` and exits 0 without sending a request. `<thread>` is a thread ID such as `th-0123456789ab`, which goes to the API as typed. It may also be the start of one, with or without `th-`, such as `th-01` or `01`, or `@last`, the newest thread that is not deleted. Before its request, the command then reads `GET /v1/threads` and `GET /v1/queued` and sends the full ID. A deleted thread counts only when no thread that is not deleted fits, so the start names a live thread whenever one fits. A start that fits two or more of the threads that count fails with exit code 64 and names each of them. One that fits none goes to the API as typed. `@last` with no thread left fails with exit code 4.
+
+`start` and `item add` without `--project` take the project whose `repoUrl` is the `origin` of the git checkout they run in, read from `GET /v1/projects`, and name it on stderr. The ssh and https spellings of a URL match, with or without a trailing `.git`. A port other than its scheme's default must match too, so `https://host:8443/o/r` and `https://host:9443/o/r` are different repositories. Without an `origin`, or unless exactly one project matches, they fail with exit code 64 as before.
 
 With `--json`, a command prints one JSON value on stdout, pretty-printed. The value is the API's reply, apart from the exceptions noted in the table. Without `--json`, output is plain text for people. Its format is not part of this contract.
 
@@ -116,12 +118,12 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `session open <thread> [--harness claude-code\|pi\|shell] [--title T]` | `POST /v1/threads/<thread>/sessions` with `{"harness"?: string, "title"?: string}`, which answers 201. While the pylon is not running, it tries again once a second | `OpenedSession`, the session it opened |
 | `session close <thread> <pane\|id>` | `DELETE /v1/threads/<thread>/sessions/<id>` with `{}`, which answers 204. It does not try again | `null` |
 | `attach <thread>` | `GET /v1/threads/<thread>/attach`, a WebSocket, as [the attach route](#the-attach-route) describes | Nothing. The terminal is the session's |
-| `start --project P [--title T] [--message M \| --claude PROMPT [--model ID]] [--node N\|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB] [--request-id ID]` | One `POST /v1/threads`, with `"message": string` when `--message` is given, `"claude": string` and `"model"?: string` when `--claude` is, as [Event stream and Claude workers](#event-stream-and-claude-workers) describes, and `"requestId": string` when `--request-id` is, which answers 201 | `Thread`, the thread that was started, with its `placement` |
+| `start [--project P] [--title T] [--message M \| --claude PROMPT [--model ID]] [--node N\|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB] [--request-id ID]` | Without `--project`, `GET /v1/projects` first, as above. Then one `POST /v1/threads`, with `"message": string` when `--message` is given, `"claude": string` and `"model"?: string` when `--claude` is, as [Event stream and Claude workers](#event-stream-and-claude-workers) describes, and `"requestId": string` when `--request-id` is, which answers 201 | `Thread`, the thread that was started, with its `placement` |
 | `start --plan ...` | One `POST /v1/threads` with `"planning": true`, as for any start | `Thread`, the planning thread that was started |
 | `start ... --after THREAD[,THREAD...]` | One `POST /v1/threads` with `"after": string[]`, and `"message"` and `"requestId"` as for any start, which answers 201 | `QueuedThread`, the thread that was queued |
 | `start-queued <thread>` | `POST /v1/threads/<thread>/start` with no body, which answers 201 | `Thread`, the thread that was started |
 | `items [--project P] [--all]` | `GET /v1/items?cancelled=false[&project=P]`, or `GET /v1/items[?project=P]` with `--all` | `PipelineItem[]`, in the order they were added. Cancelled items are left out unless `--all` is given |
-| `item add --project P [--title T] (--message M \| --claude PROMPT [--model ID]) [--after ITEM[,ITEM...]] [--node N\|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB]` | `POST /v1/items` with the fields of a start, its brief as `"message"` or `"claude"`, and `"after": string[]`, which answers 201 | `PipelineItem`, the item that was added |
+| `item add [--project P] [--title T] (--message M \| --claude PROMPT [--model ID]) [--after ITEM[,ITEM...]] [--node N\|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB]` | Without `--project`, `GET /v1/projects` first, as above. Then `POST /v1/items` with the fields of a start, its brief as `"message"` or `"claude"`, and `"after": string[]`, which answers 201 | `PipelineItem`, the item that was added |
 | `item show <item>` | `GET /v1/items/<item>` | `PipelineItem` |
 | `item approve <item>` | `POST /v1/items/<item>/approve` with `{}` | `PipelineItem` |
 | `item cancel <item>` | `POST /v1/items/<item>/cancel` with `{}` | `PipelineItem` |
