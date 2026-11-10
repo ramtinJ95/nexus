@@ -203,7 +203,7 @@ test("the CLI runs a thread's life through the SOCKS proxy, and --json prints th
   const stable = ({ lastHumanActivityAt: _, ...rest }: Thread) => rest;
   assert.deepEqual(stable(s.registry.threads.thread(thread.id)!), stable(thread));
   assert.deepEqual(s.fake.calls.at(-1), ["send", thread.id, "\n  Fix the build  \nand run the tests", `brief:${thread.id}`, "followUp"]);
-  assert.deepEqual((await s.json(["threads"])).map(stable), [{ ...stable(thread), attention: null, desired: "running", pylon: { node, actualState: "unknown", failed: null } }],
+  assert.deepEqual((await s.json(["threads"])).map(stable), [{ ...stable(thread), attention: null, desired: "running", pylon: { node, actualState: "unknown", failed: null }, pullRequestNumbers: [] }],
     "a row carries what the planner wants of the pylon and what its node last reported");
   assert.deepEqual(await s.json(["threads", "--project", "other"]), []);
 
