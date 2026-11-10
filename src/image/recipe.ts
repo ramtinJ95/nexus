@@ -6,7 +6,7 @@ import { lstat, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compare } from "../util/compare.ts";
-import { pinsSchema, type ImageRecipe } from "../protocol/images.ts";
+import { buildPinsSchema, type ImageRecipe } from "../protocol/images.ts";
 
 export const pylonRecipeDir = fileURLToPath(new URL("../../images/pylon/", import.meta.url));
 
@@ -43,5 +43,5 @@ export async function loadImageRecipe(dir: string = pylonRecipeDir, paths: reado
     files.push({ path, mode: ((await stat(from)).mode & 0o100) === 0 ? 0o644 : 0o755, content: await readFile(from, "utf8") });
   }
   files.sort((a, b) => compare(a.path, b.path));
-  return { files, pins: pinsSchema.parse(JSON.parse(await readFile(join(dir, "pins.json"), "utf8"))) };
+  return { files, pins: buildPinsSchema.parse(JSON.parse(await readFile(join(dir, "pins.json"), "utf8"))) };
 }
