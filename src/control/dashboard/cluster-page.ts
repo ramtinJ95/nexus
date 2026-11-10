@@ -52,7 +52,6 @@ const graphs = (name: NodeName) => html`<section id="node-graphs" class="graphs"
 function cleanup(c: Context, cleanups: ClusterView["nodes"][number]["cleanups"]): Html {
   const open = cleanups.findLast(isOpen);
   return html`<section aria-labelledby="node-cleanup-h"><div class="ov-head"><h2 id="node-cleanup-h">Cleanup</h2></div>
-<p id="action-error" class="error" role="alert" hidden></p>
 ${open === undefined ? html`<p class="empty">No cleanup question waits on you.</p>` : cleanupCard(c, open)}
 </section>`;
 }
