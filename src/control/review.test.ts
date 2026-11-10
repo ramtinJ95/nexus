@@ -370,6 +370,9 @@ test("a builder's pylon stays up while its reviewer reads a round, so its findin
   const reviewer = f.review().reviewer;
   f.tick(idlePolicy.agentIdleMs + 3 * 60_000);
   assert.equal(builder(), "running", "a reviewer that reads for 8 minutes finds the builder up");
+  const builderPylon = f.registry.threads.pylon(f.registry.threads.thread(f.builder)!.pylonId)!;
+  const held = () => f.registry.threads.pylonsWithHeldThreadsOn(builderPylon.node).map(({ pylon, thread }) => [pylon.pylonId, thread.id]);
+  assert.deepEqual(held(), [[builderPylon.pylonId, f.builder]], "placement finds the held builder among its node's threads");
   f.reply(reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
   const read = f.holdPolls(0);
   const pass = loop.poll();
@@ -380,6 +383,7 @@ test("a builder's pylon stays up while its reviewer reads a round, so its findin
   await pass;
   assert.equal(f.sent.at(-1)!.to, f.builder);
   assert.equal(f.registry.threads.thread(f.builder)!.awaitedUntil, undefined, "the findings went, so the review awaits the builder no more");
+  assert.deepEqual(held(), [], "and no longer once the review awaits it no more");
 
   f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
   f.registry.threads.recordActivity(f.builder, { agent: f.now });
