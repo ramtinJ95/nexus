@@ -4,7 +4,7 @@ import { pylonRoutes } from "../../contract/pylon.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { itemRoutes, projectRoutes } from "../../contract/projects.ts";
 import { questionRoutes, reviewRoutes } from "../../contract/reviews.ts";
-import { notify, refreshAfter, whenRunning } from "./page.js";
+import { notify, pressing, refreshAfter, released, whenRunning } from "./page.js";
 import { setOpen } from "./nav.js";
 import { showSession } from "./terminal-tab.js";
 
@@ -92,6 +92,8 @@ document.addEventListener("click", async (event) => {
   if (button === null) return;
   const { action, thread } = button.dataset;
   if (button.dataset.confirm !== undefined && !confirm(button.dataset.confirm)) return;
+  const focused = document.activeElement === button;
+  if (focused) pressing(button);
   button.disabled = true;
   setOpen(null);
   try {
@@ -104,5 +106,6 @@ document.addEventListener("click", async (event) => {
     // A swap replaced the button of an action that changed its region. One that changed none, such as Show in
     // terminal, is still in the page and takes another press.
     if (button.isConnected) button.disabled = false;
+    if (focused && released(button) && button.isConnected && document.activeElement === document.body) button.focus();
   }
 });

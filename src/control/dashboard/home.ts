@@ -167,7 +167,7 @@ function needsList(c: Context, h: HomeView, picked: { key: string; card: string 
   const mark = (n: InboxNeed) => leads.has(n) && keyOf(n) === picked?.key && " picked";
   const replyOf = (key: string) => key === picked?.key ? picked.reply : null;
   // The picked card opens, so a link to it shows it on a fresh load. A reader's own close survives each poll's swap.
-  const fold = (id: string, head: Html, body: Html, why: string, open: Part = false) => html`<details class="need-fold" id="fold-${id}"${open && " open"}><summary class="need-sum" data-why="${why}">${icon("chevron")}${head}</summary><div class="need-body">${body}</div></details>`;
+  const fold = (id: string, head: Html, body: Html, why: string, open: Part = false) => html`<details class="need-fold" id="fold-${id}"${open && " open"}><summary class="need-sum">${icon("chevron")}${head}<span class="need-why">${why}</span></summary><div class="need-body">${body}</div></details>`;
   return html`<div class="ov-head"><h2 id="needs-h">Needs you</h2>${needs.length > 0 && html`<span class="count">${needs.length}</span>`}</div>
 ${needs.length === 0 ? html`<p class="empty">Nothing waits on you.</p>` : html`<div class="need-list">${needs.map((n) => {
   if (n.kind === "cleanup") {

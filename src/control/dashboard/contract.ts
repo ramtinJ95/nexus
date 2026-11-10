@@ -30,7 +30,7 @@ export const factsOf = (data: Readonly<Record<string, string | undefined>>): Fac
  * attribute, whose inside the comments bound. Every string in a page is escaped, so no text can forge the comments.
  */
 export const grow = { attr: "data-grow", slots: "[data-grow]", open: "<!--grow-->", close: "<!--/grow-->" } as const;
-const grown = new RegExp(`${grow.open}([\\s\\S]*?)${grow.close}`, "g");
+export const grown = new RegExp(`${grow.open}([\\s\\S]*?)${grow.close}`, "g");
 export const growParts = (region: string) => ({ shape: region.replace(grown, grow.open), parts: [...region.matchAll(grown)].map((m) => m[1]!) });
 
 /**
