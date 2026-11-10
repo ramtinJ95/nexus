@@ -20,12 +20,13 @@ import { parseSecretsFile } from "../node-base/secrets-env.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
 import { digestPattern, tokenDigest, tsNet } from "../protocol/deploy.ts";
 import { readJson, saveJson } from "../node-base/json-file.ts";
-import { controlFields } from "../node-base/node-config.ts";
+import { controlFields, listenAddress } from "../node-base/node-config.ts";
 import { isImageId } from "../ids.ts";
 import { shellQuote } from "../shell.ts";
 import { tailscaleCli, tailscaleStatus, type TailnetDevice, type TailscaleStatus } from "../tailscale.ts";
 import { localApiWhois } from "../node-base/tailscaled.ts";
-import { backupStatusFile, configFiles, deployerFiles, ports, prefix, rootPath, servicePath, stateDirs, unitNames, users } from "../node-base/node-layout.ts";
+import { backupStatusFile, configFiles, deployerFiles, ports, prefix, readReleaseCommit, rootPath, servicePath, stateDirs, unitNames, users } from "../node-base/node-layout.ts";
+import { awaitHealthy } from "./health.ts";
 import { schemaStep } from "./plan.ts";
 import { nodeRegistry } from "./worker.ts";
 import type { Whois } from "../protocol/http.ts";
@@ -379,7 +380,9 @@ export function left(facts: Facts): Item[] {
     say: `Unless this node is registered already, mint a join token on ${control.name} with the first command, then run the command it prints here. It is like the second. The control plane follows this node from then on, and tells every other node about it.`,
     run: ["sudo deploy/install.sh --join-token", `sudo deploy/install.sh --join <token> --node ${control.name}`],
   });
-  items.push({
+  // The first image is built from the Mac with `nexus image build`, so one in the store shows the CLI reached this
+  // control plane. A node's list leaves the CLI to the control plane's, since nexus connect names the control plane.
+  if (facts.role === "control" && !facts.image) items.push({
     stage: "setup",
     say: `Set up the nexus CLI on your Mac, in a nexus checkout with Node 26, before the steps below that run nexus there. When the Mac reaches the tailnet through a SOCKS proxy rather than the Tailscale app, add --socks localhost:1055 to nexus connect.`,
     run: ["deploy/mac/install", `nexus connect ${control.host}`],
@@ -433,6 +436,7 @@ const headings = {
 } as const;
 
 export function formatLeft(items: readonly Item[]): string {
+  if (items.length === 0) return "Nothing is left to do.";
   return items.flatMap((item, i) => [
     ...item.stage !== items[i - 1]?.stage ? [...i === 0 ? [] : [""], headings[item.stage]] : [],
     `${i + 1}. ${item.say}`,
@@ -702,12 +706,21 @@ async function main(args: readonly string[]): Promise<number> {
     return 0;
   }
   if (command === "signed-in" && operands[0] !== undefined) return await signedIn(operands[0]) ? 0 : 1;
+  if (command === "healthy" && operands.length === 4) {
+    const [unit, config, release, timeoutMs] = operands as [string, string, string, string];
+    const listen = listenAddress(await readJson(config, null), config);
+    const expected = await readReleaseCommit(release);
+    const failure = await awaitHealthy(new URL(`http://${urlHost(listen.host)}:${listen.port}/v1/health`), expected, Number(timeoutMs),
+      (ms) => exec("systemctl", ["is-active", "--quiet", unit], { timeout: ms }));
+    if (failure !== null) console.error(`install: ${unit} is not healthy at ${expected ?? "a release with no commit"}: ${failure}`);
+    return failure === null ? 0 : 1;
+  }
   if (command === "registry" && operands[0] !== undefined) {
     const refusal = await registryRefusal(operands[0]);
     if (refusal !== null) console.error(`install: ${refusal}`);
     return refusal === null ? 0 : 1;
   }
-  console.error("usage: node src/deploy/setup.ts install|write|signed-in|registry|rotate claude|github [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--upgrade] [--package-manager apt|dnf|other], and write also [--github-watch]");
+  console.error("usage: node src/deploy/setup.ts install|write|signed-in|registry|healthy|rotate claude|github [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--upgrade] [--package-manager apt|dnf|other], and write also [--github-watch]");
   return 1;
 }
 

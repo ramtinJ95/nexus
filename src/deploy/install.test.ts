@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { createServer } from "node:http";
+import { once } from "node:events";
+import type { AddressInfo } from "node:net";
+import { promisify } from "node:util";
 import { chmod, copyFile, mkdtemp, mkdir, readdir, readFile, readlink, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -8,6 +12,7 @@ import { test, type TestContext } from "node:test";
 import { migrations } from "../control/schema.ts";
 import { checkoutMerged, command, NotSwitched, ReleaseInstaller, type InstallBoundary } from "./install.ts";
 import { snapshot } from "../test-support/kit.ts";
+import { answerLocalHealth } from "./health.ts";
 
 const commit = "a".repeat(40);
 async function directory(t: TestContext): Promise<string> {
@@ -349,4 +354,54 @@ test("an install of the control plane by hand refuses a registry newer than the 
   assert.notEqual(refused.code, 0);
   assert.match(refused.stderr, new RegExp(`the registry is at schema version ${migrations.length + 1}, newer than the ${migrations.length} migrations this checkout applies`));
   assert.deepEqual((await m.ran()).filter((line) => /^(install_release|link_release|install_unit|make_state|start_unit)\b/.test(line)), []);
+});
+
+/**
+ * release.sh's start_unit against a unit systemd calls active, whose service answers /v1/health with `answers` on a
+ * local port, as a release would that was starting, crashing or still the old one.
+ */
+async function startUnit(t: TestContext, answers: string, timeoutMs: number) {
+  const dir = await directory(t);
+  const prefix = join(dir, "opt", "nexus");
+  const units = join(dir, "units");
+  const shims = join(dir, "bin");
+  const log = join(dir, "log");
+  await mkdir(join(prefix, "releases", "test"), { recursive: true });
+  await writeFile(join(prefix, "releases", "test", "release-commit"), `${commit}\n`);
+  await mkdir(units);
+  await writeFile(join(units, "nexus-probe.service"), "[Service]\n");
+  await mkdir(shims);
+  for (const name of ["systemctl", "journalctl"]) await writeFile(join(shims, name), `#!/bin/sh\necho "${name} $*" >>"${log}"\n`, { mode: 0o755 });
+  const server = createServer((req, res) => { if (!answerLocalHealth(req, res, () => ({ commit: answers }))) res.writeHead(404).end(); });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => server.close());
+  const config = join(dir, "probe.json");
+  await writeFile(config, JSON.stringify({ listen: { host: "127.0.0.1", port: (server.address() as AddressInfo).port } }));
+  const real = resolve(import.meta.dirname, "../..");
+  const script = `set -euo pipefail
+. "$1/deploy/release.sh"
+repo=$1 prefix=$2 unit_dir=$3 service_path=$4 health_timeout_ms=$5 release=test
+start_unit nexus-probe.service "$prefix/active-release" "$6"`;
+  const ran = await promisify(execFile)("bash", ["-c", script, "start_unit", real, prefix, units, `${shims}:${process.env.PATH}`, String(timeoutMs), config], { env: { PATH: `${shims}:${process.env.PATH}` } })
+    .then(({ stdout, stderr }) => ({ code: 0, stdout, stderr }), (error: { code: number; stdout: string; stderr: string }) => error);
+  return { ...ran, active: await readFile(join(prefix, "active-release"), "utf8").catch(() => null), log: await readFile(log, "utf8").catch(() => "") };
+}
+
+test("start_unit reports a unit running once it answers its health check with the release's commit", async (t) => {
+  const started = await startUnit(t, commit, 60_000);
+  assert.equal(started.code, 0, started.stderr);
+  assert.match(started.stdout, /nexus-probe\.service is running release test/);
+  assert.match(started.active ?? "", /^test [0-9a-f]{12} [0-9a-f]{12}\n$/);
+  assert.match(started.log, /^systemctl restart nexus-probe\.service$/m);
+});
+
+test("start_unit fails a unit systemd calls active whose service never answers health with the release's commit", async (t) => {
+  const old = "b".repeat(40);
+  const started = await startUnit(t, old, 1000);
+  assert.equal(started.code, 1);
+  assert.match(started.stderr, new RegExp(`nexus-probe\\.service is not healthy at ${commit}: it answered commit ${old}`));
+  assert.match(started.stderr, /nexus-probe\.service is not healthy$/m);
+  assert.match(started.log, /^journalctl -u nexus-probe\.service/m);
+  assert.equal(started.active, null, "a unit that is not healthy records no start");
 });

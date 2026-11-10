@@ -6,13 +6,13 @@ This is a different program from the `nexus` inside a pylon ([`images/pylon/nexu
 
 ## Install
 
-From the root of a fresh clone, with Node 26 or newer on `PATH`:
+From the root of a fresh clone, on macOS or Linux, with Node 26 or newer on `PATH`:
 
 ```sh
 deploy/mac/install
 ```
 
-It runs `npm ci`, links `~/.local/bin/nexus` to [`deploy/mac/nexus`](../deploy/mac/nexus), prints the version, and says so when `~/.local/bin` is not on `PATH`. Give it another directory as its argument to link there instead. The shim follows its symlink back to the checkout and runs `node src/cli/nexus.ts`, so a `git pull` updates the CLI, and a pull that changes `package-lock.json` needs the script run again. Then run `nexus connect <host>`.
+It runs `npm ci`, records the `package.json` and `package-lock.json` it installed in `node_modules/.nexus-lockfile-sha256`, as a pylon's `.nexus/resume` does, links `~/.local/bin/nexus` to [`deploy/mac/nexus`](../deploy/mac/nexus), prints the version, and says so when `~/.local/bin` is not on `PATH`, with the line to add to the profile of the shell in `SHELL`. Without Node 26 it names a way to get it: `brew install node` on macOS, and the distribution's packages, nodejs.org or mise on Linux. Give it another directory as its argument to link there instead. The shim follows its symlink back to the checkout and runs `node src/cli/nexus.ts`, so a `git pull` updates the CLI. A pull that changes `package-lock.json` needs the script run again, and until then the shim exits 1 with one line that says so, rather than run the CLI on packages installed for another lockfile. It also exits 1 with one line when the `node` on `PATH` is older than Node 26, as in a project that pins an older one. Then run `nexus connect <host>`.
 
 The CLI keeps Node's compile cache, the stripped TypeScript and compiled code of its modules, in `~/.cache/nexus/compile-cache`, or where `NODE_COMPILE_CACHE` says, so a command after the first starts in about two thirds of the time. Node keeps one cache per Node version and per user in it, and replaces an entry whose file changed, as after a `git pull`. A cache it cannot create or write, such as under a `~/.cache` that is a file, leaves the CLI as it would run without one, with nothing on stderr. `NODE_DISABLE_COMPILE_CACHE=1` turns it off. It is not Node's default, the temp directory's `node-compile-cache`, because on a machine several users share, the first user's directory there is one the others cannot write in.
 

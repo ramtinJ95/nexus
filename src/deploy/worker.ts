@@ -7,6 +7,7 @@ import { command, checkoutMerged, type Command, type InstallBoundary, NotSwitche
 import { controlReady, planDeploy, prepareTries, quarantined, retryAfter, schemaStep, type Attempt, type DeployStep, type ReleaseHealth, type SchemaVersions } from "./plan.ts";
 import { digestPattern, type DrainBody, type DrainReply, type ReleaseReport, type ReleaseView, type ReportBody, type Role } from "../protocol/deploy.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
+import { awaitHealthy } from "./health.ts";
 import { deleteReleases, readReleases } from "./release-cleanup.ts";
 import { checkControlPlaneFile, parseWorkerConfig, readControlPlane, type ControlPlane, type WorkerConfig } from "./control-plane.ts";
 import { readJson, saveJson } from "../node-base/json-file.ts";
@@ -326,18 +327,9 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   const healthUrl = new URL(`http://${urlHost(listen.host)}:${listen.port}/v1/health`);
   const healthy = async () => {
     const expected = await readReleaseCommit(link);
-    const until = Date.now() + config.healthTimeoutMs;
-    let last: unknown = null;
-    do {
-      try {
-        await run("systemctl", ["is-active", "--quiet", service], prefix, Math.max(1, Math.min(5000, until - Date.now())));
-        const answered = (await jsonRequest(healthUrl, "GET", undefined, null, undefined, Math.max(1, Math.min(10_000, until - Date.now())))).commit;
-        if (answered === expected) return true;
-        last = `it answered commit ${answered ?? "none"}`;
-      } catch (error) { last = error; } // Retry while the service binds and the harness opens.
-      await sleep(500);
-    } while (Date.now() < until);
-    console.error(`${role}: ${service} is not healthy at ${expected}: ${String(last)}`);
+    const failure = await awaitHealthy(healthUrl, expected, config.healthTimeoutMs, (ms) => run("systemctl", ["is-active", "--quiet", service], prefix, ms));
+    if (failure === null) return true;
+    console.error(`${role}: ${service} is not healthy at ${expected}: ${failure}`);
     return false;
   };
   /** The request a report at its commit is for, and how many of its tries failed before the link switch. */
