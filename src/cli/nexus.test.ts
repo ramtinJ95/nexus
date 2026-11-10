@@ -163,9 +163,9 @@ async function setup(t: TestContext, setupOptions: { queue?: boolean; https?: bo
   const env = (overrides: Record<string, string> = {}) => ({
     PATH: process.env.PATH!, HOME: home, NEXUS_URL: `http://${apiName}:${control.port}`, NEXUS_SOCKS: `127.0.0.1:${proxy.port}`, ...overrides,
   });
-  function nexus(args: readonly string[], overrides?: Record<string, string>): Promise<{ code: number; stdout: string; stderr: string }> {
+  function nexus(args: readonly string[], overrides?: Record<string, string>, cwd?: string): Promise<{ code: number; stdout: string; stderr: string }> {
     return new Promise((resolve) => {
-      execFile(process.execPath, [cli, ...args], { env: env(overrides) }, (err, stdout, stderr) => {
+      execFile(process.execPath, [cli, ...args], { env: env(overrides), ...cwd === undefined ? {} : { cwd } }, (err, stdout, stderr) => {
         resolve({ code: err === null ? 0 : (err as { code: number }).code, stdout, stderr });
       });
     });
@@ -247,6 +247,74 @@ test("each command's help names every flag it takes", () => {
     const unnamed = Object.keys(command.options ?? {}).filter((flag) => !command.help.join("\n").includes(`--${flag}`) && !elsewhere[name]?.includes(flag));
     assert.deepEqual(unnamed, [], name);
   }
+});
+
+test("every command whose help takes a <thread> resolves its first argument as one", () => {
+  const unresolved = Object.entries(commands).filter(([, command]) => command.help.join("\n").includes("<thread>") !== (command.thread === true)).map(([name]) => name);
+  assert.deepEqual(unresolved, []);
+});
+
+test("a thread is named by a unique prefix of its ID, with or without th-, or by @last, and a full ID costs no lookup", async (t) => {
+  const s = await setup(t);
+  const first: Thread = await s.json(["start", "--project", "acme", "--title", "first"]);
+  await until("the clock moves past the first start, so the second is newer", () => Date.now() > first.createdAt);
+  const second: Thread = await s.json(["start", "--project", "acme", "--title", "second"]);
+  let n = 4;
+  while (second.id.startsWith(first.id.slice(0, n))) n++;
+  const prefix = first.id.slice(0, n);
+
+  let before = s.requests();
+  assert.equal((await s.json(["show", first.id])).thread.id, first.id);
+  assert.equal(s.requests() - before, 1, "a full ID goes to the API as typed, with no lookup");
+  before = s.requests();
+  assert.equal((await s.json(["show", prefix])).thread.id, first.id, "a unique prefix names its thread");
+  assert.equal(s.requests() - before, 3, "a prefix reads the threads and the queue first");
+  assert.equal((await s.json(["show", prefix.slice(3)])).thread.id, first.id, "without th- too");
+  assert.equal((await s.nexus(["archive", prefix])).stdout, `Archived ${first.id}.\n`, "a command's text names the full ID");
+
+  const both = await s.nexus(["show", "th-"]);
+  assert.equal(both.code, 64);
+  assert.equal(both.stderr, `nexus: th- is the start of 2 threads, ${first.id} (archived: first), ${second.id} (active: second). Give more of the ID. Run nexus --help for usage\n`);
+  const none = ["th-0", "th-1", "th-2"].find((p) => !first.id.startsWith(p) && !second.id.startsWith(p))!;
+  assert.equal((await s.nexus(["show", none])).stderr, `nexus: no thread ${none}\n`, "a prefix of no thread goes to the API as typed");
+
+  assert.equal((await s.json(["show", "@last"])).thread.id, second.id, "@last is the newest thread");
+  await s.json(["delete", "@last"]);
+  assert.equal((await s.json(["show", "@last"])).thread.id, first.id, "a deleted thread is never @last");
+  assert.equal((await s.json(["show", "th-"])).thread.id, first.id, "a deleted thread makes no prefix ambiguous");
+  await s.json(["delete", first.id]);
+  assert.deepEqual([(await s.nexus(["show", "@last"])).code, (await s.nexus(["show", "@last"])).stderr], [4, "nexus: @last names the newest thread that is not deleted, and there is none\n"]);
+});
+
+test("without --project, start takes the one project whose repository is the checkout's origin", async (t) => {
+  const s = await setup(t);
+  const checkout = async (origin: string | null) => {
+    const dir = await tempDir("nexus-checkout-", t);
+    await promisify(execFile)("git", ["init", "-q", dir]);
+    if (origin !== null) await promisify(execFile)("git", ["-C", dir, "remote", "add", "origin", origin]);
+    return dir;
+  };
+  for (const origin of ["git@github.com:octocat/Spoon-Knife", "ssh://git@GitHub.com:22/octocat/Spoon-Knife.git", "https://github.com/octocat/Spoon-Knife/"]) {
+    const res = await s.nexus(["start", "--title", "inferred", "--json"], undefined, await checkout(origin));
+    assert.equal(res.code, 0, res.stderr);
+    assert.equal(res.stderr, "nexus: project acme, from this checkout's origin\n", origin);
+    assert.equal(JSON.parse(res.stdout).project, "acme", origin);
+  }
+  assert.equal((await s.nexus(["start", "--title", "given", "--project", "acme"], undefined, await checkout("https://github.com/other/repo.git"))).code, 0, "--project still wins");
+
+  const other = await s.nexus(["start", "--title", "x"], undefined, await checkout("https://github.com/other/repo.git"));
+  assert.deepEqual([other.code, other.stderr], [64, "nexus: start needs --project, since no project has this checkout's origin, https://github.com/other/repo.git. Run nexus --help for usage\n"]);
+  const bare = await s.nexus(["start", "--title", "x"], undefined, await checkout(null));
+  assert.deepEqual([bare.code, bare.stderr], [64, "nexus: start needs --project. Run nexus --help for usage\n"]);
+  s.registry.projects.createProject({ ...project, id: "escaped" as ProjectId, repoUrl: "https://git.example/team/100%.git" });
+  s.registry.projects.createProject({ ...project, id: "ported" as ProjectId, repoUrl: "https://git.example:8443/team/repo.git" });
+  const ported = await s.nexus(["start", "--title", "ported"], undefined, await checkout("https://git.example:8443/team/repo"));
+  assert.deepEqual([ported.code, ported.stderr], [0, "nexus: project ported, from this checkout's origin\n"], "a port other than the scheme's default is kept");
+  const elsewhere = await s.nexus(["start", "--title", "x"], undefined, await checkout("https://git.example:9443/team/repo.git"));
+  assert.deepEqual([elsewhere.code, elsewhere.stderr], [64, "nexus: start needs --project, since no project has this checkout's origin, https://git.example:9443/team/repo.git. Run nexus --help for usage\n"], "another port is another server");
+  s.registry.projects.createProject({ ...project, id: "spoon" as ProjectId, repoUrl: "git@github.com:octocat/Spoon-Knife.git" });
+  const two = await s.nexus(["item", "add", "--message", "x"], undefined, await checkout("https://github.com/octocat/Spoon-Knife.git"));
+  assert.deepEqual([two.code, two.stderr], [64, "nexus: item add needs --project, since projects acme, spoon all have this checkout's origin, https://github.com/octocat/Spoon-Knife.git. Run nexus --help for usage\n"]);
 });
 
 test("--help or -h after a command prints its lines of nexus --help and exits 0 without a request", async (t) => {
@@ -1260,7 +1328,7 @@ test("connect says what this device may do, and the line that admits it when it 
   const s = await setup(t);
   const env = { NEXUS_URL: "", NEXUS_SOCKS: "" };
   const config = join(s.home, ".config", "nexus", "cli.json");
-  const admit = "run this on the control plane's machine, in its nexus checkout: sudo deploy/install.sh --admit";
+  const admit = "run this on the control plane's machine, in its nexus checkout after git pull. It changes the config and keeps the release that runs: sudo deploy/install.sh --admit";
 
   s.callAs(phone);
   const person = await s.nexus(["connect", s.localUrl, "--socks", "none"], env);

@@ -10,14 +10,14 @@
 # runs the role installers, asks for the agents' credentials this machine lacks (src/deploy/credentials.ts), and ends
 # with what is left for the person. Without a terminal, or with --non-interactive, the credentials come from NEXUS_*
 # variables instead. Safe to rerun: an existing config keeps its values and secrets, and gains only what is missing,
-# and an existing credential is left as it is.
+# an existing credential is left as it is, and a role that already runs a release keeps it unless --upgrade.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=deploy/release.sh
 . "$repo/deploy/release.sh"
 
-usage="usage: sudo deploy/install.sh [--node <control plane device> [--join <token>]] [--admit <device>]... [--add-node <device>=<deploy key digest>]... [--peer <device>]... [--dotfiles <git URL>] [--non-interactive]
+usage="usage: sudo deploy/install.sh [--node <control plane device> [--join <token>]] [--admit <device>]... [--add-node <device>=<deploy key digest>]... [--peer <device>]... [--dotfiles <git URL>] [--non-interactive] [--upgrade]
        sudo deploy/install.sh --join-token"
 
 # The machine's facts, one function each, so the tests can fake a machine.
@@ -49,7 +49,7 @@ mint_join_token() {
   [ "$(uid)" = 0 ] || fail "only root on the control plane's machine mints a join token: sudo deploy/install.sh --join-token"
   control_config_exists || fail "this machine runs no control plane. Run --join-token on the control plane's machine"
   [ -f "$prefix/control-current/src/control/join-token.ts" ] \
-    || fail "the control plane here is older than join tokens. Upgrade it with sudo deploy/install.sh, then mint the token"
+    || fail "the control plane here is older than join tokens. Upgrade it with nexus deploy, then mint the token"
   PATH=$service_path node "$prefix/control-current/src/control/join-token.ts" "$etc/control.json"
 }
 

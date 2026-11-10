@@ -29,11 +29,11 @@ test("every file the services import is in the release that deploy/release.sh pa
 });
 
 /**
- * Runs install_release on this checkout into a scratch prefix, as the deployer does, through `bash -c` without
- * errexit. npm is a fake that records each call and fails the one named by `failing`, and root ownership is skipped,
+ * Runs install_release on the checkout `from.repo`, this one by default, into a scratch prefix, as the deployer does
+ * with NEXUS_COMMIT set to `from.commit`, through `bash -c` without errexit. npm is a fake that records each call and fails the one named by `failing`, and root ownership is skipped,
  * as the test does not run as root. `stubs` defines shell functions that stand in for commands, to make one fail.
  */
-async function installRelease(t: TestContext, failing: string | null, stubs = "") {
+async function installRelease(t: TestContext, failing: string | null, stubs = "", from: { repo: string; commit?: string } = { repo: root, commit: "c".repeat(40) }) {
   const scratch = await tempDir("nexus-release-", t);
   const bin = join(scratch, "bin");
   await mkdir(bin);
@@ -44,15 +44,15 @@ echo "$*" >> "${join(scratch, "npm.log")}"
 exit 0
 `);
   await chmod(join(bin, "npm"), 0o755);
-  const commit = "c".repeat(40);
-  const script = `. "$1/deploy/release.sh"; prefix=$2; service_path=$3:$PATH; install() { mkdir -p "$prefix/releases"; }; chown() { :; }; ${stubs} install_release "$1"`;
+  const script = `. "$4/deploy/release.sh"; prefix=$2; service_path=$3:$PATH; install() { mkdir -p "$prefix/releases"; }; chown() { :; }; ${stubs} install_release "$1"`;
   const done = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
-    execFile("bash", ["-c", script, "build", root, join(scratch, "opt"), bin], { env: { ...process.env, NEXUS_COMMIT: commit } }, (err, _stdout, stderr) => {
+    execFile("bash", ["-c", script, "build", from.repo, join(scratch, "opt"), bin, root], { env: { ...process.env, NEXUS_COMMIT: from.commit ?? "" } }, (err, _stdout, stderr) => {
       resolve({ code: err === null ? 0 : (err.code as number), stderr });
     });
   });
   const calls = (await readFile(join(scratch, "npm.log"), "utf8").catch(() => "")).trim().split("\n").map((line) => line.split(" ").slice(0, 2).join(" "));
-  return { ...done, calls, releases: await readdir(join(scratch, "opt", "releases")), release: join(scratch, "opt", "releases", commit) };
+  const releases = await readdir(join(scratch, "opt", "releases"));
+  return { ...done, calls, releases, release: join(scratch, "opt", "releases", releases[0] ?? "none") };
 }
 
 test("a release is installed with dev dependencies, built, then pruned, and published with the dashboard client", async (t) => {
@@ -72,6 +72,66 @@ test("a release carries the image recipe the control plane builds, the same reci
   const checkout = await loadImageRecipe();
   assert.deepEqual(recipe.files.map((f) => f.path), checkout.files.map((f) => f.path));
   assert.equal(imageIdOf(recipe), imageIdOf(checkout));
+});
+
+/** A git checkout of the paths release.sh packages, at one commit with no changes. */
+async function checkout(t: TestContext) {
+  const repo = await tempDir("nexus-checkout-", t);
+  const git = (...args: string[]) => new Promise<string>((done, failed) => {
+    execFile("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.com", ...args], (err, stdout) => err === null ? done(stdout.trim()) : failed(err));
+  });
+  for (const file of ["package.json", "package-lock.json", "tsconfig.json", "src/a.ts", "deploy/a.sh", "images/pylon/a"]) {
+    await mkdir(dirname(join(repo, file)), { recursive: true });
+    await writeFile(join(repo, file), "{}\n");
+  }
+  await git("init", "--quiet");
+  await git("add", ".");
+  await git("commit", "--quiet", "-m", "a");
+  return { repo, git, head: await git("rev-parse", "HEAD") };
+}
+
+test("a release cut from a checkout records its commit only while the checkout has no changes, since one with changes is named by its content alone", async (t) => {
+  const { repo, git, head } = await checkout(t);
+  const recorded = async () => {
+    const run = await installRelease(t, null, "", { repo });
+    assert.equal(run.code, 0, run.stderr);
+    return (await readFile(join(run.release, "release-commit"), "utf8")).trim();
+  };
+  assert.equal(await recorded(), head);
+  await writeFile(join(repo, "src/a.ts"), "export {};\n");
+  assert.equal(await recorded(), "", "a changed file");
+  await git("checkout", "--quiet", "--", "src/a.ts");
+  await writeFile(join(repo, "src/b.ts"), "export {};\n");
+  assert.equal(await recorded(), "", "a new file the release packages");
+});
+
+test("a role installer keeps the release its link runs, even one cut from the checkout's own commit, and installs only when there is none yet or with --upgrade", async (t) => {
+  const { repo, head } = await checkout(t);
+  const opt = await tempDir("nexus-links-", t);
+  const deployed = "d".repeat(40);
+  await mkdir(join(opt, "releases", deployed), { recursive: true });
+  await writeFile(join(opt, "releases", deployed, "release-commit"), `${deployed}\n`);
+  await symlink(`releases/${deployed}`, join(opt, "control-current"));
+  const keeps = (...flag: string[]) => new Promise<{ code: number; stdout: string }>((done) => {
+    execFile("bash", ["-c", `. "$1/deploy/release.sh"; keeps_release "$2" "$3" "\${@:4}" && echo "release=$release"`, "keeps", root, join(opt, "control-current"), repo, ...flag], (err, stdout) => {
+      done({ code: err === null ? 0 : err.code as number, stdout });
+    });
+  });
+  assert.deepEqual(await keeps(), {
+    code: 0,
+    stdout: `control-current runs ${deployed}, and this checkout holds ${head}. This run changes the config and keeps that release. nexus deploy installs another, or --upgrade installs this checkout's\nrelease=${deployed}\n`,
+  });
+  assert.equal((await keeps("--upgrade")).code, 1, "--upgrade installs");
+  await writeFile(join(opt, "releases", deployed, "release-commit"), `${head}\n`);
+  assert.match((await keeps()).stdout, new RegExp(`^control-current runs ${head}, and this checkout holds ${head}\\.[^\\n]*\\nrelease=${deployed}\\n$`), "the deployer's release of the checkout's commit, named by that commit, is kept rather than rebuilt under its content hash");
+  await writeFile(join(repo, "src/a.ts"), "export {};\n");
+  assert.match((await keeps()).stdout, new RegExp(`^control-current runs ${head}, and this checkout holds uncommitted changes or no commit git can read\\.`));
+  await writeFile(join(opt, "releases", deployed, "release-commit"), "");
+  assert.match((await keeps()).stdout, new RegExp(`^control-current runs release ${deployed}, which records no commit, and this`));
+  assert.equal((await keeps("--upgrade")).code, 1);
+  assert.equal((await new Promise<number>((done) => {
+    execFile("bash", ["-c", `. "$1/deploy/release.sh"; keeps_release "$2" "$3"`, "keeps", root, join(opt, "current"), repo], (err) => done(err === null ? 0 : err.code as number));
+  })), 1, "a first install, with no link, installs");
 });
 
 for (const failing of ["ci --no-audit", "run build", "prune --omit=dev"]) {

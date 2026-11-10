@@ -16,7 +16,7 @@ function connectText(url: string, file: string, caller: Whoami): string {
   const head = `Connected to ${url}, saved in ${file}.`;
   const overridden = process.env.NEXUS_URL ? [`NEXUS_URL is set, so it overrides ${file} until you unset it.`] : [];
   const may = (yes: boolean, what: string) => `  ${yes ? "may" : "may not"} ${what}`;
-  const admit = (why: string) => `To let it ${why}, run this on the control plane's machine, in its nexus checkout: sudo deploy/install.sh --admit ${caller.node}`;
+  const admit = (why: string) => `To let it ${why}, run this on the control plane's machine, in its nexus checkout after git pull. It changes the config and keeps the release that runs: sudo deploy/install.sh --admit ${caller.node}`;
   return [
     head,
     `This device is tailnet node ${caller.node}. It`,

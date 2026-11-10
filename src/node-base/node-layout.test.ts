@@ -79,8 +79,11 @@ test("release.sh and the role installers name the layout's prefix, releases, rel
   ]) assert.ok(release.includes(line), line);
   assert.ok(stores.claude.file === `${etc}/secrets.env` && stores.claude.owner.startsWith("root:"));
   assert.ok(layout.releaseName.test("a".repeat(12)) && layout.releaseName.test("a".repeat(40)) && !layout.releaseName.test("a".repeat(13)), "release.sh's two name shapes");
-  assert.match(read("deploy/install-probe.sh"), new RegExp(`^link_release "\\$prefix/${roleLinks.probe}"$`, "m"));
-  assert.match(read("deploy/install-control.sh"), new RegExp(`^link_release "\\$prefix/${roleLinks.control}"$`, "m"));
+  for (const role of ["probe", "control"] as const) {
+    const installer = read(`deploy/install-${role}.sh`);
+    assert.match(installer, new RegExp(`^if ! keeps_release "\\$prefix/${roleLinks[role]}" "\\$repo" "\\$\\{1:-\\}"; then$`, "m"), role);
+    assert.match(installer, new RegExp(`^ {2}link_release "\\$prefix/${roleLinks[role]}"$`, "m"), role);
+  }
   const installDeployer = read("deploy/install-deployer.sh");
   assert.ok(installDeployer.includes(`touch "$prefix/${deployerFiles.roles}/$role"`));
   assert.ok(installDeployer.includes(`[ -e ${configFiles.deployer} ]`));
