@@ -42,7 +42,7 @@ test("a thread is named by a unique prefix of its ID, with or without th-, or by
 
   const both = await s.nexus(["show", "th-"]);
   assert.equal(both.code, 64);
-  assert.equal(both.stderr, `nexus: th- is the start of 2 threads, ${first.id} (archived: first), ${second.id} (active: second). Give more of the ID. Run nexus --help for usage\n`);
+  assert.equal(both.stderr, `nexus: th- is the start of 2 threads, ${first.id} (archived: first), ${second.id} (active: second). Give more of the ID\n`);
   const none = ["th-0", "th-1", "th-2"].find((p) => !first.id.startsWith(p) && !second.id.startsWith(p))!;
   assert.equal((await s.nexus(["show", none])).stderr, `nexus: no thread ${none}\n`, "a prefix of no thread goes to the API as typed");
 
@@ -71,18 +71,18 @@ test("without --project, start takes the one project whose repository is the che
   assert.equal((await s.spawned(["start", "--title", "given", "--project", "acme"], undefined, await checkout("https://github.com/other/repo.git"))).code, 0, "--project still wins");
 
   const other = await s.spawned(["start", "--title", "x"], undefined, await checkout("https://github.com/other/repo.git"));
-  assert.deepEqual([other.code, other.stderr], [64, "nexus: start needs --project, since no project has this checkout's origin, https://github.com/other/repo.git. Run nexus --help for usage\n"]);
+  assert.deepEqual([other.code, other.stderr], [64, "nexus: start needs --project, since no project has this checkout's origin, https://github.com/other/repo.git. Run nexus start --help for usage\n"]);
   const bare = await s.spawned(["start", "--title", "x"], undefined, await checkout(null));
-  assert.deepEqual([bare.code, bare.stderr], [64, "nexus: start needs --project. Run nexus --help for usage\n"]);
+  assert.deepEqual([bare.code, bare.stderr], [64, "nexus: start needs --project. Run nexus start --help for usage\n"]);
   s.registry.projects.createProject({ ...project, id: "escaped" as ProjectId, repoUrl: "https://git.example/team/100%.git" });
   s.registry.projects.createProject({ ...project, id: "ported" as ProjectId, repoUrl: "https://git.example:8443/team/repo.git" });
   const ported = await s.spawned(["start", "--title", "ported"], undefined, await checkout("https://git.example:8443/team/repo"));
   assert.deepEqual([ported.code, ported.stderr], [0, "nexus: project ported, from this checkout's origin\n"], "a port other than the scheme's default is kept");
   const elsewhere = await s.spawned(["start", "--title", "x"], undefined, await checkout("https://git.example:9443/team/repo.git"));
-  assert.deepEqual([elsewhere.code, elsewhere.stderr], [64, "nexus: start needs --project, since no project has this checkout's origin, https://git.example:9443/team/repo.git. Run nexus --help for usage\n"], "another port is another server");
+  assert.deepEqual([elsewhere.code, elsewhere.stderr], [64, "nexus: start needs --project, since no project has this checkout's origin, https://git.example:9443/team/repo.git. Run nexus start --help for usage\n"], "another port is another server");
   s.registry.projects.createProject({ ...project, id: "spoon" as ProjectId, repoUrl: "git@github.com:octocat/Spoon-Knife.git" });
   const two = await s.spawned(["item", "add", "--message", "x"], undefined, await checkout("https://github.com/octocat/Spoon-Knife.git"));
-  assert.deepEqual([two.code, two.stderr], [64, "nexus: item add needs --project, since projects acme, spoon all have this checkout's origin, https://github.com/octocat/Spoon-Knife.git. Run nexus --help for usage\n"]);
+  assert.deepEqual([two.code, two.stderr], [64, "nexus: item add needs --project, since projects acme, spoon all have this checkout's origin, https://github.com/octocat/Spoon-Knife.git. Run nexus item add --help for usage\n"]);
 });
 
 test("seen and --unread share the API marker without waking an archived thread", async (t) => {
@@ -395,12 +395,12 @@ test("start and item add check their worker flags alike, and item add refuses an
   const s = await setup(t, { queue: true });
   for (const command of [["start"], ["item", "add"]]) {
     const res = await s.nexus([...command, "--project", "acme", "--message", "Build A", "--model", "claude-opus-5-5"]);
-    assert.deepEqual([res.code, res.stderr], [64, "nexus: --model requires --claude. Run nexus --help for usage\n"], command.join(" "));
+    assert.deepEqual([res.code, res.stderr], [64, `nexus: --model requires --claude. Run nexus ${command.join(" ")} --help for usage\n`], command.join(" "));
   }
   await s.nexus(["project", "edit", "acme", "--pipeline", "start"]);
   const asked = s.requests();
   const empty = await s.nexus(["item", "add", "--project", "acme", "--message", "Build A", "--after", " , "]);
-  assert.deepEqual([empty.code, empty.stderr], [64, "nexus: --after needs a thread. Run nexus --help for usage\n"]);
+  assert.deepEqual([empty.code, empty.stderr], [64, "nexus: --after needs a thread. Run nexus item add --help for usage\n"]);
   assert.equal(s.requests(), asked, "nothing was sent");
   assert.deepEqual(await s.json(["items"]), []);
 });

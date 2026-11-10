@@ -18,7 +18,7 @@ The CLI keeps Node's compile cache, the stripped TypeScript and compiled code of
 
 ## Where it connects
 
-A Mac on the tailnet, through the Tailscale app, connects to the control plane directly. A Mac that reaches the tailnet only through a userspace tailscaled, such as ts-home's on `localhost:1055`, opens a SOCKS5 CONNECT to the control plane and speaks HTTP, or TLS for an `https://` URL, through it. The GETs of one command share a pool of kept connections, one for GETs sent one at a time, so a watch or a wait that polls opens no tunnel per poll. The CLI lets go of it after 4 idle seconds, before the API's server closes it after 5, and sends a GET that met a kept connection closing under it once more on a new one. Every other method opens a connection of its own, since a failure there may hide a request that ran. A watch's or a follower's stream holds a connection of its own too. The proxy resolves the name, because only it knows MagicDNS. The API allows a device by its tailnet node, so the CLI sends no token.
+A Mac on the tailnet, through the Tailscale app, connects to the control plane directly. A Mac that reaches the tailnet only through a userspace tailscaled, such as ts-home's on `localhost:1055`, opens a SOCKS5 CONNECT to the control plane and speaks HTTP, or TLS for an `https://` URL, through it. The GETs of one command share a pool of kept connections, one for GETs sent one at a time, so a watch or a wait that polls opens no tunnel per poll. The CLI lets go of it after 4 idle seconds, before the API's server closes it after 5, and sends a GET that met a kept connection closing under it once more on a new one. Every other method opens a connection of its own, since a failure there may hide a request that ran. A watch's or a follower's stream holds a connection of its own too. The proxy resolves the name, because only it knows MagicDNS. The API allows a device by its tailnet node, so the CLI sends no token. The API compresses a reply over 1 KiB of HTML, JSON, JavaScript, CSS or SVG with brotli or gzip, whichever the request's `Accept-Encoding` prefers, and says `Vary: Accept-Encoding`. An event stream and the attach route's WebSocket are never compressed. The CLI sends no `Accept-Encoding`, so its replies come as they are.
 
 Two settings choose the endpoint. For each one, the first of these that is set wins:
 
@@ -87,7 +87,7 @@ The server sends exactly one `exit` or `error`, then closes with 1000, or 1001 w
 
 ## Commands
 
-Every command takes `--json`, `--url` and `--socks`. `--help` or `-h` after a command prints that command's lines of `nexus --help` and exits 0 without sending a request. `<thread>` is a thread ID such as `th-0123456789ab`, which goes to the API as typed. It may also be the start of one, with or without `th-`, such as `th-01` or `01`, or `@last`, the newest thread that is not deleted. Before its request, the command then reads `GET /v1/threads` and `GET /v1/queued` and sends the full ID. A deleted thread counts only when no thread that is not deleted fits, so the start names a live thread whenever one fits. A start that fits two or more of the threads that count fails with exit code 64 and names each of them. One that fits none goes to the API as typed. `@last` with no thread left fails with exit code 4.
+Every command takes `--json`, `--url` and `--socks`, before its name or after it, so an alias such as `alias nx='nexus --socks localhost:1055'` works. `nexus --help`, `nexus -h` and `nexus help` print every command under section headers. `--help` or `-h` after a command, or `nexus help <command>`, prints that command's lines of `nexus --help` and exits 0 without sending a request. A group's name, such as `image`, `project`, `item` or `session`, does the same for each of its commands. A group's name alone prints those lines on stderr and exits 64, as `nexus` alone does with all of them. `<thread>` is a thread ID such as `th-0123456789ab`, which goes to the API as typed. It may also be the start of one, with or without `th-`, such as `th-01` or `01`, or `@last`, the newest thread that is not deleted. Before its request, the command then reads `GET /v1/threads` and `GET /v1/queued` and sends the full ID. A deleted thread counts only when no thread that is not deleted fits, so the start names a live thread whenever one fits. A start that fits two or more of the threads that count fails with exit code 64 and names each of them. One that fits none goes to the API as typed. `@last` with no thread left fails with exit code 4.
 
 `start` and `item add` without `--project` take the project whose `repoUrl` is the `origin` of the git checkout they run in, read from `GET /v1/projects`, and name it on stderr. The ssh and https spellings of a URL match, with or without a trailing `.git`. A port other than its scheme's default must match too, so `https://host:8443/o/r` and `https://host:9443/o/r` are different repositories. Without an `origin`, or unless exactly one project matches, they fail with exit code 64 as before.
 
@@ -338,7 +338,7 @@ A failed command prints nothing on stdout and exits with one of these codes. `do
 | 5 | `conflict` | 409. The thread's state forbids the action, for example a message to an archived thread or a close of a paused session, or a project with that ID exists |
 | 64 | `invalid` | Bad flags or arguments, a config file that cannot be read or parsed, or a 400 or 413 from the API |
 
-Without `--json`, stderr gets one line, `nexus: <message>`. With `--json`, stderr gets one JSON line, `{"error": string, "kind": Kind, "status": number | null, "code": string | null}`. `status` is the API's HTTP status, or null when there was no reply. `code` is the `code` of the API's error body, or null when it is null or absent. Since 0.68.0 every error reply's body is `{"error": string, "code": string | null, "retryable": boolean}`. The API sets `code` only where a client branches on it: `not-running` for a request that needs the pylon running before it runs, `not-ready` for a Claude worker with no session yet or not ready to take a message, `blocked` for Claude waiting at a prompt in its terminal, `moved` for a Claude session whose pane stopped running it before the message was typed, since 0.68.0 `draining` for a turn the control plane refuses while a deploy drains it, `no-route` for a path the control plane has no route for, since 0.68.0 `probe-unreachable` for a node whose probe does not answer, since 0.68.0 `probe-forbidden` for a node whose probe refuses the control plane, since 0.62.0 `no-branch` for a start that names a branch the project's remote does not have, since 0.69.0 `queued` for a thread route asked of a thread that has not started, and since 0.63.0 `too-long` for a Claude prompt that its project's standing rules push past 16384 characters. Since 0.68.0 `retryable` is true when the refusal ends by itself, so the same request sent again later can succeed: for `not-running`, `not-ready`, `moved` and `draining`, and for no other code. A reply without a code is never retryable. When nothing listens on the proxy, the message says so and points to `ts-home status`.
+Without `--json`, stderr gets `nexus: <message>`, which is one line except where a message names a second failure, as a wait whose last poll also failed does. A usage error, such as an unknown command or flag or a wrong count of arguments, ends with `Run nexus <command> --help for usage`, or `Run nexus --help for usage` when it names no command, and an unknown command or flag also names the nearest one when one is close. `nexus` alone, or a group's name alone, prints its usage on stderr instead. With `--json`, stderr gets one JSON line, `{"error": string, "kind": Kind, "status": number | null, "code": string | null}`. `status` is the API's HTTP status, or null when there was no reply. `code` is the `code` of the API's error body, or null when it is null or absent. Since 0.68.0 every error reply's body is `{"error": string, "code": string | null, "retryable": boolean}`. The API sets `code` only where a client branches on it: `not-running` for a request that needs the pylon running before it runs, `not-ready` for a Claude worker with no session yet or not ready to take a message, `blocked` for Claude waiting at a prompt in its terminal, `moved` for a Claude session whose pane stopped running it before the message was typed, since 0.68.0 `draining` for a turn the control plane refuses while a deploy drains it, `no-route` for a path the control plane has no route for, since 0.68.0 `probe-unreachable` for a node whose probe does not answer, since 0.68.0 `probe-forbidden` for a node whose probe refuses the control plane, since 0.62.0 `no-branch` for a start that names a branch the project's remote does not have, since 0.69.0 `queued` for a thread route asked of a thread that has not started, and since 0.63.0 `too-long` for a Claude prompt that its project's standing rules push past 16384 characters. Since 0.68.0 `retryable` is true when the refusal ends by itself, so the same request sent again later can succeed: for `not-running`, `not-ready`, `moved` and `draining`, and for no other code. A reply without a code is never retryable. When nothing listens on the proxy, the message says so and points to `ts-home status`.
 
 ## The watch stream
 
@@ -477,7 +477,7 @@ type Role = "control" | "probe";
 const reportStates = ["pending", "waiting-for-control", "waiting-for-idle", "installing", "healthy", "rolled-back", "failed"] as const;
 ```
 
-Missing or 90-second-old reports are pending with a reason; a probe-only node has no control row. `worker` says which deployer worker ran the poll, so a node that fell back to its bootstrap shows it; the text output prints it as `(worker bootstrap)` or `(worker <commit>)` after the state. CLI `--wait` polls every second for up to 30 minutes. Every configured component must report healthy at the full desired commit, freshly. Transient connection failures during control restart are retried. A rollback, terminal failure or deadline exits 1 with the component reasons; supersession by another release exits 5. Caller refusal is 3, invalid syntax is 64, and other transport/HTTP failures use the existing exit-code contract. Without `--wait`, success means the desired release was recorded, not deployed. `--json` prints one ReleaseView on success and the normal CLI error contract on failure.
+Missing or 90-second-old reports are pending with a reason; a probe-only node has no control row. `worker` says which deployer worker ran the poll, so a node that fell back to its bootstrap shows it; the text output prints it as `(worker bootstrap)` or `(worker <commit>)` after the state. CLI `--wait` polls every second for up to 30 minutes. Every configured component must report healthy at the full desired commit, freshly. Transient connection failures during control restart are retried. A rollback, terminal failure or deadline exits 1 with the component reasons, counting only failures the control plane received after this request, so a deploy of a failed commit again waits for fresh reports; supersession by another release exits 5. Caller refusal is 3, invalid syntax is 64, and other transport/HTTP failures use the existing exit-code contract. Without `--wait`, success means the desired release was recorded, not deployed. `--json` prints one ReleaseView on success and the normal CLI error contract on failure.
 
 Release changes require both ordinary API admission and `deployers` membership. Configured infrastructure nodes and the control node itself are always excluded, even if listed. No new in-pylon CLI command is added. Node-only polling/reporting routes are not client routes: they require the node's tailnet identity and root token. See [deployment setup](../deploy/README.md#deploy-a-merged-commit).
 
@@ -487,7 +487,7 @@ The `image` commands build the pylon image and make it current, as [the deploy g
 
 The control plane runs one image operation at a time. It is stored in the registry and advanced every 2 seconds, so it carries on across a control plane restart:
 
-<!-- types: src/control/image-store.ts ImageOperation ImageStep Outcome src/control/image-rollout.ts ImagesView ImageEntry src/control/image-store.ts RecordedImage src/protocol/images.ts ImageManifest -->
+<!-- types: src/control/image-store.ts ImageOperation ImageStep Outcome src/control/image-rollout.ts ImagesView ImageEntry src/control/image-store.ts RecordedImage ImageFetch src/protocol/images.ts ImageManifest -->
 ```ts
 // src/control/image-store.ts
 /**
@@ -507,8 +507,8 @@ type ImageOperation = ({ kind: "build"; release: string | null } | { kind: "roll
 interface ImageStep {
   node: NodeName;
   /**
-   * done: the node's observation lists the image. skipped: the node was offline when the rollout began, so it fetches
-   * the image on first use (planPylon's missing-artifact rule).
+   * done: the node's observation lists the image. skipped: the node was offline when the rollout began, so the control
+   * plane sends it the image once it is back online, as an ImageFetch.
    */
   state: "pending" | "running" | "done" | "failed" | "skipped";
   /** The job last sent for this step, saved before it is sent, so a restarted control plane asks the probe about it. */
@@ -520,9 +520,10 @@ type Outcome = { state: "running" } | { state: "done"; finishedAt: number } | { 
 // src/control/image-rollout.ts
 /**
  * `previous` is the image current before the last rollout, which rollback makes current again. `images` are newest
- * build first, and `operation` is the running operation, or the last one.
+ * build first, and `operation` is the running operation, or the last one. `fetches` are the copies of the current image
+ * the control plane sends outside a rollout, one per online node that lacks it.
  */
-interface ImagesView { current: ImageId | null; previous: ImageId | null; images: ImageEntry[]; operation: ImageOperation | null }
+interface ImagesView { current: ImageId | null; previous: ImageId | null; images: ImageEntry[]; operation: ImageOperation | null; fetches: ImageFetch[] }
 /** A recorded image, and the registry nodes whose last observation lists it, online or not. */
 type ImageEntry = RecordedImage & { nodes: NodeName[] };
 // src/control/image-store.ts
@@ -531,6 +532,25 @@ type ImageEntry = RecordedImage & { nodes: NodeName[] };
  * unknown, as for a build from a dev checkout or an image recorded through POST /v1/images.
  */
 type RecordedImage = ImageManifest & { release: string | null };
+/** The current image's copy to one online node that lacks it, which the image worker sends outside a rollout. */
+interface ImageFetch {
+  node: NodeName;
+  image: ImageId;
+  /**
+   * waiting: no job runs (before the first send, in the backoff after a failure, or while no other online node holds the
+   * image). running: a fetch-artifact job was accepted. failed: maxImageFetches jobs in a row failed, or the probe
+   * refused the job as invalid, so none is sent again until a rollout begins or the node goes offline and comes back.
+   */
+  state: "waiting" | "running" | "failed";
+  /** The job last sent, saved before it is sent, so a restarted control plane asks the probe about it. */
+  job: { id: JobId; notAfter: string } | null;
+  /** Failed jobs in a row. */
+  failures: number;
+  /** Unix ms of the last failure, which the backoff counts from, or null. */
+  failedAt: number | null;
+  /** The last failure's reason, or why no job can be sent now, or null. */
+  reason: string | null;
+}
 // src/protocol/images.ts
 interface ImageManifest {
   id: ImageId;
@@ -545,9 +565,11 @@ interface ImageManifest {
 
 `build` has one step, on the image build node. A recipe already recorded answers 200 with a `done` build at once, and no job is sent. Otherwise the build answers 202 while it runs. `rollout` has one step per node. A node that is offline when it begins is `skipped`. Each other node is `done` once its observation lists the image, after a `fetch-artifact` job from a node that holds it, checked against the recorded sha256. The image becomes current only when no step is pending, running or failed. `rollback` is a rollout of `previous`.
 
+While no rollout runs, the control plane sends the current image to each online node that lacks it, such as one that joined or was skipped because it was offline, with the same `fetch-artifact` job, since `--node auto` places no pylon on a node that lacks the current image. `fetches` holds one `ImageFetch` per such node. A failed job is sent again after a backoff of 5 and then 15 seconds, and after 3 failures in a row, or one job the probe refuses as invalid, the fetch is `failed` and none is sent again until a rollout begins, which clears `fetches`, or the node goes offline and comes back. A busy node, such as one where a pylon's own fetch of the image runs, is asked again on the next pass without counting a failure. A node is `waiting` with the reason `no other online node holds it` while no other online node holds the image to copy it from. `nexus doctor`'s `image` check warns about each online node that lacks the current image.
+
 Each command answers 409, exit code 5, while another operation runs, when the image build node is unknown or offline, when no online node holds the image to roll out, or when there is no previous image. Asking for the operation that runs again returns it. `rollout` of an image that is not recorded answers 404, exit code 4.
 
-Without `--wait`, success means the operation started. `--wait` polls `GET /v1/images` every 2 seconds for up to 45 minutes and retries connection failures, so a control plane restart does not end it. It exits 0 when the operation is done, 1 with its reason when it failed or the wait timed out, and 5 when another operation replaced it. Plain `image list` prints one line per image, its role (`current`, `previous` or `-`), when and where it was built, its release, and its nodes, then the last operation and its steps.
+Without `--wait`, success means the operation started. `--wait` polls `GET /v1/images` every 2 seconds for up to 45 minutes and retries connection failures, so a control plane restart does not end it. It exits 0 when the operation is done, 1 with its reason when it failed or the wait timed out, and 5 when another operation replaced it. Plain `image list` prints one line per image, its role (`current`, `previous` or `-`), when and where it was built, its release, and its nodes, then `Fetches of the current image <id>:` with one line per fetch, its node, its state, how many jobs in a row failed and its reason, and then the last operation and its steps.
 
 ## Templates at thread start
 
@@ -1931,7 +1953,8 @@ rj-firebat
   warn  disk            12.4 of 98.0 GiB free at /var/lib/nexus-control, low. Free space there, or delete archived threads
   ok    pylons          3 up, 2 paused, none crashed or orphaned
   ok    tailnet-key     key expiry is off for it in the tailnet
-1 failed, 1 warned, 9 ok
+  ok    image           holds the current image img-0123456789ab
+1 failed, 1 warned, 10 ok
 ```
 
 `--json` prints the report:
@@ -1952,7 +1975,7 @@ type Status = (typeof statuses)[number];
 type Check = Verdict & ({ node: NodeName; name: NodeCheckName } | { node: null; name: ControlCheckName });
 /** `text` is one line: what is wrong and what to do, or what was found when nothing is. */
 interface Verdict { status: Status; text: string }
-type NodeCheckName = "online" | "release" | "disk" | "pylons" | "tailnet-key";
+type NodeCheckName = "online" | "release" | "disk" | "pylons" | "tailnet-key" | "image";
 type ControlCheckName = "release" | "backup" | "login" | "github-token" | "certificate" | "archived-disks";
 ```
 

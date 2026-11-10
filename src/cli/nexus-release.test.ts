@@ -14,7 +14,8 @@ import type { Question } from "../control/questions.ts";
 import { testReview } from "../test-support/registry-kit.ts";
 import type { ReviewLoop } from "../control/review.ts";
 import type { ImageManifest } from "../protocol/images.ts";
-import type { ImageId, ThreadId } from "../ids.ts";
+import type { ImageId, JobId, NodeName, ThreadId } from "../ids.ts";
+import type { ImageFetch } from "../control/image-store.ts";
 import { testCapacity, testObservation, until } from "../test-support/kit.ts";
 import { CliError } from "./transport.ts";
 import type { Api } from "./kit.ts";
@@ -50,10 +51,15 @@ test("deploy and release use the shared release view and wait for both roles", a
   s.registry.releases.reportRelease({ node, role: "probe", commit: requested.desired.commit, target: requested.desired.commit, state: "healthy", reason: null, worker: "bootstrap", observedAt: Date.now() });
   assert.match((await s.nexus(["release"])).stdout, new RegExp(`^${node} probe: ${requested.desired.commit} healthy \\(worker bootstrap\\)$`, "m"));
   assert.equal((await s.json(["release"])).nodes.find((r: { role: string }) => r.role === "probe").worker, "bootstrap");
-  s.registry.releases.reportRelease({ node, role: "control", commit: "b".repeat(40), target: requested.desired.commit, state: "rolled-back", reason: "failed to bind", observedAt: Date.now() });
-  const failed = await s.nexus(["deploy", "main", "--wait", "--json"]);
+  const rollback = { node, role: "control" as const, commit: "b".repeat(40), target: requested.desired.commit, state: "rolled-back" as const, reason: "failed to bind", observedAt: Date.now() };
+  s.registry.releases.reportRelease(rollback);
+  const asked = s.requests();
+  const failing = s.nexus(["deploy", "main", "--wait", "--json"]);
+  await until("the wait polled past the rollback of the earlier request", () => s.requests() >= asked + 4);
+  s.registry.releases.reportRelease({ ...rollback, reason: "failed to bind again", observedAt: Date.now() });
+  const failed = await failing;
   assert.equal(failed.code, 1);
-  assert.match(failed.stderr, /failed to bind/);
+  assert.match(failed.stderr, /failed to bind again/);
 });
 
 test("image list and current print each image's role, build, release and nodes, and rollout --wait follows the rollout until it is done", async (t) => {
@@ -69,7 +75,20 @@ test("image list and current print each image's role, build, release and nodes, 
     "img-0123456789ab  current  built 2027-01-01T00:00:00Z on rj-firebat  release unknown       on rj-firebat",
     "img-00000000000a  -        built 2026-12-01T00:00:00Z on rj-firebat  release ffffffffffff  on rj-firebat",
   ].join("\n") + "\n");
-  assert.deepEqual(await s.json(["image", "list"]), { current: image.id, previous: null, images: [entry, olderEntry], operation: null });
+  assert.deepEqual(await s.json(["image", "list"]), { current: image.id, previous: null, images: [entry, olderEntry], operation: null, fetches: [] });
+  const fetches: ImageFetch[] = [
+    { node: "infra-testbench" as NodeName, image: image.id, state: "running", job: { id: "j-fetch" as JobId, notAfter: new Date().toISOString() }, failures: 0, failedAt: null, reason: null },
+    { node: "rj-nuc" as NodeName, image: image.id, state: "failed", job: null, failures: 3, failedAt: Date.now(), reason: "backend: the copy hashes to 0000, so it was thrown away" },
+  ];
+  s.registry.images.saveImageFetches(fetches);
+  assert.equal((await s.nexus(["image", "list"])).stdout, [
+    "img-0123456789ab  current  built 2027-01-01T00:00:00Z on rj-firebat  release unknown       on rj-firebat",
+    "img-00000000000a  -        built 2026-12-01T00:00:00Z on rj-firebat  release ffffffffffff  on rj-firebat",
+    "Fetches of the current image img-0123456789ab:",
+    "  infra-testbench: running",
+    "  rj-nuc: failed, 3 failed: backend: the copy hashes to 0000, so it was thrown away",
+  ].join("\n") + "\n");
+  assert.deepEqual((await s.json(["image", "list"])).fetches, fetches);
   assert.equal((await s.nexus(["image", "current"])).stdout, "img-0123456789ab  current  built 2027-01-01T00:00:00Z on rj-firebat  release unknown  on rj-firebat\n");
 
   const rolled = await s.nexus(["image", "rollout", older.id, "--wait"]);

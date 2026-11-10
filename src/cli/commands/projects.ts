@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { secretHostPattern, secretNamePattern } from "../../protocol/secret-grants.ts";
-import { CliError } from "../transport.ts";
+import { CliError, UsageError } from "../transport.ts";
 import { type Command, str, strs, request, resourcesOf, resourceOptions, table } from "../kit.ts";
 import { defaultSecondReview, projectRoutes, type LoginKind, type Project, type SecondReview } from "../../contract/projects.ts";
 
@@ -13,7 +13,7 @@ function secretGrantOf(flag: string) {
   const name = flag.slice(0, colon);
   const hosts = flag.slice(colon + 1).split(",");
   if (colon === -1 || !secretNamePattern.test(name) || !hosts.every((host) => secretHostPattern.test(host))) {
-    throw new CliError("invalid", "--secret takes NAME:HOST[,HOST...], an upper-case name and lower-case hostnames, such as GH_TOKEN:api.github.com,github.com. The value stays in each node's secret file");
+    throw new UsageError("--secret takes NAME:HOST[,HOST...], an upper-case name and lower-case hostnames, such as GH_TOKEN:api.github.com,github.com. The value stays in each node's secret file");
   }
   return { name, hosts };
 }
@@ -22,7 +22,7 @@ const autoReviews = { off: null, review: { mode: "review" }, land: { mode: "land
 function autoReviewOf(v: Parameters<typeof str>[0]) {
   const auto = str(v, "auto-review");
   if (auto === undefined) return undefined;
-  if (!(auto in autoReviews)) throw new CliError("invalid", "--auto-review takes off, review, land or yolo");
+  if (!(auto in autoReviews)) throw new UsageError("--auto-review takes off, review, land or yolo");
   return autoReviews[auto as keyof typeof autoReviews];
 }
 const pipelines = { off: null, approve: { autoStart: false }, start: { autoStart: true } } as const;
@@ -47,7 +47,7 @@ function secondReviewOf(flag: string): SecondReview | null {
   const parts = flag.split(",");
   const lines = parts.filter((part) => part.startsWith("lines=")).map((part) => /^lines=([1-9]\d{0,8})$/.exec(part)?.[1]);
   const valid = parts.every((part) => part === "reserved" || part.startsWith("lines=")) && lines.length <= 1 && lines.every((n) => n !== undefined) && new Set(parts).size === parts.length;
-  if (!valid) throw new CliError("invalid", "--second-reviewer takes off, on, always, or reserved, lines=N or both, such as reserved,lines=150");
+  if (!valid) throw new UsageError("--second-reviewer takes off, on, always, or reserved, lines=N or both, such as reserved,lines=150");
   return { always: false, lines: lines.length ? Number(lines[0]) : null, reserved: parts.includes("reserved") };
 }
 
@@ -91,7 +91,6 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
   "project show": {
     help: [
       "  nexus project show <id>                      a project's settings, and the standing rules each builder thread gets with its first message",
-      "    project add and project edit set the rules with --rules-file PATH, or - for stdin, and project edit --clear-rules clears them",
     ],
     args: [1, 1],
     async run(api, [id]) {
@@ -110,6 +109,7 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
       "    [--auto-review off|review|land|yolo]   review each builder's PR on its own, land it too, and with yolo waive the holds you may; land and yolo need a deployer",
       "    [--pipeline off|approve|start]    turn pipeline items into threads, once the person approves each or on their own",
       "    [--second-reviewer off|on|always|reserved,lines=N]   an independent second reviewer on Claude Opus 5.5 for the PRs the rule names",
+      "    [--rules-file PATH|- | --clear-rules]   the standing rules from a file, or - for stdin, or none",
     ],
     args: [1, 1],
     options: {
@@ -129,24 +129,24 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
       const resources = resourcesOf(v);
       if (resources !== undefined) patch.resources = resources;
       for (const [flag, clear, field] of [["allow-host", "clear-hosts", "allowedHosts"], ["login", "clear-logins", "logins"], ["secret", "clear-secrets", "secrets"], ["template-input", "clear-template-inputs", "templateInputs"]] as const) {
-        if (v[clear] && v[flag] !== undefined) throw new CliError("invalid", `--${clear} conflicts with --${flag}`);
+        if (v[clear] && v[flag] !== undefined) throw new UsageError(`--${clear} conflicts with --${flag}`);
         if (v[clear] || v[flag] !== undefined) patch[field] = flag === "secret" ? strs(v, flag).map(secretGrantOf) : strs(v, flag);
       }
       const name = str(v, "git-name"), email = str(v, "git-email");
-      if ((name === undefined) !== (email === undefined) || (v["clear-git-identity"] && name !== undefined)) throw new CliError("invalid", "use --git-name with --git-email, or --clear-git-identity");
+      if ((name === undefined) !== (email === undefined) || (v["clear-git-identity"] && name !== undefined)) throw new UsageError("use --git-name with --git-email, or --clear-git-identity");
       if (v["clear-git-identity"]) patch.gitIdentity = null;
       else if (name !== undefined) patch.gitIdentity = { name, email };
       const auto = autoReviewOf(v);
       if (auto !== undefined) patch.autoReview = auto;
       const items = str(v, "pipeline");
       if (items !== undefined) {
-        if (!(items in pipelines)) throw new CliError("invalid", "--pipeline takes off, approve or start");
+        if (!(items in pipelines)) throw new UsageError("--pipeline takes off, approve or start");
         patch.pipeline = pipelines[items as keyof typeof pipelines];
       }
       const second = str(v, "second-reviewer");
       if (second !== undefined) patch.secondReview = secondReviewOf(second);
       const rulesFile = str(v, "rules-file");
-      if (v["clear-rules"] && rulesFile !== undefined) throw new CliError("invalid", "--clear-rules conflicts with --rules-file");
+      if (v["clear-rules"] && rulesFile !== undefined) throw new UsageError("--clear-rules conflicts with --rules-file");
       if (v["clear-rules"]) patch.standingRules = null;
       else if (rulesFile !== undefined) patch.standingRules = rulesFileOf(rulesFile);
       const p = await request(api, projectRoutes.edit, { project: id!, body: patch });
@@ -168,7 +168,7 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
     },
     async run(api, [id, url], v) {
       // A forgotten URL must not quietly make a scratch project.
-      if ((url === undefined) === (v.scratch !== true)) throw new CliError("invalid", "project add takes a <repo-url> or --scratch, and not both");
+      if ((url === undefined) === (v.scratch !== true)) throw new UsageError("project add takes a <repo-url> or --scratch, and not both");
       const repoUrl = url ?? null;
       const resources = resourcesOf(v);
       const secrets = strs(v, "secret").map(secretGrantOf);

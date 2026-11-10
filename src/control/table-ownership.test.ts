@@ -34,7 +34,7 @@ test("a deleted thread's rows go from the tables a thread's delete cleared by ha
 
 test("no two stores hold one settings key", () => {
   const keys = [...holdings.values()].flatMap((h) => h.settings ?? []);
-  assert.deepEqual(keys.sort(), ["backed-up-at", "current", "deploy-drain", "image-operation", "previous-image", "release", "releases:"]);
+  assert.deepEqual(keys.sort(), ["backed-up-at", "current", "deploy-drain", "image-fetches", "image-operation", "previous-image", "release", "releases:"]);
 });
 
 test("every registry table has one owning file, the one whose holding names it, and only its owner writes it or names it, but for the listed reads", () => {

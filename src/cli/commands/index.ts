@@ -12,10 +12,15 @@ import type { Command } from "../kit.ts";
 
 export const commandGroups: readonly Readonly<Record<string, Command>>[] = [connectCommands, eventsCommands, releaseCommands, threadsCommands, watchCommands, itemsCommands, projectsCommands, usageCommands, nodesCommands, doctorCommands];
 const grouped: Readonly<Record<string, Command>> = Object.assign({}, ...commandGroups);
-const order = [
-  "connect", "events", "threads", "show", "ports", "preview", "unpreview", "files", "changes", "diff", "conversation", "session open", "session close", "attach",
-  "start", "start-queued", "items", "item add", "item show", "item approve", "item cancel", "send", "watch", "seen",
-  "abort", "retry", "retry-pylon", "wake", "archive", "unarchive", "delete", "projects", "project show", "project edit", "project add",
-  "review", "land", "deploy", "release", "image build", "image rollout", "image rollback", "image list", "image current", "nodes", "node", "doctor", "usage", "usage backfill",
+/** nexus --help lists the commands under these headers, in this order. */
+export const sections: readonly { title: string; names: readonly string[] }[] = [
+  { title: "Setup", names: ["connect", "doctor"] },
+  { title: "Threads", names: ["threads", "show", "ports", "preview", "unpreview", "files", "changes", "diff", "conversation", "session open", "session close", "attach"] },
+  { title: "Work", names: ["start", "start-queued", "send", "watch", "seen", "abort", "retry", "retry-pylon", "wake", "archive", "unarchive", "delete"] },
+  { title: "Pipeline", names: ["items", "item add", "item show", "item approve", "item cancel"] },
+  { title: "Projects", names: ["projects", "project show", "project edit", "project add"] },
+  { title: "Review and release", names: ["review", "land", "deploy", "release"] },
+  { title: "Images", names: ["image build", "image rollout", "image rollback", "image list", "image current"] },
+  { title: "Nodes, events and usage", names: ["nodes", "node", "events", "usage", "usage backfill"] },
 ];
-export const commands: Readonly<Record<string, Command>> = Object.fromEntries(order.map((name) => [name, grouped[name]!]));
+export const commands: Readonly<Record<string, Command>> = Object.fromEntries(sections.flatMap((section) => section.names).map((name) => [name, grouped[name]!]));

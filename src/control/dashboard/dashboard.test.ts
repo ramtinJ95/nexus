@@ -2,18 +2,19 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
+import { StatementSync } from "node:sqlite";
 import { request } from "node:http";
 import { itemThread, type PipelineItem } from "../pipeline.ts";
 import type { QueuedThread } from "../../contract/threads.ts";
 import type { Thread } from "../thread-store.ts";
 import type { ThreadDetail } from "../wire.ts";
-import { addThread, observeNode, testPr, testReview, claudeWorkerAt } from "../../test-support/registry-kit.ts";
+import { addThread, observeNode, testPr, testReview, claudeWorkerAt, testThread, testPylon } from "../../test-support/registry-kit.ts";
 import { personPhase, type Review } from "../review-model.ts";
 import type { ReviewLoop } from "../review.ts";
 import type { HoldsQuestion } from "../questions.ts";
 import type { Judgment } from "../judgment-store.ts";
 import type { AgentCall } from "../agent-usage.ts";
-import type { ImageId, JobId, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../../ids.ts";
+import { requestIds, type ImageId, type ItemId, type JobId, type NodeName, type ProjectId, type PylonId, type TailnetNodeId, type ThreadId } from "../../ids.ts";
 import type { ServiceFact } from "../../protocol/observations.ts";
 import type { NodeHealth } from "../../protocol/client.ts";
 import { recordingHealth, sampleOf } from "../node-metrics.ts";
@@ -189,6 +190,9 @@ test("the overview lists each project's open threads with their phases, node and
   assert.match(acme!, /<a href="\/threads\/closed\?project=acme">1 archived<\/a>/);
   const closed = sectionOf((await s.call("GET", "/threads/closed?project=acme")).text, "project-acme");
   assert.match(textOf(closed), /^acme 1 Thread Desired Observed Node Human Agent Old spike archived paused not on its node/, "the archived thread is listed on its fold's page");
+  const far = await s.call("GET", "/threads/closed?project=acme&page=1e100");
+  assert.equal(far.status, 200, "a page far past the last lists none");
+  assert.match(textOf(sectionOf(far.text, "project-acme")), /^acme 1 Newer$/);
 });
 
 test("an archived thread's timeline says why its disk is kept past its 24 hours, until its usage was read and backed up", async (t) => {
@@ -1966,7 +1970,7 @@ test("every page has somewhere to say a refresh failed", async (t) => {
   }
 });
 
-test("every page has one alert for what failed where the person acted, outside the dock a diff hides and every live region a swap replaces", async (t) => {
+test("every page has one alert for what failed where the person acted, outside the dock a diff shrinks and every live region a swap replaces", async (t) => {
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   const alert = '<div class="notices"><p id="refresh-state" class="refresh-state" role="status"></p><div id="action-error" class="error alert" role="alert" hidden></div></div>';
@@ -1976,7 +1980,7 @@ test("every page has one alert for what failed where the person acted, outside t
     assert.ok(page.split("</main>")[1]!.includes(alert), `${path} says it beside the page's refresh status, outside main`);
   }
   const css = await readFile(new URL("./style.css", import.meta.url), "utf8");
-  assert.match(css, /\.main\[data-view="file"\] \.dock \{ display: none; \}/, "a diff hides the dock, where the alert was");
+  assert.match(css, /\.main\[data-view="file"\] \.dock > :not\(#run\) \{ display: none; \}/, "a diff shrinks the dock to the agent's state, where the alert was");
   assert.match(css, /\n\.notices \{ position: fixed;/);
 });
 
@@ -3029,6 +3033,46 @@ test("a page reads the threads, the queue and the release reports as often whate
   assert.deepEqual(await reads(5, 4), one);
   assert.deepEqual(one["/"], { threads: 1, queuedThreads: 1, releaseReports: 0 }, "the home page shows no release, which the Cluster page does");
   assert.deepEqual(one["/cluster"], { threads: 1, queuedThreads: 1, releaseReports: 2 }, "the release view reads the reports again after the control node is found");
+});
+
+test("a page reads as often however many threads closed before it, and reads no transcript of a closed thread it does not show", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const reads = async (closed: number) => {
+    const s = await seeded(t);
+    // Each thread is a pipeline item's Claude worker with a transcript, as a builder is.
+    const claudeThread = (i: number) => {
+      const item = `it-${String(i).padStart(12, "0")}` as ItemId;
+      s.registry.pipeline.saveItem({ id: item, project: "acme" as ProjectId, title: `Item ${i}`, request: { project: "acme", title: `Item ${i}`, claude: "Build it" }, message: null,
+        after: [], addedBy: laptop, addedAt: Date.now(), approved: null, cancelled: null, lastError: null });
+      const thread = testThread({ title: `Item ${i}` });
+      s.registry.threads.createThread(thread, testPylon(thread), { claude: { prompt: "Build it" }, key: { requestId: requestIds.pipeline(item), body: "{}" } });
+      claudeWorkerAt(s.registry, thread.id, "started", { session: "s1" });
+      s.registry.threads.appendClaudeRead(thread.id, { session: "s1", from: transcriptStart, entries: [{ kind: "reply", at: Date.now(), text: "Done." }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: Date.now() });
+      return thread;
+    };
+    const gone = Array.from({ length: closed }, (_, i) => {
+      const thread = claudeThread(i);
+      s.registry.threads.setThreadStatus(thread.id, i % 2 === 0 ? "archived" : "deleted");
+      if (i % 2 === 0) s.registry.usage.finishSettle(thread.id, null, Date.now());
+      return thread.id;
+    });
+    t.mock.timers.setTime(Date.now() + 2 * 24 * 60 * 60_000);
+    const open = claudeThread(closed);
+    const executed = (["get", "all", "iterate"] as const).map((name) => t.mock.method(StatementSync.prototype, name));
+    const counts: Record<string, number> = {};
+    for (const path of ["/", `/threads/${open.id}`, "/threads/quiet?project=acme"]) {
+      for (const mock of executed) mock.mock.resetCalls();
+      assert.equal((await s.call("GET", path)).status, 200);
+      const calls = executed.flatMap((mock) => mock.mock.calls);
+      counts[path.replace(open.id, "<id>")] = calls.length;
+      const transcripts = calls.filter((c) => (c.this as StatementSync).sourceSQL.includes("claude_entries"));
+      assert.ok(transcripts.length > 0, `${path} reads the transcript of the thread it shows`);
+      assert.deepEqual(gone.filter((id) => transcripts.some((c) => c.arguments.some((a) => typeof a === "string" && a.includes(id)))), [], `${path} reads no closed thread's transcript`);
+    }
+    for (const mock of executed) mock.mock.restore();
+    return counts;
+  };
+  assert.deepEqual(await reads(12), await reads(2));
 });
 
 test("the sidebar's release lines read as the release view does: stale and missing reports pending, and a control line only for the node that reported one", async (t) => {

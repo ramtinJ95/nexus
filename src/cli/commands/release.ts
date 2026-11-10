@@ -2,7 +2,7 @@ import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type { ImageId } from "../../ids.ts";
 import { fullCommit, releaseOutcome, type ReleaseView } from "../../protocol/deploy.ts";
-import { CliError } from "../transport.ts";
+import { CliError, UsageError } from "../transport.ts";
 import { type Api, type Result, type Command, str, request, int, table, pollUntil } from "../kit.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { deployWaitMs, imageRoutes, releaseRoutes, type ImageEntry, type ImageOperation, type ImagesView } from "../../contract/release.ts";
@@ -25,7 +25,13 @@ function operationText(o: ImageOperation): string {
 function imagesText(view: ImagesView): string {
   const role = (id: string) => id === view.current ? "current" : id === view.previous ? "previous" : "-";
   const images = view.images.length === 0 ? "No images." : table(view.images.map((image) => imageRow(image, role(image.id))));
-  return view.operation === null ? images : `${images}\n${operationText(view.operation)}`;
+  // A control plane older than 0.79.0 sends no fetches.
+  const fetches = view.fetches ?? [];
+  return [
+    images,
+    ...fetches.length === 0 ? [] : [`Fetches of the current image ${view.current}:`, ...fetches.map((f) => `  ${f.node}: ${f.state}${f.failures > 0 ? `, ${f.failures} failed` : ""}${f.reason === null ? "" : `: ${f.reason}`}`)],
+    ...view.operation === null ? [] : [operationText(view.operation)],
+  ].join("\n");
 }
 
 /**
@@ -127,7 +133,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
     args: [1, 1], thread: true, options: { pr: { type: "string" }, rounds: { type: "string" }, land: { type: "boolean" }, cancel: { type: "boolean" } },
     async run(api, [id], v) {
       if (v.cancel === true) {
-        if (v.pr !== undefined || v.rounds !== undefined || v.land !== undefined) throw new CliError("invalid", "--cancel takes no --pr, --rounds or --land");
+        if (v.pr !== undefined || v.rounds !== undefined || v.land !== undefined) throw new UsageError("--cancel takes no --pr, --rounds or --land");
         const r = await request(api, reviewRoutes.cancel, { thread: id! });
         return { json: r, text: `Cancelled ${r.said.join("\n")}` };
       }
@@ -159,7 +165,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
     help: ["  nexus deploy <commit|main> [--wait]"],
     args: [1, 1], options: { wait: { type: "boolean" } },
     async run(api, [commit], values) {
-      if (commit !== "main" && !fullCommit.test(commit!)) throw new CliError("invalid", "deploy takes main or a full lower-case commit hash");
+      if (commit !== "main" && !fullCommit.test(commit!)) throw new UsageError("deploy takes main or a full lower-case commit hash");
       let view = await request(api, releaseRoutes.deploy, { body: { commit: commit! } });
       const target = view.desired!.commit;
       const settled = (): ReleaseView | undefined => {

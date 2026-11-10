@@ -6,7 +6,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { threadRoutes } from "../contract/threads.ts";
 import { projectRoutes } from "../contract/projects.ts";
-import { CliError } from "./transport.ts";
+import { CliError, UsageError } from "./transport.ts";
 import { request, str, type Api, type Values } from "./kit.ts";
 
 const fullThreadId = /^th-[0-9a-f]{12}$/;
@@ -80,10 +80,10 @@ export async function projectOf(api: Api, v: Values, verb: string): Promise<stri
   if (given !== undefined) return given;
   const remote = await origin();
   const key = remote === null ? null : repoKey(remote);
-  if (key === null) throw new CliError("invalid", `${verb} needs --project`);
+  if (key === null) throw new UsageError(`${verb} needs --project`);
   const matching = (await request(api, projectRoutes.list, {})).filter((p) => p.repoUrl !== null && repoKey(p.repoUrl) === key).map((p) => p.id);
   if (matching.length !== 1) {
-    throw new CliError("invalid", `${verb} needs --project, since ${matching.length === 0 ? "no project has" : `projects ${matching.join(", ")} all have`} this checkout's origin, ${remote}`);
+    throw new UsageError(`${verb} needs --project, since ${matching.length === 0 ? "no project has" : `projects ${matching.join(", ")} all have`} this checkout's origin, ${remote}`);
   }
   process.stderr.write(`nexus: project ${matching[0]}, from this checkout's origin\n`);
   return matching[0]!;

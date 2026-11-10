@@ -14,9 +14,10 @@ import type { ServiceDecl } from "../services-file.ts";
 import type { NodeName, PylonId } from "../ids.ts";
 import type { DeclaredOutput, ServiceFact } from "../protocol/observations.ts";
 import { listenHostBridge } from "../host-bridge.ts";
-import { createPylonApi } from "../probe/pylon-api.ts";
+import { createServer } from "node:http";
+import { createPylonApi, type PylonApiDeps } from "../probe/pylon-api.ts";
 import { freePort } from "../test-support/kit.ts";
-import { pylonInfoFile } from "../../images/pylon/nexus-contract.ts";
+import { pylonInfoFile, sessionKinds } from "../../images/pylon/nexus-contract.ts";
 
 const cli = fileURLToPath(new URL("../../images/pylon/nexus", import.meta.url));
 const pylonId = "pylon-t1" as PylonId;
@@ -28,7 +29,7 @@ const web: ServiceFact = { name: "web", state: "ready", port: 3000, declared: tr
 const output: DeclaredOutput = { id: "out-1-00000000", kind: "file", path: "/home/user/workspace/repo/shot.png", title: "Shot", sha256: "0".repeat(64) };
 
 /** Every guest call the CLI caused, as [member, ...args]. */
-async function probe(t: TestContext, guest: Partial<Guest> = {}) {
+async function probe(t: TestContext, guest: Partial<Guest> = {}, deps: Partial<PylonApiDeps> = {}) {
   const calls: unknown[][] = [];
   const port = await freePort();
   const base = fakeGuest((argv) => {
@@ -63,15 +64,19 @@ async function probe(t: TestContext, guest: Partial<Guest> = {}) {
       },
     },
     previewWaitMs: 50,
+    ...deps,
   });
   const bridge = await listenHostBridge({ host: "127.0.0.1", port }, async (req) => req.url === "/token/v1/request" ? pylonId : null)(api.answer);
   t.after(() => bridge.close());
-  const nexus = (args: string[], cwd = process.cwd()) => new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
-    execFile("node", [cli, ...args], { cwd, env: { ...process.env, NEXUS_API: `http://127.0.0.1:${port}/token` } }, (err, stdout, stderr) => {
+  return { nexus: (args: string[], cwd?: string, env?: NodeJS.ProcessEnv) => run(`http://127.0.0.1:${port}/token`, args, cwd, env), calls };
+}
+
+function run(api: string, args: string[], cwd = process.cwd(), env: NodeJS.ProcessEnv = {}) {
+  return new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+    execFile("node", [cli, ...args], { cwd, env: { ...process.env, NEXUS_API: api, ...env } }, (err, stdout, stderr) => {
       resolve({ code: err === null ? 0 : (err as { code: number }).code, stdout, stderr });
     });
   });
-  return { nexus, calls };
 }
 
 test("--version prints what the image smoke check expects", async (t) => {
@@ -96,6 +101,14 @@ test("output add file sends the path resolved against the shell's working direct
   assert.equal(code, 0);
   assert.match(stdout, new RegExp(`^Declared out-\\S+\\tfile\\t${import.meta.dirname}/shot.png\\tShot\\n$`));
   assert.equal(calls.find((c) => String(c[3]).includes("sha256sum"))?.at(-1), `${import.meta.dirname}/shot.png`, "the probe hashed the resolved path");
+});
+
+test("after --, a path that looks like a flag is a path", async (t) => {
+  const { nexus, calls } = await probe(t);
+  const { code, stdout } = await nexus(["output", "add", "file", "--", "--help"], import.meta.dirname);
+  assert.equal(code, 0);
+  assert.match(stdout, /^Declared /);
+  assert.equal(calls.find((c) => String(c[3]).includes("sha256sum"))?.at(-1), `${import.meta.dirname}/--help`);
 });
 
 test("output list prints one line per output", async (t) => {
@@ -131,13 +144,123 @@ test("service start builds the declaration from its flags", async (t) => {
   assert.deepEqual(calls, [["startService", "storybook", decls[0]], ["startService", "docs", decls[1]]]);
 });
 
-test("preview without a URL in time names the service, notes the wait, and exits 0", async (t) => {
+test("preview without a URL in time prints nothing on stdout, says why on stderr, and exits 1", async (t) => {
   const { nexus, calls } = await probe(t);
   const { code, stdout, stderr } = await nexus(["preview", "6006", "--title", "Storybook"]);
-  assert.equal(code, 0);
-  assert.equal(stdout, "port-6006\t6006\t-\n");
-  assert.match(stderr, /no preview URL for port-6006 yet/);
+  assert.equal(code, 1);
+  assert.equal(stdout, "");
+  assert.match(stderr, /no preview URL for port-6006 yet.*Port 6006 stays published, and `nexus preview 6006 --wait` waits for its URL\n$/);
   assert.deepEqual(calls, [["linkPort", 6006, "Storybook"]]);
+  assert.deepEqual(await nexus(["preview", "6006", "--json"]), { code: 0, stdout: `${JSON.stringify({ service: "port-6006", port: 6006, url: null }, null, 2)}\n`, stderr: "" });
+});
+
+test("preview --wait asks again until the port has a URL, and prints only the URL", async (t) => {
+  let links = 0;
+  const url = "https://pylon-t1.example.ts.net:8443/";
+  const { nexus } = await probe(t, { async linkPort(p) { links += 1; return `port-${p}`; } }, {
+    published: () => links < 2 ? [] : [{ service: "port-3000", httpsPort: 8443 }],
+    previewUrls: async () => new Map([[8443, url]]),
+  });
+  assert.deepEqual(await nexus(["preview", "3000", "--wait"]), { code: 0, stdout: `${url}\n`, stderr: "" });
+  assert.equal(links, 2, "the first reply had no URL, so it asked once more");
+});
+
+test("preview --wait that runs out of time says so and exits 1, as text and under --json", async (t) => {
+  const { nexus } = await probe(t);
+  const env = { NEXUS_PREVIEW_WAIT_MS: "1500" };
+  const message = "no preview URL for port-3000 after 1.5 seconds. Port 3000 stays published, and `nexus preview 3000 --wait` waits for its URL";
+  assert.deepEqual(await nexus(["preview", "3000", "--wait"], undefined, env), { code: 1, stdout: "", stderr: `nexus: ${message}\n` });
+  assert.deepEqual(await nexus(["preview", "3000", "--wait", "--json"], undefined, env), { code: 1, stdout: "", stderr: `${JSON.stringify({ error: message, status: null })}\n` });
+});
+
+test("preview --wait whose last request outlasts the wait reports the wait, not an unreachable probe", async (t) => {
+  let requests = 0;
+  const server = createServer((_, res) => {
+    requests += 1;
+    if (requests === 1) res.end(JSON.stringify({ service: "port-3000", port: 3000, url: null }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const reply = await run(`http://127.0.0.1:${(server.address() as { port: number }).port}`, ["preview", "3000", "--wait"], undefined, { NEXUS_PREVIEW_WAIT_MS: "2500" });
+  assert.deepEqual(reply, { code: 1, stdout: "", stderr: "nexus: no preview URL for port-3000 after 2.5 seconds. Port 3000 stays published, and `nexus preview 3000 --wait` waits for its URL\n" });
+});
+
+test("--help and -h print usage without calling the probe, the whole of it at the top and a command's own lines after one", async (t) => {
+  const { nexus, calls } = await probe(t);
+  const top = await nexus(["-h"]);
+  assert.equal(top.code, 0);
+  assert.match(top.stdout, /^nexus \S+, the Nexus pylon CLI\n/);
+  assert.equal((await nexus(["--help"])).stdout, top.stdout);
+  for (const args of [["preview", "--help"], ["preview", "3000", "-h"], ["help", "preview"]]) {
+    const { code, stdout } = await nexus(args);
+    assert.equal(code, 0, args.join(" "));
+    assert.match(stdout, /^ {2}nexus preview <port> \[--title T\] \[--wait\]/, args.join(" "));
+    assert.doesNotMatch(stdout, /nexus service|nexus unpreview/, args.join(" "));
+  }
+  const service = (await nexus(["service", "--help"])).stdout;
+  assert.match(service, /nexus service start <name>/);
+  assert.doesNotMatch(service, /nexus services/);
+  assert.match((await nexus(["output", "add", "--help"])).stdout, /nexus output add file[\s\S]*nexus output list/);
+  assert.equal((await nexus(["show", "--help"])).code, 64);
+  assert.deepEqual(calls, []);
+});
+
+test("bare services and service list the services", async (t) => {
+  const { nexus, calls } = await probe(t);
+  for (const word of ["services", "service"]) assert.deepEqual(await nexus([word]), { code: 0, stdout: "web\tready\t3000\t-\n", stderr: "nexus: no preview URL for web yet. Nexus publishes it once the control plane assigns a port, and `nexus services list` shows it then\n" });
+  assert.deepEqual(calls, [["services", "list", undefined, undefined], ["services", "list", undefined, undefined]]);
+});
+
+test("an event of an unknown kind names the kinds", async (t) => {
+  const { nexus, calls } = await probe(t);
+  const { code, stderr } = await nexus(["event", "foo"]);
+  assert.equal(code, 64);
+  assert.match(stderr, new RegExp(`^nexus: not a pylon event kind: foo\\. The kinds are ${sessionKinds.join(", ")}\\.`));
+  assert.deepEqual(calls, []);
+});
+
+test("a command of the person's CLI says this is the pylon's CLI and what it offers", async (t) => {
+  const { nexus, calls } = await probe(t);
+  const { code, stderr } = await nexus(["show", "th-1"]);
+  assert.equal(code, 64);
+  assert.match(stderr, /^nexus: unknown command: show th-1\. This is the pylon's nexus CLI, .* The person's nexus CLI, which docs\/cli\.md describes, runs on their machine and is not here\. This one offers event, info, services, service, preview, unpreview, output\. Run nexus --help/);
+  assert.deepEqual(calls, []);
+});
+
+test("under --json every failure is one JSON line on stderr with the probe's status", async (t) => {
+  const { nexus } = await probe(t, { async services() { throw new Error("Unknown service nope"); } });
+  assert.deepEqual(await nexus(["service", "restart", "nope", "--json"]), { code: 1, stdout: "", stderr: `${JSON.stringify({ error: "Unknown service nope", status: 500 })}\n` });
+  const usage = await nexus(["preview", "abc", "--json"]);
+  assert.equal(usage.code, 64);
+  assert.equal(JSON.parse(usage.stderr).status, null);
+  assert.match(JSON.parse(usage.stderr).error, /^the port must be a whole number, got abc\./);
+  const port = await freePort();
+  const gone = await run(`http://127.0.0.1:${port}`, ["info", "--json"]);
+  assert.equal(gone.code, 1);
+  assert.deepEqual({ ...JSON.parse(gone.stderr), error: "" }, { error: "", status: null });
+  assert.match(JSON.parse(gone.stderr).error, /^cannot reach /);
+});
+
+test("a 200 whose body is not JSON is a failure, not a stack trace", async (t) => {
+  const server = createServer((_, res) => res.end("<html>proxy</html>"));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const api = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  assert.deepEqual(await run(api, ["info"]), { code: 1, stdout: "", stderr: "nexus: the probe answered 200 with a body that is not JSON: <html>proxy</html>\n" });
+  assert.deepEqual(await run(api, ["info", "--json"]), { code: 1, stdout: "", stderr: `${JSON.stringify({ error: "the probe answered 200 with a body that is not JSON: <html>proxy</html>", status: 200 })}\n` });
+});
+
+test("a reply that breaks off is a failure, not a stack trace", async (t) => {
+  const server = createServer((_, res) => {
+    res.writeHead(200, { "content-length": "100" });
+    res.write("{\"pylonId\"", () => res.destroy());
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const reply = await run(`http://127.0.0.1:${(server.address() as { port: number }).port}`, ["info", "--json"]);
+  assert.equal(reply.code, 1);
+  assert.equal(JSON.parse(reply.stderr).status, 200);
+  assert.match(JSON.parse(reply.stderr).error, /^the probe's reply broke off: /);
 });
 
 test("unpreview unlinks the port, and a port a service's preview owns is refused with the guest's message", async (t) => {

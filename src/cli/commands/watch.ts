@@ -2,7 +2,7 @@
 import type { Writable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { EntryRecord, LiveState } from "@earendil-works/pi-durable";
-import { CliError } from "../transport.ts";
+import { CliError, UsageError } from "../transport.ts";
 import { type Api, type Follow, type Command, str, request, int, clip, reconnectMs, untilConsumerGone } from "../kit.ts";
 import { transient } from "../config.ts";
 import { agentView, threadRoutes, type ClaudeEntry, type ListeningPort, type ThreadDetail } from "../../contract/threads.ts";
@@ -230,7 +230,7 @@ export const watchCommands: Readonly<Record<string, Command>> = {
     options: { interval: { type: "string" } },
     async run(api, [id], v, follow, { io }) {
       const interval = int(str(v, "interval"), "--interval", 2000);
-      if (interval === 0) throw new CliError("invalid", "--interval must be above 0");
+      if (interval === 0) throw new UsageError("--interval must be above 0");
       await watch(api, follow, id!, interval, v.json === true, io.stdout);
     },
   },

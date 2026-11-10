@@ -19,7 +19,7 @@ import { testCertificate } from "../test-certificate.ts";
 import { freePort, tempDir } from "../test-support/kit.ts";
 import { call, CliError, follow } from "./transport.ts";
 import { whenRunning, type Api } from "./kit.ts";
-import { commandGroups, commands } from "./commands/index.ts";
+import { commandGroups, commands, sections } from "./commands/index.ts";
 import { version } from "../version.ts";
 import { cli, node, apiName, project, withHealth, listening, socksProxy, setup, versioned, bare } from "../test-support/cli-kit.ts";
 
@@ -105,10 +105,8 @@ test("the CLI runs a thread's life through the SOCKS proxy, and --json prints th
 });
 
 test("each command's help names every flag it takes", () => {
-  // project show's entry says how project add and project edit set the standing rules.
-  const elsewhere: Record<string, readonly string[]> = { "project edit": ["rules-file", "clear-rules"] };
   for (const [name, command] of Object.entries(commands)) {
-    const unnamed = Object.keys(command.options ?? {}).filter((flag) => !command.help.join("\n").includes(`--${flag}`) && !elsewhere[name]?.includes(flag));
+    const unnamed = Object.keys(command.options ?? {}).filter((flag) => !command.help.join("\n").includes(`--${flag}`));
     assert.deepEqual(unnamed, [], name);
   }
 });
@@ -149,7 +147,8 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
     + "    [--template-input PATH]... [--clear-template-inputs]   repository files, such as package-lock.json, that key the project's templates with .nexus/setup\n"
     + "    [--auto-review off|review|land|yolo]   review each builder's PR on its own, land it too, and with yolo waive the holds you may; land and yolo need a deployer\n"
     + "    [--pipeline off|approve|start]    turn pipeline items into threads, once the person approves each or on their own\n"
-    + "    [--second-reviewer off|on|always|reserved,lines=N]   an independent second reviewer on Claude Opus 5.5 for the PRs the rule names\n");
+    + "    [--second-reviewer off|on|always|reserved,lines=N]   an independent second reviewer on Claude Opus 5.5 for the PRs the rule names\n"
+    + "    [--rules-file PATH|- | --clear-rules]   the standing rules from a file, or - for stdin, or none\n");
   assert.equal((await s.nexus(["retry", "-h"])).stdout, "  nexus abort|retry|retry-pylon|wake <thread>\n");
   assert.equal((await s.nexus(["session", "open", "--help"])).stdout, "  nexus session open <thread> [--harness claude-code|pi|shell] [--title T]\n");
   const show = await s.nexus(["show", "--help"]);
@@ -160,6 +159,87 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
   assert.ok(s.proxy.connects.length > 0, "a command does send its request through the proxy");
   assert.equal((await s.nexus(["send", thread.id, "--", "--help"])).code, 0);
   assert.deepEqual(s.fake.calls.at(-1)?.slice(0, 3), ["send", thread.id, "--help"], "after -- it is text to send");
+});
+
+test("nexus -h prints nexus --help, which lists the commands under section headers", async (t) => {
+  const s = await setup(t);
+  const help = await s.nexus(["--help"]);
+  assert.deepEqual(await s.nexus(["-h"]), help);
+  assert.deepEqual(await s.nexus(["help"]), help);
+  const lines = help.stdout.split("\n");
+  for (const { title, names } of sections) {
+    const at = lines.indexOf(title);
+    assert.ok(at > 0 && lines[at - 1] === "", `${title} is a header`);
+    assert.ok(lines[at + 1]!.startsWith(`  nexus ${names[0]}`), `${title} starts with ${names[0]}`);
+  }
+  assert.ok(lines.includes("Help") && lines.includes("Global flags"));
+});
+
+test("a group such as image, alone or with --help, prints the entries of its commands", async (t) => {
+  const s = await setup(t);
+  for (const group of ["image", "project", "item", "session"]) {
+    const asked = await s.nexus([group, "--help"]);
+    assert.equal(asked.code, 0, `${group} --help: ${asked.stderr}`);
+    const entries = asked.stdout.split("\n").filter((line) => line.startsWith("  nexus "));
+    assert.ok(entries.length >= 2 && entries.every((line) => line.startsWith(`  nexus ${group} `)), `${group} --help prints its commands' entries: ${asked.stdout}`);
+    assert.deepEqual(await s.nexus([group, "-h"]), asked);
+    assert.deepEqual(await s.nexus(["help", group]), asked);
+    assert.deepEqual(await s.nexus([group]), { code: 64, stdout: "", stderr: asked.stdout }, `${group} alone prints them on stderr as a failure`);
+    assert.equal((await s.nexus([group, "--", "--help"])).code, 64, "after -- --help is no flag");
+  }
+  const json = await s.nexus(["image", "--json"]);
+  assert.deepEqual([json.code, JSON.parse(json.stderr)], [64, { error: "image takes a command: build, rollout, rollback, list, current", kind: "invalid", status: null, code: null }]);
+  assert.deepEqual(s.proxy.connects, [], "no help run sent a request");
+});
+
+test("nexus help <command> prints that command's help, and a mistyped command gets the nearest one", async (t) => {
+  const s = await setup(t);
+  assert.deepEqual(await s.nexus(["help", "start"]), await s.nexus(["start", "--help"]));
+  assert.deepEqual(await s.nexus(["help", "image", "build"]), await s.nexus(["image", "build", "--help"]));
+  assert.deepEqual(await s.nexus(["strat"]), { code: 64, stdout: "", stderr: "nexus: unknown command strat. Did you mean start? Run nexus --help for usage\n" });
+  assert.deepEqual(await s.nexus(["help", "strat"]), await s.nexus(["strat"]));
+  assert.deepEqual(await s.nexus(["image", "bulid"]), { code: 64, stdout: "", stderr: "nexus: unknown command image bulid. Did you mean image build? Run nexus image --help for usage\n" });
+  assert.equal((await s.nexus(["frobnicate"])).stderr, "nexus: unknown command frobnicate. Run nexus --help for usage\n", "nothing is near it");
+});
+
+test("global flags work before the command as after it", async (t) => {
+  const s = await setup(t);
+  const listed = async (args: readonly string[], overrides?: Record<string, string>) => {
+    const res = await s.nexus(args, overrides);
+    assert.equal(res.code, 0, `${args.join(" ")}: ${res.stderr}`);
+    return JSON.parse(res.stdout);
+  };
+  assert.deepEqual(await listed(["--json", "projects"]), [project]);
+  const dead = { NEXUS_URL: `http://127.0.0.1:${await freePort()}`, NEXUS_SOCKS: "" };
+  assert.deepEqual(await listed(["--socks", "none", "--url", s.localUrl, "--json", "projects"], dead), [project], "--socks and --url before projects");
+  assert.deepEqual(await listed([`--url=${s.localUrl}`, "--socks=none", "--json", "projects"], dead), [project], "and as --flag=value");
+  assert.equal((await s.nexus(["-h", "start"])).stdout, (await s.nexus(["start", "--help"])).stdout);
+  assert.deepEqual(await s.nexus(["--bogus", "projects"]), { code: 64, stdout: "", stderr: "nexus: unknown flag --bogus, since before a command nexus takes only --json, --url, --socks, --help and --version. Run nexus --help for usage\n" });
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Flags"]);
+  const sent = s.fake.calls.length;
+  assert.deepEqual(await s.nexus(["help", "send", thread.id, "--", "hello"]), await s.nexus(["send", "--help"]));
+  assert.equal(s.fake.calls.length, sent, "help sends nothing");
+  assert.equal((await s.nexus(["--json", "send", thread.id, "--", "--json"])).code, 0);
+  assert.deepEqual(s.fake.calls.at(-1)?.slice(0, 3), ["send", thread.id, "--json"], "a leading flag stays before --");
+});
+
+test("a usage error points at its command's help, and an error that is not about usage points nowhere", async (t) => {
+  const s = await setup(t);
+  assert.deepEqual(await s.nexus(["show"]), { code: 64, stdout: "", stderr: "nexus: show takes 1 argument, got 0. Run nexus show --help for usage\n" });
+  assert.deepEqual(await s.nexus(["session", "open"]), { code: 64, stdout: "", stderr: "nexus: session open takes 1 argument, got 0. Run nexus session open --help for usage\n" });
+  assert.deepEqual(await s.nexus(["diff", "th-x", "--turn", "--uncommitted"]), { code: 64, stdout: "", stderr: "nexus: --turn and --uncommitted cannot be used together. Run nexus diff --help for usage\n" });
+  assert.equal((await s.nexus(["deploy", "abc"])).stderr, "nexus: deploy takes main or a full lower-case commit hash. Run nexus deploy --help for usage\n");
+  assert.deepEqual(await s.nexus(["projects"], { NEXUS_URL: "", NEXUS_SOCKS: "" }), { code: 64, stdout: "", stderr: "nexus: no control plane is set. Run nexus connect <host> with its tailnet name, or give --url or NEXUS_URL\n" });
+  const json = await s.nexus(["show", "--json"]);
+  assert.equal(JSON.parse(json.stderr).error, "show takes 1 argument, got 0", "--json's error has no pointer");
+});
+
+test("an unknown flag names the command that does not take it, and the nearest flag it does take", async (t) => {
+  const s = await setup(t);
+  assert.deepEqual(await s.nexus(["threads", "--bogus"]), { code: 64, stdout: "", stderr: "nexus: threads takes no --bogus. Run nexus threads --help for usage\n" });
+  assert.deepEqual(await s.nexus(["threads", "--projet", "acme"]), { code: 64, stdout: "", stderr: "nexus: threads takes no --projet. Did you mean --project? Run nexus threads --help for usage\n" });
+  assert.equal((await s.nexus(["image", "list", "-x"])).stderr, "nexus: image list takes no -x. Run nexus image list --help for usage\n");
+  assert.equal(JSON.parse((await s.nexus(["threads", "--bogus", "--json"])).stderr).error, "threads takes no --bogus");
 });
 
 test("each failure has its own exit code, and with --json its error is one JSON line on stderr", async (t) => {
@@ -204,7 +284,7 @@ test("the URL and the proxy come from the flags, then the environment, then the 
   const dead = `http://127.0.0.1:${await freePort()}`;
   const config = join(s.home, ".config", "nexus", "cli.json");
   const none = await s.nexus(["projects"], unset);
-  assert.deepEqual([none.code, none.stderr], [64, "nexus: no control plane is set. Run nexus connect <host> with its tailnet name, or give --url or NEXUS_URL. Run nexus --help for usage\n"], "no URL is built in");
+  assert.deepEqual([none.code, none.stderr], [64, "nexus: no control plane is set. Run nexus connect <host> with its tailnet name, or give --url or NEXUS_URL\n"], "no URL is built in");
   assert.deepEqual(await s.json(["projects"], { ...unset, NEXUS_URL: s.localUrl }), [project], "without a proxy the CLI connects directly");
   await mkdir(join(s.home, ".config", "nexus"), { recursive: true });
 

@@ -60,7 +60,7 @@ test("project add creates a project with the contract's defaults or its flags, a
   await fails(["project", "add", "other", repo, "--node", node, "--login", "gemini"], 64, { kind: "invalid", status: 400 });
   await fails(["project", "add", "other", repo, "--node", node, "--cpus", "two"], 64, { kind: "invalid", status: null, error: "--cpus takes a whole number, got two" });
   await fails(["project", "add"], 64, { kind: "invalid", status: null, error: "project add takes 1 to 2 arguments, got 0" });
-  await fails(["project", "other"], 64, { kind: "invalid", status: null, error: "unknown command project" });
+  await fails(["project", "other"], 64, { kind: "invalid", status: null, error: "unknown command project other" });
   assert.deepEqual(s.registry.projects.projects().map((p) => p.id).toSorted(), ["acme", "custom", "hello"], "no refused project was created");
 
   const spread = await s.nexus(["project", "add", "spread", repo]);

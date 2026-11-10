@@ -19,7 +19,7 @@ import type { TokenAnswer } from "./github.ts";
 import type { TailscaleStatus } from "../tailscale.ts";
 
 export interface DoctorSources {
-  registry: Pick<Registry, "nodes" | "now" | "threads" | "placement" | "releases">;
+  registry: Pick<Registry, "nodes" | "now" | "threads" | "placement" | "releases" | "images">;
   self: TailnetNodeId;
   backupStatus(): Promise<BackupStatusRead>;
   login(): Promise<LoginState>;
@@ -48,9 +48,11 @@ export async function runDoctor(s: DoctorSources): Promise<DoctorReport> {
     s.tailnet().then((t) => [...t.self === null ? [] : [t.self], ...t.peers], (err: unknown) => ({ unreadable: codeOf(err) })),
   ]);
   const now = (s.clock ?? Date.now)();
+  const records = s.registry.nodes.nodes();
+  const current = s.registry.images.currentImage();
   return doctorReport({
     now, upSince: s.startedAt,
-    nodes: s.registry.nodes.nodes().map((record) => nodeSummary(s.registry, record)),
+    nodes: records.map((record) => nodeSummary(s.registry, record)),
     release: releaseView(s.registry, s.self, now),
     controlNode: s.registry.nodes.nodeByTailnetId(s.self)?.name ?? null,
     backup, login, certificate, github, tailnet,
@@ -59,6 +61,11 @@ export async function runDoctor(s: DoctorSources): Promise<DoctorReport> {
       const p = s.registry.threads.pylon(t.pylonId);
       return p !== undefined && observedPylon(s.registry, p) !== "absent";
     }),
+    image: {
+      current,
+      holders: current === null ? [] : records.filter((r) => r.observation?.artifacts.includes(current) === true).map((r) => r.name),
+      fetches: s.registry.images.imageFetches(),
+    },
   });
 }
 
