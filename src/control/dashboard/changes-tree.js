@@ -10,6 +10,28 @@ import { noteCount } from "./review-notes.js";
 // A template's icons are in its content, outside the document.
 const iconOf = (name) => document.getElementById("icons").content.querySelector(`.i-${name}`).cloneNode(true);
 
+/**
+ * The changed files the reader marked viewed, by path, each with the file's look then: its status, its old path and
+ * its counts. A file whose look changed since reads as not viewed, as the agent changed it again.
+ */
+const viewedKey = thread === undefined ? null : storageKeys.viewed(thread);
+const lookOf = (file) => JSON.stringify([file.status, file.oldPath, file.additions, file.deletions]);
+let viewed = (() => {
+  try {
+    const saved = JSON.parse(viewedKey === null ? "null" : kept.read(viewedKey) ?? "null");
+    return typeof saved === "object" && saved !== null && !Array.isArray(saved) ? saved : {};
+  } catch {
+    return {};
+  }
+})();
+export const isViewed = (file) => viewed[file.path] === lookOf(file);
+export function markViewed(file, on) {
+  const { [file.path]: _, ...rest } = viewed;
+  viewed = on ? { ...rest, [file.path]: lookOf(file) } : rest;
+  kept.write(viewedKey, Object.keys(viewed).length === 0 ? null : JSON.stringify(viewed));
+  if (checkout.changes !== null) renderChanges();
+}
+
 function showChanges(...nodes) {
   document.getElementById("changes-body")?.replaceChildren(...present(nodes));
 }
@@ -71,7 +93,10 @@ export async function readChanges(wake = false) {
   if (base !== checkout.base) return readChanges();
 }
 
-/** A tree of the changed files, with each folder that holds only one folder merged into it, as src/checkout. */
+/**
+ * A tree of the changed files, each level's folders and then its files by name, with each folder that holds only one
+ * folder merged into it, as src/checkout.
+ */
 function treeOf(files) {
   const root = { dirs: new Map(), files: [] };
   for (const file of files) {
@@ -83,6 +108,12 @@ function treeOf(files) {
     }
     dir.files.push({ name: parts.at(-1), file });
   }
+  const sort = (dir) => {
+    dir.dirs = new Map([...dir.dirs].sort(([a], [b]) => a.localeCompare(b)));
+    dir.files.sort((a, b) => a.name.localeCompare(b.name));
+    for (const inner of dir.dirs.values()) sort(inner);
+  };
+  sort(root);
   const merged = (name, dir) => {
     while (dir.files.length === 0 && dir.dirs.size === 1) {
       const [[child, inner]] = dir.dirs;
@@ -92,6 +123,14 @@ function treeOf(files) {
     return [name, dir];
   };
   return { root, merged };
+}
+
+/** The changed files as the tree lists them, top to bottom, or none before the changes are read. */
+export function changedFiles() {
+  if (checkout.changes === null) return [];
+  const { root, merged } = treeOf(checkout.changes.files);
+  const walk = (dir) => [...[...dir.dirs].flatMap(([part, inner]) => walk(merged(part, inner)[1])), ...dir.files.map(({ file }) => file)];
+  return walk(root);
 }
 
 function renderChanges() {
@@ -105,7 +144,7 @@ function renderChanges() {
   const { root, merged } = treeOf(files);
   const branch = (dir, path) => {
     const items = [];
-    for (const [part, inner] of [...dir.dirs].sort(([a], [b]) => a.localeCompare(b))) {
+    for (const [part, inner] of dir.dirs) {
       const [name, deepest] = merged(part, inner);
       const at = path === "" ? name : `${path}/${name}`;
       const fold = el("details", { className: "tree-dir", open: !checkout.closed.has(at) },
@@ -114,11 +153,13 @@ function renderChanges() {
       fold.addEventListener("toggle", () => { if (fold.open) checkout.closed.delete(at); else checkout.closed.add(at); });
       items.push(fold);
     }
-    for (const { name, file } of dir.files.sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const { name, file } of dir.files) {
+      const seen = isViewed(file);
       const open = el("button", {
-        type: "button", className: `tree-file${activeTab === file.path ? " active" : ""}`,
-        title: file.oldPath === null ? file.path : `${file.path}, ${file.status} from ${file.oldPath}`,
-      }, badge(file.status), el("span", { className: "tree-name", textContent: name }), noteCount(file.path), counts(file.additions, file.deletions));
+        type: "button", className: `tree-file${activeTab === file.path ? " active" : ""}${seen ? " viewed" : ""}`,
+        title: `${file.oldPath === null ? file.path : `${file.path}, ${file.status} from ${file.oldPath}`}${seen ? ", viewed" : ""}`,
+      }, badge(file.status), el("span", { className: "tree-name", textContent: name }), seen && el("span", { className: "tree-viewed", textContent: "✓" }),
+      noteCount(file.path), counts(file.additions, file.deletions));
       open.dataset.path = file.path;
       open.addEventListener("click", () => openFile(file));
       items.push(open);

@@ -484,7 +484,12 @@ h4.md-h { font-size: 1.07em; }
 
 /* composer: an open input over a hairline, with the model as a chip and a round send button */
 .dock { flex: none; padding: 10px 32px 16px; width: 100%; position: relative; display: grid; grid-template-columns: minmax(0, 780px); justify-content: center; gap: 6px; border-top: 1px solid var(--line-soft); }
-.main[data-view="file"] .dock { display: none; }
+/* While a diff shows, the dock is one line: the agent's state, and an action's error. */
+.main[data-view="file"] .dock { padding: 6px 32px; }
+.main[data-view="file"] .dock > :not(#run, #action-error) { display: none; }
+.main[data-view="file"] .state-bar { flex-wrap: nowrap; min-height: 28px; overflow: hidden; }
+.main[data-view="file"] .state-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.main[data-view="file"] .attach-line { display: none; }
 /* a Claude worker's terminal is its prompt, so under the terminal the composer gives way to it */
 .main[data-view="term"] #composer { display: none; }
 /* What failed where the person acted, and why the page is not updating, over every view of every page, the dock's included, which a diff hides. */
@@ -604,6 +609,9 @@ h4.md-h { font-size: 1.07em; }
 .fv-head > .dim { flex: none; white-space: nowrap; }
 .fv-head .lines { margin-left: auto; }
 .fv-note { margin: 16px 20px; }
+.fv-steps { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+.fv-viewed { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; cursor: pointer; }
+.fv-more { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .fv-meta { padding: 8px 20px; font-family: var(--mono); border-bottom: 1px solid var(--line-soft); }
 /* The diff draws in its own shadow root, which inherits these. */
 .diff-view { --diffs-font-family: var(--mono); --diffs-font-size: 12.5px; --diffs-line-height: 20px; --diffs-light-bg: var(--bg); --diffs-dark-bg: var(--bg); padding: 4px 0 24px; }
@@ -611,6 +619,9 @@ h4.md-h { font-size: 1.07em; }
 .fv-review:empty { display: none; }
 .review-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 20px; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; color: var(--text-2); }
 .review-bar span { margin-right: auto; }
+.review-undo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 20px; border-bottom: 1px solid var(--line-soft); }
+.review-undo span { margin-right: auto; }
+.note-hint { margin: 0; padding: 6px 20px; border-bottom: 1px solid var(--line-soft); }
 .notes-outdated { display: grid; gap: 8px; padding: 10px 20px; border-bottom: 1px solid var(--line-soft); }
 .notes-outdated > p { margin: 0; }
 .note-pick { position: absolute; z-index: 2; display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; box-shadow: var(--pop); }
@@ -713,6 +724,8 @@ h4.md-h { font-size: 1.07em; }
 .tree-file:hover { background: var(--hover); }
 .tree-file.active { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .tree-file:focus-visible { outline: 2px solid var(--accent); }
+.tree-file.viewed .tree-name { color: var(--text-2); }
+.tree-viewed { flex: none; color: var(--ok); font-size: 11px; }
 .tree-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
 
 /* the thread overview */
@@ -1109,6 +1122,8 @@ meter:-moz-meter-sub-sub-optimum::-moz-meter-bar { background: var(--bad); }
   .attach-line { margin-left: 0; }
   .term-view { margin: 0 0 6px; border-radius: 0; }
   .fv-head { padding: 10px 12px; }
+  .main[data-view="file"] .dock { padding: 6px 12px; }
+  .review-undo, .note-hint { padding-left: 12px; padding-right: 12px; }
   .fv-head .fv-layout { display: none; }
 
   .page { padding: 14px 12px 24px; }

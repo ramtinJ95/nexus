@@ -4,12 +4,14 @@ import { answerFinal } from "../plain-wording.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { questionRoutes } from "../../contract/reviews.ts";
 import { chunk, end, notify, onSwap, refreshAfter, whenRunning } from "./page.js";
-import { review, reviewSent } from "./review-notes.js";
+import { composerHolds, review, reviewSent } from "./review-notes.js";
 import { kept } from "./contract.ts";
 import { composerDraft } from "./draft.js";
 
 const draft = composerDraft({ kept });
 draft.restore();
+// The review kept says what it last put in the composer, and the draft restored now is what the composer holds.
+composerHolds(document.getElementById("prompt-text")?.value ?? "");
 document.addEventListener("input", (event) => {
   if (event.target.id === "prompt-text") draft.save(event.target);
 });
