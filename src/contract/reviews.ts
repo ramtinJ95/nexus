@@ -23,5 +23,6 @@ export const reviewRoutes = {
 } as const;
 
 export const questionRoutes = {
+  show: route<Question>()("GET", "/v1/questions/{question}"),
   answer: route<Question, z.input<typeof answerSchema>>()("POST", "/v1/questions/{question}/answer"),
 } as const;

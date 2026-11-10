@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { buffer } from "node:stream/consumers";
 import { setTimeout as sleep } from "node:timers/promises";
+import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type { ParseArgsOptionsConfig } from "node:util";
 import type { z } from "zod";
@@ -291,4 +292,27 @@ export function untilConsumerGone(onEnd: () => void): () => void {
     clearInterval(orphan);
     for (const signal of signals) process.removeListener(signal, onEnd);
   };
+}
+
+/** Where the person confirms what a command does for them: its stdin, and the stderr it asks on. */
+export interface Terminal { input: Readable & { readonly isTTY?: boolean }; output: Writable & { readonly isTTY?: boolean } }
+
+/**
+ * An agent on the person's Mac calls as the same tailnet node, so the terminal is what tells the person apart: with
+ * no terminal the command refuses, with `refusal`.
+ */
+export function needsTerminal(terminal: Terminal, refusal: string): void {
+  if (terminal.input.isTTY !== true || terminal.output.isTTY !== true) throw new CliError("invalid", refusal);
+}
+
+/** Whether the person typed yes after `prompt`. A closed stdin is a no. */
+export async function typedYes(terminal: Terminal, prompt: string): Promise<boolean> {
+  terminal.output.write(prompt);
+  const lines = createInterface({ input: terminal.input, terminal: false });
+  const answer = await new Promise<string | null>((resolve) => {
+    lines.once("line", resolve);
+    lines.once("close", () => resolve(null));
+  });
+  lines.close();
+  return answer?.trim() === "yes";
 }

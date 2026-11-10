@@ -43,6 +43,7 @@ const before: readonly (readonly [string, RegExp, ApiRoute, readonly string[]])[
   ["POST", /^\/v1\/threads\/([^/]+)\/review$/, reviewRoutes.start, ["thread"]],
   ["POST", /^\/v1\/threads\/([^/]+)\/review\/cancel$/, reviewRoutes.cancel, ["thread"]],
   ["POST", /^\/v1\/threads\/([^/]+)\/land$/, reviewRoutes.land, ["thread"]],
+  ["GET", /^\/v1\/questions\/([^/]+)$/, questionRoutes.show, ["question"]],
   ["POST", /^\/v1\/questions\/([^/]+)\/answer$/, questionRoutes.answer, ["question"]],
 ];
 

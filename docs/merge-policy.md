@@ -90,7 +90,7 @@ A second reviewer never approves by failing. One that gives no verdict Nexus can
 
 ## What the person may waive
 
-Answering Land to the review's question, pressing Land on the dashboard, or confirming `nexus land --waive` in a terminal, is how the person waives a hold. `nexus land` without the flag never waives one, so an agent that drives the CLI does not waive a hold by accident. A project in yolo mode answers for the person, as [Yolo landing](#yolo-landing) says.
+Answering Land to the review's question, on the dashboard or with `nexus answer` confirmed in a terminal, pressing Land on the dashboard, or confirming `nexus land --waive` in a terminal, is how the person waives a hold. `nexus land` without the flag never waives one, so an agent that drives the CLI does not waive a hold by accident. A project in yolo mode answers for the person, as [Yolo landing](#yolo-landing) says.
 
 Each hold has a code, `HoldCode` in [the CLI reference](cli.md#reviews-and-landing). The table below is each code's rule in `src/control/holds.ts`, which `node scripts/docs-gen.ts` writes. `loop` is a reason of the review loop's own, such as a deployer no longer asking for the landing, a project that no longer lands on its own, or a deploy that failed. Where one hold alone holds a landing, the loop acts on it itself when the table names a remedy: it asks the builder to rebase a conflicting branch onto its base, and, when the description changed since the reviewer quoted it, asks the reviewer to quote it again. A missing quote holds the landing until a Land press asks for one.
 

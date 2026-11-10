@@ -637,6 +637,7 @@ test("the route table holds the routes it always has, and each path matches one 
     "GET ^\\/v1\\/nodes\\/([^/]+)\\/health$ deployer: read a node's health",
     "GET ^\\/v1\\/nodes\\/([^/]+)\\/metrics$ deployer: read a node's metrics",
     "GET ^\\/v1\\/projects$ allowed",
+    "GET ^\\/v1\\/questions\\/([^/]+)$ allowed",
     "GET ^\\/v1\\/queued$ allowed",
     "GET ^\\/v1\\/queued\\/([^/]+)$ allowed",
     "GET ^\\/v1\\/release$ allowed",

@@ -107,6 +107,7 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `review <thread> [--pr N] [--rounds N] [--land]` | `POST /v1/threads/<thread>/review` with `{"pr"?: number, "rounds"?: number, "land"?: true}`, which answers 201 | `Review`, the review it started, with `said`, its line and notes as the text prints them, as each review route's reply has |
 | `review --cancel <thread>` | `POST /v1/threads/<thread>/review/cancel` with `{}`. It takes no `--pr`, `--rounds` or `--land` | `Review` with `said`, ended `cancelled` |
 | `land <thread> [--waive]` | `POST /v1/threads/<thread>/land` with `{}`, or with `--waive` `{"head", "waive"?}` read from `GET /v1/threads/<thread>` | `Review` with `said`, moved back to its check. A `--waive` that answered the review's question prints the thread's `reviewView` from `GET /v1/threads/<thread>` |
+| `answer <question\|thread> [option]` | `GET /v1/questions/<question>`, or when that answers 404 `GET /v1/threads/<thread>` with `<thread>` as above. With an option, once the person typed `yes` on a terminal, `POST /v1/questions/<id>/answer` with `{"option": string}`, as [Questions](#questions) describes | Without an option, `Question[]`: the question, answered or not, or the thread's open questions. With one, the `Question` as stored |
 | `deploy <commit\|main> [--wait]` | `PUT /v1/release` with `{"commit": string}`, then `GET /v1/release` while waiting | `ReleaseView`, described below |
 | `release` | `GET /v1/release` | `ReleaseView` |
 | `image build [--wait]` | `POST /v1/images/build` with `{}`, then `GET /v1/images` while waiting | `ImageOperation`, the build, or `ImagesView` with `--wait` |
@@ -1535,7 +1536,7 @@ The dashboard's start dialog sends no request ID, and guards against a second pr
 
 ## Questions
 
-A question is something a thread asks the person, with a fixed set of answers. The dashboard shows each open one as a card on its thread's page, with a button per option, and the thread's attention is `decision` until it is answered. A [failure judgment](#failure-judgments) asks one when a failed pylon is the person's to decide, a [planning thread](#planning-threads) asks one per item it proposes, a Claude worker's [AskUserQuestion](#a-claude-workers-askuserquestion) call is one while its dialog waits, and since 0.65.0 a review asks one about the holds at its head that the person may waive. The CLI shows questions, and answers only a review's question about its holds, through `land --waive`.
+A question is something a thread asks the person, with a fixed set of answers. The dashboard shows each open one as a card on its thread's page, with a button per option, and the thread's attention is `decision` until it is answered. A [failure judgment](#failure-judgments) asks one when a failed pylon is the person's to decide, a [planning thread](#planning-threads) asks one per item it proposes, a Claude worker's [AskUserQuestion](#a-claude-workers-askuserquestion) call is one while its dialog waits, and since 0.65.0 a review asks one about the holds at its head that the person may waive. `show` prints a thread's questions, and `answer` answers them, as [Answering from the CLI](#answering-from-the-cli) describes.
 
 `ThreadDetail.questions` lists every question the thread asked, answered ones included, in the order they were asked. Each is a `Question`:
 
@@ -1585,6 +1586,12 @@ question qn-image: Rebuild the pylon image?
 ```
 
 The first line has only the text's first line. `reserved:` is printed only for a reserved case. The last line is `needs you` for a person question, `needs a deployer` for a deployer question, or `answered "<option>" by <node> <time>` once it is answered, or since 0.62.0 `withdrawn when the thread was archived <time>`.
+
+### Answering from the CLI
+
+Since 0.81.0 `nexus answer <question|thread>` prints the question that has that ID, answered or not, or else the open questions of the thread that `<thread>` names, each as `show` prints it. After an open question it prints how to answer it, ``answer it with `nexus answer <id> <option>` ``. It finds a question by its ID with `GET /v1/questions/<id>`, which any allowed caller may read and which answers the `Question` as stored or 404 `no question <id>`, and otherwise reads the thread. When neither has that ID or name it fails with exit code 4, `no question or thread <given>`. A thread with no open question prints `<thread> asks no open question`.
+
+`nexus answer <question|thread> <option>` answers the question with one of its `options`, as `show` prints them. It needs a terminal, as `land --waive` does, because an agent on the person's Mac calls as the same tailnet node and only the terminal tells the person apart. Without a terminal on stdin and stderr it fails with exit code 64 before it sends any request. On one it prints the question's ID, what asked it, the option and the question's whole text on stderr, and asks the person to type `yes`. Anything else answers nothing and exits 1. Once they typed `yes` it sends `POST /v1/questions/<id>/answer` with `{"option": <option>}`, and the route decides as it does for the dashboard, so a person who is not a deployer gets 403 for a `deployer` question, exit code 3. A thread's name answers its one open question, and a thread with several fails with exit code 64 and names their IDs. An option the question lacks fails with exit code 64 before the prompt. A [Claude worker's AskUserQuestion](#a-claude-workers-askuserquestion) takes a choice for each question it asks, which one option cannot give, so `answer` lists it but answers it only on the dashboard or in the pylon's terminal, through `nexus attach <thread>`.
 
 ### A Claude worker's AskUserQuestion
 
