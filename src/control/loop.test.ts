@@ -1198,6 +1198,21 @@ test("a pass over several running pylons reads its node's record at most once", 
   assert.ok(reads <= 1, `the pass read ${node}'s record ${reads} times`);
 });
 
+test("a tick that waits on nothing reads its thread once", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  let reads = 0;
+  const counted: Registry = { ...registry, threads: { ...registry.threads, thread: (id) => { if (id === thread.id) reads++; return registry.threads.thread(id); } } };
+  const fake = fakeNode({ autoFinish: true });
+  const loop = run(t, counted, fake.probe, { intervalMs: 60_000 });
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.threads.pylon(thread.pylonId)?.submitted === null);
+  await settled(fake, loop);
+
+  reads = 0;
+  await loop.wake(node);
+  assert.equal(reads, 1);
+});
+
 test("a pylon pauses once its agent turn ends and nobody has used it for a while", async (t) => {
   const registry = openRegistry(tempDb());
   const longAgo = Date.now() - 60 * 60_000;
@@ -1948,6 +1963,114 @@ test("a deleted thread whose Claude launch was cut off has the launch failed, th
   run(t, registry, fake.probe);
   await until("worker failed", () => registry.threads.claudeWorker(thread.id)?.state === "failed");
   assert.deepEqual(fake.submitted, []);
+});
+
+test("a pass over archived threads whose pylons are gone reads none of them, nor any thread for the holds on its node", async (t) => {
+  const { registry, shift } = shiftedRegistry();
+  seedRegistry(registry, { nodes: [node] });
+  const threads = Array.from({ length: 40 }, () => addThread(registry, { node, boot: { image } }));
+  for (const [i, thread] of threads.entries()) await archivedAgo(registry, shift, thread, i % 2 === 0 ? archivedDiskMs : 60_000);
+  const reads: string[] = [];
+  const counted: Registry = {
+    ...registry,
+    threads: {
+      ...registry.threads,
+      thread: (id) => { reads.push(`thread ${id}`); return registry.threads.thread(id); },
+      pylon: (id) => { reads.push(`pylon ${id}`); return registry.threads.pylon(id); },
+      pylonsWithThreadsOn: (name) => { reads.push(`pylonsWithThreadsOn ${name}`); return registry.threads.pylonsWithThreadsOn(name); },
+    },
+  };
+  const fake = fakeNode({ autoFinish: true });
+  const loop = run(t, counted, fake.probe, { intervalMs: 60_000 });
+  await until("the node is online", () => registry.nodes.node(node)?.state === "online");
+  await settled(fake, loop);
+
+  reads.length = 0;
+  await loop.wake(node);
+  assert.deepEqual(reads, []);
+  assert.deepEqual(fake.submitted, []);
+});
+
+test("an archived thread's pylon that is gone is ticked again once its node lists or routes it, or a preview, disk delete, job or retry is left to settle", async (t) => {
+  const { registry, shift } = shiftedRegistry();
+  seedRegistry(registry, { nodes: [node] });
+  const [listed, routed, previewed, cleaned, submitted, retried] = Array.from({ length: 6 }, () => addThread(registry, { node, boot: { image } }));
+  for (const thread of [listed, routed, previewed, cleaned, submitted, retried]) await archivedAgo(registry, shift, thread!, archivedDiskMs);
+  const fake = fakeNode({ autoFinish: true });
+  const loop = run(t, registry, fake.probe);
+  await until("the node is online", () => registry.nodes.node(node)?.state === "online");
+  await settled(fake, loop);
+  assert.deepEqual(registry.threads.pylonIdsToTick(node, []), [], "none has anything left to settle");
+
+  fake.pylons.set(listed!.pylonId, stoppedPylon(listed!.pylonId, { sessions: null }));
+  fake.routes.set(10200, { httpsPort: 10200, pylonId: routed!.pylonId, service: "web" });
+  fake.announce();
+  await until("the listed and the routed pylon are deleted", () => !fake.pylons.has(listed!.pylonId) && fake.routes.size === 0
+    && [listed!, routed!].every((th) => registry.threads.pylon(th.pylonId)?.submitted === null));
+  assert.deepEqual(fake.submitted.map((job) => job.kind === "delete" && job.pylonId).sort(), [listed!.pylonId, routed!.pylonId].sort());
+
+  registry.threads.allocatePreviews(previewed!.pylonId, ["web"], previewPorts);
+  registry.threads.savePylon({ ...registry.threads.pylon(cleaned!.pylonId)!, failed: "gave up" });
+  registry.threads.requestDiskDelete(cleaned!.pylonId, cleaned!.id);
+  registry.threads.savePylon({ ...registry.threads.pylon(submitted!.pylonId)!, submitted: envelope({ kind: "delete", pylonId: submitted!.pylonId }, node, Date.now() - 31_000) });
+  registry.threads.savePylon({ ...registry.threads.pylon(retried!.pylonId)!, failed: "gave up" });
+  assert.ok(registry.threads.retryPylon(retried!.pylonId));
+  void loop.wake(node);
+  await until("each is settled", () => registry.threads.previews(previewed!.pylonId).length === 0
+    && registry.threads.diskDeleteRequestedAt(cleaned!.pylonId) === undefined && registry.threads.pylon(cleaned!.pylonId)?.failed === null
+    && registry.threads.pylon(submitted!.pylonId)?.submitted === null && registry.threads.pylon(retried!.pylonId)?.retrying === false);
+  await settled(fake, loop);
+  assert.equal(fake.submitted.length, 2, "nothing else is sent");
+  const names = new Map(Object.entries({ listed, routed, previewed, cleaned, submitted, retried }).map(([k, v]) => [v!.pylonId, k]));
+  assert.deepEqual(registry.threads.pylonIdsToTick(node, []).map((id) => names.get(id)), [], "and none is ticked once settled");
+});
+
+test("an archived thread's pylon that is gone, whose last job failed for good, is ticked until the planner records the failure", async (t) => {
+  const { registry, shift } = shiftedRegistry();
+  seedRegistry(registry, { nodes: [node] });
+  const [final, exhausted, retried] = Array.from({ length: 3 }, () => addThread(registry, { node, boot: { image } }));
+  for (const thread of [final, exhausted, retried]) await archivedAgo(registry, shift, thread!, 60_000, false);
+  const failure = (code: JobErrorCode, count: number) => ({ count, last: { at: Date.now() - 60 * 60_000, code, message: "boom" } });
+  registry.threads.savePylon({ ...registry.threads.pylon(final!.pylonId)!, attempts: failure("invalid", 1) });
+  registry.threads.savePylon({ ...registry.threads.pylon(exhausted!.pylonId)!, attempts: failure("backend", 5) });
+  registry.threads.savePylon({ ...registry.threads.pylon(retried!.pylonId)!, attempts: failure("backend", 1) });
+  const fake = fakeNode({ autoFinish: true });
+  const loop = run(t, registry, fake.probe, { log: () => {} });
+  await until("the node is online", () => registry.nodes.node(node)?.state === "online");
+  await settled(fake, loop);
+  assert.deepEqual([final, exhausted, retried].map((th) => registry.threads.pylon(th!.pylonId)?.failed?.split(",")[0] ?? null),
+    ["last job failed with invalid", "gave up after 5 failed attempts", null], "a failure the planner retries fails nothing");
+  assert.deepEqual(registry.threads.pylonIdsToTick(node, []), [], "and once recorded, none is ticked");
+  assert.deepEqual(fake.submitted, []);
+});
+
+test("an archived thread's pylon that is gone boots for a wake for reading, and for an unarchive with the git identity its project took since", async (t) => {
+  const { registry, shift } = shiftedRegistry();
+  seedRegistry(registry, { nodes: [node] });
+  const [read, unarchived] = [addThread(registry, { node, boot: { image } }), addThread(registry, { node, boot: { image } })];
+  await archivedAgo(registry, shift, read, 60_000, false);
+  await archivedAgo(registry, shift, unarchived, archivedDiskMs);
+  const fake = fakeNode({ autoFinish: true });
+  const loop = run(t, registry, fake.probe);
+  await until("the node is online", () => registry.nodes.node(node)?.state === "online");
+  await settled(fake, loop);
+  assert.deepEqual(registry.threads.pylonIdsToTick(node, []), []);
+
+  registry.usage.holdSettle(read.id, Date.now());
+  void loop.wake(node);
+  await until("the pylon is woken for reading", () => fake.pylons.get(read.pylonId)?.phase === "running");
+  const wake = fake.submitted[0]!;
+  assert.ok(wake.kind === "spawn" && wake.pylonId === read.pylonId && wake.relaunch === false);
+  registry.usage.releaseUsageHold({ by: "settle" });
+
+  const override = { name: "Work Person", email: "work@example.com" };
+  registry.projects.editProject(unarchived.project, (p) => ({ ...p, gitIdentity: override }));
+  registry.threads.setThreadStatus(unarchived.id, "active");
+  registry.threads.recordActivity(unarchived.id, { human: Date.now() });
+  await until("the unarchived pylon runs", () => fake.pylons.get(unarchived.pylonId)?.phase === "running");
+  const boot = fake.submitted.find((job) => job.kind === "spawn" && job.pylonId === unarchived.pylonId)!;
+  assert.ok(boot.kind === "spawn");
+  assert.deepEqual(boot.boot.gitIdentity, override);
 });
 
 test("a used-up port range is logged, and the services that got a port are still published", async (t) => {
