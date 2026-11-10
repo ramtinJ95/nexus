@@ -26,7 +26,7 @@ Object.assign(globalThis, {
   localStorage: { getItem: (key) => stored.get(key) ?? null, setItem: (key, value) => stored.set(key, value), removeItem: (key) => stored.delete(key) },
   addEventListener: (type, listener) => listeners.set(type, listener),
   EventSource: { OPEN: 1, CLOSED: 2 },
-  fetch: async () => ({ ok: true, status: 200, text: async () => served }),
+  fetch: async () => ({ ok: true, status: 200, headers: new Headers(), text: async () => served }),
   DOMParser: class { parseFromString(client) { return page(client); } },
   document: {
     querySelector: (s) => s === "main" ? { dataset: { pollMs: "60000" } } : s === "dialog[open]" ? dialog : page(running).querySelector(s),
