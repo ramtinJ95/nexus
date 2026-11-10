@@ -89,6 +89,8 @@ function dockerBuildArgs(pins: BuildPins): Record<string, string> {
     PI_VERSION: pins.pi,
     HERDR_VERSION: pins.herdr,
     HERDR_SHA256: pins.herdrSha256,
+    HERDR_CORE_VERSION: pins.herdrCore,
+    HERDR_CORE_SHA256: pins.herdrCoreSha256,
     PI_ENV_VERSION: pins.piEnv,
     PI_ENV_SHA256: pins.piEnvSha256,
     DOTFILES_COMMIT: pins.dotfilesCommon,
@@ -113,8 +115,9 @@ function dockerBuildArgs(pins: BuildPins): Record<string, string> {
  * 4. Smoke boot at 4 GiB (2 GiB hangs): plain exec PATH, CA and the offline switches for pi and Claude Code's
  *    official marketplace, `user` with a setuid sudo that prints no warning and the hostname pylon, which
  *    resolves through /etc/hosts, a home with no hook outbox and no Claude or pi session from the build, the exact
- *    pinned versions of node, claude, pi, herdr, pi-env and nvim and the nexus CLI's declared version as user,
- *    sshd and sandboxssh, Herdr's pi integration with its own resume turned off, no KVM module loaded,
+ *    pinned versions of node, claude, pi, herdr, herdr-core, pi-env and nvim and the nexus CLI's declared version as user,
+ *    sshd and sandboxssh, Herdr's pi integration with its own resume turned off, Herdr Core as hc with its notes
+ *    turned off, no KVM module loaded,
  *    the agent setup installed exactly as the recipe's manifest says with pi loading every extension offline,
  *    the PYLON.md import for Claude Code and pi, gh at its pin answering git's credential requests from GH_TOKEN,
  *    curl and Node fetch to an allowed host through TLS interception, tini reaping an orphan it adopts as
@@ -386,13 +389,14 @@ function nexusCliVersion(recipe: ImageRecipe): string {
  * Each tool's `--version` output for its pin, in the format that tool prints it. Neovim's is its first line,
  * because the lines after it describe the build rather than the release.
  */
-function versionChecks(recipe: ImageRecipe): SmokeCheck[] {
+function versionChecks(recipe: ImageRecipe & { pins: BuildPins }): SmokeCheck[] {
   const { pins } = recipe;
   const versions: [tool: string, script: string, output: string][] = [
     ["node", "node --version", `v${pins.node}`],
     ["claude", "claude --version", `${pins.claudeCode} (Claude Code)`],
     ["pi", "pi --version", pins.pi],
     ["herdr", "herdr --version", `herdr ${pins.herdr}`],
+    ["herdr-core", "herdr-core --version", `hc ${pins.herdrCore}`],
     ["pi-env", `${piEnv} --version`, `pi-env ${pins.piEnv}`],
     ["nexus", "nexus --version", `nexus ${nexusCliVersion(recipe)}`],
     ["nvim", "nvim --version | head -n 1", `NVIM v${pins.neovim}`],
@@ -401,7 +405,7 @@ function versionChecks(recipe: ImageRecipe): SmokeCheck[] {
 }
 
 /** Plain execs run with sandboxd's environment, and `runuser -l` gives the login shell that SSH and Herdr panes get. */
-export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
+export function smokeChecks(recipe: ImageRecipe & { pins: BuildPins }): readonly SmokeCheck[] {
   const { pins } = recipe;
   const agentSetup = installedLayout(agentSetupOf(recipe));
   return [
@@ -457,6 +461,11 @@ export function smokeChecks(recipe: ImageRecipe): readonly SmokeCheck[] {
       name: "Herdr leaves resume to Nexus and skips onboarding",
       argv: userSmoke("cat ~/.config/herdr/config.toml"),
       expect: /^onboarding = false\n\n\[session\]\nresume_agents_on_restore = false\n$/,
+    },
+    {
+      name: "Herdr Core answers as hc and types nothing on its own",
+      argv: userSmoke("hc --version; cat ~/.config/herdr-core/config.toml"),
+      expect: `hc ${pins.herdrCore}\nnotes = false\n`,
     },
     {
       // The subshell exits at once, so tini adopts its `sleep 0`. A second later tini's only child is sh, not

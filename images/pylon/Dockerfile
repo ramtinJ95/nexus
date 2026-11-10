@@ -55,6 +55,18 @@ RUN cd /tmp \
  && install -m 0755 herdr /usr/local/bin/herdr \
  && rm herdr
 
+# Herdr Core beside Herdr, from its release tarball, checked like Node. Nothing in Nexus runs it yet. hc is the
+# name its installer links and its help uses.
+ARG HERDR_CORE_VERSION
+ARG HERDR_CORE_SHA256
+RUN cd /tmp \
+ && curl -fsSLo herdr-core.tgz "https://releases.herdr.dev/core/${HERDR_CORE_VERSION}/herdr-core-linux-x86_64.tar.gz" \
+ && echo "${HERDR_CORE_SHA256}  herdr-core.tgz" | sha256sum -c - \
+ && tar -xzf herdr-core.tgz herdr-core \
+ && install -m 0755 herdr-core /usr/local/bin/herdr-core \
+ && ln -s herdr-core /usr/local/bin/hc \
+ && rm herdr-core.tgz herdr-core
+
 # gh from its release tarball, checked like Node. git asks gh for github.com credentials, and gh reads GH_TOKEN
 # when git asks, so the placeholder that Gondolin mints on each boot is never stored. The helper lives in
 # /etc/gitconfig, which no dotfiles layer replaces. push.negotiate makes a push first find the commits the
@@ -132,3 +144,6 @@ RUN printf '@~/.nexus/PYLON.md\n' > /home/user/.claude/CLAUDE.md \
 # the session on the first attach to every new pylon.
 RUN mkdir -p /home/user/.config/herdr \
  && printf 'onboarding = false\n\n[session]\nresume_agents_on_restore = false\n' > /home/user/.config/herdr/config.toml
+# Without `notes = false`, Herdr Core types notes to parent agents and <hc> tags into messages on its own.
+RUN mkdir -p /home/user/.config/herdr-core \
+ && printf 'notes = false\n' > /home/user/.config/herdr-core/config.toml
