@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
+import { ports } from "../node-base/node-layout.ts";
 
 const root = resolve(import.meta.dirname, "../..");
 
@@ -22,6 +23,21 @@ interface Machine {
   status: object | null;
   tailscaled: string[];
   controlConfig: boolean;
+  memoryKib: number;
+  /** What free_space prints for each path the installer fills, its free KiB and its mount point. */
+  free: Record<string, string>;
+  /** Whether ss is there to say who listens on a port. */
+  ss: boolean;
+  /** The unit or command listening on each port that is taken. */
+  listeners: Partial<Record<number, string>>;
+  /** The home of each user that exists. */
+  homes: Record<string, string>;
+  /** What /opt/nexus holds. */
+  prefixEntries: string[];
+  /** The roles installed, which deploy/install.sh finds in /opt/nexus/deployer/roles. */
+  roles: string[];
+  /** What `systemctl is-active` says of each unit, "unknown" for one it does not list. */
+  units: Record<string, string>;
 }
 
 const running = {
@@ -31,15 +47,19 @@ const running = {
   CertDomains: ["firebat.tail1234.ts.net"],
 };
 
+const gib = 1024 * 1024;
+
 const complete: Machine = {
   uid: 0, kernel: "Linux", systemd: true, node: "26", arch: "x86_64", manager: "apt", kvm: "kvm",
-  commands: ["qemu-system-x86_64", "qemu-img", "tailscale"],
+  commands: ["qemu-system-x86_64", "qemu-img", "tailscale", "git", "npm"],
   status: running, tailscaled: ["TS_PERMIT_CERT_UID=nexus-control"], controlConfig: false,
+  memoryKib: 16 * gib, ss: true, free: { "/var/lib/nexus": `${200 * gib} /`, "/opt/nexus": `${200 * gib} /` }, listeners: {}, homes: {}, prefixEntries: [],
+  roles: [], units: {},
 };
 
 const fresh: Machine = {
-  uid: 1000, kernel: "Linux", systemd: true, node: "none", arch: "x86_64", manager: "apt", kvm: "missing",
-  commands: [], status: null, tailscaled: [], controlConfig: false,
+  ...complete,
+  uid: 1000, node: "none", kvm: "missing", commands: [], status: null, tailscaled: [],
 };
 
 /** Each fact function of deploy/install.sh, answering as `m` does. */
@@ -60,6 +80,14 @@ ${status}
 }
 tailscaled_environment() { printf '%s\\n' ${m.tailscaled.map((line) => `'${line}'`).join(" ")}; }
 control_config_exists() { ${m.controlConfig}; }
+memory_kib() { echo ${m.memoryKib}; }
+free_space() { case $1 in ${Object.entries(m.free).map(([path, free]) => `'${path}') echo '${free}' ;;`).join(" ")} esac; }
+ports_readable() { ${m.ss}; }
+port_listener() { case $1 in ${Object.entries(m.listeners).map(([port, unit]) => `${port}) echo '${unit}' ;;`).join(" ")} *) ;; esac; }
+user_home() { case $1 in ${Object.entries(m.homes).map(([user, home]) => `${user}) echo '${home}' ;;`).join(" ")} *) ;; esac; }
+prefix_entries() { printf '%s\\n' ${m.prefixEntries.map((entry) => `'${entry}'`).join(" ")} | grep . || true; }
+installed_roles() { printf '%s\\n' ${m.roles.map((role) => `'${role}'`).join(" ")} | grep . || true; }
+unit_state() { case $1 in ${Object.entries(m.units).map(([unit, state]) => `${unit}) echo ${state} ;;`).join(" ")} *) echo unknown ;; esac; }
 `;
 }
 
@@ -89,6 +117,7 @@ test("a fresh machine reports every miss at once, each with its fix", async () =
   assert.deepEqual(found.map((entry) => entry.split("\n")[0]), [
     "- The installer changes the system, so it runs as root.",
     "- Node 26 or newer must be in /usr/local/bin:/usr/bin, found none.",
+    "- git must be in /usr/local/bin:/usr/bin. The deployer fetches each release with it.",
     "- Pylons are QEMU VMs, and qemu-system-x86_64 or qemu-img is not in /usr/local/bin:/usr/bin.",
     "- /dev/kvm is missing, so QEMU cannot run pylons with KVM.",
     "- Tailscale is not installed in /usr/local/bin:/usr/bin. Nexus reaches its nodes and callers over the tailnet.",
@@ -98,6 +127,7 @@ test("a fresh machine reports every miss at once, each with its fix", async () =
   for (const fix of [
     "    sudo deploy/install.sh\n",
     "curl -fsSL https://deb.nodesource.com/setup_26.x | sudo bash - && sudo apt-get install -y nodejs",
+    "sudo apt-get install -y git",
     "sudo apt-get install -y qemu-system-x86 qemu-utils",
     "sudo modprobe kvm_intel || sudo modprobe kvm_amd",
     "curl -fsSL https://tailscale.com/install.sh | sh",
@@ -150,14 +180,6 @@ check_prerequisites node '' 'sudo deploy/install.sh'; printf '%s\\0' "\${misses[
   assert.deepEqual(run.stdout.split("\0").filter((entry) => entry !== "").map((entry) => entry.split("\n")[0]), ["- Tailscale is not running and logged in."]);
 });
 
-test("a tailscale check that cannot run stops the installer and says how to see why", async () => {
-  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)}
-node() { echo "SyntaxError: broken checkout" >&2; return 1; }
-check_prerequisites node '' 'sudo deploy/install.sh'`);
-  assert.equal(run.code, 1);
-  assert.match(run.stderr, /setup\.ts check could not read tailscale's status\. See what it says: tailscale status --json \| node .*\/src\/deploy\/setup\.ts check/);
-});
-
 test("MagicDNS and HTTPS certificates turned off are both reported", async () => {
   const status = { ...running, CurrentTailnet: { ...running.CurrentTailnet, MagicDNSEnabled: false }, CertDomains: null };
   assert.deepEqual(await misses({ ...complete, status }, "node"), [
@@ -167,11 +189,76 @@ test("MagicDNS and HTTPS certificates turned off are both reported", async () =>
   assert.equal((await misses({ ...complete, status: { ...running, CertDomains: [] } }, "node")).length, 1);
 });
 
-test("without Node 26 the tailscale settings are checked on the rerun, since src/deploy/setup.ts reads them", async () => {
-  const status = { ...running, BackendState: "NeedsLogin" };
-  for (const node of ["none", "22"]) {
-    assert.deepEqual((await misses({ ...complete, node, status }, "node")).map((entry) => entry.split("\n")[0]), [`- Node 26 or newer must be in /usr/local/bin:/usr/bin, found ${node}.`]);
-  }
+/** A machine some other software got to first, with too little memory and disk, on a tailnet set up wrong, and no Node yet. */
+const crowded: Machine = {
+  ...complete,
+  node: "none", commands: ["qemu-system-x86_64", "qemu-img", "tailscale"],
+  memoryKib: 4 * gib, free: { "/var/lib/nexus": `${5 * gib} /`, "/opt/nexus": `${5 * gib} /` },
+  listeners: { 7470: "nexus-repository.service" }, homes: { nexus: "/opt/sonatype-work" }, prefixEntries: ["bin", "etc"],
+  status: { ...running, CurrentTailnet: { ...running.CurrentTailnet, MagicDNSEnabled: false }, CertDomains: null, Self: { ...running.Self, KeyExpiry: "2027-05-01T00:00:00Z" } },
+};
+
+test("a first run without Node lists every miss at once, the tailnet's settings among them", async () => {
+  assert.deepEqual((await misses(crowded, "node")).map((entry) => entry.split("\n")[0]), [
+    "- Nexus needs at least 8 GiB of memory, and this machine has 4096 MiB.",
+    "- Node 26 or newer must be in /usr/local/bin:/usr/bin, found none.",
+    "- git must be in /usr/local/bin:/usr/bin. The deployer fetches each release with it.",
+    "- Nexus needs at least 20 GiB free on /, which holds /var/lib/nexus, and it has 5 GiB.",
+    "- Port 7470 is taken by nexus-repository.service, and Nexus's nexus-control.service listens on it.",
+    "- A user nexus exists with home /opt/sonatype-work, so other software made it, and Nexus would run as it.",
+    "- /opt/nexus holds files and no releases directory, so other software put them there.",
+    "- MagicDNS is off. Nodes and preview URLs are named by MagicDNS.",
+    "- HTTPS certificates are off. Previews and the dashboard are served over HTTPS.",
+  ]);
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(crowded)}
+node() { echo "node $*" >&2; }
+main --node firebat`);
+  assert.equal(run.code, 1);
+  assert.match(run.stderr, /^Warnings:\n- This machine's Tailscale key expires at 2027-05-01T00:00:00Z\. Then it leaves the tailnet, and Nexus loses it until someone logs it in again\.\n {4}Turn off key expiry for this machine at https:\/\/login\.tailscale\.com\/admin\/machines\n/);
+  assert.match(run.stderr, /\nThis machine is missing 9 prerequisite\(s\)\. Nothing was changed\./, "the key expiry is a warning, not a miss");
+  for (const fix of ["sudo apt-get install -y git", "sudo ss -ltnp 'sport = :7470' names the process", "sudo userdel nexus", "sudo mv /opt/nexus /opt/nexus.other"]) assert.ok(run.stderr.includes(fix), fix);
+});
+
+test("a key that expires warns, and the install goes on", async () => {
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs({ ...complete, status: { ...running, Self: { ...running.Self, KeyExpiry: "2027-05-01T00:00:00Z" } } })} ${steps}
+main --admit macbook`);
+  assert.equal(run.code, 0, run.stderr);
+  assert.match(run.stderr, /^Warnings:\n- This machine's Tailscale key expires at 2027-05-01T00:00:00Z\./);
+  assert.match(run.stderr, /\nnode \.\/src\/deploy\/setup\.ts install --package-manager apt --admit macbook\n$/);
+});
+
+test("npm missing is a miss of its own only once Node 26 is there, since the Node fix brings it", async () => {
+  assert.deepEqual((await misses({ ...complete, commands: complete.commands.filter((c) => c !== "npm") }, "node")).map((entry) => entry.split("\n")[0]), ["- npm must be in /usr/local/bin:/usr/bin, since each release is built with npm ci. Node 26 came without it."]);
+  assert.ok(!(await misses({ ...complete, node: "none", commands: complete.commands.filter((c) => c !== "npm") }, "node")).some((entry) => entry.includes("npm must")));
+});
+
+test("memory a little under 8 GiB, as an 8 GiB machine reports, is enough", async () => {
+  assert.deepEqual(await misses({ ...complete, memoryKib: 7_900_000 }, "node"), []);
+  assert.equal((await misses({ ...complete, memoryKib: 7 * gib }, "node")).length, 1);
+});
+
+test("each filesystem short of 20 GiB is one miss, however many of Nexus's paths it holds", async () => {
+  assert.equal((await misses({ ...complete, free: { "/var/lib/nexus": `${19 * gib} /`, "/opt/nexus": `${19 * gib} /` } }, "node")).length, 1);
+  assert.deepEqual((await misses({ ...complete, free: { "/var/lib/nexus": `${19 * gib} /var`, "/opt/nexus": `${3 * gib} /` } }, "node")).map((entry) => entry.split("\n")[0]), [
+    "- Nexus needs at least 20 GiB free on /var, which holds /var/lib/nexus, and it has 19 GiB.",
+    "- Nexus needs at least 20 GiB free on /, which holds /opt/nexus, and it has 3 GiB.",
+  ]);
+});
+
+test("each of Nexus's ports another process holds is a miss, and Nexus's own units on them are not", async () => {
+  const taken = Object.fromEntries(Object.values(ports).map((port) => [port, "caddy"]));
+  assert.deepEqual((await misses({ ...complete, listeners: taken }, "node")).map((entry) => entry.match(/^- Port (\d+) is taken by caddy/)?.[1]), Object.values(ports).map(String));
+  const blind = await bash(`. "$1/deploy/install.sh"; ${stubs({ ...complete, ss: false, listeners: taken })} ${steps}
+main --check`);
+  assert.equal(blind.code, 0, blind.stderr);
+  assert.match(blind.stderr, /^Warnings:\n- ss is missing, so ports 7470, 7443, 7480 and 7481 were not checked\./, "without ss the ports are a warning, not a silent pass");
+  const own = { [ports.control]: "nexus-control.service", [ports.dashboard]: "nexus-control.service", [ports.probe]: "nexus-probe.service", [ports.gateway]: "nexus-probe.service" };
+  assert.deepEqual(await misses({ ...complete, listeners: own }, "control"), [], "a rerun on an installed machine");
+});
+
+test("Nexus's own users and prefix are no miss, so a rerun passes", async () => {
+  assert.deepEqual(await misses({ ...complete, homes: { nexus: "/var/lib/nexus", "nexus-control": "/var/lib/nexus-control" }, prefixEntries: ["current", "deployer", "releases"] }, "control"), []);
+  assert.match((await misses({ ...complete, homes: { "nexus-control": "/home/nexus-control" } }, "control")).join("\n"), /^- A user nexus-control exists with home \/home\/nexus-control/);
 });
 
 test("the installer stops before changing anything when a prerequisite is missing", async () => {
@@ -180,14 +267,14 @@ node() { echo "node $*" >&2; }
 bash() { echo "bash $*" >&2; }
 main --admit macbook`);
   assert.equal(run.code, 1);
-  assert.match(run.stderr, /^This machine is missing 6 prerequisite\(s\)\. Nothing was changed\. Fix each, then rerun:\n- The installer changes the system/);
+  assert.match(run.stderr, /^This machine is missing 7 prerequisite\(s\)\. Nothing was changed\. Fix each, then rerun:\n- The installer changes the system/);
   assert.match(run.stderr, /\n {4}sudo deploy\/install\.sh --admit macbook\n/);
   assert.doesNotMatch(run.stderr, /^(node|bash) /m);
 });
 
-/** Stand-ins for what main runs, each saying on stderr what it ran. `setup.ts check` is the prerequisites' own, so it runs. */
+/** Stand-ins for what main runs, each saying on stderr what it ran. */
 const steps = `
-node() { [ "$2" != check ] || { command node "$@"; return; }; echo "node \${*//$repo/.}" >&2; }
+node() { echo "node \${*//$repo/.}" >&2; }
 `;
 const ran = (stderr: string) => stderr.trim().split("\n");
 
@@ -258,4 +345,77 @@ main --non-interactive --rotate github`);
   assert.notEqual(late.code, 0);
   assert.match(late.stderr, /--rotate comes first: sudo deploy\/install\.sh --rotate claude\|github/);
   assert.doesNotMatch(user.stderr + bare.stderr + late.stderr, /^node /m);
+});
+
+test("--check on a fresh machine lists the misses and runs nothing", async () => {
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(fresh)} ${steps}
+installed_check() { echo "installed_check" >&2; }
+main --check`);
+  assert.equal(run.code, 1);
+  assert.match(run.stderr, /^This machine has 7 problem\(s\)\. --check changed nothing\. Fix each, then check again:\n- The installer changes the system/);
+  assert.match(run.stderr, /\n {4}sudo deploy\/install\.sh --check\n/);
+  assert.doesNotMatch(run.stderr, /^(node|installed_check)/m);
+  const ready = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps}
+main --check`);
+  assert.equal(ready.code, 0, ready.stderr);
+  assert.equal(ready.stdout, "Every prerequisite holds. Nexus is not installed here yet. --check changed nothing.\n");
+  assert.equal(ready.stderr, "");
+});
+
+const installed: Machine = {
+  ...complete,
+  roles: ["control", "probe"],
+  homes: { nexus: "/var/lib/nexus", "nexus-control": "/var/lib/nexus-control" }, prefixEntries: ["control-current", "current", "deployer", "releases"],
+  listeners: { [ports.control]: "nexus-control.service", [ports.dashboard]: "nexus-control.service", [ports.probe]: "nexus-probe.service", [ports.gateway]: "nexus-probe.service" },
+  units: Object.fromEntries(["nexus-control.service", "nexus-probe.service", "nexus-backup.timer", "nexus-deployer.timer", "nexus-deployer.path"].map((unit) => [unit, "active"])),
+};
+
+test("--check on an installed machine adds its units and what installed.ts finds, and changes nothing", async () => {
+  const healthy = await bash(`. "$1/deploy/install.sh"; ${stubs(installed)} ${steps}
+installed_check() { echo "installed_check \${*//$repo/.}" >&2; }
+main --check`);
+  assert.equal(healthy.code, 0, healthy.stderr);
+  assert.equal(healthy.stdout, "Every prerequisite holds, and the installed control probe role(s) run as they should. --check changed nothing.\n");
+  const units = { ...installed.units, "nexus-control.service": "inactive", "nexus-backup.service": "failed", "nexus-deployer.service": "inactive" };
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs({ ...installed, units })} ${steps}
+installed_check() { printf -- '- /opt/nexus/current runs %s, and the desired release is %s.\\n    nexus release says where the deploy stands\\0' "$(printf 'a%.0s' {1..40})" "$(printf 'b%.0s' {1..40})"; printf -- '- /etc/nexus/probe.json: invalid.\\n    Correct it\\0'; }
+main --check`);
+  assert.equal(run.code, 1);
+  assert.deepEqual(run.stderr.split("\n").filter((line) => line.startsWith("- ")), [
+    "- nexus-control.service is inactive, and should be running.",
+    "- nexus-backup.service failed its last run.",
+    `- /opt/nexus/current runs ${"a".repeat(40)}, and the desired release is ${"b".repeat(40)}.`,
+    "- /etc/nexus/probe.json: invalid.",
+  ]);
+  assert.match(run.stderr, /^This machine has 4 problem\(s\)\. --check changed nothing\./);
+  assert.match(run.stderr, /\n {4}sudo systemctl start nexus-control\.service, and journalctl -u nexus-control\.service -n 50 says why it stopped\n/);
+  assert.doesNotMatch(run.stderr, /^node /m, "--check never reaches setup.ts install");
+});
+
+test("--check on an installed node checks the node's units and needs no certificate drop-in", async () => {
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs({ ...installed, roles: ["probe"], tailscaled: [], units: { "nexus-probe.service": "active", "nexus-deployer.timer": "active", "nexus-deployer.path": "active", "nexus-backup.service": "failed" } })} ${steps}
+installed_check() { :; }
+main --check`);
+  assert.equal(run.code, 0, run.stderr);
+  assert.match(run.stdout, /the installed probe role\(s\) run as they should/);
+});
+
+test("--check runs src/deploy/installed.ts on the prefix and config directory, and says how to see why when it fails", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "nexus-check-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  await mkdir(join(dir, "opt/deployer/roles"), { recursive: true });
+  await writeFile(join(dir, "opt/deployer/roles/probe"), "");
+  await mkdir(join(dir, "etc"));
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs({ ...installed, roles: ["probe"], free: { ...installed.free, [`${dir}/opt`]: `${200 * gib} /` } })} prefix=${dir}/opt etc=${dir}/etc
+main --check --node firebat`);
+  assert.equal(run.code, 1);
+  assert.deepEqual(run.stderr.split("\n").filter((line) => line.startsWith("- ")), [
+    `- ${dir}/opt/current is missing, so the probe has no release.`,
+    `- ${dir}/etc/control-plane.json is missing. deploy/install.sh writes it, and so does deploy/set-control-plane.sh.`,
+  ]);
+  const broken = await bash(`. "$1/deploy/install.sh"; ${stubs(installed)}
+installed_check() { echo "SyntaxError: broken checkout" >&2; return 1; }
+main --check`);
+  assert.equal(broken.code, 1);
+  assert.match(broken.stderr, /SyntaxError: broken checkout\ninstall: src\/deploy\/installed\.ts could not check the install\. See what it says: sudo node .*\/src\/deploy\/installed\.ts \/opt\/nexus \/etc\/nexus\n$/);
 });

@@ -12,13 +12,14 @@
 # with what is left for the person. Without a terminal, or with --non-interactive, the credentials come from NEXUS_*
 # variables instead. Safe to rerun: an existing config keeps its values and secrets, and gains only what is missing,
 # an existing credential is left as it is, and a role that already runs a release keeps it unless --upgrade.
+#   sudo deploy/install.sh --check [--node <device>]   checks the prerequisites and, once installed, the install, and changes nothing
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=deploy/release.sh
 . "$repo/deploy/release.sh"
 
-usage="usage: sudo deploy/install.sh [--node <control plane device> [--join <token>]] [--admit <device>]... [--add-node <device>=<deploy key digest>]... [--peer <device>]... [--dotfiles <git URL>] [--non-interactive] [--upgrade]
+usage="usage: sudo deploy/install.sh [--check] [--node <control plane device> [--join <token>]] [--admit <device>]... [--add-node <device>=<deploy key digest>]... [--peer <device>]... [--dotfiles <git URL>] [--non-interactive] [--upgrade]
        sudo deploy/install.sh --join-token
        sudo deploy/install.sh --rotate claude|github [--non-interactive]"
 
@@ -34,6 +35,28 @@ package_manager() {
   if command -v apt-get >/dev/null; then echo apt; elif command -v dnf >/dev/null; then echo dnf; else echo other; fi
 }
 tailscale_status() { PATH=$service_path tailscale status --json 2>/dev/null; }
+memory_kib() { awk '/^MemTotal:/ { print $2 }' /proc/meminfo; }
+# The free KiB and the mount point of the filesystem that would hold $1.
+free_space() {
+  local path=$1
+  while [ ! -e "$path" ]; do path=$(dirname "$path"); done
+  df -Pk "$path" 2>/dev/null | awk 'NR == 2 { print $4, $6 }' || true
+}
+# The systemd unit, or else the command, of the process that listens on TCP port $1, nothing when none does.
+port_listener() {
+  local line pid unit
+  line=$(ss -Hltnp "sport = :$1" 2>/dev/null | head -n 1 || true)
+  [ -n "$line" ] || return 0
+  pid=$(sed -n 's/.*pid=\([0-9]*\).*/\1/p' <<<"$line")
+  unit=$(sed -n 's|.*/\([^/]*\.service\)$|\1|p' "/proc/$pid/cgroup" 2>/dev/null | head -n 1)
+  echo "${unit:-$(cat "/proc/$pid/comm" 2>/dev/null || echo "a process ss could not name")}"
+}
+ports_readable() { command -v ss >/dev/null; }
+user_home() { getent passwd "$1" | cut -d: -f6 || true; }
+prefix_entries() { ls -A "$prefix" 2>/dev/null; }
+unit_state() { systemctl is-active "$1" 2>/dev/null || true; }
+installed_roles() { ls "$prefix/deployer/roles" 2>/dev/null || true; }
+installed_check() { PATH=$service_path node "$repo/src/deploy/installed.ts" "$prefix" "$etc"; }
 # The running tailscaled's environment when root can read it, so a drop-in that awaits a restart does not count.
 tailscaled_environment() {
   local pid
@@ -64,10 +87,52 @@ miss() {
   misses+=("$entry")
 }
 
-# Records every prerequisite this machine misses for the role, control or node, and changes nothing. $3 is the command
-# line to rerun. Tailscale's settings are read by src/deploy/setup.ts, so a machine without Node 26 has them checked on the rerun.
+warnings=()
+warn() {
+  local entry="- $1" line
+  shift
+  for line in "$@"; do entry+=$'\n'"    $line"; done
+  warnings+=("$entry")
+}
+
+# Reads `tailscale status --json` on stdin without Node, which a first run may lack, and prints the settings the
+# prerequisites need, one per line: `backend <BackendState>`, `magicdns true|false`, `certdomain <domain>` for each of
+# CertDomains, and `keyexpiry <time>` when this node's key expires. It walks the JSON's tokens, so neither indentation
+# nor the order of keys matters, and text that is not JSON prints nothing, as a tailscale that is not running.
+tailnet_settings() {
+  awk 'BEGIN { RS = "\001" }
+  function value(v) {
+    if (depth == 1 && key[1] == "BackendState") print "backend " v
+    else if (depth == 2 && kind[2] == "{" && key[1] == "CurrentTailnet" && key[2] == "MagicDNSEnabled") print "magicdns " v
+    else if (depth == 2 && kind[2] == "[" && key[1] == "CertDomains") print "certdomain " v
+    else if (depth == 2 && kind[2] == "{" && key[1] == "Self" && key[2] == "KeyExpiry") print "keyexpiry " v
+  }
+  {
+    s = $0; n = length(s); depth = 0
+    for (i = 1; i <= n; i++) {
+      c = substr(s, i, 1)
+      if (c == "\"") {
+        str = ""
+        for (i++; i <= n && (c = substr(s, i, 1)) != "\""; i++) {
+          if (c == "\\") { i++; c = substr(s, i, 1) }
+          str = str c
+        }
+        for (j = i + 1; substr(s, j, 1) ~ /[ \t\r\n]/; j++) {}
+        if (substr(s, j, 1) == ":") { key[depth] = str; i = j } else value(str)
+      } else if (c == "{" || c == "[") { depth++; kind[depth] = c; key[depth] = "" }
+      else if (c == "}" || c == "]") depth--
+      else if (c ~ /[a-z0-9-]/) {
+        for (j = i; substr(s, j + 1, 1) ~ /[a-zA-Z0-9.+-]/; j++) {}
+        value(substr(s, i, j - i + 1)); i = j
+      }
+    }
+  }'
+}
+
+# Records every prerequisite this machine misses for the role, control or node, and changes nothing. $2 is the command
+# line to rerun.
 check_prerequisites() {
-  local role=$1 rerun=$2 major qemu packages status off
+  local role=$1 rerun=$2 major qemu packages status settings manager kib
   [ "$(uid)" = 0 ] || miss "The installer changes the system, so it runs as root." "$rerun"
   if [ "$(kernel)" != Linux ] || ! systemd_booted; then
     miss "Nexus runs as systemd services, and this machine is not a Linux booted with systemd." "Install on a Linux that boots with systemd, such as Debian 12, Ubuntu 24.04 or Fedora 42."
@@ -77,15 +142,32 @@ check_prerequisites() {
   [ "$(machine)" = x86_64 ] \
     || miss "Pylons run x86_64 images under KVM, and this machine is $(machine)." "Install on an x86_64 Linux machine."
 
-  local manager
+  # A machine sold with 8 GiB reports a little less, since the firmware and the kernel keep some of it.
+  kib=$(memory_kib)
+  [ "${kib:-0}" -ge $((7680 * 1024)) ] \
+    || miss "Nexus needs at least 8 GiB of memory, and this machine has $((${kib:-0} / 1024)) MiB." "Install on a machine, or give this VM, at least 8 GiB of memory."
+
   manager=$(package_manager)
   major=$(node_major)
+  local node_fix
+  case $manager in
+    apt) node_fix="curl -fsSL https://deb.nodesource.com/setup_26.x | sudo bash - && sudo apt-get install -y nodejs" ;;
+    dnf) node_fix="curl -fsSL https://rpm.nodesource.com/setup_26.x | sudo bash - && sudo dnf install -y nodejs" ;;
+    *) node_fix="Install Node 26 from https://nodejs.org/en/download into /usr/local." ;;
+  esac
   if [ "$major" = none ] || [ "$major" -lt 26 ]; then
+    miss "Node 26 or newer must be in $service_path, found $major." "$node_fix"
+  elif ! in_service_path npm; then
+    # NodeSource's package and nodejs.org's archive both bring npm, so it goes missing only with a Node from elsewhere.
+    miss "npm must be in $service_path, since each release is built with npm ci. Node 26 came without it." "$node_fix"
+  fi
+  if ! in_service_path git; then
     case $manager in
-      apt) miss "Node 26 or newer must be in $service_path, found $major." "curl -fsSL https://deb.nodesource.com/setup_26.x | sudo bash - && sudo apt-get install -y nodejs" ;;
-      dnf) miss "Node 26 or newer must be in $service_path, found $major." "curl -fsSL https://rpm.nodesource.com/setup_26.x | sudo bash - && sudo dnf install -y nodejs" ;;
-      *) miss "Node 26 or newer must be in $service_path, found $major." "Install Node 26 from https://nodejs.org/en/download into /usr/local." ;;
+      apt) packages="sudo apt-get install -y git" ;;
+      dnf) packages="sudo dnf install -y git" ;;
+      *) packages="Install git so that it is in $service_path." ;;
     esac
+    miss "git must be in $service_path. The deployer fetches each release with it." "$packages"
   fi
 
   qemu=qemu-system-x86_64
@@ -103,22 +185,53 @@ check_prerequisites() {
     miss "/dev/kvm does not belong to the kvm group, which the probe's user joins to run QEMU." "sudo groupadd --system --force kvm && sudo udevadm trigger --name-match=kvm"
   fi
 
+  # `nexus nodes` marks a node with under 20 GiB free, and pylons, their image and the releases live here.
+  local path free mount mounts=" "
+  for path in /var/lib/nexus "$prefix"; do
+    read -r free mount <<<"$(free_space "$path")"
+    [[ $mounts != *" $mount "* ]] || continue
+    mounts+="$mount "
+    [ "${free:-0}" -ge $((20 * 1024 * 1024)) ] \
+      || miss "Nexus needs at least 20 GiB free on $mount, which holds $path, and it has $((${free:-0} / 1024 / 1024)) GiB." "Free space on $mount, or give it a larger disk."
+  done
+
+  local port listener want
+  if ports_readable; then
+    for port in 7470 7443 7480 7481; do
+      case $port in 7470|7443) want=nexus-control.service ;; *) want=nexus-probe.service ;; esac
+      listener=$(port_listener "$port")
+      [ -z "$listener" ] || [ "$listener" = "$want" ] \
+        || miss "Port $port is taken by $listener, and Nexus's $want listens on it." "sudo ss -ltnp 'sport = :$port' names the process. Stop it, or move it to another port."
+    done
+  else
+    warn "ss is missing, so ports 7470, 7443, 7480 and 7481 were not checked. A service already on one stops Nexus's from starting." "Install iproute2, which brings ss, and check again"
+  fi
+
+  local user home
+  for user in nexus:/var/lib/nexus nexus-control:/var/lib/nexus-control; do
+    home=$(user_home "${user%%:*}")
+    [ -z "$home" ] || [ "$home" = "${user#*:}" ] \
+      || miss "A user ${user%%:*} exists with home $home, so other software made it, and Nexus would run as it." "Remove the software that made it, then: sudo userdel ${user%%:*}"
+  done
+  if [ -n "$(prefix_entries)" ] && ! prefix_entries | grep -x releases >/dev/null; then
+    miss "$prefix holds files and no releases directory, so other software put them there." "Remove that software, or move its files aside: sudo mv $prefix $prefix.other"
+  fi
+
   if ! in_service_path tailscale; then
     miss "Tailscale is not installed in $service_path. Nexus reaches its nodes and callers over the tailnet." "curl -fsSL https://tailscale.com/install.sh | sh" "sudo tailscale up"
-  elif [ "$major" != none ] && [ "$major" -ge 26 ]; then
-    if status=$(tailscale_status); then
-      off=$(PATH=$service_path node "$repo/src/deploy/setup.ts" check <<<"$status") \
-        || fail "src/deploy/setup.ts check could not read tailscale's status. See what it says: tailscale status --json | node $repo/src/deploy/setup.ts check"
-    else
-      off=not-running
-    fi
-    if [[ $off == *not-running* ]]; then
+  else
+    settings=$(status=$(tailscale_status) && tailnet_settings <<<"$status" || true)
+    if ! grep -qx 'backend Running' <<<"$settings"; then
       miss "Tailscale is not running and logged in." "sudo systemctl enable --now tailscaled && sudo tailscale up"
     else
-      [[ $off != *magicdns-off* ]] \
+      grep -qx 'magicdns true' <<<"$settings" \
         || miss "MagicDNS is off. Nodes and preview URLs are named by MagicDNS." "Turn on MagicDNS at https://login.tailscale.com/admin/dns"
-      [[ $off != *certificates-off* ]] \
+      grep -q '^certdomain ' <<<"$settings" \
         || miss "HTTPS certificates are off. Previews and the dashboard are served over HTTPS." "Turn on HTTPS Certificates at https://login.tailscale.com/admin/dns"
+      local expiry
+      expiry=$(sed -n 's/^keyexpiry //p' <<<"$settings")
+      [ -z "$expiry" ] \
+        || warn "This machine's Tailscale key expires at $expiry. Then it leaves the tailnet, and Nexus loses it until someone logs it in again." "Turn off key expiry for this machine at https://login.tailscale.com/admin/machines"
     fi
   fi
 
@@ -131,8 +244,53 @@ check_prerequisites() {
   fi
 }
 
+# Records each unit of the installed roles that is not as it should be: the services and timers running, and the
+# oneshot services not failed.
+check_units() {
+  local roles=$1 unit state
+  local units=(nexus-deployer.timer nexus-deployer.path)
+  [[ $roles != *control* ]] || units+=(nexus-control.service nexus-backup.timer)
+  [[ $roles != *probe* ]] || units+=(nexus-probe.service)
+  for unit in "${units[@]}"; do
+    state=$(unit_state "$unit")
+    [ "$state" = active ] \
+      || miss "$unit is ${state:-unknown to systemd}, and should be running." "sudo systemctl start $unit, and journalctl -u $unit -n 50 says why it stopped"
+  done
+  for unit in nexus-deployer.service nexus-backup.service; do
+    [ "$unit" != nexus-backup.service ] || [[ $roles == *control* ]] || continue
+    [ "$(unit_state "$unit")" != failed ] \
+      || miss "$unit failed its last run." "journalctl -u $unit -n 50 says why"
+  done
+}
+
+# The prerequisites and, on an installed machine, its units, links and configs. It changes nothing. An installed machine
+# without the control role is a node, whatever the arguments say.
+check_machine() {
+  local role=$1 rerun=$2 roles found
+  roles=$(installed_roles)
+  [ -z "$roles" ] || [[ $roles == *control* ]] || role=node
+  check_prerequisites "$role" "$rerun"
+  if [ -n "$roles" ]; then
+    check_units "$roles"
+    mapfile -d '' -t found < <(installed_check)
+    wait $! || fail "src/deploy/installed.ts could not check the install. See what it says: sudo node $repo/src/deploy/installed.ts $prefix $etc"
+    misses+=("${found[@]}")
+  fi
+  [ ${#warnings[@]} = 0 ] || { echo "Warnings:" >&2; printf '%s\n' "${warnings[@]}" >&2; }
+  if [ ${#misses[@]} -gt 0 ]; then
+    echo "This machine has ${#misses[@]} problem(s). --check changed nothing. Fix each, then check again:" >&2
+    printf '%s\n' "${misses[@]}" >&2
+    exit 1
+  fi
+  if [ -n "$roles" ]; then
+    echo "Every prerequisite holds, and the installed $(echo $roles) role(s) run as they should. --check changed nothing."
+  else
+    echo "Every prerequisite holds. Nexus is not installed here yet. --check changed nothing."
+  fi
+}
+
 main() {
-  local role=control i
+  local role=control check=no i
   local args=("$@")
   if [ "${1:-}" = --join-token ]; then
     [ $# = 1 ] || fail "--join-token takes no other argument. $usage"
@@ -150,11 +308,17 @@ main() {
     case ${args[i]} in
       --rotate|--rotate=*) fail "--rotate comes first: sudo deploy/install.sh --rotate claude|github [--non-interactive]" ;;
       --node|--node=*|--join|--join=*) role=node ;;
+      --check) check=yes ;;
       -h|--help) echo "$usage"; exit 0 ;;
     esac
   done
 
+  if [ $check = yes ]; then
+    check_machine "$role" "sudo deploy/install.sh${args[*]:+ ${args[*]}}"
+    return
+  fi
   check_prerequisites "$role" "sudo deploy/install.sh${args[*]:+ ${args[*]}}"
+  [ ${#warnings[@]} = 0 ] || { echo "Warnings:" >&2; printf '%s\n' "${warnings[@]}" >&2; }
   if [ ${#misses[@]} -gt 0 ]; then
     echo "This machine is missing ${#misses[@]} prerequisite(s). Nothing was changed. Fix each, then rerun:" >&2
     printf '%s\n' "${misses[@]}" >&2

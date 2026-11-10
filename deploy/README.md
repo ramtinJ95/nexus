@@ -28,12 +28,20 @@ A tailnet name is a device's MagicDNS name, short (`macbook`) or full (`macbook.
 The installer checks every prerequisite first. It reports each one that is missing, with the command that fixes it, and stops before it changes anything:
 
 - a Linux booted with systemd, and root;
-- Node 26 or newer in `/usr/local/bin` or `/usr/bin`, the units' `PATH`;
+- an x86_64 machine with at least 8 GiB of memory, read from `MemTotal`, which may be up to 512 MiB under 8 GiB for what the firmware and kernel keep;
+- Node 26 or newer in `/usr/local/bin` or `/usr/bin`, the units' `PATH`, with its npm, which builds each release, and git, which the deployer fetches releases with;
 - QEMU, `qemu-system-<arch>` and `qemu-img`, because pylons are QEMU VMs;
 - `/dev/kvm`, owned by the `kvm` group;
+- 20 GiB free on each filesystem that holds `/var/lib/nexus` or `/opt/nexus`, the mark under which `nexus nodes` calls a disk low;
+- ports 7470, 7443, 7480 and 7481 free, or held by Nexus's own `nexus-control` and `nexus-probe`, as `ss` names their listeners. A machine without `ss` gets a warning that the ports were not checked;
+- no `nexus` or `nexus-control` user with another home than Nexus gives it, and no `/opt/nexus` with files but no `releases` directory, as other software of the same name leaves;
 - tailscale, installed, running and logged in;
-- MagicDNS and HTTPS certificates turned on for the tailnet. `src/deploy/setup.ts check` reads these from `tailscale status --json`, so without Node 26 they are checked on the rerun;
+- MagicDNS and HTTPS certificates turned on for the tailnet. The installer reads them from `tailscale status --json` in the shell, so a machine without Node has them checked on the first run too;
 - on the control plane's machine, tailscaled started with `TS_PERMIT_CERT_UID=nexus-control`, so the control plane can fetch the dashboard's certificate (see [HTTPS dashboard](#https-dashboard)).
+
+A node key that expires is a warning, not a miss. The installer names when it expires and goes on, since the machine works until then. When it expires the machine leaves the tailnet until someone logs it in again, so turn key expiry off for the machine in Tailscale's admin console.
+
+`sudo deploy/install.sh --check` runs the same checks and changes nothing, even when every prerequisite holds. On an installed machine it also checks the install: each unit of the installed roles running, or for `nexus-deployer.service` and `nexus-backup.service` not failed; each of `current`, `control-current` and `deployer-current` naming a release in `/opt/nexus/releases` that holds the desired release the control plane names, as the deployer reads it; `control-plane.json` and `deployer.json`; and `control.json`, `probe.json` and `secrets.env`, each parsed by the installed release that reads it. It lists every problem with its fix and exits 1, or says that everything holds and exits 0. An installed machine without the control role is checked as a node. `src/deploy/installed.ts` makes the install's checks, and loads from the checkout before `npm ci`.
 
 `--dotfiles` is optional. Without it, control.json names no dotfiles repository and every pylon keeps the layer the image bakes. With it, the installer runs `git ls-remote` first on the branch control.json names for it, `main` in a new control.json, and writes nothing when git cannot reach it. A rerun with the URL control.json holds checks it again, so once the git SSH key is on GitHub, rerunning with the same `--dotfiles` checks an SSH URL. A rerun with another URL checks nothing and says control.json keeps its own. The config write the installer makes after the credentials step leaves `--dotfiles` out, so it never checks with a key GitHub does not know yet. It checks an HTTPS URL without credentials, so give a private repository's SSH URL. It checks an SSH URL with the machine's git SSH key, which the credentials step makes, so on a first install it says the URL is not checked yet. Unchecked, a wrong URL shows as a failed pull in the pylon boot's log. A probe from before optional dotfiles cannot boot a pylon without them, so take `dotfiles` out of an existing control.json only after every probe is upgraded.
 
