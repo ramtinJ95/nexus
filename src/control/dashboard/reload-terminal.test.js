@@ -29,7 +29,7 @@ Object.assign(globalThis, {
   location: { href: "http://nexus.test/", pathname: "/", search: "", reload: () => { reloads++; } },
   addEventListener: () => {},
   EventSource: { OPEN: 1, CLOSED: 2 },
-  fetch: async () => ({ ok: true, status: 200, text: async () => served }),
+  fetch: async () => ({ ok: true, status: 200, headers: new Headers(), text: async () => served }),
   DOMParser: class { parseFromString(client) { return page(client); } },
   document: {
     querySelector: (s) => s === "main" ? { dataset: { pollMs: "60000" } } : page(running).querySelector(s),

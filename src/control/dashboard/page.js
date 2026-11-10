@@ -185,11 +185,20 @@ export function follow(url) {
   });
 }
 
+/** The last page read, so a poll that finds it unchanged gets a 304 and no body. */
+let lastRead = null;
 export async function readPage(url) {
+  const href = String(url);
+  // Another read may replace lastRead before this one answers, as overlapping node picks do.
+  const cached = lastRead?.href === href ? lastRead : null;
   // A link that stalls mid-body would otherwise hold the refresh lock forever.
-  const res = await fetch(url, { headers: { accept: "text/html" }, cache: "no-store", signal: AbortSignal.timeout(pollMs * 2) });
+  const res = await fetch(url, { headers: { accept: "text/html", ...(cached && { "if-none-match": cached.etag }) }, cache: "no-store", signal: AbortSignal.timeout(pollMs * 2) });
+  if (res.status === 304 && cached !== null) return new DOMParser().parseFromString(cached.text, "text/html");
   if (!res.ok) throw new Error(`the control plane answered ${res.status}`);
-  return new DOMParser().parseFromString(await res.text(), "text/html");
+  const text = await res.text();
+  const etag = res.headers.get("etag");
+  lastRead = etag ? { href, etag, text } : null;
+  return new DOMParser().parseFromString(text, "text/html");
 }
 
 // The client this page runs. A deploy serves another, and removes the chunks of this one it has not loaded yet.
