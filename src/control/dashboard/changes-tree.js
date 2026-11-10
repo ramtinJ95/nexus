@@ -87,7 +87,7 @@ export async function readChanges(wake = false) {
       forgetChanged(changes.files);
       renderChanges();
       refreshTabs(changes.files);
-      followHash();
+      followHash(true);
     } catch (err) {
       if (base !== checkout.base) return;
       // The thread closed while the read was out, so the closing, not the failure it caused, is what to show.

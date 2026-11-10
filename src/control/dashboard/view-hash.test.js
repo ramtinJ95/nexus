@@ -183,6 +183,9 @@ test("each view's hash on load shows that view", async () => {
   const { view, step } = await load("#tl-review");
   assert.equal(view(), "timeline", "a step's hash shows the timeline");
   assert.equal(step.scrolledTo, 1, "and brings the step into view");
+  await page.readChanges();
+  await page.readChanges();
+  assert.equal(step.scrolledTo, 1, "a read of the changes, as after each turn, leaves the reader where they scrolled");
 
   const linked = await load("#file=src/c.ts");
   assert.deepEqual([linked.view(), location.hash], ["convo", "#file=src/c.ts"], "a file whose tab is not open waits for the changes, with its hash");
