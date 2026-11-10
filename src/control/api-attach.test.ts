@@ -245,5 +245,23 @@ test("an upgrade the API serves no WebSocket for is handled as an ordinary reque
   const upgrade = { connection: "upgrade", upgrade: "websocket", "sec-websocket-version": "13", "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==" };
   assert.equal((await s.call("GET", "/v1/projects", undefined, upgrade)).status, 200);
   const other = await s.call("GET", attachPathOf(s.thread.id), undefined, { connection: "upgrade", upgrade: "h2c" });
-  assert.deepEqual(other, { status: 404, body: { error: `no route /v1/threads/${s.thread.id}/attach`, code: "no-route", retryable: false } });
+  assert.deepEqual(other, { status: 426, body: { error: "the attach route answers only a WebSocket upgrade", code: null, retryable: false } });
+});
+
+test("a GET of the attach route that does not upgrade answers the refusal the upgrade gets, which a browser's WebSocket cannot read", async (t) => {
+  const s = await withThread(t, { attachTiming: fastAttach });
+  const [mine, theirs] = [await streamsAs(s, [laptop], `/v1/threads/${s.thread.id}/events`), await streamsAs(s, [phone], `/v1/threads/${s.thread.id}/events`)];
+  t.after(() => { for (const stream of mine) stream.close(); });
+  const refusedAlike = async (error: string) => {
+    const refusal = { error, code: null, retryable: false };
+    assert.deepEqual(await attachTo(s.port, attachPathOf(s.thread.id)), { status: 503, body: refusal });
+    assert.deepEqual(await s.call("GET", attachPathOf(s.thread.id)), { status: 503, body: refusal });
+  };
+  await refusedAlike(`${maxStreams} streams are open, the most this control plane serves at once`);
+  for (const stream of theirs) stream.close();
+  await until("the phone's streams gave their places back", () => s.fake.watching(s.thread.id) === maxStreamsPerCaller);
+  await refusedAlike(`${maxStreamsPerCaller} streams of ${laptop} are open, the most one caller holds at once`);
+  mine.pop()!.close();
+  await until("a closed stream frees its place", async () => (await s.call("GET", attachPathOf(s.thread.id))).status === 426);
+  assert.equal((await s.call("GET", `/v1/threads/${s.thread.id}/attach?cols=0&rows=30`)).status, 400, "a bad query is refused as the upgrade refuses it");
 });
