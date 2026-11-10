@@ -1,6 +1,10 @@
 # Changelog
 
-What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
+What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), except in the commands [Version skew](cli.md#version-skew) names, so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
+
+## 0.80.0
+
+`deploy`, `release`, `doctor` and `connect` run against a control plane older than `minControlVersion`, and warn a terminal, so a `git pull` that raised the floor leaves the commands that upgrade it working. A control plane newer than the CLI gets a terminal one line that says to pull the checkout and run `deploy/mac/install` again. `connect` and `doctor` print both versions, and `connect --json` adds `versions`. The config file honours `XDG_CONFIG_HOME`, and keeps a file already at `~/.config/nexus/cli.json`, as [Connecting a device](cli.md#connecting-a-device) describes. No route changes.
 
 ## 0.79.0
 

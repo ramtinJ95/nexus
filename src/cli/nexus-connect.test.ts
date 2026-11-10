@@ -15,8 +15,9 @@ import { processStream } from "../process-stream.ts";
 import type { TailnetNodeId } from "../ids.ts";
 import type { ByteStream, StreamEnd } from "../protocol/streams.ts";
 import { testCertificate } from "../test-certificate.ts";
+import { version } from "../version.ts";
 import { freePort, tempDir, until } from "../test-support/kit.ts";
-import { cli, laptop, phone, apiName, project, withHealth, listening, socksProxy, setup, observeRunning, versioned, bare } from "../test-support/cli-kit.ts";
+import { cli, laptop, phone, apiName, project, withHealth, listening, socksProxy, setup, observeRunning } from "../test-support/cli-kit.ts";
 
 /** A pipe to the relay in the guest that prints Herdr's screen once its source is in, and exits 0 when its stdin ends. */
 function herdrPipe(): ByteStream {
@@ -112,6 +113,7 @@ test("connect finds the API on the dashboard's HTTPS port, saves it, and the nex
   assert.equal(connected.code, 0, connected.stderr);
   assert.equal(connected.stdout, [
     `Connected to https://${apiName}:7443, saved in ${config}.`,
+    `This CLI runs Nexus ${version}, and the control plane ${version}.`,
     `This device is tailnet node ${laptop}. It`,
     "  may read threads, projects and nodes",
     "  may start and message threads",
@@ -132,7 +134,7 @@ test("connect finds the API on the dashboard's HTTPS port, saves it, and the nex
   assert.equal(plain.code, 0, plain.stderr);
   assert.deepEqual(JSON.parse(plain.stdout), {
     url: `http://${apiName}:7470`, socks: `127.0.0.1:${proxy.port}`, config,
-    caller: { node: laptop, allowed: true, person: true, deployer: true },
+    caller: { node: laptop, allowed: true, person: true, deployer: true }, versions: { cli: version, control: version },
   }, "a certificate this device does not trust falls back to HTTP, and the saved proxy is kept");
   assert.deepEqual(JSON.parse(await readFile(config, "utf8")), { url: `http://${apiName}:7470`, socks: `127.0.0.1:${proxy.port}` });
 });
@@ -160,6 +162,7 @@ test("connect says what this device may do, and the line that admits it when it 
   assert.equal(person.code, 0, person.stderr);
   assert.equal(person.stdout, [
     `Connected to ${s.localUrl}, saved in ${config}.`,
+    `This CLI runs Nexus ${version}, and the control plane ${version}.`,
     `This device is tailnet node ${phone}. It`,
     "  may read threads, projects and nodes",
     "  may start and message threads",
@@ -174,6 +177,7 @@ test("connect says what this device may do, and the line that admits it when it 
   assert.equal(stranger.code, 0, stranger.stderr);
   assert.equal(stranger.stdout, [
     `Connected to ${s.localUrl}, saved in ${config}.`,
+    `This CLI runs Nexus ${version}, and the control plane ${version}.`,
     "This device is tailnet node nSTRANGER. It",
     "  may not read threads, projects and nodes",
     "  may not start and message threads",
@@ -198,7 +202,7 @@ test("connect fails without saving when no control plane answers, or one does no
   assert.equal(down.code, 2);
   assert.match(down.stderr, new RegExp(`^nexus: no Nexus control plane answers at ${apiName} through the SOCKS proxy at 127\\.0\\.0\\.1:${proxy.port}:\n  https://${apiName}:7443: the SOCKS proxy .+\n  http://${apiName}:7470: the SOCKS proxy .+\n$`));
   const refusedHere = await s.nexus(["connect", `http://127.0.0.1:${dead}`, "--socks", "none"], env);
-  assert.deepEqual([refusedHere.code, refusedHere.stderr], [2, `nexus: no Nexus control plane answers at http://127.0.0.1:${dead}:\n  http://127.0.0.1:${dead}: nothing is listening on 127.0.0.1:${dead}\nIf this device reaches the tailnet only through a SOCKS5 proxy, such as ts-home's userspace tailscaled, give it with --socks HOST:PORT\n`], "connect names each try's reason alone, and never itself");
+  assert.deepEqual([refusedHere.code, refusedHere.stderr], [2, `nexus: no Nexus control plane answers at http://127.0.0.1:${dead}:\n  http://127.0.0.1:${dead}: nothing is listening on 127.0.0.1:${dead}\nIf this device reaches the tailnet only through a SOCKS5 proxy, such as a userspace tailscaled, give it with --socks HOST:PORT\n`], "connect names each try's reason alone, and never itself");
   const direct = await s.nexus(["connect", "127.0.0.1"], env);
   assert.equal(direct.code, 2);
   assert.match(direct.stderr, /give it with --socks HOST:PORT\n$/);
@@ -215,11 +219,3 @@ test("connect fails without saving when no control plane answers, or one does no
   await assert.rejects(readFile(config), { code: "ENOENT" });
 });
 
-test("connect refuses a control plane older than the CLI reads, and saves nothing", async (t) => {
-  const old = await versioned(t, { commit: "a".repeat(40), https: {} });
-  const res = await bare(t, ["connect", old.url, "--json"]);
-  assert.equal(res.code, 1);
-  assert.match(JSON.parse(res.stderr).error, /^the control plane at http:\/\/127\.0\.0\.1:\d+ runs Nexus older than [\d.]+, and this CLI needs [\d.]+ or later\. Upgrade it, as deploy\/README\.md describes$/);
-  assert.deepEqual(old.paths, ["/v1/health"], "it asks no whoami");
-  await assert.rejects(readFile(res.config), { code: "ENOENT" });
-});

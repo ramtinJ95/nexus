@@ -9,6 +9,7 @@ import type { WebSocket } from "ws";
 import { CliError, UsageError, type ErrorKind } from "./transport.ts";
 import { callOf, type ApiRoute, type CallArgs, type ReplyOf } from "../contract/route.ts";
 import { threadRoutes } from "../contract/threads.ts";
+import type { Versions } from "./config.ts";
 
 export type Values = Record<string, string | boolean | string[] | undefined>;
 export type Api = (method: string, path: string, body?: unknown, idleMs?: number) => Promise<unknown>;
@@ -28,6 +29,8 @@ export interface Io {
 }
 interface Local {
   connect(path: string): Promise<WebSocket>;
+  /** The versions the health read before the command's first request found. */
+  versions(): Promise<Versions>;
   io: Io;
 }
 export interface Command {
@@ -36,6 +39,11 @@ export interface Command {
   args: readonly [min: number, max: number];
   /** Its first argument names a thread, which a prefix of the ID or `@last` may give. */
   thread?: true;
+  /**
+   * It runs against a control plane older than `minControlVersion`, with a warning, since it is how a person
+   * upgrades or diagnoses one.
+   */
+  anyVersion?: true;
   options?: ParseArgsOptionsConfig;
   /** Nothing when the command printed its own output, as watch does, or the exit code it ends with then. */
   run(api: Api, args: readonly string[], values: Values, follow: Follow, local: Local): Promise<Result | number | void>;
