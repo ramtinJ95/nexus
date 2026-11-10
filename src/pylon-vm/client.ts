@@ -36,7 +36,7 @@ import {
 	readLogTail,
 	readRecord,
 } from "./storage.ts";
-import { reapGroup, signalGroup } from "../process-group.ts";
+import { killGraceMs, reapGroup, signalGroup } from "../process-group.ts";
 import { saveJson } from "../node-base/json-file.ts";
 
 /** sun_path holds 104 bytes on macOS and 108 on Linux, including the terminating NUL. The shorter rules. */
@@ -460,15 +460,22 @@ async function create(
 		);
 	}
 }
+/** What ends a retry stop's wait on the old controller's stop, and how long its process group's SIGTERM then gets. */
+export interface RetryStopDeadlines {
+	stop: () => AbortSignal;
+	termGraceMs: number;
+}
+export const retryStopDeadlines: RetryStopDeadlines = { stop: () => AbortSignal.timeout(30_000), termGraceMs: killGraceMs };
 export async function run<I extends ActionInput>(
 	root: string,
 	input: I,
 	signal?: AbortSignal,
+	deadlines = retryStopDeadlines,
 ): Promise<Reply<I["action"]>> {
 	const action = actionSchema.parse(input);
-	return actions[action.action].reply.parse(await dispatch(root, action, signal)) as Reply<I["action"]>;
+	return actions[action.action].reply.parse(await dispatch(root, action, signal, deadlines)) as Reply<I["action"]>;
 }
-async function dispatch(root: string, action: Action, signal?: AbortSignal): Promise<unknown> {
+async function dispatch(root: string, action: Action, signal: AbortSignal | undefined, deadlines: RetryStopDeadlines): Promise<unknown> {
 	await privateRoot(root);
 	if (action.action === "create" || action.action === "prepare")
 		return create(root, action, signal);
@@ -539,7 +546,7 @@ async function dispatch(root: string, action: Action, signal?: AbortSignal): Pro
 	if (action.action === "finish-retry-stop" && !existsSync(instanceFiles(dir).retryStop)) return null;
 	if (action.action === "recorded") return { status: statusSchema.parse(JSON.parse(await readFile(instanceFiles(dir).status, "utf8"))) };
 	await readRecord(dir);
-	if (action.action === "retry-stop" || action.action === "finish-retry-stop") return stopForRetry(root, action.name, signal);
+	if (action.action === "retry-stop" || action.action === "finish-retry-stop") return stopForRetry(root, action.name, signal, deadlines);
 	if (action.action === "logs" && !action.service) {
 		return {
 			name: action.name,
@@ -554,8 +561,8 @@ async function dispatch(root: string, action: Action, signal?: AbortSignal): Pro
 	if (action.action === "inspect") return offline(dir);
 	throw new Error(`${action.name} is not running. Use start first`);
 }
-/** Stop gets 30 s; group termination then gets 10 s before SIGKILL and 10 s to confirm exit. */
-async function stopForRetry(root: string, name: string, signal?: AbortSignal): Promise<void> {
+/** Stop gets until `stop` aborts, 30 s by default; group termination then gets `termGraceMs` before SIGKILL and 10 s to confirm exit. */
+async function stopForRetry(root: string, name: string, signal: AbortSignal | undefined, { stop, termGraceMs }: RetryStopDeadlines): Promise<void> {
 	const dir = directory(root, "instances", name);
 	signal?.throwIfAborted();
 	const lock = instanceFiles(dir).launchLock;
@@ -588,7 +595,8 @@ async function stopForRetry(root: string, name: string, signal?: AbortSignal): P
 				throw new Error("The controller changed during retry stop; refusing to stop another boot");
 		}
 		try {
-			const reply = await send(dir, { action: "stop", name }, signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000));
+			const deadline = stop();
+			const reply = await send(dir, { action: "stop", name }, signal ? AbortSignal.any([signal, deadline]) : deadline);
 			if (reply === absent && owner === null) await settle(dir);
 		} catch (error) {
 			if (owner === null) throw error;
@@ -605,7 +613,7 @@ async function stopForRetry(root: string, name: string, signal?: AbortSignal): P
 				return signalGroup(controller.pid, name);
 			};
 			await checkedSignal("SIGTERM");
-			await reapGroup(controller.pid, `controller ${controller.pid}`, checkedSignal);
+			await reapGroup(controller.pid, `controller ${controller.pid}`, checkedSignal, termGraceMs);
 			await log(`stopped old controller ${controller.pid} (start ${controller.start}, host boot ${controller.boot}) and its process group`);
 			await rm(instanceFiles(dir).socket, { force: true });
 			await rm(instanceFiles(dir).pid, { force: true });
