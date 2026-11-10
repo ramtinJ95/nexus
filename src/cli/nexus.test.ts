@@ -147,7 +147,7 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
     + "    [--template-input PATH]... [--clear-template-inputs]   repository files, such as package-lock.json, that key the project's templates with .nexus/setup\n"
     + "    [--auto-review off|review|land|yolo]   review each builder's PR on its own, land it too, and with yolo waive the holds you may; land and yolo need a deployer\n"
     + "    [--pipeline off|approve|start]    turn pipeline items into threads, once the person approves each or on their own\n"
-    + "    [--second-reviewer off|on|always|reserved,lines=N]   a second reviewer on another model for the PRs the rule names\n"
+    + "    [--second-reviewer off|on|always|reserved,lines=N]   an independent second reviewer on Claude Opus 5.5 for the PRs the rule names\n"
     + "    [--rules-file PATH|- | --clear-rules]   the standing rules from a file, or - for stdin, or none\n");
   assert.equal((await s.nexus(["retry", "-h"])).stdout, "  nexus abort|retry|retry-pylon|wake <thread>\n");
   assert.equal((await s.nexus(["session", "open", "--help"])).stdout, "  nexus session open <thread> [--harness claude-code|pi|shell] [--title T]\n");
