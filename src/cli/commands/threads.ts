@@ -6,8 +6,10 @@ import { projectOf } from "../refs.ts";
 import { attachTerminal, processTty } from "../attach.ts";
 import { CliError, UsageError } from "../transport.ts";
 import { startRules } from "../../contract/threads-parse.ts";
-import { type Values, type Api, type Command, str, request, int, briefOptions, briefOf, table, waitMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
-import { detailText, portsText, listingText, changesText, queuedRow, queuedText, threadRow } from "../thread-text.ts";
+import { type Values, type Api, type Command, type Io, str, request, int, briefOptions, briefOf, colourOf, waitMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
+import { thenWatch, watchOf, watchOptions } from "./watch.ts";
+import { detailText, portsText, listingText, changesText, queuedTable, queuedText, threadsText } from "../thread-text.ts";
+import { needsPerson } from "../../contract/attention.ts";
 
 function portArg(given: string): number {
   const port = Number(given);
@@ -20,17 +22,25 @@ const baseOf = (v: Values): ChangesBase => {
   return v.turn === true ? "turn" : v.uncommitted === true ? "head" : "start";
 };
 
-async function served(api: Api, id: string, port: number): Promise<Preview> {
-  let preview: Preview | null | undefined;
+/** `published` is what the publish answered, so a terminal sees the preview before the first poll answers. */
+async function served(api: Api, io: Io, id: string, port: number, published: Preview): Promise<Preview> {
+  let preview: Preview | null = published;
   return pollUntil({
     deadlineMs: waitMs, everyMs: waitPollMs,
     timedOut: () => {
       const why = preview && preview.failed !== null ? `, because ${preview.failed}` : "";
       return new CliError("failed", `port ${port} of ${id} was not served within ${waitMs / 1000} s${why}. \`nexus ports ${id}\` shows whether it listens and whether its preview is published`);
     },
+    shown: {
+      to: io.stderr,
+      state: () => preview === null ? `Port ${port} of ${id} has no preview yet`
+        : preview.ready ? undefined
+        : `${preview.url} is published, and not served yet${preview.failed === null ? "" : `, because ${preview.failed}`}`,
+      stopped: () => `Stopped waiting. The preview stays published, and \`nexus ports ${id}\` shows when it is served`,
+    },
   }, async () => {
     const d = await request(api, routes.show, { thread: id });
-    preview = d.ports?.find((l) => l.port === port)?.preview;
+    preview = d.ports?.find((l) => l.port === port)?.preview ?? null;
     return preview?.ready === true ? preview : undefined;
   });
 }
@@ -62,23 +72,30 @@ const statusChange = (route: typeof routes.archive | typeof routes.unarchive | t
 export const threadsCommands: Readonly<Record<string, Command>> = {
   threads: {
     help: [
-      "  nexus threads [--project P] [--all] [--open] [--queued]",
+      "  nexus threads [--project P] [--all] [--open] [--active] [--needs-me] [--limit N] [--queued]",
       "    threads, then queued ones; deleted ones and cancelled queued ones only with --all, no archived ones with --open, and --queued lists only queued ones",
+      "    --active lists only active threads and --needs-me only those whose attention waits on you, with no queued ones; --limit N the first N",
     ],
     args: [0, 0],
-    options: { project: { type: "string" }, all: { type: "boolean" }, open: { type: "boolean" }, queued: { type: "boolean" } },
-    async run(api, _, v) {
+    options: { project: { type: "string" }, all: { type: "boolean" }, open: { type: "boolean" }, queued: { type: "boolean" }, active: { type: "boolean" }, "needs-me": { type: "boolean" }, limit: { type: "string" } },
+    async run(api, _, v, _follow, { io }) {
       const project = str(v, "project");
-      const queuing = request(api, routes.queued, { query: { project, ...v.all === true ? {} : { status: "queued" } } });
+      const limit = int(str(v, "limit"), "--limit", Infinity);
+      if (limit === 0) throw new UsageError("--limit takes 1 or more");
+      const onlyThreads = v.active === true || v["needs-me"] === true;
+      if (v.queued === true && onlyThreads) throw new UsageError("--queued lists threads that have not started, so it cannot go with --active or --needs-me");
+      const colour = colourOf(io);
+      const queuing = onlyThreads ? Promise.resolve([]) : request(api, routes.queued, { query: { project, ...v.all === true ? {} : { status: "queued" } } });
       if (v.queued === true) {
-        const queued = await queuing;
-        return { json: queued, text: queued.length === 0 ? "No queued threads." : table(queued.map(queuedRow)) };
+        const queued = (await queuing).slice(0, limit);
+        return { json: queued, text: queued.length === 0 ? "No queued threads." : queuedTable(queued, colour) };
       }
       const listing = request(api, routes.list, { query: { project, ...v.open === true ? { deleted: false, status: "open" } : v.all === true ? {} : { deleted: false } } });
       // A control plane older than 0.77.0 ignores status=open and answers every thread but the deleted ones.
-      const [queued, shown] = await Promise.all([queuing, v.open === true ? listing.then((rows) => rows.filter((r) => r.status === "active" || r.status === "idle")) : listing]);
-      const rows = [...shown.map(threadRow), ...queued.map(queuedRow)];
-      return { json: shown, text: rows.length === 0 ? "No threads." : table(rows) };
+      const [queued, listed] = await Promise.all([queuing, listing]);
+      const shown = listed.filter((r) => (v.open !== true || r.status === "active" || r.status === "idle") && (v.active !== true || r.status === "active") && (v["needs-me"] !== true || needsPerson(r.attention)));
+      const threads = shown.slice(0, limit);
+      return { json: threads, text: threadsText(threads, queued.slice(0, limit - threads.length), colour) };
     },
   },
   show: {
@@ -111,10 +128,10 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     thread: true,
     args: [2, 2],
     options: { wait: { type: "boolean" } },
-    async run(api, [id, given], v) {
+    async run(api, [id, given], v, _follow, { io }) {
       const port = portArg(given!);
       const linked = await request(api, pylonRoutes.preview, { thread: id!, body: { port } });
-      const preview = v.wait === true ? await served(api, id!, port) : linked;
+      const preview = v.wait === true ? await served(api, io, id!, port, linked) : linked;
       return { json: preview, text: preview.failed !== null ? `${preview.url} (not ready: ${preview.failed})` : preview.ready ? preview.url : `${preview.url} (not served yet. \`--wait\` waits until it is)` };
     },
   },
@@ -122,9 +139,9 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     help: ["  nexus unpreview <thread> <port>              stop publishing a port that preview published"],
     thread: true,
     args: [2, 2],
-    async run(api, [id, given]) {
+    async run(api, [id, given], _v, _follow, { io }) {
       const port = portArg(given!);
-      await whenRunning(api, id!, () => request(api, pylonRoutes.unpreview, { thread: id!, port: String(port) }), `port ${port} is still published`);
+      await whenRunning(api, io, id!, () => request(api, pylonRoutes.unpreview, { thread: id!, port: String(port) }), `port ${port} is still published`);
       return { json: null, text: `Unpublished port ${port} of ${id}.` };
     },
   },
@@ -132,8 +149,8 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     help: ["  nexus files <thread> [path]                  a directory of the pylon's checkout"],
     thread: true,
     args: [1, 2],
-    async run(api, [id, path = ""]) {
-      const l = await whenRunning(api, id!, () => request(api, pylonRoutes.files, { thread: id!, query: { path } }), "nothing was listed");
+    async run(api, [id, path = ""], _v, _follow, { io }) {
+      const l = await whenRunning(api, io, id!, () => request(api, pylonRoutes.files, { thread: id!, query: { path } }), "nothing was listed");
       return { json: l, text: listingText(l) };
     },
   },
@@ -142,8 +159,8 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     thread: true,
     args: [1, 1],
     options: { uncommitted: { type: "boolean" }, turn: { type: "boolean" } },
-    async run(api, [id], v) {
-      const c = await whenRunning(api, id!, () => request(api, pylonRoutes.changes, { thread: id!, query: { base: baseOf(v) } }), "no changes were read");
+    async run(api, [id], v, _follow, { io }) {
+      const c = await whenRunning(api, io, id!, () => request(api, pylonRoutes.changes, { thread: id!, query: { base: baseOf(v) } }), "no changes were read");
       return { json: c, text: changesText(c) };
     },
   },
@@ -152,9 +169,9 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     thread: true,
     args: [1, Infinity],
     options: { uncommitted: { type: "boolean" }, turn: { type: "boolean" } },
-    async run(api, [id, ...paths], v) {
+    async run(api, [id, ...paths], v, _follow, { io }) {
       const query = { base: baseOf(v), paths };
-      const d = await whenRunning(api, id!, () => request(api, pylonRoutes.diff, { thread: id!, query }), "no diff was read");
+      const d = await whenRunning(api, io, id!, () => request(api, pylonRoutes.diff, { thread: id!, query }), "no diff was read");
       const text = d.diff === "" ? "No changes." : d.diff.replace(/\n$/, "");
       return { json: d, text: d.truncated ? `${text}\n[The diff stops here, at its 4 MiB limit. Name paths to see the rest.]` : text };
     },
@@ -164,10 +181,10 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     thread: true,
     args: [1, 1],
     options: { harness: { type: "string" }, title: { type: "string" } },
-    async run(api, [id], v) {
+    async run(api, [id], v, _follow, { io }) {
       const body = Object.fromEntries((["harness", "title"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]]));
       // The API answers once the agent is ready or waits for its human, which can take a minute.
-      const opened = await whenRunning(api, id!, () => request(api, pylonRoutes.openSession, { thread: id!, body }), "no session was opened");
+      const opened = await whenRunning(api, io, id!, () => request(api, pylonRoutes.openSession, { thread: id!, body }), "no session was opened");
       return { json: opened, text: `Opened ${opened.harness} session ${JSON.stringify(opened.title)} in pane ${opened.herdrPane} of ${id}. \`nexus attach ${id}\` attaches to it.` };
     },
   },
@@ -193,14 +210,18 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
   start: {
     help: [
       "  nexus start [--project P] [--title T] [--message M | --claude PROMPT [--model ID]] [--node N|auto] [--branch B] [--commit C]",
-      "              [--cpus n] [--memory GiB] [--disk GiB] [--after THREAD[,THREAD...]] [--request-id ID] [--plan]",
+      "              [--cpus n] [--memory GiB] [--disk GiB] [--after THREAD[,THREAD...]] [--request-id ID] [--plan] [--watch [--interval MS]]",
       "    --after queues it to start once each of those threads' pull requests has merged",
       "    --plan makes it a planning thread, whose proposed items become questions you accept or reject",
       "    --request-id makes a repeat of the start answer the thread the first made",
+      "    --watch then follows the run until it replies, as watch --until-idle does",
     ],
     args: [0, 0],
-    options: { ...briefOptions, "request-id": { type: "string" }, plan: { type: "boolean" } },
-    async run(api, _, v) {
+    options: { ...briefOptions, ...watchOptions, "request-id": { type: "string" }, plan: { type: "boolean" } },
+    async run(api, _, v, follow, { io }) {
+      const interval = watchOf(v);
+      if (v.watch === true && v.message === undefined && v.claude === undefined) throw new UsageError("--watch waits for the reply to the first message, so it needs --message or --claude");
+      if (v.watch === true && v.after !== undefined) throw new UsageError("--watch cannot go with --after, since a queued thread has no run yet");
       // One request: the control plane sends the first message once the thread starts, as the person's.
       const body = briefOf(v, await projectOf(api, v, "start"), startRules);
       if (body.after !== undefined) {
@@ -210,7 +231,10 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
         return { json: q, text: `Queued ${q.id} on ${q.project}: ${q.title}. It starts once ${listed(q.after)} ${q.after.length === 1 ? "has merged its pull request" : "have merged their pull requests"}.` };
       }
       const t = await request(api, routes.start, { body });
-      return { json: t, text: `Started ${v.plan === true ? "planning thread " : ""}${t.id} on ${t.project}: ${t.title}${v.message === undefined ? "" : "\nSent the first message."}` };
+      const started = `Started ${v.plan === true ? "planning thread " : ""}${t.id} on ${t.project}: ${t.title}${v.message === undefined ? "" : "\nSent the first message."}`;
+      return await thenWatch(api, follow, io, v, interval, t.id, {
+        json: t, text: v.watch === true ? started : `${started}\n\`nexus watch ${t.id}\` follows it.`,
+      }, { since: { lastReplyAt: null, questions: [] }, from: null });
     },
   },
   "start-queued": {
@@ -224,26 +248,28 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
   },
   send: {
     help: [
-      "  nexus send <thread> <text...> [--steer] [--request-id ID]",
+      "  nexus send <thread> <text...> [--steer] [--request-id ID] [--watch [--interval MS]]",
       "    a message to the agent, or typed into the Claude worker's session, which waits for a paused pylon to wake",
+      "    --watch then follows the run until it replies, as watch --until-idle does",
     ],
     thread: true,
     args: [2, Infinity],
-    options: { steer: { type: "boolean" }, "request-id": { type: "string" } },
-    async run(api, [id, ...words], v) {
+    options: { ...watchOptions, steer: { type: "boolean" }, "request-id": { type: "string" } },
+    async run(api, [id, ...words], v, follow, { io }) {
+      const interval = watchOf(v);
       const steer = v.steer === true;
       // The API treats a resend with the same request ID as the same message, so a caller that retries passes one.
       const requestId = str(v, "request-id") ?? `msg:${randomUUID()}`;
       // A Claude worker's message is typed in its pylon, so its send waits for a paused pylon to wake.
-      const claude = (await request(api, routes.show, { thread: id! })).claudeWorker !== undefined;
+      const before = await request(api, routes.show, { thread: id! });
+      const claude = before.claudeWorker !== undefined;
       const body = { text: words.join(" "), requestId, mode: steer ? "steer" as const : "followUp" as const };
       const message = () => request(api, routes.message, { thread: id!, body });
-      const reply = claude ? await whenRunning(api, id!, message, "the message was not sent") : await message();
-      if ("claude" in reply) {
-        const resumed = reply.claude.resumed ? " Its session was resumed to take it." : "";
-        return { json: reply, text: reply.claude.outcome === "queued" ? `Queued for Claude in ${id}, which takes it at its next step.${resumed}` : `Sent to Claude in ${id}.${resumed}` };
-      }
-      return { json: reply, text: steer ? `Sent to ${id}, to join the current run after its tool round.` : `Sent to ${id}.` };
+      const reply = claude ? await whenRunning(api, io, id!, message, "the message was not sent") : await message();
+      const resumed = "claude" in reply && reply.claude.resumed ? " Its session was resumed to take it." : "";
+      const text = "claude" in reply ? reply.claude.outcome === "queued" ? `Queued for Claude in ${id}, which takes it at its next step.${resumed}` : `Sent to Claude in ${id}.${resumed}`
+        : steer ? `Sent to ${id}, to join the current run after its tool round.` : `Sent to ${id}.`;
+      return await thenWatch(api, follow, io, v, interval, id!, { json: reply, text }, { since: before, from: body.text });
     },
   },
   seen: {
@@ -264,7 +290,22 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
   abort: action("Aborted the run of", (api, thread) => request(api, routes.abort, { thread })),
   retry: action("Retried the parked tasks of", (api, thread) => request(api, routes.retry, { thread })),
   "retry-pylon": action("Retried the pylon of", (api, thread) => request(api, routes.retryPylon, { thread })),
-  wake: action("Recorded activity on", (api, thread) => request(api, routes.activity, { thread, body: { kind: "human" } })),
+  wake: {
+    help: actionHelp,
+    args: [1, 1],
+    thread: true,
+    async run(api, [id], v) {
+      await request(api, routes.activity, { thread: id!, body: { kind: "human" } });
+      if (v.json === true) return { json: null, text: "" };
+      const { thread: t, pylon, desired } = await request(api, routes.show, { thread: id! });
+      const text = desired !== "running"
+        ? `Recorded your activity on ${id}, but it is ${t.status}, so its pylon stays ${desired}.${t.status === "archived" ? ` \`nexus unarchive ${id}\` wakes it.` : ""}`
+        : pylon.actualState === "failed" || pylon.failed !== null ? `Recorded your activity on ${id}, but its pylon failed, and activity does not retry it. \`nexus retry-pylon ${id}\` does.`
+        : pylon.actualState === "running" ? `Recorded your activity on ${id}, which keeps its running pylon awake.`
+        : `Recorded your activity on ${id}, so Nexus wakes its pylon, which is ${pylon.actualState}.`;
+      return { json: null, text };
+    },
+  },
   archive: statusChange(routes.archive, "Archived", "Its queued start is cancelled."),
   unarchive: statusChange(routes.unarchive, "Unarchived", "It is queued again."),
   delete: statusChange(routes.delete, "Deleted", "It will never start."),

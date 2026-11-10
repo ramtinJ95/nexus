@@ -14,14 +14,17 @@ import type { Question } from "../control/questions.ts";
 import { testReview } from "../test-support/registry-kit.ts";
 import type { ReviewLoop } from "../control/review.ts";
 import type { ImageManifest } from "../protocol/images.ts";
+import type { ImageOperation } from "../contract/release.ts";
+import { commands } from "./commands/index.ts";
 import type { ImageId, JobId, NodeName, ThreadId } from "../ids.ts";
 import type { ImageFetch } from "../control/image-store.ts";
 import { testCapacity, testObservation, until } from "../test-support/kit.ts";
 import { CliError } from "./transport.ts";
-import type { Api } from "./kit.ts";
+import type { Api, Result } from "./kit.ts";
 import { answeredText, pressOf } from "./commands/release.ts";
 import { version } from "../version.ts";
-import { node, laptop, image, setup } from "../test-support/cli-kit.ts";
+import { node, laptop, image, setup, timeless } from "../test-support/cli-kit.ts";
+import { localTime } from "./kit.ts";
 
 const approvedRound = { head: "1".repeat(40), verdict: { token: "a", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: null }, check: { passed: true, output: "ok" }, live: { kind: "ran" as const, thread: "th-0123456789ab" as ThreadId, passed: true, output: "ok" }, answers: null };
 
@@ -62,6 +65,40 @@ test("deploy and release use the shared release view and wait for both roles", a
   assert.match(failed.stderr, /failed to bind again/);
 });
 
+test("deploy --wait on a terminal writes each change of the release to stderr, and Ctrl-C says the deployment carries on", async (t) => {
+  const s = await setup(t);
+  const target = (await s.json(["deploy", "main"])).desired.commit as string;
+  const waiting = s.onTerminal(["deploy", "main", "--wait"]);
+  await until("the wait shows the release it waits for", () => waiting.stderr().includes(`Desired: ${target}`));
+  s.registry.releases.reportRelease({ node, role: "control", commit: "b".repeat(40), target, state: "installing", reason: null, observedAt: Date.now() });
+  await until("the wait shows the release's change", () => waiting.stderr().includes(`${node} control: ${"b".repeat(40)} installing`));
+  waiting.child.kill("SIGINT");
+  const stopped = await waiting.exited;
+  assert.deepEqual([stopped.code, stopped.stdout], [130, ""], stopped.stderr);
+  assert.equal(stopped.stderr.split("\n").filter((line) => line.startsWith("Desired: ")).length, 2, "each state is written once, when it changes");
+  assert.ok(stopped.stderr.endsWith("Stopped waiting. The deployment carries on, and `nexus release` shows where it is\n"), stopped.stderr);
+
+  const asked = s.requests();
+  const quiet = s.nexus(["deploy", "main", "--wait"]);
+  await until("the wait off a terminal polls", () => s.requests() >= asked + 3);
+  for (const role of ["control", "probe"] as const) s.registry.releases.reportRelease({ node, role, commit: target, target, state: "healthy", reason: null, observedAt: Date.now() });
+  const done = await quiet;
+  assert.deepEqual([done.code, done.stderr], [0, ""], "off a terminal the wait writes nothing to stderr");
+});
+
+test("image build --wait ends with the rollout to run next, which stays a command of its own", async () => {
+  const built: ImageOperation = { kind: "build", release: null, image: image.id, requestedBy: laptop, requestedAt: 1, steps: [{ node, state: "running", job: null, reason: null }], state: "running" };
+  const asked: string[] = [];
+  const api: Api = async (method, path) => {
+    asked.push(`${method} ${path}`);
+    if (method === "POST") return built;
+    return { current: image.id, previous: null, images: [], operation: { ...built, steps: [{ node, state: "done", job: null, reason: null }], state: "done", finishedAt: 2 } };
+  };
+  const result = await commands["image build"]!.run(api, [], { wait: true }, null as never, { connect: null as never, versions: null as never, io: process });
+  assert.deepEqual(asked, ["POST /v1/images/build", "GET /v1/images"], "it rolls nothing out");
+  assert.equal((result as Result).text, `No images.\nbuild ${image.id}: done\n  ${node}: done\nRoll it out to every online node with: nexus image rollout ${image.id} --wait`);
+});
+
 test("image list and current print each image's role, build, release and nodes, and rollout --wait follows the rollout until it is done", async (t) => {
   const s = await setup(t);
   const older: ImageManifest = { ...image, id: "img-00000000000a" as ImageId, builtAt: "2026-12-01T00:00:00Z" };
@@ -69,11 +106,13 @@ test("image list and current print each image's role, build, release and nodes, 
   s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
   s.registry.threads.ingested(testObservation(node, { artifacts: [image.id, older.id] }), []);
   const entry = { ...image, release: null, nodes: [node] };
+  const [built27, built26] = [image.builtAt, older.builtAt].map((at) => localTime(Date.parse(at)));
   const olderEntry = { ...older, release: "f".repeat(40), nodes: [node] };
 
-  assert.equal((await s.nexus(["image", "list"])).stdout, [
-    "img-0123456789ab  current  built 2027-01-01T00:00:00Z on rj-firebat  release unknown       on rj-firebat",
-    "img-00000000000a  -        built 2026-12-01T00:00:00Z on rj-firebat  release ffffffffffff  on rj-firebat",
+  assert.equal(timeless((await s.nexus(["image", "list"])).stdout), [
+    "Image  Role  Built  Release  Nodes",
+    `img-0123456789ab  current  ${built27} on rj-firebat  unknown  rj-firebat`,
+    `img-00000000000a  -  ${built26} on rj-firebat  ffffffffffff  rj-firebat`,
   ].join("\n") + "\n");
   assert.deepEqual(await s.json(["image", "list"]), { current: image.id, previous: null, images: [entry, olderEntry], operation: null, fetches: [] });
   const fetches: ImageFetch[] = [
@@ -81,21 +120,24 @@ test("image list and current print each image's role, build, release and nodes, 
     { node: "rj-nuc" as NodeName, image: image.id, state: "failed", job: null, failures: 3, failedAt: Date.now(), reason: "backend: the copy hashes to 0000, so it was thrown away" },
   ];
   s.registry.images.saveImageFetches(fetches);
-  assert.equal((await s.nexus(["image", "list"])).stdout, [
-    "img-0123456789ab  current  built 2027-01-01T00:00:00Z on rj-firebat  release unknown       on rj-firebat",
-    "img-00000000000a  -        built 2026-12-01T00:00:00Z on rj-firebat  release ffffffffffff  on rj-firebat",
+  assert.equal(timeless((await s.nexus(["image", "list"])).stdout), [
+    "Image  Role  Built  Release  Nodes",
+    `img-0123456789ab  current  ${built27} on rj-firebat  unknown  rj-firebat`,
+    `img-00000000000a  -  ${built26} on rj-firebat  ffffffffffff  rj-firebat`,
     "Fetches of the current image img-0123456789ab:",
     "  infra-testbench: running",
     "  rj-nuc: failed, 3 failed: backend: the copy hashes to 0000, so it was thrown away",
   ].join("\n") + "\n");
   assert.deepEqual((await s.json(["image", "list"])).fetches, fetches);
-  assert.equal((await s.nexus(["image", "current"])).stdout, "img-0123456789ab  current  built 2027-01-01T00:00:00Z on rj-firebat  release unknown  on rj-firebat\n");
+  assert.equal(timeless((await s.nexus(["image", "current"])).stdout), `Image  Role  Built  Release  Nodes\nimg-0123456789ab  current  ${built27} on rj-firebat  unknown  rj-firebat\n`);
 
   const rolled = await s.nexus(["image", "rollout", older.id, "--wait"]);
   assert.equal(rolled.code, 0, rolled.stderr);
-  assert.equal(rolled.stdout, [
-    "img-0123456789ab  previous  built 2027-01-01T00:00:00Z on rj-firebat  release unknown       on rj-firebat",
-    "img-00000000000a  current   built 2026-12-01T00:00:00Z on rj-firebat  release ffffffffffff  on rj-firebat",
+  assert.equal(rolled.stderr, "", "off a terminal the wait writes nothing to stderr");
+  assert.equal(timeless(rolled.stdout), [
+    "Image  Role  Built  Release  Nodes",
+    `img-0123456789ab  previous  ${built27} on rj-firebat  unknown  rj-firebat`,
+    `img-00000000000a  current  ${built26} on rj-firebat  ffffffffffff  rj-firebat`,
     "rollout img-00000000000a: done",
     "  rj-firebat: done",
   ].join("\n") + "\n");

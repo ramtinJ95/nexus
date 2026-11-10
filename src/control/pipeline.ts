@@ -14,7 +14,7 @@ import { newItemId, requestIds, type ItemId, type ProjectId, type ThreadId } fro
 import { Refusal } from "./refusal.ts";
 import { queuedView, waitOf, type ThreadQueue } from "./queue.ts";
 import { trackStep, type Review } from "./review-model.ts";
-import { checkBeside, liveNote, phaseNote } from "./wording.ts";
+import { checkBeside, heldNote, liveNote, phaseNote } from "./wording.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import { attentionLabels } from "./plain-wording.ts";
@@ -116,8 +116,8 @@ function startedPhase(registry: PipelineRegistry, t: Thread, review: Review | nu
     case "needs-person": return phase("held", `its review ended for the person: ${review.phase.holds[0]?.text ?? "no reason given"}`);
     case "merging": case "deploying": case "rolling-back": return phase("landing", `${pr} is ${review.phase.kind.replace("-", " ")}${phaseNote(review)}`);
     case "approved": return review.land === null ? phase("held", `${pr} is approved, and lands once the person runs nexus land ${id}`) : phase("landing", `${pr} is approved`);
-    case "reviewing": case "fixing": case "quoting": case "checking": return phase(onTrack(review), `${pr}, round ${review.rounds.length}: ${review.phase.kind}${checkBeside(review)}`);
-    case "verifying": return phase(onTrack(review), `${pr}, round ${review.rounds.length}: ${liveNote(review)}`);
+    case "reviewing": case "fixing": case "quoting": case "checking": return phase(onTrack(review), `${pr}, round ${review.rounds.length}: ${review.phase.kind}${checkBeside(review)}${heldNote(review)}`);
+    case "verifying": return phase(onTrack(review), `${pr}, round ${review.rounds.length}: ${liveNote(review)}${heldNote(review)}`);
     // A review that ended without landing says nothing of a pull request reopened or merged since, which its links do.
     case "closed": case "cancelled": case undefined: break;
     default: return review!.phase satisfies never;

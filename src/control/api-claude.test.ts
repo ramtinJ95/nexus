@@ -217,7 +217,7 @@ test("a Claude worker thread takes no messages while archived, deleted or before
   assert.equal(early.status, 409);
   assert.match(early.body.error, /has not started a session yet/);
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/archive`, {})).status, 200);
-  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/messages`, { text: "hi", requestId: "msg:2" }), { status: 409, body: { error: `thread ${s.thread.id} is archived`, code: null, retryable: false } });
+  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/messages`, { text: "hi", requestId: "msg:2" }), { status: 409, body: { error: `thread ${s.thread.id} is archived. \`nexus unarchive ${s.thread.id}\` opens it again`, code: null, retryable: false } });
   assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}`, {})).status, 200);
   assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/messages`, { text: "hi", requestId: "msg:3" }), { status: 409, body: { error: `thread ${s.thread.id} is deleted`, code: null, retryable: false } });
   assert.equal((await s.call("GET", `/v1/threads/${s.thread.id}/conversation`)).status, 409);

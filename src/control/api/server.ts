@@ -145,7 +145,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   asset(entry);
   const { registry, whois, allowed, hostnames, harness, claude, startThread, wake, probes, streamStallMs = 30_000, attachTiming: timing = attachTiming, closeWaitMs = 5_000 } = options;
   const access = apiAccess(registry, wake, options);
-  const { thread, threadRefusal, guard, current, roleOf } = access;
+  const { thread, threadRefusal, guard, current, roleOf, admittable } = access;
   const pylon = pylonAccess({ registry, probes, wake, guard, current });
   const { inPylon, whileRunning } = pylon;
   const wakeThread = access.wakeThread;
@@ -239,7 +239,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   async function admitted(req: IncomingMessage, policy: Policy | undefined): Promise<{ caller: TailnetNodeId; roles: ReadonlySet<Role>; host: string | null }> {
     const named = policy?.role === "joiner" ? await callerOf(req, options.joins!.whois) : await callerOf(req, whois).then((id) => id === null ? null : { id, host: null });
     const roles: ReadonlySet<Role> = named === null ? new Set() : policy?.role === "joiner" ? new Set(["joiner"]) : roleOf(named.id, req.headers.authorization);
-    admit(roles, policy);
+    admit(roles, policy, named !== null && admittable(named.id) ? named.id : null);
     checkHost(req);
     return { caller: named!.id, roles, host: named!.host };
   }
@@ -261,7 +261,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (atPath.length === 0) throw new Refusal("missing", `no route ${path}`, "no-route");
     if (match === undefined) throw new Refusal("method", `${req.method} is not allowed on ${path}`);
     const { entry: [, , policy, route], m } = match;
-    demand(roles, policy);
+    demand(roles, policy, caller);
     const url = new URL(req.url ?? "/", "http://nexus");
     const run = () => route(m, { query: url.searchParams, caller, roles, host, body: (empty) => readJson(req, empty) });
     const reply = policy.startsTurn ? await gate.run(async () => run()) : await run();
@@ -339,7 +339,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   async function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
     const { caller, roles } = await admitted(req, attach);
-    demand(roles, attach);
+    demand(roles, attach, caller);
     if (stopping) throw new Refusal("unavailable", "the control plane is stopping");
     // CORS does not guard a WebSocket handshake, so without this a preview's page could open a terminal from the
     // browser of anyone allowed.

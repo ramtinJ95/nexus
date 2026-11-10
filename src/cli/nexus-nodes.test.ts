@@ -8,7 +8,8 @@ import type { Thread } from "../control/thread-store.ts";
 import type { PylonId } from "../ids.ts";
 import type { NodeHealth } from "../protocol/client.ts";
 import { stoppedPylon, testCapacity, testObservation } from "../test-support/kit.ts";
-import { node, image, setup } from "../test-support/cli-kit.ts";
+import { node, image, setup, timeless } from "../test-support/cli-kit.ts";
+import { localTime } from "./kit.ts";
 
 test("nodes marks an overcommitted node and says what its pylons hold", async (t) => {
   const s = await setup(t);
@@ -23,7 +24,8 @@ test("nodes marks an overcommitted node and says what its pylons hold", async (t
       { pylonId: crashed!.pylonId, phase: "broken", detail: "the controller exited", cause: "controller", logTail: "" }],
   }), []);
   const text = (await s.nexus(["nodes"])).stdout;
-  assert.match(text, /^rj-firebat +online +observed .+ {2}2\/8 CPUs, 40\/22\.8 GiB memory committed, overcommitted, 30 GiB disk committed, 100 GiB disk free$/m);
+  assert.match(text, /^Node +State +Observed +Capacity$/m);
+  assert.match(text, /^rj-firebat +online +\d+s ago \(.+\) {2}2\/8 CPUs, 40\/22\.8 GiB memory committed, overcommitted, 30 GiB disk committed, 100 GiB disk free$/m);
   assert.match(text, /^ {2}pylons: 1 up holding 2 CPUs and 4 GiB, 1 paused needing 4 GiB to wake, 1 archived, 1 crashed needing 4 GiB to retry, 1 orphaned \(pylon-x\)$/m);
 });
 
@@ -64,7 +66,7 @@ test("usage backfill starts a run, --dry-run lists what it would read, --stop st
   assert.equal(await backfillLine(), "Backfill: not run. A deployer runs `nexus usage backfill` to read archived threads' pylons.");
 
   const dry = await s.nexus(["usage", "backfill", "--dry-run"]);
-  assert.equal(dry.stdout, `A start reads 2 archived threads, one pylon at a time:\n${old.id}  acme  rj-firebat  Old work\n${gone.id}  acme  rj-firebat  Gone\n`);
+  assert.equal(dry.stdout, `A start reads 2 archived threads, one pylon at a time:\nThread           Project  Node        Title\n${old.id}  acme     rj-firebat  Old work\n${gone.id}  acme     rj-firebat  Gone\n`);
   assert.deepEqual(await s.json(["usage", "backfill", "--dry-run"]), {
     backfill: { state: "never" },
     plan: [{ thread: old.id, project: "acme", node, title: "Old work", reason: null }, { thread: gone.id, project: "acme", node, title: "Gone", reason: null }],
@@ -80,8 +82,8 @@ test("usage backfill starts a run, --dry-run lists what it would read, --stop st
   s.registry.usage.finishUsageBackfillThread(old.id, "done", null, Date.parse("2026-10-28T09:10:00Z"));
   s.registry.usage.finishUsageBackfillThread(gone.id, "skipped", "rj-firebat holds no disk for its pylon", Date.parse("2026-10-28T09:11:00Z"));
   s.registry.usage.finishUsageBackfill(Date.parse("2026-10-28T09:12:00Z"));
-  assert.equal(await backfillLine(), `Backfill: done at 2026-10-28 09:12 UTC, 2 of 2 threads read, 1 skipped, recovered 1234 calls and 5.6M tokens.\nSkipped:\n${gone.id}  Gone  rj-firebat holds no disk for its pylon`);
-  assert.equal((await s.nexus(["usage", "backfill", "--dry-run"])).stdout, `A start reads 1 archived thread, one pylon at a time:\n${gone.id}  acme  rj-firebat  Gone\n  skipped before: rj-firebat holds no disk for its pylon\n`);
+  assert.equal(await backfillLine(), `Backfill: done at 2026-10-28 09:12 UTC, 2 of 2 threads read, 1 skipped, recovered 1234 calls and 5.6M tokens.\nSkipped:\nThread           Title  Why\n${gone.id}  Gone   rj-firebat holds no disk for its pylon`);
+  assert.equal((await s.nexus(["usage", "backfill", "--dry-run"])).stdout, `A start reads 1 archived thread, one pylon at a time:\nThread           Project  Node        Title\n${gone.id}  acme     rj-firebat  Gone\n  skipped before: rj-firebat holds no disk for its pylon\n`);
 });
 
 test("usage prints the tokens of the last 7 days in all and by each breakdown, --since, --project and --by narrow it, and --json is the API's report", async (t) => {
@@ -133,8 +135,8 @@ test("node prints a node's health, unknown where the host exposes nothing, and -
   };
   s.nodeHealth(async () => health);
   assert.deepEqual(await s.json(["node", node]), health);
-  assert.equal((await s.nexus(["node", node])).stdout, [
-    `node: ${node}, read 2027-01-01T00:00:00.000Z`,
+  assert.equal(timeless((await s.nexus(["node", node])).stdout), [
+    `node: ${node}, read ${localTime(Date.parse(health.readAt))}`,
     "load: 2.50 1.75 1.00 (1, 5, 15 min) on 16 CPUs",
     "memory: 40.2 of 62.8 GiB available",
     "swap: 2 of 8 GiB used",

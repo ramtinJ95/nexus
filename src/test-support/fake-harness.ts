@@ -30,6 +30,7 @@ export function fakeHarness(options: { onParked?: (threadId: string, parked: boo
   const watchers = new Map<string, Set<(view: ConversationView) => void>>();
   const submitted = new Set<string>();
   let held: Promise<void> | null = null;
+  let commitsHeld = false;
   /** A sent message's entry kind, `nexus.<sender>` for an automated one, as the harness host submits it. */
   const kinds = new WeakMap<Message, string>();
   const transcript = (threadId: string) => {
@@ -51,6 +52,7 @@ export function fakeHarness(options: { onParked?: (threadId: string, parked: boo
   };
   const commit = (threadId: string) => {
     const next = view(threadId);
+    if (commitsHeld) return;
     for (const listener of watchers.get(threadId) ?? []) listener(next);
   };
   const harness: ThreadHarness = {
@@ -109,6 +111,8 @@ export function fakeHarness(options: { onParked?: (threadId: string, parked: boo
       held = gate.promise;
       return () => { held = null; gate.resolve(); };
     },
+    /** Keeps each commit from the watches open now, which still see the commits before, while a new read sees it. */
+    holdCommits() { commitsHeld = true; },
     /** How many watches of the thread are open. */
     watching: (threadId: string) => watchers.get(threadId)?.size ?? 0,
     /** Makes the thread's run hold this many tasks the restart limit parked. */

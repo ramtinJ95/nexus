@@ -59,8 +59,8 @@ export const resourcesOf = (size: StartRequest["resources"], project: Pick<Proje
  * The network a pylon boots with: its project's hosts and secrets. Every boot pulls the dotfiles through the
  * allowlist. A template build pulls none, so their host stays out of the setup hash.
  */
-export const bootNetwork = (project: Project, dotfilesRepo: string): BootInputs["network"] => ({
-  allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), [dotfilesRepo]), secrets: bootSecrets(project),
+export const bootNetwork = (project: Project, dotfilesRepo: string | undefined): BootInputs["network"] => ({
+  allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), dotfilesRepo === undefined ? [] : [dotfilesRepo]), secrets: bootSecrets(project),
 });
 
 /** What the mirror read for the thread's ref, or why the thread boots fresh without a template. */
@@ -130,7 +130,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     const freshRepo: RepoInit = hasRemote(project)
       ? { kind: "clone", url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } }
       : { kind: "empty", branch };
-    const network = bootNetwork(project, dotfiles.repo);
+    const network = bootNetwork(project, dotfiles?.repo);
 
     const resources = resourcesOf(request.resources, project);
     const id = queued ?? start.id ?? newThreadId();

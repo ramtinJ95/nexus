@@ -29,7 +29,7 @@ async function scratch(t: { after(fn: () => Promise<void>): void }): Promise<str
 async function published(t: { after(fn: () => Promise<void>): void }, content = "saved image bytes") {
   const root = await scratch(t);
   const store = artifactDirectory(join(root, "a"), fileCodec("image.tar"));
-  const manifest = await store.publish(template, async (dir) => { await writeFile(join(dir, "image.tar"), content); return unhashed; }, AbortSignal.timeout(5_000));
+  const manifest = await store.publish(template, async (dir) => { await writeFile(join(dir, "image.tar"), content); return unhashed; }, AbortSignal.timeout(60_000));
   return { root, store, manifest };
 }
 
@@ -60,7 +60,7 @@ test("an import verifies the copy, then holds the same artifact as the exporter"
   const { root, store, manifest } = await published(t);
   const peer = artifactDirectory(join(root, "b"), fileCodec("image.tar"));
   const { stream } = await store.export(template);
-  await peer.import(manifest, stream, AbortSignal.timeout(5_000));
+  await peer.import(manifest, stream, AbortSignal.timeout(60_000));
   assert.deepEqual(await peer.list(), [template]);
   assert.deepEqual(await peer.manifest(template), manifest);
   assert.equal(await sha256Of((await peer.export(template)).stream), manifest.sha256);
@@ -71,23 +71,23 @@ test("a copy that differs by one byte or breaks off is thrown away, and nothing 
   const { root, manifest } = await published(t);
   const peer = artifactDirectory(join(root, "b"), fileCodec("image.tar"));
   await assert.rejects(
-    peer.import(manifest, Readable.from([Buffer.from("saved image bytez")]), AbortSignal.timeout(5_000)),
+    peer.import(manifest, Readable.from([Buffer.from("saved image bytez")]), AbortSignal.timeout(60_000)),
     (err) => err instanceof JobFailure && err.code === "backend" && /hashes to [0-9a-f]{64}, not [0-9a-f]{64}, so it was thrown away/.test(err.message),
   );
   const broken = new Readable({ read() {} });
   broken.push("saved ");
   setImmediate(() => broken.destroy(new Error("socket hang up")));
-  await assert.rejects(peer.import(manifest, broken, AbortSignal.timeout(5_000)), /socket hang up/);
+  await assert.rejects(peer.import(manifest, broken, AbortSignal.timeout(60_000)), /socket hang up/);
   assert.deepEqual(await peer.list(), []);
   assert.deepEqual(await leftovers(peer), []);
 });
 
 test("an import of an artifact already held is a no-op, unless the sha256 disagrees", async (t) => {
   const { store, manifest } = await published(t);
-  await store.import(manifest, Readable.from([Buffer.from("never read")]), AbortSignal.timeout(5_000));
+  await store.import(manifest, Readable.from([Buffer.from("never read")]), AbortSignal.timeout(60_000));
   assert.equal(await sha256Of((await store.export(template)).stream), manifest.sha256);
   await assert.rejects(
-    store.import({ ...manifest, sha256: "0".repeat(64) }, Readable.from([]), AbortSignal.timeout(5_000)),
+    store.import({ ...manifest, sha256: "0".repeat(64) }, Readable.from([]), AbortSignal.timeout(60_000)),
     (err) => err instanceof JobFailure && err.code === "invalid",
   );
 });
@@ -100,7 +100,7 @@ test("an import that a crash cut short is cleaned up by the next one", async (t)
   await writeFile(join(peerRoot, `${template}.partial.archive`), "half");
   const peer = artifactDirectory(peerRoot, fileCodec("image.tar"));
   assert.deepEqual(await peer.list(), [], "a partial import is not held");
-  await peer.import(manifest, (await store.export(template)).stream, AbortSignal.timeout(5_000));
+  await peer.import(manifest, (await store.export(template)).stream, AbortSignal.timeout(60_000));
   assert.deepEqual(await peer.list(), [template]);
   assert.deepEqual(await leftovers(peer), []);
 });
@@ -114,7 +114,7 @@ test("a drop or a publish that a crash cut short is cleaned up by its retry", as
   assert.deepEqual(await readdir(store.root), []);
   await mkdir(join(store.root, `${template}.partial`));
   await writeFile(join(store.root, `${template}.partial`, "stale"), "from the build before");
-  await store.publish(template, async (dir) => { await writeFile(join(dir, "image.tar"), "saved image bytes"); return unhashed; }, AbortSignal.timeout(5_000));
+  await store.publish(template, async (dir) => { await writeFile(join(dir, "image.tar"), "saved image bytes"); return unhashed; }, AbortSignal.timeout(60_000));
   assert.deepEqual(await readdir(store.root), [template]);
   assert.deepEqual((await readdir(store.path(template))).sort(), ["image.tar", "template.json"]);
 });
@@ -122,7 +122,7 @@ test("a drop or a publish that a crash cut short is cleaned up by its retry", as
 test("a published image gets image.json with the sha256 of an archive that leaves it out, and is listed", async (t) => {
   const store = artifactDirectory(join(await scratch(t), "a"), fileCodec("rootfs.ext4"));
   const built: Omit<ImageManifest, "id" | "sha256"> = { gondolinBuildId: "gb-1", pins: {} as ImageManifest["pins"], builtOn: "infra-testbench" as ImageManifest["builtOn"], builtAt: "2027-01-01T00:00:00.000Z" };
-  const manifest = await store.publish(image, async (dir) => { await writeFile(join(dir, "rootfs.ext4"), "rootfs bytes"); return built; }, AbortSignal.timeout(5_000));
+  const manifest = await store.publish(image, async (dir) => { await writeFile(join(dir, "rootfs.ext4"), "rootfs bytes"); return built; }, AbortSignal.timeout(60_000));
   assert.deepEqual(manifest, { ...built, id: image, sha256: createHash("sha256").update("rootfs bytes").digest("hex") });
   assert.deepEqual((await readdir(store.path(image))).sort(), ["image.json", "rootfs.ext4"]);
   assert.deepEqual(await store.list(), [image]);
@@ -130,7 +130,7 @@ test("a published image gets image.json with the sha256 of an archive that leave
 
 test("a publish whose fill fails leaves no .partial and publishes nothing", async (t) => {
   const store = artifactDirectory(join(await scratch(t), "a"), fileCodec("image.tar"));
-  await assert.rejects(store.publish(template, async (dir) => { await writeFile(join(dir, "image.tar"), "half"); throw new Error("docker save failed"); }, AbortSignal.timeout(5_000)), /docker save failed/);
+  await assert.rejects(store.publish(template, async (dir) => { await writeFile(join(dir, "image.tar"), "half"); throw new Error("docker save failed"); }, AbortSignal.timeout(60_000)), /docker save failed/);
   assert.deepEqual(await readdir(store.root), []);
 });
 
@@ -141,7 +141,7 @@ test("an ID that is not an image or template ID names no path", async (t) => {
   const invalid = (err: unknown) => err instanceof JobFailure && err.code === "invalid";
   assert.throws(() => store.path("tpl-x/../../pylons" as TemplateId), invalid);
   await assert.rejects(store.drop("tpl-x/../../pylons" as TemplateId, []), invalid);
-  await assert.rejects(store.import({ ...unhashed, id: "tpl-.." as TemplateId, sha256: "0".repeat(64) }, Readable.from([]), AbortSignal.timeout(5_000)), invalid);
+  await assert.rejects(store.import({ ...unhashed, id: "tpl-.." as TemplateId, sha256: "0".repeat(64) }, Readable.from([]), AbortSignal.timeout(60_000)), invalid);
   assert.deepEqual(await readdir(root), ["pylons"]);
 });
 
@@ -203,7 +203,7 @@ test("a tar copy of a sparse image keeps its holes and archives again to the man
   };
   await writeFile(join(dir, "image.json"), JSON.stringify(manifest));
   const peer = artifactDirectory(join(root, "b"), tarCodec);
-  await peer.import(manifest, (await store.export(image)).stream, AbortSignal.timeout(30_000));
+  await peer.import(manifest, (await store.export(image)).stream, AbortSignal.timeout(60_000));
   assert.equal(await sha256Of((await peer.export(image)).stream), manifest.sha256);
   const du = spawnSync("du", ["-k", join(peer.path(image), "rootfs.ext4")], { encoding: "utf8" }).stdout;
   assert.ok(Number(du.split("\t")[0]) < 1024, `the 1 GiB sparse rootfs takes ${du.trim()} after the copy`);

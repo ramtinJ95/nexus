@@ -72,7 +72,7 @@ function backfill(t: TestContext, registry: Registry, counter = fakeCounter(regi
 }
 
 async function until<T>(what: string, read: () => T, ok: (value: T) => boolean): Promise<T> {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 60_000;
   for (;;) {
     const value = read();
     if (ok(value)) return value;

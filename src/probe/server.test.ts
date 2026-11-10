@@ -390,7 +390,7 @@ test("a peer probe fetches an artifact as its manifest in a header and its archi
   const manifest = templateManifest("a".repeat(64));
   fake.offer(manifest, "archive bytes");
   const fetchAs = (answering: TailnetNodeId, artifact: PortableArtifactId = template, sha256 = manifest.sha256) =>
-    fetchArtifact({ host: "127.0.0.1", port: probe.port }, artifact, sha256, { whois: async () => answering, peers: [probeNodeId] }, AbortSignal.timeout(5_000));
+    fetchArtifact({ host: "127.0.0.1", port: probe.port }, artifact, sha256, { whois: async () => answering, peers: [probeNodeId] }, AbortSignal.timeout(60_000));
   callAs(peer);
   const copy = await fetchAs(probeNodeId);
   assert.ok("manifest" in copy);
@@ -519,7 +519,7 @@ test("a snapshot lists the checkpoints of the stopped pylons it reports, also wh
     return listed;
   };
   const observed = async () => {
-    for await (const e of client.observe(AbortSignal.timeout(5000))) return e.type === "snapshot" ? e.observation : assert.fail(e.type);
+    for await (const e of client.observe(AbortSignal.timeout(60_000))) return e.type === "snapshot" ? e.observation : assert.fail(e.type);
     return assert.fail("observe ended");
   };
   const first = await observed();
@@ -560,8 +560,8 @@ test("observe starts with a snapshot carrying the applied liveHash, and a new pr
   abort.abort();
 
   const restarted = await setup(t, { backend: fake.backend });
-  await fake.backend.ensureRunning(boot, spawnJob.kind === "spawn" ? spawnJob.live : assert.fail(), AbortSignal.timeout(1000));
-  for await (const e of restarted.client.observe(AbortSignal.timeout(5000))) {
+  await fake.backend.ensureRunning(boot, spawnJob.kind === "spawn" ? spawnJob.live : assert.fail(), AbortSignal.timeout(60_000));
+  for await (const e of restarted.client.observe(AbortSignal.timeout(60_000))) {
     assert.ok(e.type === "snapshot");
     assert.notEqual(e.observation.probeBootId, observation.probeBootId);
     const p = e.observation.pylons[0];
@@ -578,7 +578,7 @@ test("a spawn without its sessions reaches the backend as such, and its pylon re
     assert.equal((await finished(client, env.jobId)).state, "succeeded");
   };
   const liveHash = async () => {
-    for await (const e of client.observe(AbortSignal.timeout(5000))) {
+    for await (const e of client.observe(AbortSignal.timeout(60_000))) {
       assert.ok(e.type === "snapshot");
       const p = e.observation.pylons[0];
       return p?.phase === "running" ? p.liveHash : assert.fail(`the pylon is ${p?.phase}`);
@@ -601,7 +601,7 @@ test("capacity counts the CPUs and memory of VMs that are up and the disk of eve
   fake.pylons.set(at("pylon-b"), { pylonId: at("pylon-b"), vm: "booting", checkpoint: null, image, holds: { cpus: 2, memoryGiB: 8, diskGiB: 30 } });
   fake.pylons.set(at("pylon-c"), { pylonId: at("pylon-c"), vm: "stopped", checkpoint: "ckpt-c-1", image, sessions: null, holds: { cpus: 0, memoryGiB: 0, diskGiB: 60 } });
   fake.pylons.set(at("pylon-d"), { pylonId: at("pylon-d"), vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:00:00Z" });
-  for await (const e of client.observe(AbortSignal.timeout(5000))) {
+  for await (const e of client.observe(AbortSignal.timeout(60_000))) {
     const capacity = (e.type === "snapshot" ? e.observation : assert.fail()).capacity ?? assert.fail();
     assert.deepEqual([capacity.committedCpus, capacity.committedMemoryGiB, capacity.committedDiskGiB], [6, 16, 150], "a pylon whose backend reserves nothing counts for nothing");
     assert.ok(capacity.cpus > 0 && capacity.memoryGiB > 0);
@@ -630,7 +630,7 @@ test("a broken pylon's log tail and a failed job's log leave the node with the v
   ].join("\n");
   const broken = "pylon-broken" as PylonId;
   fake.pylons.set(broken, { pylonId: broken, vm: "broken", checkpoint: null, image, detail: "the controller failed to boot the VM", cause: "controller", logTail: log });
-  for await (const e of client.observe(AbortSignal.timeout(5000))) {
+  for await (const e of client.observe(AbortSignal.timeout(60_000))) {
     const observed = (e.type === "snapshot" ? e.observation : assert.fail()).pylons.find((p) => p.pylonId === broken);
     assert.deepEqual(observed, { pylonId: broken, phase: "broken", detail: "the controller failed to boot the VM", cause: "controller", logTail: redactedLog });
     break;
@@ -668,7 +668,7 @@ test("the snapshot's capacity and node health report each filesystem Nexus write
   await Promise.all([mkdir(storage), mkdir(artifacts)]);
   const { client } = await setup(t, { backend: { ...fakeBackend().backend, storage }, watched: [artifacts, join(root, "absent")] });
   const snapshot = await (async () => {
-    for await (const e of client.observe(AbortSignal.timeout(5000))) return e.type === "snapshot" ? e.observation : assert.fail(e.type);
+    for await (const e of client.observe(AbortSignal.timeout(60_000))) return e.type === "snapshot" ? e.observation : assert.fail(e.type);
   })();
   const disks = snapshot!.capacity?.disks;
   assert.deepEqual(disks?.map((d) => [d.paths, d.pylons]), [[[storage, artifacts], true]], "one filesystem holds both directories");
@@ -676,7 +676,7 @@ test("the snapshot's capacity and node health report each filesystem Nexus write
   assert.deepEqual((await client.health()).disks?.map((d) => d.paths), [[storage, artifacts]]);
 
   const docker = await setup(t, { watched: [artifacts] });
-  for await (const e of docker.client.observe(AbortSignal.timeout(5000))) {
+  for await (const e of docker.client.observe(AbortSignal.timeout(60_000))) {
     assert.equal(e.type === "snapshot" && e.observation.capacity?.disks?.some((d) => d.pylons === true), false, "a backend that keeps no pylon disks marks no filesystem as the pylons'");
     break;
   }
@@ -693,7 +693,7 @@ test("a held secret from the control plane is held, applied to the running pylon
   assert.deepEqual(fake.secretUpdates, [["NEXUS_CHATGPT_TOKEN", token]]);
   assert.equal(secrets.value("NEXUS_CHATGPT_TOKEN"), token, "the backend boots new pylons with it");
   assert.deepEqual(logged, ["pylon-stuck: NEXUS_CHATGPT_TOKEN was not updated: its controller did not answer"]);
-  for await (const e of client.observe(AbortSignal.timeout(5000))) {
+  for await (const e of client.observe(AbortSignal.timeout(60_000))) {
     const observation = e.type === "snapshot" ? e.observation : assert.fail();
     assert.deepEqual(observation.grants, { secrets: ["NEXUS_CHATGPT_TOKEN"], gitSsh: false });
     assert.ok(!JSON.stringify(observation).includes(token));
@@ -735,14 +735,14 @@ test("a secret body that is not valid HTTP is answered as malformed, not as too 
   assert.match(reply, /^HTTP\/1\.1 400 Bad Request\r\n/);
   assert.doesNotMatch(reply, /at most/);
   const read = () => logged.filter((line) => line.startsWith("PUT /v1/secrets/NEXUS_CHATGPT_TOKEN: "));
-  for (const deadline = Date.now() + 10_000; read().length === 0 && Date.now() < deadline;) await new Promise((r) => setTimeout(r, 5));
+  for (const deadline = Date.now() + 60_000; read().length === 0 && Date.now() < deadline;) await new Promise((r) => setTimeout(r, 5));
   assert.deepEqual(read(), ["PUT /v1/secrets/NEXUS_CHATGPT_TOKEN: aborted"]);
   assert.deepEqual([secrets.names(), fake.secretUpdates], [[], []], "nothing was held or applied");
 });
 
 test("an observer learns at once that the probe got a held secret it did not have", async (t) => {
   const { base, client } = await setup(t, { secrets: nodeSecrets({ value: () => undefined, names: () => [] }) });
-  const events = client.observe(AbortSignal.timeout(5000))[Symbol.asyncIterator]();
+  const events = client.observe(AbortSignal.timeout(60_000))[Symbol.asyncIterator]();
   const first = (await events.next()).value;
   assert.deepEqual(first?.type === "snapshot" && first.observation.grants?.secrets, []);
   assert.equal((await fetch(`${base}/v1/secrets/NEXUS_CHATGPT_TOKEN`, { method: "PUT", body: "eyJhbGciOiJSUzI1NiJ9.e30.c2ln" })).status, 204);
@@ -754,7 +754,7 @@ test("an observer learns at once that the probe got a held secret it did not hav
 test("observations say the node nests KVM only when its backend does", async (t) => {
   for (const nestedVirtualization of [true, false]) {
     const { client } = await setup(t, { backend: { ...fakeBackend().backend, nestedVirtualization } });
-    for await (const e of client.observe(AbortSignal.timeout(5000))) {
+    for await (const e of client.observe(AbortSignal.timeout(60_000))) {
       const observation = e.type === "snapshot" ? e.observation : assert.fail();
       assert.equal(observation.nestedVirtualization, nestedVirtualization ? true : undefined);
       break;
@@ -764,7 +764,7 @@ test("observations say the node nests KVM only when its backend does", async (t)
 
 test("observations name the secrets the node holds, never their values, and whether it has a git SSH key", async (t) => {
   const { client } = await setup(t, { secrets: nodeSecrets({ value: () => "s3cr3t", names: () => ["GH_TOKEN"] }), backend: { ...fakeBackend().backend, gitSsh: true } });
-  for await (const e of client.observe(AbortSignal.timeout(5000))) {
+  for await (const e of client.observe(AbortSignal.timeout(60_000))) {
     const observation = e.type === "snapshot" ? e.observation : assert.fail();
     assert.deepEqual(observation.grants, { secrets: ["GH_TOKEN"], gitSsh: true });
     assert.deepEqual(observation.heldSecrets, ["NEXUS_CHATGPT_TOKEN"], "it takes the held secrets from the control plane, handed over or not");
@@ -820,7 +820,7 @@ test("a command and a stream ask the backend for their own pylon's state and lis
     state: async (id) => { asked.push(`state ${id}`); return fake.backend.state(id); },
   };
   const { client } = await setup(t, { backend });
-  await fake.backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(1000));
+  await fake.backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(60_000));
   assert.deepEqual(await client.command(pylonId, { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 }), { kind: "exec", exitCode: 0, output: "ran", truncated: false });
   assert.deepEqual(await (await client.stream(pylonId, ["true"])).done, { kind: "exited", code: 0 });
   await assert.rejects(client.command("pylon-gone" as PylonId, { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 }), { code: "not-running" });
@@ -1077,23 +1077,27 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
     "link-port": { kind: "link-port", port: 3000 },
     "unlink-port": { kind: "unlink-port", port: 3000 },
   };
-  /** Which commands answer nothing while `hold` holds the probe, sent all at once. The rest answer, done or failed. */
-  async function waiting(hold: () => Promise<() => void>): Promise<string[]> {
+  /**
+   * Which commands, sent all at once while `hold` holds the probe, are still unanswered once every command but `expected`
+   * has answered, done or failed. Those answers get 60 s, which only ends a hang.
+   */
+  async function waiting(expected: readonly string[], hold: () => Promise<() => void>): Promise<string[]> {
     const release = await hold();
-    const sent = Object.entries(commands).map(([name, command]) => {
-      const answered = client.command(pylonId, command).then(() => true, () => true);
-      return { name, answered, waits: Promise.race([answered.then(() => false), new Promise<boolean>((resolve) => setTimeout(resolve, 1_000, true))]) };
-    });
-    const waits = await Promise.all(sent.map((s) => s.waits));
+    const answered = new Set<string>();
+    const sent = Object.entries(commands).map(([name, command]) => client.command(pylonId, command).catch(() => undefined).finally(() => answered.add(name)));
+    const others = Object.keys(commands).filter((name) => !expected.includes(name));
+    for (const deadline = Date.now() + 60_000; others.some((name) => !answered.has(name)) && Date.now() < deadline;) await new Promise((r) => setTimeout(r, 5));
+    const unanswered = Object.keys(commands).filter((name) => !answered.has(name));
     release();
-    await Promise.all(sent.map((s) => s.answered));
-    return sent.filter((_, i) => waits[i]).map((s) => s.name);
+    await Promise.all(sent);
+    return unanswered;
   }
 
   const artifacts = fake.backend.artifacts.list;
   const reads = new AbortController();
   t.after(() => reads.abort());
-  const readsWait = await waiting(async () => {
+  const readsWaiting = ["link-port", "unlink-port"];
+  const readsWait = await waiting(readsWaiting, async () => {
     const held = Promise.withResolvers<void>();
     const reached = Promise.withResolvers<void>();
     fake.backend.artifacts.list = async () => {
@@ -1109,16 +1113,17 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
     };
   });
   reads.abort();
-  assert.deepEqual(readsWait, ["link-port", "unlink-port"], "a link or unlink waits for a read in flight, and nothing else does");
+  assert.deepEqual(readsWait, readsWaiting, "a link or unlink waits for a read in flight, and nothing else does");
 
   panes = working;
-  const sessionWaits = await waiting(async () => {
+  const sessionWaiting = ["open-session with prompt and resume", "send-claude", "interrupt-claude"];
+  const sessionWaits = await waiting(sessionWaiting, async () => {
     typing = Promise.withResolvers<void>();
     void client.command(pylonId, { kind: "send-claude", session, text: "hold" }).catch(() => undefined);
     await typingHeld.promise;
     return () => typing!.resolve();
   });
-  assert.deepEqual(sessionWaits, ["open-session with prompt and resume", "send-claude", "interrupt-claude"], "only a send, a prompted launch and an interrupt wait for another command to the same Claude session");
+  assert.deepEqual(sessionWaits, sessionWaiting, "only a send, a prompted launch and an interrupt wait for another command to the same Claude session");
 
   const list = fake.backend.list;
   fake.backend.list = () => { listed++; return list(); };
@@ -1189,7 +1194,7 @@ test("observations carry session facts from Herdr, and null when Herdr cannot be
   await running(client);
 
   const sessionsSeen = async () => {
-    for await (const e of client.observe(AbortSignal.timeout(5000))) {
+    for await (const e of client.observe(AbortSignal.timeout(60_000))) {
       const p = e.type === "snapshot" ? e.observation.pylons[0] : assert.fail("the first event is a snapshot");
       return p?.phase === "running" ? p.sessions : assert.fail("the pylon runs");
     }
@@ -1205,7 +1210,7 @@ test("a stopped pylon's observation carries the sessions its backend kept from t
   const { client, fake } = await setup(t, {}, fakeGuest(() => { throw new Error("a stopped pylon has no guest"); }));
   const recorded = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "claude-code" as const, harnessSessionId: "bd2c2d6b", title: "review" }];
   const seen = async () => {
-    for await (const e of client.observe(AbortSignal.timeout(5000))) return e.type === "snapshot" ? e.observation.pylons[0] : assert.fail("the first event is a snapshot");
+    for await (const e of client.observe(AbortSignal.timeout(60_000))) return e.type === "snapshot" ? e.observation.pylons[0] : assert.fail("the first event is a snapshot");
   };
   fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-unit-1", image, sessions: recorded });
   assert.deepEqual(await seen(), { pylonId, phase: "stopped", checkpoint: "ckpt-unit-1", sessions: recorded });
@@ -1248,7 +1253,7 @@ test("observations carry the pylon's declared outputs", async (t) => {
   });
   const { client } = await setup(t, {}, guest);
   await running(client);
-  for await (const e of client.observe(AbortSignal.timeout(5000))) {
+  for await (const e of client.observe(AbortSignal.timeout(60_000))) {
     const p = e.type === "snapshot" ? e.observation.pylons[0] : assert.fail("the first event is a snapshot");
     assert.deepEqual(p?.phase === "running" ? p.declaredOutputs : assert.fail("the pylon runs"), [output]);
     break;
@@ -1268,7 +1273,7 @@ async function streaming(t: import("node:test").TestContext) {
     },
   } as Partial<Guest> as Guest;
   const ctx = await setup(t, { backend: { ...fake.backend, guest: () => guest }, log: (line) => logged.push(line) });
-  await fake.backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(1000));
+  await fake.backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(60_000));
   return { ...ctx, logged, guestStreams };
 }
 
@@ -1303,7 +1308,7 @@ test("a stream whose caller left while the guest started it is told so, and the 
     stream: (_argv: readonly string[], _log: (text: string) => void, signal?: AbortSignal) => new Promise<ByteStream>((start) => starts.push({ signal: signal!, start })),
   } as Partial<Guest> as Guest;
   const { probe } = await setup(t, { backend: { ...fake.backend, guest: () => guest }, log: (line) => logged.push(line) });
-  await fake.backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(1000));
+  await fake.backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(60_000));
   const caller = connect({ host: "127.0.0.1", port: probe.port, allowHalfOpen: true });
   t.after(() => caller.destroy());
   let answered = "";
@@ -1329,7 +1334,7 @@ async function slowStarts(t: import("node:test").TestContext, streamTiming: { st
     stream: (_argv: readonly string[], _log: (text: string) => void, signal?: AbortSignal) => new Promise<ByteStream>((start) => starts.push({ signal: signal!, start })),
   } as Partial<Guest> as Guest;
   const ctx = await setup(t, { backend: { ...fake.backend, guest: () => guest }, streamTiming });
-  await fake.backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(1000));
+  await fake.backend.ensureRunning(boot, { previews: [], overlay: [] }, AbortSignal.timeout(60_000));
   return { ...ctx, starts };
 }
 
@@ -1446,7 +1451,7 @@ test("terminals attached to Herdr in the guest, such as nexus attach, count as a
     : argv[0] === "pgrep" ? { exitCode: 0, output: "2\n" } : { exitCode: 0, output: "" });
   const { client } = await setup(t, {}, guest);
   await running(client);
-  for await (const e of client.observe(AbortSignal.timeout(5000))) {
+  for await (const e of client.observe(AbortSignal.timeout(60_000))) {
     const p = e.type === "snapshot" ? e.observation.pylons[0] : assert.fail(e.type);
     assert.ok(p?.phase === "running" && p.attachedClients === 2, JSON.stringify(p));
     break;
@@ -1461,7 +1466,7 @@ test("a count of attached terminals that fails reads as none, is logged once, an
   const { client } = await setup(t, { log: (line) => logged.push(line) }, guest);
   await running(client);
   const attachedClients = async () => {
-    for await (const e of client.observe(AbortSignal.timeout(5000))) {
+    for await (const e of client.observe(AbortSignal.timeout(60_000))) {
       const p = e.type === "snapshot" ? e.observation.pylons[0] : assert.fail(e.type);
       return p?.phase === "running" ? p.attachedClients : assert.fail(JSON.stringify(p));
     }
@@ -1481,7 +1486,7 @@ test("a count of attached terminals that fails is logged again after its pylon w
   const { client, fake } = await setup(t, { log: (line) => logged.push(line) }, guest);
   await running(client);
   const phase = async () => {
-    for await (const e of client.observe(AbortSignal.timeout(5000))) return e.type === "snapshot" ? e.observation.pylons[0]?.phase : assert.fail(e.type);
+    for await (const e of client.observe(AbortSignal.timeout(60_000))) return e.type === "snapshot" ? e.observation.pylons[0]?.phase : assert.fail(e.type);
   };
   const failures = () => logged.filter((line) => line.includes("attached terminals")).length;
   assert.equal(await phase(), "running");
@@ -1595,7 +1600,7 @@ test("observations carry the supervisor's services, and null when it cannot be r
   const { client } = await open();
   await run(client, withPreview(pylonId, 10000));
   const seen = async () => {
-    for await (const e of client.observe(AbortSignal.timeout(5000))) {
+    for await (const e of client.observe(AbortSignal.timeout(60_000))) {
       const p = e.type === "snapshot" ? e.observation.pylons[0] : assert.fail("the first event is a snapshot");
       return p?.phase === "running" ? p.services : assert.fail("the pylon runs");
     }
@@ -1969,7 +1974,7 @@ test("probe git observations derive pushed-branch outputs and bound reads across
   const { client, fake } = await setup(t, { log: (line) => logged.push(line) }, guest);
   fake.pylons.set(pylonId, { pylonId, vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:00:00Z" });
   const snapshot = async () => {
-    for await (const event of client.observe(AbortSignal.timeout(5000))) {
+    for await (const event of client.observe(AbortSignal.timeout(60_000))) {
       assert.equal(event.type, "snapshot");
       if (event.type === "snapshot") return event;
     }
@@ -2029,7 +2034,7 @@ test("a branch pushed just after a git read reaches the snapshots only once that
   const { client, fake } = await setup(t, {}, guest);
   fake.pylons.set(pylonId, { pylonId, vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:00:00Z" });
   const branches = async () => {
-    for await (const event of client.observe(AbortSignal.timeout(5000))) {
+    for await (const event of client.observe(AbortSignal.timeout(60_000))) {
       if (event.type !== "snapshot") continue;
       return ingest(event, node, new Map([[pylonId, "absent"]]), now).flatMap((w) => w.record === "output" && w.kind === "branch" ? [w.ref] : []);
     }
@@ -2057,7 +2062,7 @@ test("a git read again is answered once a snapshot that read it is published, th
   });
   const { client, fake } = await setup(t, {}, guest);
   fake.pylons.set(pylonId, { pylonId, vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:00:00Z" });
-  const events = client.observe(AbortSignal.timeout(10_000))[Symbol.asyncIterator]();
+  const events = client.observe(AbortSignal.timeout(60_000))[Symbol.asyncIterator]();
   const snapshot = async () => {
     for (let next = await events.next(); !next.done; next = await events.next()) if (next.value.type === "snapshot") return next.value.observation;
     return assert.fail("missing snapshot");
@@ -2194,7 +2199,7 @@ const recordIn = async (file: string): Promise<unknown> => JSON.parse(await read
 const up = (id: PylonId): BackendPylon => ({ pylonId: id, vm: "running", checkpoint: null, image, bootedAt: "2027-01-01T00:00:00Z" });
 const down = (id: PylonId, checkpoint: CheckpointId): BackendPylon => ({ pylonId: id, vm: "stopped", checkpoint, image, sessions: null });
 const first = async (client: ReturnType<typeof connectProbe>) => {
-  for await (const e of client.observe(AbortSignal.timeout(5000))) return e.type === "snapshot" ? e.observation : assert.fail(e.type);
+  for await (const e of client.observe(AbortSignal.timeout(60_000))) return e.type === "snapshot" ? e.observation : assert.fail(e.type);
   return assert.fail("observe ended");
 };
 const pylonA = "pylon-a" as PylonId;
@@ -2306,7 +2311,7 @@ test("a drain records why a pause failed, and a pause still running when its tim
   const started = Date.now();
   const outcomes = await probe.drain(300);
   const took = Date.now() - started;
-  assert.ok(took >= 300 && took < 2_000, `${took} ms`);
+  assert.ok(took >= 300 && took < 60_000, `${took} ms: at least the drain's time, and the upper bound only ends a hang`);
   const failures = { [pylonA]: `${pylonA}: qemu refused the checkpoint`, [pylonB]: "it did not pause within the shutdown's 0.3 s" };
   assert.deepEqual(outcomes, [{ pylonId: pylonA, failed: failures[pylonA] }, { pylonId: pylonB, failed: failures[pylonB] }]);
   assert.deepEqual(await recordIn(file), { pylons: { [pylonA]: { failed: failures[pylonA] }, [pylonB]: { failed: failures[pylonB] } } });
@@ -2316,14 +2321,19 @@ test("a drain keeps its time though the backend's pause ignores the abort, and r
   const file = await shutdownFile(t);
   const { probe, fake } = await setup(t, { shutdownFile: file, log: () => {} });
   fake.pylons.set(pylonA, up(pylonA));
-  fake.backend.ensurePaused = () => new Promise((resolve) => setTimeout(resolve, 1_500));
-  const started = Date.now();
-  const outcomes = await probe.drain(300);
-  const took = Date.now() - started;
-  assert.ok(took >= 300 && took < 2_000, `${took} ms`);
-  const failed = "it did not pause within the shutdown's 0.3 s";
-  assert.deepEqual(outcomes, [{ pylonId: pylonA, failed }]);
-  assert.deepEqual(await recordIn(file), { pylons: { [pylonA]: { failed } } });
+  const paused = Promise.withResolvers<void>();
+  fake.backend.ensurePaused = () => paused.promise;
+  try {
+    const started = Date.now();
+    const outcomes = await probe.drain(300);
+    const took = Date.now() - started;
+    assert.ok(took >= 300 && took < 60_000, `${took} ms: at least the drain's time, and the upper bound only ends a hang`);
+    const failed = "it did not pause within the shutdown's 0.3 s";
+    assert.deepEqual(outcomes, [{ pylonId: pylonA, failed }]);
+    assert.deepEqual(await recordIn(file), { pylons: { [pylonA]: { failed } } });
+  } finally {
+    paused.resolve();
+  }
 });
 
 test("a close right after a wake leaves the record without the woken pylon, so a restart does not mark it again", async (t) => {

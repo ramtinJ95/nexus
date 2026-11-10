@@ -31,7 +31,7 @@ export function projectRoutes(kit: ApiKit, features: Features): readonly RouteEn
       const { autoReview, pipeline, standingRules, secondReview, ...patch } = parse(projectEditSchema, await r.body());
       // A CLI older than modes sends `land`.
       const mode: AutoReviewMode | null | undefined = autoReview == null ? autoReview : "mode" in autoReview ? autoReview.mode : autoReview.land ? "land" : "review";
-      if (mode === "land" || mode === "yolo") demand(r.roles, landing);
+      if (mode === "land" || mode === "yolo") demand(r.roles, landing, r.caller);
       const project = registry.projects.editProject(id as ProjectId, ({ autoReview: kept, pipeline: running, standingRules: standing, secondReview: second, ...previous }) => {
         const updated: Project = parse(projectSchema, { ...previous, ...patch, resources: { ...previous.resources, ...patch.resources } });
         refuseUnknownNode(updated);

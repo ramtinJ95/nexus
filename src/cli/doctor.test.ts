@@ -45,14 +45,16 @@ test("doctor prints each check under the control plane or its node, and exits 1 
   const res = await run([]);
   assert.equal(res.code, 1, res.stderr);
   assert.equal(res.stderr, "");
-  assert.equal(res.stdout, `control plane
-  ok    backup       the newest backup, 2026-11-01T00-23-41Z, is 3 h old and verified
-  warn  certificate  the dashboard's certificate for rj-firebat.example.ts.net expires in 5 days
+  assert.equal(res.stdout, `This CLI runs Nexus ${version}, and the control plane ${version}.
+  Status  Check        Result
+control plane
+  ok      backup       the newest backup, 2026-11-01T00-23-41Z, is 3 h old and verified
+  warn    certificate  the dashboard's certificate for rj-firebat.example.ts.net expires in 5 days
 rj-firebat
-  ok    online       online and observed in the last 5 min
-  warn  disk         12.4 of 98.0 GiB free at /var/lib/nexus-control, low
+  ok      online       online and observed in the last 5 min
+  warn    disk         12.4 of 98.0 GiB free at /var/lib/nexus-control, low
 infra-testbench
-  fail  online       offline, last observed 3 h ago
+  fail    online       offline, last observed 3 h ago
 1 failed, 2 warned, 2 ok
 `);
   const json = await run(["--json"]);
