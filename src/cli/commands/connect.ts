@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import type { Whoami } from "../../contract/threads.ts";
 import { saveJson } from "../../node-base/json-file.ts";
 import { call, CliError } from "../transport.ts";
-import { type Command, str } from "../kit.ts";
+import { type Command, type Io, str } from "../kit.ts";
 import { controlPorts, configFile, readConfig, checkVersion, socksOf, controlUrl } from "../config.ts";
 
 function candidatesOf(host: string): URL[] {
@@ -12,9 +12,9 @@ function candidatesOf(host: string): URL[] {
   return controlPorts.map((url) => controlUrl(url.replace("{host}", host)));
 }
 
-function connectText(url: string, file: string, caller: Whoami): string {
+function connectText(url: string, file: string, caller: Whoami, env: Io["env"]): string {
   const head = `Connected to ${url}, saved in ${file}.`;
-  const overridden = process.env.NEXUS_URL ? [`NEXUS_URL is set, so it overrides ${file} until you unset it.`] : [];
+  const overridden = env.NEXUS_URL ? [`NEXUS_URL is set, so it overrides ${file} until you unset it.`] : [];
   const may = (yes: boolean, what: string) => `  ${yes ? "may" : "may not"} ${what}`;
   const admit = (why: string) => `To let it ${why}, run this on the control plane's machine, in its nexus checkout after git pull. It changes the config and keeps the release that runs: sudo deploy/install.sh --admit ${caller.node}`;
   return [
@@ -34,10 +34,10 @@ export const connectCommands: Readonly<Record<string, Command>> = {
   connect: {
     help: ["  nexus connect <host>                         find the control plane on a tailnet name or URL, save it, and say what this device may do"],
     args: [1, 1],
-    async run(_, [host], v) {
-      const file = configFile();
+    async run(_, [host], v, _follow, { io }) {
+      const file = configFile(io.env);
       const config = await readConfig(file);
-      const socks = socksOf(v, config);
+      const socks = socksOf(v, config, io.env);
       const tried: string[] = [];
       for (const url of candidatesOf(host!)) {
         const endpoint = { url, socks };
@@ -64,7 +64,7 @@ export const connectCommands: Readonly<Record<string, Command>> = {
         const saved = { ...config, url: url.origin, ...str(v, "socks") === undefined ? {} : { socks: str(v, "socks") } };
         await mkdir(dirname(file), { recursive: true });
         await saveJson(file, saved);
-        return { json: { url: url.origin, socks: saved.socks ?? null, config: file, caller }, text: connectText(url.origin, file, caller) };
+        return { json: { url: url.origin, socks: saved.socks ?? null, config: file, caller }, text: connectText(url.origin, file, caller, io.env) };
       }
       throw new CliError("unreachable", [`no Nexus control plane answers at ${host}${socks === null ? "" : ` through the SOCKS proxy at ${socks.host}:${socks.port}`}:`,
         ...tried.map((line) => `  ${line}`),
