@@ -67,7 +67,11 @@ test("a command that gets a slot late has only what is left of its deadline, and
 	const late = direct(fake.vm, ["sleep", "1"], 0);
 	let failure: unknown;
 	void late.catch((error: unknown) => { failure = error; });
-	const settle = () => new Promise((resolve) => setImmediate(resolve));
+	const hang = performance.now() + 60_000;
+	const settle = () => {
+		assert.ok(performance.now() < hang, "60 s of real time only ends a hang");
+		return new Promise((resolve) => setImmediate(resolve));
+	};
 	while (fake.commands.length < held.length) await settle();
 	t.mock.timers.tick(5000);
 	fake.answer();

@@ -1077,23 +1077,27 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
     "link-port": { kind: "link-port", port: 3000 },
     "unlink-port": { kind: "unlink-port", port: 3000 },
   };
-  /** Which commands answer nothing while `hold` holds the probe, sent all at once. The rest answer, done or failed. */
-  async function waiting(hold: () => Promise<() => void>): Promise<string[]> {
+  /**
+   * Which commands, sent all at once while `hold` holds the probe, are still unanswered once every command but `expected`
+   * has answered, done or failed. Those answers get 60 s, which only ends a hang.
+   */
+  async function waiting(expected: readonly string[], hold: () => Promise<() => void>): Promise<string[]> {
     const release = await hold();
-    const sent = Object.entries(commands).map(([name, command]) => {
-      const answered = client.command(pylonId, command).then(() => true, () => true);
-      return { name, answered, waits: Promise.race([answered.then(() => false), new Promise<boolean>((resolve) => setTimeout(resolve, 1_000, true))]) };
-    });
-    const waits = await Promise.all(sent.map((s) => s.waits));
+    const answered = new Set<string>();
+    const sent = Object.entries(commands).map(([name, command]) => client.command(pylonId, command).catch(() => undefined).finally(() => answered.add(name)));
+    const others = Object.keys(commands).filter((name) => !expected.includes(name));
+    for (const deadline = Date.now() + 60_000; others.some((name) => !answered.has(name)) && Date.now() < deadline;) await new Promise((r) => setTimeout(r, 5));
+    const unanswered = Object.keys(commands).filter((name) => !answered.has(name));
     release();
-    await Promise.all(sent.map((s) => s.answered));
-    return sent.filter((_, i) => waits[i]).map((s) => s.name);
+    await Promise.all(sent);
+    return unanswered;
   }
 
   const artifacts = fake.backend.artifacts.list;
   const reads = new AbortController();
   t.after(() => reads.abort());
-  const readsWait = await waiting(async () => {
+  const readsWaiting = ["link-port", "unlink-port"];
+  const readsWait = await waiting(readsWaiting, async () => {
     const held = Promise.withResolvers<void>();
     const reached = Promise.withResolvers<void>();
     fake.backend.artifacts.list = async () => {
@@ -1109,16 +1113,17 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
     };
   });
   reads.abort();
-  assert.deepEqual(readsWait, ["link-port", "unlink-port"], "a link or unlink waits for a read in flight, and nothing else does");
+  assert.deepEqual(readsWait, readsWaiting, "a link or unlink waits for a read in flight, and nothing else does");
 
   panes = working;
-  const sessionWaits = await waiting(async () => {
+  const sessionWaiting = ["open-session with prompt and resume", "send-claude", "interrupt-claude"];
+  const sessionWaits = await waiting(sessionWaiting, async () => {
     typing = Promise.withResolvers<void>();
     void client.command(pylonId, { kind: "send-claude", session, text: "hold" }).catch(() => undefined);
     await typingHeld.promise;
     return () => typing!.resolve();
   });
-  assert.deepEqual(sessionWaits, ["open-session with prompt and resume", "send-claude", "interrupt-claude"], "only a send, a prompted launch and an interrupt wait for another command to the same Claude session");
+  assert.deepEqual(sessionWaits, sessionWaiting, "only a send, a prompted launch and an interrupt wait for another command to the same Claude session");
 
   const list = fake.backend.list;
   fake.backend.list = () => { listed++; return list(); };
