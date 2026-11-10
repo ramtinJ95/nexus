@@ -3,7 +3,7 @@
 // and polls the page to swap in each `data-live` region that changed. A thread page also follows its stream, which
 // sends the conversation region as the run streams, and reads its checkout's changes into the inspector, opening
 // each changed file's diff as a tab beside the conversation.
-import { coordinator, notificationChannel, noticeText, noticeUrl } from "./notifications.js";
+import { coordinator, notificationChannel } from "./notifications.js";
 import { api } from "./request.js";
 import { chunk, el, end, follow, main, pollMs, recordVisit, refreshAfter, refreshNow, stream, tick, toggled } from "./page.js";
 import { pickPane, setOpen } from "./nav.js";
@@ -72,26 +72,24 @@ const currentThread = () => /^\/threads\/([^/]+)$/.exec(location.pathname)?.[1] 
 const focused = () => document.visibilityState === "visible" && document.hasFocus();
 // Loaded now, before the page's first poll, so it reads the newest change the page showed.
 const checks = import("./health.js");
-const notifications = coordinator((row) => {
-  void checks.then((m) => m.notice(notificationChannel(focused(), currentThread(), row.id, window.isSecureContext,
-    window.isSecureContext && "Notification" in window ? Notification.permission : "unavailable"), row.title, noticeText(row), noticeUrl(row)));
-});
+const showRow = (row, raises, quiet = false) => {
+  const tab = { focused: focused(), current: currentThread(), secure: window.isSecureContext,
+    permission: window.isSecureContext && "Notification" in window ? Notification.permission : "unavailable", raises, quiet, elsewhere, keep };
+  return checks.then((m) => m.showRow(row, tab));
+};
+// A focused tab shows its own notice, and the tab that follows the events says which tab raises a background one.
+const notifications = coordinator((row) => void showRow(row, !focused() && raises(row)));
 const health = (change) => void checks.then((m) => m.showHealth(change, notificationChannel));
 const caughtUp = (hand) => void checks.then((m) => m.caughtUp(hand));
 if (location.pathname === "/health") void checks.then((m) => m.markHealthSeen());
-const permission = el("button", { type: "button", className: "btn side-add", textContent: "Enable system notifications" });
-if (window.isSecureContext && "Notification" in window) {
-  permission.onclick = async () => { permission.textContent = `Notifications: ${await Notification.requestPermission()}`; };
-} else {
-  permission.disabled = true;
-  permission.textContent = "System notifications need HTTPS";
-}
+const permission = el("button", { type: "button", className: "btn side-add", disabled: true });
 document.querySelector("aside")?.append(permission);
+void checks.then((m) => m.permissionControl(permission));
 // After the button, which shortens the list it joins.
 document.querySelector(".row.active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
 const listed = (rows, now) => {
   listRows(rows);
   return notifications(rows, now);
 };
-const { markSeen, askRows } = startRows({ api, notifications: listed, health, caughtUp, changed: () => { if (document.visibilityState === "visible") void refreshAfter(); }, currentThread, focused, activeTab: () => activeTab });
+const { markSeen, askRows, raises, elsewhere, keep } = startRows({ api, notifications: listed, raise: (row, quiet) => showRow(row, true, quiet), health, caughtUp, changed: () => { if (document.visibilityState === "visible") void refreshAfter(); }, currentThread, focused, activeTab: () => activeTab });
 setInterval(markSeen, 1000);

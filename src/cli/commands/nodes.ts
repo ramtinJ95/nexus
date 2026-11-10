@@ -42,15 +42,19 @@ function healthText(h: NodeHealth): string {
   ].join("\n");
 }
 
-export const nodesCommands: Readonly<Record<string, Command>> = {
-  node: {
-    help: ["  nexus node <name>                            a node's load, memory, disk, temperatures and pylon processes, read now; deployers only"],
-    args: [1, 1],
-    async run(api, [name]) {
-      const health = await request(api, nodeRoutes.health, { node: name! });
-      return { json: health, text: healthText(health) };
-    },
+const node: Command = {
+  help: ["  nexus node [show] <name>                     a node's load, memory, disk, temperatures and pylon processes, read now; deployers only"],
+  args: [1, 1],
+  async run(api, [name]) {
+    const health = await request(api, nodeRoutes.health, { node: name! });
+    return { json: health, text: healthText(health) };
   },
+};
+
+export const nodesCommands: Readonly<Record<string, Command>> = {
+  node,
+  // A node may be named show, and `nexus node show` has always read its health.
+  "node show": { ...node, args: [0, 1], run: (api, [name = "show"], ...rest) => node.run(api, [name], ...rest) },
   nodes: {
     help: ["  nexus nodes"],
     args: [0, 0],

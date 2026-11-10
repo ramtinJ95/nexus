@@ -104,6 +104,15 @@ export const answeredText = (view: ReviewView, said: readonly string[], running:
   ? `Waived the holds at ${view.head.slice(0, 12)}. It lands once the reviewer approves and its checks pass.\n${said.join("\n")}`
   : `Landing ${said.join("\n")}`;
 
+const imageList: Command = {
+  help: ["  nexus image list | images                    recorded images, the nodes that hold each, and the last image operation"],
+  args: [0, 0],
+  async run(api) {
+    const view = await request(api, imageRoutes.list, {});
+    return { json: view, text: imagesText(view) };
+  },
+};
+
 export const releaseCommands: Readonly<Record<string, Command>> = {
   release: {
     help: ["  nexus release"],
@@ -178,14 +187,8 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
   "image build": imageCommand(["  nexus image build [--wait]                   build the recipe of the control plane's release, and record the image"], [0, 0], (api) => request(api, imageRoutes.build, {})),
   "image rollout": imageCommand(["  nexus image rollout <image> [--wait]         copy an image to every online node, then make it current"], [1, 1], (api, [image]) => request(api, imageRoutes.rollout, { body: { image: image as ImageId } })),
   "image rollback": imageCommand(["  nexus image rollback [--wait]                roll out again the image that was current before this one"], [0, 0], (api) => request(api, imageRoutes.rollback, {})),
-  "image list": {
-    help: ["  nexus image list                             recorded images, the nodes that hold each, and the last image operation"],
-    args: [0, 0],
-    async run(api) {
-      const view = await request(api, imageRoutes.list, {});
-      return { json: view, text: imagesText(view) };
-    },
-  },
+  "image list": imageList,
+  images: imageList,
   "image current": {
     help: ["  nexus image current                          the current image and the one before it"],
     args: [0, 0],

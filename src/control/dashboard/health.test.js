@@ -87,7 +87,7 @@ test("a change in a background tab shows a system notification that its recovery
 
 test("every function the client calls on the module it loads is one the module exports", () => {
   const called = [...readFileSync(new URL("./client.js", import.meta.url), "utf8").matchAll(/checks\.then\(\(m\) => m\.(\w+)\(/g)].map((m) => m[1]);
-  assert.deepEqual([...new Set(called)].sort(), ["caughtUp", "markHealthSeen", "notice", "showHealth"]);
+  assert.deepEqual([...new Set(called)].sort(), ["caughtUp", "markHealthSeen", "permissionControl", "showHealth", "showRow"]);
   for (const name of called) assert.equal(typeof health[name], "function", name);
 });
 
