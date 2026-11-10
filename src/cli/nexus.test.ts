@@ -291,7 +291,9 @@ test("each failure has its own exit code, and with --json its error is one JSON 
 test("the URL and the proxy come from the flags, then the environment, then the config file", async (t) => {
   const s = await setup(t);
   const unset = { NEXUS_URL: "", NEXUS_SOCKS: "" };
-  const dead = `http://127.0.0.1:${await freePort()}`;
+  // A GET tries a refused port again for 15 s, and a freed port may be another test's server by then. Port 1 is
+  // privileged, so no test can listen on it.
+  const dead = "http://127.0.0.1:1";
   const config = join(s.home, ".config", "nexus", "cli.json");
   const none = await s.nexus(["projects"], unset);
   assert.deepEqual([none.code, none.stderr], [64, "nexus: no control plane is set. Run nexus connect <host> with its tailnet name, or give --url or NEXUS_URL\n"], "no URL is built in");
