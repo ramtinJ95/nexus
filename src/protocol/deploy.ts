@@ -25,6 +25,8 @@ export interface ReleaseReport {
   target: string | null;
   state: (typeof reportStates)[number];
   reason: string | null;
+  /** The deployer worker that sent it: `bootstrap`, or the commit of the release it was promoted from. Absent from a worker from before the field. */
+  worker?: string;
   /** When the control plane received the report, in Unix milliseconds, or 0 before the first. */
   observedAt: number;
 }
