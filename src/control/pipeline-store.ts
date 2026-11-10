@@ -1,6 +1,6 @@
 /** An item's phase is derived, so it is not stored. */
 import { json, type Db, type Holding } from "./db.ts";
-import { requestIds, type ItemId, type ProjectId, type ThreadId } from "../ids.ts";
+import type { ItemId, ProjectId } from "../ids.ts";
 import type { StartRequest } from "./start-request.ts";
 
 export interface ItemRecord {
@@ -25,22 +25,11 @@ export interface ItemRecord {
 
 export const holding = { tables: { pipeline_items: { record: "id" } } } as const satisfies Holding;
 
-/** `startRequest` is the thread store's, which finds the thread an item became by the item's request ID. */
-export function pipelineStore(db: Db, startRequest: (requestId: string) => { thread: ThreadId } | undefined) {
+export function pipelineStore(db: Db) {
   const { sql } = db;
   const items = db.hold(holding).records<ItemRecord>("pipeline_items");
-  const all = (): ItemRecord[] => sql("SELECT record FROM pipeline_items ORDER BY rowid").all().map((r) => json<ItemRecord>(r.record));
   return {
-    participant: {
-      /** An item reads its phase from the thread it became, for as long as the item is listed. */
-      keeps(threads: ReadonlyMap<ThreadId, unknown>): ReadonlyMap<ThreadId, string> {
-        return new Map(all().flatMap((item): [ThreadId, string][] => {
-          const thread = item.cancelled === null ? startRequest(requestIds.pipeline(item.id))?.thread : undefined;
-          return thread !== undefined && threads.has(thread) ? [[thread, `pipeline item ${item.id} became it`]] : [];
-        }));
-      },
-    },
-    items: all,
+    items: (): ItemRecord[] => sql("SELECT record FROM pipeline_items ORDER BY rowid").all().map((r) => json<ItemRecord>(r.record)),
     item: (id: ItemId): ItemRecord | undefined => items.get(id) ?? undefined,
     saveItem(record: ItemRecord) { items.save(record.id, record); },
   };

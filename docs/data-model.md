@@ -125,7 +125,6 @@ Until then an archived thread keeps every record, and only its pylon's disk goes
 A thread stays past its 7 days while something still reads it. Each pass logs why once, for each thread it keeps.
 
 - A queued thread whose status is `queued` names it in its `after`.
-- A pipeline item became it, by its request ID. Items are never removed, so neither is such a thread.
 - One of its pull requests is open, as its PR watch last read it.
 - One of its questions is open.
 - A review that has not ended names it, as its builder, a reviewer, its check thread or a verify pylon.
@@ -144,7 +143,7 @@ Each store's holding (`Holding` in `src/control/db.ts`) says what a purge does w
 A purge never removes these.
 
 - `events`. The log keeps its newest 10,000 events on its own, and deleting a thread's from among them could move the oldest past a client's cursor, which would then read as expired.
-- `start_requests`. A start repeated under a purged thread's request ID still finds the thread, and answers 409 that it was purged rather than starting it again, and a pipeline item still finds the thread it became.
+- `start_requests`. A start repeated under a purged thread's request ID still finds the thread, and answers 409 that it was purged rather than starting it again, and a pipeline item still finds the thread it became, whose phase then reads `archived`, as its thread was deleted and purged.
 - `queued_threads`, which holds a queued start as it was asked for.
 - `usage_days`, whose daily sums keep a purged thread's calls, though its `usage_records` go. `reviewed_prs` and `review_rounds` keep what each pull request's reviews read and spent.
 - `usage_backfill`, the backfill's one run, which names a thread only while it holds its pylon.

@@ -9,7 +9,8 @@ import { image, withThread } from "../test-support/api-kit.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import { retentionPass } from "./retention-pass.ts";
 import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
-import type { ItemId, JobId, NodeName, ProjectId, ThreadId } from "../ids.ts";
+import { requestIds, type ItemId, type JobId, type NodeName, type ProjectId, type ThreadId } from "../ids.ts";
+import { itemView } from "./pipeline.ts";
 import type { Judgment } from "./judgment-store.ts";
 import type { Thread } from "./thread-store.ts";
 import type { ThreadDetail } from "./wire.ts";
@@ -155,11 +156,6 @@ test("an archived thread a feature still reads stays past its week, and the pass
     request: { project: "acme", title: "Next", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued",
     startNow: null, lastError: null, startedAt: null, firstMessage: null,
   });
-  const item = "it-000000000001" as ItemId;
-  const itemThread = testThread();
-  r.threads.createThread(itemThread, testPylon(itemThread), { key: { requestId: `pipeline:${item}`, body: "{}" } });
-  r.threads.setThreadStatus(itemThread.id, "archived");
-  r.pipeline.saveItem({ id: item, project: "acme" as ProjectId, title: "Item", request: { project: "acme", title: "Item" }, message: "Build it.", after: [], addedBy: "nLAPTOP", addedAt: w.now, approved: null, cancelled: null, lastError: null });
   const withPr = w.closed("archived");
   r.prWatches.savePrWatch(withPr, { links: [{ pr: testPr({ number: 4, state: "open" }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   const asking = w.closed("archived");
@@ -175,7 +171,7 @@ test("an archived thread a feature still reads stays past its week, and the pass
   await w.passes();
   assert.equal(w.status(free), "deleted", "a thread nothing reads goes");
   const reasons: [ThreadId, string][] = [
-    [waitedFor, `queued thread ${queuedId} waits for it`], [itemThread.id, `pipeline item ${item} became it`], [withPr, "its pull request #4 is open"],
+    [waitedFor, `queued thread ${queuedId} waits for it`], [withPr, "its pull request #4 is open"],
     [asking, "its question qn-open is open"], [builder, "its review rv-1 has not ended"], [reviewer, `review rv-1 of ${builder}, whose reviewer it is, has not ended`],
     [read, "the usage backfill holds its pylon"],
   ];
@@ -183,6 +179,20 @@ test("an archived thread a feature still reads stays past its week, and the pass
     assert.equal(w.status(id), "archived", why);
     assert.deepEqual(w.keeps(id), [`retention: keeps ${id}, as ${why}`]);
   }
+});
+
+test("a pipeline item whose thread was purged lists as archived and still names it", (t) => {
+  const registry = seedRegistry(testRegistry(t, tempDb()));
+  const item = "it-000000000001" as ItemId;
+  const built = testThread();
+  registry.threads.createThread(built, testPylon(built), { key: { requestId: requestIds.pipeline(item), body: "{}" } });
+  registry.pipeline.saveItem({ id: item, project: "acme" as ProjectId, title: "Item", request: { project: "acme", title: "Item" }, message: "Build it.", after: [], addedBy: "nLAPTOP", addedAt: Date.now(), approved: null, cancelled: null, lastError: null });
+  registry.threads.setThreadStatus(built.id, "deleted");
+  registry.threads.purgeThread(built.id);
+
+  const view = itemView(registry, registry.pipeline.item(item)!, Date.now());
+  assert.equal(view.thread, built.id, "the item still names the thread it became, so no pass queues it again");
+  assert.deepEqual(view.phase, { kind: "archived", why: "its thread was deleted and purged from the registry" });
 });
 
 test("a deleted thread is purged a week after its delete once a backup began since, but not while its pylon is on its node, its conversation's abort is unrecorded, or a stored review names it", async (t) => {
