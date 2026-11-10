@@ -208,14 +208,19 @@ function parse(argv) {
 }
 
 /** One reply of the probe, or the failure's message and HTTP status, null when there was no reply. */
-async function send(request) {
+async function send(request, ms) {
   let res;
   try {
-    res = await fetch(`${api}${bridgeRequestPath}`, { method: "POST", signal: AbortSignal.timeout(request.op === "event" ? 1500 : 120_000), headers: { "content-type": "application/json" }, body: JSON.stringify(request) });
+    res = await fetch(`${api}${bridgeRequestPath}`, { method: "POST", signal: AbortSignal.timeout(request.op === "event" ? 1500 : ms), headers: { "content-type": "application/json" }, body: JSON.stringify(request) });
   } catch (err) {
     return { error: `cannot reach ${api}: ${err.cause?.message ?? err.message}`, status: null };
   }
-  const body = await res.text();
+  let body;
+  try {
+    body = await res.text();
+  } catch (err) {
+    return { error: `the probe's reply broke off: ${err.cause?.message ?? err.message}`, status: res.status };
+  }
   if (res.status !== 200) return { error: body.trimEnd() || `HTTP ${res.status}`, status: res.status };
   try {
     return { reply: JSON.parse(body) };
@@ -227,7 +232,9 @@ async function send(request) {
 const waitMs = 120_000;
 
 async function main(argv) {
-  const json = argv.includes("--json");
+  const end = argv.indexOf("--");
+  const flags = end === -1 ? argv : argv.slice(0, end);
+  const json = flags.includes("--json");
   const fail = (error, status, code) => {
     process.stderr.write(json ? `${JSON.stringify({ error, status })}\n` : `nexus: ${error}\n`);
     return code;
@@ -236,7 +243,7 @@ async function main(argv) {
     console.log(`nexus ${version}`);
     return 0;
   }
-  const asked = argv[0] === "help" ? argv.slice(1) : argv.includes("--help") || argv.includes("-h") ? argv : null;
+  const asked = argv[0] === "help" ? argv.slice(1) : flags.includes("--help") || flags.includes("-h") ? flags : null;
   if (asked !== null) {
     if (asked.length === 0 || asked[0].startsWith("-")) process.stdout.write(usage);
     else if (families.includes(asked[0])) process.stdout.write(familyHelp(asked[0]));
@@ -257,10 +264,10 @@ async function main(argv) {
     return 64;
   }
   const deadline = Date.now() + waitMs;
-  let answer = await send(call.request);
-  while (call.wait && answer.reply !== undefined && !call.command.settled(answer.reply) && Date.now() < deadline) {
+  let answer = await send(call.request, waitMs);
+  while (call.wait && answer.reply !== undefined && !call.command.settled(answer.reply) && deadline - Date.now() > 1000) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
-    answer = await send(call.request);
+    answer = await send(call.request, deadline - Date.now());
   }
   if (answer.reply === undefined) return fail(answer.error, answer.status, 1);
   const { reply } = answer;

@@ -103,6 +103,14 @@ test("output add file sends the path resolved against the shell's working direct
   assert.equal(calls.find((c) => String(c[3]).includes("sha256sum"))?.at(-1), `${import.meta.dirname}/shot.png`, "the probe hashed the resolved path");
 });
 
+test("after --, a path that looks like a flag is a path", async (t) => {
+  const { nexus, calls } = await probe(t);
+  const { code, stdout } = await nexus(["output", "add", "file", "--", "--help"], import.meta.dirname);
+  assert.equal(code, 0);
+  assert.match(stdout, /^Declared /);
+  assert.equal(calls.find((c) => String(c[3]).includes("sha256sum"))?.at(-1), `${import.meta.dirname}/--help`);
+});
+
 test("output list prints one line per output", async (t) => {
   const { nexus } = await probe(t);
   assert.deepEqual(await nexus(["output", "list"]), { code: 0, stdout: `${output.id}\tfile\t${output.path}\tShot\n`, stderr: "" });
@@ -220,6 +228,19 @@ test("a 200 whose body is not JSON is a failure, not a stack trace", async (t) =
   const api = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   assert.deepEqual(await run(api, ["info"]), { code: 1, stdout: "", stderr: "nexus: the probe answered 200 with a body that is not JSON: <html>proxy</html>\n" });
   assert.deepEqual(await run(api, ["info", "--json"]), { code: 1, stdout: "", stderr: `${JSON.stringify({ error: "the probe answered 200 with a body that is not JSON: <html>proxy</html>", status: 200 })}\n` });
+});
+
+test("a reply that breaks off is a failure, not a stack trace", async (t) => {
+  const server = createServer((_, res) => {
+    res.writeHead(200, { "content-length": "100" });
+    res.write("{\"pylonId\"", () => res.destroy());
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => server.close());
+  const reply = await run(`http://127.0.0.1:${(server.address() as { port: number }).port}`, ["info", "--json"]);
+  assert.equal(reply.code, 1);
+  assert.equal(JSON.parse(reply.stderr).status, 200);
+  assert.match(JSON.parse(reply.stderr).error, /^the probe's reply broke off: /);
 });
 
 test("unpreview unlinks the port, and a port a service's preview owns is refused with the guest's message", async (t) => {
