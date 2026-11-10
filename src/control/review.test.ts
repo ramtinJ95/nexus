@@ -2089,6 +2089,56 @@ test("a second reviewer held with its review's first keeps its 30 minutes for af
   assert.equal(reviewOf(f, auto).second?.kind, "starting", "a failed start right after the hold is tried again");
 });
 
+/** `f`'s own review approved with its live check waiting for room, in `f`'s loop. */
+async function verifyWaits(f: ReturnType<typeof fixture>) {
+  f.verifies = true;
+  f.live = { kind: "running" };
+  f.liveRoom = false;
+  const loop = await approved(f, "nLAPTOP");
+  assert.equal(f.review().phase.kind, "verifying");
+  f.tick(1_000);
+  return loop;
+}
+
+test("a check held beside the reviewer keeps its place in line through the reviewer's approval", async (t) => {
+  const f = fixture(t);
+  const loop = await verifyWaits(f);
+  const earlier = await otherBuilder(f, loop, "th-builder-3", 9, "person");
+  await loop.poll();
+  f.tick(1_000);
+  const later = await otherBuilder(f, loop, "th-builder-2", 8, "person");
+  await loop.poll();
+  f.reply(reviewOf(f, earlier).reviewer, verdict(reviewOf(f, earlier), {}));
+  await loop.poll();
+  assert.equal(reviewOf(f, earlier).phase.kind, "checking");
+  f.liveRoom = true;
+  f.placed.length = 0;
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual(f.placed.slice(0, 3), [`verify pylon of ${f.builder}`, `check of ${earlier}`, `check of ${later}`]);
+});
+
+test("a held start that fails once let through ends its hold, so it holds no other start and its deadline runs", async (t) => {
+  const f = fixture(t, { autoReview: { mode: "review", enabledBy: "nLAPTOP" } });
+  const loop = await verifyWaits(f);
+  const checked = await otherBuilder(f, loop, "th-builder-2", 8, "person");
+  await loop.poll();
+  f.reply(reviewOf(f, checked).reviewer, verdict(reviewOf(f, checked), {}));
+  await loop.poll();
+  assert.match(reviewSaidText(reviewOf(f, checked)), new RegExp(`its check ${behindVerify(f.builder, 7)}`));
+  const auto = await otherBuilder(f, loop, "th-builder-3", 9, "auto");
+  await loop.poll();
+  assert.equal(reviewOf(f, auto).reviewerStarted, false);
+  f.checkStartFails = true;
+  f.liveRoom = true;
+  await loop.poll();
+  assert.doesNotMatch(reviewSaidText(reviewOf(f, checked)), /waits for th-builder:/);
+  assert.equal(reviewOf(f, auto).reviewerStarted, true, "a start that failed holds nothing");
+  f.tick(61 * 60_000);
+  await loop.poll();
+  assert.deepEqual(shown(reviewOf(f, checked).phase), { kind: "needs-person", reasons: [`.nexus/check gave no verdict within 60 minutes at ${head2}.`] });
+});
+
 test("a live check its pylon cannot run goes to the person, and a verify pylon no review holds is archived", async (t) => {
   const f = fixture(t);
   f.verifies = true;

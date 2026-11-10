@@ -401,10 +401,17 @@ export function reviewLoop(deps: ReviewDeps) {
       // for, which a refusal for room alone leaves in line.
       const behind = heldBehind(r);
       if (behind !== null) return { kind: "run", run: sameBehind(run.behind, behind) ? run : { ...run, behind } };
-      const gone = await endedOnGitHub(r);
-      if (gone !== null) return { kind: "ended", review: gone };
       const held = run.behind !== undefined;
-      const started = await runs.start(builder, r.pr.branch, head, kind === "beside" || undefined);
+      let started: Awaited<ReturnType<CheckRuns["start"]>>;
+      try {
+        const gone = await endedOnGitHub(r);
+        if (gone !== null) return { kind: "ended", review: gone };
+        started = await runs.start(builder, r.pr.branch, head, kind === "beside" || undefined);
+      } catch (err) {
+        // A hold that ends in a failed start still ends, or it would hold every other start with no deadline of its own.
+        if (!held) throw err;
+        return { kind: "run", run: { startedAt: now(), thread: null } };
+      }
       const startedAt = (run.room === true || held) && !("room" in started && started.room) ? now() : run.startedAt;
       if ("thread" in started) return { kind: "run", run: { startedAt, thread: started.thread } };
       // Saved rather than thrown once, so the check's deadline counts from the end of its hold.
@@ -611,7 +618,9 @@ export function reviewLoop(deps: ReviewDeps) {
       const n = roundsSpent(next);
       if (reviewerApproved(round)) {
         if (phase.check?.unrunnable !== undefined) return await checkUnrunnable(next, phase.check.unrunnable);
-        const after: Phase = phase.check === undefined || phase.check.refused !== undefined || phase.check.behind !== undefined ? checking() : { kind: "checking", startedAt: phase.check.startedAt, thread: phase.check.thread };
+        // A held check goes on held, keeping its place in line.
+        const { check } = phase;
+        const after: Phase = check === undefined || check.refused !== undefined ? checking() : { kind: "checking", startedAt: check.startedAt, thread: check.thread, ...check.behind && { behind: check.behind } };
         return reviewersFindings(round).length ? send({ ...next, phase: after }, "builder", () => builderNotes(next)) : { ...next, phase: after, nudges: 0 };
       }
       const asks = seatsOf(round).filter((seat) => verdictAt(round, seat)!.verdict === "changes");
