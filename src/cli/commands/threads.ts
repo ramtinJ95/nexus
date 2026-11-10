@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { sessionHarnessSchema } from "../../protocol/agent-kinds.ts";
 import { threadRoutes as routes, type Preview } from "../../contract/threads.ts";
 import { pylonRoutes, type ChangesBase } from "../../contract/pylon.ts";
-import { projectOf } from "../refs.ts";
+import { projectOf, threadOf } from "../refs.ts";
 import { attachTerminal, processTty } from "../attach.ts";
 import { CliError, UsageError } from "../transport.ts";
 import { startRules } from "../../contract/threads-parse.ts";
-import { type Values, type Api, type Command, type Io, str, request, int, briefOptions, briefOf, textFrom, colourOf, waitMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
+import { type Values, type Api, type Command, type Io, type Result, str, request, fileOf, int, briefOptions, briefOf, textFrom, colourOf, waitMs, waitPollMs, pollUntil, whenRunning } from "../kit.ts";
 import { thenWatch, watchOf, watchOptions } from "./watch.ts";
 import { detailText, portsText, listingText, changesText, queuedTable, queuedText, threadsText } from "../thread-text.ts";
 import { needsPerson } from "../../contract/attention.ts";
@@ -58,16 +58,61 @@ const action = (done: string, call: (api: Api, thread: string) => Promise<null>)
   },
 });
 
-const statusHelp = ["  nexus archive|unarchive|delete <thread>"];
+/** One outcome of a command given several threads, in the order given, as `--json` prints it. */
+type Outcome = { given: string; reply: unknown } | { given: string; error: string; kind: CliError["kind"]; status: number | null; code: string | null };
+
+/**
+ * One thread runs as it always has, and its failure is the command's. Several run one after another, so one that
+ * fails stops none of the rest: each prints its line, and the first failure's kind is the exit code.
+ */
+async function eachThread(api: Api, given: readonly string[], one: (thread: string) => Promise<Result>): Promise<Result> {
+  if (given.length === 1) return await one(await threadOf(api, given[0]!));
+  const outcomes: Outcome[] = [];
+  const lines: string[] = [];
+  for (const g of given) {
+    try {
+      const done = await one(await threadOf(api, g));
+      outcomes.push({ given: g, reply: done.json });
+      lines.push(done.text);
+    } catch (err) {
+      if (!(err instanceof CliError)) throw err;
+      outcomes.push({ given: g, error: err.message, kind: err.kind, status: err.status, code: err.code });
+      lines.push(`${g}: ${err.message}`);
+    }
+  }
+  const failed = outcomes.find((o) => "error" in o);
+  return { json: outcomes, text: lines.join("\n"), ...failed === undefined ? {} : { exit: failed.kind } };
+}
+
+const statusHelp = ["  nexus archive|unarchive|delete <thread...>"];
 const statusChange = (route: typeof routes.archive | typeof routes.unarchive | typeof routes.delete, done: string, queued: string): Command => ({
   help: statusHelp,
-  args: [1, 1],
-  thread: true,
-  async run(api, [id]) {
-    const t = await request(api, route, { thread: id! });
+  args: [1, Infinity],
+  run: (api, given) => eachThread(api, given, async (id) => {
+    const t = await request(api, route, { thread: id });
     return { json: t, text: `${done} ${t.id}.${"waits" in t ? ` ${queued}` : ""}` };
-  },
+  }),
 });
+
+const show: Command = {
+  help: [
+    "  nexus show <thread>                          a thread with its pylon, sessions, previews and outputs",
+    "    thread show <thread> is the same",
+  ],
+  thread: true,
+  args: [1, 1],
+  async run(api, [id]) {
+    let d;
+    try {
+      d = await request(api, routes.show, { thread: id! });
+    } catch (err) {
+      if (!(err instanceof CliError) || err.code !== "queued") throw err;
+      const q = await request(api, routes.queuedThread, { thread: id! });
+      return { json: q, text: queuedText(q) };
+    }
+    return { json: d, text: detailText(d) };
+  },
+};
 
 export const threadsCommands: Readonly<Record<string, Command>> = {
   threads: {
@@ -98,22 +143,8 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
       return { json: threads, text: threadsText(threads, queued.slice(0, limit - threads.length), colour) };
     },
   },
-  show: {
-    help: ["  nexus show <thread>                          a thread with its pylon, sessions, previews and outputs"],
-    thread: true,
-    args: [1, 1],
-    async run(api, [id]) {
-      let d;
-      try {
-        d = await request(api, routes.show, { thread: id! });
-      } catch (err) {
-        if (!(err instanceof CliError) || err.code !== "queued") throw err;
-        const q = await request(api, routes.queuedThread, { thread: id! });
-        return { json: q, text: queuedText(q) };
-      }
-      return { json: d, text: detailText(d) };
-    },
-  },
+  show,
+  "thread show": show,
   ports: {
     help: ["  nexus ports <thread>                         the TCP ports the pylon listens on, and each one's preview"],
     thread: true,
@@ -152,6 +183,16 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     async run(api, [id, path = ""], _v, _follow, { io }) {
       const l = await whenRunning(api, io, id!, () => request(api, pylonRoutes.files, { thread: id!, query: { path } }), "nothing was listed");
       return { json: l, text: listingText(l) };
+    },
+  },
+  cat: {
+    help: ["  nexus cat <thread> <path>                    a file of the pylon's checkout, written to stdout as its bytes"],
+    thread: true,
+    args: [2, 2],
+    async run(api, [id, path], v, _follow, { io }) {
+      if (v.json === true) throw new UsageError("cat writes the file's bytes as they are, so it takes no --json. `nexus files <thread> [dir] --json` gives a file's size");
+      const bytes = await whenRunning(api, io, id!, () => fileOf(api, pylonRoutes.file, { thread: id!, query: { path: path! } }), "nothing was read");
+      io.stdout.write(bytes);
     },
   },
   changes: {
@@ -281,17 +322,19 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
   },
   seen: {
     help: [
-      "  nexus seen <thread> [--unread | --last-reply-at MS]",
+      "  nexus seen <thread...> [--unread | --last-reply-at MS]",
       "    mark the latest reply seen, or unread, or only up to the reply at MS, as captured with what the client showed",
     ],
-    thread: true,
-    args: [1, 1],
+    args: [1, Infinity],
     options: { unread: { type: "boolean" }, "last-reply-at": { type: "string" } },
-    async run(api, [id], v) {
+    async run(api, given, v) {
       const shown = str(v, "last-reply-at");
       if (shown !== undefined && v.unread) throw new UsageError("--last-reply-at marks a reply seen, so it cannot go with --unread");
-      await request(api, v.unread ? routes.unseen : routes.seen, { thread: id!, body: shown === undefined ? {} : { lastReplyAt: int(shown, "--last-reply-at", 0) } });
-      return { json: null, text: `Marked ${id} ${v.unread ? "unread" : "seen"}.` };
+      const body = shown === undefined ? {} : { lastReplyAt: int(shown, "--last-reply-at", 0) };
+      return await eachThread(api, given, async (id) => {
+        await request(api, v.unread ? routes.unseen : routes.seen, { thread: id, body });
+        return { json: null, text: `Marked ${id} ${v.unread ? "unread" : "seen"}.` };
+      });
     },
   },
   abort: action("Aborted the run of", (api, thread) => request(api, routes.abort, { thread })),

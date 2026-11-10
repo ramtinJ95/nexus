@@ -152,7 +152,7 @@ test("--help or -h after a command prints its lines of nexus --help and exits 0 
   assert.equal((await s.nexus(["retry", "-h"])).stdout, "  nexus abort|retry|retry-pylon|wake <thread>\n");
   assert.equal((await s.nexus(["session", "open", "--help"])).stdout, "  nexus session open <thread> [--harness claude-code|pi|shell] [--title T]\n");
   const show = await s.nexus(["show", "--help"]);
-  assert.deepEqual([show.code, show.stdout], [0, "  nexus show <thread>                          a thread with its pylon, sessions, previews and outputs\n"], "help needs no thread");
+  assert.deepEqual([show.code, show.stdout], [0, "  nexus show <thread>                          a thread with its pylon, sessions, previews and outputs\n    thread show <thread> is the same\n"], "help needs no thread");
   assert.deepEqual(s.proxy.connects, [], "no help run sent a request");
 
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Help"]);

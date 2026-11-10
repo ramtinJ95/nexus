@@ -10,15 +10,21 @@ import { brokenRule, startFields } from "../contract/threads-parse.ts";
 import type { itemSchema } from "../contract/projects-parse.ts";
 import type { WebSocket } from "ws";
 import { CliError, UsageError, type ErrorKind } from "./transport.ts";
-import { callOf, type ApiRoute, type CallArgs, type ReplyOf } from "../contract/route.ts";
+import { callOf, type ApiRoute, type CallArgs, type FileBytes, type ReplyOf } from "../contract/route.ts";
 import { threadRoutes } from "../contract/threads.ts";
 
 export type Values = Record<string, string | boolean | string[] | undefined>;
-export type Api = (method: string, path: string, body?: unknown, idleMs?: number) => Promise<unknown>;
+/** With `as` set to `bytes`, a success answers the body's bytes as a Buffer, for a route that serves a file. */
+export type Api = (method: string, path: string, body?: unknown, idleMs?: number, as?: "bytes") => Promise<unknown>;
 export type Follow = (path: string, onEvent: (data: unknown) => void | Promise<void>, signal: AbortSignal, onCursor?: (id: string) => void) => Promise<void>;
 export async function request<R extends ApiRoute>(api: Api, route: R, args: CallArgs<R>): Promise<ReplyOf<R>> {
   const { path, body } = callOf(route, args);
   return await api(route.method, path, body, route.idleMs) as ReplyOf<R>;
+}
+/** The bytes a route that answers a file serves. */
+export async function fileOf<R extends ApiRoute<"GET", string, FileBytes>>(api: Api, route: R, args: CallArgs<R>): Promise<Buffer> {
+  const { path, body } = callOf(route, args);
+  return await api(route.method, path, body, route.idleMs, "bytes") as Buffer;
 }
 /** With `exit`, the command prints its result and then exits as that kind of failure. */
 export interface Result { json: unknown; text: string; exit?: ErrorKind }
@@ -261,11 +267,11 @@ export const restartMs = 15_000;
 export function ridingRestarts(api: Api, said: Note): Api {
   let noted = false;
   const lookAt = (err: CliError) => new CliError(err.kind, `${err.message}. The control plane is down or restarting, or the URL is not its own: \`nexus connect <host>\` finds it again, and \`systemctl status nexus-control\` on its machine shows whether it runs`, err.status, err.code, err.retryable, err.restarting);
-  return async (method, path, body, idleMs) => {
+  return async (method, path, body, idleMs, as) => {
     const deadline = Date.now() + restartMs;
     for (;;) {
       try {
-        return await api(method, path, body, idleMs);
+        return await api(method, path, body, idleMs, as);
       } catch (err) {
         if (!(err instanceof CliError) || !err.restarting) throw err;
         if (method !== "GET" || Date.now() >= deadline) throw lookAt(err);

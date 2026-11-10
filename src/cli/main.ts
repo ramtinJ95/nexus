@@ -116,7 +116,7 @@ async function runCommand(name: string, args: readonly string[], io: Io): Promis
   const note = noteTo(io.stderr);
   const read = () => target ??= settings(values, io.env).then((at) => checked(at, command.anyVersion === true, note)).catch((err: unknown) => { target = undefined; throw err; });
   const endpoint = async (): Promise<Endpoint> => (await read()).endpoint;
-  const api: Api = ridingRestarts(async (method, path, body, idleMs) => call(await endpoint(), method, path, body, idleMs), note);
+  const api: Api = ridingRestarts(async (method, path, body, idleMs, as) => call(await endpoint(), method, path, body, idleMs, as), note);
   if (command.thread === true) positionals[0] = await threadOf(api, positionals[0]!);
   const result = await command.run(api, positionals, values,
     async (path, onEvent, signal, onCursor) => follow(await endpoint(), path, onEvent, signal, onCursor), { connect: async (path) => upgrade(await endpoint(), path), versions: async () => (await read()).versions, io });

@@ -16,12 +16,12 @@ const grouped: Readonly<Record<string, Command>> = Object.assign({}, ...commandG
 /** nexus --help lists the commands under these headers, in this order. */
 export const sections: readonly { title: string; names: readonly string[] }[] = [
   { title: "Setup", names: ["connect", "doctor"] },
-  { title: "Threads", names: ["threads", "show", "ports", "preview", "unpreview", "files", "changes", "diff", "conversation", "session open", "session close", "attach"] },
+  { title: "Threads", names: ["threads", "show", "thread show", "ports", "preview", "unpreview", "files", "cat", "changes", "diff", "conversation", "session open", "session close", "attach"] },
   { title: "Work", names: ["start", "start-queued", "send", "answer", "watch", "seen", "abort", "retry", "retry-pylon", "wake", "archive", "unarchive", "delete"] },
   { title: "Pipeline", names: ["items", "item add", "item show", "item approve", "item cancel"] },
   { title: "Projects", names: ["projects", "project show", "project edit", "project add"] },
   { title: "Review and release", names: ["review", "land", "deploy", "release"] },
-  { title: "Images", names: ["image build", "image rollout", "image rollback", "image list", "image current"] },
-  { title: "Nodes, events and usage", names: ["nodes", "node", "events", "usage", "usage backfill"] },
+  { title: "Images", names: ["image build", "image rollout", "image rollback", "image list", "images", "image current"] },
+  { title: "Nodes, events and usage", names: ["nodes", "node", "node show", "events", "usage", "usage backfill"] },
 ];
 export const commands: Readonly<Record<string, Command>> = Object.fromEntries(sections.flatMap((section) => section.names).map((name) => [name, grouped[name]!]));

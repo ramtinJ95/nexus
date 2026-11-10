@@ -42,15 +42,18 @@ function healthText(h: NodeHealth): string {
   ].join("\n");
 }
 
-export const nodesCommands: Readonly<Record<string, Command>> = {
-  node: {
-    help: ["  nexus node <name>                            a node's load, memory, disk, temperatures and pylon processes, read now; deployers only"],
-    args: [1, 1],
-    async run(api, [name]) {
-      const health = await request(api, nodeRoutes.health, { node: name! });
-      return { json: health, text: healthText(health) };
-    },
+const node: Command = {
+  help: ["  nexus node [show] <name>                     a node's load, memory, disk, temperatures and pylon processes, read now; deployers only"],
+  args: [1, 1],
+  async run(api, [name]) {
+    const health = await request(api, nodeRoutes.health, { node: name! });
+    return { json: health, text: healthText(health) };
   },
+};
+
+export const nodesCommands: Readonly<Record<string, Command>> = {
+  node,
+  "node show": node,
   nodes: {
     help: ["  nexus nodes"],
     args: [0, 0],

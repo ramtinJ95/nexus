@@ -2,6 +2,10 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), except in the commands [Version skew](cli.md#version-skew) names, so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.82.0
+
+Adds `nexus cat <thread> <path>`, which writes one file of the pylon's checkout to stdout as its bytes, from `GET /v1/threads/<thread>/files/content`, and takes no `--json`. Adds `images`, `node show <name>` and `thread show <thread>`, which run `image list`, `node <name>` and `show <thread>`. `archive`, `unarchive`, `delete` and `seen` take several threads, as [Commands](cli.md#commands) describes: one prints as before, and several print one line each, or with `--json` one array of `{"given", "reply"}` or `{"given", "error", "kind", "status", "code"}`. No route changes, so a control plane older than 0.82.0 serves all of them.
+
 ## 0.81.0
 
 Adds `nexus answer <question|thread> [option]`, which prints a question and its options, or a thread's open questions, and with an option answers it through `POST /v1/questions/<id>/answer` once the person types `yes` in a terminal, as [Answering from the CLI](cli.md#answering-from-the-cli) describes. Without a terminal it refuses before it sends anything. Adds `GET /v1/questions/<id>`, which answers the `Question` as stored. A control plane older than 0.81.0 answers that route 404, so `answer` there finds a question only by its thread.
