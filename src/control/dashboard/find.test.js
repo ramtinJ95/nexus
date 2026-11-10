@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { findText } from "./contract.ts";
+import { findText, narrow as narrowQuery } from "./contract.ts";
 
 /** An element with what find.js and switcher.js read of one, and the selectors they use. */
 class El {
@@ -39,6 +39,7 @@ class El {
   scrollIntoView() {}
 }
 class Input extends El {}
+class Form extends El {}
 class TextArea extends El {}
 class Dialog extends El {
   showModal() { this.open = true; this.opened?.(); }
@@ -56,25 +57,36 @@ const threads = [
   { id: "th-docs0000001", title: "Write the docs", project: "beta", prs: [412], at: 4 },
 ];
 /** A row as shell.ts renders it, with its `data-find`. */
-const row = (t) => new El("li", {}, [new El("a", { class: "row", dataset: { find: findText(t, t.prs) } })]);
+const row = (t) => {
+  const link = new El("a", { class: "row", dataset: { find: findText(t, t.prs) } });
+  link.setAttribute("href", `/threads/${t.id}`);
+  return new El("li", {}, [link]);
+};
 /** A page as the server renders it, with beta folded as its reader left it. */
 function page() {
   const group = (project, open) => new El("details", { id: `group-${project}`, class: "group", open }, [new El("ul", {}, threads.filter((t) => t.project === project).map(row))]);
   const filter = new Input("input", { id: "filter" });
+  const form = new Form("form", { id: "filter-form" }, [filter]);
+  form.setAttribute("action", "/threads/closed");
+  form.setAttribute("role", "search");
   const textarea = new TextArea("textarea", { id: "prompt-text" });
-  const root = new El("html", {}, [filter, new El("nav", { id: "side-threads" }, [group("acme", true), group("beta", false)]), textarea, switcher]);
+  const root = new El("html", {}, [form, new El("nav", { id: "side-threads" }, [group("acme", true), group("beta", false)]), textarea, switcher]);
   const doc = Object.assign(root, {
     getElementById: (id) => [...root.all()].find((el) => el.id === id) ?? null,
     createElement: (tag) => new El(tag),
     activeElement: null,
+    body: new El("body"),
   });
-  return { doc, filter, textarea, shown: () => doc.querySelectorAll("li").filter((li) => !li.hidden && li.parentElement.parentElement.open).map((li) => threads.find((t) => li.querySelector("a.row").dataset.find === findText(t, t.prs)).id) };
+  return { doc, filter, form, textarea, shown: () => doc.querySelectorAll("li").filter((li) => !li.hidden && li.parentElement.parentElement.open).map((li) => threads.find((t) => li.querySelector("a.row").dataset.find === findText(t, t.prs)).id) };
 }
 
 const stored = new Map();
+let phone = false;
 let assigned = [];
 Object.assign(globalThis, {
-  HTMLInputElement: Input, HTMLTextAreaElement: TextArea, HTMLSelectElement: class extends El {},
+  HTMLInputElement: Input, HTMLTextAreaElement: TextArea, HTMLSelectElement: class extends El {}, HTMLFormElement: Form,
+  FormData: class { constructor(form) { return form.querySelectorAll("input").map((input) => [input.id === "filter" ? "q" : input.id, input.value]); } },
+  matchMedia: (query) => ({ matches: query === narrowQuery && phone }),
   sessionStorage: { getItem: (k) => stored.get(k) ?? null, setItem: (k, v) => stored.set(k, String(v)), removeItem: (k) => stored.delete(k) },
   location: { assign: (href) => assigned.push(href) },
 });
@@ -144,6 +156,21 @@ test("/ focuses the filter, but not while the reader types or a dialog is open",
   assert.equal(pressed.defaultPrevented, true);
   assert.equal(p.doc.activeElement, p.filter, "the filter has focus");
   assert.equal(p.filter.selected, true, "with what it holds selected, to type over");
+  assert.equal(p.doc.body.dataset.open, undefined, "a wide page's sidebar is always shown");
+  phone = true;
+  p.doc.fire("keydown", { key: "/", target: p.doc });
+  phone = false;
+  assert.equal(p.doc.body.dataset.open, "side", "a phone's drawer opens to show the filter");
+});
+
+test("Enter in the filter searches the archived and deleted threads for it, though the page's policy refuses a form's own submit", async () => {
+  stored.clear();
+  assigned = [];
+  const p = page();
+  await load(p);
+  type(p.filter, "checkout retry");
+  assert.equal(p.doc.fire("submit", { target: p.form }).defaultPrevented, true, "the browser's submit, which form-action 'none' refuses, is not run");
+  assert.deepEqual(assigned, ["/threads/closed?q=checkout+retry"]);
 });
 
 test("Ctrl/⌘K opens the switcher over the listed rows, and the keyboard picks a thread and opens it", async () => {
@@ -172,6 +199,8 @@ test("Ctrl/⌘K opens the switcher over the listed rows, and the keyboard picks 
   assert.equal(switcherInput.getAttribute("aria-activedescendant"), switcherList.children[0].id);
   switcherInput.fire("keydown", { key: "Enter" });
   assert.deepEqual(assigned, [`/threads/${threads[1].id}`], "Enter opens the picked thread");
+  type(switcherInput, "412");
+  assert.equal(listed()[0][1], `/threads/${threads[3].id}`, "a pull request's number finds its thread, as the sidebar's row of it holds it");
 
   const closed = new Promise((resolve) => { switcher.closed = resolve; });
   assert.equal(p.doc.fire("keydown", { key: "K", metaKey: true, target: switcherInput }).defaultPrevented, true);
