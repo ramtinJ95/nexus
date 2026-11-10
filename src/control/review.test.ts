@@ -1463,6 +1463,42 @@ test("a path that holds for what its patch changes holds for a change to what it
     ["reserved-path:egress", "reserved-path:auth"], "a file GitHub shows no patch for may change anything");
 });
 
+test("the code that enforces the policy, the dependency manifests and what the checks run hold the landing, while docs and tests still hold for nothing", () => {
+  const review = testReview({ builder: "th-b" as ThreadId, reviewer: "th-r" as ThreadId, pr: { repo: "ramtinJ95/nexus", number: 199, url: "", title: "", branch: "f" }, models: { builder: "a", reviewer: "b" }, maxRounds: 3, phase: { kind: "approved" },
+    rounds: [{ head: head1, verdict: { token: "x", verdict: "approve", findings: [], reserved: [], notCheckedLive: null }, check: { passed: true, output: "" }, live: { kind: "absent" }, answers: null }] });
+  const changed = (path: string, patch = "@@ -1 +1 @@\n-const a = 1;\n+const a = 2;", deploys = true) => headHolds({ review, deploys, files: [{ path, previous: null, patch }] }).map((h) => h.text);
+  for (const path of ["src/control/review.ts", "src/control/review-model.ts", "src/control/gate.ts", "src/control/landing.ts", "src/control/github.ts", "src/control/prompts.ts"]) {
+    assert.deepEqual(changed(path), [`Always needs the person: changes to login or auth, as it changes ${path}.`], `${path} enforces the policy`);
+  }
+  assert.deepEqual(changed("package-lock.json", '@@ -10,3 +10,3 @@\n-      "version": "8.22.0",\n+      "version": "8.22.1",'), ["Always needs the person: changes to secrets, as it changes package-lock.json."], "a release installs the lockfile as root");
+  const secrets = ["Always needs the person: changes to secrets, as it changes package.json."];
+  // A hunk does not show how deep in the JSON its lines are, so no reading of one proves a line outside scripts and the dependencies.
+  for (const patch of [
+    '@@ -9,3 +9,4 @@\n   "scripts": {\n+    "postinstall": "sh evil.sh",\n     "build": "node src/control/dashboard/build.ts",',
+    '@@ -30,3 +30,4 @@\n     "@earendil-works/chord": "1.4.0",\n+    "left-pad": "1.3.0",\n     "@earendil-works/gondolin": "0.13.0",',
+    '@@ -7,6 +7,7 @@\n     "node": ">=26"\n   },\n   "scripts": {\n+  "postinstall": "sh evil.sh",\n     "build": "node src/control/dashboard/build.ts",',
+    '@@ -42,4 +42,5 @@\n   "overrides": {\n     "undici": "7.30.1"\n   },\n+  "description": "x", "scripts": { "postinstall": "sh evil.sh" },\n }',
+    '@@ -1,4 +1,4 @@\n {\n   "name": "nexus",\n-  "version": "0.0.0",\n+  "version": "0.0.1",',
+  ]) assert.deepEqual(changed("package.json", patch), secrets, patch);
+  for (const path of ["npm-shrinkwrap.json", ".npmrc", "src/control/dashboard/build.ts", "src/control/dashboard/assets.ts"]) {
+    assert.deepEqual(changed(path), [`Always needs the person: changes to secrets, as it changes ${path}.`], `a release's npm ci or npm run build reads or runs ${path} as root`);
+  }
+  assert.deepEqual(changed("package.json", ""), [...secrets, "Always needs the person: anything irreversible, as it changes package.json."], "a manifest GitHub shows no patch for may change anything");
+
+  const check = (paths: string) => [`The pull request changes ${paths}, the check this policy relies on or what it runs.`];
+  assert.deepEqual(changed(".nexus/setup", "@@ -1 +1 @@\n+echo", false), check(".nexus/setup"), "the check pylon runs setup at boot, in any repository");
+  assert.deepEqual(changed(".nexus/resume", "@@ -1 +1 @@\n+echo", false), check(".nexus/resume"), "and resume when it boots from a template");
+  assert.deepEqual(changed("tsconfig.json"), check("tsconfig.json"), "what Nexus's typecheck reads");
+  assert.deepEqual(changed("tsconfig.json", undefined, false), [], "which another repository's check may not read");
+  assert.deepEqual(changed(".claude/skills/verify-nexus/scripts/live-check"), ["The pull request changes .claude/skills/verify-nexus/scripts/live-check, the live check this policy relies on or what it runs."]);
+  assert.deepEqual(changed(".claude/skills/verify-nexus/scripts/stack.ts"), ["The pull request changes .claude/skills/verify-nexus/scripts/stack.ts, the live check this policy relies on or what it runs."]);
+  assert.deepEqual(changed(".nexus/check"), ["The pull request changes .nexus/check, the check this policy relies on."], "the check itself keeps its words");
+
+  for (const path of ["docs/merge-policy.md", "README.md", "src/control/review.test.ts", "src/control/gate.test.ts", ".claude/skills/verify-nexus/SKILL.md", ".claude/skills/verify-nexus/scripts/README.md"]) {
+    assert.deepEqual(changed(path), [], `${path} holds for nothing`);
+  }
+});
+
 test("the policy's review conditions: another model, an approval with no P0 to P2 open, and every blocking finding answered", () => {
   const round = { head: head1, verdict: { token: "x", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: "the cache under real traffic" }, check: { passed: true, output: "" }, live: { kind: "absent" as const }, answers: null };
   const review = testReview({
@@ -5263,7 +5299,7 @@ test("each pull request a second model caught on 2026-11-04 gets a second review
     assert.match(f.sent.at(-1)!.message.text, new RegExp(`From the second reviewer on claude-fable-5-1:\\n\\n2\\.F1 \\(P1\\) ${finding.where}: ${finding.summary}`));
   }
   assert.match(secondReviewRule(defaultSecondReview, missed[1]!.files, true)!, /^the change has 158 changed lines/);
-  assert.equal(secondReviewRule({ always: false, lines: null, reserved: true }, missed[2]!.files, true), null, "#445 touched no reserved path, so only its size names it");
+  assert.equal(secondReviewRule({ always: false, lines: null, reserved: true }, missed[2]!.files, true), "the change has holds for the person on its paths: reserved-path:auth", "#445 changed the review loop, which holds as the policy's own code");
 });
 
 test("both reviewers get the builder's brief, cut as the description is, so a change that leaves out what it asked for can be found", async (t) => {

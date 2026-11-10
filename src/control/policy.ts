@@ -49,10 +49,12 @@ const authWords = new RegExp(`whois|caller|allowed|person|deployer|roleOf|demand
  * registry newer than its code, so a rollback past one cannot start.
  */
 const reservedPaths: readonly { case: ReservedCase; matches(path: string, patch: string): boolean }[] = [
-  { case: "secrets", matches: (p) => names(p, /secret|credential/i) || p === "src/probe/redact.ts" || shipsFrom(p, "deploy/") },
+  { case: "secrets", matches: (p) => names(p, /secret|credential/i) || ["src/probe/redact.ts", "package.json", "package-lock.json", "src/control/dashboard/build.ts", "src/control/dashboard/assets.ts"].includes(p) || shipsFrom(p, "deploy/")
+    // Files Nexus has none of, which npm reads in place of the lockfile or for its settings once a pull request adds one.
+    || /^(npm-shrinkwrap\.json|\.npmrc)$/.test(p) },
   { case: "egress", matches: (p, patch) => ["src/pylon-vm/host-bridge.ts", "src/pylon-vm/runtime.ts"].includes(p) || names(p, /network|egress|allowlist/i)
     || ((["src/control/project.ts", "src/control/overlay.ts", "src/control/threads.ts", "src/control/live.ts"].includes(p) || shipsFrom(p, "src/pylon-vm/", "src/backends/pylon-vm/")) && changes(patch, egressWords)) },
-  { case: "auth", matches: (p, patch) => ["src/control/api/server.ts", "src/control/login.ts", "src/control/attach.ts", "src/control/policy.ts", "src/control/holds.ts", "src/contract/reserved.ts", "src/protocol/http.ts", "src/protocol/routes.ts", "src/control/api/access.ts", "src/control/api/kit.ts", "src/control/api/pylon-access.ts", "src/probe/config.ts", "src/probe/server.ts", "src/deploy/control-plane.ts", "src/deploy/http.ts"].includes(p) || names(p, /auth|login|whois/i)
+  { case: "auth", matches: (p, patch) => ["src/control/api/server.ts", "src/control/login.ts", "src/control/attach.ts", "src/control/policy.ts", "src/control/holds.ts", "src/control/review.ts", "src/control/review-model.ts", "src/control/gate.ts", "src/control/landing.ts", "src/control/github.ts", "src/control/prompts.ts", "src/contract/reserved.ts", "src/protocol/http.ts", "src/protocol/routes.ts", "src/control/api/access.ts", "src/control/api/kit.ts", "src/control/api/pylon-access.ts", "src/probe/config.ts", "src/probe/server.ts", "src/deploy/control-plane.ts", "src/deploy/http.ts"].includes(p) || names(p, /auth|login|whois/i)
     || ((["src/control/main.ts", "src/control/releases.ts", "src/protocol/deploy.ts"].includes(p) || shipsFrom(p, "src/control/api/", "src/probe/", "src/deploy/")) && changes(patch, authWords))
     || (shipsFrom(p, "src/pylon-vm/", "src/backends/pylon-vm/") && changes(patch, modeWords)) },
   { case: "tailnet", matches: (p) => names(p, /tailnet|tailscale/i) },
@@ -78,7 +80,7 @@ const recordedHolds = (review: Review): Hold[] => [
 ];
 
 /** The holds of the paths a change touches that need the person, which a second reviewer's rule reads. */
-const reservedPathHolds = (files: readonly ChangedFile[], deploys: boolean): Hold[] => [...changedChecks(files), ...deploys ? pathHolds(files) : []];
+const reservedPathHolds = (files: readonly ChangedFile[], deploys: boolean): Hold[] => [...changedChecks(files, deploys), ...deploys ? pathHolds(files) : []];
 
 /**
  * Why `rule`, a project's setting, gives the pull request whose change is `files` a second reviewer, or null when it
@@ -109,10 +111,20 @@ export function headHolds({ review, files, deploys }: HeadFacts): Hold[] {
   ];
 }
 
-const changedChecks = (files: readonly ChangedFile[]): Hold[] => [
-  ...files.some((f) => f.path === ".nexus/check" || f.previous === ".nexus/check") ? [hold("check-changed", "The pull request changes .nexus/check, the check this policy relies on.")] : [],
-  ...files.some((f) => f.path === ".nexus/verify" || f.previous === ".nexus/verify") ? [hold("verify-changed", "The pull request changes .nexus/verify, the live check this policy relies on.")] : [],
+/**
+ * The scripts each check runs, by the hold a change to one gives. A check pylon runs .nexus/setup at boot, or
+ * .nexus/resume when it boots from a template, in any repository. The rest are what Nexus's own scripts call.
+ */
+const checkPaths: readonly { code: "check-changed" | "verify-changed"; script: string; what: string; matches(path: string, deploys: boolean): boolean }[] = [
+  { code: "check-changed", script: ".nexus/check", what: "the check this policy relies on", matches: (p, deploys) => [".nexus/check", ".nexus/setup", ".nexus/resume"].includes(p) || (deploys && p === "tsconfig.json") },
+  { code: "verify-changed", script: ".nexus/verify", what: "the live check this policy relies on", matches: (p, deploys) => p === ".nexus/verify" || (deploys && shipsFrom(p, ".claude/skills/verify-nexus/scripts/")) },
 ];
+
+const changedChecks = (files: readonly ChangedFile[], deploys: boolean): Hold[] => checkPaths.flatMap(({ code, script, what, matches }) => {
+  const paths = [...new Set(files.flatMap((f) => [f.path, ...f.previous === null ? [] : [f.previous]]).filter((p) => matches(p, deploys)))];
+  if (!paths.length) return [];
+  return [hold(code, `The pull request changes ${paths.join(", ")}, ${what}${paths.length === 1 && paths[0] === script ? "" : " or what it runs"}.`)];
+});
 
 function pathHolds(files: readonly ChangedFile[]): Hold[] {
   const hits = new Map<ReservedCase, string[]>();
