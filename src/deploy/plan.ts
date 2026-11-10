@@ -4,8 +4,12 @@ export interface ReleaseHealth { commit: string | null; healthy: boolean }
 /** An outcome the worker recorded at a commit: its journal's transaction, or the target of its last report. */
 export interface Attempt {
   commit: string | null;
+  /** The requestedAt of the desired release it was made for, so a new request for the same commit tries it again. */
+  requestedAt: number;
   state: ReleaseReport["state"];
   reason: string | null;
+  /** When a failure before the link switch may be tried again, by the node's clock. */
+  retryAt?: number;
 }
 export interface DeployInput {
   desired: DesiredRelease | null;
@@ -14,18 +18,32 @@ export interface DeployInput {
   control: ReleaseHealth;
   attempts: readonly Attempt[];
   turnRunning: boolean;
+  /** The node's clock, which `retryAt` is read against. */
+  now: number;
 }
 export type DeployStep =
   | { kind: "idle" }
   | { kind: "healthy" }
   | { kind: "wait"; reason: "control-first" | "idle" }
   | { kind: "stop"; reason: string }
+  | { kind: "retry"; attempt: Attempt }
   | { kind: "install"; commit: string };
 
-/** The first attempt that failed or rolled back at the desired commit, which holds that commit back until another is requested. */
+/** How many tries of one request may fail before the link switch, and the wait after the first, which doubles after each. */
+export const prepareTries = 5;
+export const retryBaseMs = 60_000;
+
+/** When to try again after the `failed`th failure before the link switch, or null once that quarantines the request. */
+export function retryAfter(failed: number, now: number): number | null {
+  return failed >= prepareTries ? null : now + retryBaseMs * 2 ** (failed - 1);
+}
+
+const forRequest = (desired: DesiredRelease, a: Attempt) => a.commit === desired.commit && a.requestedAt === desired.requestedAt;
+
+/** The first attempt at the desired request that failed or rolled back, which holds it back until the commit is requested again. */
 export function quarantined(desired: DesiredRelease | null, attempts: readonly Attempt[]): Attempt | null {
   if (desired === null) return null;
-  return attempts.find((a) => a.commit === desired.commit && (a.state === "rolled-back" || a.state === "failed")) ?? null;
+  return attempts.find((a) => forRequest(desired, a) && (a.state === "rolled-back" || a.state === "failed")) ?? null;
 }
 
 /** Control runs `commit` and is healthy there, which a probe waits for before it installs `commit`. */
@@ -39,6 +57,8 @@ export function planDeploy(input: DeployInput): DeployStep {
   const held = quarantined(desired, input.attempts);
   if (held !== null) return { kind: "stop", reason: held.reason ?? held.state };
   if (current.commit === desired.commit && current.healthy) return { kind: "healthy" };
+  const waiting = input.attempts.find((a) => forRequest(desired, a) && a.retryAt !== undefined && a.retryAt > input.now);
+  if (waiting !== undefined) return { kind: "retry", attempt: waiting };
   if (input.role === "probe" && !controlReady(desired.commit, input.control)) {
     return { kind: "wait", reason: "control-first" };
   }
