@@ -29,6 +29,7 @@ async function host(args: string[]) {
     console.error(`join-token: ${db} is not a regular file of the control plane's user, so it is not opened as root`);
     process.exit(1);
   }
+  process.setgroups!([]);
   process.setgid!(owner.gid);
   process.setuid!(owner.uid);
   const registry = openRegistry(db);

@@ -66,6 +66,14 @@ export const peekParam = "peek";
 export const peekHref = (key: string) => `/?${peekParam}=${encodeURIComponent(key)}`;
 
 /**
+ * What a search for a thread matches: its title, project and ID, and each of its pull requests as `#88`. A thread row's
+ * `data-find` holds it, and a fold page's `?q=` and the switcher match it. A query matches when its every word does.
+ */
+export const findText = (t: { id: string; title: string; project: string }, prs: readonly number[] = []) =>
+  [t.title, t.project, t.id, ...prs.map((n) => `#${n}`)].join(" ").toLowerCase();
+export const found = (text: string, query: string) => query.toLowerCase().split(/\s+/).every((word) => text.includes(word));
+
+/**
  * The events that change a thread list row's attention, its reply or whether it works, and a check's change, which
  * rows.js follows.
  */
@@ -79,6 +87,8 @@ export const storageKeys = {
   /** The dark theme the toggle goes back to. */
   darkTheme: "nexus.theme.dark",
   pane: "nexus.pane",
+  /** The sidebar's thread filter, kept for the tab. */
+  filter: "nexus.filter",
   folded: "nexus.folded",
   flightView: "nexus.flight-view",
   base: "nexus.base",

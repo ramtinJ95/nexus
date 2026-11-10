@@ -301,6 +301,51 @@ test("thousands of closed threads leave the home page small, and their page list
   assert.equal(oldest.rows.filter((r) => r.includes("Closed")).length, 1, "and lists no other closed thread");
 });
 
+test("a thread's row names it in full and carries what a search matches, and ?q= searches the closed and quiet pages on the server", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const s = await seeded(t);
+  const cache = addThread(s.registry, { thread: { title: "Review of #88: feat(checkout) cache the cart", status: "archived" } });
+  const retries = addThread(s.registry, { thread: { title: "Review of #88: feat(checkout) retry the charge", status: "deleted" } });
+  const docs = addThread(s.registry, { thread: { title: "Write the docs", project: "beta" as ProjectId, status: "archived" } });
+  s.registry.prWatches.savePrWatch(docs.id, { links: [{ pr: testPr({ repo: "acme/nexus", number: 412 }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  const fix = await s.start("acme", "Fix checkout");
+  s.registry.prWatches.savePrWatch(fix.id, { links: [{ pr: testPr({ repo: "acme/nexus", number: 7 }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+
+  const listed = JSON.parse((await s.call("GET", "/v1/threads")).text) as { id: string; pullRequestNumbers: number[] }[];
+  assert.deepEqual(Object.fromEntries(listed.map((r) => [r.id, r.pullRequestNumbers])), { [cache.id]: [], [retries.id]: [], [docs.id]: [412], [fix.id]: [7] }, "the list's rows carry their linked pull requests' numbers, which the switcher matches");
+  const home = (await s.call("GET", "/")).text;
+  const row = new RegExp(`<a class="row[^"]*" href="/threads/${fix.id}" title="Fix checkout" data-find="fix checkout acme ${fix.id} #7"`);
+  assert.match(home, row, "the row's title names the thread in full, and its data-find holds its title, project, ID and pull request");
+  assert.match(home, /<form id="filter-form" action="\/threads\/closed" role="search"><label class="filter">.*?<input id="filter" name="q"/, "Enter in the filter searches the closed threads");
+
+  const closed = async (query: string) => {
+    const html = (await s.call("GET", `/threads/closed?${query}`)).text;
+    return { html, titles: [...html.split('id="fold-list"')[1]!.matchAll(/<a href="\/threads\/[^"]+">([^<]*)<\/a>/g)].map((m) => m[1]).toSorted() };
+  };
+  assert.deepEqual((await closed("q=")).titles, [cache.title, retries.title, docs.title].toSorted(), "an empty query lists every closed thread");
+  assert.deepEqual((await closed("q=checkout+retry")).titles, [retries.title], "each word of the query matches the title");
+  assert.deepEqual((await closed("q=%23412")).titles, [docs.title], "a pull request's number matches its thread");
+  assert.deepEqual((await closed("q=412")).titles, [docs.title], "and without its #");
+  assert.deepEqual((await closed("q=beta")).titles, [docs.title], "a project's name matches its threads");
+  assert.deepEqual((await closed(`q=${cache.id}`)).titles, [cache.title], "a thread's ID matches it");
+  assert.deepEqual((await closed("project=acme&q=88")).titles, [cache.title, retries.title].toSorted(), "the query narrows a project's page");
+  const none = await closed("project=acme&q=nothing+like+it");
+  assert.deepEqual(none.titles, []);
+  assert.match(textOf(sectionOf(none.html, "project-acme")), /No threads match “nothing like it”\./);
+  assert.match(none.html, /<form class="bar-end fold-search" method="get" action="\/threads\/closed" role="search"><input type="hidden" name="project" value="acme"><input type="search" name="q" value="nothing like it"/, "the search box holds the query and keeps the project");
+
+  const day = Date.now() - 24 * 60 * 60_000;
+  const quiet = (i: number, title: string) => addThread(s.registry, { thread: { title, createdAt: day + i, lastHumanActivityAt: day } });
+  const old = Array.from({ length: 101 }, (_, i) => quiet(i, `Quiet spike ${i}`));
+  quiet(200, "Quiet docs pass");
+  observeNode(s.registry);
+  const quietPage = (await s.call("GET", "/threads/quiet?project=acme&q=spike")).text.split('id="fold-list"')[1]!;
+  assert.equal([...quietPage.matchAll(/>Quiet spike \d+</g)].length, 100, "the quiet page matches on the server, a hundred to a page");
+  assert.doesNotMatch(quietPage, /Quiet docs pass/);
+  assert.match(quietPage, /<a class="link" href="\/threads\/quiet\?project=acme&amp;page=2&amp;q=spike">Show older<\/a>/, "its next page keeps the query");
+  assert.match((await s.call("GET", "/threads/quiet?project=acme&page=2&q=spike")).text.split('id="fold-list"')[1]!, new RegExp(`>${old[0]!.title}<`), "the oldest match is on the next page");
+});
+
 test("a quiet fold lists its newest hundred, and the open one past them, and links the rest", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const s = await seeded(t);
