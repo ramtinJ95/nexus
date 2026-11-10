@@ -89,6 +89,7 @@ RUN cd /tmp \
 # COPY keeps each file's mode, which the recipe carries from git.
 COPY nexus /usr/local/bin/nexus
 COPY nexus-claude-hook /usr/local/bin/nexus-claude-hook
+COPY nexus-claude-hook.mjs /usr/local/bin/nexus-claude-hook.mjs
 COPY nexus-ask.ts /usr/local/bin/nexus-ask.ts
 COPY nexus-contract.ts /usr/local/bin/nexus-contract.ts
 COPY nexus-heartbeat.ts /usr/local/bin/nexus-heartbeat.ts

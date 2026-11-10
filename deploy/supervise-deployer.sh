@@ -7,7 +7,10 @@ flock -n 9 || exit 0
 run_worker() { timeout --kill-after=10s 900s /usr/bin/env -i PATH=/usr/local/bin:/usr/bin:/bin node "$1"; }
 worker="$prefix/deployer-current/src/deploy/worker.ts"
 if [ -e "$worker" ]; then
-  if run_worker "$worker"; then exit 0; fi
+  status=0
+  run_worker "$worker" || status=$?
+  # 75 is a poll whose call to the control plane failed, which the bootstrap would fail too, and is no fault of the worker.
+  if [ "$status" -eq 0 ] || [ "$status" -eq 75 ]; then exit "$status"; fi
   readlink "$prefix/deployer-current" > "$prefix/deployer/rejected"
   rm -f "$prefix/deployer-current"
 fi

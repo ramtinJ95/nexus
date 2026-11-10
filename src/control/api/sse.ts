@@ -2,7 +2,7 @@ import type { ServerResponse } from "node:http";
 import type { Frames, Watch } from "../conversation-view.ts";
 import type { Registry } from "../registry.ts";
 import type { Thread } from "../thread-store.ts";
-import type { ThreadId } from "../../ids.ts";
+import type { TailnetNodeId, ThreadId } from "../../ids.ts";
 import { HttpError } from "../http-error.ts";
 import { apiPingMs } from "../../contract/route.ts";
 
@@ -10,22 +10,33 @@ type EventBatch = ReturnType<Registry["threads"]["eventBatch"]>;
 
 /** Streams open at once, across threads and callers. Each holds a watch, and the streams of one thread page share its renders. */
 export const maxStreams = 16;
+/** Streams one caller holds at once, so one device, or a page open on it, cannot take every place. */
+export const maxStreamsPerCaller = maxStreams / 2;
 
 export function eventStreams(streamStallMs: number) {
   /**
-   * Each open stream's and terminal's thread and how to end it, so a delete ends its thread's streams. The event log's
-   * followers belong to no thread.
+   * Each open stream's and terminal's thread, caller and how to end it, so a delete ends its thread's streams. The
+   * event log's followers belong to no thread.
    */
-  const open = new Set<{ thread: ThreadId | null; end(): void }>();
+  const open = new Set<{ thread: ThreadId | null; caller: TailnetNodeId; end(): void }>();
+
+  /** Why `caller` may open no stream or terminal now, with `full` the reason when every place is taken, or null. */
+  function noRoom(caller: TailnetNodeId, full: string): string | null {
+    if (open.size >= maxStreams) return full;
+    const held = [...open].filter((s) => s.caller === caller).length;
+    return held >= maxStreamsPerCaller ? `${maxStreamsPerCaller} streams of ${caller} are open, the most one caller holds at once` : null;
+  }
 
   /**
-   * Takes one of the streams' places for a server-sent event stream, or refuses with `full`. A client that leaves
-   * bytes unread for `streamStallMs` is dropped, and one that still listens connects again. `end` runs once, whichever
-   * comes first: the client leaves, `thread` is deleted, or the source ends. The source's `onEnd`, the timer and the
-   * place go at once, and the response ends once the client reads what it holds, or is dropped after the stall limit.
+   * Takes one of the streams' places for a server-sent event stream, or refuses with `full`, or once `caller` holds its
+   * share. A client that leaves bytes unread for `streamStallMs` is dropped, and one that still listens connects again.
+   * `end` runs once, whichever comes first: the client leaves, `thread` is deleted, or the source ends. The source's
+   * `onEnd`, the timer and the place go at once, and the response ends once the client reads what it holds, or is
+   * dropped after the stall limit.
    */
-  function eventStream(res: ServerResponse, thread: ThreadId | null, full: string, onEnd: () => void = () => {}) {
-    if (open.size >= maxStreams) throw new HttpError(503, full);
+  function eventStream(res: ServerResponse, caller: TailnetNodeId, thread: ThreadId | null, full: string, onEnd: () => void = () => {}) {
+    const refused = noRoom(caller, full);
+    if (refused !== null) throw new HttpError(503, refused);
     let timer: NodeJS.Timeout | undefined;
     let stalled: NodeJS.Timeout | undefined;
     let ended = false;
@@ -39,7 +50,7 @@ export function eventStreams(streamStallMs: number) {
       res.end();
       if (!res.closed) stall();
     };
-    const handle = { thread, end };
+    const handle = { thread, caller, end };
     open.add(handle);
     res.on("close", () => {
       clearTimeout(stalled);
@@ -72,9 +83,9 @@ export function eventStreams(streamStallMs: number) {
    * until it drains, commits only replace the view to send, and the next event carries everything since the last one.
    * So the harness's listener never waits on a client.
    */
-  async function stream<V>(res: ServerResponse, t: Thread, follow: () => Promise<Watch<V>>, frames: Frames<V>, leave = () => {}) {
+  async function stream<V>(res: ServerResponse, caller: TailnetNodeId, t: Thread, follow: () => Promise<Watch<V>>, frames: Frames<V>, leave = () => {}) {
     let watch: Watch<V> | null = null;
-    const sse = eventStream(res, t.id, `${maxStreams} streams are open, the most this control plane serves at once`, () => {
+    const sse = eventStream(res, caller, t.id, `${maxStreams} streams are open, the most this control plane serves at once`, () => {
       void watch?.stop();
       leave();
     });
@@ -121,8 +132,8 @@ export function eventStreams(streamStallMs: number) {
    * as a ping, every second. A client that reads slowly gets the rest of a batch on the first tick after it caught up,
    * from the last event it was sent.
    */
-  function followEvents(res: ServerResponse, first: EventBatch, read: (since: string) => EventBatch) {
-    const sse = eventStream(res, null, "too many streams");
+  function followEvents(res: ServerResponse, caller: TailnetNodeId, first: EventBatch, read: (since: string) => EventBatch) {
+    const sse = eventStream(res, caller, null, "too many streams");
     let since: string;
     const flush = (batch = read(since)) => {
       for (const event of batch.events) {
@@ -141,6 +152,6 @@ export function eventStreams(streamStallMs: number) {
     flush(first);
   }
 
-  return { open, stream, followEvents };
+  return { open, noRoom, stream, followEvents };
 }
 export type EventStreams = ReturnType<typeof eventStreams>;
