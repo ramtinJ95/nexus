@@ -87,7 +87,7 @@ const changedFile = (f: FileEntry): ChangedFile => ({ path: f.filename, previous
  * Each resource has its own ETag: a PR's ETag says nothing about its checks or comments. The cache keeps the resources
  * read most recently, and drops a PR's commit resources once its head moves, since nothing reads them again.
  */
-export function githubClient(token: string, request: typeof fetch = fetch): GitHub & { token(): Promise<TokenAnswer> } {
+export function githubClient(token: string, request: typeof fetch = fetch, clock: () => number = Date.now): GitHub & { token(): Promise<TokenAnswer> } {
   let answer: { at: number; value: TokenAnswer } | null = null;
   const cache = new Map<string, { etag: string | null; value: unknown; next: string | null }>();
   /** Each open PR's head at its last read, by repository and number. */
@@ -98,7 +98,7 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
     const retryAfter = response.headers.get("retry-after");
     const exhausted = response.headers.get("x-ratelimit-remaining") === "0";
     if ((response.status === 403 || response.status === 429) && (exhausted || retryAfter !== null)) {
-      const now = Date.now();
+      const now = clock();
       const after = retryAfter === null ? NaN : /^\d+(?:\.\d+)?$/.test(retryAfter) ? now + Number(retryAfter) * 1000 : Date.parse(retryAfter);
       const reset = exhausted ? Number(response.headers.get("x-ratelimit-reset")) * 1000 : NaN;
       const deadlines = [after, reset].filter((at) => Number.isFinite(at) && at >= now);
@@ -109,7 +109,7 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
   }
   /** No request goes out while a rate limit lasts, and none follows a redirect away from GitHub. */
   async function call(path: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}) {
-    if (Date.now() < retryAt) throw new Error("GitHub is waiting for its rate limit");
+    if (clock() < retryAt) throw Object.assign(new Error("GitHub is waiting for its rate limit"), { code: "rate-limited" });
     const response = await request(`https://api.github.com${path}`, { ...init, headers: { ...headers, ...init.headers }, signal: AbortSignal.timeout(30_000), redirect: "error" });
     noteToken(response);
     return response;
@@ -121,7 +121,7 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
     const value: TokenAnswer | null = response.status === 401 ? { kind: "refused" }
       : !Number.isNaN(expiresAt) ? { kind: "accepted", expiresAt: new Date(expiresAt).toISOString() }
       : response.ok ? { kind: "accepted", expiresAt: null } : null;
-    if (value !== null) answer = { at: Date.now(), value };
+    if (value !== null) answer = { at: clock(), value };
   }
   /** Makes `path` the most recently used entry, evicting the least recently used one when the cache is full. */
   function remember(path: string, entry: { etag: string | null; value: unknown; next: string | null }) {
@@ -168,12 +168,12 @@ export function githubClient(token: string, request: typeof fetch = fetch): GitH
   return {
     /** The token's last answer, asking GitHub's rate limit, which costs none of it, when no call had one in the last hour. */
     async token() {
-      if (answer === null || Date.now() - answer.at >= tokenAnswerMaxAgeMs) {
+      if (answer === null || clock() - answer.at >= tokenAnswerMaxAgeMs) {
         try {
           const response = await call("/rate_limit");
           await response.body?.cancel();
           if (!response.ok) limited(response);
-          if (answer === null) throw new Error(`GitHub rate limit: HTTP ${response.status}`);
+          if (answer === null) throw Object.assign(new Error(`GitHub rate limit: HTTP ${response.status}`), { code: `HTTP-${response.status}` });
         } catch (err) {
           if (answer === null) throw err;
         }
