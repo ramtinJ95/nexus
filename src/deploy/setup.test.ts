@@ -248,12 +248,14 @@ test("--dotfiles is checked with git ls-remote, as a pylon would pull it", async
 test("a write checks the --dotfiles URL control.json holds, with the git SSH key probe.json names once it exists, and a rerun after the key checks it again", async (t) => {
   const ssh = "git@github.com:example/dotfiles.git";
   const first = files(run(["--dotfiles", ssh]));
-  assert.deepEqual(dotfilesStep(ssh, [...first.values()]), { kind: "check", url: ssh, ssh: null }, "before the credentials step makes the key");
+  assert.deepEqual(dotfilesStep(ssh, [...first.values()]), { kind: "check", url: ssh, ref: "main", ssh: null }, "before the credentials step makes the key");
   assert.equal((await checkDotfiles(ssh, "main", null)).kind, "unchecked");
   const rerun = [...files(run(["--dotfiles", ssh], { ...onDisk(first), gitKey: true })).values()];
-  assert.deepEqual(dotfilesStep(ssh, rerun), { kind: "check", url: ssh, ssh: { key: paths.gitKey, knownHosts: paths.gitKnownHosts } }, "the rerun the unchecked message names checks it with the key");
+  assert.deepEqual(dotfilesStep(ssh, rerun), { kind: "check", url: ssh, ref: "main", ssh: { key: paths.gitKey, knownHosts: paths.gitKnownHosts } }, "the rerun the unchecked message names checks it with the key");
   assert.deepEqual(dotfilesStep(undefined, rerun), { kind: "none" }, "the write after the credentials step, which install runs without --dotfiles, checks nothing");
   assert.deepEqual(dotfilesStep("https://github.com/example/other.git", rerun), { kind: "kept", held: ssh }, "a URL control.json does not take is not checked");
+  const onTrunk = { ...onDisk(first), control: { ...(onDisk(first).control as Record<string, Json>), dotfiles: { repo: ssh, ref: "trunk" } } };
+  assert.deepEqual(dotfilesStep(ssh, [...files(run(["--dotfiles", ssh], onTrunk)).values()]), { kind: "check", url: ssh, ref: "trunk", ssh: null }, "a rerun checks the branch control.json keeps, not main");
 
   const dir = await tempDir("nexus-dotfiles-ssh-", t);
   const key = { key: join(dir, "git_ed25519"), knownHosts: join(dir, "git_known_hosts") };

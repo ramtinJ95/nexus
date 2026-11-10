@@ -485,7 +485,7 @@ async function write(flags: Flags): Promise<number> {
   const step = dotfilesStep(flags.dotfiles, result.files);
   if (step.kind === "kept") console.log(`--dotfiles ${flags.dotfiles}: control.json keeps ${step.held}, so the URL is not checked. Edit the file to change it`);
   if (step.kind === "check") {
-    const check = await checkDotfiles(step.url, dotfilesRef, step.ssh);
+    const check = await checkDotfiles(step.url, step.ref, step.ssh);
     if (check.kind === "refused") {
       console.error(`install: --dotfiles ${step.url}: ${check.reason}`);
       return 1;
@@ -497,19 +497,21 @@ async function write(flags: Flags): Promise<number> {
   return 0;
 }
 
-/** What a write does about --dotfiles: check the URL control.json holds, with the probe's git SSH key, or say control.json keeps another. */
+/**
+ * What a write does about --dotfiles: check the URL and branch control.json holds, which a rerun keeps as they are,
+ * with the probe's git SSH key, or say control.json keeps another URL.
+ */
 export type DotfilesStep =
   | { kind: "none" }
-  | { kind: "check"; url: string; ssh: { key: string; knownHosts: string } | null }
+  | { kind: "check"; url: string; ref: string; ssh: { key: string; knownHosts: string } | null }
   | { kind: "kept"; held: string };
 
 export function dotfilesStep(flag: string | undefined, files: readonly FileWrite[]): DotfilesStep {
   if (flag === undefined) return { kind: "none" };
   const control = files.find((f) => f.path === paths.control)?.value;
   const dotfiles = isObject(control) ? control.dotfiles : undefined;
-  const held = isObject(dotfiles) && typeof dotfiles.repo === "string" ? dotfiles.repo : undefined;
-  if (held === undefined) return { kind: "none" };
-  return held === flag ? { kind: "check", url: flag, ssh: probeGitSsh(files) } : { kind: "kept", held };
+  if (!isObject(dotfiles) || typeof dotfiles.repo !== "string" || typeof dotfiles.ref !== "string") return { kind: "none" };
+  return dotfiles.repo === flag ? { kind: "check", url: flag, ref: dotfiles.ref, ssh: probeGitSsh(files) } : { kind: "kept", held: dotfiles.repo };
 }
 
 /** The git SSH key and known hosts the probe.json being written names, which the probe hands its pylons. */
