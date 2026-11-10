@@ -97,7 +97,8 @@ const clipStartChars = 60;
  * The clipboard OSC 52 reaches, as @xterm/addon-clipboard asks for one. Herdr's mouse selection copies through it, so
  * it writes the browser's one clipboard for every selection but X11's primary, which would clobber it. A write lands
  * only while `focused()` says the terminal has focus and only up to maxClipboardChars, and `told` hears what each
- * write did, as clipboardNotice words it, so output in the pylon never sets the clipboard unseen. It never reads the
+ * write did, as clipboardNotice words it, and whether it landed, so output in the pylon never sets the clipboard
+ * unseen. It never reads the
  * clipboard, so output in the pylon cannot see what the person copied: a query gets empty data.
  */
 export function clipboardOf(clipboard, focused, told) {
@@ -105,11 +106,11 @@ export function clipboardOf(clipboard, focused, told) {
     readText: () => "",
     writeText: async (selection, text) => {
       if (selection === "p") return;
-      if (!focused()) return told(clipboardNotice("unfocused", text));
-      if (text.length > maxClipboardChars) return told(clipboardNotice("too long", text));
+      if (!focused()) return told(clipboardNotice("unfocused", text), false);
+      if (text.length > maxClipboardChars) return told(clipboardNotice("too long", text), false);
       // A browser refuses a write from a page without focus, and has no clipboard outside a secure context.
       const wrote = clipboard === undefined ? false : await clipboard.writeText(text).then(() => true, () => false);
-      told(clipboardNotice(wrote ? "copied" : "refused", text));
+      told(clipboardNotice(wrote ? "copied" : "refused", text), wrote);
     },
   };
 }
