@@ -63,8 +63,8 @@ Before 0.9.0, `attach` ran ssh to the pylon's node, chosen by `"ssh"` in the con
 
 - `cols` and `rows` are the terminal's size, whole numbers from 1 to 9999, and both are required, because Herdr refuses a terminal of zero size. `term` is the terminal type, which matches `^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$`, and is `xterm-256color` when it is left out. The CLI sends `$TERM` when it matches, and `xterm-256color` otherwise.
 - `pane` is the Herdr pane the terminal lands in, such as `w2:p1`, in place of the Claude worker's, and matches `^w[0-9]{1,9}:p[0-9]{1,9}$`. The route passes it to the pylon as an argument, never as shell text. A pane that is not open focuses nothing, and the terminal lands where Herdr was. Herdr's focus is the server's, so every terminal attached to the pylon moves there. The CLI sends no `pane`.
-- The route admits the caller as every route does, and then only a person. An `Origin` header must be absent, as it is from the CLI, or exactly `http://<Host>`, the dashboard's own origin. A browser sends Origin with every WebSocket, and previews are served under the API's hostname on other ports, so a preview's page could otherwise open a terminal.
-- Every refusal comes before the 101, as an ordinary reply with the API's error body, as [Failures](#failures) describes: 403 for a caller, Host or Origin it does not allow, 400 for a bad query, 404 for an unknown thread, 409 for an archived or deleted thread, and 503 when the node has no probe or 16 streams are open, which terminals share with the event streams.
+- The route admits the caller as every route does, and then only a person. An `Origin` header must be absent, as it is from the CLI, or exactly the dashboard's own origin, `http://<Host>` on the plain-HTTP listener and `https://<Host>` on the HTTPS one, and a `Sec-Fetch-Site` header must not be `cross-site` or `same-site`. A browser sends Origin with every WebSocket, and previews are served under the API's hostname on other ports, so a preview's page could otherwise open a terminal.
+- Every refusal comes before the 101, as an ordinary reply with the API's error body, as [Failures](#failures) describes: 403 for a caller, Host, Origin or site it does not allow, 400 for a bad query, 404 for an unknown thread, 409 for an archived or deleted thread, and 503 when the node has no probe, 16 streams are open, which terminals share with the event streams, or this machine holds 8 of them.
 
 After the 101, a binary message carries terminal bytes, both ways, and a text message carries one JSON object, whose `type` says what it is. Either end ignores a type it does not know.
 
@@ -1137,6 +1137,9 @@ nothing. The CLI remembers these IDs for reconnects. It writes one record at a
 time and waits for stdout's `drain` before reading more stream data, so an unread
 pipe cannot grow an unbounded output buffer. Backpressure drops a stalled reader, which can reconnect with
 `since`. This is separate from a thread's conversation `/events` route.
+The control plane serves 16 streams at once, which followers, conversation streams
+and terminals share, and at most 8 to one machine. A follow past either gets the
+API's 503 and its reason, which the CLI prints before it reconnects.
 
 For a Claude Code session on the Mac, run the following through its background
 Bash-task facility, and retain the task handle so the session can read new lines:
