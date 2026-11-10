@@ -1,5 +1,5 @@
 import { breakdownLook, breakdowns, tokenColumns, tokenCount, utc, type BackfillPlanRow, type UsageBackfill, type UsageReport, type UsageTotals } from "../../contract/usage.ts";
-import { CliError } from "../transport.ts";
+import { UsageError } from "../transport.ts";
 import { type Command, str, request, table } from "../kit.ts";
 import { usageRoutes } from "../../contract/reports.ts";
 
@@ -55,7 +55,7 @@ export const usageCommands: Readonly<Record<string, Command>> = {
     args: [0, 0],
     options: { "dry-run": { type: "boolean" }, stop: { type: "boolean" } },
     async run(api, _, v) {
-      if (v["dry-run"] === true && v.stop === true) throw new CliError("invalid", "--dry-run and --stop do not go together");
+      if (v["dry-run"] === true && v.stop === true) throw new UsageError("--dry-run and --stop do not go together");
       if (v["dry-run"] === true) {
         const view = await request(api, usageRoutes.backfill, {});
         return { json: view, text: backfillPlanText(view.plan) };

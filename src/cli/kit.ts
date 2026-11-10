@@ -6,7 +6,7 @@ import type { Project } from "../contract/projects.ts";
 import { brokenRule, startFields } from "../contract/threads-parse.ts";
 import type { itemSchema } from "../contract/projects-parse.ts";
 import type { WebSocket } from "ws";
-import { CliError, type ErrorKind } from "./transport.ts";
+import { CliError, UsageError, type ErrorKind } from "./transport.ts";
 import { callOf, type ApiRoute, type CallArgs, type ReplyOf } from "../contract/route.ts";
 import { threadRoutes } from "../contract/threads.ts";
 
@@ -47,7 +47,7 @@ export const strs = (v: Values, key: string) => (v[key] as string[] | undefined)
 export function int(value: string | undefined, flag: string, fallback: number): number {
   if (value === undefined) return fallback;
   const n = Number(value);
-  if (!Number.isInteger(n) || n < 0) throw new CliError("invalid", `${flag} takes a whole number, got ${value}`);
+  if (!Number.isInteger(n) || n < 0) throw new UsageError(`${flag} takes a whole number, got ${value}`);
   return n;
 }
 
@@ -72,7 +72,7 @@ const flagOf = (field: string) => `--${field === "planning" ? "plan" : field}`;
 /** `project` is --project, or what `projectOf` made of this checkout. */
 export function briefOf(v: Values, project: string, rules: Parameters<typeof brokenRule>[0]): z.input<typeof itemSchema> & { requestId?: string; planning?: true } {
   const after = str(v, "after")?.split(",").map((id) => id.trim()).filter((id) => id !== "");
-  if (after?.length === 0) throw new CliError("invalid", "--after needs a thread");
+  if (after?.length === 0) throw new UsageError("--after needs a thread");
   const resources = resourcesOf(v);
   const requestId = str(v, "request-id");
   const body = {
@@ -81,7 +81,7 @@ export function briefOf(v: Values, project: string, rules: Parameters<typeof bro
     ...requestId === undefined ? {} : { requestId }, ...v.plan === true ? { planning: true as const } : {},
   };
   const broken = brokenRule(rules, body, flagOf);
-  if (broken !== undefined) throw new CliError("invalid", broken);
+  if (broken !== undefined) throw new UsageError(broken);
   return body;
 }
 
