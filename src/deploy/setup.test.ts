@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,7 +15,7 @@ import { parseProbeConfig } from "../probe/config.ts";
 import { parseControlPlane } from "./control-plane.ts";
 import { parseTailscaleStatus } from "../tailscale.ts";
 import type { FollowUp } from "./credentials.ts";
-import { checkDotfiles, formatLeft, holdsImage, install, left, paths, parseFlags, report, tailnetDevices, setup, type Existing, type Facts, type FileWrite, type InstallSteps, type Json, type Setup } from "./setup.ts";
+import { checkDotfiles, dotfilesGained, probeGitSsh, formatLeft, holdsImage, install, left, paths, parseFlags, report, tailnetDevices, setup, type Existing, type Facts, type FileWrite, type InstallSteps, type Json, type Setup } from "./setup.ts";
 
 const status = JSON.stringify({
   Version: "1.90.0",
@@ -229,6 +230,32 @@ test("--dotfiles is checked with git ls-remote, as a pylon would pull it", async
   t.after(() => { if (global === undefined) delete process.env.GIT_CONFIG_GLOBAL; else process.env.GIT_CONFIG_GLOBAL = global; });
   assert.equal((await git("ls-remote", url)).stdout === "", false, "this machine's git config reaches the URL");
   assert.equal((await checkDotfiles(url, "main", null)).kind, "refused", "the check reaches it as a pylon would, without this machine's git config");
+
+  const checkout = join(dir, "checkout");
+  await git("init", "--quiet", checkout);
+  await git("-C", checkout, "config", `url.${repo}.insteadOf`, url);
+  const cwd = process.cwd();
+  process.chdir(checkout);
+  t.after(() => process.chdir(cwd));
+  delete process.env.GIT_CONFIG_GLOBAL;
+  assert.equal((await git("ls-remote", url)).stdout === "", false, "the checkout's own git config reaches the URL");
+  assert.equal((await checkDotfiles(url, "main", null)).kind, "refused", "the installer's checkout lends the check none of its config");
+  const ran = join(dir, "ran");
+  assert.equal((await checkDotfiles(`--upload-pack=touch ${ran}`, "main", key)).kind, "refused");
+  assert.equal(existsSync(ran), false, "a URL starting with a dash is a repository, not an option");
+});
+
+test("only a write that adds dotfiles to control.json checks them, with the git SSH key probe.json names once the key exists", () => {
+  const first = files(run(["--dotfiles", "git@github.com:example/dotfiles.git"]));
+  assert.equal(dotfilesGained([...first.values()]), "git@github.com:example/dotfiles.git");
+  assert.equal(probeGitSsh([...first.values()]), null, "before the credentials step makes the key");
+  const afterCredentials = [...files(run(["--dotfiles", "git@github.com:example/dotfiles.git"], { ...onDisk(first), gitKey: true })).values()];
+  assert.equal(dotfilesGained(afterCredentials), undefined, "the write after the credentials step keeps the URL, which GitHub cannot know the new key for yet");
+  assert.deepEqual(probeGitSsh(afterCredentials), { key: paths.gitKey, knownHosts: paths.gitKnownHosts });
+  assert.equal(dotfilesGained([...files(run(["--dotfiles", "https://github.com/example/other.git"], onDisk(first))).values()]), undefined, "a URL control.json does not take is not checked");
+  const { dotfiles: _, ...without } = onDisk(first).control as Record<string, Json>;
+  const added = [...files(run(["--dotfiles", dotfiles], { ...onDisk(first), control: without })).values()];
+  assert.equal(dotfilesGained(added), dotfiles, "a control.json without dotfiles gains the flag's");
 });
 
 test("a node cannot become a control plane by accident", () => {

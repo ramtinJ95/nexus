@@ -210,19 +210,20 @@ export type DotfilesCheck =
 /**
  * Whether git here reaches `ref` of `url` as a pylon would: an HTTPS URL without credentials, and any other with the
  * node's git SSH key and known hosts. The credentials step makes that key after the configs are written, so a first
- * install cannot check an SSH URL yet. No git config of this machine applies, so no credential helper of root's
- * passes a repository that pylons cannot fetch.
+ * install cannot check an SSH URL yet. No git config of this machine applies, neither root's nor that of a
+ * repository around the installer's working directory, so no credential helper or URL rewrite passes a repository
+ * that pylons cannot fetch.
  */
 export async function checkDotfiles(url: string, ref: string, ssh: { key: string; knownHosts: string } | null): Promise<DotfilesCheck> {
   const https = url.startsWith("https://");
   if (!https && ssh === null) return { kind: "unchecked", reason: "pylons reach an SSH URL with this machine's git SSH key, which the credentials step makes. Rerun the installer with --dotfiles after it to check the URL" };
-  const { GIT_ASKPASS: _, SSH_ASKPASS: __, ...inherited } = process.env;
+  const inherited = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_") && name !== "SSH_ASKPASS"));
   const env = {
-    ...inherited, GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null",
+    ...inherited, GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CEILING_DIRECTORIES: "/",
     ...https || ssh === null ? {} : { GIT_SSH_COMMAND: `ssh -i ${shellQuote(ssh.key)} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${shellQuote(ssh.knownHosts)}` },
   };
   try {
-    await exec("git", ["ls-remote", "--exit-code", url, `refs/heads/${ref}`], { env, timeout: 60_000 });
+    await exec("git", ["-c", "credential.helper=", "ls-remote", "--exit-code", "--", url, `refs/heads/${ref}`], { cwd: "/", env, timeout: 60_000 });
     return { kind: "reachable" };
   } catch (err) {
     const failed = err as { code?: unknown; killed?: boolean; stderr?: string };
@@ -481,21 +482,33 @@ async function write(flags: Flags): Promise<number> {
     for (const error of result.errors) console.error(`install: ${error}`);
     return 1;
   }
-  if (flags.dotfiles !== undefined) {
-    const check = await checkDotfiles(flags.dotfiles, dotfilesRef, probeGitSsh(result.files));
+  const gained = dotfilesGained(result.files);
+  if (gained !== undefined) {
+    const check = await checkDotfiles(gained, dotfilesRef, probeGitSsh(result.files));
     if (check.kind === "refused") {
-      console.error(`install: --dotfiles ${flags.dotfiles}: ${check.reason}`);
+      console.error(`install: --dotfiles ${gained}: ${check.reason}`);
       return 1;
     }
-    if (check.kind === "unchecked") console.log(`--dotfiles ${flags.dotfiles} is not checked yet: ${check.reason}`);
+    if (check.kind === "unchecked") console.log(`--dotfiles ${gained} is not checked yet: ${check.reason}`);
   }
   for (const f of result.files) if (f.state !== "unchanged") await saveJson(f.path, f.value, { mode: f.mode, mkdir: true });
   console.log(report(result.files));
   return 0;
 }
 
+/**
+ * The dotfiles URL this write adds to control.json, the only one worth checking. A later write keeps the URL already
+ * there, as the write after the credentials step does, before the person has added the new git SSH key to GitHub.
+ */
+export function dotfilesGained(files: readonly FileWrite[]): string | undefined {
+  const control = files.find((f) => f.path === paths.control);
+  if (control === undefined || !isObject(control.value) || !isObject(control.value.dotfiles)) return undefined;
+  const added = control.state === "new" || control.changes.some((c) => c.kind === "added" && c.at === "dotfiles");
+  return added && typeof control.value.dotfiles.repo === "string" ? control.value.dotfiles.repo : undefined;
+}
+
 /** The git SSH key and known hosts the probe.json being written names, which the probe hands its pylons. */
-function probeGitSsh(files: readonly FileWrite[]): { key: string; knownHosts: string } | null {
+export function probeGitSsh(files: readonly FileWrite[]): { key: string; knownHosts: string } | null {
   const probe = files.find((f) => f.path === paths.probe)?.value;
   const backend = isObject(probe) ? probe.backend : undefined;
   const gitSsh = isObject(backend) ? backend.gitSsh : undefined;
