@@ -164,10 +164,10 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
   function call(method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<{ status: number; body: any }> {
     return callJson({ host: "127.0.0.1", port: api.port, method, path, body, headers });
   }
-  /** A GET whose body is kept as bytes, with the reply's headers. */
-  function raw(path: string): Promise<{ status: number; headers: import("node:http").IncomingHttpHeaders; body: Buffer }> {
+  /** A GET whose body is kept as bytes, as sent, with the reply's headers. */
+  function raw(path: string, headers: Record<string, string> = {}): Promise<{ status: number; headers: import("node:http").IncomingHttpHeaders; body: Buffer }> {
     return new Promise((resolve, reject) => {
-      request({ host: "127.0.0.1", port: api.port, method: "GET", path, agent: false, headers: { host: `127.0.0.1:${api.port}` } }, (res) => {
+      request({ host: "127.0.0.1", port: api.port, method: "GET", path, agent: false, headers: { host: `127.0.0.1:${api.port}`, ...headers } }, (res) => {
         const chunks: Buffer[] = [];
         res.on("data", (chunk: Buffer) => chunks.push(chunk));
         res.on("end", () => resolve({ status: res.statusCode!, headers: res.headers, body: Buffer.concat(chunks) }));
