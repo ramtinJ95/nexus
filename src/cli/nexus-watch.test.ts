@@ -18,7 +18,12 @@ import { cli, node, setup, at, claudeWatched } from "../test-support/cli-kit.ts"
 
 /** The JSON lines a watch prints, one at a time. */
 function watchLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: readonly string[], interval = 50) {
-  const child = spawn(process.execPath, [cli, "watch", ...args, "--json", "--interval", String(interval)], { env: s.env() });
+  return jsonLines(t, s, ["watch", ...args, "--json", "--interval", String(interval)]);
+}
+
+/** The JSON lines a run of the CLI prints, one at a time. */
+function jsonLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: readonly string[]) {
+  const child = spawn(process.execPath, [cli, ...args], { env: s.env() });
   t.after(() => { child.kill(); });
   let stderr = "";
   child.stderr.on("data", (chunk) => { stderr += chunk; });
@@ -28,8 +33,8 @@ function watchLines(t: TestContext, s: Awaited<ReturnType<typeof setup>>, args: 
     async next(): Promise<any> {
       // The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone.
       const timeout = AbortSignal.timeout(60_000);
-      const line = await Promise.race([lines.next(), once(timeout, "abort").then(() => assert.fail(`no line from watch. stderr: ${stderr}`))]);
-      assert.ok(!line.done, `watch ended early. stderr: ${stderr}`);
+      const line = await Promise.race([lines.next(), once(timeout, "abort").then(() => assert.fail(`no line from ${args[0]}. stderr: ${stderr}`))]);
+      assert.ok(!line.done, `${args[0]} ended early. stderr: ${stderr}`);
       return JSON.parse(line.value);
     },
   };
@@ -383,4 +388,115 @@ test("a watch whose reader closed the pipe exits 0 when the thread's deletion en
   watch.child.stdout.destroy();
   await s.json(["delete", thread.id]);
   assert.deepEqual(await exited, [0, null]);
+});
+
+/** The agent's answer, as pi-durable commits it once its run ends. */
+const answered = (s: Awaited<ReturnType<typeof setup>>, id: string, text: string) => {
+  s.fake.transcript(id).messages.push({ role: "assistant", content: [{ type: "text", text }], stopReason: "stop", timestamp: 0 } as never);
+  delete s.fake.transcript(id).docs["pi.live"];
+  s.fake.commit(id);
+};
+
+test("send --watch --json prints the send's reply as one line, then the watch stream, and exits 0 once the run that took the message replied", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--message", "hi"]);
+  const sending = jsonLines(t, s, ["send", thread.id, "Count the lines", "--watch", "--json", "--interval", "50"]);
+  const exited = once(sending.child, "exit");
+  const next = () => sending.next();
+
+  assert.equal((await next()).type, undefined, "the send's reply comes first, as one line");
+  const reset = await next();
+  assert.deepEqual([reset.type, reset.entries.map((e: any) => e.text)], ["reset", ["> hi", "> Count the lines"]], "the stream is the watch's, backlog and all");
+  assert.equal((await next()).run, "idle");
+  await next();
+
+  s.fake.transcript(thread.id).docs["pi.live"] = streaming("Counting");
+  s.fake.commit(thread.id);
+  for (let line = await next(); line.type !== "state" || line.run !== "working"; line = await next());
+  answered(s, thread.id, "hello.py has 3 lines.");
+  for (let line = await next(); line.type !== "entry"; line = await next());
+  s.registry.threads.recordReply(thread.id, Date.UTC(2026, 10, 9));
+  assert.deepEqual(await exited, [0, null]);
+});
+
+test("send --watch prints the run from the sent message on, though the reply came before the watch opened", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--message", "hi"]);
+  const release = s.fake.holdWatches();
+  const sent = s.nexus(["send", thread.id, "Count the lines", "--watch", "--interval", "50"]);
+  await until("the message reached the agent", async () => s.fake.transcript(thread.id).messages.length === 2);
+  answered(s, thread.id, "hello.py has 3 lines.");
+  s.registry.threads.recordReply(thread.id, Date.UTC(2026, 10, 9));
+  release();
+  const res = await sent;
+  assert.equal(res.code, 0, res.stderr);
+  assert.equal(res.stdout, `Sent to ${thread.id}.\n> Count the lines\nhello.py has 3 lines.\n-- active, pylon unknown\n-- It replied.\n`);
+});
+
+test("watch --until-idle exits 10 when the run parks, 12 when the thread asks the person, and 11 when the worker fails", async (t) => {
+  const s = await setup(t);
+  const firstState = async (watch: ReturnType<typeof watchLines>) => {
+    for (let line = await watch.next(); line.type !== "state"; line = await watch.next());
+  };
+
+  const parks: Thread = await s.json(["start", "--project", "acme", "--message", "hi"]);
+  const parking = watchLines(t, s, [parks.id, "--until-idle"]);
+  const parked = once(parking.child, "exit");
+  await firstState(parking);
+  s.fake.park(parks.id, 2);
+  assert.deepEqual(await parked, [10, null]);
+
+  const asks: Thread = await s.json(["start", "--project", "acme", "--message", "hi"]);
+  s.registry.questions.askQuestion({ kind: "judgment", id: "qn-before", thread: asks.id, text: "Asked before the watch", options: ["Yes"], reserved: null, answerer: "person", askedAt: 1, failure: 0 });
+  const asking = watchLines(t, s, [asks.id, "--until-idle"]);
+  const asked = once(asking.child, "exit");
+  await firstState(asking);
+  s.registry.questions.askQuestion({ kind: "judgment", id: "qn-new", thread: asks.id, text: "Start the next brief?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: 2, failure: 0 });
+  assert.deepEqual(await asked, [12, null], "only a question asked since the watch began ends it");
+
+  const c = await claudeWatched(t, s, false);
+  const failing = watchLines(t, s, [c.thread.id, "--until-idle"]);
+  const failed = once(failing.child, "exit");
+  await firstState(failing);
+  claudeWorkerAt(s.registry, c.thread.id, "failed", { message: "claude exited" });
+  assert.deepEqual(await failed, [11, null]);
+});
+
+test("conversation --last prints only the newest reply, and --last N the newest N entries", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--message", "hi"]);
+  answered(s, thread.id, "First answer.");
+  s.fake.transcript(thread.id).messages.push(
+    { role: "user", content: "And the tests?", timestamp: 0 } as never,
+    { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "bash", arguments: { command: "npm test" } }], stopReason: "toolUse", timestamp: 0 } as never,
+  );
+  s.fake.commit(thread.id);
+  answered(s, thread.id, "They pass.");
+
+  const reply = await s.nexus(["conversation", thread.id, "--last"]);
+  assert.deepEqual([reply.code, reply.stdout], [0, "They pass.\n"]);
+  const three = await s.nexus(["conversation", thread.id, "--last", "3"]);
+  assert.deepEqual([three.code, three.stdout], [0, '> And the tests?\n\n[tool] bash {"command":"npm test"}\n\nThey pass.\n']);
+  assert.deepEqual((await s.json(["conversation", thread.id, "--last"])).entries.map((e: any) => e.id), [5], "--json keeps the view's shape, with only the entries picked");
+  assert.equal((await s.nexus(["conversation", thread.id, "3"])).code, 64, "a count needs --last");
+});
+
+test("start --watch follows the first message's run until it replies, and needs a first message to wait for", async (t) => {
+  const s = await setup(t);
+  assert.equal((await s.nexus(["start", "--project", "acme", "--title", "quiet", "--watch"])).code, 64);
+  assert.equal((await s.nexus(["start", "--project", "acme", "--message", "hi", "--interval", "50"])).code, 64);
+  assert.deepEqual(await s.json(["threads"]), [], "a bad flag starts nothing");
+  const release = s.fake.holdWatches();
+  const started = s.nexus(["start", "--project", "acme", "--message", "Count the lines", "--watch", "--interval", "50"]);
+  let id = "";
+  await until("the thread started", async () => {
+    id = (await s.json(["threads"]))[0]?.id ?? "";
+    return id !== "" && s.fake.transcript(id).messages.length === 1;
+  });
+  answered(s, id, "hello.py has 3 lines.");
+  s.registry.threads.recordReply(id as never, Date.UTC(2026, 10, 9));
+  release();
+  const res = await started;
+  assert.equal(res.code, 0, res.stderr);
+  assert.match(res.stdout, /^Started th-[0-9a-f]+ on acme: Count the lines\nSent the first message\.\n> Count the lines\nhello\.py has 3 lines\.\n-- active, pylon unknown\n-- It replied\.\n$/);
 });

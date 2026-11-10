@@ -3,7 +3,7 @@ import type { Writable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { EntryRecord, LiveState } from "@earendil-works/pi-durable";
 import { CliError } from "../transport.ts";
-import { type Api, type Follow, type Command, str, request, int, clip, reconnectMs, untilConsumerGone } from "../kit.ts";
+import { type Api, type Follow, type Command, type Io, type Result, type Values, str, request, int, clip, reconnectMs, untilConsumerGone } from "../kit.ts";
 import { transient } from "../config.ts";
 import { agentView, threadRoutes, type ClaudeEntry, type ListeningPort, type ThreadDetail } from "../../contract/threads.ts";
 import { claudeFrames, maxEntries, queuedOf, streamRoutes, type ClaudeFrame, type ViewFrame } from "../../contract/streams.ts";
@@ -45,6 +45,30 @@ function stateText(s: ThreadStateEvent): string {
   return `-- ${s.status}, pylon ${s.pylon}${s.failed === null ? "" : ` (${s.failed.split("\n")[0]})`}${run}${s.queued === 0 ? "" : `, ${s.queued} queued`}${ports.length === 0 ? "" : `, listening on ${ports.join(", ")}`}`;
 }
 
+/** How a watch that waits for the run's reply ends, by the exit code it ends with, as docs/cli.md#waiting-for-the-reply lists them. */
+const untilIdleExits = { replied: 0, parked: 10, failed: 11, waiting: 12 } as const;
+interface Ending { outcome: keyof typeof untilIdleExits; text: string }
+/** The thread as the wait began. Its reply and its questions then came before the run waited for. */
+type Since = Pick<ThreadDetail, "lastReplyAt" | "questions">;
+/** With `from`, the text's first print starts at the newest entry that ends with that message. */
+interface Until { since: Since | null; from: string | null }
+
+/**
+ * A run has replied once nothing runs or is queued and the control plane holds a reply later than the one before
+ * the wait, as it records one at every end of a run. A failure, a new question or a Claude prompt ends the
+ * wait at once, since the run cannot go on without the person.
+ */
+function ending(d: ThreadDetail, s: ThreadStateEvent, since: Since): Ending | null {
+  if (s.status === "archived" || s.status === "deleted") return { outcome: "failed", text: `The thread was ${s.status} before its run replied` };
+  if (d.attention === "failed") return { outcome: "failed", text: `It failed: ${(d.pylon.failed ?? d.claudeWorker?.message ?? "no reason given").split("\n")[0]}` };
+  const asked = d.questions.some((q) => q.answer === null && q.withdrawn === undefined && !since.questions.some((old) => old.id === q.id));
+  if (asked) return { outcome: "waiting", text: `It asks you a question, which \`nexus show ${d.thread.id}\` shows` };
+  if (d.claudeWorker !== undefined && d.thread.sessionWaiting === true) return { outcome: "waiting", text: `Claude waits for your input in its terminal${d.thread.sessionWaitingMessage === undefined ? "" : `: ${d.thread.sessionWaitingMessage}`}` };
+  if (s.run === "parked") return { outcome: "parked", text: `${s.parkedTasks} parked tasks hold the run, which \`nexus retry ${d.thread.id}\` retries` };
+  if (s.run === "working" || s.queued > 0 || (d.lastReplyAt ?? -Infinity) <= (since.lastReplyAt ?? -Infinity)) return null;
+  return d.attention === "decision" ? { outcome: "waiting", text: `It replied, and waits on your decision, which \`nexus show ${d.thread.id}\` says` } : { outcome: "replied", text: "It replied." };
+}
+
 /**
  * The conversation is pi-durable's active context, not the full history: a new head marker, a compaction or a delete can reorder or drop entries.
  * So the first print shows the context whole, a later one that only appends prints each new entry, and any other
@@ -53,9 +77,9 @@ function stateText(s: ThreadStateEvent): string {
  * from the latest of both sources, so an answer's entry is printed before the live event that drops its partial.
  * An unreachable or failing control plane is reported once and retried through, so a live pane survives a restart
  * of the control plane. Ends after the state that says the thread is deleted, or once the process that started it
- * is gone.
+ * is gone, and with `until` once the run ends as `ending` says, whose code it answers.
  */
-async function watch(api: Api, follow: Follow, id: string, intervalMs: number, json: boolean, output: Writable): Promise<void> {
+async function watch(api: Api, follow: Follow, id: string, intervalMs: number, json: boolean, output: Writable, until: Until | null = null): Promise<number> {
   const emit = (event: WatchEvent, text: string) => {
     if (json) output.write(`${JSON.stringify(event)}\n`);
     else if (text !== "") output.write(`${text}\n`);
@@ -73,6 +97,17 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
   /** The pull requests printed since the last whole print of the transcript, which Claude Code names again and again. */
   let pullRequests = new Set<string>();
   let textShown = false;
+  let transcriptShown = false;
+  let since = until?.since ?? null;
+  const ended = Promise.withResolvers<number>();
+  let over = false;
+  const sent = until?.from == null ? null : until.from.split("\n").map((line) => `> ${line}`).join("\n");
+  /** What the text's first print shows: all of it, or from the sent message on, which is nothing until it joins. */
+  const backlogOf = <E extends { text: string }>(all: E[]): E[] => {
+    if (sent === null) return all;
+    const at = all.findLastIndex((e) => e.text.endsWith(sent));
+    return at === -1 ? [] : all.slice(at);
+  };
   const firstDetail = Promise.withResolvers<ThreadDetail>();
   const failing = new Map<"poll" | "stream", string>();
   let recovered = false;
@@ -99,7 +134,7 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
         }
       } else {
         const all = entries.map(rendered);
-        emit({ type: "reset", thread: id, entries: all }, before === null ? joined(all) : `-- The conversation was rewritten. It now reads:\n${joined(all)}`);
+        emit({ type: "reset", thread: id, entries: all }, before === null ? joined(backlogOf(all)) : `-- The conversation was rewritten. It now reads:\n${joined(all)}`);
       }
       printed = entries.map((e) => e.id);
     }
@@ -117,8 +152,9 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
       pullRequests = new Set();
       const all = frame.entries.map(claudeRendered);
       // A worker's first session replaces an empty transcript, which replaces nothing a person saw.
-      emit({ type: "claude-reset", thread: id, session: frame.session, dropped: frame.dropped, entries: all }, textShown ? `-- Claude's transcript was replaced. It now reads:\n${joined(all)}` : joined(all));
-      textShown = all.some((e) => e.text !== "");
+      const shownNow = transcriptShown ? all : backlogOf(all);
+      emit({ type: "claude-reset", thread: id, session: frame.session, dropped: frame.dropped, entries: all }, textShown ? `-- Claude's transcript was replaced. It now reads:\n${joined(all)}` : joined(shownNow));
+      textShown = shownNow.some((e) => e.text !== "");
     } else {
       for (const entry of frame?.entries ?? []) {
         const e = claudeRendered(entry);
@@ -126,12 +162,13 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
         emit({ type: "claude-entry", thread: id, ...e }, e.text);
       }
     }
+    transcriptShown = true;
     return { working: transcript.working, live: claudeLiveOf(id, transcript) };
   }
 
   function print() {
     const d = detail;
-    if (d === null) return;
+    if (d === null || over) return;
     const run = d.claudeWorker === undefined ? printConversation(d) : printTranscript(d);
     if (run === null) return;
     const state = stateOf(d, run.working, run.live.queued.length);
@@ -144,6 +181,13 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
     const liveKey = JSON.stringify(run.live);
     if (liveKey !== liveShown) emit(run.live, "");
     liveShown = liveKey;
+    if (until === null) return;
+    since ??= d;
+    const end = ending(d, state, since);
+    if (end === null) return;
+    over = true;
+    if (!json) output.write(`-- ${end.text}\n`);
+    ended.resolve(untilIdleExits[end.outcome]);
   }
 
   /** Each connection's first frame is the whole view, and each later one replaces what changed. */
@@ -206,32 +250,84 @@ async function watch(api: Api, follow: Follow, id: string, intervalMs: number, j
   const dispose = untilConsumerGone(() => process.exit(0));
   const streaming = stream();
   try {
-    await Promise.race([poll(), streaming.then(() => new Promise<never>(() => {}))]);
+    return await Promise.race([ended.promise, poll().then(() => until === null ? 0 : untilIdleExits.failed), streaming.then(() => new Promise<never>(() => {}))]);
   } finally {
     stop.abort();
     dispose();
   }
 }
 
+const intervalOf = (v: Values) => {
+  const interval = int(str(v, "interval"), "--interval", 2000);
+  if (interval === 0) throw new CliError("invalid", "--interval must be above 0");
+  return interval;
+};
+
+/** The options of a start or send that waits for the reply. */
+export const watchOptions = { watch: { type: "boolean" }, interval: { type: "string" } } as const;
+
+/** The poll of a start's or send's `--watch`, or null without one, read before the request so a bad flag sends nothing. */
+export function watchOf(v: Values): number | null {
+  if (v.watch === true) return intervalOf(v);
+  if (v.interval !== undefined) throw new CliError("invalid", "--interval goes with --watch");
+  return null;
+}
+
+/**
+ * With `--watch`, prints what the start or send did, then the run as it goes until it ends, as `watch --until-idle`
+ * does, and answers its exit code. Its `--json` reply is one line, so every line of the output is one JSON value.
+ */
+export async function thenWatch(api: Api, follow: Follow, io: Io, v: Values, interval: number | null, id: string, done: Result, until: Until): Promise<Result | number> {
+  if (interval === null) return done;
+  io.stdout.write(`${v.json === true ? JSON.stringify(done.json) : done.text}\n`);
+  return await watch(api, follow, id, interval, v.json === true, io.stdout, until);
+}
+
+/** The newest `last` entries that print anything, or with "reply" the newest reply. */
+function lastOf<E>(entries: readonly E[], text: (e: E) => string, reply: (e: E) => boolean, last: number | "reply"): { entries: E[]; text: string } {
+  const shown = entries.flatMap((e) => {
+    const t = text(e);
+    return t === "" ? [] : [{ e, t }];
+  });
+  const picked = last === "reply" ? shown.filter(({ e }) => reply(e)).slice(-1) : shown.slice(-last);
+  return { entries: picked.map(({ e }) => e), text: picked.length > 0 ? picked.map(({ t }) => t).join("\n\n") : last === "reply" ? "No reply yet." : "No messages yet." };
+}
+const repliedIn = (entry: EntryRecord) => (entry.model ?? []).some((m) => m.role === "assistant" && m.content.some((part) => part.type === "text" && part.text !== ""));
+
 export const watchCommands: Readonly<Record<string, Command>> = {
   conversation: {
-    help: ["  nexus conversation <thread>                  the agent's transcript, or the Claude worker's"],
-    args: [1, 1],
+    help: [
+      "  nexus conversation <thread> [--last [N]]     the agent's transcript, or the Claude worker's",
+      "    --last prints only the newest reply, and --last N the newest N entries",
+    ],
+    args: [1, 2],
     thread: true,
-    async run(api, [id]) {
+    options: { last: { type: "boolean" } },
+    async run(api, [id, count], v) {
+      if (count !== undefined && v.last !== true) throw new CliError("invalid", `conversation takes a count only after --last, got ${count}`);
+      const last = v.last !== true ? null : count === undefined ? "reply" : int(count, "--last", 1);
+      if (last === 0) throw new CliError("invalid", "--last N must be above 0");
       const served = agentView((await request(api, threadRoutes.conversation, { thread: id! }))!);
-      return { json: served.view, text: served.kind === "claude" ? claudeText(served.view) : conversationText(served.view) };
+      if (last === null) return { json: served.view, text: served.kind === "claude" ? claudeText(served.view) : conversationText(served.view) };
+      if (served.kind === "claude") {
+        const pullRequests = new Set<string>();
+        const picked = lastOf(served.view.entries, (e) => claudeEntryText(e, pullRequests), (e) => e.kind === "reply", last);
+        return { json: { ...served.view, entries: picked.entries }, text: picked.text };
+      }
+      const picked = lastOf(served.view.entries, entryText, repliedIn, last);
+      return { json: { ...served.view, entries: picked.entries }, text: picked.text };
     },
   },
   watch: {
-    help: ["  nexus watch <thread> [--interval MS]         the conversation, or the Claude worker's transcript, as it grows"],
+    help: [
+      "  nexus watch <thread> [--interval MS] [--until-idle]   the conversation, or the Claude worker's transcript, as it grows",
+      "    --until-idle ends once the run replies, with exit code 0, or 10 when it parks, 11 when it fails, 12 when it waits on you",
+    ],
     args: [1, 1],
     thread: true,
-    options: { interval: { type: "string" } },
+    options: { interval: { type: "string" }, "until-idle": { type: "boolean" } },
     async run(api, [id], v, follow, { io }) {
-      const interval = int(str(v, "interval"), "--interval", 2000);
-      if (interval === 0) throw new CliError("invalid", "--interval must be above 0");
-      await watch(api, follow, id!, interval, v.json === true, io.stdout);
+      return await watch(api, follow, id!, intervalOf(v), v.json === true, io.stdout, v["until-idle"] === true ? { since: null, from: null } : null);
     },
   },
 };
