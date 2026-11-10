@@ -25,7 +25,7 @@
   --line-soft: #ececec;
   --text: #1d1d1f;
   --text-2: #5f5f64;
-  --text-3: #6b6b70;
+  --text-3: #646469;
   --accent: #2f6fdf;
   --on-accent: #ffffff;
   --ok: #2f9e55;
@@ -69,7 +69,7 @@
   --line-soft: #2f2f32;
   --text: #ececef;
   --text-2: #aeaeb3;
-  --text-3: #939399;
+  --text-3: #9f9fa5;
   --accent: #6aa2ff;
   --on-accent: #1c1c1e;
   --ok: #4cc072;
@@ -103,8 +103,8 @@
  * them from Omarchy's. Its semantic colours map onto these by name, and its terminal block is the terminal's. The
  * sidebar and code are its background and surface mixed half and half, a hover its surface and overlay, the second
  * text level 70% text and 30% muted text, and a diff line's tint 15% of its status colour over the background. The
- * third text level is its muted text, mixed with the least text that reads at 4.5:1 on every surface: 57% in Tokyo
- * Night, 39% in Kanagawa, none in Catppuccin. Kanagawa's deleted text is its peach red, as its own red is too dark
+ * third text level is its muted text, mixed with the least text that reads at 4.5:1 on every surface and on a hover
+ * over one: 61% in Tokyo Night, 43% in Kanagawa, none in Catppuccin. Kanagawa's deleted text is its peach red, as its own red is too dark
  * on the tint.
  */
 :root[data-theme="tokyo-night"] {
@@ -121,7 +121,7 @@
   --line-soft: #292e42;
   --text: #a9b1d6;
   --text-2: #9098bf;
-  --text-3: #858eb5;
+  --text-3: #8991b8;
   --accent: #7aa2f7;
   --on-accent: #1a1b26;
   --ok: #9ece6a;
@@ -205,7 +205,7 @@
   --line-soft: #363646;
   --text: #dcd7ba;
   --text-2: #bcb8a2;
-  --text-3: #9b9989;
+  --text-3: #a09d8c;
   --accent: #dcd7ba;
   --on-accent: #1f1f28;
   --ok: #76946a;

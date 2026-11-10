@@ -52,7 +52,7 @@ test("a terminal's palette has its 16 colours", () => {
  * its bar is not listed, so the list stays what the PR reports.
  */
 const belowBar: Record<string, string[]> = {
-  "kanagawa-wave": ["--add-text on --add-bg"],
+  "kanagawa-wave": ["--add-text on --add-bg over --bg"],
 };
 
 /** Each pair of a theme's colours, the contrast it has and the contrast WCAG AA asks of it. */
@@ -63,13 +63,15 @@ function pairs(props: Map<string, string>): [pair: string, ratio: number, bar: n
     // Body text, and the two levels the dashboard derives from it, as text on each surface it lies on. The third level
     // sets timestamps, tags and tool calls at 10.5 to 12px, so it is small text too.
     ...["--text", "--text-2", "--text-3"].flatMap((fg) => surfaces.map((bg): [string, string, string, number] => [fg, bg, bg, 4.5])),
+    // The filter and a card's context strip lie on a hover's tint, which a light theme lays over the surface below.
+    ...surfaces.map((under): [string, string, string, number] => ["--text-3", "--hover", under, 4.5]),
     // A selected row's metadata, which takes the second level on the selected tint.
     ["--text-2", "--selected", "--side", 4.5],
     ["--on-accent", "--accent", "--accent", 4.5], ["--term-text", "--term-bg", "--term-bg", 4.5],
     ["--add-text", "--add-bg", "--bg", 4.5], ["--del-text", "--del-bg", "--bg", 4.5],
     // Status colours, at the bar WCAG sets for large text and a control's parts.
     ...["--accent", "--ok", "--warn", "--bad"].map((fg): [string, string, string, number] => [fg, "--bg", "--bg", 3]),
-  ].map(([fg, bg, under, bar]) => [`${fg} on ${bg}`, contrast(v(fg as string), v(bg as string), v(under as string)), bar as number]);
+  ].map(([fg, bg, under, bar]) => [`${fg} on ${bg}${under === bg ? "" : ` over ${under}`}`, contrast(v(fg as string), v(bg as string), v(under as string)), bar as number]);
 }
 
 test("every theme's text meets WCAG AA on every surface, but for the pairs macarchy's palettes set below it", () => {
