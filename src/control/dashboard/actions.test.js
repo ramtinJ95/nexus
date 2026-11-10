@@ -11,8 +11,7 @@ Object.assign(globalThis, {
   addEventListener() {},
   matchMedia: () => ({ matches: false, addEventListener() {} }),
   MutationObserver: class { observe() {} },
-  // Every page has the sidebar's filter, which find.js keeps.
-  document: { querySelector: none, getElementById: (id) => id === "filter" ? node() : null, querySelectorAll: () => [], addEventListener() {}, createElement: node },
+  document: { querySelector: none, getElementById: none, querySelectorAll: () => [], addEventListener() {}, createElement: node },
 });
 const { handlers } = await import("./actions.js");
 

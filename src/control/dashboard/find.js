@@ -5,13 +5,13 @@ import { found, keptForTab, narrow, storageKeys } from "./contract.ts";
 
 export const typing = (el) => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || el?.isContentEditable === true;
 
-// layout() gives every page the sidebar, so every page has the filter.
 const filter = document.getElementById("filter");
 
 // A filter shows the threads it matches in folded projects and archived folds, and folds them away again once it
 // is cleared.
 const openedByFilter = new Set();
 export function applyFilter() {
+  if (filter === null) return;
   const query = filter.value.trim();
   for (const group of document.querySelectorAll("#side-threads .group")) {
     const rows = [...group.querySelectorAll("li")];
@@ -25,12 +25,14 @@ export function applyFilter() {
   }
 }
 
-// client.js filters once it has folded the projects the reader folded.
-filter.value = keptForTab.read(storageKeys.filter) ?? "";
-filter.addEventListener("input", () => {
-  keptForTab.write(storageKeys.filter, filter.value === "" ? null : filter.value);
-  applyFilter();
-});
+if (filter !== null) {
+  // client.js filters once it has folded the projects the reader folded.
+  filter.value = keptForTab.read(storageKeys.filter) ?? "";
+  filter.addEventListener("input", () => {
+    keptForTab.write(storageKeys.filter, filter.value === "" ? null : filter.value);
+    applyFilter();
+  });
+}
 
 // The rows the thread list read last, which the switcher lists.
 let rows = [];
@@ -46,7 +48,7 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     switcher ??= import("./switcher.js").catch(() => { switcher = null; });
     void switcher.then((m) => m?.toggle(rows));
-  } else if (event.key === "/" && !event.metaKey && !event.ctrlKey && !event.altKey && !typing(event.target) && document.querySelector("dialog[open]") === null) {
+  } else if (event.key === "/" && !event.metaKey && !event.ctrlKey && !event.altKey && filter !== null && !typing(event.target) && document.querySelector("dialog[open]") === null) {
     event.preventDefault();
     // A phone's sidebar is a drawer, hidden until it opens.
     if (matchMedia(narrow).matches) document.body.dataset.open = "side";
@@ -57,7 +59,7 @@ document.addEventListener("keydown", (event) => {
 // The page's policy refuses every form's own submit, so a search goes where its form would.
 document.addEventListener("submit", (event) => {
   const form = event.target;
-  if (!(form instanceof HTMLFormElement) || form.getAttribute("role") !== "search") return;
+  if (form.getAttribute?.("role") !== "search") return;
   event.preventDefault();
   // An empty sidebar filter has no search to run, and hides its button.
   if (form.id === "filter-form" && filter.value.trim() === "") return;

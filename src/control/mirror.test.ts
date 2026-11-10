@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import { projectMirror } from "./mirror.ts";
+import { setupHashOf } from "./templates.ts";
 import type { RemoteProject } from "./project.ts";
 import type { NodeName, ProjectId } from "../ids.ts";
 import { tempDir } from "../test-support/kit.ts";
@@ -27,6 +28,26 @@ await git("commit", "--quiet", "-am", "build in setup");
 await git("checkout", "--quiet", "-b", "bare-branch");
 await git("rm", "--quiet", "-r", ".nexus");
 await git("commit", "--quiet", "-m", "no setup");
+await git("checkout", "--quiet", "main");
+await git("checkout", "--quiet", "-b", "locks");
+await writeFile(join(origin, "package-lock.json"), '{"lockfileVersion":3}\n');
+await writeFile(join(origin, "README.md"), "one\n");
+await git("add", ".");
+await git("commit", "--quiet", "-m", "lockfile");
+const lockedOnce = await git("rev-parse", "HEAD");
+await writeFile(join(origin, "README.md"), "two\n");
+await git("commit", "--quiet", "-am", "readme only");
+const readmeChanged = await git("rev-parse", "HEAD");
+await writeFile(join(origin, "package-lock.json"), '{"lockfileVersion":3,"packages":{}}\n');
+await git("commit", "--quiet", "-am", "lockfile only");
+const lockChanged = await git("rev-parse", "HEAD");
+await writeFile(join(origin, "__proto__"), "one\n");
+await git("add", ".");
+await git("commit", "--quiet", "-m", "a file named __proto__");
+const protoOnce = await git("rev-parse", "HEAD");
+await writeFile(join(origin, "__proto__"), "two\n");
+await git("commit", "--quiet", "-am", "__proto__ only");
+const protoChanged = await git("rev-parse", "HEAD");
 await git("checkout", "--quiet", "main");
 
 const project: RemoteProject = {
@@ -117,4 +138,31 @@ test("two reads of one commit fetch it once, and a branch fetches again only onc
 test("a branch is matched by its whole name, not by a longer ref that ends in it", async () => {
   await git("branch", "nested/refs/heads/solo", "bare-branch");
   assert.equal(await mirror.setupInputs(project, { branch: "solo" }), null);
+});
+
+test("a listed template input keys the template: a commit that changes only it gets a new key, and one that changes an unlisted file keeps it", async () => {
+  const listing: RemoteProject = { ...project, templateInputs: ["package-lock.json", "no/such/file"] };
+  const keyAt = async (commit: string, at = listing) => setupHashOf(at, (await mirror.setupInputs(at, { commit }))!);
+  assert.deepEqual(await mirror.setupInputs(listing, { commit: lockedOnce }), {
+    commit: lockedOnce, setupBlob: await git("rev-parse", `${lockedOnce}:.nexus/setup`),
+    inputBlobs: { "package-lock.json": await git("rev-parse", `${lockedOnce}:package-lock.json`), "no/such/file": null },
+  });
+  assert.equal(await keyAt(readmeChanged), await keyAt(lockedOnce), "README.md is not listed");
+  assert.notEqual(await keyAt(lockChanged), await keyAt(readmeChanged), "package-lock.json is listed");
+  assert.equal(await keyAt(lockChanged), await keyAt(lockChanged), "an absent path reads the same every time");
+  assert.equal(await keyAt(lockChanged, project), await keyAt(lockedOnce, project), "a project that lists nothing keys on .nexus/setup alone");
+  assert.equal(await keyAt(lockedOnce, { ...project, templateInputs: [] }), setupHashOf(project, { commit: lockedOnce, setupBlob: await git("rev-parse", `${lockedOnce}:.nexus/setup`) }), "an empty list keeps the key a project had before it listed any");
+});
+
+test("a template input named __proto__ keys the template like any other path", async () => {
+  const listing: RemoteProject = { ...project, templateInputs: ["__proto__"] };
+  const keyAt = async (commit: string) => setupHashOf(listing, (await mirror.setupInputs(listing, { commit }))!);
+  assert.notEqual(await keyAt(protoChanged), await keyAt(protoOnce));
+});
+
+test("a commit read before its project listed a template input is read again for the new list", async () => {
+  const fresh = projectMirror({ githubToken: null });
+  assert.equal((await fresh.setupInputs(project, { commit: lockedOnce }))?.inputBlobs, undefined);
+  const listing: RemoteProject = { ...project, templateInputs: ["package-lock.json"] };
+  assert.deepEqual((await fresh.setupInputs(listing, { commit: lockedOnce }))?.inputBlobs, { "package-lock.json": await git("rev-parse", `${lockedOnce}:package-lock.json`) });
 });

@@ -86,7 +86,7 @@ let phone = false;
 let assigned = [];
 Object.defineProperty(globalThis, "navigator", { value: { platform: "Linux x86_64" }, configurable: true, writable: true });
 Object.assign(globalThis, {
-  HTMLInputElement: Input, HTMLTextAreaElement: TextArea, HTMLSelectElement: class extends El {}, HTMLFormElement: Form,
+  HTMLInputElement: Input, HTMLTextAreaElement: TextArea, HTMLSelectElement: class extends El {},
   FormData: class { constructor(form) { return form.querySelectorAll("input").map((input) => [input.getAttribute("name"), input.value]); } },
   matchMedia: (query) => ({ matches: query === narrowQuery && phone }),
   sessionStorage: { getItem: (k) => stored.get(k) ?? null, setItem: (k, v) => stored.set(k, String(v)), removeItem: (k) => stored.delete(k) },

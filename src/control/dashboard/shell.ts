@@ -63,7 +63,7 @@ ${page.main}
 </main>
 ${page.inspector}
 </div>
-<p id="refresh-state" class="refresh-state" role="status"></p>
+<div class="notices"><p id="refresh-state" class="refresh-state" role="status"></p><div id="action-error" class="error alert" role="alert" hidden></div></div>
 <div class="scrim" data-close aria-hidden="true"></div>
 <template id="icons">${clonedIcons.map(icon)}</template>
 ${startDialog(c, page.start)}

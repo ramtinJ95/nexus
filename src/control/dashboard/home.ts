@@ -38,7 +38,6 @@ export function home(c: Context, h: HomeView, dialogs: Pick<Shell, "start" | "ad
     main: html`<header class="bar">${menu}<div class="crumb"><h1>Threads</h1></div><div class="bar-end"><a class="btn btn-ghost" href="/projects/new" data-new-project>New project</a><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
 <div class="seg-bar home-seg" role="radiogroup" aria-label="Show"><label class="seg-tab"><input type="radio" name="home-side" value="needs" id="side-needs" checked>Needs you<span class="seg-n" id="seg-needs-n" data-live>${waiting || ""}</span></label><label class="seg-tab"><input type="radio" name="home-side" value="flight" id="side-flight">In flight<span class="seg-n" id="seg-flight-n" data-live>${flying || ""}</span></label></div>
 <div class="split${peek !== null && !carded && " peeking"}" id="split">
-<p id="action-error" class="error split-error" role="alert" hidden></p>
 <section class="split-needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c, h, carded ? { key: peeked, card, reply: peek?.kind === "thread" ? peek.latest.reply : null } : null)}</section>
 <div class="split-peek" id="peek" data-live>${peekView(c, h, carded ? null : peek)}</div>
 <section class="split-flight" id="in-flight" aria-labelledby="flight-h">

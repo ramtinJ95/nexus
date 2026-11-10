@@ -11,6 +11,9 @@ export function attachUrl(location, thread, { cols, rows }, pane = null) {
   return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${path}`;
 }
 
+/** The attach route at `url` as a plain request, which answers the refusal its upgrade got. */
+export const refusalUrl = (url) => url.replace(/^ws/, "http");
+
 /**
  * The terminal's status for each message of the route: `attached` clears it, and `exit` and `error` end the terminal.
  * A type this end does not know is ignored, as the route's contract asks.
@@ -25,17 +28,22 @@ function statusOf(message) {
   }
 }
 
-/** A close before any message is a refusal, which a browser's WebSocket cannot read, such as an archived thread's. */
+/**
+ * A close before any message is a refusal, such as an archived thread's, which a browser's WebSocket cannot read, so
+ * the terminal asks for its reason over a plain request.
+ */
 const refused = { text: "The terminal could not attach. The thread may be archived, or the control plane unreachable.", over: true, why: "refused" };
+const refusedFor = (reason) => reason === null ? refused : { ...refused, text: `The terminal could not attach: ${reason}.` };
 const dropped = { text: "The connection dropped. Herdr keeps the session, so attach again.", over: true, why: "dropped" };
 const detached = { text: "Detached. Herdr keeps its sessions running.", over: true, why: "detached" };
 
 /**
  * Joins `term` to the attach route over `socket`: keys go as binary messages once it is attached, each resize as a
  * resize message, and the pylon's output is written to `term`. `status` hears each change, and once with `over` and
- * `why` it ended: `exit`, `error` with the error's `kind`, `refused`, `dropped` or `detached`. Returns its detach.
+ * `why` it ended: `exit`, `error` with the error's `kind`, `refused`, with the reason `whyRefused(socket)` reads when
+ * it is given, `dropped` or `detached`. Returns its detach.
  */
-export function joinTerminal(term, socket, status) {
+export function joinTerminal(term, socket, status, whyRefused = null) {
   let heard = false;
   let attached = false;
   let over = false;
@@ -68,7 +76,11 @@ export function joinTerminal(term, socket, status) {
     attached = true;
     term.focus();
   });
-  socket.addEventListener("close", () => end(heard ? dropped : refused));
+  socket.addEventListener("close", () => {
+    if (heard) return end(dropped);
+    if (whyRefused === null) return end(refused);
+    whyRefused(socket).catch(() => null).then((reason) => end(refusedFor(reason)));
+  });
   const typed = term.onData((data) => sendKeys(encoder.encode(data)));
   const binary = term.onBinary((data) => sendKeys(Uint8Array.from(data, (c) => c.charCodeAt(0))));
   const resized = term.onResize(({ cols, rows }) => send(encodeMessage({ type: "resize", size: { cols, rows } })));
@@ -163,7 +175,7 @@ const transient = (s, retry) => s.why === "dropped" || (s.why === "error" && s.k
  * pause, and attaches again when it shows. `status` hears what joinTerminal says, and the waits between. Returns the
  * person's detach.
  */
-export function keepAttached(term, open, status, page = document) {
+export function keepAttached(term, open, status, page = document, whyRefused = null) {
   let state = { kind: "over" };
   let tries = 0;
   const enter = (next) => {
@@ -189,7 +201,7 @@ export function keepAttached(term, open, status, page = document) {
   const join = (retry) => {
     const joined = { kind: "joined", retry, hiding: undefined, steady: undefined, detach: () => {} };
     enter(joined);
-    joined.detach = joinTerminal(term, open(), (s) => { if (state === joined) heard(joined, s); });
+    joined.detach = joinTerminal(term, open(), (s) => { if (state === joined) heard(joined, s); }, whyRefused);
   };
   const heard = (joined, s) => {
     if (!s.over) {

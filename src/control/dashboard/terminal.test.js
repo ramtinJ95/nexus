@@ -1,7 +1,7 @@
 import { mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { attachPath, defaultTerm } from "../../contract/attach.ts";
-import { attachUrl, clipboardOf, hiddenDetachMs, joinTerminal, keepAttached, keyFor, landing, linkText, maxClipboardChars, opensLink, steadyMs } from "./terminal.js";
+import { attachUrl, clipboardOf, hiddenDetachMs, joinTerminal, keepAttached, keyFor, landing, linkText, maxClipboardChars, opensLink, refusalUrl, steadyMs } from "./terminal.js";
 import { styleAdopter } from "./term-styles.js";
 
 /** A terminal as xterm.js exposes it: what it was written, how often it was reset, and the keys and resizes it hands out. */
@@ -77,6 +77,26 @@ test("a close before any message is a refusal, one after is a dropped link, and 
   assert.deepEqual(ends((s) => s.close()), ["The terminal could not attach. The thread may be archived, or the control plane unreachable."]);
   assert.deepEqual(ends((s) => { s.text({ type: "attached" }); s.close(); }), ["The connection dropped. Herdr keeps the session, so attach again."]);
   assert.deepEqual(ends((s) => { s.text({ type: "error", kind: "conflict", message: "thread th-x is archived, so its pylon stays paused" }); s.close(); }), ["thread th-x is archived, so its pylon stays paused"]);
+});
+
+test("a refused terminal says the reason a plain request to its route reads, and the generic line when it reads none", async () => {
+  const ends = async (reason) => {
+    const s = fakeSocket();
+    const over = Promise.withResolvers();
+    const asked = [];
+    joinTerminal(fakeTerm().term, s.socket, (status) => { if (status.over) over.resolve(status); }, async (socket) => {
+      asked.push(socket);
+      return reason;
+    });
+    s.close();
+    const status = await over.promise;
+    assert.deepEqual(asked, [s.socket], "it asks about the refused socket");
+    return status;
+  };
+  assert.deepEqual(await ends("16 streams are open, the most this control plane serves at once"), { text: "The terminal could not attach: 16 streams are open, the most this control plane serves at once.", over: true, why: "refused" });
+  assert.deepEqual(await ends(null), { text: "The terminal could not attach. The thread may be archived, or the control plane unreachable.", over: true, why: "refused" });
+  assert.equal(refusalUrl(attachUrl({ protocol: "https:", host: "nexus.example.ts.net" }, "th-x", { cols: 80, rows: 24 })), "https://nexus.example.ts.net/v1/threads/th-x/attach?cols=80&rows=24&term=xterm-256color");
+  assert.equal(refusalUrl(attachUrl({ protocol: "http:", host: "127.0.0.1:7470" }, "th-x", { cols: 80, rows: 24 })), "http://127.0.0.1:7470/v1/threads/th-x/attach?cols=80&rows=24&term=xterm-256color");
 });
 
 test("detaching closes the socket, says Herdr keeps its sessions, and stops sending keys", () => {
