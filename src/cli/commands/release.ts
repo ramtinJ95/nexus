@@ -1,9 +1,7 @@
-import { createInterface } from "node:readline";
-import type { Readable, Writable } from "node:stream";
 import type { ImageId } from "../../ids.ts";
 import { fullCommit, releaseOutcome, type ReleaseView } from "../../protocol/deploy.ts";
 import { CliError, UsageError } from "../transport.ts";
-import { type Api, type Io, type Result, type Command, str, request, int, table, pollUntil, when } from "../kit.ts";
+import { type Api, type Io, type Result, type Command, str, request, int, table, pollUntil, when, needsTerminal, typedYes, type Terminal } from "../kit.ts";
 import { threadRoutes } from "../../contract/threads.ts";
 import { deployWaitMs, imageRoutes, releaseRoutes, type ImageEntry, type ImageOperation, type ImagesView } from "../../contract/release.ts";
 import { landOption, questionRoutes, reviewRoutes, type ReviewView } from "../../contract/reviews.ts";
@@ -75,26 +73,11 @@ const imageCommand = (help: Command["help"], args: Command["args"], start: (api:
   },
 });
 
-export interface Terminal { input: Readable & { readonly isTTY?: boolean }; output: Writable & { readonly isTTY?: boolean } }
+const waiveRefusal = "land --waive shows you the holds it waives and asks you to confirm them, and stdin or stderr is not a terminal. Run it in a terminal, or press Land on the dashboard";
 
-function needsTerminal(terminal: Terminal): void {
-  if (terminal.input.isTTY !== true || terminal.output.isTTY !== true) throw new CliError("invalid", "land --waive shows you the holds it waives and asks you to confirm them, and stdin or stderr is not a terminal. Run it in a terminal, or press Land on the dashboard");
-}
-
-/**
- * An agent on the person's Mac calls as the same tailnet node, so the terminal is what tells the person apart: with
- * no terminal it refuses.
- */
 export async function confirmWaiver(terminal: Terminal, pr: number, head: string, holds: readonly string[]): Promise<boolean> {
-  needsTerminal(terminal);
-  terminal.output.write(`Land pull request #${pr} at ${head}, waiving the holds the merge policy reserves for you:\n${holds.map((h) => `  ${h}\n`).join("")}Type yes to waive them and land: `);
-  const lines = createInterface({ input: terminal.input, terminal: false });
-  const answer = await new Promise<string | null>((resolve) => {
-    lines.once("line", resolve);
-    lines.once("close", () => resolve(null));
-  });
-  lines.close();
-  return answer?.trim() === "yes";
+  needsTerminal(terminal, waiveRefusal);
+  return typedYes(terminal, `Land pull request #${pr} at ${head}, waiving the holds the merge policy reserves for you:\n${holds.map((h) => `  ${h}\n`).join("")}Type yes to waive them and land: `);
 }
 
 /**
@@ -104,7 +87,7 @@ export async function confirmWaiver(terminal: Terminal, pr: number, head: string
  * is still `running`, so the answer waives them for its landing later rather than starts it.
  */
 export async function pressOf(api: Api, id: string, terminal: Terminal): Promise<{ head?: string; waive?: string[]; question?: string; running?: boolean }> {
-  needsTerminal(terminal);
+  needsTerminal(terminal, waiveRefusal);
   const { reviewView: view } = await request(api, threadRoutes.show, { thread: id });
   if (view === null) return {};
   if (view.question !== null) {

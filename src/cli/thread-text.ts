@@ -25,7 +25,7 @@ function setupText(s: ThreadSetup): string {
 }
 
 /** A Claude worker's ask has a line per question it asks, and no options of its own. */
-function questionText(q: Question): string {
+export function questionText(q: Question): string {
   const [first, ...rest] = q.text.split("\n");
   return [
     `question ${q.id}: ${first}`,

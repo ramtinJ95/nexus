@@ -169,7 +169,7 @@ test("the units' groups, the probe's kvm and tailscale operator rights, and tail
 
 test("the installers install each unit file under its own name in the layout's unit directory", () => {
   const release = read("deploy/release.sh");
-  for (const line of [`local source=$1 unit=${unitDir}/$2`, `sha256sum < "${unitDir}/$unit"`, `"${releasesDir}/$release"`]) assert.ok(release.includes(line), line);
+  for (const line of [`\nunit_dir=${unitDir}\n`, "local source=$1 unit=$unit_dir/$2", 'sha256sum < "$unit_dir/$unit"', `"${releasesDir}/$release"`]) assert.ok(release.includes(line), line);
   const installed = ["deploy/release.sh", "deploy/install-deployer.sh"].flatMap((file) => [...read(file).matchAll(/^\s*install_unit "\$\w+\/deploy\/([\w.-]+)" ([\w.-]+)$/gm)]);
   for (const [line, source, unit] of installed) assert.equal(source, unit, line);
   assert.deepEqual(installed.map(([, , unit]) => unit).sort(), [...Object.values(unitNames)].sort());

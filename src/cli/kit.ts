@@ -1,4 +1,7 @@
+import { readFile } from "node:fs/promises";
+import { buffer } from "node:stream/consumers";
 import { setTimeout as sleep } from "node:timers/promises";
+import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import type { ParseArgsOptionsConfig } from "node:util";
 import type { z } from "zod";
@@ -46,6 +49,8 @@ export interface Command {
    */
   anyVersion?: true;
   options?: ParseArgsOptionsConfig;
+  /** What an unknown flag's error adds, for a command whose text is its arguments and may start with a dash. */
+  dashHint?: string;
   /** Nothing when the command printed its own output, as watch does, or the exit code it ends with then. */
   run(api: Api, args: readonly string[], values: Values, follow: Follow, local: Local): Promise<Result | number | void>;
 }
@@ -68,6 +73,24 @@ export function resourcesOf(v: Values): Partial<Project["resources"]> | undefine
   return Object.keys(resources).length > 0 ? resources : undefined;
 }
 
+/**
+ * Text that no shell argument has to carry, read from the file at `path`, or from stdin when it is `-`. A file's last
+ * line break is how files end, not part of the text.
+ */
+export async function textFrom(path: string, flag: string, stdin: Readable): Promise<string> {
+  const from = path === "-" ? "stdin" : path;
+  let read: string;
+  try {
+    // Decoded as readFile decodes, which keeps a leading byte order mark that text() would drop.
+    read = (path === "-" ? await buffer(stdin) : await readFile(path)).toString("utf8");
+  } catch (err) {
+    throw new CliError("invalid", `${flag} could not read ${from}: ${(err as Error).message}`);
+  }
+  const body = read.replace(/\r?\n$/, "");
+  if (body === "") throw new UsageError(`${flag} read nothing from ${from}`);
+  return body;
+}
+
 export const resourceOptions = { cpus: { type: "string" }, memory: { type: "string" }, disk: { type: "string" } } as const;
 
 /**
@@ -75,11 +98,23 @@ export const resourceOptions = { cpus: { type: "string" }, memory: { type: "stri
  * start's --request-id and --plan `requestId` and `planning`.
  */
 const textFields = Object.keys(startFields.shape).filter((field) => !["resources", "after", "requestId", "planning"].includes(field));
-export const briefOptions = { ...Object.fromEntries(textFields.map((field) => [field, { type: "string" }])), ...resourceOptions, after: { type: "string" } } as const satisfies ParseArgsOptionsConfig;
+/** A brief's message or Claude prompt may come from a file or stdin, as --message-file and --claude-file. */
+const fileFields = ["message", "claude"] as const;
+export const briefOptions = {
+  ...Object.fromEntries(textFields.map((field) => [field, { type: "string" }])), ...Object.fromEntries(fileFields.map((field) => [`${field}-file`, { type: "string" }])),
+  ...resourceOptions, after: { type: "string" },
+} as const satisfies ParseArgsOptionsConfig;
 const flagOf = (field: string) => `--${field === "planning" ? "plan" : field}`;
 
 /** `project` is --project, or what `projectOf` made of this checkout. */
-export function briefOf(v: Values, project: string, rules: Parameters<typeof brokenRule>[0]): z.input<typeof itemSchema> & { requestId?: string; planning?: true } {
+export async function briefOf(v: Values, project: string, rules: Parameters<typeof brokenRule>[0], stdin: Readable): Promise<z.input<typeof itemSchema> & { requestId?: string; planning?: true }> {
+  const files = fileFields.flatMap((field) => {
+    const path = str(v, `${field}-file`);
+    if (path !== undefined && v[field] !== undefined) throw new UsageError(`--${field} and --${field}-file cannot be used together`);
+    return path === undefined ? [] : [{ field, path }];
+  });
+  // The rules see a file's text as given before any is read, so a refused brief never waits on stdin.
+  v = { ...v, ...Object.fromEntries(files.map(({ field }) => [field, "-"])) };
   const after = str(v, "after")?.split(",").map((id) => id.trim()).filter((id) => id !== "");
   if (after?.length === 0) throw new UsageError("--after needs a thread");
   const resources = resourcesOf(v);
@@ -89,8 +124,9 @@ export function briefOf(v: Values, project: string, rules: Parameters<typeof bro
     ...resources === undefined ? {} : { resources }, ...after === undefined ? {} : { after },
     ...requestId === undefined ? {} : { requestId }, ...v.plan === true ? { planning: true as const } : {},
   };
-  const broken = brokenRule(rules, body, flagOf);
+  const broken = brokenRule(rules, body, (field) => files.some((file) => file.field === field) ? `--${field}-file` : flagOf(field));
   if (broken !== undefined) throw new UsageError(broken);
+  for (const { field, path } of files) (body as Record<string, unknown>)[field] = await textFrom(path, `--${field}-file`, stdin);
   return body;
 }
 
@@ -256,4 +292,27 @@ export function untilConsumerGone(onEnd: () => void): () => void {
     clearInterval(orphan);
     for (const signal of signals) process.removeListener(signal, onEnd);
   };
+}
+
+/** Where the person confirms what a command does for them: its stdin, and the stderr it asks on. */
+export interface Terminal { input: Readable & { readonly isTTY?: boolean }; output: Writable & { readonly isTTY?: boolean } }
+
+/**
+ * An agent on the person's Mac calls as the same tailnet node, so the terminal is what tells the person apart: with
+ * no terminal the command refuses, with `refusal`.
+ */
+export function needsTerminal(terminal: Terminal, refusal: string): void {
+  if (terminal.input.isTTY !== true || terminal.output.isTTY !== true) throw new CliError("invalid", refusal);
+}
+
+/** Whether the person typed yes after `prompt`. A closed stdin is a no. */
+export async function typedYes(terminal: Terminal, prompt: string): Promise<boolean> {
+  terminal.output.write(prompt);
+  const lines = createInterface({ input: terminal.input, terminal: false });
+  const answer = await new Promise<string | null>((resolve) => {
+    lines.once("line", resolve);
+    lines.once("close", () => resolve(null));
+  });
+  lines.close();
+  return answer?.trim() === "yes";
 }

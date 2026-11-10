@@ -381,10 +381,12 @@ test("the credentials are printed under their own heading as the next step, and 
   assert.doesNotMatch(formatLeft(left({ ...freshControl, secretNames: ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"], gitKey: true, signedIn: true })), /credentials/);
 });
 
-test("a finished control machine is left only the Mac CLI", () => {
-  const items = left({ ...freshControl, secretNames: ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"], gitKey: true, signedIn: true, admitted: true, docker: { kind: "ready" }, dockerGroup: true, image: true });
-  assert.equal(items.length, 1);
-  assert.deepEqual(items[0]!.run, ["deploy/mac/install", "nexus connect rj-firebat.tail1234.ts.net"]);
+test("a finished control machine is left nothing, and one with every step done but the image is left the Mac CLI and the image", () => {
+  const done: Facts = { ...freshControl, secretNames: ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"], gitKey: true, signedIn: true, admitted: true, docker: { kind: "ready" }, dockerGroup: true, image: true };
+  assert.deepEqual(left(done), []);
+  assert.equal(formatLeft(left(done)), "Nothing is left to do.");
+  const items = left({ ...done, image: false });
+  assert.deepEqual(items.map((item) => item.run[0]), ["deploy/mac/install", "nexus image build --wait"]);
 });
 
 test("a node is told how to join the control plane, unless this run joined it", () => {
@@ -395,10 +397,11 @@ test("a node is told how to join the control plane, unless this run joined it", 
   assert.match(all, /^sudo deploy\/install\.sh --join <token> --node infra-testbench$/m);
   assert.doesNotMatch(all, /--add-node|--peer/, "no digest to paste and no other node to rerun");
   assert.match(all, /^sudo deploy\/install\.sh --node infra-testbench$/m, "the git key is made by a rerun of the node install");
-  assert.match(all, /^nexus connect infra-testbench\.tail1234\.ts\.net$/m, "the Mac connects to the control plane, not to this node");
+  assert.doesNotMatch(all, /deploy\/mac\/install|nexus connect/, "the Mac CLI is the control plane's step");
   assert.equal(formatLeft(items).split("\n")[0], "What is left:");
   const joined = left({ self: tailnet.self, secretNames: [], gitKey: true, role: "node", control, joined: true }).flatMap((i) => i.run).join("\n");
   assert.doesNotMatch(joined, /--join/);
+  assert.deepEqual(left({ self: tailnet.self, secretNames: ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN"], gitKey: true, role: "node", control, joined: true }), [], "a joined node with its credentials is left nothing");
 });
 
 test("a store holds an image only once an image ID is in it, not a crashed fill's partial", async () => {

@@ -34,12 +34,13 @@ export const itemsCommands: Readonly<Record<string, Command>> = {
     help: [
       "  nexus item add [--project P] [--title T] (--message M | --claude PROMPT [--model ID]) [--after ITEM[,ITEM...]]",
       "                 [--node N|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB]",
+      "    --message-file PATH|- and --claude-file PATH|- read the brief from a file or stdin",
       "    an item becomes a queued thread once the items it is after are, and starts once their pull requests merge",
     ],
     args: [0, 0],
     options: briefOptions,
-    async run(api, _, v) {
-      const i = await request(api, itemRoutes.add, { body: briefOf(v, await projectOf(api, v, "item add"), itemRules) });
+    async run(api, _, v, _follow, local) {
+      const i = await request(api, itemRoutes.add, { body: await briefOf(v, await projectOf(api, v, "item add"), itemRules, local.io.stdin) });
       return { json: i, text: `Added ${i.id} to ${i.project}: ${i.title}. It is ${i.phase.kind}: ${i.phase.why}.` };
     },
   },

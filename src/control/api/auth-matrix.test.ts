@@ -41,7 +41,7 @@ const requests: readonly (readonly [string, string, unknown?])[] = [
   ["GET", "/v1/usage"], ["GET", "/v1/usage?since=7d"], ["GET", "/v1/usage/backfill"], ["POST", "/v1/usage/backfill", {}], ["DELETE", "/v1/usage/backfill", {}],
   ["GET", "/v1/events"], ["GET", "/v1/events?kind=thread.failed"], ["GET", `/v1/threads/${t0}/events`], ["GET", `/v1/threads/${t0}/claude/events`],
   ["POST", `/v1/threads/${t0}/review`, {}], ["POST", `/v1/threads/${t0}/review/cancel`, {}], ["POST", `/v1/threads/${t0}/land`, {}], ["POST", `/v1/threads/${t0}/land`, { bogus: 1 }],
-  ["POST", "/v1/questions/q-nosuch/answer", { option: "yes" }],
+  ["GET", "/v1/questions/q-nosuch"], ["POST", "/v1/questions/q-nosuch/answer", { option: "yes" }],
   ["POST", `/v1/threads/${t0}/previews`, {}], ["DELETE", `/v1/threads/${t0}/previews/3000`, {}],
   ["POST", `/v1/threads/${t0}/sessions`, {}], ["DELETE", `/v1/threads/${t0}/sessions/s1`, {}], ["POST", `/v1/threads/${t0}/sessions/s1/focus`, {}],
   ["GET", `/v1/threads/${t0}/files`], ["GET", `/v1/threads/${t0}/files/content?path=a`], ["GET", `/v1/threads/${t0}/image?path=a`],

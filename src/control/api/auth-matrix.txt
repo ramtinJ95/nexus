@@ -44,6 +44,7 @@ deployer POST /v1/threads/th-000000000000/review -> 404 no thread th-00000000000
 deployer POST /v1/threads/th-000000000000/review/cancel -> 409 the review loop needs the control plane's GitHub token (github.tokenFile), which is not configured
 deployer POST /v1/threads/th-000000000000/land -> 404 no thread th-000000000000
 deployer POST /v1/threads/th-000000000000/land -> 400 ✖ Unrecognized key: "bogus"
+deployer GET /v1/questions/q-nosuch -> 404 no question q-nosuch
 deployer POST /v1/questions/q-nosuch/answer -> 404 no question q-nosuch
 deployer POST /v1/threads/th-000000000000/previews -> 404 no thread th-000000000000
 deployer DELETE /v1/threads/th-000000000000/previews/3000 -> 404 no thread th-000000000000
@@ -186,6 +187,7 @@ person POST /v1/threads/th-000000000000/review -> 404 no thread th-000000000000
 person POST /v1/threads/th-000000000000/review/cancel -> 409 the review loop needs the control plane's GitHub token (github.tokenFile), which is not configured
 person POST /v1/threads/th-000000000000/land -> 403 caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nPHONE
 person POST /v1/threads/th-000000000000/land -> 403 caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nPHONE
+person GET /v1/questions/q-nosuch -> 404 no question q-nosuch
 person POST /v1/questions/q-nosuch/answer -> 404 no question q-nosuch
 person POST /v1/threads/th-000000000000/previews -> 404 no thread th-000000000000
 person DELETE /v1/threads/th-000000000000/previews/3000 -> 404 no thread th-000000000000
@@ -342,6 +344,7 @@ control-node POST /v1/threads/th-000000000000/review -> 403 caller may not start
 control-node POST /v1/threads/th-000000000000/review/cancel -> 403 caller may not cancel a review: only a person may, never the control plane, infrastructure nodes or pylons
 control-node POST /v1/threads/th-000000000000/land -> 403 caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons
 control-node POST /v1/threads/th-000000000000/land -> 403 caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons
+control-node GET /v1/questions/q-nosuch -> 404 no question q-nosuch
 control-node POST /v1/questions/q-nosuch/answer -> 404 no question q-nosuch
 control-node POST /v1/threads/th-000000000000/previews -> 403 caller may not publish a preview: only a person may, never the control plane, infrastructure nodes or pylons
 control-node DELETE /v1/threads/th-000000000000/previews/3000 -> 403 caller may not unpublish a preview: only a person may, never the control plane, infrastructure nodes or pylons
@@ -480,6 +483,7 @@ control-node-without-key POST /v1/threads/th-000000000000/review -> 403 caller m
 control-node-without-key POST /v1/threads/th-000000000000/review/cancel -> 403 caller may not cancel a review: only a person may, never the control plane, infrastructure nodes or pylons
 control-node-without-key POST /v1/threads/th-000000000000/land -> 403 caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons
 control-node-without-key POST /v1/threads/th-000000000000/land -> 403 caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons
+control-node-without-key GET /v1/questions/q-nosuch -> 404 no question q-nosuch
 control-node-without-key POST /v1/questions/q-nosuch/answer -> 404 no question q-nosuch
 control-node-without-key POST /v1/threads/th-000000000000/previews -> 403 caller may not publish a preview: only a person may, never the control plane, infrastructure nodes or pylons
 control-node-without-key DELETE /v1/threads/th-000000000000/previews/3000 -> 403 caller may not unpublish a preview: only a person may, never the control plane, infrastructure nodes or pylons
@@ -630,6 +634,7 @@ reporter POST /v1/threads/th-000000000000/review -> 403 caller is not a tailnet 
 reporter POST /v1/threads/th-000000000000/review/cancel -> 403 caller is not a tailnet node this control plane allows
 reporter POST /v1/threads/th-000000000000/land -> 403 caller is not a tailnet node this control plane allows
 reporter POST /v1/threads/th-000000000000/land -> 403 caller is not a tailnet node this control plane allows
+reporter GET /v1/questions/q-nosuch -> 403 caller is not a tailnet node this control plane allows
 reporter POST /v1/questions/q-nosuch/answer -> 403 caller is not a tailnet node this control plane allows
 reporter POST /v1/threads/th-000000000000/previews -> 403 caller is not a tailnet node this control plane allows
 reporter DELETE /v1/threads/th-000000000000/previews/3000 -> 403 caller is not a tailnet node this control plane allows
@@ -750,6 +755,7 @@ reporter-wrong-key POST /v1/threads/th-000000000000/review -> 403 caller is not 
 reporter-wrong-key POST /v1/threads/th-000000000000/review/cancel -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key POST /v1/threads/th-000000000000/land -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key POST /v1/threads/th-000000000000/land -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key GET /v1/questions/q-nosuch -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key POST /v1/questions/q-nosuch/answer -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key POST /v1/threads/th-000000000000/previews -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key DELETE /v1/threads/th-000000000000/previews/3000 -> 403 caller is not a tailnet node this control plane allows
@@ -870,6 +876,7 @@ node-without-key POST /v1/threads/th-000000000000/review -> 403 caller is not a 
 node-without-key POST /v1/threads/th-000000000000/review/cancel -> 403 caller is not a tailnet node this control plane allows
 node-without-key POST /v1/threads/th-000000000000/land -> 403 caller is not a tailnet node this control plane allows
 node-without-key POST /v1/threads/th-000000000000/land -> 403 caller is not a tailnet node this control plane allows
+node-without-key GET /v1/questions/q-nosuch -> 403 caller is not a tailnet node this control plane allows
 node-without-key POST /v1/questions/q-nosuch/answer -> 403 caller is not a tailnet node this control plane allows
 node-without-key POST /v1/threads/th-000000000000/previews -> 403 caller is not a tailnet node this control plane allows
 node-without-key DELETE /v1/threads/th-000000000000/previews/3000 -> 403 caller is not a tailnet node this control plane allows
@@ -990,6 +997,7 @@ stranger POST /v1/threads/th-000000000000/review -> 403 caller is not a tailnet 
 stranger POST /v1/threads/th-000000000000/review/cancel -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger POST /v1/threads/th-000000000000/land -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger POST /v1/threads/th-000000000000/land -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/questions/q-nosuch -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger POST /v1/questions/q-nosuch/answer -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger POST /v1/threads/th-000000000000/previews -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger DELETE /v1/threads/th-000000000000/previews/3000 -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
@@ -1104,6 +1112,7 @@ unnamed POST /v1/threads/th-000000000000/review -> 403 caller is not a tailnet n
 unnamed POST /v1/threads/th-000000000000/review/cancel -> 403 caller is not a tailnet node this control plane allows
 unnamed POST /v1/threads/th-000000000000/land -> 403 caller is not a tailnet node this control plane allows
 unnamed POST /v1/threads/th-000000000000/land -> 403 caller is not a tailnet node this control plane allows
+unnamed GET /v1/questions/q-nosuch -> 403 caller is not a tailnet node this control plane allows
 unnamed POST /v1/questions/q-nosuch/answer -> 403 caller is not a tailnet node this control plane allows
 unnamed POST /v1/threads/th-000000000000/previews -> 403 caller is not a tailnet node this control plane allows
 unnamed DELETE /v1/threads/th-000000000000/previews/3000 -> 403 caller is not a tailnet node this control plane allows
