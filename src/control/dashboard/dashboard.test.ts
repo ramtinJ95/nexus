@@ -319,9 +319,10 @@ test("thousands of closed threads leave the home page small, and their page list
 test("a thread's row names it in full and carries what a search matches, and ?q= searches the closed and quiet pages on the server", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
   const s = await seeded(t);
-  const cache = addThread(s.registry, { thread: { title: "Review of #88: feat(checkout) cache the cart", status: "archived" } });
-  const retries = addThread(s.registry, { thread: { title: "Review of #88: feat(checkout) retry the charge", status: "deleted" } });
-  const docs = addThread(s.registry, { thread: { title: "Write the docs", project: "beta" as ProjectId, status: "archived" } });
+  // IDs of their own, since a random one may hold the digits a query below searches for.
+  const cache = addThread(s.registry, { thread: { id: "th-c0000000000a" as ThreadId, title: "Review of #88: feat(checkout) cache the cart", status: "archived" } });
+  const retries = addThread(s.registry, { thread: { id: "th-c0000000000b" as ThreadId, title: "Review of #88: feat(checkout) retry the charge", status: "deleted" } });
+  const docs = addThread(s.registry, { thread: { id: "th-c0000000000c" as ThreadId, title: "Write the docs", project: "beta" as ProjectId, status: "archived" } });
   s.registry.prWatches.savePrWatch(docs.id, { links: [{ pr: testPr({ repo: "acme/nexus", number: 412 }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
   const fix = await s.start("acme", "Fix checkout");
   s.registry.prWatches.savePrWatch(fix.id, { links: [{ pr: testPr({ repo: "acme/nexus", number: 7 }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });

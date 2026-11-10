@@ -319,6 +319,7 @@ test("a queued builder does not start while a review's gate pylon waits for room
   f.review(gated, { kind: "verifying", startedAt: 1, thread: null, refused: "no node can run this pylon: rj-firebat is overcommitted", room: true });
   await q.poll();
   assert.deepEqual(f.starts, [], "the verify pylon gets the room first");
+  assert.deepEqual(queuedView(f.registry, f.registry.queue.queuedThread(record.id)!).waits.at(-1), { thread: gated, state: "waiting", why: "PR #9's verify pylon waits for a node to have room, which goes to it first" }, "the thread says what it waits for");
   const now = q.add(f.request({ title: "Now" }), null, [a], laptop);
   await q.startNow(now.id, laptop);
   assert.deepEqual(f.starts, [now.id], "the person's start now does not wait");
