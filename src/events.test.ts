@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,7 +38,9 @@ test("pylon event input rejects other threads, unknown kinds and oversized paylo
     { kind: "session.waiting", message: "x".repeat(2049) },
     { kind: "session.ended", session: "x".repeat(201) },
   ]) assert.equal(pylonEventSchema.safeParse(input).success, false);
-  assert.equal(pylonEventSchema.safeParse({ kind: "session.turn-started", session: "abc" }).success, true);
+  assert.equal(pylonEventSchema.safeParse({ kind: "session.turn-started", session: "abc" }).success, true, "an image from before sends no prompt hash");
+  assert.equal(pylonEventSchema.safeParse({ kind: "session.turn-started", session: "abc", promptSha256: "0a".repeat(32) }).success, true);
+  for (const promptSha256 of ["0A".repeat(32), "0a".repeat(31), "", 7]) assert.equal(pylonEventSchema.safeParse({ kind: "session.turn-started", promptSha256 }).success, false);
   for (const cursor of ["-1", "1.2", "01", "9007199254740992"]) assert.throws(() => eventCursor(cursor));
 });
 
@@ -102,15 +105,31 @@ test("parallel tool hooks share a throttled heartbeat, and refresh after five mi
 });
 
 test("a turn end with background tasks still running reports a heartbeat, and names the shells it waits for alone", async () => {
-  const { reportedKind } = await import("../images/pylon/nexus-heartbeat.ts");
+  const { hookReport } = await import("../images/pylon/nexus-heartbeat.ts");
   const subagent = { id: "ac4719df54252d254", type: "subagent", status: "running", agent_type: "general-purpose" };
   const shell = { id: "bq5q9o836", type: "shell", status: "running", command: "sleep 90" };
-  assert.deepEqual(reportedKind("session.turn-ended", { background_tasks: [shell, subagent] }), { kind: "session.heartbeat" });
-  assert.deepEqual(reportedKind("session.turn-ended", { background_tasks: [shell] }), { kind: "session.heartbeat", shells: ["bq5q9o836"] });
-  assert.deepEqual(reportedKind("session.turn-ended", { background_tasks: [{ ...subagent, status: "completed" }, { ...shell, status: "completed" }] }), { kind: "session.turn-ended" });
-  assert.deepEqual(reportedKind("session.turn-ended", { background_tasks: [] }), { kind: "session.turn-ended" });
-  assert.deepEqual(reportedKind("session.turn-ended", {}), { kind: "session.turn-ended" }, "a Claude without the field ends turns as before");
-  assert.deepEqual(reportedKind("session.ended", { background_tasks: [subagent, shell] }), { kind: "session.ended" });
+  assert.deepEqual(hookReport("session.turn-ended", { background_tasks: [shell, subagent] }), { kind: "session.heartbeat" });
+  assert.deepEqual(hookReport("session.turn-ended", { background_tasks: [shell] }), { kind: "session.heartbeat", shells: ["bq5q9o836"] });
+  assert.deepEqual(hookReport("session.turn-ended", { background_tasks: [{ ...subagent, status: "completed" }, { ...shell, status: "completed" }] }), { kind: "session.turn-ended" });
+  assert.deepEqual(hookReport("session.turn-ended", { background_tasks: [] }), { kind: "session.turn-ended" });
+  assert.deepEqual(hookReport("session.turn-ended", {}), { kind: "session.turn-ended" }, "a Claude without the field ends turns as before");
+  assert.deepEqual(hookReport("session.ended", { background_tasks: [subagent, shell] }), { kind: "session.ended" });
+});
+
+test("a turn's start carries the SHA-256 of its prompt as written, without the tags Claude wraps a pasted one in", async () => {
+  const { hookReport } = await import("../images/pylon/nexus-heartbeat.ts");
+  const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+  const short = "Reply with exactly SHORT-OK";
+  const lines = "Line A of a message.\nLine B of it.\nReply with exactly MULTI-OK";
+  const long = `${"filler ".repeat(600)}Reply with exactly LONG-OK`;
+  // The prompts Claude Code 2.1.322 handed its UserPromptSubmit hook for these three messages sent with `hc send`.
+  assert.deepEqual(hookReport("session.turn-started", { prompt: short }), { kind: "session.turn-started", promptSha256: sha256(short) });
+  assert.deepEqual(hookReport("session.turn-started", { prompt: lines }), { kind: "session.turn-started", promptSha256: sha256(lines) });
+  assert.deepEqual(hookReport("session.turn-started", { prompt: `\n\n<pasted_content id="2398">\n${long}\n</pasted_content id="2398">\n` }), { kind: "session.turn-started", promptSha256: sha256(long) });
+  const quoted = `See <pasted_content id="1">\nthis\n</pasted_content id="1">`;
+  assert.deepEqual(hookReport("session.turn-started", { prompt: quoted }), { kind: "session.turn-started", promptSha256: sha256(quoted) }, "tags inside the text are its own");
+  assert.deepEqual(hookReport("session.turn-started", {}), { kind: "session.turn-started" });
+  assert.deepEqual(hookReport("session.turn-ended", { prompt: short }), { kind: "session.turn-ended" });
 });
 
 test("a held turn end heartbeats every five minutes while the command runs, and ends the turn after it exits or waits at the cap", async () => {

@@ -8,7 +8,7 @@ import { z } from "zod";
 import { agentKinds, sessionHarnessSchema, type SessionHarness } from "./agent-kinds.ts";
 import { asSent, parse, parseJson, unchecked } from "../parse.ts";
 import type { ArtifactId, CheckpointId, ImageId, LiveHash, NodeName, PylonId } from "../ids.ts";
-import { pylonIdField, pylonIdSchema } from "./fields.ts";
+import { pylonIdField, pylonIdSchema, sha256 } from "./fields.ts";
 import { jobStatusSchema, type JobStatus } from "./jobs.ts";
 import { eventIdPattern, maxEventMessageLength, maxSessionLength, sessionKinds } from "../../images/pylon/nexus-contract.ts";
 
@@ -18,6 +18,8 @@ export const pylonEventSchema = z.strictObject({
   session: z.string().min(1).max(maxSessionLength).optional(),
   message: z.string().max(maxEventMessageLength).optional(),
   id: z.string().regex(eventIdPattern).optional(),
+  /** On a turn's start, the SHA-256 of its prompt without Claude's paste tags. An image from before sends none. */
+  promptSha256: sha256.optional(),
 });
 export type PylonEvent = z.infer<typeof pylonEventSchema>;
 export interface ReportedEvent { sequence: number; pylon: PylonId; event: PylonEvent; time: number }

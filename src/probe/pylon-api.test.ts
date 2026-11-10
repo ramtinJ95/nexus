@@ -198,9 +198,11 @@ test("events are scoped by the bridge and reject guest-supplied thread identity"
   const accepted: unknown[] = [];
   const { call } = setup({}, { event: (pylon, event) => accepted.push({ pylon, event }) });
   assert.equal((await call({ op: "event", kind: "session.turn-ended", session: "c1" })).status, 200);
-  assert.deepEqual(accepted, [{ pylon: pylonId, event: { kind: "session.turn-ended", session: "c1" } }]);
-  for (const extra of [{ thread: "other" }, { kind: "thread.failed" }, { message: "a".repeat(2049) }]) {
+  const promptSha256 = "0a".repeat(32);
+  assert.equal((await call({ op: "event", kind: "session.turn-started", session: "c1", promptSha256 })).status, 200);
+  assert.deepEqual(accepted, [{ pylon: pylonId, event: { kind: "session.turn-ended", session: "c1" } }, { pylon: pylonId, event: { kind: "session.turn-started", session: "c1", promptSha256 } }]);
+  for (const extra of [{ thread: "other" }, { kind: "thread.failed" }, { message: "a".repeat(2049) }, { promptSha256: "not a hash" }]) {
     assert.equal((await call({ op: "event", kind: "session.turn-ended", ...extra })).status, 400);
   }
-  assert.equal(accepted.length, 1);
+  assert.equal(accepted.length, 2);
 });

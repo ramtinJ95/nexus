@@ -1001,7 +1001,7 @@ test("a turn running before turn starts were recorded has no known start", (t) =
  * listed background shells, on the test's clock, and calls `exited` once the command exits.
  */
 async function claudeHooks(registry: ReturnType<typeof seeded>, clock: { now: number }) {
-  const { holdTurnEnd, reportedKind } = await import("../../images/pylon/nexus-heartbeat.ts");
+  const { holdTurnEnd, hookReport } = await import("../../images/pylon/nexus-heartbeat.ts");
   type Kind = import("../protocol/observations.ts").PylonEvent["kind"];
   let sequence = 0;
   const held: number[] = [];
@@ -1009,7 +1009,7 @@ async function claudeHooks(registry: ReturnType<typeof seeded>, clock: { now: nu
     sequence: ++sequence, time: clock.now, pylon: pylonId, event: { kind, session: "c1", at, ...(message === undefined ? {} : { message }) },
   });
   const hook = (kind: Kind, input: { background_tasks?: unknown } = {}, at = (clock.now += 1000)) => {
-    const reported = reportedKind(kind, input);
+    const reported = hookReport(kind, input);
     if (reported.shells !== undefined) held.push(at);
     send(reported.kind as Kind, at);
   };

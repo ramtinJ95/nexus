@@ -38,7 +38,7 @@ true satisfies ParsesTo<typeof pylonInfoSchema, PylonInfo>;
 export type ServiceView = ServiceFact & { url: string | null };
 
 export type PylonApiRequest =
-  | { op: "event"; kind: typeof sessionKinds[number]; at?: number; session?: string; message?: string; id?: string }
+  | { op: "event"; kind: typeof sessionKinds[number]; at?: number; session?: string; message?: string; id?: string; promptSha256?: string }
   | { op: "info" }
   | { op: "services"; action: typeof servicesActions[number]; name?: ServiceName }
   | { op: "service-logs"; name: ServiceName; lines: number }

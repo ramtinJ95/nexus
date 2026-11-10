@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { setTimeout as wait } from "node:timers/promises";
 import { bridgeRequestPath, nexusApi } from "./nexus-contract.ts";
 
-export type OutboxEvent = { kind: string; at: number; session?: string; message?: string; id: string };
+export type OutboxEvent = { kind: string; at: number; session?: string; message?: string; promptSha256?: string; id: string };
 export type Outcome = "delivered" | "rejected" | "retry";
 
 export const maxEntries = 1000;
