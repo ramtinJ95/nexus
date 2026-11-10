@@ -14,7 +14,7 @@ On a Linux machine that boots with systemd, from a checkout of this repository:
 
 ```sh
 git clone https://github.com/ramtinJ95/nexus.git && cd nexus
-sudo deploy/install.sh --admit <your Mac's tailnet name> --dotfiles <dotfiles git URL>
+sudo deploy/install.sh --admit <your Mac's tailnet name> [--dotfiles <dotfiles git URL>]
 ```
 
 This installs the control plane, a probe and the deployer on one machine. On each further machine, install only a probe and the deployer, and name the control plane's machine and a join token minted there, as [Add a node](#add-a-node) describes:
@@ -33,7 +33,9 @@ The installer checks every prerequisite first. It reports each one that is missi
 - `/dev/kvm`, owned by the `kvm` group;
 - tailscale, installed, running and logged in;
 - MagicDNS and HTTPS certificates turned on for the tailnet. `src/deploy/setup.ts check` reads these from `tailscale status --json`, so without Node 26 they are checked on the rerun;
-- on the control plane's machine, tailscaled started with `TS_PERMIT_CERT_UID=nexus-control`, so the control plane can fetch the dashboard's certificate (see [HTTPS dashboard](#https-dashboard)), and `--dotfiles` on the first install.
+- on the control plane's machine, tailscaled started with `TS_PERMIT_CERT_UID=nexus-control`, so the control plane can fetch the dashboard's certificate (see [HTTPS dashboard](#https-dashboard)).
+
+`--dotfiles` is optional. Without it, control.json names no dotfiles repository and every pylon keeps the layer the image bakes. With it, the installer runs `git ls-remote` first on the branch control.json names for it, `main` in a new control.json, and writes nothing when git cannot reach it. A rerun with the URL control.json holds checks it again, so once the git SSH key is on GitHub, rerunning with the same `--dotfiles` checks an SSH URL. A rerun with another URL checks nothing and says control.json keeps its own. The config write the installer makes after the credentials step leaves `--dotfiles` out, so it never checks with a key GitHub does not know yet. It checks an HTTPS URL without credentials, so give a private repository's SSH URL. It checks an SSH URL with the machine's git SSH key, which the credentials step makes, so on a first install it says the URL is not checked yet. Unchecked, a wrong URL shows as a failed pull in the pylon boot's log. A probe from before optional dotfiles cannot boot a pylon without them, so take `dotfiles` out of an existing control.json only after every probe is upgraded.
 
 Then `src/deploy/setup.ts` writes the configs from `tailscale status --json`:
 
@@ -428,7 +430,7 @@ The control plane runs as the system user `nexus-control`, apart from the probe'
 | `/var/backups/nexus` | The daily backups, as [Daily backup](#daily-backup) describes. Root, mode 0700. |
 | `/var/lib/nexus-backup/status.json` | What the last backup run found, which `nexus doctor` reads, as [Daily backup](#daily-backup) describes. Root's, mode 0644, and it holds no credentials. |
 
-`control.json` names every node's probe, the tailnet nodes that may call the API (`callers`), the common dotfiles layer every new pylon pulls (`dotfiles`), the model new threads start with (`harness.model`), and the https ports previews are allocated from on each node (`previewPorts`, 10200 to 10999 when omitted). A node's `tailnetHost` is its MagicDNS name, such as `infra-testbench.example.ts.net`, because preview URLs name it and its `tailscale serve` certificate is for that name. Each machine's `control-plane.json` must name the control plane's own stable node ID, `self.tailnetNodeId`. The control plane's machine must also be one of its nodes, with a probe: the release view lists the control role under the node whose ID is `self`, and only that node's deployer, authenticated by its deploy key like any node's, may report the control plane's health or drain it. `"resumeAfterUsageLimit": true` makes the control plane type a continue into each Claude worker that stopped on its usage limit, three minutes after the limit resets, as [the CLI's usage-limit stops](../docs/cli.md#usage-limit-stops) describe. It is off when omitted.
+`control.json` names every node's probe, the tailnet nodes that may call the API (`callers`), the common dotfiles layer every new pylon pulls (`dotfiles`, optional: without it pylons keep the image's baked layer), the model new threads start with (`harness.model`), and the https ports previews are allocated from on each node (`previewPorts`, 10200 to 10999 when omitted). A node's `tailnetHost` is its MagicDNS name, such as `infra-testbench.example.ts.net`, because preview URLs name it and its `tailscale serve` certificate is for that name. Each machine's `control-plane.json` must name the control plane's own stable node ID, `self.tailnetNodeId`. The control plane's machine must also be one of its nodes, with a probe: the release view lists the control role under the node whose ID is `self`, and only that node's deployer, authenticated by its deploy key like any node's, may report the control plane's health or drain it. `"resumeAfterUsageLimit": true` makes the control plane type a continue into each Claude worker that stopped on its usage limit, three minutes after the limit resets, as [the CLI's usage-limit stops](../docs/cli.md#usage-limit-stops) describe. It is off when omitted.
 
 ### HTTPS dashboard
 

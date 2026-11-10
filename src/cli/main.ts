@@ -6,7 +6,7 @@
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import { call, CliError, exitCodes, follow, upgrade, UsageError, type Endpoint } from "./transport.ts";
 import { version } from "../version.ts";
-import type { Api, Io, Values } from "./kit.ts";
+import { noteTo, ridingRestarts, type Api, type Io, type Values } from "./kit.ts";
 import { threadOf } from "./refs.ts";
 import { settings, checked } from "./config.ts";
 import { groups, nearest, subcommandsOf, usage, usageOf } from "./help.ts";
@@ -106,13 +106,16 @@ async function runCommand(name: string, args: readonly string[], io: Io): Promis
   }
   // Only once a command calls the API, since connect sets the URL rather than reading it. A failed health read is
   // not kept, so a watch's next try reads it again.
-  let target: Promise<Endpoint> | undefined;
-  const endpoint = () => target ??= settings(values, io.env).then(checked).catch((err: unknown) => { target = undefined; throw err; });
-  const api: Api = async (method, path, body, idleMs) => call(await endpoint(), method, path, body, idleMs);
+  let target: ReturnType<typeof checked> | undefined;
+  const note = noteTo(io.stderr);
+  const read = () => target ??= settings(values, io.env).then((at) => checked(at, command.anyVersion === true, note)).catch((err: unknown) => { target = undefined; throw err; });
+  const endpoint = async (): Promise<Endpoint> => (await read()).endpoint;
+  const api: Api = ridingRestarts(async (method, path, body, idleMs) => call(await endpoint(), method, path, body, idleMs), note);
   if (command.thread === true) positionals[0] = await threadOf(api, positionals[0]!);
   const result = await command.run(api, positionals, values,
-    async (path, onEvent, signal, onCursor) => follow(await endpoint(), path, onEvent, signal, onCursor), { connect: async (path) => upgrade(await endpoint(), path), io });
+    async (path, onEvent, signal, onCursor) => follow(await endpoint(), path, onEvent, signal, onCursor), { connect: async (path) => upgrade(await endpoint(), path), versions: async () => (await read()).versions, io });
   if (result === undefined) return 0;
+  if (typeof result === "number") return result;
   io.stdout.write(`${values.json === true ? JSON.stringify(result.json, null, 2) : result.text}\n`);
   return result.exit === undefined ? 0 : exitCodes[result.exit];
 }

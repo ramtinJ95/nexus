@@ -25,12 +25,15 @@ export class CliError extends Error {
   readonly status: number | null;
   readonly code: RefusalCode | null;
   readonly retryable: boolean;
-  constructor(kind: ErrorKind, message: string, status: number | null = null, code: RefusalCode | null = null, retryable = false) {
+  /** The control plane refused or dropped the connection, as it does while it restarts, so a read may try again. */
+  readonly restarting: boolean;
+  constructor(kind: ErrorKind, message: string, status: number | null = null, code: RefusalCode | null = null, retryable = false, restarting = false) {
     super(message);
     this.kind = kind;
     this.status = status;
     this.code = code;
     this.retryable = retryable;
+    this.restarting = restarting;
   }
 }
 
@@ -66,7 +69,7 @@ function handshake(raw: Socket, host: string): Promise<Socket> {
     const socket = tlsConnect({ socket: raw, host, ...isIP(host) === 0 ? { servername: host } : {} });
     const fail = (err: Error) => {
       raw.destroy();
-      reject(err instanceof CliError ? err : new CliError("unreachable", `the TLS handshake with ${host} failed: ${err.message}`));
+      reject(err instanceof CliError ? err : new CliError("unreachable", `the TLS handshake with ${host} failed: ${err.message}`, null, null, false, restartCodes.has(codeOf(err))));
     };
     socket.once("error", fail);
     raw.once("error", fail);
@@ -247,9 +250,12 @@ function exchange(via: Agent | Socket, host: string, method: string, path: strin
   });
 }
 
-const lost = (host: string, err: Error) => err instanceof CliError ? err : new CliError("unreachable", `the connection to ${host} failed: ${reason(err)}`);
+const lost = (host: string, err: Error) => err instanceof CliError ? err : new CliError("unreachable", `the connection to ${host} failed: ${reason(err)}`, null, null, false, restartCodes.has(codeOf(err)));
 /** A name with both an IPv6 and an IPv4 address fails with one error per address and no message of its own. */
 const reason = (err: Error) => err instanceof AggregateError ? err.errors.map((e: Error) => e.message).join(", ") : err.message;
+const codeOf = (err: Error): string | undefined => (err as NodeJS.ErrnoException).code ?? (err instanceof AggregateError ? (err.errors[0] as NodeJS.ErrnoException | undefined)?.code : undefined);
+const restartCodes: ReadonlySet<string | undefined> = new Set(["ECONNREFUSED", "ECONNRESET", "EPIPE"]);
+const unresolved: ReadonlySet<string | undefined> = new Set(["ENOTFOUND", "EAI_AGAIN"]);
 
 function withIdleTimeout(socket: Socket, what: string, ms = apiIdleMs): Socket {
   socket.setTimeout(ms, () => socket.destroy(new CliError("unreachable", `${what} sent nothing for ${socket.timeout! / 1000}s`)));
@@ -259,9 +265,21 @@ function withIdleTimeout(socket: Socket, what: string, ms = apiIdleMs): Socket {
 function direct(target: HostPort): Promise<Socket> {
   return new Promise((resolve, reject) => {
     const socket = withIdleTimeout(connect(target.port, target.host), `${target.host}:${target.port}`);
-    socket.once("error", (err) => reject(err instanceof CliError ? err : new CliError("unreachable", `cannot reach ${target.host}:${target.port}: ${reason(err)}`)));
+    socket.once("error", (err) => reject(err instanceof CliError ? err : directFailure(target, err)));
     socket.once("connect", () => resolve(socket));
   });
+}
+
+function directFailure(target: HostPort, err: Error): CliError {
+  const at = `${target.host}:${target.port}`;
+  const code = codeOf(err);
+  if (code === "ECONNREFUSED") {
+    return new CliError("unreachable", `nothing is listening on ${at}`, null, null, false, true);
+  }
+  if (unresolved.has(code)) {
+    return new CliError("unreachable", `${target.host} does not resolve. If this device reaches the tailnet only through a SOCKS5 proxy, such as a userspace tailscaled, give it with --socks HOST:PORT or NEXUS_SOCKS. Otherwise \`tailscale status\` shows whether this device is on the tailnet`);
+  }
+  return new CliError("unreachable", `cannot reach ${at}: ${reason(err)}`, null, null, false, restartCodes.has(code));
 }
 
 const replies: Readonly<Record<number, string>> = {
@@ -285,7 +303,7 @@ function tunnel(proxy: HostPort, target: HostPort): Promise<Socket> {
       reject(err);
     };
     const onError = (err: NodeJS.ErrnoException) => fail(err instanceof CliError ? err
-      : err.code === "ECONNREFUSED" ? new CliError("unreachable", `nothing is listening on ${where}. It is ts-home's userspace tailscaled, the only way this Mac reaches the home tailnet. Check it with \`ts-home status\``)
+      : err.code === "ECONNREFUSED" ? new CliError("unreachable", `nothing is listening on ${where}. Start the proxy, such as a userspace tailscaled, or give the one this device uses with --socks HOST:PORT or NEXUS_SOCKS, or none to connect directly`)
       : new CliError("unreachable", `cannot reach ${where}: ${reason(err)}`));
     const onData = (chunk: Buffer) => {
       received = Buffer.concat([received, chunk]);
@@ -298,7 +316,8 @@ function tunnel(proxy: HostPort, target: HostPort): Promise<Socket> {
       }
       if (received.length < 5) return;
       if (received[1] !== 0) {
-        return fail(new CliError("unreachable", `${where} could not reach ${target.host}:${target.port}: ${replies[received[1]!] ?? `reply ${received[1]}`}. The node may be offline or its control plane down. \`ts-home status\` shows whether the node is online`));
+        // Reply 5 is the control plane's own refusal, as while it restarts.
+        return fail(new CliError("unreachable", `${where} could not reach ${target.host}:${target.port}: ${replies[received[1]!] ?? `reply ${received[1]}`}. The node may be offline or its control plane down. \`tailscale status\`, asked of the tailscaled behind the proxy, shows whether the node is online`, null, null, false, received[1] === 5));
       }
       const length = boundLength(received);
       if (length === undefined) return fail(new CliError("unreachable", `${where} sent a reply with unknown address type ${received[3]}`));

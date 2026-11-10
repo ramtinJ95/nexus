@@ -26,8 +26,12 @@ export interface Io {
   readonly stderr: Writable & { readonly isTTY?: boolean };
   readonly env: Readonly<Record<string, string | undefined>>;
 }
+/** This CLI's version, and the one its control plane's health reports, null when it reports none. */
+export interface Versions { cli: string; control: string | null }
 interface Local {
   connect(path: string): Promise<WebSocket>;
+  /** The versions the health read before the command's first request found. */
+  versions(): Promise<Versions>;
   io: Io;
 }
 export interface Command {
@@ -36,9 +40,14 @@ export interface Command {
   args: readonly [min: number, max: number];
   /** Its first argument names a thread, which a prefix of the ID or `@last` may give. */
   thread?: true;
+  /**
+   * It runs against a control plane older than `minControlVersion`, with a warning, since it is how a person
+   * upgrades or diagnoses one.
+   */
+  anyVersion?: true;
   options?: ParseArgsOptionsConfig;
-  /** Nothing when the command printed its own output, as watch does. */
-  run(api: Api, args: readonly string[], values: Values, follow: Follow, local: Local): Promise<Result | void>;
+  /** Nothing when the command printed its own output, as watch does, or the exit code it ends with then. */
+  run(api: Api, args: readonly string[], values: Values, follow: Follow, local: Local): Promise<Result | number | void>;
 }
 
 export const str = (v: Values, key: string) => v[key] as string | undefined;
@@ -101,46 +110,113 @@ export const waitMs = 120_000;
 export const waitPollMs = 1_000;
 
 /**
+ * A line for the person at a wait. Only a terminal gets it, since the client extensions read stdout and may take
+ * output on stderr for a failure.
+ */
+export type Note = (line: string) => void;
+export const noteTo = (stderr: Io["stderr"]): Note => (line) => { if (stderr.isTTY === true) stderr.write(`${line}\n`); };
+
+/**
+ * What a wait says on the run's stderr `to` while it waits: its state, each time that changes, and on Ctrl-C what
+ * carries on without it.
+ */
+export interface Shown { to: Io["stderr"]; state: () => string | undefined; stopped: () => string }
+
+/**
  * A wait rides through an unreachable control plane, since every deploy restarts it and a step that reads finishes
  * on the next try. A step that sends what it waits on passes `tolerateUnreachable: false`, because an
- * unreachable answer may hide a request that ran.
+ * unreachable answer may hide a request that ran. With `shown`, a terminal sees the wait's state, and Ctrl-C ends
+ * the wait with exit code 130 once it said what carries on.
  */
-export async function pollUntil<T>(o: { deadlineMs: number; everyMs: number; tolerateUnreachable?: boolean; timedOut: () => CliError }, step: () => Promise<T | undefined>): Promise<T> {
+export async function pollUntil<T>(o: { deadlineMs: number; everyMs: number; tolerateUnreachable?: boolean; timedOut: () => CliError; shown?: Shown }, step: () => Promise<T | undefined>): Promise<T> {
   const deadline = Date.now() + o.deadlineMs;
-  for (;;) {
-    let lost: CliError | null = null;
-    try {
-      const done = await step();
-      if (done !== undefined) return done;
-    } catch (err) {
-      if (o.tolerateUnreachable === false || !(err instanceof CliError) || err.kind !== "unreachable") throw err;
-      lost = err;
+  const shown = o.shown?.to.isTTY === true ? o.shown : undefined;
+  const note = shown === undefined ? () => {} : noteTo(shown.to);
+  let said: string | undefined;
+  const show = () => {
+    const state = shown?.state();
+    if (state !== undefined && state !== said) note(said = state);
+  };
+  const stop = () => {
+    note(shown!.stopped());
+    process.exit(130);
+  };
+  if (shown !== undefined) process.once("SIGINT", stop);
+  try {
+    show();
+    for (;;) {
+      let lost: CliError | null = null;
+      try {
+        const done = await step();
+        if (done !== undefined) return done;
+      } catch (err) {
+        if (o.tolerateUnreachable === false || !(err instanceof CliError) || err.kind !== "unreachable") throw err;
+        lost = err;
+      }
+      show();
+      if (Date.now() >= deadline) {
+        const timedOut = o.timedOut();
+        throw lost === null ? timedOut : new CliError(timedOut.kind, `${timedOut.message}\nThe last poll failed: ${lost.message}`);
+      }
+      await sleep(o.everyMs);
     }
-    if (Date.now() >= deadline) {
-      const timedOut = o.timedOut();
-      throw lost === null ? timedOut : new CliError(timedOut.kind, `${timedOut.message}\nThe last poll failed: ${lost.message}`);
-    }
-    await sleep(o.everyMs);
+  } finally {
+    process.off("SIGINT", stop);
   }
 }
 
 /** Each try is human activity, so the first wakes a paused pylon. */
-export async function whenRunning<T>(api: Api, id: string, send: () => Promise<T>, undone: string): Promise<T> {
-  let refused: CliError;
+export async function whenRunning<T>(api: Api, io: Io, id: string, send: () => Promise<T>, undone: string): Promise<T> {
+  let refused: CliError | undefined;
+  let sending = false;
   return pollUntil({
     deadlineMs: waitMs, everyMs: waitPollMs, tolerateUnreachable: false,
-    timedOut: () => new CliError("failed", `the pylon of ${id} did not run within ${waitMs / 1000} s, so ${undone}. ${refused.message}`),
+    timedOut: () => new CliError("failed", `the pylon of ${id} did not run within ${waitMs / 1000} s, so ${undone}. ${refused!.message}`),
+    shown: {
+      to: io.stderr,
+      state: () => refused && `Waiting up to ${waitMs / 1000} s for the pylon of ${id} to run: ${refused.message}`,
+      stopped: () => sending ? `Stopped waiting while a try was out, so it may have gone through. The pylon of ${id} keeps waking` : `Stopped waiting, so ${undone}. The pylon of ${id} keeps waking`,
+    },
   }, async () => {
     try {
+      sending = true;
       return await send();
     } catch (err) {
       if (!(err instanceof CliError) || !err.retryable) throw err;
+      sending = false;
       const { status } = (await request(api, threadRoutes.show, { thread: id })).thread;
       if (status === "archived" || status === "deleted") throw err;
       refused = err;
       return undefined;
     }
   });
+}
+
+/** How long a read tries again after the control plane refused or dropped its connection, as a deploy's restart does. */
+export const restartMs = 15_000;
+
+/**
+ * A GET may run twice, so one that meets a restarting control plane tries again each second for `restartMs`, and
+ * the process says so once, however many polls a wait makes. Any other request fails at once, since it may have gone
+ * through. Either failure then names where to look, which `connect`, trying its candidates, does not need.
+ */
+export function ridingRestarts(api: Api, said: Note): Api {
+  let noted = false;
+  const lookAt = (err: CliError) => new CliError(err.kind, `${err.message}. The control plane is down or restarting, or the URL is not its own: \`nexus connect <host>\` finds it again, and \`systemctl status nexus-control\` on its machine shows whether it runs`, err.status, err.code, err.retryable, err.restarting);
+  return async (method, path, body, idleMs) => {
+    const deadline = Date.now() + restartMs;
+    for (;;) {
+      try {
+        return await api(method, path, body, idleMs);
+      } catch (err) {
+        if (!(err instanceof CliError) || !err.restarting) throw err;
+        if (method !== "GET" || Date.now() >= deadline) throw lookAt(err);
+        if (!noted) said(`${err.message}. Trying again for up to ${restartMs / 1000} s, as the control plane restarts on each deploy`);
+        noted = true;
+      }
+      await sleep(1_000);
+    }
+  };
 }
 
 export const reconnectMs = (failed: number, maxMs = 30_000) => Math.min(maxMs, 1000 * 2 ** failed);

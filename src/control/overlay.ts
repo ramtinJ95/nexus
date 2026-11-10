@@ -20,8 +20,8 @@ export interface PylonOverlay {
   allowedHosts: readonly string[];
   previews: readonly { service: ServiceName; url: string }[]; // https://<node>.<tailnet>.ts.net:<port>/
   logins: readonly LoginKind[];
-  /** The common dotfiles layer. Every boot pulls it before relaunching sessions. The image bakes a fallback copy. */
-  dotfiles: { repo: string; ref: string };
+  /** The common dotfiles layer. Every boot pulls it before relaunching sessions. The image bakes a fallback copy, which a pylon without one keeps. */
+  dotfiles?: { repo: string; ref: string } | undefined;
   /** The pylon's frozen BootInputs.repo, so the guide describes this checkout. */
   repo: RepoInit;
   /** Names and hosts, never values, so the guide can say what each token is for. From BootInputs.network.secrets. */
@@ -64,7 +64,7 @@ export function renderOverlay(overlay: PylonOverlay): readonly OverlayFile[] {
     allowedHosts: overlay.allowedHosts,
     previews: overlay.previews,
     logins: overlay.logins,
-    dotfiles: overlay.dotfiles,
+    ...overlay.dotfiles === undefined ? {} : { dotfiles: overlay.dotfiles },
   };
   return [
     { path: "/etc/profile.d/nexus.sh", mode: 0o644, owner: "root", content: Object.entries(env).map(([name, value]) => `export ${name}=${shellQuote(value)}\n`).join("") },

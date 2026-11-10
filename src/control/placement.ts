@@ -72,7 +72,7 @@ function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighe
   const missing = need.network.secrets.map((s) => s.name).filter((name) => !o.grants.secrets.includes(name) && !o.heldSecrets.includes(name));
   const from = (name: string) => heldSecrets.includes(name) ? `${name}, which its probe is too old to take from the control plane` : `${name} in its secret file`;
   if (missing.length > 0) return refused(`has no secret ${missing.map(from).join(", ")}`);
-  const ssh = [...need.repo.kind === "clone" ? [need.repo.url] : [], need.dotfiles.repo].filter((url) => !url.startsWith("https://"));
+  const ssh = [...need.repo.kind === "clone" ? [need.repo.url] : [], ...need.dotfiles === undefined ? [] : [need.dotfiles.repo]].filter((url) => !url.startsWith("https://"));
   if (ssh.length > 0 && !o.grants.gitSsh) return refused(`has no git SSH key to reach ${ssh.join(" and ")}`);
   // Room that frees never gives a pylon more than the node has.
   const disks = c.disks?.find((d) => d.pylons === true);

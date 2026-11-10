@@ -5,7 +5,7 @@ import type { PylonId, TailnetNodeId } from "../ids.ts";
 import type { NodeHealth } from "../protocol/client.ts";
 import type { NodeMetrics } from "./node-metrics.ts";
 import { sampleOf } from "./node-metrics.ts";
-import { node, phone, testApi, withThread, deployment } from "../test-support/api-kit.ts";
+import { node, phone, testApi, withThread, deployment, admitStep } from "../test-support/api-kit.ts";
 
 const hour = 3_600_000;
 const day = 24 * hour;
@@ -59,7 +59,7 @@ test("only a deployer reads a node's metrics, of a node that exists, over a rang
   assert.equal((await s.call("GET", path(`from=${to - hour}`))).body.to >= to, true, "to defaults to now");
   assert.deepEqual(await s.call("GET", path(`from=${to - hour}`, "nowhere")), { status: 404, body: { error: "no node nowhere", code: null, retryable: false } });
   s.callAs(phone);
-  assert.deepEqual(await s.call("GET", path(`from=${to - hour}`)), { status: 403, body: { error: "caller may not read a node's metrics: only deployers may, never infrastructure nodes or pylons", code: null, retryable: false } });
+  assert.deepEqual(await s.call("GET", path(`from=${to - hour}`)), { status: 403, body: { error: `caller may not read a node's metrics: only deployers may, never infrastructure nodes or pylons${admitStep(phone, "deploy")}`, code: null, retryable: false } });
   s.callAs("nFIREBAT" as TailnetNodeId);
   assert.equal((await s.call("GET", path(`from=${to - hour}`))).status, 403, "the control node is never a deployer, though listed");
   const off = await testApi(t);

@@ -297,7 +297,7 @@ test("start --request-id starts one thread and sends its first message once, how
   assert.equal(s.requests() - before, 1, "one request starts it with its first message");
   const again = await s.nexus(args);
   assert.equal(again.code, 0, again.stderr);
-  assert.equal(again.stdout, `Started ${first.id} on acme: Fix the build\nSent the first message.\n`);
+  assert.equal(again.stdout, `Started ${first.id} on acme: Fix the build\nSent the first message.\n\`nexus watch ${first.id}\` follows it.\n`);
   assert.deepEqual((await s.json(["threads"])).map((r: Thread) => r.id), [first.id]);
   assert.deepEqual(s.fake.transcript(first.id).messages.map((m) => m.content), ["Fix the build"]);
   const other = await s.nexus(["start", "--project", "acme", "--message", "Fix the tests", "--request-id", "start:cli", "--json"]);
@@ -310,7 +310,7 @@ test("start --plan starts a planning thread, whose first message carries the gui
   assert.equal((await s.nexus(["start", "--project", "acme", "--plan", "--claude", "Plan it"])).code, 64);
   const started = await s.nexus(["start", "--project", "acme", "--plan", "--message", "Plan the orchestration wave"]);
   assert.equal(started.code, 0, started.stderr);
-  const id = /^Started planning thread (th-[0-9a-f]+) on acme: Plan the orchestration wave\nSent the first message\.$/.exec(started.stdout.trim())?.[1];
+  const id = /^Started planning thread (th-[0-9a-f]+) on acme: Plan the orchestration wave\nSent the first message\.\n`nexus watch \1` follows it\.$/.exec(started.stdout.trim())?.[1];
   assert.ok(id !== undefined, started.stdout);
   const first = s.fake.transcript(id).messages[0]!.content as string;
   assert.ok(first.startsWith(planningPrefix) && first.endsWith("Plan the orchestration wave"));

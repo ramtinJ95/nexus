@@ -41,6 +41,8 @@ export const node = "rj-firebat" as NodeName;
 export const laptop = "nLAPTOP" as TailnetNodeId;
 /** An allowed person's device that is not a deployer. */
 export const phone = "nPHONE" as TailnetNodeId;
+/** The step a refusal names that lets a person's device `caller` do `what`. */
+export const admitStep = (caller: TailnetNodeId, what: string) => `. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it ${what}: sudo deploy/install.sh --admit ${caller}`;
 export const project = {
   id: "acme", repoUrl: "git@example.com:acme.git", defaultBranch: "main", defaultNode: node,
   resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: ["registry.npmjs.org"],
@@ -67,7 +69,8 @@ export type TestApiOptions = Omit<Partial<ApiOptions>, "deployment" | "features"
   pipeline?: boolean;
   /** Defaults to `pipeline`. */
   planning?: boolean;
-  dotfiles?: typeof dotfiles;
+  /** null is a control.json that names no dotfiles repository. */
+  dotfiles?: typeof dotfiles | null;
   gitIdentity?: { name: string; email: string };
   /** The registry's clock. */
   clock?: () => number;
@@ -119,7 +122,7 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
   }]]);
   const claude = claudeConversations({ registry, probes: apiOptions.probes ?? probes, log: (message) => { logged.push(message); } });
   const services = threadServices({
-    registry, harness, mirror, dotfiles: dots ?? dotfiles, gitIdentity, wake, gate: turnGate(() => false),
+    registry, harness, mirror, dotfiles: dots === null ? undefined : dots ?? dotfiles, gitIdentity, wake, gate: turnGate(() => false),
     queue: queued === true || piped === true, planning: planned === true ? { replies: agentReader(registry, harness, claude).replies } : null,
   });
   const { startThread, queue, pipeline, planning: plans } = services.api;
@@ -209,7 +212,7 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
   };
 }
 
-export async function withThread(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; deployment?: DeploymentOptions; reviews?: ReviewLoop; project?: typeof project; dotfiles?: typeof dotfiles; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number; clock?: () => number } = {}) {
+export async function withThread(t: import("node:test").TestContext, options: { gitIdentity?: { name: string; email: string }; deployment?: DeploymentOptions; reviews?: ReviewLoop; project?: typeof project; dotfiles?: typeof dotfiles | null; streamStallMs?: number; attachTiming?: AttachTiming; closeWaitMs?: number; clock?: () => number } = {}) {
   const s = await testApi(t, options);
   assert.equal((await s.call("POST", "/v1/projects", options.project ?? project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);

@@ -6,7 +6,7 @@
  */
 import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createServer as createHttpServer, type RequestListener } from "node:http";
@@ -45,6 +45,20 @@ export async function inProcess(args: readonly string[], env: Io["env"]): Promis
   const sink = (stream: keyof typeof printed) => new Writable({ decodeStrings: false, write(chunk, _encoding, done) { printed[stream] += chunk; done(); } });
   const code = await main(args, { stdin: Readable.from([]), stdout: sink("stdout"), stderr: sink("stderr"), env });
   return { code, ...printed };
+}
+
+/**
+ * The CLI as a process of its own whose stderr claims a terminal, as a person's shell gives one, while the test reads
+ * what it wrote so far and may send it a signal.
+ */
+export function onTerminal(args: readonly string[], env: Io["env"]) {
+  const child = spawn(process.execPath, ["--import", 'data:text/javascript,Object.defineProperty(process.stderr, "isTTY", { value: true })', cli, ...args], { env });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk: Buffer) => { stdout += chunk; });
+  child.stderr.on("data", (chunk: Buffer) => { stderr += chunk; });
+  const exited = once(child, "exit").then(([code]): Run => ({ code: code as number, stdout, stderr }));
+  return { child, stderr: () => stderr, exited };
 }
 
 /** The CLI as a process of its own, with `env` as its whole environment, in `cwd` if given. */
@@ -166,13 +180,14 @@ export async function setup(t: TestContext, setupOptions: { queue?: boolean; htt
    * checkout `cwd` names, whose origin a start without --project reads.
    */
   const spawned = (args: readonly string[], overrides?: Record<string, string>, cwd?: string) => inChild(args, env(overrides), cwd);
+  const terminal = (args: readonly string[]) => onTerminal(args, env());
   async function json(args: readonly string[], overrides?: Record<string, string>, run = nexus): Promise<any> {
     const res = await run([...args, "--json"], overrides);
     assert.equal(res.code, 0, res.stderr);
     return JSON.parse(res.stdout);
   }
   return {
-    registry, fake, proxy, home, get api() { return control.api; }, env, nexus, spawned, json, commands, startThread,
+    registry, fake, proxy, home, get api() { return control.api; }, env, nexus, spawned, onTerminal: terminal, json, commands, startThread,
     requests: control.requests,
     callAs: control.callAs,
     probeAnswers(next: typeof answer) { answer = next; },
@@ -211,12 +226,23 @@ export async function claudeWatched(t: TestContext, s: Awaited<ReturnType<typeof
   if (launched) claudeWorkerAt(s.registry, thread.id, "started", { session: "s1" });
   const projects = await tempDir("nexus-claude-projects-", t);
   await mkdir(join(projects, "-home-user-workspace-repo"));
-  s.probePipes(async (argv) => processStream(argv[0]!, argv.slice(1).map((arg) => arg === claudeProjects ? projects : arg), () => {}));
+  let held: Promise<void> | null = null;
+  s.probePipes(async (argv) => {
+    await held;
+    return processStream(argv[0]!, argv.slice(1).map((arg) => arg === claudeProjects ? projects : arg), () => {});
+  });
   observeRunning(s, thread, [], []);
   let sequence = 0;
   return {
     thread, transcript: join(projects, "-home-user-workspace-repo", "s1.jsonl"),
-    report: (kind: "session.turn-started" | "session.turn-ended") => s.registry.threads.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time: Date.now(), event: { kind, session: "s1" } }),
+    /** Makes each read of the pylon wait until the returned function is called. */
+    holdReads() {
+      const gate = Promise.withResolvers<void>();
+      held = gate.promise;
+      return () => { held = null; gate.resolve(); };
+    },
+    /** A session event, at `time` by the pylon's clock, now unless given. */
+    report: (kind: "session.turn-started" | "session.turn-ended", time = Date.now()) => s.registry.threads.reportSession(node, { sequence: ++sequence, pylon: thread.pylonId, time, event: { kind, session: "s1" } }),
   };
 }
 
