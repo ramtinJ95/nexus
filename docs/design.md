@@ -141,9 +141,9 @@ The probe also serves its host's health on request: load, CPUs, memory and swap,
 
 ## Doctor and health alerts
 
-`nexus doctor` and the control plane's health alerts run the same checks, so the person learns that a running install is unhealthy without reading logs over SSH. The checks in `src/control/doctor.ts` are pure functions over facts the control plane already holds, and `src/control/doctor-run.ts` gathers them at the boundary: the registry's nodes, their observations and the release reports, the archived threads whose disk it keeps, the backup's status file, the harness's login and the certificate the dashboard serves. Each check gives ok, warn or fail with one line that says what is wrong and what to do.
+`nexus doctor` and the control plane's health alerts run the same checks, so the person learns that a running install is unhealthy without reading logs over SSH. The checks in `src/control/doctor.ts` are pure functions over facts the control plane already holds, and `src/control/doctor-run.ts` gathers them at the boundary: the registry's nodes, their observations and the release reports, the archived threads whose disk it keeps, the backup's status file, the harness's login, the certificate the dashboard serves, what GitHub last said of the control plane's token, and tailscaled's status on the control plane's machine. Each check gives ok, warn or fail with one line that says what is wrong and what to do.
 
-Each node gets four checks:
+Each node gets five checks:
 
 | Check | Ok | Warn | Fail |
 |---|---|---|---|
@@ -151,14 +151,16 @@ Each node gets four checks:
 | `release` | Its probe role runs the desired release and is healthy, no release is desired, or the desired release was requested under 30 minutes ago and the role still rolls out toward it | It still deploys, waits, or its deployer's report is missing or stale 30 minutes after the desired release was requested | It failed or rolled back |
 | `disk` | No filesystem Nexus writes to is low | A filesystem is low, under 10% or 20 GiB free, as [node diagnostics](#node-diagnostics) say, or the probe is too old to report filesystems | The pylons' filesystem is under the reserve a start keeps, so every start and wake on the node is refused |
 | `pylons` | None crashed or orphaned | A pylon crashed, an orphan is listed, or the node is overcommitted | |
+| `tailnet-key` | Its tailnet key has 14 days or more left, or key expiry is off for it | Under 14 days left, or tailscaled's status on the control plane's machine cannot be read or does not list the node | Its key expired |
 
-The control plane gets five more:
+The control plane gets six more:
 
 | Check | Ok | Warn | Fail |
 |---|---|---|---|
 | `release` | The control role runs the desired release and is healthy | As a node's | As a node's |
 | `backup` | The newest backup verified and is under 26 hours old | The last run failed, but the newest is still under 26 hours old, or no run is recorded yet and the control plane has run under 26 hours | No run recorded though the control plane has run 26 hours, no complete backup, the newest does not verify, or it is 26 hours old or more |
 | `login` | Signed in, and the login offers `harness.model` | | No such provider, not signed in, the model is not offered, or an OAuth refresh fails |
+| `github-token` | GitHub's last answer gives the token 14 days or more, or no expiry, or `control.json` names no `github.tokenFile` | Under 14 days left, or GitHub gave no answer | GitHub refuses the token, or it expired |
 | `certificate` | The dashboard's certificate has 6 days or more left, or `control.json` sets no `https` | Under 6 days left | Under 2 days, expired, for another name, or the port does not answer |
 | `archived-disks` | No archived disk is kept past its 24 hours, or each kept one waits for a backup and was read under 26 hours ago | A disk past its 24 hours waits for its token usage to be read, after no failed read or after fewer than 3 in a row | Reading one disk's usage failed 3 times in a row, a disk is still unread 48 hours after its archive, or a disk read 26 hours ago or more still waits for a backup |
 
@@ -169,6 +171,10 @@ The backup check reads `/var/lib/nexus-backup/status.json`, which the root backu
 The archived-disks check reads the archived threads whose disk the cleanup keeps for their usage, less those whose node no longer lists their pylon, since those have no disk left. A disk whose reads keep failing stays until a read succeeds or the person deletes the thread, and the check names it with the last reason, and Needs you shows it. A pylon that cannot be read, one that failed or whose image no online node holds, is not counted: its disk goes at its 24 hours with its usage recorded unread. A disk whose read waits, for an offline node, a node without room for the pylon or a probe too old to wake it, records why, which the check, the thread and `nexus show` say, and it fails 48 hours after the archive. A disk that waits for a backup fails with the backup check, which says why no backup verified.
 
 The login check reads the stored login, lists the models it offers, and resolves its auth as a turn would, which refreshes an expired OAuth token against OpenAI's auth server. It never calls a model. A failure keeps only pi-ai's error code, such as `oauth`, because its message can carry the token endpoint's reply, which the changes keep 30 days. An API key resolves without a request, so the check cannot tell a revoked key from a good one.
+
+The github-token check reads what GitHub's answers to the control plane's own calls say of its token: a 401, which an expired or revoked token gets, or the `github-authentication-token-expiration` header, which a token with an expiry gets on each answer. A classic token without one, or a fine-grained one set to never expire, gets no header. When no call had an answer in the last hour, as on an install with no open pull request, the check asks for GitHub's rate limit, which costs none of it. It covers only the token in `github.tokenFile`. Each node's `GH_TOKEN` in `/etc/nexus/secrets.env`, which the pylons get, is another copy the control plane cannot read, so its text says so, and the person renews both.
+
+The tailnet-key check reads tailscaled's status over LocalAPI on the control plane's machine, which lists that machine as `Self` and every other node as a peer, each with its `KeyExpiry` when key expiry is on for it. When the control node's key expires, the API, the dashboard, the CLI and every alert go dark at once, and another node's expiry otherwise shows only as `offline` after the fact, so both warn two weeks ahead. A node key renews only by reauthenticating the node or by turning off its key expiry in Tailscale's admin console, which Nexus cannot do for the person. A control plane that runs on no node gets no check of its own key, as the release check already warns.
 
 The certificate check opens a TLS connection to the dashboard's port, as a browser does, without trusting what it gets, so an expiring certificate is still read. The API asks tailscaled for a certificate valid a week and reloads it every 12 hours, so under 6 days left means renewal fails. Nexus cannot read the certificates `tailscale serve` uses for previews on each node, which tailscaled renews on its own, and the probes speak plain HTTP over WireGuard, so they rely on no certificate.
 

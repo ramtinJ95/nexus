@@ -10,6 +10,8 @@ import type { ReleaseReport, ReleaseView } from "../protocol/deploy.ts";
 import type { LoginState } from "./harness/credentials.ts";
 import type { BackupStatusRead } from "./backup-status.ts";
 import type { NodeSummary } from "./wire.ts";
+import type { TokenAnswer } from "./github.ts";
+import type { TailnetDevice } from "../tailscale.ts";
 import { worst, type Check, type ControlCheckName, type DoctorReport, type NodeCheckName, type Verdict } from "./doctor-model.ts";
 
 /** The dashboard's certificate as a TLS client sees it on the dashboard's port, or `none` without control.json's https. */
@@ -30,6 +32,10 @@ export interface DoctorFacts {
   /** `unreadable` holds the error's code, never its message, which can carry the login's own text. */
   login: LoginState | { unreadable: string };
   certificate: CertificateFact;
+  /** What GitHub last said of the control plane's token, `none` when control.json names no github.tokenFile, or why GitHub gave no answer. */
+  github: TokenAnswer | { kind: "none" } | { kind: "unread"; error: string };
+  /** Every device tailscaled on the control plane's machine lists, itself among them, or why its status could not be read. */
+  tailnet: readonly TailnetDevice[] | { unreadable: string };
   /** The archived threads whose disk may be kept for their usage, as the registry's keptArchives lists them, less those whose node has no disk for them. */
   keptArchives: readonly (ActivityFacts & ArchiveFacts & { id: ThreadId; title: string })[];
 }
@@ -50,6 +56,8 @@ export const rolloutMs = 30 * minute;
 /** The API asks tailscaled for a certificate valid a week and reloads it every 12 hours, so less than this left means renewal fails. */
 export const certificateWarnMs = 6 * day;
 export const certificateFailMs = 2 * day;
+/** A credential that expires sooner warns, so the person has two weeks to renew it. */
+export const expiryWarnMs = 14 * day;
 
 const span = (ms: number) => ms < hour ? `${Math.max(1, Math.round(ms / minute))} min` : ms < 2 * day ? `${Math.round(ms / hour)} h` : `${Math.round(ms / day)} days`;
 const ok = (text: string): Verdict => ({ status: "ok", text });
@@ -128,6 +136,33 @@ function login(f: DoctorFacts): Verdict {
   return ok(credential === "oauth" ? `signed in to ${provider} with ChatGPT, which offers ${modelId}` : `an API key for ${provider}, which Nexus cannot check without calling a model`);
 }
 
+function githubToken(f: DoctorFacts): Verdict {
+  const t = f.github;
+  if (t.kind === "none") return ok("control.json names no github.tokenFile, so the PR watch, the review loop and landings are off");
+  const copy = "This is the control plane's token in github.tokenFile. Each node's GH_TOKEN in /etc/nexus/secrets.env, which the pylons get, is another copy this check does not read";
+  const renew = `Install a new token in github.tokenFile and restart nexus-control, as deploy/README.md's Control-plane GitHub PR watch says. ${copy}`;
+  if (t.kind === "unread") return warn(`GitHub gave no answer about the control plane's token, with a ${t.error} error, so its expiry is unknown. ${copy}`);
+  if (t.kind === "refused") return fail(`GitHub refuses the control plane's token, as it does an expired or revoked one, so the PR watch, the review loop and landings fail. ${renew}`);
+  if (t.expiresAt === null) return ok(`GitHub reports no expiry for the control plane's token. ${copy}`);
+  const left = Date.parse(t.expiresAt) - f.now;
+  if (left <= 0) return fail(`the control plane's GitHub token expired at ${t.expiresAt}, so the PR watch, the review loop and landings fail. ${renew}`);
+  if (left < expiryWarnMs) return warn(`the control plane's GitHub token expires in ${span(left)}, at ${t.expiresAt}, and then the PR watch, the review loop and landings fail. ${renew}`);
+  return ok(`the control plane's GitHub token is valid for ${span(left)}. ${copy}`);
+}
+
+function tailnetKey(n: NodeSummary, f: DoctorFacts): Verdict {
+  if ("unreadable" in f.tailnet) return warn(`tailscaled's status on the control plane's machine could not be read, with a ${f.tailnet.unreadable} error, so this node's key expiry is unknown`);
+  const device = f.tailnet.find((d) => d.id === n.tailnetNodeId);
+  if (device === undefined) return warn(`tailscaled on the control plane's machine does not list tailnet node ${n.tailnetNodeId}, so its key expiry is unknown. Check that ${n.tailnetHost} is in the tailnet`);
+  if (device.keyExpiry === null) return ok("key expiry is off for it in the tailnet");
+  const control = n.name === f.controlNode ? ", which takes the API, the dashboard, the CLI and every alert with it" : "";
+  const renew = "Turn off key expiry for it in Tailscale's admin console, or reauthenticate it with sudo tailscale up --force-reauth from a console that does not run over the tailnet";
+  const left = Date.parse(device.keyExpiry) - f.now;
+  if (left <= 0) return fail(`its tailnet key expired at ${device.keyExpiry}, so it is off the tailnet${control}. ${renew}`);
+  if (left < expiryWarnMs) return warn(`its tailnet key expires in ${span(left)}, at ${device.keyExpiry}, and then it drops off the tailnet${control}. ${renew}`);
+  return ok(`its tailnet key is valid for ${span(left)}`);
+}
+
 function certificate(f: DoctorFacts): Verdict {
   const c = f.certificate;
   if (c.kind === "none") return ok("control.json sets no https, so the dashboard serves no certificate");
@@ -174,11 +209,13 @@ const nodeChecks: Readonly<Record<NodeCheckName, (n: NodeSummary, f: DoctorFacts
   release: (n, f) => release(f.release.nodes.find((r) => r.node === n.name && r.role === "probe"), f.release.desired, f.now),
   disk,
   pylons,
+  "tailnet-key": tailnetKey,
 };
 const controlChecks: Readonly<Record<ControlCheckName, (f: DoctorFacts) => Verdict>> = {
   release: (f) => release(f.release.nodes.find((r) => r.node === f.controlNode && r.role === "control"), f.release.desired, f.now),
   backup,
   login,
+  "github-token": githubToken,
   certificate,
   "archived-disks": archivedDisks,
 };
