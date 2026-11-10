@@ -44,6 +44,13 @@ function fakeRegistry(nodes: FakeNode[]) {
       ...Object.fromEntries((n.orphans ?? []).map((p) => [`pylonResident:pylon-${p.id}:`, p.residentGiB])) },
   };
   const byName = new Map(nodes.map((n) => [n.name, n]));
+  // Each pylon's thread is active, so one its node has yet to report is about to boot there.
+  const pylonsWithThreadsOn = (name: NodeName) => (byName.get(name)?.pylons ?? []).map((p) => ({
+    pylon: { pylonId: `pylon-${p.id}` as PylonId, failed: null, retrying: false, boot: { resources: { cpus: 2, memoryGiB: p.memoryGiB, diskGiB: 10 } } } as unknown as StoredPylon,
+    thread: { id: p.id, status: "active", agentTurnRunning: false, working: false, ...p.held
+      ? { lastAgentActivityAt: now - 3_600_000, lastHumanActivityAt: now - 3_600_000, ...!released.has(p.id) && { awaitedUntil: now + 600_000 } }
+      : { lastAgentActivityAt: now, lastHumanActivityAt: now } } as unknown as Thread,
+  }));
   return {
     now: () => now,
     nodes: { nodes: () => nodes.map(record) },
@@ -52,13 +59,8 @@ function fakeRegistry(nodes: FakeNode[]) {
       pylonsWithStatusOn: (name: NodeName) => (byName.get(name)?.pylons ?? []).map((p) => ({
         pylon: { pylonId: `pylon-${p.id}` as PylonId, boot: { resources: { cpus: 2, memoryGiB: p.memoryGiB, diskGiB: 10 } } } as StoredPylon, status: "active" as const,
       })),
-      // Each pylon's thread is active, so one its node has yet to report is about to boot there.
-      pylonsWithThreadsOn: (name: NodeName) => (byName.get(name)?.pylons ?? []).map((p) => ({
-        pylon: { pylonId: `pylon-${p.id}` as PylonId, failed: null, retrying: false, boot: { resources: { cpus: 2, memoryGiB: p.memoryGiB, diskGiB: 10 } } } as unknown as StoredPylon,
-        thread: { id: p.id, status: "active", agentTurnRunning: false, working: false, ...p.held
-          ? { lastAgentActivityAt: now - 3_600_000, lastHumanActivityAt: now - 3_600_000, ...!released.has(p.id) && { awaitedUntil: now + 600_000 } }
-          : { lastAgentActivityAt: now, lastHumanActivityAt: now } } as unknown as Thread,
-      })),
+      pylonsWithThreadsOn,
+      pylonsWithHeldThreadsOn: (name: NodeName) => pylonsWithThreadsOn(name).filter(({ thread }) => thread.awaitedUntil !== undefined),
     },
     placement: {
       releaseHold: (thread: ThreadId) => { released.add(thread); },

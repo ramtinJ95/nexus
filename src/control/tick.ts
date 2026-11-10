@@ -51,7 +51,10 @@ export interface TickContext {
   artifactSha256: PlanInput["artifactSha256"];
   /** Called after every change to the record, including just before a submit. */
   save(pylon: PylonRecord): void;
-  /** The desired phase as it stands now, read again after the waits on the probe, so no plan acts on one they overturned. */
+  /**
+   * The desired phase as it stands now, read again after a wait on the probe, so no plan acts on one it overturned. A
+   * tick that does not wait plans on the desired phase its pylon came with.
+   */
   desired: () => DesiredPhase;
   /** The boot whose transcripts a settle sealed, read again with the desired phase. */
   sealedBoot: () => string | undefined;
@@ -66,7 +69,9 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
   const { probe } = ctx;
   let { observation } = ctx;
   let inFlight: JobStatus | null = null;
+  let waited = false;
   if (observation !== null && pylon.submitted !== null) {
+    waited = true;
     try {
       const settled = await settle(pylon, ctx, observation);
       if (settled === "wait") return { kind: "wait", reason: "in-flight" };
@@ -77,7 +82,7 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
       observation = null;
     }
   }
-  pylon.desired = ctx.desired();
+  if (waited) pylon.desired = ctx.desired();
   const failedNow = failedStep(pylon);
   if (failedNow !== null) return failedNow;
   const sealedBoot = ctx.sealedBoot();
