@@ -5,7 +5,7 @@ import type { Io } from "./kit.ts";
 
 const entries = (names: readonly string[]) => [...new Set(names.map((name) => commands[name]!.help))].flat().join("\n");
 
-export const usage = (env: Io["env"]) => `nexus ${version}, the Nexus control plane from this Mac
+export const usage = (env: Io["env"]) => `nexus ${version}, the Nexus control plane from this machine
 
 ${sections.map((section) => `${section.title}\n${entries(section.names)}\n`).join("\n")}
 Help

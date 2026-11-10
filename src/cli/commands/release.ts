@@ -123,7 +123,7 @@ export const answeredText = (view: ReviewView, said: readonly string[], running:
 export const releaseCommands: Readonly<Record<string, Command>> = {
   release: {
     help: ["  nexus release"],
-    args: [0, 0],
+    args: [0, 0], anyVersion: true,
     async run(api) {
       const view = await request(api, releaseRoutes.release, {});
       return { json: view, text: releaseText(view) };
@@ -168,7 +168,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
   },
   deploy: {
     help: ["  nexus deploy <commit|main> [--wait]"],
-    args: [1, 1], options: { wait: { type: "boolean" } },
+    args: [1, 1], anyVersion: true, options: { wait: { type: "boolean" } },
     async run(api, [commit], values, _follow, { io }) {
       if (commit !== "main" && !fullCommit.test(commit!)) throw new UsageError("deploy takes main or a full lower-case commit hash");
       let view = await request(api, releaseRoutes.deploy, { body: { commit: commit! } });

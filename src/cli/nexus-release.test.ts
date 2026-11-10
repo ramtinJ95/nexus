@@ -93,7 +93,7 @@ test("image build --wait ends with the rollout to run next, which stays a comman
     if (method === "POST") return built;
     return { current: image.id, previous: null, images: [], operation: { ...built, steps: [{ node, state: "done", job: null, reason: null }], state: "done", finishedAt: 2 } };
   };
-  const result = await commands["image build"]!.run(api, [], { wait: true }, null as never, { connect: null as never, io: process });
+  const result = await commands["image build"]!.run(api, [], { wait: true }, null as never, { connect: null as never, versions: null as never, io: process });
   assert.deepEqual(asked, ["POST /v1/images/build", "GET /v1/images"], "it rolls nothing out");
   assert.equal((result as Result).text, `No images.\nbuild ${image.id}: done\n  ${node}: done\nRoll it out to every online node with: nexus image rollout ${image.id} --wait`);
 });

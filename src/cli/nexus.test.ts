@@ -263,7 +263,7 @@ test("each failure has its own exit code, and with --json its error is one JSON 
   await fails(["show"], 64, { kind: "invalid", status: null });
 
   const down = await fails(["threads"], 2, { kind: "unreachable", status: null }, { NEXUS_SOCKS: `127.0.0.1:${await freePort()}` });
-  assert.match(down, /nothing is listening on the SOCKS proxy .*ts-home/);
+  assert.match(down, /nothing is listening on the SOCKS proxy at \S+\. Start the proxy, such as a userspace tailscaled, or give the one this device uses with --socks HOST:PORT or NEXUS_SOCKS, or none to connect directly$/);
   const refusing = await socksProxy(t, 4);
   const offline = await fails(["threads"], 2, { kind: "unreachable", status: null }, { NEXUS_SOCKS: `127.0.0.1:${refusing.port}` });
   assert.match(offline, /could not reach nexus\.test:\d+: host unreachable\. The node may be offline/);
@@ -272,7 +272,7 @@ test("each failure has its own exit code, and with --json its error is one JSON 
   assert.match(closed, /closed the connection before answering the CONNECT/);
 
   const unresolved = await fails(["threads"], 2, { kind: "unreachable", status: null }, { NEXUS_URL: "http://a..b:7470", NEXUS_SOCKS: "none" });
-  assert.equal(unresolved, "a..b does not resolve. If this device reaches the tailnet only through a SOCKS5 proxy, such as ts-home's userspace tailscaled, give it with --socks HOST:PORT or NEXUS_SOCKS. Otherwise `tailscale status` shows whether this device is on the tailnet");
+  assert.equal(unresolved, "a..b does not resolve. If this device reaches the tailnet only through a SOCKS5 proxy, such as a userspace tailscaled, give it with --socks HOST:PORT or NEXUS_SOCKS. Otherwise `tailscale status` shows whether this device is on the tailnet");
 
   await s.json(["archive", id]);
   await fails(["preview", id, "3000"], 5, { kind: "conflict", status: 409, error: `thread ${id} is archived, so its pylon stays paused. \`nexus unarchive ${id}\` opens it again` });

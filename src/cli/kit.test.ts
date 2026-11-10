@@ -103,7 +103,7 @@ test("preview --wait on a terminal says the preview it published before its firs
   const published: Preview = { pylon: "pylon-th-1", service: "port-3000", httpsPort: 10200, ready: false, failed: null, url: "https://rj-firebat.tail.ts.net:10200/" } as Preview;
   let answer!: (detail: unknown) => void;
   const api: Api = async (method) => method === "POST" ? published : new Promise((resolve) => { answer = resolve; });
-  const waiting = commands.preview!.run(api, ["th-1", "3000"], { wait: true }, null as never, { connect: null as never, io: { ...process, stderr } });
+  const waiting = commands.preview!.run(api, ["th-1", "3000"], { wait: true }, null as never, { connect: null as never, versions: null as never, io: { ...process, stderr } });
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(typeof answer, "function", "the first poll is out");
   assert.deepEqual(written, [`${published.url} is published, and not served yet\n`], "said while the first poll is out");
