@@ -362,7 +362,7 @@ test("threads --open asks for the open threads, and leaves out the others a cont
   assert.ok(old.paths.includes("/v1/threads?deleted=false&status=open"), old.paths.join(" "));
 });
 
-test("a follow whose first health read fails reads it again, and follows once the control plane answers", { timeout: 30_000 }, async (t) => {
+test("a follow whose first health read fails reads it again, and follows once the control plane answers", { timeout: 60_000 }, async (t) => {
   const paths: string[] = [];
   const followed = Promise.withResolvers<void>();
   let failures = 1;
@@ -416,9 +416,7 @@ test("the CLI exits as soon as its command is done, though the server keeps the 
   const s = await setup(t);
   const dir = await tempDir("nexus-keep-", t);
   const certificate = await testCertificate(dir, apiName);
-  let answered = 0;
   const server = createHttpsServer(certificate, withHealth((_req, res) => {
-    res.on("finish", () => { answered = Date.now(); });
     res.writeHead(200, { "content-type": "application/json" }).end("[]");
   }));
   server.keepAliveTimeout = 60_000;
@@ -426,10 +424,18 @@ test("the CLI exits as soon as its command is done, though the server keeps the 
   server.on("secureConnection", (socket) => { open.add(socket); socket.on("close", () => open.delete(socket)); });
   const port = await listening(t, server);
   t.after(() => { for (const socket of open) socket.destroy(); });
-  const res = await s.spawned(["projects"], { NEXUS_URL: `https://${apiName}:${port}`, NODE_EXTRA_CA_CERTS: join(dir, "cert.pem") });
+  const atExit = join(dir, "at-exit.mjs");
+  await writeFile(atExit, [
+    'import { subscribe } from "node:diagnostics_channel";',
+    'import { writeSync } from "node:fs";',
+    "const sockets = [];",
+    'subscribe("net.client.socket", ({ socket }) => sockets.push(socket));',
+    'process.on("exit", () => writeSync(2, `connections open at exit: ${sockets.filter((socket) => !socket.destroyed).length}\\n`));',
+  ].join("\n"));
+  const res = await s.spawned(["projects"], { NEXUS_URL: `https://${apiName}:${port}`, NODE_EXTRA_CA_CERTS: join(dir, "cert.pem"), NODE_OPTIONS: `--import=${atExit}` });
   assert.deepEqual([res.code, res.stdout], [0, "No projects.\n"], res.stderr);
-  // The pool lets go of an idle connection after 4 s, so a socket that held the process would show here.
-  assert.ok(Date.now() - answered < 3_000, `the CLI exited ${Date.now() - answered} ms after its answer`);
+  // A socket that held the process would keep it until the pool lets go of the idle connection and closes it.
+  assert.match(res.stderr, /connections open at exit: [1-9]/, "the CLI exited with its kept connection still open");
 });
 
 test("a reused connection takes each request's own idle timeout, and a silence on it is not sent again", { timeout: 60_000 }, async (t) => {

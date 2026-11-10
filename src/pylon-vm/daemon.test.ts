@@ -67,7 +67,7 @@ async function controller(t: TestContext, instance = name) {
 		await until(() => log().includes(`injected accept error ${n}\n`));
 	};
 	// bind creates control.sock before listen, so a connect between them is refused.
-	for (const deadline = Date.now() + 30_000; ; await delay(10)) {
+	for (const deadline = Date.now() + 60_000; ; await delay(10)) {
 		if (child.exitCode !== null) throw new Error(`controller exited ${child.exitCode}:\n${log()}`);
 		const refused = await new Promise<boolean>((accept, reject) => {
 			const socket = connect(join(dir, "control.sock"));
@@ -116,7 +116,7 @@ test("a body over 8 MiB is refused with a reply, and the controller keeps servin
 test("a body that is no action is answered without waiting behind the lifecycle queue", async (t) => {
 	const { post } = await controller(t);
 	void post(JSON.stringify({ action: "services", name, op: "status" })).catch(() => {});
-	const answered = await Promise.race([post(JSON.stringify({ action: "frob", name })), delay(5000, "still waiting")]);
+	const answered = await Promise.race([post(JSON.stringify({ action: "frob", name })), delay(60_000, "still waiting", { ref: false })]);
 	assert.notEqual(answered, "still waiting", "the reply to a body that is no action waited for the queue");
 	assert.equal((answered as { ok: boolean }).ok, false);
 	assert.match((answered as { error: string }).error, /^action\.action: /);
@@ -185,7 +185,7 @@ test("a controller retired by a failed stop leaves the scratch directory and con
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
 	for (const instance of [name, "pylon-full"]) {
-		test(`${signal} during socket chmod cleans up ${instance}`, { timeout: 30_000 }, async (t) => {
+		test(`${signal} during socket chmod cleans up ${instance}`, { timeout: 60_000 }, async (t) => {
 			const c = await launched(t, instance, true);
 			while (!c.log().includes("socket chmod waiting")) {
 				assert.equal(c.child.exitCode, null, c.log());

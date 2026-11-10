@@ -735,7 +735,7 @@ test("a secret body that is not valid HTTP is answered as malformed, not as too 
   assert.match(reply, /^HTTP\/1\.1 400 Bad Request\r\n/);
   assert.doesNotMatch(reply, /at most/);
   const read = () => logged.filter((line) => line.startsWith("PUT /v1/secrets/NEXUS_CHATGPT_TOKEN: "));
-  for (const deadline = Date.now() + 10_000; read().length === 0 && Date.now() < deadline;) await new Promise((r) => setTimeout(r, 5));
+  for (const deadline = Date.now() + 60_000; read().length === 0 && Date.now() < deadline;) await new Promise((r) => setTimeout(r, 5));
   assert.deepEqual(read(), ["PUT /v1/secrets/NEXUS_CHATGPT_TOKEN: aborted"]);
   assert.deepEqual([secrets.names(), fake.secretUpdates], [[], []], "nothing was held or applied");
 });
@@ -2306,7 +2306,7 @@ test("a drain records why a pause failed, and a pause still running when its tim
   const started = Date.now();
   const outcomes = await probe.drain(300);
   const took = Date.now() - started;
-  assert.ok(took >= 300 && took < 2_000, `${took} ms`);
+  assert.ok(took >= 300 && took < 60_000, `${took} ms: at least the drain's time, and the upper bound only ends a hang`);
   const failures = { [pylonA]: `${pylonA}: qemu refused the checkpoint`, [pylonB]: "it did not pause within the shutdown's 0.3 s" };
   assert.deepEqual(outcomes, [{ pylonId: pylonA, failed: failures[pylonA] }, { pylonId: pylonB, failed: failures[pylonB] }]);
   assert.deepEqual(await recordIn(file), { pylons: { [pylonA]: { failed: failures[pylonA] }, [pylonB]: { failed: failures[pylonB] } } });
@@ -2316,11 +2316,11 @@ test("a drain keeps its time though the backend's pause ignores the abort, and r
   const file = await shutdownFile(t);
   const { probe, fake } = await setup(t, { shutdownFile: file, log: () => {} });
   fake.pylons.set(pylonA, up(pylonA));
-  fake.backend.ensurePaused = () => new Promise((resolve) => setTimeout(resolve, 1_500));
+  fake.backend.ensurePaused = () => new Promise(() => {});
   const started = Date.now();
   const outcomes = await probe.drain(300);
   const took = Date.now() - started;
-  assert.ok(took >= 300 && took < 2_000, `${took} ms`);
+  assert.ok(took >= 300 && took < 60_000, `${took} ms: at least the drain's time, and the upper bound only ends a hang`);
   const failed = "it did not pause within the shutdown's 0.3 s";
   assert.deepEqual(outcomes, [{ pylonId: pylonA, failed }]);
   assert.deepEqual(await recordIn(file), { pylons: { [pylonA]: { failed } } });

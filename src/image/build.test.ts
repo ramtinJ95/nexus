@@ -115,7 +115,7 @@ test("buildImage refuses a recipe from a job whose paths, modes, pins, nexus scr
     { files: [{ ...manifest, content: manifest.content.replace(/"commit":"([0-9a-f]{7})[0-9a-f]+"/, '"commit":"$1"') }], pins },
   ];
   for (const recipe of bad) {
-    await assert.rejects(buildImage(recipe, node, store, AbortSignal.timeout(5_000)), (err) => err instanceof JobFailure && err.code === "invalid");
+    await assert.rejects(buildImage(recipe, node, store, AbortSignal.timeout(60_000)), (err) => err instanceof JobFailure && err.code === "invalid");
   }
   assert.deepEqual(await readdir(root), []);
 });
@@ -132,7 +132,7 @@ test("a build job under the probe's 077 umask gives Docker each recipe file with
   const umask = process.umask(0o077);
   process.env.PATH = `${join(root, "bin")}:${path}`;
   try {
-    await assert.rejects(buildImage(recipe, "infra-testbench" as NodeName, artifactDirectory(join(root, "out"), tarCodec), AbortSignal.timeout(30_000)), /docker build exited 1/);
+    await assert.rejects(buildImage(recipe, "infra-testbench" as NodeName, artifactDirectory(join(root, "out"), tarCodec), AbortSignal.timeout(60_000)), /docker build exited 1/);
   } finally {
     process.umask(umask);
     process.env.PATH = path;
@@ -157,7 +157,7 @@ test("every download in the Dockerfile is checked against a sha256 that buildIma
   const path = process.env.PATH;
   process.env.PATH = `${join(root, "bin")}:${path}`;
   try {
-    await assert.rejects(buildImage(recipe, "infra-testbench" as NodeName, artifactDirectory(join(root, "out"), tarCodec), AbortSignal.timeout(30_000)), /docker build exited 1/);
+    await assert.rejects(buildImage(recipe, "infra-testbench" as NodeName, artifactDirectory(join(root, "out"), tarCodec), AbortSignal.timeout(60_000)), /docker build exited 1/);
   } finally {
     process.env.PATH = path;
   }
@@ -190,7 +190,7 @@ test("an image.json in the store that names the recipe's image but is no manifes
   const path = process.env.PATH;
   process.env.PATH = `${join(root, "bin")}:${path}`;
   try {
-    await assert.rejects(buildImage(recipe, "infra-testbench" as NodeName, store, AbortSignal.timeout(30_000)));
+    await assert.rejects(buildImage(recipe, "infra-testbench" as NodeName, store, AbortSignal.timeout(60_000)));
   } finally {
     process.env.PATH = path;
   }

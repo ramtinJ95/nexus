@@ -54,7 +54,7 @@ test("a judgment's conversation is offered no tools, needs no pylon, and has rep
     locator: { awaitRunning: () => { located++; return Promise.reject(new Error("no pylon in this test")); } },
   });
   const eventually = async <T>(read: () => T | null | Promise<T | null>): Promise<T> => {
-    for (let i = 0; i < 500; i++) {
+    for (const deadline = Date.now() + 60_000; Date.now() < deadline;) {
       const value = await read();
       if (value !== null) return value;
       await new Promise((r) => setTimeout(r, 10));

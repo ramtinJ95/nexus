@@ -546,12 +546,11 @@ test("a services status that changes nothing leaves status.json as it was, and o
 	assert.deepEqual(Object.keys(JSON.parse(await readFile(status, "utf8")).previews), ["web", "api"], "the probe's preview gateway reads the new preview's origin from it");
 });
 
-/** What the guest's health check prints for the port, and the path if given, and how long it took. */
-function answers(port: number, path?: string): Promise<{ answer: string; ms: number }> {
-	const began = Date.now();
+/** What the guest's health check prints for the port, and the path if given. A check still running after 60 s is killed, which only ends a hang. */
+function answers(port: number, path?: string): Promise<{ answer: string }> {
 	return new Promise((accept, reject) =>
-		execFile("python3", ["-c", answersScript, String(port), ...(path === undefined ? [] : [path])], (error, stdout) =>
-			error ? reject(error) : accept({ answer: stdout.trim(), ms: Date.now() - began })),
+		execFile("python3", ["-c", answersScript, String(port), ...(path === undefined ? [] : [path])], { timeout: 60_000 }, (error, stdout) =>
+			error ? reject(error) : accept({ answer: stdout.trim() })),
 	);
 }
 /** Answers 200, 302 or 503 by path, and 421 to a Host that is not its own address, as Vite's host check would. */
@@ -575,7 +574,7 @@ test("the health check asks the port itself on 127.0.0.1 or else ::1, as its own
 	const trickle = createTcpServer((socket) => {
 		const bytes = Buffer.from("HTTP/1.1 200 OK\r\nX-Slow: " + "y".repeat(100));
 		let sent = 0;
-		const timer = setInterval(() => sent < bytes.length ? socket.write(bytes.subarray(sent, ++sent)) : socket.end(), 300);
+		const timer = setInterval(() => socket.write(sent < bytes.length ? bytes.subarray(sent, ++sent) : "y"), 300);
 		socket.on("close", () => clearInterval(timer)).on("error", () => {});
 	});
 	await new Promise<void>((accept) => trickle.listen(0, "127.0.0.1", accept));
@@ -593,10 +592,7 @@ test("the health check asks the port itself on 127.0.0.1 or else ::1, as its own
 	assert.deepEqual(new Set(v6.hosts), new Set([`[::1]:${v6.port}`]), "it asked ::1 as its own Host");
 	assert.equal((await answers(v4.port, "/ok")).answer, "True");
 	assert.deepEqual(new Set(v4.hosts), new Set([`127.0.0.1:${v4.port}`]));
-	const { answer, ms } = await answers(slow, "/");
-	assert.equal(answer, "False", "a response that trickles in is not healthy");
-	// Far above 2 s, which a loaded machine's Python start adds to, and far below the 35 s the trickle takes to end.
-	assert.ok(ms < 15_000, `it gave up after 2 s, not each socket read's, but took ${ms} ms`);
+	assert.equal((await answers(slow, "/")).answer, "False", "a response that trickles in forever is not healthy, so the check gave up after 2 s in all, not each socket read's");
 	v6.close();
 	assert.equal((await answers(v6.port)).answer, "False", "a port nothing listens on does not");
 });

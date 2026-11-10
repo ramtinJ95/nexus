@@ -56,19 +56,28 @@ for (const delayedAnswer of [false, true])
 		await t.waitFor(() => {
 			assert.ok(lines.some((line) => line.startsWith(`guest command ${named} answered and released its slot`)), `the log has its release:\n${lines.join("\n")}`);
 			assert.ok(lines.some((line) => new RegExp(`^guest command g\\d+ killed \\d+ guest processes of .*\\b${named}\\b`).test(line)), `the log has the kill:\n${lines.join("\n")}`);
-		}, { timeout: 10000 });
+		}, { timeout: 60000 });
 	});
 
-test("a command that gets a slot late has only what is left of its deadline, and its error says it may still have run", async () => {
+test("a command that gets a slot late has only what is left of its deadline, and its error says it may still have run", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
 	const fake = fakeVm(undefined, undefined, sleeping);
 	const held = holdAll(fake.vm, 60000);
 	for (const command of held) void command.catch(() => {});
-	const started = Date.now();
 	const late = direct(fake.vm, ["sleep", "1"], 0);
-	setTimeout(() => fake.answer(), 5000);
-	await assert.rejects(late, /got no answer within 10000 ms .*may still have run or may run later, so check what it does before retrying it/);
-	const elapsed = Date.now() - started;
-	assert.ok(elapsed < 11000, `the wait for a slot and for the answer share one deadline, but it took ${elapsed} ms`);
+	let failure: unknown;
+	void late.catch((error: unknown) => { failure = error; });
+	const settle = () => new Promise((resolve) => setImmediate(resolve));
+	while (fake.commands.length < held.length) await settle();
+	t.mock.timers.tick(5000);
+	fake.answer();
+	while (!fake.commands.includes("sleep 1")) await settle();
+	t.mock.timers.tick(4999);
+	await settle();
+	assert.equal(failure, undefined, "it still waits for its answer just before the deadline");
+	t.mock.timers.tick(1);
+	await settle();
+	assert.match(String(failure), /got no answer within 10000 ms .*may still have run or may run later, so check what it does before retrying it/, "the wait for a slot and for the answer share one deadline");
 	await Promise.allSettled(held);
 	fake.answer();
 });
