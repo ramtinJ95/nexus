@@ -2,7 +2,7 @@
 // toggled, its visit, and the markup the features build. Features hook into a swap through `onSwap` and `afterSwap`.
 import { agoText, clock } from "./elapsed.ts";
 import { atEnd, endFollower } from "./scroll.js";
-import { request } from "./request.js";
+import { refusalAt, request } from "./request.js";
 import { threadRoutes } from "../../contract/threads.ts";
 import { toggledBy } from "./folds.js";
 import { swapKeeping } from "./keep.js";
@@ -18,6 +18,21 @@ export function showError(id, err) {
   if (el === null) return;
   el.textContent = err === null ? "" : err.message;
   el.hidden = err === null;
+}
+
+/**
+ * Says what failed where the person acted, in the notices every view of every page shows, or clears it when `err` is
+ * null. `retry`, when given, is what its Try again does.
+ */
+export function notify(err, retry = null) {
+  const region = document.getElementById("action-error");
+  if (region === null) return;
+  region.hidden = err === null;
+  region.replaceChildren(...(err === null ? [] : present([
+    el("span", { className: "alert-text", textContent: err.message }),
+    retry !== null && el("button", { type: "button", className: "btn btn-xs", textContent: "Try again", onclick: () => { notify(null); retry(); } }),
+    el("button", { type: "button", className: "btn btn-xs btn-ghost", textContent: "Dismiss", onclick: () => notify(null) }),
+  ])));
 }
 
 const focusKey = (el) => el.id !== "" ? `#${CSS.escape(el.id)}`
@@ -102,6 +117,14 @@ export function swap(regions) {
   for (const settle of settlers) settle();
 }
 
+// Why the control plane refused the conversation's stream, which the page says while it polls in its place.
+let refusedStream = null;
+function sayUpdated() {
+  const state = document.getElementById("refresh-state");
+  // A page that offers the reload keeps saying so.
+  if (state !== null && !outdated) state.textContent = refusedStream === null ? "" : `Live updates are off, so this page updates every ${pollMs / 1000} s: ${refusedStream}.`;
+}
+
 // While the stream is open it alone writes the conversation, so a poll that started before a frame cannot put
 // older text back. Its frames come in order: the region whole, then the parts that grew since.
 export let stream = null;
@@ -114,9 +137,20 @@ export function follow(url) {
   if (url === undefined || document.visibilityState !== "visible" || (stream !== null && stream.readyState !== EventSource.CLOSED)) return;
   // EventSource reconnects by itself after a dropped connection. A refused one is closed for good, so the next
   // poll opens another.
-  stream = new EventSource(url);
+  const source = stream = new EventSource(url);
   shows = null;
-  stream.addEventListener("message", (event) => {
+  source.addEventListener("open", () => {
+    refusedStream = null;
+    sayUpdated();
+  });
+  source.addEventListener("error", () => {
+    if (source.readyState !== EventSource.CLOSED) return;
+    refusalAt(url).then((reason) => {
+      refusedStream = reason;
+      sayUpdated();
+    }, () => {});
+  });
+  source.addEventListener("message", (event) => {
     frames += 1;
     const frame = JSON.parse(event.data);
     const convo = document.getElementById("convo");
@@ -211,7 +245,7 @@ async function refresh() {
     const activity = next.querySelector("main")?.dataset.activity;
     if (activity === undefined) delete main.dataset.activity;
     else main.dataset.activity = activity;
-    if (state !== null && !outdated) state.textContent = "";
+    sayUpdated();
   } catch (err) {
     if (state !== null && addressed() === at && !outdated) state.textContent = `Not updated: ${err.message}. Retrying.`;
   }
@@ -225,7 +259,7 @@ export function recordVisit() {
   if (thread === undefined) return;
   // A visit wakes a paused pylon, so a failed record is worth saying.
   request(threadRoutes.activity, { thread, body: { kind: "human" } }).catch((err) => {
-    showError("action-error", new Error(`This visit was not recorded, so a paused pylon stays paused: ${err.message}`));
+    notify(new Error(`This visit was not recorded, so a paused pylon stays paused: ${err.message}`));
   });
 }
 

@@ -177,6 +177,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     // `tailscale status` and a refused request already tell it.
     ["GET", /^\/v1\/whoami$/, { role: "tailnet" }, (_, { caller, roles }) => ok({ node: caller, allowed: roles.has("allowed"), person: roles.has("person"), deployer: roles.has("deployer") } satisfies Whoami)],
     ...options.joins === undefined ? [] : [joinRoute(options.joins)],
+    // A browser's WebSocket cannot read the refusal of an upgrade, so the dashboard's terminal reads it with a GET that
+    // does not upgrade. It answers what the upgrade would get, or 426 when the upgrade would be taken.
+    ["GET", attachRoute, attach, (m, r) => {
+      attachable(m[1]!, r.query, r.caller);
+      return { status: 426, body: { error: "the attach route answers only a WebSocket upgrade", code: null, retryable: false } };
+    }],
     ...featureRoutes(kit, options, nodeHealth),
   ];
 
@@ -299,18 +305,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    * GET /v1/threads/<thread>/attach as a WebSocket. Every refusal is an HTTP reply before the 101, so a client maps it
    * as it maps any route's. A terminal takes a place among the streams, so a delete ends it too.
    */
-  async function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
-    const { caller, roles } = await admitted(req, attach);
-    demand(roles, attach);
-    if (stopping) throw new Refusal("unavailable", "the control plane is stopping");
-    // CORS does not guard a WebSocket handshake, so without this a preview's page could open a terminal from the
-    // browser of anyone allowed.
-    const foreign = foreignSite(req);
-    if (foreign !== null) throw new Refusal("forbidden", `the attach route does not answer pages from ${foreign}`);
-    const t = thread(attachRoute.exec(pathOf(req.url)!)![1]!);
+  /** What the attach route checks of the thread and the query before it upgrades. */
+  function attachable(id: string, query: URLSearchParams, caller: TailnetNodeId) {
+    const t = thread(id);
     let request: ReturnType<typeof parseAttachQuery>;
     try {
-      request = parseAttachQuery(new URL(req.url ?? "/", "http://nexus").searchParams);
+      request = parseAttachQuery(query);
     } catch (err) {
       throw new Refusal("invalid", (err as Error).message);
     }
@@ -320,6 +320,18 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (probe === undefined) throw new Refusal("unavailable", `no probe is configured for ${pylon.node}`);
     const full = noRoom(caller, `${maxStreams} streams are open, the most this control plane serves at once`);
     if (full !== null) throw new Refusal("unavailable", full);
+    return { t, pylon, probe, request };
+  }
+
+  async function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
+    const { caller, roles } = await admitted(req, attach);
+    demand(roles, attach);
+    if (stopping) throw new Refusal("unavailable", "the control plane is stopping");
+    // CORS does not guard a WebSocket handshake, so without this a preview's page could open a terminal from the
+    // browser of anyone allowed.
+    const foreign = foreignSite(req);
+    if (foreign !== null) throw new Refusal("forbidden", `the attach route does not answer pages from ${foreign}`);
+    const { t, pylon, probe, request } = attachable(attachRoute.exec(pathOf(req.url)!)![1]!, new URL(req.url ?? "/", "http://nexus").searchParams, caller);
     if (socket.destroyed) return;
     const stop = new AbortController();
     const handle = { thread: t.id, caller, end: () => stop.abort("deleted" satisfies Ending) };
