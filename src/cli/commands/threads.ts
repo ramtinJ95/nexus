@@ -62,11 +62,11 @@ const statusChange = (route: typeof routes.archive | typeof routes.unarchive | t
 export const threadsCommands: Readonly<Record<string, Command>> = {
   threads: {
     help: [
-      "  nexus threads [--project P] [--all] [--queued]",
-      "    threads, then queued ones; deleted ones and cancelled queued ones only with --all, and --queued lists only queued ones",
+      "  nexus threads [--project P] [--all] [--open] [--queued]",
+      "    threads, then queued ones; deleted ones and cancelled queued ones only with --all, no archived ones with --open, and --queued lists only queued ones",
     ],
     args: [0, 0],
-    options: { project: { type: "string" }, all: { type: "boolean" }, queued: { type: "boolean" } },
+    options: { project: { type: "string" }, all: { type: "boolean" }, open: { type: "boolean" }, queued: { type: "boolean" } },
     async run(api, _, v) {
       const project = str(v, "project");
       const queuing = request(api, routes.queued, { query: { project, ...v.all === true ? {} : { status: "queued" } } });
@@ -74,7 +74,9 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
         const queued = await queuing;
         return { json: queued, text: queued.length === 0 ? "No queued threads." : table(queued.map(queuedRow)) };
       }
-      const [queued, shown] = await Promise.all([queuing, request(api, routes.list, { query: { project, ...v.all === true ? {} : { deleted: false } } })]);
+      const listing = request(api, routes.list, { query: { project, ...v.open === true ? { deleted: false, status: "open" } : v.all === true ? {} : { deleted: false } } });
+      // A control plane older than 0.77.0 ignores status=open and answers every thread but the deleted ones.
+      const [queued, shown] = await Promise.all([queuing, v.open === true ? listing.then((rows) => rows.filter((r) => r.status === "active" || r.status === "idle")) : listing]);
       const rows = [...shown.map(threadRow), ...queued.map(queuedRow)];
       return { json: shown, text: rows.length === 0 ? "No threads." : table(rows) };
     },
