@@ -245,6 +245,7 @@ function composeReview() {
   const before = review.composed?.text;
   prompt.value = before !== undefined && prompt.value.includes(before) ? prompt.value.replace(before, () => text)
     : prompt.value.trim() === "" ? text : `${prompt.value.trimEnd()}\n\n${text}`;
+  prompt.dispatchEvent(new Event("input", { bubbles: true }));
   review.composed = { text, ids: review.notes.map((n) => n.id) };
   saveReview();
   decorate();
