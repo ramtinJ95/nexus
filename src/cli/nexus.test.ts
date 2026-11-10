@@ -1129,7 +1129,7 @@ const claudeRecords = {
   call: { type: "assistant", timestamp: at(2), message: { model: "claude-opus-5-5", content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "wc -l hello.py" } }] } },
   failed: { type: "user", timestamp: at(3), message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "wc: hello.py: No such file", is_error: true }] } },
   reply: { type: "assistant", timestamp: at(4), message: { model: "claude-opus-5-5", content: [{ type: "text", text: "There is no hello.py." }] } },
-  pr: { type: "pr-link", sessionId: "s1", prNumber: 7, prUrl: "https://github.com/acme/shop/pull/7", prRepository: "acme/shop", timestamp: at(5) },
+  pr: { type: "pr-link", sessionId: "s1", prNumber: 7, prUrl: "https://github.com/octocat/Spoon-Knife/pull/7", prRepository: "octocat/Spoon-Knife", timestamp: at(5) },
 };
 const jsonl = (...records: object[]) => records.map((r) => `${JSON.stringify(r)}\n`).join("");
 
@@ -1168,7 +1168,7 @@ test("watch follows a Claude worker's transcript: the entries whole, then each n
     if (line.type === "claude-entry") texts.push(line.text);
     idle ||= line.type === "state" && line.run === "idle";
   }
-  assert.deepEqual(texts, ["[tool error] wc: hello.py: No such file", "There is no hello.py.", "[pull request] Opened pull request #7: https://github.com/acme/shop/pull/7", ""],
+  assert.deepEqual(texts, ["[tool error] wc: hello.py: No such file", "There is no hello.py.", "[pull request] Opened pull request #7: https://github.com/octocat/Spoon-Knife/pull/7", ""],
     "a pull request Claude Code names again prints nothing the second time");
 
   const restart = await s.stop();
@@ -2273,8 +2273,8 @@ test("conversation prints a Claude worker's transcript, and send types into its 
     { kind: "notice", at: 8, tone: "error", text: "The model failed" },
     { kind: "turn", at: 9, durationMs: 72_000 },
     { kind: "record", at: null, type: "mystery", summary: '{"type":"mystery"}' },
-    { kind: "pull-request", at: 10, number: 7, url: "https://github.com/acme/shop/pull/7", repository: "acme/shop" },
-    { kind: "pull-request", at: 10, number: 7, url: "https://github.com/acme/shop/pull/7", repository: "acme/shop" },
+    { kind: "pull-request", at: 10, number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", repository: "octocat/Spoon-Knife" },
+    { kind: "pull-request", at: 10, number: 7, url: "https://github.com/octocat/Spoon-Knife/pull/7", repository: "octocat/Spoon-Knife" },
     { kind: "prompt", at: 10, text: "/compact", from: "command" },
     { kind: "queue", at: 11, op: "enqueue", text: "and then deploy" },
     { kind: "tool", at: 12, id: "t3", name: "Read", input: { file_path: "hello.py" } },
@@ -2292,7 +2292,7 @@ test("conversation prints a Claude worker's transcript, and send types into its 
     "[error] The model failed",
     "[turn] 72s",
     '[record] mystery: {"type":"mystery"}',
-    "[pull request] Opened pull request #7: https://github.com/acme/shop/pull/7",
+    "[pull request] Opened pull request #7: https://github.com/octocat/Spoon-Knife/pull/7",
     "> [slash command] /compact",
   ];
   assert.equal((await s.nexus(["conversation", thread.id])).stdout, [...transcript, '[tool] Read {"file_path":"hello.py"} (no result)', "(queued) > and then deploy"].join("\n\n") + "\n");
