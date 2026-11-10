@@ -146,6 +146,8 @@ export function follow(url) {
   source.addEventListener("error", () => {
     if (source.readyState !== EventSource.CLOSED) return;
     refusalAt(url).then((reason) => {
+      // A poll may have opened another stream while the reason was read.
+      if (stream !== source) return;
       refusedStream = reason;
       sayUpdated();
     }, () => {});

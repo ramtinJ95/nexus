@@ -76,14 +76,18 @@ const { follow } = await import("./page.js");
 const dispatch = async (type, event) => {
   for (const listener of listeners[type] ?? []) await listener({ defaultPrevented: false, preventDefault() {}, ...event });
 };
-const json = (status, body) => new Response(body === undefined ? "" : JSON.stringify(body), { status });
+const json = (status, body) => new Response(body === undefined ? null : JSON.stringify(body), { status });
 const buttonsOf = (el) => el.children.filter((c) => c.tag === "button");
+/** Waits for `signal`, and gives up after 60 s, to end a hang. */
+const until = (what, signal) => Promise.race([signal, new Promise((_, reject) => setTimeout(() => reject(new Error(`timed out waiting until ${what}`)), 60_000).unref())]);
 
 test("a button whose action changes no region takes another press once the action settles", async () => {
   fetchImpl = async (url) => url.startsWith("/v1/") ? json(204) : Promise.reject(new Error("offline"));
   const button = new FakeElement("button", { selectors: ["button[data-action]"], dataset: { action: "close-session", thread: "th-x", session: "w2:p1" } });
+  alert.hidden = false;
   await dispatch("click", { target: button });
-  assert.equal(fetched.at(-1)?.url, "/v1/threads/th-x/sessions/w2%3Ap1");
+  assert.deepEqual(fetched.slice(-2).map((f) => f.url), ["/v1/threads/th-x/sessions/w2%3Ap1", "http://nexus.test/threads/th-x"], "the action went through and the page refreshed after it");
+  assert.equal(alert.hidden, true, "a success clears the alert");
   assert.equal(button.disabled, false, "the action settled and the button is still in the page");
   const gone = new FakeElement("button", { selectors: ["button[data-action]"], isConnected: false, dataset: { action: "close-session", thread: "th-x", session: "w2:p1" } });
   await dispatch("click", { target: gone });
@@ -121,10 +125,20 @@ test("a message whose send timed out offers Try again, which sends it under the 
   await dispatch("submit", { target: form, submitter: send });
   assert.equal(alert.text, "The message may not have been sent: the control plane did not answer in 120 s. Try again Dismiss");
   const first = fetched.at(-1).body.requestId;
-  fetchImpl = async (url) => url.startsWith("/v1/") ? json(200, { requestId: first }) : Promise.reject(new Error("offline"));
-  await buttonsOf(alert)[0].onclick();
-  assert.deepEqual(fetched.filter((f) => f.url === "/v1/threads/th-x/messages").map((f) => f.body.requestId), [first, first]);
-  assert.equal(alert.hidden, true, "the sent message clears the alert");
+  form.elements.text.value = "ship it, and the docs";
+  const refreshed = Promise.withResolvers();
+  fetchImpl = async (url) => {
+    if (url.startsWith("/v1/")) return json(200, { requestId: first });
+    refreshed.resolve();
+    throw new Error("offline");
+  };
+  buttonsOf(alert)[0].onclick();
+  await until("the resend went through", refreshed.promise);
+  assert.deepEqual(fetched.filter((f) => f.url === "/v1/threads/th-x/messages").map((f) => f.body), [
+    { text: "ship it", mode: "followUp", requestId: first },
+    { text: "ship it", mode: "followUp", requestId: first },
+  ], "Try again sends the message that timed out, whatever the draft holds now");
+  assert.equal(alert.hidden, true, "the page refreshes only after a send that went through, which clears the alert");
   regions.delete("prompt");
 });
 
@@ -142,7 +156,7 @@ test("a refused stream says why the page polls instead, until a stream opens", a
   const refused = FakeEventSource.opened.at(-1);
   refused.readyState = FakeEventSource.CLOSED;
   refused.fire("error");
-  await Promise.race([said.promise, new Promise((_, reject) => setTimeout(() => reject(new Error("the page never said why")), 60_000).unref())]);
+  await until("the page says why", said.promise);
   assert.equal(text, "Live updates are off, so this page updates every 5 s: 16 streams are open, the most this control plane serves at once.");
   follow("/threads/th-x/stream");
   const next = FakeEventSource.opened.at(-1);
@@ -150,4 +164,27 @@ test("a refused stream says why the page polls instead, until a stream opens", a
   next.readyState = FakeEventSource.OPEN;
   next.fire("open");
   assert.equal(text, "");
+
+  const late = Promise.withResolvers();
+  const asked = Promise.withResolvers();
+  fetchImpl = async () => {
+    asked.resolve();
+    return late.promise;
+  };
+  next.readyState = FakeEventSource.CLOSED;
+  next.fire("error");
+  await until("the page asks why", asked.promise);
+  follow("/threads/th-x/stream");
+  const recovered = FakeEventSource.opened.at(-1);
+  recovered.readyState = FakeEventSource.OPEN;
+  recovered.fire("open");
+  const read = Promise.withResolvers();
+  late.resolve({ ok: false, status: 503, text: async () => {
+    read.resolve();
+    return JSON.stringify({ error: "16 streams are open, the most this control plane serves at once", code: null, retryable: false });
+  } });
+  await until("the reason is read", read.promise);
+  // What is left of the read is promise reactions, which all run before the next macrotask.
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(text, "", "a reason read after another stream opened is not said");
 });
