@@ -58,8 +58,10 @@ async function loadMore() {
   if (openDiff.read !== diffRead) return;
   const more = openDiff.more + 1;
   const top = fileView.scrollTop;
-  openDiff = { ...openDiff, read: ++diffRead, more, shown: diffOf(openDiff.text, maxDiffRows * (more + 1)) };
+  const read = ++diffRead;
+  openDiff = { ...openDiff, read, more, shown: diffOf(openDiff.text, maxDiffRows * (more + 1)) };
   await drawDiff(openDiff);
+  if (read !== diffRead) return;
   fileView.scrollTop = top;
   fileView.querySelector(".diff-view")?.focus({ preventScroll: true });
 }

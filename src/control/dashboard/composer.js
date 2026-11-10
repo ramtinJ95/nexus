@@ -9,9 +9,16 @@ import { kept } from "./contract.ts";
 import { composerDraft } from "./draft.js";
 
 const draft = composerDraft({ kept });
-draft.restore();
-// The review kept says what it last put in the composer, and the draft restored now is what the composer holds.
-composerHolds(document.getElementById("prompt-text")?.value ?? "");
+/**
+ * Fills the composer with its draft, which is then what it holds of the review kept. A page with no composer, as an
+ * archived thread's, leaves the review as kept, for the composer an unarchive brings back.
+ */
+function restore() {
+  draft.restore();
+  const prompt = document.getElementById("prompt-text");
+  if (prompt !== null) composerHolds(prompt.value);
+}
+restore();
 document.addEventListener("input", (event) => {
   if (event.target.id === "prompt-text") draft.save(event.target);
 });
@@ -87,7 +94,7 @@ async function send(form, message) {
 onSwap(() => {
   const before = document.getElementById("prompt-text");
   return () => {
-    if (document.getElementById("prompt-text") !== before) draft.restore();
+    if (document.getElementById("prompt-text") !== before) restore();
     for (const send of document.querySelectorAll("#prompt button[type=submit]")) send.disabled = outgoing?.inFlight === true;
   };
 });

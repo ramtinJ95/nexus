@@ -35,6 +35,8 @@ const ids = new Map([
 ]);
 const facts = make("span", { dataset: { pylon: "paused", turn: "false", agentAt: "0", threadStatus: "active", open: "true" } });
 const stored = new Map();
+/** The changes the pylon lists, which the changes route answers with. Any other route fails, as the diff is not what these tests read. */
+let listed = null;
 const documentListeners = new Map();
 Object.assign(globalThis, {
   Element,
@@ -47,6 +49,7 @@ Object.assign(globalThis, {
   MutationObserver: class { observe() {} },
   getComputedStyle: () => ({ getPropertyValue: () => "" }),
   EventSource: { OPEN: 1, CLOSED: 2 },
+  fetch: async (path) => path.includes("/changes") ? { ok: true, status: 200, text: async () => JSON.stringify(listed) } : { ok: false, status: 500, text: async () => "" },
   document: {
     querySelector: (s) => s === "main" ? make("main", { dataset: { pollMs: "60000" } }) : s === "#facts span" ? facts : null,
     querySelectorAll: () => [],
@@ -57,6 +60,7 @@ Object.assign(globalThis, {
 });
 const { checkout } = await import("./checkout.js");
 const tabs = await import("./tab-bar.js");
+const { readChanges } = await import("./changes-tree.js");
 await import("./file-view.js");
 
 const file = (path, additions) => ({ path, oldPath: null, status: "modified", additions, deletions: 1 });
@@ -108,4 +112,19 @@ test("a file marked viewed shows so in the tree and its header until it changes 
   press("[");
   press("]");
   assert.equal(viewedBox().checked, false, "the agent changed the file since");
+});
+
+test("a viewed mark the agent's change cleared stays cleared once the file reads as it did when marked", async () => {
+  const [a, b, readme] = [file("src/a.ts", 3), file("src/b.ts", 9), file("README.md", 1)];
+  viewedBox().checked = true;
+  viewedBox().fire("change");
+  assert.equal(viewedBox().checked, true);
+  facts.dataset.pylon = "running";
+  const read = async (files) => {
+    listed = { ...checkout.changes, files };
+    await readChanges();
+    return treeFiles().find((el) => el.dataset.path === "src/b.ts").className.includes("viewed");
+  };
+  assert.equal(await read([a, { ...b, additions: 4 }, readme]), false, "the agent changed the file");
+  assert.equal(await read([a, b, readme]), false, "its counts came back, but the reader has not viewed it since");
 });

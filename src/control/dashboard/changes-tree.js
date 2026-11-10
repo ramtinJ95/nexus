@@ -25,11 +25,19 @@ let viewed = (() => {
   }
 })();
 export const isViewed = (file) => viewed[file.path] === lookOf(file);
+function keepViewed(next) {
+  viewed = next;
+  kept.write(viewedKey, Object.keys(viewed).length === 0 ? null : JSON.stringify(viewed));
+}
 export function markViewed(file, on) {
   const { [file.path]: _, ...rest } = viewed;
-  viewed = on ? { ...rest, [file.path]: lookOf(file) } : rest;
-  kept.write(viewedKey, Object.keys(viewed).length === 0 ? null : JSON.stringify(viewed));
+  keepViewed(on ? { ...rest, [file.path]: lookOf(file) } : rest);
   if (checkout.changes !== null) renderChanges();
+}
+/** Drops the marks of files that changed since, or are no longer changed, so a file changed back is not viewed again. */
+function forgetChanged(files) {
+  const still = Object.fromEntries(files.filter(isViewed).map((file) => [file.path, viewed[file.path]]));
+  if (Object.keys(still).length !== Object.keys(viewed).length) keepViewed(still);
 }
 
 function showChanges(...nodes) {
@@ -68,6 +76,7 @@ export async function readChanges(wake = false) {
       // The thread closed while the read was out, so the reply is stale.
       if (!factsNow().open) return changesUnreadable(factsNow());
       checkout.changes = changes;
+      forgetChanged(changes.files);
       renderChanges();
       refreshTabs(changes.files);
     } catch (err) {
