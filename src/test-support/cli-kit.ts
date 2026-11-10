@@ -39,11 +39,11 @@ export const cli = fileURLToPath(new URL("../cli/nexus.ts", import.meta.url));
 
 export interface Run { code: number; stdout: string; stderr: string }
 
-/** One run of the CLI in this process, with `env` as its environment, and stdout a terminal when `tty`. */
-export async function inProcess(args: readonly string[], env: Io["env"], tty = false): Promise<Run> {
+/** One run of the CLI in this process, with `env` as its environment, `stdin` on its stdin, and stdout a terminal when `tty`. */
+export async function inProcess(args: readonly string[], env: Io["env"], { tty = false, stdin = "" }: { tty?: boolean; stdin?: string | Buffer | undefined } = {}): Promise<Run> {
   const printed = { stdout: "", stderr: "" };
   const sink = (stream: keyof typeof printed) => new Writable({ decodeStrings: false, write(chunk, _encoding, done) { printed[stream] += chunk; done(); } });
-  const code = await main(args, { stdin: Readable.from([]), stdout: Object.assign(sink("stdout"), tty ? { isTTY: true } : {}), stderr: sink("stderr"), env });
+  const code = await main(args, { stdin: Readable.from(stdin.length === 0 ? [] : [stdin]), stdout: Object.assign(sink("stdout"), tty ? { isTTY: true } : {}), stderr: sink("stderr"), env });
   return { code, ...printed };
 }
 
@@ -180,15 +180,15 @@ export async function setup(t: TestContext, setupOptions: { queue?: boolean; htt
   const env = (overrides: Record<string, string> = {}) => ({
     PATH: process.env.PATH!, HOME: home, NEXUS_URL: `http://${apiName}:${control.port}`, NEXUS_SOCKS: `127.0.0.1:${proxy.port}`, ...overrides,
   });
-  const nexus = (args: readonly string[], overrides?: Record<string, string>) => inProcess(args, env(overrides));
-  const ttyOut = (args: readonly string[], overrides?: Record<string, string>) => inProcess(args, env(overrides), true);
+  const nexus = (args: readonly string[], overrides?: Record<string, string>, stdin?: string | Buffer) => inProcess(args, env(overrides), { stdin });
+  const ttyOut = (args: readonly string[], overrides?: Record<string, string>) => inProcess(args, env(overrides), { tty: true });
   /**
    * For what only a process shows: its exit status, NODE_EXTRA_CA_CERTS, attach's want of a terminal, and the
    * checkout `cwd` names, whose origin a start without --project reads.
    */
   const spawned = (args: readonly string[], overrides?: Record<string, string>, cwd?: string) => inChild(args, env(overrides), cwd);
   const terminal = (args: readonly string[]) => onTerminal(args, env());
-  async function json(args: readonly string[], overrides?: Record<string, string>, run = nexus): Promise<any> {
+  async function json(args: readonly string[], overrides?: Record<string, string>, run: (args: readonly string[], overrides?: Record<string, string>) => Promise<Run> = nexus): Promise<any> {
     const res = await run([...args, "--json"], overrides);
     assert.equal(res.code, 0, res.stderr);
     return JSON.parse(res.stdout);

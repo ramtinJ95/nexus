@@ -9,6 +9,8 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import { promisify } from "node:util";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { planningPrefix } from "../control/agent-protocol.ts";
 import type { QueuedThread, ThreadRow } from "../contract/threads.ts";
 import type { Thread } from "../control/thread-store.ts";
@@ -491,6 +493,54 @@ test("send to a Claude worker whose message meets an unreachable control plane f
   assert.equal(JSON.parse(sent.stderr).kind, "unreachable");
   assert.equal(sends.length, 1, "the message may have run, so it is not sent again");
   assert.ok(Date.now() - started < 60_000, "it fails at once rather than waiting the 120 s for the pylon, and this bound only ends a hang");
+});
+
+test("send, start and item add take a message from stdin or a file as written, and text that starts with a dash after --", async (t) => {
+  const s = await setup(t, { queue: true });
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "texts"]);
+  const sent = () => s.fake.calls.at(-1)?.slice(2, 3)[0];
+  const dir = await tempDir("nexus-message-", t);
+  const file = join(dir, "message.md");
+  const awkward = "- first bullet\n--force is broken\nplease check the --json output\n";
+  await writeFile(file, awkward);
+
+  assert.equal((await s.nexus(["send", thread.id, "-"], undefined, awkward)).stdout, `Sent to ${thread.id}.\n`);
+  assert.equal(sent(), awkward.slice(0, -1), "send - reads stdin, less the last line break");
+  assert.equal((await s.nexus(["send", thread.id, "--file", file, "--steer"])).code, 0);
+  assert.deepEqual(s.fake.calls.at(-1)?.slice(2), [awkward.slice(0, -1), s.fake.calls.at(-1)![3], "steer"], "--file reads the file, and flags still parse");
+  assert.equal((await s.nexus(["send", thread.id, "--", "- first bullet"])).code, 0);
+  assert.equal(sent(), "- first bullet", "after -- text that starts with a dash is sent");
+  assert.equal((await s.nexus(["send", thread.id, "please", "check", "--steer", "this"])).code, 0);
+  assert.deepEqual(s.fake.calls.at(-1)?.slice(2), ["please check this", s.fake.calls.at(-1)![3], "steer"], "flags among the words parse as before");
+  await s.nexus(["send", thread.id, "-"], undefined, Buffer.from("\uFEFFhi\r\n"));
+  assert.equal(sent(), "\uFEFFhi", "stdin is decoded as a file is, keeping a byte order mark");
+  await s.nexus(["send", thread.id, "-", "x"]);
+  assert.equal(sent(), "- x", "- with other words is text, as before");
+
+  const before = s.fake.calls.length;
+  const refused = async (args: string[], stderr: string, stdin?: string) => assert.deepEqual(
+    [(await s.nexus(args, undefined, stdin)).stderr, s.fake.calls.length], [`nexus: ${stderr}\n`, before], args.join(" "));
+  await refused(["send", thread.id, "- first bullet"], "send takes no -. To send text that starts with a dash, put -- before it, or pass it on stdin with - or from a file with --file PATH. Run nexus send --help for usage");
+  await refused(["send", thread.id], "send needs the message: words, - to read stdin, or --file PATH. Run nexus send --help for usage");
+  await refused(["send", thread.id, "-"], "send - read nothing from stdin. Run nexus send --help for usage");
+  await refused(["send", thread.id, "hi", "--file", file], "send takes its text as words, -, or --file, not both words and --file. Run nexus send --help for usage");
+  await refused(["send", thread.id, "--file", join(dir, "none")], `--file could not read ${join(dir, "none")}: ENOENT: no such file or directory, open '${join(dir, "none")}'`);
+  await refused(["start", "--project", "acme", "--message", "--force is broken"], "--message takes a value that starts with a dash only as --message=VALUE, or from a file or stdin with --message-file PATH|-. Run nexus start --help for usage");
+  await refused(["start", "--project", "acme", "--message", "x", "--message-file", file], "--message and --message-file cannot be used together. Run nexus start --help for usage");
+  await refused(["send", thread.id, "--stee", "x"], "send takes no --stee. Did you mean --steer? To send text that starts with a dash, put -- before it, or pass it on stdin with - or from a file with --file PATH. Run nexus send --help for usage");
+  await refused(["start", "--project", "acme", "--message-file", "-", "--claude-file", "-"], "--message-file is for a Nexus agent thread. A Claude worker's first prompt is its --claude-file. Run nexus start --help for usage", "never read");
+
+  const started: Thread = await s.json(["start", "--project", "acme", "--message-file", "-"], undefined, async (args, overrides) => s.nexus(args, overrides, awkward));
+  assert.equal(started.title, "- first bullet", "the title is the file's first line");
+  assert.deepEqual(s.fake.calls.at(-1)?.slice(1, 3), [started.id, awkward.slice(0, -1)], "start --message-file - sends stdin as the first message");
+  assert.match((await s.nexus(["start", "--project", "acme", "--message-file", file])).stdout, /\nSent the first message\.\n/, "the text says a message from a file was sent");
+  const claude: Thread = await s.json(["start", "--project", "acme", "--title", "c", "--claude-file", file]);
+  assert.equal(s.registry.threads.claudeWorker(claude.id)?.prompt, `/poteto-mode ${awkward.trim()}`, "start --claude-file reads the prompt from the file");
+
+  await s.nexus(["project", "edit", "acme", "--pipeline", "approve"]);
+  const item = await s.json(["item", "add", "--project", "acme", "--message-file", file]);
+  const prompted = await s.json(["item", "add", "--project", "acme", "--claude-file", "-"], undefined, async (args, overrides) => s.nexus(args, overrides, "--force is broken"));
+  assert.deepEqual([item.brief, prompted.brief, prompted.worker], [awkward.slice(0, -1), "--force is broken", "claude"]);
 });
 
 test("show reads only a refusal coded queued as a queued thread, and passes any other 409 on", async () => {
