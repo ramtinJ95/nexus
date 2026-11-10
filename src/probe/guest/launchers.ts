@@ -168,6 +168,7 @@ merge(path.join(home, '.claude.json'), state => {
 merge(path.join(home, '.claude/settings.json'), state => {
   state.theme ??= 'dark';
   state.model = '${defaultClaudeModel}';
+  state.effortLevel = 'high';
   state.attribution = { ...state.attribution, commit: '', pr: '' };
   state.skipDangerousModePermissionPrompt = true;
 });
