@@ -4,7 +4,7 @@ import { z } from "zod";
 import { readJson } from "../node-base/json-file.ts";
 import { parse } from "../parse.ts";
 import { call, CliError, type Endpoint, type HostPort } from "./transport.ts";
-import { type Values, str } from "./kit.ts";
+import { type Io, type Values, str } from "./kit.ts";
 import { ports } from "../node-base/node-layout.ts";
 
 /**
@@ -16,7 +16,7 @@ export const minControlVersion = "0.74.0";
 class OutdatedControl extends CliError {}
 export const transient = (err: CliError): err is CliError & { kind: "unreachable" | "failed" } => (err.kind === "unreachable" || err.kind === "failed") && !(err instanceof OutdatedControl);
 export const controlPorts = [`https://{host}:${ports.dashboard}`, `http://{host}:${ports.control}`];
-export const configFile = () => join(homedir(), ".config", "nexus", "cli.json");
+export const configFile = (env: Io["env"] = process.env) => join(env.HOME || homedir(), ".config", "nexus", "cli.json");
 
 const configSchema = z.strictObject({ url: z.string().optional(), socks: z.string().optional() });
 
@@ -35,13 +35,13 @@ export async function readConfig(file: string): Promise<Config> {
 }
 
 type Config = z.infer<typeof configSchema>;
-const env = (name: string) => process.env[name] || undefined;
+const fromEnv = (env: Io["env"], name: string) => env[name] || undefined;
 
-export async function settings(v: Values): Promise<Endpoint> {
-  const config = await readConfig(configFile());
-  const url = str(v, "url") ?? env("NEXUS_URL") ?? config.url;
+export async function settings(v: Values, env: Io["env"]): Promise<Endpoint> {
+  const config = await readConfig(configFile(env));
+  const url = str(v, "url") ?? fromEnv(env, "NEXUS_URL") ?? config.url;
   if (url === undefined) throw new CliError("invalid", "no control plane is set. Run nexus connect <host> with its tailnet name, or give --url or NEXUS_URL");
-  return { url: controlUrl(url), socks: socksOf(v, config) };
+  return { url: controlUrl(url), socks: socksOf(v, config, env) };
 }
 
 const versionParts = (v: unknown) => typeof v === "string" ? /^(\d+)\.(\d+)\.(\d+)$/.exec(v)?.slice(1).map(Number) ?? null : null;
@@ -63,8 +63,8 @@ export async function checked(endpoint: Endpoint): Promise<Endpoint> {
   return endpoint;
 }
 
-export function socksOf(v: Values, config: Config): HostPort | null {
-  const socks = str(v, "socks") ?? env("NEXUS_SOCKS") ?? config.socks;
+export function socksOf(v: Values, config: Config, env: Io["env"]): HostPort | null {
+  const socks = str(v, "socks") ?? fromEnv(env, "NEXUS_SOCKS") ?? config.socks;
   return socks === undefined || socks === "none" ? null : hostPort(socks);
 }
 
