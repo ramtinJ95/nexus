@@ -82,12 +82,14 @@ async function openSource(path: string): Promise<{ file: FileHandle; facts: Stat
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch((err: NodeJS.ErrnoException) => {
     throw new Error(err.code === "ENOENT" ? `${path} is missing` : err.code === "ELOOP" ? `${path} is not a regular file` : `${path} does not open: ${err.message}`);
   });
-  const facts = await file.stat();
-  if (!facts.isFile()) {
+  try {
+    const facts = await file.stat();
+    if (!facts.isFile()) throw new Error(`${path} is not a regular file`);
+    return { file, facts };
+  } catch (err) {
     await file.close();
-    throw new Error(`${path} is not a regular file`);
+    throw err;
   }
-  return { file, facts };
 }
 
 /** Whether a descriptor other than `own` holds the file `facts` states, as SQLite's does once it has opened that file by its path. */
@@ -99,6 +101,7 @@ async function heldElsewhere(own: number, facts: Stats): Promise<boolean> {
   }
   return false;
 }
+
 const quoted = (path: string) => `'${path.replaceAll("'", "''")}'`;
 
 function integrity(path: string): string | undefined {
