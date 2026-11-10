@@ -2,7 +2,7 @@ import { test, type TestContext } from "node:test";
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openRegistry, type Registry } from "./registry.ts";
@@ -628,6 +628,38 @@ test("Claude turn events keep a pylon awake until it ends, independently of harn
   registry.threads.reportSession("other-node" as NodeName, { sequence: 100, pylon: pylonId, time: 0, event: { kind: "session.turn-started" } });
   assert.equal(registry.threads.thread(threadId)!.sessionTurnRunning, undefined);
   assert.equal(registry.threads.events("0", { kinds: ["session.turn-ended"] }).length, 1);
+});
+
+test("a prompt submitted in any of the pylon's Claudes is the person's at its hook's stamp, unless Nexus typed it or launched the worker with it", async (t) => {
+  const registry = seeded(t, tempDb(), undefined, "Fix the checkout");
+  const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+  let sequence = 0;
+  const started = (session: string, at: number, prompt?: string) => registry.threads.reportSession(node, {
+    sequence: ++sequence, pylon: pylonId, time: Date.now(), event: { kind: "session.turn-started", session, at, ...prompt === undefined ? {} : { promptSha256: sha256(prompt) } },
+  });
+  const human = () => registry.threads.thread(threadId)!.lastHumanActivityAt;
+  const feedback = `${senders["pr-watch"].prefix} CI failed`;
+  await typeIntoClaude(registry, threadId, "s1", null, "pr-1", feedback, async () => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed: false }), "pr-watch");
+  started("s1", 5_000, "Fix the checkout");
+  assert.equal(human(), thread.lastHumanActivityAt, "the worker's launch prompt is Nexus's");
+  started("s1", 6_000, feedback);
+  assert.equal(human(), thread.lastHumanActivityAt, "a message Nexus typed is Nexus's");
+  started("s1", 7_000);
+  assert.equal(human(), thread.lastHumanActivityAt, "an image from before hashes no prompt, so its turn counts for nobody");
+  started("by-hand", 9_000, "Try the other approach");
+  assert.equal(human(), 9_000, "a prompt of the person's counts at its hook's stamp, not when it arrived");
+  started("side", 8_000, "An older prompt the outbox sent late");
+  assert.equal(human(), 9_000, "a late report never moves it back");
+});
+
+test("a long message Nexus typed is still Nexus's when Claude hands its hook the message as a paste", async (t) => {
+  const { hookReport } = await import("../../images/pylon/nexus-heartbeat.ts");
+  const registry = seeded(t, tempDb(), undefined, "Fix the checkout");
+  const findings = `${senders.review.prefix} ${"finding ".repeat(600)}`;
+  await typeIntoClaude(registry, threadId, "s1", null, "rv-1:1", findings, async () => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed: false }), "review");
+  const { promptSha256 } = hookReport("session.turn-started", { prompt: `\n\n<pasted_content id="7">\n${findings}\n</pasted_content id="7">\n` });
+  registry.threads.reportSession(node, { sequence: 1, pylon: pylonId, time: Date.now(), event: { kind: "session.turn-started", session: "s1", at: 5_000, promptSha256 } });
+  assert.equal(registry.threads.thread(threadId)!.lastHumanActivityAt, thread.lastHumanActivityAt);
 });
 
 test("a lost turn end expires while heartbeats keep a long turn awake", async (t) => {
