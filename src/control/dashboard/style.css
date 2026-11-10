@@ -299,6 +299,10 @@ a.link { color: var(--accent); }
 .filter:focus-within { background: var(--bg); box-shadow: 0 0 0 1px var(--line); }
 .filter input { all: unset; flex: 1; min-width: 0; font-size: 13px; color: var(--text); }
 .filter input::placeholder { color: var(--text-3); }
+.filter kbd { font-size: 10.5px; color: var(--text-3); }
+.filter:focus-within kbd { display: none; }
+#filter-closed { margin: 0 4px 8px; border: 0; background: none; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.side:has(#filter:placeholder-shown) #filter-closed { display: none; }
 .groups { overflow: auto; flex: 1; padding: 2px 8px 12px; }
 .side-empty { padding: 8px; }
 .group { position: relative; margin-top: 8px; }
@@ -1012,6 +1016,14 @@ meter:-moz-meter-sub-sub-optimum::-moz-meter-bar { background: var(--bad); }
 /* the start-a-thread and new-project dialogs */
 .modal { margin: 96px auto auto; width: 540px; max-width: calc(100vw - 24px); max-height: calc(100% - 120px); overflow: auto; padding: 0; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--pop); }
 .modal::backdrop { background: rgba(0, 0, 0, 0.28); backdrop-filter: blur(2px); }
+.switcher input { all: unset; box-sizing: border-box; width: 100%; padding: 14px 18px; font-size: 15px; border-bottom: 1px solid var(--line); }
+.switcher ul { list-style: none; margin: 0; padding: 6px; max-height: 50vh; overflow: auto; }
+.switcher li { display: flex; align-items: baseline; gap: 10px; padding: 7px 12px; border-radius: 8px; }
+.switcher li a { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); text-decoration: none; }
+.switcher li[aria-selected="true"] { background: var(--hover); }
+.switcher-hint { margin: 0; padding: 8px 18px 12px; font-size: 12px; }
+.fold-search { align-items: center; }
+.fold-search input[type="search"] { height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; width: 220px; max-width: 40vw; }
 /* the header and footer pad into the space the form leaves around them, so they cover what scrolls beneath without moving */
 .modal header { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 10px 20px; margin-bottom: -10px; position: sticky; top: 0; z-index: 1; background: var(--bg); }
 .modal h2 { margin: 0; font-size: 15px; font-weight: 600; }

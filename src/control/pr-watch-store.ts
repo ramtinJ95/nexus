@@ -39,6 +39,11 @@ export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: Thre
       },
     },
     prWatch: (thread: ThreadId): PrWatchState | null => watches.get(thread),
+    /** The number of each pull request linked to each thread, in one read. */
+    prNumbers(): ReadonlyMap<ThreadId, number[]> {
+      const rows = db.sql("SELECT thread, json_extract(link.value, '$.pr.number') AS number FROM pr_watches, json_each(pr_watches.record, '$.links') AS link").all() as { thread: ThreadId; number: number }[];
+      return new Map([...Map.groupBy(rows, (r) => r.thread)].map(([thread, linked]) => [thread, linked.map((r) => r.number)]));
+    },
     /**
      * Replaces the thread's PR watch, and tells the event log of new feedback, of each PR linked since the last save, and
      * of an error that starts or clears.

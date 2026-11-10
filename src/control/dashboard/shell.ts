@@ -13,7 +13,7 @@ import type { Status } from "../doctor-model.ts";
 import { span } from "./elapsed.ts";
 import { themeScript, Html, html, dot, icon, menu, threadState, dims, workingFor, type Tone } from "./view.ts";
 import type { Context } from "./context.ts";
-import { clonedIcons, type Page } from "./contract.ts";
+import { clonedIcons, findText, type Page } from "./contract.ts";
 import { assetUrl } from "./assets.ts";
 import { problemsText } from "../plain-wording.ts";
 import { tickMs } from "../loop.ts";
@@ -68,6 +68,7 @@ ${page.inspector}
 <template id="icons">${clonedIcons.map(icon)}</template>
 ${startDialog(c, page.start)}
 ${projectDialog(c, page.addProject === true)}
+<dialog id="switcher" class="modal switcher" aria-label="Go to a thread"><input id="switcher-q" type="search" placeholder="Go to a thread" aria-label="Go to a thread" role="combobox" aria-controls="switcher-list" aria-expanded="true" aria-autocomplete="list" autocomplete="off"><ul id="switcher-list" role="listbox" aria-label="Threads"></ul><p class="switcher-hint dim"><kbd>↑</kbd><kbd>↓</kbd> pick, <kbd>Enter</kbd> open, <kbd>Esc</kbd> close</p></dialog>
 <noscript><p class="noscript">Adding projects, starting, archiving and deleting threads, sending messages and live updates need JavaScript.</p></noscript>
 </body>
 </html>
@@ -108,7 +109,9 @@ export function closedLabel(threads: readonly Thread[]): string {
 
 /** How many threads a fold lists before it links to its own page, which keeps every page small however many threads close. */
 export const foldCap = 100;
-export const foldHref = (kind: "quiet" | "closed", project: string, page = 1) => `/threads/${kind}?project=${encodeURIComponent(project)}${page > 1 ? `&page=${page}` : ""}`;
+/** A fold's page of `project`'s threads, or of every project's when it is null, that match `query` when it is not empty. */
+export const foldHref = (kind: "quiet" | "closed", project: string | null, page = 1, query = "") =>
+  `/threads/${kind}?${new URLSearchParams([...project === null ? [] : [["project", project]], ...page > 1 ? [["page", String(page)]] : [], ...query === "" ? [] : [["q", query]]])}`;
 
 function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): Html {
   const { projects } = c;
@@ -116,16 +119,16 @@ function sidebar(c: Context, active: ThreadId | undefined, nav: Shell["nav"]): H
   const row = (t: Thread) => {
     const r = c.row(t);
     const [label, tone] = threadState(r, c.now);
-    return html`<li><a class="row${t.id === active && " active"}${dims(r, active) && " dim"}" href="/threads/${t.id}"${t.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${t.title}</span><span class="row-at">${workingFor(t, c.now) ?? span(lastActive(t), c.now) ?? "now"}</span></a></li>`;
+    return html`<li><a class="row${t.id === active && " active"}${dims(r, active) && " dim"}" href="/threads/${t.id}" title="${t.title}" data-find="${c.find(t)}"${t.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${t.title}</span><span class="row-at">${workingFor(t, c.now) ?? span(lastActive(t), c.now) ?? "now"}</span></a></li>`;
   };
   // A queued thread has no time of its own to show until it starts, so its row says what it is instead.
   const queuedRow = (q: QueuedThread) => {
     const [label, tone] = queuedLook(q);
-    return html`<li><a class="row${q.id === active && " active"}" href="/threads/${q.id}"${q.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${q.title}</span><span class="row-at">${label}</span></a></li>`;
+    return html`<li><a class="row${q.id === active && " active"}" href="/threads/${q.id}" title="${q.title}" data-find="${findText(q)}"${q.id === active && html` aria-current="page"`}><span class="row-icon">${icon("branch")}${dot(tone, label)}</span><span class="row-title">${q.title}</span><span class="row-at">${label}</span></a></li>`;
   };
   return html`<aside class="side" aria-label="Threads">
 <div class="side-head"><a class="brand" href="/"><span class="brand-mark" aria-hidden="true">◆</span>nexus</a><a class="btn btn-new" href="/threads/new" data-start>New thread<kbd>N</kbd></a></div>
-<label class="filter"><span aria-hidden="true">⌕</span><input id="filter" type="search" placeholder="Filter threads" aria-label="Filter threads" autocomplete="off"></label>
+<form id="filter-form" action="/threads/closed" role="search"><label class="filter"><span aria-hidden="true">⌕</span><input id="filter" name="q" type="search" placeholder="Filter threads" aria-label="Filter threads" aria-keyshortcuts="/" autocomplete="off"><kbd>/</kbd></label></form>
 <nav class="side-nav" aria-label="Pages"><a class="side-link" href="/#needs-you">${icon("inbox")}Needs you<span class="side-count" id="needs-count" data-live>${c.needs.length || ""}</span></a>${([["cluster", "Cluster", "server"], ["usage", "Usage", "chart"]] as const).map(([to, label, glyph]) => html`<a class="side-link${nav === to && " active"}" href="/${to}"${nav === to && html` aria-current="page"`}>${icon(glyph)}${label}</a>`)}<div id="side-health" data-live>${healthLink(c, nav === "health")}</div></nav>
 <nav class="groups" id="side-threads" data-live aria-label="Threads by project">
 ${projects.length === 0 ? html`<p class="empty side-empty">No projects yet.</p>` : projects.map((p) => {
@@ -141,6 +144,7 @@ ${closed.length > 0 && html`<a class="archived-link" id="archived-${p.id}" href=
 </details>`;
 })}
 </nav>
+<button type="submit" form="filter-form" class="archived-link" id="filter-closed">Search archived and deleted threads</button>
 <div class="side-theme"><label class="theme-pick" title="Theme">${icon("palette")}<span class="vh">Theme</span><select id="theme">${themes.map(([name, label]) => html`<option value="${name}">${label}</option>`)}</select></label><button type="button" class="icon-btn" id="theme-toggle" aria-label="Switch between light and dark" title="Switch between light and dark">${icon("contrast")}</button></div>
 <a class="btn side-add" href="/projects/new" data-new-project>New project</a>
 </aside>`;
