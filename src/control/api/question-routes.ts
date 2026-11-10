@@ -4,7 +4,7 @@ import { HttpError } from "../http-error.ts";
 import { answerDelivered, answerExits, claudeHook } from "../../../images/pylon/nexus-contract.ts";
 import { askAnswer, choicesSchema, choicesSummary, type AnswerRefusal, type Choice, type ClaudeQuestion, type Question, type QuestionKind, type QuestionOf } from "../questions.ts";
 import { ok, on, parse, type RouteEntry, type ApiKit } from "./kit.ts";
-import { refusalOf } from "./access.ts";
+import { anyAllowed, refusalOf } from "./access.ts";
 import { questionRoutes as routes } from "../../contract/reviews.ts";
 import { answerSchema } from "../../contract/reviews-parse.ts";
 import type { z } from "zod";
@@ -98,6 +98,11 @@ export function questionRoutes(kit: ApiKit, features: Features): readonly RouteE
   };
 
   return [
+    on(routes.show, anyAllowed, ({ question: id }) => {
+      const question = registry.questions.question(id);
+      if (question === null) throw new HttpError(404, `no question ${id}`);
+      return ok(question);
+    }),
     on(routes.answer, { role: "allowed", why: "each question says who may answer it, which refusalOf checks" }, async ({ question: id }, r) => {
       const body = parse(answerSchema, await r.body());
       const question = registry.questions.question(id);
