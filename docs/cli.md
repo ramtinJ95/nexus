@@ -14,6 +14,8 @@ deploy/mac/install
 
 It runs `npm ci`, links `~/.local/bin/nexus` to [`deploy/mac/nexus`](../deploy/mac/nexus), prints the version, and says so when `~/.local/bin` is not on `PATH`. Give it another directory as its argument to link there instead. The shim follows its symlink back to the checkout and runs `node src/cli/nexus.ts`, so a `git pull` updates the CLI, and a pull that changes `package-lock.json` needs the script run again. Then run `nexus connect <host>`.
 
+The CLI keeps Node's compile cache, the stripped TypeScript and compiled code of its modules, in `~/.cache/nexus/compile-cache`, or where `NODE_COMPILE_CACHE` says, so a command after the first starts in about two thirds of the time. Node keeps one cache per Node version and per user in it, and replaces an entry whose file changed, as after a `git pull`. A cache it cannot create or write, such as under a `~/.cache` that is a file, leaves the CLI as it would run without one, with nothing on stderr. `NODE_DISABLE_COMPILE_CACHE=1` turns it off. It is not Node's default, the temp directory's `node-compile-cache`, because on a machine several users share, the first user's directory there is one the others cannot write in.
+
 ## Where it connects
 
 A Mac on the tailnet, through the Tailscale app, connects to the control plane directly. A Mac that reaches the tailnet only through a userspace tailscaled, such as ts-home's on `localhost:1055`, opens a SOCKS5 CONNECT to the control plane and speaks HTTP, or TLS for an `https://` URL, through it. The GETs of one command share a pool of kept connections, one for GETs sent one at a time, so a watch or a wait that polls opens no tunnel per poll. The CLI lets go of it after 4 idle seconds, before the API's server closes it after 5, and sends a GET that met a kept connection closing under it once more on a new one. Every other method opens a connection of its own, since a failure there may hide a request that ran. A watch's or a follower's stream holds a connection of its own too. The proxy resolves the name, because only it knows MagicDNS. The API allows a device by its tailnet node, so the CLI sends no token.
@@ -320,6 +322,8 @@ interface Diff { base: ChangesBaseAt; diff: string; truncated: boolean }
 The control plane also serves `POST /v1/images`, which records the manifest of an image built outside it, such as a local stack's Docker image. It records only a new image: the same manifest again answers 201 as the first time did, and another manifest under a recorded ID is refused with 409, because nodes verify the bytes they fetch against the recorded sha256. The CLI leaves it out.
 
 ## Failures
+
+A reader that closes stdout before a command finishes writing, such as `head` or a `less` quit early, ends any command with exit code 0 and nothing on stderr.
 
 A failed command prints nothing on stdout and exits with one of these codes. `doctor` alone prints its report and then exits 1 when a check failed:
 
