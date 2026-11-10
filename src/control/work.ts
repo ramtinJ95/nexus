@@ -1,6 +1,6 @@
 /** What waits on the person: the inbox, which lists each thread's needs beside what else stops a thread or holds work. */
 import type { ThreadId } from "../ids.ts";
-import { itemView, threadStage, type PipelineItem } from "./pipeline.ts";
+import { threadStage, type PipelineItem } from "./pipeline.ts";
 import type { CleanupQuestion } from "./questions.ts";
 import type { QueuedThread } from "../contract/threads.ts";
 import type { Registry } from "./registry.ts";
@@ -13,8 +13,9 @@ export type HeldWork = { kind: "item"; item: PipelineItem } | { kind: "queued"; 
 /** A thread's card, a node's cleanup question with its Cluster card, or work its pipeline phase holds for the person that no card acts on. */
 export type InboxNeed = ThreadNeed | { kind: "cleanup"; question: CleanupQuestion; since: number } | { kind: "held"; work: HeldWork; since: number };
 
+/** `threads` are the open threads and the archived ones that may need the person, and `items` the pipeline's items not yet threads, as of `now`. */
 interface Work {
-  registry: Registry; now: number; threads(): readonly Thread[]; queuedIn(project: string): readonly QueuedThread[];
+  registry: Registry; now: number; threads: readonly Thread[]; items: readonly PipelineItem[]; queuedIn(project: string): readonly QueuedThread[];
 }
 
 /**
@@ -31,14 +32,14 @@ export function needsOf(w: Work, detail: (thread: Thread) => ServerDetail): Inbo
     return needs.map((n) => ({ ...n, d }));
   };
   // Open threads' cards before archives', so the sort keeps that order between cards of the same age.
-  const threads = Map.groupBy(w.threads(), (t) => t.status === "archived");
+  const threads = Map.groupBy(w.threads, (t) => t.status === "archived");
   const cards = [...cleanups, ...(threads.get(false) ?? []).flatMap(cardsOf), ...(threads.get(true) ?? []).flatMap(cardsOf)].sort((a, b) => a.since - b.since);
   const carded = new Set(cards.flatMap((n) => n.kind === "cleanup" || n.kind === "held" ? [] : [n.d.thread.id]));
   const holds = (id: ThreadId) => threadStage(w.registry, id, w.now).phase.kind === "held";
   const held = [
-    ...w.registry.pipeline.items().map((i) => itemView(w.registry, i, w.now)).filter((item) => item.thread === null && item.phase.kind === "held").map((item): InboxNeed => ({ kind: "held", work: { kind: "item", item }, since: item.addedAt })),
+    ...w.items.filter((item) => item.phase.kind === "held").map((item): InboxNeed => ({ kind: "held", work: { kind: "item", item }, since: item.addedAt })),
     ...w.registry.projects.projects().flatMap((p) => w.queuedIn(p.id)).filter((q) => holds(q.id)).map((q): InboxNeed => ({ kind: "held", work: { kind: "queued", q }, since: q.createdAt })),
-    ...w.threads().filter((t) => isOpenStatus(t.status) && !carded.has(t.id) && holds(t.id)).map((thread): InboxNeed => ({ kind: "held", work: { kind: "thread", thread, d: detail(thread) }, since: Math.max(thread.createdAt, thread.lastAgentActivityAt) })),
+    ...w.threads.filter((t) => isOpenStatus(t.status) && !carded.has(t.id) && holds(t.id)).map((thread): InboxNeed => ({ kind: "held", work: { kind: "thread", thread, d: detail(thread) }, since: Math.max(thread.createdAt, thread.lastAgentActivityAt) })),
   ].sort((a, b) => a.since - b.since);
   return [...cards, ...held];
 }

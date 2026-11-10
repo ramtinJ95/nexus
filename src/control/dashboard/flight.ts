@@ -49,7 +49,7 @@ const itemLine = (c: Context, i: PipelineItem): Line => ({ key: i.id, title: i.t
 export function flightLines(c: Context, h: HomeView): Map<Stage, Line[]> {
   const recent = (t: Thread) => isOpenStatus(t.status) || (t.status === "archived" && t.archivedAt !== undefined && c.now - t.archivedAt < deployedForMs);
   const lines = [
-    ...h.items.filter((i) => i.thread === null).map((i) => itemLine(c, i)),
+    ...c.items.filter((i) => i.thread === null).map((i) => itemLine(c, i)),
     ...c.projects.flatMap((p) => c.queuedIn(p.id)).map((q) => queuedLine(c, q)),
     ...c.threads.filter((t) => recent(t) && h.role(t) === "builder").map((t) => [t, threadLine(c, t)] as const).filter(([t, l]) => t.status !== "archived" || l.life.stage === "deployed").map(([, l]) => l),
   ];
@@ -116,11 +116,11 @@ function latest({ reply, asked }: Latest, now: number): Html {
 }
 
 /** What an item waits to start after and its brief, which its preview and its Needs you card show. */
-export function itemBrief(h: HomeView, i: PipelineItem): Html {
+export function itemBrief(c: Context, i: PipelineItem): Html {
   // An item that became a thread previews as that thread, so one that waits on the person leads to its card.
   const after = i.after.map((id) => {
-    const x = h.items.find((y) => y.id === id);
-    return { key: x?.thread ?? id, title: x?.title ?? id };
+    const x = c.pipeline.get(id);
+    return { key: x?.thread ?? id, title: x?.record.title ?? id };
   });
   return html`${after.length > 0 && html`<p class="peek-meta">After ${after.map((x, n) => html`${n > 0 && ", "}<a class="link" href="${peekHref(x.key)}" data-peek="${x.key}">${x.title}</a>`)}</p>`}
 ${i.brief === null ? html`<p class="empty">No brief.</p>` : html`<div class="peek-reply"><p class="peek-k">Brief</p><div class="peek-text">${prose(i.brief)}</div></div>`}`;
@@ -137,7 +137,7 @@ export function peekView(c: Context, h: HomeView, p: Peek | null): Html | false 
 <header class="peek-head"><span class="peek-proj">${i.project}<span class="dim"> item </span><code>${i.id}</code></span><h2 id="peek-h">${dot(phaseTone[i.phase.kind], i.phase.kind)}<span>${i.title}</span></h2>${i.thread !== null && html`<a class="btn btn-xs" href="/threads/${i.thread}">Open thread</a>`}${close}</header>
 ${lifeTrack(life, false)}
 ${next(life)}
-${itemBrief(h, i)}
+${itemBrief(c, i)}
 <p class="peek-meta">Added by ${i.addedBy} ${ago(i.addedAt, c.now)}, for ${i.worker === "claude" ? `Claude Code${i.model !== null ? `, ${i.model}` : ""}` : "the Nexus agent"}.</p>
 ${project !== undefined && itemActions(i, project)}
 </section>`;

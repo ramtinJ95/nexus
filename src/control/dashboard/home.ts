@@ -102,7 +102,7 @@ ${queued.length > 0 && html`<h3 class="ov-sub">Queued</h3><table class="ov ov-qu
 })}</tbody>
 </table>`}
 ${quiet.length > 0 && html`<details class="ov-closed" id="quiet-${p.id}"><summary>${quietLabel(quiet)}</summary>${table(c, offline, quiet.slice(0, foldCap))}${quiet.length > foldCap && html`<a class="link" href="${foldHref("quiet", p.id)}">All ${quiet.length} quiet</a>`}</details>`}
-${closed.length > 0 && html`<p class="ov-closed" id="closed-${p.id}"><a href="${foldHref("closed", p.id)}">${closedLabel(closed)}</a></p>`}
+${closed.archived + closed.deleted > 0 && html`<p class="ov-closed" id="closed-${p.id}"><a href="${foldHref("closed", p.id)}">${closedLabel(closed)}</a></p>`}
 </section>`;
 })}`;
 }
@@ -113,19 +113,24 @@ const foldNames = { quiet: "Quiet threads", closed: "Archived and deleted thread
  * A fold's threads, newest first, `foldCap` to a page, in each of its projects, that match `query` as the sidebar's filter
  * matches its rows. A closed fold also lists the queued threads cancelled or deleted before they started.
  */
-export function foldPage(c: Context, kind: "quiet" | "closed", { project, projects, offline, cancelled }: FoldView, page: number, query = ""): Html {
+export function foldPage(c: Context, kind: "quiet" | "closed", { project, projects, offline, cancelled, closed }: FoldView, page: number, query = ""): Html {
   const paged = <T>(all: readonly T[]) => all.slice((page - 1) * foldCap, page * foldCap);
   const none = query !== "" ? html`No threads match “${query}”.` : kind === "quiet" ? "No quiet threads." : "No archived or deleted threads.";
+  const listed = (of: string): { shown: readonly Thread[]; total: number } => {
+    if (kind === "closed") return closed(of);
+    const quiet = threadsOf(c, of).quiet.filter((t) => found(c.find(t), query));
+    return { shown: paged(quiet), total: quiet.length };
+  };
   return layout(c, {
     title: foldNames[kind],
     main: html`<header class="bar">${menu}<div class="crumb"><a class="crumb-p" href="/">Threads</a><span class="sep" aria-hidden="true">/</span><h1>${foldNames[kind]}</h1></div><form class="bar-end fold-search" method="get" action="/threads/${kind}" role="search">${project !== null && html`<input type="hidden" name="project" value="${project}">`}<input type="search" name="q" value="${query}" placeholder="Title, project, ID or #PR" aria-label="Search ${foldNames[kind].toLowerCase()}" autocomplete="off"><button type="submit" class="btn btn-xs">Search</button></form></header>
 <div class="scroll"><div class="page" id="fold-list" data-live>${projects.map((p) => {
-  const threads = threadsOf(c, p.id)[kind].filter((t) => found(c.find(t), query));
+  const { shown, total } = listed(p.id);
   const queued = cancelled.filter((q) => q.project === p.id && found(findText(q), query));
-  const older = threads.length > page * foldCap || queued.length > page * foldCap;
+  const older = total > page * foldCap || queued.length > page * foldCap;
   return html`<section aria-labelledby="project-${p.id}">
-<div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><span class="count">${threads.length}</span></div>
-${threads.length + queued.length === 0 ? html`<p class="empty">${none}</p>` : html`${paged(threads).length > 0 && table(c, offline, paged(threads))}
+<div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><span class="count">${total}</span></div>
+${total + queued.length === 0 ? html`<p class="empty">${none}</p>` : html`${shown.length > 0 && table(c, offline, shown)}
 ${paged(queued).length > 0 && html`<h3 class="ov-sub">Never started</h3><table class="ov ov-queued">
 <thead><tr><th>Thread</th></tr></thead>
 <tbody>${paged(queued).map((record) => {
@@ -178,7 +183,7 @@ ${fold(needId(n), html`<div class="need-head"><span class="need-what">Cleanup</s
     const what = item === undefined ? (l.state[0] === "blocked" ? "Blocked" : "Held") : item.approved === null && project?.pipeline?.autoStart === false ? "Approve item" : "Held item";
     return html`<article class="need need-held${mark(n)}" id="${needId(n)}" data-peek-key="${l.key}" tabindex="-1" aria-label="${what}: ${l.title}">
 ${fold(needId(n), html`<div class="need-head"><span class="need-what">${what}</span><a class="need-thread" href="${peekHref(l.key)}" data-peek="${l.key}"><span class="dim">${l.project} /</span> ${l.title}</a><span class="need-at">${l.when}</span></div>`,
-  html`${n.work.kind === "thread" ? whereNow(c, h, n.work.d, l.life, replyOf(l.key)) : html`<div class="need-ctx">${lifeTrack(l.life, false)}</div>`}<p class="land-note">${l.life.why.replace(/\.$/, "")}.</p>${item !== undefined && itemBrief(h, item)}${item !== undefined && project !== undefined ? itemActions(item, project) : n.work.kind === "queued" && html`<div class="need-act"><a class="btn btn-xs" href="/threads/${l.key}">Open thread</a></div>`}`, l.life.why, mark(n))}
+  html`${n.work.kind === "thread" ? whereNow(c, h, n.work.d, l.life, replyOf(l.key)) : html`<div class="need-ctx">${lifeTrack(l.life, false)}</div>`}<p class="land-note">${l.life.why.replace(/\.$/, "")}.</p>${item !== undefined && itemBrief(c, item)}${item !== undefined && project !== undefined ? itemActions(item, project) : n.work.kind === "queued" && html`<div class="need-act"><a class="btn btn-xs" href="/threads/${l.key}">Open thread</a></div>`}`, l.life.why, mark(n))}
 </article>`;
   }
   const t = n.d.thread;
