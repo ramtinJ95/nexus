@@ -46,17 +46,8 @@ RUN cd /tmp \
  && install -D -o root -g root -m 0755 package/bin/pi-env-linux-x64/pi-env /usr/local/libexec/nexus/pi-env \
  && rm -r pi-env.tgz package
 
-# Herdr's release binary, checked like Node. herdr.dev's installer would fetch only the latest release.
-ARG HERDR_VERSION
-ARG HERDR_SHA256
-RUN cd /tmp \
- && curl -fsSLo herdr "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-x86_64" \
- && echo "${HERDR_SHA256}  herdr" | sha256sum -c - \
- && install -m 0755 herdr /usr/local/bin/herdr \
- && rm herdr
-
-# Herdr Core beside Herdr, from its release tarball, checked like Node. Nothing in Nexus runs it yet. hc is the
-# name its installer links and its help uses.
+# Herdr Core, which every session runs in, from its release tarball, checked like Node. hc is the name its
+# installer links and its help uses.
 ARG HERDR_CORE_VERSION
 ARG HERDR_CORE_SHA256
 RUN cd /tmp \
@@ -140,12 +131,6 @@ RUN mkdir -p /home/user/.pi/agent/extensions /home/user/.claude /home/user/.agen
 # it through the link. A dotfiles layer that installs either file must keep this.
 RUN printf '@~/.nexus/PYLON.md\n' > /home/user/.claude/CLAUDE.md \
  && ln -s /home/user/.nexus/PYLON.md /home/user/.pi/agent/AGENTS.md
-# Nexus relaunches each pane's agent on wake (src/probe/guest/sessions.ts) and checks that it runs. Herdr's own resume on
-# restore would start it first, and when that start fails, as `claude --resume` does for a session never
-# prompted, Herdr still reports the agent as running. Without `onboarding = false`, Herdr's first-run dialog covers
-# the session on the first attach to every new pylon.
-RUN mkdir -p /home/user/.config/herdr \
- && printf 'onboarding = false\n\n[session]\nresume_agents_on_restore = false\n' > /home/user/.config/herdr/config.toml
 # Without `notes = false`, Herdr Core types notes to parent agents and <hc> tags into messages on its own.
 RUN mkdir -p /home/user/.config/herdr-core \
  && printf 'notes = false\n' > /home/user/.config/herdr-core/config.toml

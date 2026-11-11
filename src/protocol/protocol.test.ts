@@ -256,7 +256,9 @@ const imageManifest = { id: image, gondolinBuildId: "b1", builtOn: "rj-firebat",
 const templateManifest = { id: template, key: { project: "p", image, setupHash: "h" }, commit: "c0ffee", builtAt: "2027-01-01T00:00:00Z", sha256: hex };
 
 test("an artifact manifest is read as it was written, with the fields it does not know", () => {
-  for (const manifest of [imageManifest, { ...imageManifest, pins: { ...imageManifest.pins, herdrSha256: hex } }, { ...imageManifest, pins: { ...imageManifest.pins, herdrSha256: hex, herdrCore: "0.1.20", herdrCoreSha256: hex } }, templateManifest, { ...imageManifest, ...unknown }, { ...templateManifest, key: { ...templateManifest.key, ...unknown } }]) {
+  const herdr = { herdr: "0.9.5" }, core = { herdrCore: "0.1.20", herdrCoreSha256: hex };
+  const pinsOverTime = [herdr, { ...herdr, herdrSha256: hex }, { ...herdr, herdrSha256: hex, ...core }, core];
+  for (const manifest of [imageManifest, ...pinsOverTime.map((pins) => ({ ...imageManifest, pins: { ...imageManifest.pins, ...pins } })), templateManifest, { ...imageManifest, ...unknown }, { ...templateManifest, key: { ...templateManifest.key, ...unknown } }]) {
     assert.deepEqual(parseArtifactManifest(manifest), manifest);
   }
   const bad: unknown[] = [

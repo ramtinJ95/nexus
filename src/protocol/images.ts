@@ -20,8 +20,8 @@ import type { ImageId, NodeName, ProjectId, TemplateId } from "../ids.ts";
  *      nexus-kvm.
  *   3. `user`, UID 1000, passwordless sudo, /home/user/workspace.
  *   4. Node from the checksum-verified official tarball into /usr/local.
- *   5. Claude Code and pi from npm, Herdr from its checksum-verified release binary into /usr/local/bin, Herdr Core
- *      beside it as /usr/local/bin/herdr-core and `hc` from its checksum-verified release tarball, which every session runs in,
+ *   5. Claude Code and pi from npm, Herdr Core as /usr/local/bin/herdr-core and `hc` from its checksum-verified
+ *      release tarball, which every session runs in,
  *      the pi-env daemon at /usr/local/libexec/nexus/pi-env, the in-pylon `nexus` CLI,
  *      nexus-kvm at /usr/local/libexec/nexus/nexus-kvm, claude-managed-settings.json as root's
  *      /etc/claude-code/managed-settings.json, which allows Claude Code Opus, Sonnet and Haiku, denies Fable, and holds
@@ -62,9 +62,9 @@ export interface ImageRecipe {
     nodeSha256: string; // of node-v<node>-linux-x64.tar.xz, from that release's SHASUMS256.txt
     claudeCode: string;
     pi: string;
-    herdr: string;
-    herdrSha256?: string; // of herdr-linux-x86_64, that release asset's digest on GitHub. An image built before the pin has none
-    herdrCore?: string; // "0.1.20", Herdr Core beside Herdr. An image built before the pin has none, nor its digest
+    herdr?: string; // "0.9.5", Herdr before Core. Only an image built before Herdr left the image has it
+    herdrSha256?: string; // of herdr-linux-x86_64, that release asset's digest on GitHub. An image built before the pin, or after Herdr left, has none
+    herdrCore?: string; // "0.1.20", which every session runs in. An image built before the pin has none, nor its digest
     herdrCoreSha256?: string; // of herdr-core-linux-x86_64.tar.gz, from that release's manifest.json
     piEnv: string; // the pi-env daemon, which must speak the protocol of the harness's pi-env client (1)
     piEnvSha256: string; // of package/bin/pi-env-linux-x64/pi-env in that npm tarball
@@ -85,7 +85,7 @@ export const pinsSchema = z.strictObject({
   nodeSha256: z.string().regex(/^[0-9a-f]{64}$/),
   claudeCode: z.string().min(1),
   pi: z.string().min(1),
-  herdr: z.string().min(1),
+  herdr: z.string().min(1).exactOptional(),
   herdrSha256: z.string().regex(/^[0-9a-f]{64}$/).exactOptional(),
   herdrCore: z.string().regex(/^\d+\.\d+\.\d+$/).exactOptional(),
   herdrCoreSha256: z.string().regex(/^[0-9a-f]{64}$/).exactOptional(),
@@ -100,9 +100,8 @@ export const pinsSchema = z.strictObject({
   neovimSha256: z.string().regex(/^[0-9a-f]{64}$/),
 }) satisfies z.ZodType<ImageRecipe["pins"]>;
 
-/** The pins of a recipe to build: an image built before herdrSha256 or Herdr Core was pinned may lack them, a build may not. */
-export const buildPinsSchema = pinsSchema.extend({
-  herdrSha256: z.string().regex(/^[0-9a-f]{64}$/),
+/** The pins of a recipe to build: an image built before Herdr Core was pinned may lack it, a build may not, and no build installs Herdr 0.9.5. */
+export const buildPinsSchema = pinsSchema.omit({ herdr: true, herdrSha256: true }).extend({
   herdrCore: z.string().regex(/^\d+\.\d+\.\d+$/),
   herdrCoreSha256: z.string().regex(/^[0-9a-f]{64}$/),
 });
