@@ -25,10 +25,21 @@ export const asUser = (script: string): readonly string[] => ["runuser", "-l", "
 export const onClaudeTranscript = (body: string, none: number) => `for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; ${body}; exit 0; done; exit ${none}`;
 
 /**
- * Exits 0 while the user's Herdr Core runs. It matches the process, because every Core command, a read included,
- * starts a core when none runs (spikes/herdr-core/README.md, core-autostart).
+ * Sets $s to the socket of the user's Herdr Core, which the core keeps in its state folder's core.lock, and exits 0
+ * while a process listens on a socket `match` accepts, from the kernel's table of Unix sockets. `connect` follows the
+ * same HC_SESSION, so it reaches that core and no other of the user's.
  */
-export const coreRunning = `pgrep -u "$(id -u)" -x -f '([^ ]*/)?herdr-core serve' >/dev/null`;
+const listensAt = (match: string) => `{ s=$(cat "\${XDG_STATE_HOME:-$HOME/.local/state}/herdr-core/\${HC_SESSION:-default}/core.lock" 2>/dev/null); awk -v s="$s" '$4=="00010000"&&${match}{f=1}END{exit !f}' /proc/net/unix; }`;
+/**
+ * Exits 0 while the user's Herdr Core runs. It checks that the core listens, because every Core command, a read
+ * included, starts a core when none does (spikes/herdr-core/README.md, core-autostart).
+ */
+export const coreRunning = listensAt("$NF==s");
+/**
+ * Exits 0 while the holder of the core's programs listens. A core that crashed leaves its holder and every program
+ * in it running, and the next core takes them back, live at their addresses (spikes/herdr-core/README.md, core-crash).
+ */
+export const coreHeld = listensAt('index($NF,substr(s,1,length(s)-5)".holder.")==1');
 export const coreStartMs = 5_000;
 /**
  * setsid detaches the core from the exec, and the redirects let the exec return without waiting on its output. In an
@@ -42,7 +53,7 @@ export const startCore = "setsid -f tini -s -- herdr-core serve </dev/null >/dev
  * so the core gets the login environment rather than that of whatever reaches it first, such as a Claude whose
  * session variables would pass to every terminal.
  */
-export const ensureCore = `{ ${coreRunning} || { ${startCore}; i=0; until ${coreRunning}; do i=$((i + 1)); [ $i -lt ${coreStartMs / 100} ] || break; sleep 0.1; done; ${coreRunning}; }; }`;
+export const ensureCore = `{ up() ${coreRunning}; up || { ${startCore}; i=${coreStartMs / 100}; while [ $((i-=1)) -gt 0 ] && ! up; do sleep 0.1; done; up; }; }`;
 
 /** A Core terminal's address on its own machine, such as t7. */
 export const terminalPattern = /^t[0-9a-z]{1,12}$/;

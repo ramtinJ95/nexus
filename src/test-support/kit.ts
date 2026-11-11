@@ -4,9 +4,9 @@
  */
 import { spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, request } from "node:http";
-import { connect, createServer as createTcpServer } from "node:net";
+import { connect, createServer as createTcpServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, type TestContext } from "node:test";
@@ -153,4 +153,40 @@ export function callText({ host, port, method, path, body, headers = {} }: CallO
 export async function call(options: CallOptions): Promise<{ status: number; body: any }> {
   const { status, text } = await callText(options);
   return { status, body: text === "" ? null : JSON.parse(text) };
+}
+
+/** Guest scripts that find the core by its socket read the kernel's table of Unix sockets. */
+export const unixSockets = process.platform === "linux" || "reads /proc/net/unix";
+
+/**
+ * A home whose Herdr Core is a real Unix socket, as the guest's guard finds one: its state folder's core.lock names
+ * the socket, and the guard sees it while something listens there. `listen` starts the core or its holder, `close`
+ * ends it, as a crash does. `env` runs a guest script as a user of that home.
+ */
+export async function coreHome(t: Pick<TestContext, "after">): Promise<{ home: string; socket: string; env: NodeJS.ProcessEnv; listen(what: "core" | "holder"): Promise<void>; close(what: "core" | "holder"): Promise<void> }> {
+  const home = await tempDir("nexus-core-home-", t);
+  const state = join(home, ".local/state/herdr-core/default");
+  await mkdir(state, { recursive: true });
+  const socket = { core: join(home, "default.sock"), holder: join(home, "default.holder.0a1b2c3d.sock") };
+  await writeFile(join(state, "core.lock"), socket.core);
+  const servers = new Map<string, Server>();
+  const close = async (what: "core" | "holder") => {
+    const server = servers.get(what);
+    servers.delete(what);
+    if (server !== undefined) await new Promise((resolve) => server.close(resolve));
+  };
+  t.after(async () => { await close("core"); await close("holder"); });
+  const { XDG_STATE_HOME: _state, HC_SESSION: _session, ...inherited } = process.env;
+  return {
+    home,
+    socket: socket.core,
+    env: { ...inherited, HOME: home },
+    async listen(what) {
+      const server = createTcpServer();
+      server.listen(socket[what]);
+      await once(server, "listening");
+      servers.set(what, server);
+    },
+    close,
+  };
 }

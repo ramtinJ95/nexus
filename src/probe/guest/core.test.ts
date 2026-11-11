@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tempDir } from "../../test-support/kit.ts";
+import { coreHome, tempDir, unixSockets } from "../../test-support/kit.ts";
 import { core, coreCall, CoreError, noCore, screenChars } from "./core.ts";
 import { coreError, coreOk, fakeCore, fakeGuest } from "../../backends/fake-guest.ts";
 
@@ -26,30 +26,34 @@ test("an error reply rejects with Core's kind, a late call with its limit, and a
   await assert.rejects(core(fakeGuest(() => coreOk({ terminals: [{ ...shell, state: "gone" }] })), "terminal.list", {}), /terminal\.list result\.terminals\[0\]\.state/);
   await assert.rejects(core(fakeGuest(() => ({ exitCode: 1, output: "herdr-core: not found\n" })), "terminal.list", {}), /exited 1 without a JSON reply/);
   assert.deepEqual(await core(fakeGuest(() => coreOk({ terminals: [shell] })), "terminal.list", {}), { terminals: [shell] });
+  await assert.rejects(core(fakeGuest(() => ({ ...coreOk({ terminals: [shell] }), truncated: true })), "terminal.list", {}), /terminal\.list's reply passed the guest's 65536-byte output limit/,
+    "a cut reply is an error, even one that still parses");
 });
 
-test("in the guest, the call checks for a core before Core can start one, and keeps only what Nexus reads of each terminal", async (t) => {
+test("in the guest, the call checks for a core before Core can start one, tells a crashed one's programs from none, and keeps only what Nexus reads of each terminal", { skip: unixSockets !== true && unixSockets }, async (t) => {
   const dir = await tempDir("nexus-core-call-", t);
+  const user = await coreHome(t);
   const prompt = "p".repeat(20_000);
   const fat = { ...shell, screen: "s".repeat(30_000), records: { big: "r".repeat(10_000) }, argv: ["claude", "--resume", "id-1", prompt], foreground: { argv: ["claude", "--resume", "id-1", prompt], cwd: "/w", name: "claude", pid: 7 }, status: { state: "idle", app: "claude-code", msg: "m" } };
   const replies: Record<string, unknown> = {
     "terminal.list": { hidden_finished: 0, machines: [], terminals: [fat, fat] },
     "terminal.read": { text: "x".repeat(20_000) + "end\n\n", complete: true, how: "screen" },
   };
-  await writeFile(join(dir, "pgrep"), `#!/bin/sh\ntest -e ${dir}/running\n`, { mode: 0o755 });
   await writeFile(join(dir, "replies.json"), JSON.stringify(replies));
   await writeFile(join(dir, "herdr-core"), `#!/bin/sh\ntouch ${dir}/started\nread -r request\nexec node -e 'const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))[JSON.parse(process.argv[2]).method]; console.log("a warning first"); console.log(JSON.stringify({ id: 1, jsonrpc: "2.0", result: r }))' ${dir}/replies.json "$request"\n`, { mode: 0o755 });
   const guest = fakeGuest((argv) => {
-    const run = spawnSync(argv[0]!, argv.slice(1), { env: { ...process.env, PATH: `${dir}:${process.env.PATH}` }, encoding: "utf8" });
+    const run = spawnSync(argv[0]!, argv.slice(1), { env: { ...user.env, PATH: `${dir}:${process.env.PATH}` }, encoding: "utf8" });
     return { exitCode: run.status, output: run.stdout + run.stderr };
   });
   await assert.rejects(core(guest, "terminal.list", {}), (err) => err instanceof CoreError && err.kind === "no_core");
+  await user.listen("holder");
+  await assert.rejects(core(guest, "terminal.list", {}), (err) => err instanceof CoreError && err.kind === "core_lost");
   assert.equal(existsSync(join(dir, "started")), false, "herdr-core never ran");
-  await writeFile(join(dir, "running"), "");
+  await user.listen("core");
   const { terminals } = await core(guest, "terminal.list", {});
   assert.equal(terminals.length, 2);
-  assert.deepEqual(terminals[0]!.foreground, { argv: ["claude", "--resume", "id-1", prompt.slice(0, 1024)], cwd: "/w", name: "claude" });
-  assert.equal(terminals[0]!.argv[3], prompt.slice(0, 1024));
+  assert.deepEqual(terminals[0]!.foreground, { argv: ["claude", "--resume", "id-1", prompt.slice(0, 256)], cwd: "/w", name: "claude" });
+  assert.equal(terminals[0]!.argv[3], prompt.slice(0, 256));
   assert.deepEqual(terminals[0]!.status, { state: "idle", app: "claude-code" });
   const output = guest.execs.at(-1)!;
   assert.equal(output[2], coreCall);

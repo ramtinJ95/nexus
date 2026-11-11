@@ -2,18 +2,20 @@
  * Herdr Core's API inside a pylon, one guest exec as `user` per call: a JSON-RPC request piped through
  * `herdr-core connect` to the core the pylon's boot started. Every Core command, a read included, starts a core when
  * none runs (spikes/herdr-core/README.md, core-autostart), so the exec first checks that one runs and exits
- * `noCoreExit` without one. A read therefore never starts a core.
+ * `noCoreExit` without one, or `coreLostExit` when the programs of a core that crashed still run without it. A read
+ * therefore never starts a core.
  */
 import { z } from "zod";
 import type { Guest } from "../../backends/backend.ts";
 import { nonEmpty, parse, parseJson } from "../../parse.ts";
-import { callTimeoutMs, coreRunning } from "../../guest-contract.ts";
+import { callTimeoutMs, coreHeld, coreRunning, execOutputMaxBytes } from "../../guest-contract.ts";
 import { home } from "../../../images/pylon/nexus-contract.ts";
 
 export const noCoreExit = 69;
+export const coreLostExit = 70;
 /** How much of a terminal's screen a read keeps, and of each of its arguments a terminal keeps. */
 export const screenChars = 8192;
-const argChars = 1024;
+const argChars = 256;
 
 /**
  * Keeps only what Nexus reads of each terminal in the reply. A terminal comes with its whole screen, and its arguments
@@ -41,9 +43,13 @@ process.stdin.setEncoding("utf8").on("data", (chunk) => { text += chunk; }).on("
 });`;
 
 /** `$1` is the request and `$2` slimReply. */
-export const coreCall = `${coreRunning} || exit ${noCoreExit}; printf '%s\\n' "$1" | herdr-core connect | exec node -e "$2"`;
+export const coreCall = `${coreRunning} || { ${coreHeld} && exit ${coreLostExit}; exit ${noCoreExit}; }; printf '%s\\n' "$1" | herdr-core connect | exec node -e "$2"`;
 
-/** A Core error. `kind` is Core's, such as `not_found`, `name_taken`, `blocked`, `finished` or `live`, or `no_core` when no core runs. */
+/**
+ * A Core error. `kind` is Core's, such as `not_found`, `name_taken`, `blocked`, `unavailable`, `finished` or `live`;
+ * or `no_core` when no core runs; or `core_lost` when none runs but the programs of one that crashed do, so what
+ * runs is unknown until a core takes them back.
+ */
 export class CoreError extends Error {
   readonly kind: string;
   constructor(kind: string, message: string) {
@@ -106,9 +112,11 @@ const replySchema = z.object({
 /** One API call. `connect` exits 0 on an error reply too, so the reply decides. */
 export async function core<M extends CoreMethod>(guest: Guest, method: M, params: Params[M], timeoutMs = callTimeoutMs): Promise<z.infer<(typeof results)[M]>> {
   const request = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
-  const { exitCode, output } = await guest.exec(["sh", "-c", coreCall, "core", request, slimReply], { cwd: home, timeoutMs });
+  const { exitCode, output, truncated } = await guest.exec(["sh", "-c", coreCall, "core", request, slimReply], { cwd: home, timeoutMs });
   if (exitCode === null) throw new Error(`${method} did not finish within ${timeoutMs} ms`);
   if (exitCode === noCoreExit) throw new CoreError("no_core", `${method}: no Herdr Core runs`);
+  if (exitCode === coreLostExit) throw new CoreError("core_lost", `${method}: no Herdr Core runs, but the programs of one that crashed still do`);
+  if (truncated) throw new Error(`${method}'s reply passed the guest's ${execOutputMaxBytes}-byte output limit`);
   const line = output.trimEnd().split("\n").findLast((l) => l.startsWith("{"));
   if (line === undefined) throw new Error(`${method} exited ${exitCode} without a JSON reply: ${output.slice(-500)}`);
   const reply = parseJson(replySchema, line, `${method} reply`);
