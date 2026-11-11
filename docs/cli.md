@@ -1282,7 +1282,8 @@ the local probe answers, so a probe restart delays reports rather than losing
 them; see the data model's outbox and buffer limits. `nexus event` itself sends
 once and fails while the probe is unavailable. The UserPromptSubmit hook's
 `session.turn-started` also carries `promptSha256`, the SHA-256 of the prompt
-without the `<pasted_content>` tags Claude Code wraps a pasted one in, so the
+without the `<pasted_content>` tags Claude Code wraps a pasted one in, and none
+for a prompt no one typed, such as a finished task's `<task-notification>`, so the
 control plane counts a prompt Nexus did not type as human activity, as
 [the data model](data-model.md) describes. `nexus event` sends none.
 

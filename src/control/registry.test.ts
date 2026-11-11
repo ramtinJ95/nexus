@@ -662,6 +662,16 @@ test("a long message Nexus typed is still Nexus's when Claude hands its hook the
   assert.equal(registry.threads.thread(threadId)!.lastHumanActivityAt, thread.lastHumanActivityAt);
 });
 
+test("the turn Claude starts for a finished background task is no one's activity", async (t) => {
+  const { hookReport } = await import("../../images/pylon/nexus-heartbeat.ts");
+  const registry = seeded(t, tempDb(), undefined, "Fix the checkout");
+  const report = (sequence: number, at: number, prompt: string) => registry.threads.reportSession(node, { sequence, pylon: pylonId, time: Date.now(), event: { kind: "session.turn-started", at, session: "s1", promptSha256: hookReport("session.turn-started", { prompt }).promptSha256 } });
+  report(1, 5_000, "<task-notification>\n<task-id>bmo4drl8q</task-id>\n<status>completed</status>\n<summary>Background command \"Sleep 20 seconds\" completed (exit code 0)</summary>\n</task-notification>");
+  assert.equal(registry.threads.thread(threadId)!.lastHumanActivityAt, thread.lastHumanActivityAt);
+  report(2, 6_000, "Now the other file");
+  assert.equal(registry.threads.thread(threadId)!.lastHumanActivityAt, 6_000, "the person's next prompt counts");
+});
+
 test("a lost turn end expires while heartbeats keep a long turn awake", async (t) => {
   const { desiredPhase } = await import("./reconcile.ts");
   const { sessionActivityTtlMs } = await import("./events.ts");

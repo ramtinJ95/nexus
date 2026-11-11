@@ -7,7 +7,7 @@ import * as contract from "../../images/pylon/nexus-contract.ts";
 const image = (file: string) => readFileSync(new URL(`../../images/pylon/${file}`, import.meta.url), "utf8");
 
 test("each guest path, name and limit equals the literal it replaced", () => {
-  const { eventIdPattern, claudeTurn, answerExits, answerDelivered, maxAsksBytes, unpasted, ...values } = contract;
+  const { eventIdPattern, claudeTurn, answerExits, answerDelivered, maxAsksBytes, unpasted, typedPrompt, ...values } = contract;
   assert.deepEqual(values, {
     home: "/home/user",
     workspaceDir: "/home/user/workspace",

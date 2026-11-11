@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, readlink, rm, stat, writeFile } from "node:fs/promises";
-import { unpasted } from "./nexus-contract.ts";
+import { typedPrompt } from "./nexus-contract.ts";
 
 export const heartbeatIntervalMs = 5 * 60_000;
 /**
@@ -15,13 +15,17 @@ const settleMs = 30_000;
 /**
  * What a hook reports: its kind, the background shells a turn end waits for, and a turn start's SHA-256 of its prompt
  * as it was written, without the tags Claude wraps a paste in, which the control plane matches against the hashes of
- * what Nexus typed (textSha256 in src/control/claude-worker.ts). Claude's Stop hook also runs when the main turn ends
+ * what Nexus typed (textSha256 in src/control/claude-worker.ts). A prompt no one typed, such as a finished task's
+ * notification, gets no hash, so it counts for nobody. Claude's Stop hook also runs when the main turn ends
  * with background tasks still running, and Claude starts a new turn as each one finishes, so such a turn end only
  * proves activity. A shell may be a dev server that never finishes, so while only shells run, holdTurnEnd keeps the
  * turn working until they exit or the cap passes.
  */
 export function hookReport(kind: string, input: { background_tasks?: unknown; prompt?: unknown }): { kind: string; shells?: string[]; promptSha256?: string } {
-  if (kind === "session.turn-started") return typeof input.prompt === "string" ? { kind, promptSha256: createHash("sha256").update(unpasted(input.prompt)).digest("hex") } : { kind };
+  if (kind === "session.turn-started") {
+    const typed = typeof input.prompt === "string" ? typedPrompt(input.prompt) : null;
+    return typed === null ? { kind } : { kind, promptSha256: createHash("sha256").update(typed).digest("hex") };
+  }
   const tasks = Array.isArray(input.background_tasks) ? input.background_tasks as { id?: unknown; type?: unknown; status?: unknown }[] : [];
   const running = (type: string) => tasks.filter((t) => t?.type === type && t.status === "running");
   if (kind !== "session.turn-ended") return { kind };
