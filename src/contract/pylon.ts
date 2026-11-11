@@ -78,7 +78,6 @@ export const pylonRoutes = {
   unpreview: route<null>()("DELETE", "/v1/threads/{thread}/previews/{port}"),
   openSession: route<OpenedSession, SessionRequest>()("POST", "/v1/threads/{thread}/sessions", undefined, pylonWaitMs),
   closeSession: route<null>()("DELETE", "/v1/threads/{thread}/sessions/{session}"),
-  focusSession: route<null>()("POST", "/v1/threads/{thread}/sessions/{session}/focus"),
   files: route<Listing>()("GET", "/v1/threads/{thread}/files", pathQuery, pylonWaitMs),
   file: route<FileBytes>()("GET", "/v1/threads/{thread}/files/content", pathQuery),
   image: route<FileBytes>()("GET", "/v1/threads/{thread}/image", imageQuery),

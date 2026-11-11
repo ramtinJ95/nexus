@@ -349,7 +349,7 @@ test("session open opens Claude Code by default, waits for a paused pylon, and s
   s.probeAnswers(async () => ({ kind: "close-session", outcome: "not-open" }));
   const stale = await s.nexus(["session", "close", thread.id, "w1:p1"]);
   assert.equal(stale.code, 4);
-  assert.match(stale.stderr, /no session is open in pane w1:p1 .* A wake may have moved it/);
+  assert.match(stale.stderr, /no session is open in terminal w1:p1 .* A wake may have moved it/);
 
   // A paused session is refused at once, and its pylon is not asked.
   s.registry.threads.apply({ record: "sessions", pylonId: thread.pylonId, sessions: [

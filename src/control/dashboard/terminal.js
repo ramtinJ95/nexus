@@ -1,5 +1,5 @@
 // A thread page's browser terminal: the attach route's WebSocket, as docs/cli.md describes it, joined to a terminal
-// such as xterm.js. It lands where `nexus attach` does, and Herdr keeps its sessions when the terminal ends.
+// such as xterm.js. It lands where `nexus attach` does, and Herdr Core keeps its sessions when the terminal ends.
 import { attachPath, defaultTerm, encodeMessage } from "../../contract/attach.ts";
 
 /**
@@ -22,7 +22,7 @@ function statusOf(message) {
   switch (message.type) {
     case "waiting": return { text: `Waiting for the pylon, which is ${message.pylon}. Attaching wakes it.`, over: false };
     case "attached": return { text: null, over: false };
-    case "exit": return { text: message.code === 0 ? "Detached from Herdr. Its sessions keep running." : `Herdr exited with code ${message.code}. Its sessions keep running.`, over: true, why: "exit" };
+    case "exit": return { text: message.code === 0 ? "Detached from Herdr Core. Its sessions keep running." : `Herdr Core exited with code ${message.code}. Its sessions keep running.`, over: true, why: "exit" };
     case "error": return { text: message.message, over: true, why: "error", kind: message.kind };
     default: return undefined;
   }
@@ -34,8 +34,8 @@ function statusOf(message) {
  */
 const refused = { text: "The terminal could not attach. The thread may be archived, or the control plane unreachable.", over: true, why: "refused" };
 const refusedFor = (reason) => reason === null ? refused : { ...refused, text: `The terminal could not attach: ${reason}.` };
-const dropped = { text: "The connection dropped. Herdr keeps the session, so attach again.", over: true, why: "dropped" };
-const detached = { text: "Detached. Herdr keeps its sessions running.", over: true, why: "detached" };
+const dropped = { text: "The connection dropped. Herdr Core keeps the session, so attach again.", over: true, why: "dropped" };
+const detached = { text: "Detached. Herdr Core keeps its sessions running.", over: true, why: "detached" };
 
 /**
  * Joins `term` to the attach route over `socket`: keys go as binary messages once it is attached, each resize as a
@@ -106,7 +106,7 @@ export const maxClipboardChars = 256 << 10;
 const clipStartChars = 60;
 
 /**
- * The clipboard OSC 52 reaches, as @xterm/addon-clipboard asks for one. Herdr's mouse selection copies through it, so
+ * The clipboard OSC 52 reaches, as @xterm/addon-clipboard asks for one. A program in the pylon copies through it, so
  * it writes the browser's one clipboard for every selection but X11's primary, which would clobber it. A write lands
  * only while `focused()` says the terminal has focus and only up to maxClipboardChars, and `told` hears what each
  * write did, as clipboardNotice words it, and whether it landed, so output in the pylon never sets the clipboard
@@ -161,7 +161,7 @@ export function opensLink(uri, text, ask) {
 export const hiddenDetachMs = 10 * 60_000;
 const maxTries = 8;
 /**
- * How long a join stays attached before the tries start over. `attached` comes before Herdr's client runs, so a pylon
+ * How long a join stays attached before the tries start over. `attached` comes before Core's client runs, so a pylon
  * whose sshd takes the link and drops it at once would otherwise be tried again every second for good.
  */
 export const steadyMs = 10_000;
@@ -205,7 +205,7 @@ export function keepAttached(term, open, status, page = document, whyRefused = n
   };
   const heard = (joined, s) => {
     if (!s.over) {
-      // `attached`: Herdr redraws the screen, and a reattach must not keep the modes the dropped client set.
+      // `attached`: Core's client redraws the screen, and a reattach must not keep the modes the dropped client set.
       if (s.text === null) {
         joined.steady = setTimeout(() => { tries = 0; }, steadyMs);
         term.reset();
@@ -215,7 +215,7 @@ export function keepAttached(term, open, status, page = document, whyRefused = n
     if (!transient(s, joined.retry)) return end(s);
     // An unreachable error says why, such as a pylon that is not answering, and what to try.
     const why = s.why === "error" ? `${s.text[0].toUpperCase()}${s.text.slice(1).replace(/\.?$/, ".")}` : "The connection dropped.";
-    if (tries === maxTries) return end({ text: `${why} Attaching again failed ${maxTries} times. Herdr keeps the session, so attach again.`, over: true });
+    if (tries === maxTries) return end({ text: `${why} Attaching again failed ${maxTries} times. Herdr Core keeps the session, so attach again.`, over: true });
     if (page.visibilityState === "hidden") return sleep(true, untilShown);
     const delay = Math.min(30_000, 1000 * 2 ** tries++);
     enter({ kind: "retrying", timer: setTimeout(() => (page.visibilityState === "hidden" ? sleep(true, untilShown) : join(true)), delay) });
@@ -239,33 +239,4 @@ export function keepAttached(term, open, status, page = document, whyRefused = n
   join(false);
   visibility();
   return () => { if (state.kind !== "over") end(detached); };
-}
-
-/**
- * Whether the terminal's current connection has landed, from the statuses keepAttached gives and `term`'s writes: Herdr's
- * client draws after `attached`, once the attach focused its pane. A drop starts the wait again, so a focus asked for
- * then waits for the reattach, which focuses a pane of its own. `landed()` answers false once the terminal is over.
- */
-export function landing(term) {
-  let state = "joining";
-  let waiting = [];
-  const settle = (value) => {
-    for (const resolve of waiting) resolve(value);
-    waiting = [];
-  };
-  const drawn = term.onWriteParsed(() => {
-    if (state !== "attached") return;
-    state = "landed";
-    settle(true);
-  });
-  return {
-    heard({ text, over }) {
-      if (state === "over") return;
-      if (!over) return void (state = text === null ? "attached" : "joining");
-      state = "over";
-      drawn.dispose();
-      settle(false);
-    },
-    landed: () => state === "landed" ? Promise.resolve(true) : state === "over" ? Promise.resolve(false) : new Promise((resolve) => waiting.push(resolve)),
-  };
 }

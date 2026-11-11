@@ -50,7 +50,7 @@ deployer POST /v1/threads/th-000000000000/previews -> 404 no thread th-000000000
 deployer DELETE /v1/threads/th-000000000000/previews/3000 -> 404 no thread th-000000000000
 deployer POST /v1/threads/th-000000000000/sessions -> 404 no thread th-000000000000
 deployer DELETE /v1/threads/th-000000000000/sessions/s1 -> 404 no thread th-000000000000
-deployer POST /v1/threads/th-000000000000/sessions/s1/focus -> 404 no thread th-000000000000
+deployer POST /v1/threads/th-000000000000/sessions/s1/focus -> 404 no route /v1/threads/th-000000000000/sessions/s1/focus
 deployer GET /v1/threads/th-000000000000/files -> 404 no thread th-000000000000
 deployer GET /v1/threads/th-000000000000/files/content?path=a -> 404 no thread th-000000000000
 deployer GET /v1/threads/th-000000000000/image?path=a -> 404 no thread th-000000000000
@@ -193,7 +193,7 @@ person POST /v1/threads/th-000000000000/previews -> 404 no thread th-00000000000
 person DELETE /v1/threads/th-000000000000/previews/3000 -> 404 no thread th-000000000000
 person POST /v1/threads/th-000000000000/sessions -> 404 no thread th-000000000000
 person DELETE /v1/threads/th-000000000000/sessions/s1 -> 404 no thread th-000000000000
-person POST /v1/threads/th-000000000000/sessions/s1/focus -> 404 no thread th-000000000000
+person POST /v1/threads/th-000000000000/sessions/s1/focus -> 404 no route /v1/threads/th-000000000000/sessions/s1/focus
 person GET /v1/threads/th-000000000000/files -> 404 no thread th-000000000000
 person GET /v1/threads/th-000000000000/files/content?path=a -> 404 no thread th-000000000000
 person GET /v1/threads/th-000000000000/image?path=a -> 404 no thread th-000000000000
@@ -350,7 +350,7 @@ control-node POST /v1/threads/th-000000000000/previews -> 403 caller may not pub
 control-node DELETE /v1/threads/th-000000000000/previews/3000 -> 403 caller may not unpublish a preview: only a person may, never the control plane, infrastructure nodes or pylons
 control-node POST /v1/threads/th-000000000000/sessions -> 403 caller may not open a session in a thread's pylon: only a person may, never the control plane, infrastructure nodes or pylons
 control-node DELETE /v1/threads/th-000000000000/sessions/s1 -> 403 caller may not close a session in a thread's pylon: only a person may, never the control plane, infrastructure nodes or pylons
-control-node POST /v1/threads/th-000000000000/sessions/s1/focus -> 403 caller may not focus a session in a thread's pylon: only a person may, never the control plane, infrastructure nodes or pylons
+control-node POST /v1/threads/th-000000000000/sessions/s1/focus -> 404 no route /v1/threads/th-000000000000/sessions/s1/focus
 control-node GET /v1/threads/th-000000000000/files -> 404 no thread th-000000000000
 control-node GET /v1/threads/th-000000000000/files/content?path=a -> 404 no thread th-000000000000
 control-node GET /v1/threads/th-000000000000/image?path=a -> 404 no thread th-000000000000
@@ -489,7 +489,7 @@ control-node-without-key POST /v1/threads/th-000000000000/previews -> 403 caller
 control-node-without-key DELETE /v1/threads/th-000000000000/previews/3000 -> 403 caller may not unpublish a preview: only a person may, never the control plane, infrastructure nodes or pylons
 control-node-without-key POST /v1/threads/th-000000000000/sessions -> 403 caller may not open a session in a thread's pylon: only a person may, never the control plane, infrastructure nodes or pylons
 control-node-without-key DELETE /v1/threads/th-000000000000/sessions/s1 -> 403 caller may not close a session in a thread's pylon: only a person may, never the control plane, infrastructure nodes or pylons
-control-node-without-key POST /v1/threads/th-000000000000/sessions/s1/focus -> 403 caller may not focus a session in a thread's pylon: only a person may, never the control plane, infrastructure nodes or pylons
+control-node-without-key POST /v1/threads/th-000000000000/sessions/s1/focus -> 404 no route /v1/threads/th-000000000000/sessions/s1/focus
 control-node-without-key GET /v1/threads/th-000000000000/files -> 404 no thread th-000000000000
 control-node-without-key GET /v1/threads/th-000000000000/files/content?path=a -> 404 no thread th-000000000000
 control-node-without-key GET /v1/threads/th-000000000000/image?path=a -> 404 no thread th-000000000000
@@ -640,7 +640,7 @@ reporter POST /v1/threads/th-000000000000/previews -> 403 caller is not a tailne
 reporter DELETE /v1/threads/th-000000000000/previews/3000 -> 403 caller is not a tailnet node this control plane allows
 reporter POST /v1/threads/th-000000000000/sessions -> 403 caller is not a tailnet node this control plane allows
 reporter DELETE /v1/threads/th-000000000000/sessions/s1 -> 403 caller is not a tailnet node this control plane allows
-reporter POST /v1/threads/th-000000000000/sessions/s1/focus -> 403 caller is not a tailnet node this control plane allows
+reporter POST /v1/threads/th-000000000000/sessions/s1/focus -> 404 no route /v1/threads/th-000000000000/sessions/s1/focus
 reporter GET /v1/threads/th-000000000000/files -> 403 caller is not a tailnet node this control plane allows
 reporter GET /v1/threads/th-000000000000/files/content?path=a -> 403 caller is not a tailnet node this control plane allows
 reporter GET /v1/threads/th-000000000000/image?path=a -> 403 caller is not a tailnet node this control plane allows

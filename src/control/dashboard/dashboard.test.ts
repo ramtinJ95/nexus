@@ -1312,7 +1312,7 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
   assert.match(sessions, /^Sessions 3 /);
   assert.match(sessions, /Claude Code review working w1:p1 session 5f0c/);
   assert.match(sessions, /pi idle w2:p1 session \/home\/user\/\.pi\/sessions\/a\.jsonl/);
-  assert.match(sessions, /Shell idle w3:p1 Show in terminal Close New shell New pi New Claude Show in terminal focuses the pane in Herdr, which moves every terminal attached to the pylon, nexus attach included\. Attach from a shell in the pylon herdr --session nexus Copy$/);
+  assert.match(sessions, /Shell idle w3:p1 Show in terminal Close New shell New pi New Claude Show in terminal attaches the terminal tab to that session alone\. herdr-app shows them all\. Attach from a shell in the pylon hc Copy$/);
 
   const previews = sectionOf(res.text, "previews-h");
   assert.ok(previews.includes('href="https://rj-firebat.tail.ts.net:8443/"'), "a ready preview links to its tailnet HTTPS URL");

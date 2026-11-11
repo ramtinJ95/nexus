@@ -5,7 +5,6 @@ import { linkedName } from "../../services-file.ts";
 import { readTranscriptImage } from "../claude-transcript.ts";
 import { partHash } from "../conversation-view.ts";
 import { ok, created, noContent, parse, on, type Reply, type RouteEntry, type ApiKit } from "./kit.ts";
-import { focusScript, herdrPanePattern } from "../../guest-contract.ts";
 import { checkoutDir } from "../../../images/pylon/nexus-contract.ts";
 import { anyAllowed } from "./access.ts";
 import { pylonRoutes as routes, type ImageSource, type OpenedSession } from "../../contract/pylon.ts";
@@ -25,7 +24,7 @@ function imageType(bytes: Buffer): string | null {
 }
 
 export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortRange }): readonly RouteEntry[] {
-  const { thread, guard, wakeThread, inPylon, whileRunning, pylonCommand, execInPylon, registry, agents } = kit;
+  const { thread, guard, wakeThread, inPylon, whileRunning, pylonCommand, registry, agents } = kit;
 
   /** What each source of a conversation's image reads it with. Null is an image that is gone. */
   const imageReaders: { [K in ImageSource["source"]]: (t: Thread, source: Extract<ImageSource, { source: K }>) => Promise<Buffer | null> } = {
@@ -93,7 +92,7 @@ export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortR
   }
 
   /**
-   * Opens a Herdr session in the pylon's checkout, with the harness's agent in it, and answers once the agent is
+   * Opens a terminal in the pylon's checkout, with the harness's agent in it, and answers once the agent is
    * ready or waits for its human, such as at Claude Code's login. The node publishes its sessions again at once,
    * so ThreadDetail lists it within moments.
    */
@@ -105,10 +104,10 @@ export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortR
 
   /**
    * Closes a session by its ID. A paused one is refused without waking its pylon, since the wake brings it back and
-   * it closes once it runs. A failed one in no pane is forgotten, so no wake tries it again. Any other ID is a pane,
-   * perhaps one opened a moment ago that no observation lists yet. A pane that is not open, or that runs another
-   * session than the one listed there, is a 404, never a success: a caller may hold a pane from before a wake that
-   * brought its session back in another one, and gave this one to another session.
+   * it closes once it runs. A failed one in no terminal is forgotten, so no wake tries it again. Any other ID is a
+   * terminal, perhaps one opened a moment ago that no observation lists yet. A terminal that is not live, or that runs
+   * another session than the one listed there, is a 404, never a success: a caller may hold a terminal from before a
+   * wake that brought its session back in another one.
    */
   async function closeSession(t: Thread, id: string): Promise<void> {
     const session = registry.threads.session(t.pylonId, id);
@@ -123,19 +122,8 @@ export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortR
     }
     const listed = session === undefined ? {} : { session: { harness: session.harness, harnessSessionId: session.harnessSessionId, title: session.title } };
     const { outcome } = await pylonCommand(t, { kind: "close-session", herdrPane: id, ...listed });
-    if (outcome === "not-open") throw new HttpError(404, `no session is open in pane ${id} of pylon ${t.pylonId}. A wake may have moved it to another pane, which the thread's sessions list`);
-    if (outcome === "moved") throw new HttpError(404, `pane ${id} of pylon ${t.pylonId} runs another session now, so it was left open. A wake moved session ${id} to another pane, which the thread's sessions list`);
-  }
-
-  /**
-   * Focuses a session's pane in the pylon's Herdr, which moves every terminal attached to it there, as the dashboard's
-   * Show in terminal does for one already attached.
-   */
-  async function focusSession(t: Thread, pane: string): Promise<void> {
-    if (!herdrPanePattern.test(pane)) throw new HttpError(400, `pane must be a Herdr pane ID such as w1:p1, got ${JSON.stringify(pane.slice(0, 80))}`);
-    const { exitCode, output } = await execInPylon(t, ["sh", "-c", focusScript, "focus", pane]);
-    if (exitCode === 1) throw new HttpError(404, `no pane ${pane} is open in pylon ${t.pylonId}`);
-    if (exitCode !== 0) throw new Error(`focusing pane ${pane} exited ${exitCode}: ${output.trim().slice(-200)}`);
+    if (outcome === "not-open") throw new HttpError(404, `no session is open in terminal ${id} of pylon ${t.pylonId}. A wake may have moved it to another terminal, which the thread's sessions list`);
+    if (outcome === "moved") throw new HttpError(404, `terminal ${id} of pylon ${t.pylonId} runs another session now, so it was left open. A wake moved session ${id} to another terminal, which the thread's sessions list`);
   }
 
   return [
@@ -154,10 +142,6 @@ export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortR
     }),
     on(routes.closeSession, { role: "person", action: "close a session in a thread's pylon" }, async ({ thread: id, session }) => {
       await closeSession(thread(id), session);
-      return noContent;
-    }),
-    on(routes.focusSession, { role: "person", action: "focus a session in a thread's pylon" }, async ({ thread: id, session }) => {
-      await focusSession(thread(id), session);
       return noContent;
     }),
     on(routes.files, anyAllowed, async ({ thread: id }, r) => {

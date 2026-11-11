@@ -108,7 +108,7 @@ test("attach says each state the pylon waits in, then gives it the terminal raw,
 
 test("every other end is a CliError of its own kind, and puts the terminal and its screen modes back", async () => {
   const ends: [ServerMessage | "garbage", (err: unknown) => boolean][] = [
-    [{ type: "exit", code: 3 }, kindOf("failed", /^Herdr in the pylon of th-0123456789ab exited 3$/)],
+    [{ type: "exit", code: 3 }, kindOf("failed", /^Herdr Core in the pylon of th-0123456789ab exited 3$/)],
     [{ type: "error", kind: "conflict", message: "thread th-0123456789ab is deleted" }, kindOf("conflict", /^thread th-0123456789ab is deleted$/)],
     ["garbage", kindOf("failed", /a message attach does not understand/)],
   ];
@@ -234,7 +234,7 @@ test("a refusal of another kind when linking again ends the attach with it", asy
   assert.deepEqual(t.modes, [true, false]);
 });
 
-test("attach gives up once linking again fails every try, and says Herdr keeps the session", async () => {
+test("attach gives up once linking again fails every try, and says Herdr Core keeps the session", async () => {
   const t = fakeTty();
   const cp = controlPlane((ws) => send(ws, { type: "attached" }));
   let calls = 0;
@@ -242,7 +242,7 @@ test("attach gives up once linking again fails every try, and says Herdr keeps t
   const attaching = attachTerminal(connect, "th-0123456789ab", t.tty, { tries: 3, delayMs: () => 0, steadyMs: 0 });
   await until(() => t.modes.length === 1);
   cp.links[0]!.destroy(new Error("reset"));
-  await assert.rejects(attaching, kindOf("unreachable", /^cannot reach nexus:443: ECONNREFUSED, and attaching again failed 3 times\. Herdr keeps the session, so `nexus attach th-0123456789ab` again$/));
+  await assert.rejects(attaching, kindOf("unreachable", /^cannot reach nexus:443: ECONNREFUSED, and attaching again failed 3 times\. Herdr Core keeps the session, so `nexus attach th-0123456789ab` again$/));
   assert.equal(calls, 4, "the first link and three tries");
   assert.equal(t.status.length, 3, "a line for each try");
   assert.deepEqual(t.modes, [true, false]);

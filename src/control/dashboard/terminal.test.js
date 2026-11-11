@@ -1,7 +1,7 @@
 import { mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { attachPath, defaultTerm } from "../../contract/attach.ts";
-import { attachUrl, clipboardOf, hiddenDetachMs, joinTerminal, keepAttached, keyFor, landing, linkText, maxClipboardChars, opensLink, refusalUrl, steadyMs } from "./terminal.js";
+import { attachUrl, clipboardOf, hiddenDetachMs, joinTerminal, keepAttached, keyFor, linkText, maxClipboardChars, opensLink, refusalUrl, steadyMs } from "./terminal.js";
 import { styleAdopter } from "./term-styles.js";
 
 /** A terminal as xterm.js exposes it: what it was written, how often it was reset, and the keys and resizes it hands out. */
@@ -26,7 +26,7 @@ function fakeSocket() {
 test("the attach route is on the page's own host, over wss behind HTTPS, with the terminal's size and the pane it lands in", () => {
   assert.equal(attachUrl({ protocol: "https:", host: "nexus.example.ts.net" }, "th-0123456789ab", { cols: 120, rows: 40 }), "wss://nexus.example.ts.net/v1/threads/th-0123456789ab/attach?cols=120&rows=40&term=xterm-256color");
   assert.equal(attachUrl({ protocol: "http:", host: "127.0.0.1:7470" }, "th-x", { cols: 80, rows: 24 }), "ws://127.0.0.1:7470/v1/threads/th-x/attach?cols=80&rows=24&term=xterm-256color");
-  assert.equal(attachUrl({ protocol: "http:", host: "127.0.0.1:7470" }, "th-x", { cols: 80, rows: 24 }, "w2:p1"), "ws://127.0.0.1:7470/v1/threads/th-x/attach?cols=80&rows=24&term=xterm-256color&pane=w2%3Ap1", "a session's Show in terminal lands in its pane");
+  assert.equal(attachUrl({ protocol: "http:", host: "127.0.0.1:7470" }, "th-x", { cols: 80, rows: 24 }, "t2"), "ws://127.0.0.1:7470/v1/threads/th-x/attach?cols=80&rows=24&term=xterm-256color&pane=t2", "a session's Show in terminal lands in its terminal");
 });
 
 test("the attach URL's path is the route's attachPath for the same size and pane", () => {
@@ -61,7 +61,7 @@ test("a joined terminal waits for the pylon, takes focus once attached, and carr
   assert.deepEqual(s.socket.sent, ["hello\r", JSON.stringify({ type: "resize", cols: 100, rows: 30 })]);
   s.text({ type: "exit", code: 0 });
   s.close();
-  assert.deepEqual(statuses.slice(2), [{ text: "Detached from Herdr. Its sessions keep running.", over: true, why: "exit" }], "the close after an exit says nothing more");
+  assert.deepEqual(statuses.slice(2), [{ text: "Detached from Herdr Core. Its sessions keep running.", over: true, why: "exit" }], "the close after an exit says nothing more");
   t.type("late");
   assert.equal(s.socket.sent.length, 2, "an ended terminal sends no keys");
 });
@@ -75,7 +75,7 @@ test("a close before any message is a refusal, one after is a dropped link, and 
     return statuses.filter((status) => status.over).map((status) => status.text);
   };
   assert.deepEqual(ends((s) => s.close()), ["The terminal could not attach. The thread may be archived, or the control plane unreachable."]);
-  assert.deepEqual(ends((s) => { s.text({ type: "attached" }); s.close(); }), ["The connection dropped. Herdr keeps the session, so attach again."]);
+  assert.deepEqual(ends((s) => { s.text({ type: "attached" }); s.close(); }), ["The connection dropped. Herdr Core keeps the session, so attach again."]);
   assert.deepEqual(ends((s) => { s.text({ type: "error", kind: "conflict", message: "thread th-x is archived, so its pylon stays paused" }); s.close(); }), ["thread th-x is archived, so its pylon stays paused"]);
 });
 
@@ -99,7 +99,7 @@ test("a refused terminal says the reason a plain request to its route reads, and
   assert.equal(refusalUrl(attachUrl({ protocol: "http:", host: "127.0.0.1:7470" }, "th-x", { cols: 80, rows: 24 })), "http://127.0.0.1:7470/v1/threads/th-x/attach?cols=80&rows=24&term=xterm-256color");
 });
 
-test("detaching closes the socket, says Herdr keeps its sessions, and stops sending keys", () => {
+test("detaching closes the socket, says Herdr Core keeps its sessions, and stops sending keys", () => {
   const t = fakeTerm();
   const s = fakeSocket();
   const statuses = [];
@@ -110,7 +110,7 @@ test("detaching closes the socket, says Herdr keeps its sessions, and stops send
   t.type("x");
   assert.ok(s.socket.closed);
   assert.deepEqual(s.socket.sent, []);
-  assert.deepEqual(statuses.at(-1), { text: "Detached. Herdr keeps its sessions running.", over: true, why: "detached" });
+  assert.deepEqual(statuses.at(-1), { text: "Detached. Herdr Core keeps its sessions running.", over: true, why: "detached" });
   assert.equal(statuses.filter((status) => status.over).length, 1);
 });
 
@@ -204,17 +204,15 @@ function kept(t) {
   const { term, type } = fakeTerm();
   const sockets = [];
   const statuses = [];
-  const lands = landing(term);
   const { page, show } = fakePage();
   const close = keepAttached(term, () => {
     const s = fakeSocket();
     sockets.push(s);
     return s.socket;
   }, (status) => {
-    lands.heard(status);
     statuses.push(status);
   }, page);
-  return { term, type, sockets, statuses, lands, show, close, tick: (ms) => mock.timers.tick(ms) };
+  return { term, type, sockets, statuses, show, close, tick: (ms) => mock.timers.tick(ms) };
 }
 
 test("a dropped link attaches again after 1 s, then 2 s while each try is refused, and anew once one attaches", (t) => {
@@ -277,25 +275,6 @@ test("a join that attaches and drops at once counts as a failed try, so a pylon 
   assert.match(k.statuses.at(-1).text, /failed 8 times/);
 });
 
-test("a session shown while the link reattaches waits for the reattach to draw, so the reattach's own focus cannot undo it", async (t) => {
-  const k = kept(t);
-  const now = (promise) => Promise.race([promise, new Promise((resolve) => setImmediate(() => resolve("waiting")))]);
-  k.sockets[0].text({ type: "attached" });
-  assert.equal(await now(k.lands.landed()), "waiting", "attached, but Herdr's client has not drawn");
-  k.sockets[0].bytes("herdr");
-  assert.equal(await now(k.lands.landed()), true);
-  k.sockets[0].close();
-  const during = k.lands.landed();
-  assert.equal(await now(during), "waiting", "a dropped link has not landed");
-  k.tick(1000);
-  k.sockets[1].text({ type: "attached" });
-  assert.equal(await now(during), "waiting");
-  k.sockets[1].bytes("herdr again");
-  assert.equal(await now(during), true, "lands once the reattach draws");
-  k.close();
-  assert.equal(await now(k.lands.landed()), false, "a detached terminal never lands");
-});
-
 test("an exit, a conflict and a first refusal end the terminal without a second socket", (t) => {
   const ends = [
     (s) => { s.text({ type: "attached" }); s.text({ type: "exit", code: 0 }); s.close(); },
@@ -349,7 +328,7 @@ test("detaching while a retry waits opens nothing more and says it detached once
   k.close();
   k.tick(60_000);
   assert.equal(k.sockets.length, 1);
-  assert.deepEqual(k.statuses.filter((s) => s.over), [{ text: "Detached. Herdr keeps its sessions running.", over: true, why: "detached" }]);
+  assert.deepEqual(k.statuses.filter((s) => s.over), [{ text: "Detached. Herdr Core keeps its sessions running.", over: true, why: "detached" }]);
 });
 
 test("after 8 failed tries the terminal ends and says to attach again", (t) => {

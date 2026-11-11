@@ -2,6 +2,10 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), except in the commands [Version skew](cli.md#version-skew) names, so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.84.0
+
+A pylon's sessions are Herdr Core terminals, so a session's `herdrPane` is a Core terminal address such as `t7`, the attach route's `pane` matches `^t[0-9a-z]{1,12}$` and attaches to that terminal alone, and `ThreadDetail.attach` is `hc`. A failed session in no terminal keeps the address it was recorded at as its `id`, in place of a `failed-` hash. Removes `POST /v1/threads/<thread>/sessions/<session>/focus`, which a control plane older than 0.84.0 still serves: the dashboard's Show in terminal attaches its terminal tab to the session instead. The CLI never called it. Herdr sessions a pylon ran before are not carried over: the probe reads and opens only Core terminals, so a pylon on an image without Herdr Core lists no sessions and opens none.
+
 ## 0.83.0
 
 Adds `nexus exec <thread> <line>`, which runs a shell line in a running pylon with stdin and stdout piped to it untouched, as `ssh` does, from the WebSocket `GET /v1/threads/<thread>/exec`, so `hc machine add --via 'nexus exec <thread>'` makes the pylon a Herdr Core machine, as [the exec route](cli.md#the-exec-route) describes. It never wakes a pylon. A control plane older than 0.83.0 answers the route 404, so `exec` fails there.

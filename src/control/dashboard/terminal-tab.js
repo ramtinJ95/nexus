@@ -1,5 +1,3 @@
-import { request } from "./request.js";
-import { pylonRoutes } from "../../contract/pylon.ts";
 import { afterSwap, chunk, holdReload } from "./page.js";
 import { factsNow, thread } from "./checkout.js";
 import { activeTab, showTab, tabShows, tabsBar, terminalTab } from "./tab-bar.js";
@@ -19,7 +17,7 @@ afterSwap(terminalFollows);
 // terminal that ends on its own keeps its last screen until the next attach replaces it.
 let terminal = null;
 let lastTerminal = null;
-/** The pane the next attach lands in, in place of the Claude worker's. */
+/** The terminal the next attach lands in, in place of the Claude worker's. */
 let landing = null;
 holdReload(() => terminal !== null);
 /**
@@ -29,14 +27,12 @@ holdReload(() => terminal !== null);
 const fading = new Map();
 
 /**
- * Shows `pane` in the terminal tab. A terminal that is not attached attaches there. An attached one has Herdr focus
- * it, which moves every terminal attached to the pylon, once its current connection has landed, so that an attach or
- * a reattach does not undo it.
+ * Shows the session in `pane` in the terminal tab, which shows one terminal at a time: an attached one detaches, and
+ * the tab attaches again there. herdr-app shows every session of the pylon at once.
  */
 export async function showSession(thread, pane) {
-  const opened = await terminal;
-  if (opened != null && await opened.landed()) await request(pylonRoutes.focusSession, { thread, session: pane });
-  else landing = pane;
+  landing = pane;
+  (await terminal)?.close();
   showTab(terminalTab);
 }
 
