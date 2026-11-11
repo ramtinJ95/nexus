@@ -5,10 +5,10 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
-import { closeSession, dropFailedSession, interruptClaude, LaunchStalled, openSession, pausedSessionsIn, recordSessions, relaunchSessions, sendToClaude, sessionFacts, type ClaudeSessionLock, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
+import { attachedTerminals, closeSession, dropFailedSession, interruptClaude, LaunchStalled, openSession, pausedSessionsIn, recordSessions, relaunchSessions, sendToClaude, sessionFacts, type ClaudeSessionLock, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
 import { claudeTextProblem } from "../../protocol/agent-kinds.ts";
 import { coreError, coreOk, fakeCore, fakeGuest, launchedProgram, sessionsFileReply, type ExecReply, type FakeCore, type FakeTerminal } from "../../backends/fake-guest.ts";
-import { ensureCore } from "../../guest-contract.ts";
+import { coreViewer, ensureCore } from "../../guest-contract.ts";
 import { checkoutDir, claudeLaunchesDir, claudeProjects, piSessions, sessionsFile } from "../../../images/pylon/nexus-contract.ts";
 
 /** Nothing else runs here, so no call needs to wait for the relaunch. */
@@ -787,4 +787,14 @@ test("a sessions file is read as the sessions it records, without its models or 
   ];
   for (const value of bad) assert.throws(() => pausedSessionsIn(JSON.stringify(value)), Error, JSON.stringify(value));
   assert.deepEqual(pausedSessionsIn(JSON.stringify({ ...file, sessions: [noSessionId], failed: [] })), [{ id: "t2", herdrPane: "t2", harness: "shell", title: "sh", harnessSessionId: null }], "a missing session ID reads as none");
+});
+
+test("attached terminals are the core's viewers, which pgrep counts, and a count pgrep did not give rejects", async () => {
+  const counting = (reply: ExecReply) => fakeGuest(() => reply);
+  const guest = counting({ exitCode: 0, output: "2\n" });
+  assert.equal(await attachedTerminals(guest), 2);
+  assert.deepEqual(guest.execs, [["pgrep", "-c", "-x", "-f", coreViewer]]);
+  assert.equal(await attachedTerminals(counting({ exitCode: 1, output: "0\n" })), 0, "pgrep exits 1 for none");
+  await assert.rejects(attachedTerminals(counting({ exitCode: 2, output: "pgrep: bad regex\n" })), /counting attached terminals: pgrep exited 2: pgrep: bad regex/);
+  await assert.rejects(attachedTerminals(counting({ exitCode: 0, output: "" })), /pgrep exited 0/);
 });

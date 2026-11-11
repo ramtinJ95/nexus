@@ -44,15 +44,19 @@ export const startCore = "setsid -f tini -s -- herdr-core serve </dev/null >/dev
  */
 export const ensureCore = `{ ${coreRunning} || { ${startCore}; i=0; until ${coreRunning}; do i=$((i + 1)); [ $i -lt ${coreStartMs / 100} ] || break; sleep 0.1; done; ${coreRunning}; }; }`;
 
-/** The named Herdr session every pane of a pylon runs in, and every terminal attaches to. */
+/** The named Herdr session the pylon's live checks of Herdr 0.9.5 ran in. */
 export const herdrSession = "nexus";
-/** The whole command line of each attached client, which the probe counts as presence and a human runs to attach. */
-export const herdrClient = `herdr --session ${herdrSession}`;
 
 /** A Core terminal's address on its own machine, such as t7. */
 export const terminalPattern = /^t[0-9a-z]{1,12}$/;
 /** What a person runs in a shell in the pylon to attach: Core's picker of the pylon's terminals. */
 export const coreAttach = "hc";
+/**
+ * The whole command line of a terminal viewing the core, which the probe counts as a human's presence: Core's picker
+ * or an attach to one terminal, whether named herdr-core or hc. The core itself, a held terminal, and `connect` and
+ * `events`, as an app or the probe runs them, are not people.
+ */
+export const coreViewer = "([^ ]*/)?(herdr-core|hc)( attach( .*)?)?";
 
 /**
  * The shell command a human's terminal runs in the pylon to attach to its core, which it starts first as a boot does

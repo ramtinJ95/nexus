@@ -15,8 +15,8 @@ test("each name and limit equals the literal it replaced", () => {
     execOutputMaxBytes: 65_536,
     callTimeoutMs: 10_000,
     herdrSession: "nexus",
-    herdrClient: "herdr --session nexus",
     coreAttach: "hc",
+    coreViewer: "([^ ]*/)?(herdr-core|hc)( attach( .*)?)?",
     coreStartMs: 5_000,
   });
   assert.equal(coreRunning, `pgrep -u "$(id -u)" -x -f '([^ ]*/)?herdr-core serve' >/dev/null`);
@@ -27,6 +27,16 @@ test("each name and limit equals the literal it replaced", () => {
   assert.deepEqual(asUser("id"), ["runuser", "-l", "user", "-c", "id"]);
   assert.equal(onClaudeTranscript("cat \"$f\"", 3), 'for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; cat "$f"; exit 0; done; exit 3');
   assert.equal(attachScript, `${ensureCore}; t=$1; [ -n "$t" ] && herdr-core get "$t" --json 2>/dev/null | grep -q '"state": *"live"' && exec herdr-core attach "$t"; exec herdr-core`);
+});
+
+test("a viewer is Core's picker or an attach, not the core, a held terminal, or an app's connect and events", () => {
+  // pgrep -x matches the whole command line, as these anchors do. Each is one check.sh's viewer-cmdline saw.
+  const viewer = new RegExp(`^${contract.coreViewer}$`);
+  const counted = ["herdr-core attach target", "herdr-core", "/usr/local/bin/herdr-core attach t7", "hc", "hc attach t2"];
+  const not = ["/home/user/.local/bin/herdr-core serve", "herdr-core hold --socket /run/user/1000/herdr-core/default.holder.f460535f.sock",
+    "herdr-core events --json", "herdr-core connect", "tini -s -- herdr-core serve", "sh -c herdr-core attach t1", "herdr --session nexus"];
+  assert.deepEqual(counted.filter((line) => !viewer.test(line)), []);
+  assert.deepEqual(not.filter((line) => viewer.test(line)), []);
 });
 
 /**

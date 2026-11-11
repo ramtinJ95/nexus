@@ -20,7 +20,7 @@ import type { CommandResult, InterruptClaudeOutcome } from "../../protocol/comma
 import { nonEmpty, parseJson } from "../../parse.ts";
 import { claudeCode, launchers, type Launcher } from "./launchers.ts";
 import { agentKinds, claudeSessionId, sessionHarnessSchema, type SessionHarness } from "../../protocol/agent-kinds.ts";
-import { callTimeoutMs, coreStartMs, ensureCore, herdrClient } from "../../guest-contract.ts";
+import { callTimeoutMs, coreStartMs, coreViewer, ensureCore } from "../../guest-contract.ts";
 import { core, CoreError, noCore, type Terminal } from "./core.ts";
 import { checkoutDir, claudeLaunchesDir, home, sessionsFile } from "../../../images/pylon/nexus-contract.ts";
 
@@ -529,7 +529,7 @@ async function recordOutcomes(guest: Guest, file: SessionsFile, outcomes: readon
  * presence. Rejects when the guest cannot be counted, so the caller decides what that means.
  */
 export async function attachedTerminals(guest: Guest, timeoutMs = callTimeoutMs): Promise<number> {
-  const { exitCode, output } = await guest.exec(["pgrep", "-c", "-x", "-f", herdrClient], { cwd: home, timeoutMs });
+  const { exitCode, output } = await guest.exec(["pgrep", "-c", "-x", "-f", coreViewer], { cwd: home, timeoutMs });
   // pgrep prints the count, 0 included, and exits 1 when it is 0.
   const count = Number(output.trim());
   if ((exitCode !== 0 && exitCode !== 1) || output.trim() === "" || !Number.isInteger(count)) {
