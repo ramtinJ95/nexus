@@ -2,14 +2,14 @@
   "dotfiles": {"url":"https://github.com/ramtinJ95/dotfiles","commit":"30ee68ba509bfa926bd2731e9dfbfa0ab7fedac5"},
   "claude": {
     "marketplaces": [
-      {"name":"claude-mods","url":"https://github.com/ramtinJ95/claude-mods","commit":"f8608ce1beb664c4ec8172c4bc9ccbbf5ec2c0fe"},
+      {"name":"claude-mods","url":"https://github.com/ramtinJ95/claude-mods","commit":"50365d251b78e1ca7822c0ec99b3c1c4de8b72c4"},
       {"name":"cursor-plugins","url":"https://github.com/cursor/plugins","commit":"236e5481d05cbadc315b374a5de54971858c27bb"}
     ],
     "plugins": [
       {"id":"notes-compaction@claude-mods","version":"0.2.11"},
       {"id":"pstack@cursor-plugins","version":"0.15.36"},
       {"id":"review-pane@claude-mods","version":"0.3.0"},
-      {"id":"shepherdr@claude-mods","version":"0.2.6"}
+      {"id":"shepherdr@claude-mods","version":"0.3.0"}
     ]
   },
   "pi": {
@@ -23,7 +23,7 @@
       {"kind":"npm","name":"@ramtinj95/pi-claude-delegation","version":"0.2.0"},
       {"kind":"npm","name":"@howaboua/pi-codex-web-run","version":"0.0.10"},
       {"kind":"npm","name":"@howaboua/pi-codex-imagegen","version":"0.0.13"},
-      {"kind":"npm","name":"@howaboua/pi-shepherdr","version":"0.2.27"},
+      {"kind":"npm","name":"@howaboua/pi-shepherdr","version":"0.2.28-core.12.1.gda85fa2e8a0f"},
       {"kind":"npm","name":"@howaboua/pi-notes-compaction","version":"0.0.15"}
     ],
     "extensions": [

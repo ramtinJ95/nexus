@@ -142,7 +142,7 @@ nexus output list
 ${logins}
 ## Review before a pull request
 
-This is for Claude Code, whose shepherdr mod gives it the \`mcp__shepherdr__agents\` tool. Before you open a pull request or push to one, have a shepherdr \`reviewer\` check the diff. Spawn it with \`agent_type: "reviewer"\`, a \`label\` that names its tab, such as \`review\`, the pull request's base branch as \`base\`, and a message that says what the change is for. The reviewer is a read-only pi worker in a new Herdr tab of this pylon, on the model the person's \`reviewer\` profile names. Fix the findings you accept. Then say in your reply, and in the pull request, which findings you accepted and which you rejected, and why. Without the tool, say the review was skipped.
+This is for Claude Code, whose shepherdr mod gives it the \`mcp__shepherdr__agents\` tool. Before you open a pull request or push to one, have a shepherdr \`reviewer\` check the diff. Spawn it with \`agent_type: "reviewer"\`, a \`label\` that names its tab, such as \`review\`, the pull request's base branch as \`base\`, and a message that says what the change is for. The reviewer is a read-only pi worker in a new Herdr Core terminal of this pylon, on the model the person's \`reviewer\` profile names. Fix the findings you accept. Then say in your reply, and in the pull request, which findings you accepted and which you rejected, and why. Without the tool, say the review was skipped.
 
 ${reviewLogin}
 
