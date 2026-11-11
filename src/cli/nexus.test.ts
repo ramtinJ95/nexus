@@ -368,13 +368,13 @@ test("a command refuses a control plane that reports no version, or one older th
   assert.deepEqual(current.paths, ["/v1/health", "/v1/projects"]);
 });
 
-test("threads --open asks for the open threads, and leaves out the others a control plane that ignores status=open answers", async (t) => {
-  const rows = ["active", "idle", "archived"].map((status, i) => ({ id: `th-00000000000${i}`, status, project: "acme", title: "t", pylon: { actualState: "paused" }, createdAt: 0 }));
-  const old = await versioned(t, { commit: null, version: "0.76.0" }, rows);
-  const res = await bare(t, ["threads", "--open", "--json"], { NEXUS_URL: old.url });
+test("threads --open asks the control plane for the open threads", async (t) => {
+  const rows = ["active", "idle"].map((status, i) => ({ id: `th-00000000000${i}`, status, project: "acme", title: "t", pylon: { actualState: "paused" }, createdAt: 0 }));
+  const current = await versioned(t, { commit: null, version }, rows);
+  const res = await bare(t, ["threads", "--open", "--json"], { NEXUS_URL: current.url });
   assert.equal(res.code, 0, res.stderr);
   assert.deepEqual(JSON.parse(res.stdout).map((r: Thread) => r.status), ["active", "idle"]);
-  assert.ok(old.paths.includes("/v1/threads?deleted=false&status=open"), old.paths.join(" "));
+  assert.ok(current.paths.includes("/v1/threads?deleted=false&status=open"), current.paths.join(" "));
 });
 
 test("a follow whose first health read fails reads it again, and follows once the control plane answers", { timeout: 60_000 }, async (t) => {

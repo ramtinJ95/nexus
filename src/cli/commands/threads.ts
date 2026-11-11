@@ -138,9 +138,8 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
         return { json: queued, text: queued.length === 0 ? "No queued threads." : queuedTable(queued, colour) };
       }
       const listing = request(api, routes.list, { query: { project, ...v.open === true ? { deleted: false, status: "open" } : v.all === true ? {} : { deleted: false } } });
-      // A control plane older than 0.77.0 ignores status=open and answers every thread but the deleted ones.
       const [queued, listed] = await Promise.all([queuing, listing]);
-      const shown = listed.filter((r) => (v.open !== true || r.status === "active" || r.status === "idle") && (v.active !== true || r.status === "active") && (v["needs-me"] !== true || needsPerson(r.attention)));
+      const shown = listed.filter((r) => (v.active !== true || r.status === "active") && (v["needs-me"] !== true || needsPerson(r.attention)));
       const threads = shown.slice(0, limit);
       return { json: threads, text: threadsText(threads, queued.slice(0, limit - threads.length), colour) };
     },
