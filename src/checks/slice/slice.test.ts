@@ -3,7 +3,7 @@
  * probe runs spawn, pause and delete with a real backend. One test body runs against one backend fixture:
  *
  * - Docker (the default), against the local Docker, in an image the test builds on Node (for the in-pylon CLI)
- *   with Herdr, git, tini and python3 from Debian and Herdr's installer, so it needs the network once. The pylon clones
+ *   with git, tini and python3 from Debian and Herdr Core from its installer, so it needs the network once. The pylon clones
  *   and pulls its dotfiles from a repository in the image (slice-repo.ts). Everything it creates carries the label
  *   nexus.test=<run>, and cleanup removes only that.
  * - pylon-vm, when NEXUS_SLICE_BACKEND=pylon-vm, with NEXUS_PYLON_VM_IMAGE=<an image's directory in an artifact store> and
@@ -151,9 +151,9 @@ function dockerFixture(): SliceFixture {
     sessions: ["shell"],
     serviceUser: "user",
     pylonLog: containerLog,
-    // Docker execs run as root, so Herdr's config is root's. The pylon image turns off Herdr's agent resume the same way.
+    // Docker execs run as root, so Herdr Core's config is root's. The pylon image turns off Core's notes the same way.
     async setUp() {
-      const { herdr } = JSON.parse(await readFile(new URL("../../../images/pylon/pins.json", import.meta.url), "utf8")) as { herdr: string };
+      const { herdrCore } = JSON.parse(await readFile(new URL("../../../images/pylon/pins.json", import.meta.url), "utf8")) as { herdrCore: string };
       const dir = await mkdtemp(join(tmpdir(), "nexus-slice-image-"));
       try {
         await writeFile(join(dir, "Dockerfile"), [
@@ -162,11 +162,11 @@ function dockerFixture(): SliceFixture {
           // The base image's `node` already has uid 1000.
           `RUN useradd --create-home --shell /bin/bash user && install -d -o user -g user /home/user/workspace ${checkoutDir}`,
           sliceRepoStep,
-          "ARG HERDR_VERSION",
-          'RUN curl -fsSL https://herdr.dev/install.sh -o /tmp/herdr-install.sh && HERDR_INSTALL_DIR=/usr/local/bin sh /tmp/herdr-install.sh && rm /tmp/herdr-install.sh && test "$(herdr --version)" = "herdr ${HERDR_VERSION}"',
-          "RUN mkdir -p /root/.config/herdr && printf 'onboarding = false\\n\\n[session]\\nresume_agents_on_restore = false\\n' > /root/.config/herdr/config.toml",
+          "ARG HERDR_CORE_VERSION",
+          'RUN curl -fsSL https://releases.herdr.dev/core/install.sh -o /tmp/hc-install.sh && HC_VERSION=${HERDR_CORE_VERSION} HC_INSTALL_DIR=/usr/local/bin sh /tmp/hc-install.sh && rm /tmp/hc-install.sh && test "$(hc --version)" = "hc ${HERDR_CORE_VERSION}"',
+          "RUN mkdir -p /root/.config/herdr-core && printf 'notes = false\\n' > /root/.config/herdr-core/config.toml",
         ].join("\n") + "\n");
-        await docker(["build", "--quiet", "--label", testLabel, "--build-arg", `HERDR_VERSION=${herdr}`, "--tag", tag, dir]);
+        await docker(["build", "--quiet", "--label", testLabel, "--build-arg", `HERDR_CORE_VERSION=${herdrCore}`, "--tag", tag, dir]);
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
