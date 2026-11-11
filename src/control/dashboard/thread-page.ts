@@ -97,12 +97,12 @@ ${t.status !== "deleted" && termView(t)}
 /**
  * The terminal tab, which client.js attaches on its first show, as `nexus attach` does, and shows while the thread is
  * open, so an unarchive brings it back without a reload. A Nexus agent runs on the control plane, so its thread's
- * terminal is the pylon's Herdr session and its conversation stays in the composer. A Claude worker's lands in its
- * pane, but Show in terminal moves it to any session's, so the head names the whole session.
+ * terminal is the pylon's Herdr Core and its conversation stays in the composer. A Claude worker's lands in its
+ * terminal, and Show in terminal attaches it to any session's, so the head names the whole core.
  */
 function termView(t: Thread): Html {
   return html`<section class="term-view" id="term-view" role="tabpanel" aria-label="Terminal" hidden>
-<div class="tv-head"><span class="tv-where">The pylon's Herdr session</span><span class="tv-status" id="term-status" role="status"></span><button type="button" class="btn btn-xs" id="term-again" hidden>Attach again</button><button type="button" class="btn btn-xs btn-ghost" id="term-detach" hidden>Detach</button></div>
+<div class="tv-head"><span class="tv-where">The pylon's Herdr Core</span><span class="tv-status" id="term-status" role="status"></span><button type="button" class="btn btn-xs" id="term-again" hidden>Attach again</button><button type="button" class="btn btn-xs btn-ghost" id="term-detach" hidden>Detach</button></div>
 <p class="tv-clip" id="term-copied" role="status" hidden></p><p class="tv-clip" id="term-refused" role="status" hidden></p>
 <div class="tv-host" id="term-host"></div>
 </section>`;
@@ -291,7 +291,7 @@ ${s.state === "failed" && html`<p class="error s-why">It did not come back from 
 ${t.status === "active" && sessionActions(t.id, s, worker !== null && s.harness === "claude-code" && s.harnessSessionId === worker)}
 </li>`)}</ul>`}
 ${t.status === "active" && html`<div class="s-new">${newSessions.map(([harness, label]) => html`<button type="button" class="btn btn-xs"${act("open-session")} data-thread="${t.id}" data-harness="${harness}">${label}</button>`)}</div>
-<p class="dim small">Show in terminal focuses the pane in Herdr, which moves every terminal attached to the pylon, <code>nexus attach</code> included.</p>`}
+<p class="dim small">Show in terminal attaches the terminal tab to that session alone. herdr-app shows them all.</p>`}
 <p class="attach-h">Attach from a shell in the pylon</p>
 <div class="attach"><code id="attach-command">${d.attach}</code><button type="button" class="btn btn-xs" data-copy="attach-command">Copy</button></div>
 </section>
@@ -301,7 +301,7 @@ ${t.status === "active" && html`<div class="s-new">${newSessions.map(([harness, 
 const newSessions = [["shell", "New shell"], ["pi", "New pi"], ["claude-code", "New Claude"]] as const satisfies readonly (readonly [SessionHarness, string])[];
 
 /**
- * A running session shows in the terminal. Any but the worker's own closes, and a failed one in no pane is dropped by
+ * A running session shows in the terminal. Any but the worker's own closes, and a failed one in no terminal is dropped by
  * its ID. A paused one does neither until its pylon wakes.
  */
 function sessionActions(thread: string, s: ThreadDetail["sessions"][number], own: boolean): Html {

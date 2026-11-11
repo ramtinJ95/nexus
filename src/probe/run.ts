@@ -194,7 +194,7 @@ export async function runCommand(pylonId: PylonId, command: PylonCommand, deps: 
       try {
         return { kind: "open-session", herdrPane: await openSession(guest, { harness, title, cwd: checkoutDir, ...(model === undefined ? {} : { model }), ...(prompt === undefined ? {} : { prompt }), ...(resume === undefined ? {} : { resume }) }) };
       } catch (err) {
-        // An unprompted open's caller reads only the pane, so it would take a stall for a session that started.
+        // An unprompted open's caller reads only the terminal, so it would take a stall for a session that started.
         if (!(err instanceof LaunchStalled) || prompt === undefined) throw err;
         return { kind: "open-session", herdrPane: err.herdrPane, stalled: err.message };
       }

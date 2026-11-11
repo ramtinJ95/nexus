@@ -11,8 +11,8 @@ import type { ActualState } from "../control/reconcile.ts";
 export const defaultTerm = "xterm-256color";
 
 /**
- * The opening size and TERM of the terminal. Both go in the URL, because Herdr needs a size before it starts. `pane`
- * is the pane it lands in, in place of the Claude worker's.
+ * The opening size and TERM of the terminal. Both go in the URL, because Herdr Core's client needs a size before it
+ * starts. `pane` is the address of the Core terminal it shows, in place of the Claude worker's.
  */
 export interface AttachRequest { size: TerminalSize; term: string; pane?: string }
 
@@ -31,7 +31,7 @@ export type AttachErrorKind = "conflict" | "failed" | "unreachable";
 export type ServerMessage =
   | { type: "waiting"; pylon: ActualState }
   | { type: "attached" }
-  /** 0 is Herdr's own detach. */
+  /** 0 is Core's own detach. */
   | { type: "exit"; code: number }
   | { type: "error"; kind: AttachErrorKind; message: string };
 

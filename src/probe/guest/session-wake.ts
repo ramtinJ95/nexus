@@ -26,7 +26,7 @@ export async function recordBeforePause(guest: Guest, log: PylonLog): Promise<re
     await log(`sessions: recording failed, so the wake relaunches what the last record holds: ${(err as Error).message}`);
     return null;
   }
-  await log(recorded === null ? "sessions: no Herdr server runs, so the last record stands" : `sessions: recorded ${recorded.length} for the wake`);
+  await log(recorded === null ? "sessions: no Herdr Core runs, so the last record stands" : `sessions: recorded ${recorded.length} for the wake`);
   return recorded?.map(toPaused) ?? null;
 }
 
@@ -42,7 +42,7 @@ export interface RelaunchMark {
 
 /**
  * What a pause of a running guest keeps for its wake. A guest whose relaunch is still pending keeps the last record,
- * because its sessions never came back and Herdr would record none. So does a guest whose sessions cannot be recorded.
+ * because its sessions never came back and the core would record none. So does a guest whose sessions cannot be recorded.
  */
 export async function pauseSessions(guest: Guest, log: PylonLog, mark: RelaunchMark): Promise<readonly PausedSession[] | null> {
   if (await mark.pending()) return mark.lastRecorded();
@@ -58,10 +58,10 @@ export async function finishRelaunch(pylonId: PylonId, guest: Guest, log: PylonL
 
 /**
  * Calls that start a Claude session or type into it run one at a time per pylon and session: a launch, a send, and a
- * wake's relaunch, which holds every Claude session it brings back. Each finds the pane the call before it left the
- * session in, so none starts the session in a second pane. Two sends never interleave their chunks in its prompt, and
+ * wake's relaunch, which holds every Claude session it brings back. Each finds the terminal the call before it left the
+ * session in, so none starts the session in a second terminal. Two sends never interleave in its prompt, and
  * a launch sent again while the first still runs, as when the control plane lost its answer, waits for it and then
- * reads how far it got.
+ * finds the terminal it started.
  */
 export const claudeSessionLock = claudeSessionLocks();
 
@@ -99,7 +99,7 @@ function outcomeLine(o: RelaunchOutcome): string {
   switch (o.result) {
     case "present": return `sessions: ${session} was already running in ${o.herdrPane}`;
     case "relaunched": return `sessions: relaunched ${session} in ${o.herdrPane}`;
-    case "failed": return `sessions: ${session} did not come back${o.herdrPane === null ? "" : `, and its pane ${o.herdrPane} stays open`}: ${o.message}`;
-    case "dropped": return `sessions: dropped ${session}, a second record of ${agentKinds[o.record.harness].label} session ${o.record.harnessSessionId}${o.herdrPane === null ? "" : `, and closed its pane ${o.herdrPane}`}`;
+    case "failed": return `sessions: ${session} did not come back${o.herdrPane === null ? "" : `, and its terminal ${o.herdrPane} stays open`}: ${o.message}`;
+    case "dropped": return `sessions: dropped ${session}, a second record of ${agentKinds[o.record.harness].label} session ${o.record.harnessSessionId}${o.herdrPane === null ? "" : `, and closed its terminal ${o.herdrPane}`}`;
   }
 }

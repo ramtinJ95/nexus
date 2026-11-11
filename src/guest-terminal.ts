@@ -15,7 +15,7 @@ const frameType = { keys: 0, resize: 1 } as const;
 const maxSide = 9999;
 
 declare const checked: unique symbol;
-/** Whole cols and rows from 1 to 9999. Only terminalSize makes one, so a zero size, which Herdr refuses, cannot reach a guest. */
+/** Whole cols and rows from 1 to 9999. Only terminalSize makes one, so a zero size cannot reach a guest. */
 export type TerminalSize = { readonly cols: number; readonly rows: number; readonly [checked]: true };
 
 /** Throws a message naming the bad side. */
@@ -26,7 +26,7 @@ export function terminalSize(cols: number, rows: number): TerminalSize {
   return { cols, rows } as TerminalSize;
 }
 
-/** A program on a pty in the guest. Dropping it hangs up, as closing an ssh session does, so Herdr's client detaches and its session stays. */
+/** A program on a pty in the guest. Dropping it hangs up, as closing an ssh session does, so Herdr Core's client detaches and its session stays. */
 export interface Terminal extends AsyncIterable<Uint8Array> {
   write(keys: Uint8Array): Promise<void>;
   resize(size: TerminalSize): Promise<void>;

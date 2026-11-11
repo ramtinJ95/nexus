@@ -80,7 +80,7 @@ export type PylonObservation =
   | { pylonId: PylonId; phase: "booting" | "stopping" | "deleting" }
   /**
    * `sessions`: what the wake brings back, as the pause recorded it. Null when the pause recorded nothing, such as with
-   * no Herdr server, or the pylon stopped without a pause. The wake then
+   * no Herdr Core running, or the pylon stopped without a pause. The wake then
    * relaunches what an earlier record holds, which only the checkpoint knows.
    */
   | { pylonId: PylonId; phase: "stopped"; checkpoint: CheckpointId | null; sessions: readonly PausedSession[] | null; wakeAfterBoot?: true }
@@ -119,10 +119,10 @@ export interface RunningFacts {
   listening: readonly ListeningFact[] | null;
   /** Listed once the probe has published the preview and warmed its URL. */
   previews: readonly { service: string; httpsPort: number }[];
-  sessions: readonly SessionFact[] | null; // null when Herdr could not be read. No Herdr server is an empty list
+  sessions: readonly SessionFact[] | null; // null when the core could not be read. No core running is an empty list
   git: GitFacts | null; // null until the first poll, or when the checkout is missing
   declaredOutputs: readonly DeclaredOutput[];
-  /** The Herdr clients attached to the pylon's session, such as `nexus attach`, counted as human presence. */
+  /** The terminals viewing the pylon's Herdr Core, such as `nexus attach` or Core's picker, counted as human presence. */
   attachedClients: number;
   /** Set while the pylon's guest gives no answer to its guest commands. Absent while it answers, and from a probe that predates it. */
   notAnswering?: GuestNotAnswering;
@@ -136,20 +136,27 @@ export interface GuestNotAnswering { since: string; timeouts: number }
  */
 export interface ServiceFact { name: string; state: "starting" | "ready" | "failed" | "stopped"; port: number; declared: boolean; wantsPreview: boolean; unrouted?: string }
 export interface ListeningFact { port: number }
-/** `unknown` is Herdr's word for a pane it cannot classify, which every plain shell is. */
+/**
+ * A Core terminal's status. `unknown` is a terminal whose program has reported none, which every plain shell is. The
+ * probe reads Core's `done` as `idle`, so it no longer reports `done`, which a control plane may still hold from an
+ * older probe.
+ */
 export type HerdrStatus = "working" | "idle" | "blocked" | "done" | "unknown";
 /**
- * A session in a running pylon. `id` names it: its Herdr pane, or `failed-` and a hash of its record for a session
- * the last wake left in no pane (sessions.ts). `failed` is one the last wake did not bring back, which the next wake
- * tries again: `message` says why, and `herdrPane` is the pane it left behind, such as a shell its agent would not
- * start in, or null. `status` is Herdr's for the pane, unknown with none: a control plane older than session states
- * stores one for every session. It cannot store a session in no pane, so the control plane is upgraded before the
- * probes (deploy/README.md).
+ * A session in a running pylon. `id` names it: the address of its Herdr Core terminal, or for a session the last wake
+ * left in no terminal the address it was recorded at (sessions.ts). `failed` is one the last wake did not bring back,
+ * which the next wake tries again: `message` says why, and `herdrPane` is the terminal it left behind, such as a
+ * Claude whose launch stalled, or null. `status` is Core's for the terminal, unknown with none: a control plane older
+ * than session states stores one for every session. It cannot store a session in no terminal, so the control plane is
+ * upgraded before the probes (deploy/README.md).
  */
 export type SessionFact =
   | {
     id: string; state: "running"; herdrPane: string; harness: SessionHarness; harnessSessionId: string | null; status: HerdrStatus;
-    /** The session's title, its Herdr workspace's label. A probe from before titles were reported sends none. */
+    /**
+     * The session's title: its terminal's `nexus.title` label, or for a terminal opened by hand its name or its
+     * harness's label. A probe from before titles were reported sends none.
+     */
     title?: string;
   }
   | { id: string; state: "failed"; herdrPane: string | null; harness: SessionHarness; harnessSessionId: string | null; status: HerdrStatus; title: string; message: string };

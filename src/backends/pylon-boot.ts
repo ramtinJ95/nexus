@@ -4,7 +4,7 @@
  * controller (src/pylon-vm/runtime.ts), which runs each as root, and the Docker double runs them in its container.
  */
 import { shellQuote as q } from "../shell.ts";
-import { asUser } from "../guest-contract.ts";
+import { asUser, coreStartMs, ensureCore } from "../guest-contract.ts";
 import { JobFailure } from "../protocol/jobs.ts";
 import type { PylonId } from "../ids.ts";
 import type { BootInputs, CloneRepo, RepoInit } from "../protocol/spawn.ts";
@@ -18,9 +18,9 @@ export const asUserIn = (script: string, cwd: string) => asUser(`cd ${q(cwd)} &&
 
 /**
  * Every boot, as user, before setup or resume. A failed or slow pull keeps what the disk has, which is the
- * image's baked copy until a pull succeeds. A boot without a dotfiles repository pulls nothing and keeps it too. Then the layer's install runs and Herdr's integrations are
- * reinstalled. Each step's outcome (pull, install, Herdr) is one `dotfiles:` or `herdr:` line in the pylon's log, and none fails the
- * boot. The fetch has its own limit, so the fork's 120 s hook deadline never cuts off what follows it.
+ * image's baked copy until a pull succeeds. A boot without a dotfiles repository pulls nothing and keeps it too. Then the layer's install runs.
+ * Each step's outcome (pull, install) is one `dotfiles:` line in the pylon's log, and none fails the boot. The fetch has its own limit,
+ * so the fork's 120 s hook deadline never cuts off what follows it.
  */
 function dotfilesPull(dotfiles: BootInputs["dotfiles"]): string {
   const at = `$(git -C ${dotfilesDir} rev-parse --short HEAD 2>/dev/null || echo nothing)`;
@@ -36,14 +36,16 @@ function dotfilesPull(dotfiles: BootInputs["dotfiles"]): string {
     `if ! test -x ${dotfilesDir}/install; then echo 'dotfiles: no install script'`,
     `elif (cd ${dotfilesDir} && ./install); then echo 'dotfiles: installed'`,
     `else echo "dotfiles: install exited $?"; fi`,
-    // The layer's install may replace ~/.claude and ~/.pi/agent files that hold Herdr's hooks, which report session IDs.
-    "if ! command -v herdr >/dev/null; then echo 'herdr: not installed, integrations skipped'",
-    "elif herdr integration install pi && herdr integration install claude; then echo 'herdr: reinstalled the pi and claude integrations'",
-    "else echo 'herdr: reinstalling the pi and claude integrations failed'; fi",
   ].join("\n"), home);
 }
 
-/** Every boot's hooks, in order. The agents' logins follow the dotfiles pull, whose install may replace their files. */
+/** Starts Herdr Core, which every session runs in, once the login environment it hands its terminals is settled. One `herdr-core:` line. */
+const coreStart = asUserIn(`if ${ensureCore}; then echo 'herdr-core: running'; else echo 'herdr-core: did not start within ${coreStartMs / 1000} s'; fi`, home);
+
+/**
+ * Every boot's hooks, in order. The agents' logins follow the dotfiles pull, whose install may replace their files, and
+ * the core starts last, so its terminals get what they set.
+ */
 export function bootHooks(boot: Pick<BootInputs, "dotfiles" | "gitIdentity" | "network">): string[] {
   const granted = (harness: SessionHarness) => agentKinds[harness].signIn?.grants.some((grant) => boot.network.secrets.some((s) => s.name === grant.name)) ?? false;
   return [
@@ -53,6 +55,7 @@ export function bootHooks(boot: Pick<BootInputs, "dotfiles" | "gitIdentity" | "n
       return login !== undefined && granted(harness) ? [asUserIn(login, home)] : [];
     }),
     ...boot.gitIdentity === undefined ? [] : [asUserIn(`git config --global user.name ${q(boot.gitIdentity.name)} && git config --global user.email ${q(boot.gitIdentity.email)}`, home)],
+    coreStart,
   ];
 }
 

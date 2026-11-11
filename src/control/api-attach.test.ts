@@ -61,8 +61,8 @@ test("the attach route refuses before the 101 with the API's JSON errors, and a 
   await refused(400, /cols must be a whole number from 1 to 9999, got 0/, attachTo(s.port, attachPathOf(s.thread.id, "cols=0&rows=30")));
   await refused(400, /rows must be a whole number/, attachTo(s.port, attachPathOf(s.thread.id, "cols=80")));
   await refused(400, /term must be a terminal type/, attachTo(s.port, attachPathOf(s.thread.id, "cols=80&rows=24&term=x%20y")));
-  for (const pane of ["", "p1", "w1:p1%3Breboot", "%24(id)"]) {
-    await refused(400, /^pane must be a Herdr pane ID such as w1:p1, got /, attachTo(s.port, attachPathOf(s.thread.id, `cols=80&rows=24&pane=${pane}`)));
+  for (const pane of ["", "p1", "w1:p1", "t1%3Breboot", "%24(id)", "vps%2Ft3"]) {
+    await refused(400, /^pane must be a Herdr Core terminal such as t7, got /, attachTo(s.port, attachPathOf(s.thread.id, `cols=80&rows=24&pane=${pane}`)));
   }
   await refused(404, /^no thread th-missing$/, attachTo(s.port, attachPathOf("th-missing")));
   assert.equal(s.streams.length, 0, "no refusal reached the probe");
@@ -134,14 +134,14 @@ test("an attach wakes the pylon, waits for it, and carries keys, resizes and out
   assert.deepEqual(a.received.slice(2), ["herdr screen", { type: "exit", code: 0 }]);
 });
 
-test("a Claude worker's attach lands in the pane of its Claude session, one that names a pane lands there, and a Nexus agent thread's where Herdr was", async (t) => {
+test("a Claude worker's attach lands in the terminal of its Claude session, one that names a terminal lands there, and a Nexus agent thread's in Core's picker", async (t) => {
   const s = await withThread(t, { attachTiming: fastAttach });
   const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "fix it" });
   const claude = { ...s, thread: started.body as Thread };
   claudeWorkerAt(s.registry, claude.thread.id, "started", { session: claudeSession });
   const session = (herdrPane: string, harness: "shell" | "claude-code", harnessSessionId: string | null) => ({ id: herdrPane, state: "running" as const, herdrPane, harness, harnessSessionId, status: "idle" as const, title: "x", message: null });
   observeRunning(claude, {});
-  s.registry.threads.apply({ record: "sessions", pylonId: claude.thread.pylonId, sessions: [session("w1:p1", "shell", null), session("w2:p1", "claude-code", "another-session"), session("w3:p1", "claude-code", claudeSession)] });
+  s.registry.threads.apply({ record: "sessions", pylonId: claude.thread.pylonId, sessions: [session("t1", "shell", null), session("t2", "claude-code", "another-session"), session("t3", "claude-code", claudeSession)] });
   s.probePipes(async (argv) => argv[0] === "python3" ? fakePipe().stream : processStream("true", [], () => {}));
   const landsIn = async (thread: string, query?: string) => {
     const a = await attachTo(s.port, attachPathOf(thread, query));
@@ -151,8 +151,8 @@ test("a Claude worker's attach lands in the pane of its Claude session, one that
     await a.closed;
     return s.streams.findLast(([, argv]) => argv[0] === "python3")![1].slice(8);
   };
-  assert.deepEqual(await landsIn(claude.thread.id), ["sh", "-c", attachScript, "attach", "w3:p1"]);
-  assert.deepEqual(await landsIn(claude.thread.id, "cols=100&rows=30&pane=w1:p1"), ["sh", "-c", attachScript, "attach", "w1:p1"], "an argument, never the script's text");
+  assert.deepEqual(await landsIn(claude.thread.id), ["sh", "-c", attachScript, "attach", "t3"]);
+  assert.deepEqual(await landsIn(claude.thread.id, "cols=100&rows=30&pane=t1"), ["sh", "-c", attachScript, "attach", "t1"], "an argument, never the script's text");
   observeRunning(s, {});
   assert.deepEqual(await landsIn(s.thread.id), ["sh", "-c", attachScript, "attach", ""]);
 });

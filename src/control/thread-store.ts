@@ -68,13 +68,15 @@ export type StoredPylon = Omit<PylonRecord, "desired" | "thread"> & { thread: Th
 export interface ListedPylon { node: NodeName; failed: string | null; job: JobStatus | null; attention: Attention }
 
 /**
- * A session of a pylon. `id` names it, and is what closes it: its Herdr pane, or `failed-` and a hash for a failed
- * session in no pane. A `paused` session comes back when its pylon wakes. A `failed` one did not come back from the
- * last wake, `message` says why, and the next wake tries it again. A paused session's `herdrPane` is the pane it had,
- * and a failed one's the pane it left behind, such as a shell its agent would not start in. `harness` is `shell` for an
- * agent Nexus did not start, such as one run by hand. `harnessSessionId` is the Claude Code session ID or the pi
- * session file, which a wake resumes. `status` is the Herdr status it had when last read running, `unknown` if never.
- * `title` is its Herdr workspace's label, null for a session last observed from a probe that did not report titles.
+ * A session of a pylon. `id` names it, and is what closes it: the address of its Herdr Core terminal, such as `t7`,
+ * or for a failed session in no terminal the address it was recorded at. A `paused` session comes back when its pylon
+ * wakes. A `failed` one did not come back from the last wake, `message` says why, and the next wake tries it again. A
+ * paused session's `herdrPane` is the terminal it had, and a failed one's the terminal it left behind, such as a
+ * Claude whose launch stalled. `harness` is `shell` for an agent Nexus does not launch, such as Codex run by hand.
+ * `harnessSessionId` is the Claude Code session ID or the pi session file, which a wake resumes. `status` is Core's
+ * status of the terminal when last read running, `unknown` if never. `title` is its terminal's `nexus.title` label,
+ * or for a terminal opened by hand its name or its harness's label, and null for a session last observed from a probe
+ * that did not report titles.
  */
 export type Session = { pylon: PylonId; id: string; harness: SessionHarness; harnessSessionId: string | null; title: string | null; status: HerdrStatus } & (
   | { state: "running"; herdrPane: string; message: null }

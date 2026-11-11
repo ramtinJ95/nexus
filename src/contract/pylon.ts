@@ -68,7 +68,7 @@ const diffQuery: QueryCodec<DiffQuery, { base: string | undefined; paths: string
   decode: (params) => ({ base: params.get("base") ?? undefined, paths: params.getAll("path") }),
 };
 
-/** The Herdr workspace's label is the harness's name by default, and the harness is Claude Code's. */
+/** The terminal's `nexus.title` label is the harness's name by default, and the harness is Claude Code's. */
 export interface SessionRequest { harness?: SessionHarness | undefined; title?: string | undefined }
 /** A session the route opened, which `nexus session open` prints. Its observed state shows in ThreadDetail.sessions. */
 export interface OpenedSession { herdrPane: string; harness: SessionHarness; title: string }
@@ -78,7 +78,6 @@ export const pylonRoutes = {
   unpreview: route<null>()("DELETE", "/v1/threads/{thread}/previews/{port}"),
   openSession: route<OpenedSession, SessionRequest>()("POST", "/v1/threads/{thread}/sessions", undefined, pylonWaitMs),
   closeSession: route<null>()("DELETE", "/v1/threads/{thread}/sessions/{session}"),
-  focusSession: route<null>()("POST", "/v1/threads/{thread}/sessions/{session}/focus"),
   files: route<Listing>()("GET", "/v1/threads/{thread}/files", pathQuery, pylonWaitMs),
   file: route<FileBytes>()("GET", "/v1/threads/{thread}/files/content", pathQuery),
   image: route<FileBytes>()("GET", "/v1/threads/{thread}/image", imageQuery),

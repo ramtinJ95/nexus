@@ -158,6 +158,7 @@
     "src/probe/event-journal.ts: reserved-path:auth",
     "src/probe/fake-tailscale.ts: reserved-path:auth",
     "src/probe/gateway.ts: reserved-path:auth",
+    "src/probe/guest/core.ts: reserved-path:auth",
     "src/probe/guest/git-facts.py: reserved-path:auth",
     "src/probe/guest/git-facts.ts: reserved-path:auth",
     "src/probe/guest/launchers.ts: reserved-path:auth",

@@ -140,7 +140,7 @@ test("a program that cannot start exits 127 and says why on the terminal", async
   assert.deepEqual(await terminal.done, { kind: "exited", code: 127 });
 });
 
-test("the relay goes in on stdin, so Herdr's attach fits the probe's request URL with room to spare", async () => {
+test("the relay goes in on stdin, so Core's attach fits the probe's request URL with room to spare", async () => {
   const pipes = localPipes();
   const terminal = await openTerminal(pipes.open, size, "xterm-256color", ["sh", "-c", "exit 0"]);
   assert.deepEqual(await terminal.done, { kind: "exited", code: 0 });

@@ -268,7 +268,7 @@ test("a lost terminal is unreachable, and a conflict when the thread was archive
   assert.equal(await a.closed, 1000);
   const [, end] = a.received as [unknown, { type: string; kind: string; message: string }];
   assert.equal(end.kind, "unreachable");
-  assert.match(end.message, /^the link to the pylon of th-0123456789ab was lost.*Herdr keeps the session/);
+  assert.match(end.message, /^the link to the pylon of th-0123456789ab was lost.*Herdr Core keeps the session/);
 
   const archived = fakeTerminal();
   const door = fakeDoor([archived]);

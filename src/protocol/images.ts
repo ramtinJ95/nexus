@@ -21,9 +21,8 @@ import type { ImageId, NodeName, ProjectId, TemplateId } from "../ids.ts";
  *   3. `user`, UID 1000, passwordless sudo, /home/user/workspace.
  *   4. Node from the checksum-verified official tarball into /usr/local.
  *   5. Claude Code and pi from npm, Herdr from its checksum-verified release binary into /usr/local/bin, Herdr Core
- *      beside it as /usr/local/bin/herdr-core and `hc` from its checksum-verified release tarball, which Nexus does not use yet,
- *      `herdr integration install` for pi and Claude Code as user (the sessions stream reads harness session
- *      IDs through them), the pi-env daemon at /usr/local/libexec/nexus/pi-env, the in-pylon `nexus` CLI,
+ *      beside it as /usr/local/bin/herdr-core and `hc` from its checksum-verified release tarball, which every session runs in,
+ *      `herdr integration install` for pi and Claude Code as user, which Nexus no longer reads, the pi-env daemon at /usr/local/libexec/nexus/pi-env, the in-pylon `nexus` CLI,
  *      nexus-kvm at /usr/local/libexec/nexus/nexus-kvm, and
  *      the fallback copy of the common dotfiles layer as a git repository at /opt/nexus/dotfiles, owned by
  *      user, which boots clone and then fetch.

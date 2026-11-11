@@ -1,18 +1,23 @@
 /**
- * Node validation for sessions.ts against a real Herdr, which the unit tests only fake. Run it inside a
- * scratch pylon as `user`, from a copy of src/, with the image's Node:
+ * Node validation for sessions.ts against a real Herdr Core, which the unit tests only fake. Run it inside a scratch
+ * pylon as `user`, from a copy of src/, with the image's Node, from a shell that is not a Core terminal, such as one
+ * `nexus exec` runs, because stopping the core ends every terminal:
  *
  *   node src/probe/guest/sessions.check.ts
  *
- * It drives a local Guest (execFile and fs), so every Herdr call is the one the probe makes. It stops the
- * pylon's Herdr server twice and deletes its persisted state, which ends every session in it, so never
- * run it in a pylon someone uses.
+ * It drives a local Guest (execFile and fs), so every Core call is the one the probe makes, through core.ts. It stops
+ * the pylon's core twice and deletes its state once, which ends every terminal in it, so never run it in a pylon
+ * someone uses.
  *
- * Two wakes. RESTORE stops the server and keeps Herdr's state, the way a checkpoint carries it, so Herdr
- * restores its panes, titles and cwds. The pylon's Herdr config turns off Herdr's own agent resume, so the
- * relaunch must start each agent in its restored pane. FRESH also deletes that state with
- * `herdr session delete`, so the relaunch must recreate every pane and resume each agent from the sessions
- * file alone. In both, each agent pane must then run its agent with the flag that resumes its session.
+ * Two wakes. RESTORE stops the core and keeps its state, as a checkpoint carries it. The core then brings the kept
+ * shell back at its address with its labels, and the agents, which are not kept, do not come back live. The relaunch
+ * must find the shell in place and resume each agent in a new terminal. FRESH also deletes the core's state, as on the
+ * first wake of a disk from before Core, so the relaunch must reopen every session, the shell included, from the
+ * sessions file alone. In both, each agent's terminal must then run its agent with the flag that resumes its session.
+ *
+ * Assumed, not seen in spikes/herdr-core: a VM restore, whose core dies with the VM, brings back what a graceful
+ * `herdr-core server stop` and start do, which is all the spike's restart-kept saw. And the core keeps its state under
+ * ~/.local/state/herdr-core, where the spike's pylon-socket check found its socket.
  */
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
@@ -22,14 +27,17 @@ import type { Guest } from "../../backends/backend.ts";
 import { exit } from "../../exec.ts";
 import { unusedGuest } from "../../backends/fake-guest.ts";
 import type { SessionFact } from "../../protocol/observations.ts";
-import { closeSession, openSession, recordSessions, relaunchSessions, sessionFacts, type RecordedSession, type ClaudeSessionLock, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
-import { herdrSession } from "../../guest-contract.ts";
+import { closeSession, dropFailedSession, openSession, recordSessions, relaunchSessions, sendToClaude, sessionFacts, type RecordedSession, type ClaudeSessionLock, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
+import { core } from "./core.ts";
+import { coreRunning } from "../../guest-contract.ts";
 import { claudeProjects as projects, home as cwd } from "../../../images/pylon/nexus-contract.ts";
 
 /** Nothing else runs here, so no call needs to wait for the relaunch. */
 const unlocked: ClaudeSessionLock = (_, work) => work();
 
 const shellCwd = `${cwd}/check-shell-cwd`;
+/** The pylon sets no XDG_STATE_HOME (spikes/herdr-core, pylon-socket), so the core's state is under the home's. */
+const coreState = `${cwd}/.local/state/herdr-core`;
 const guest: Guest = {
   async exec(argv, opts) {
     const { code, stdout, stderr } = await exit(argv[0]!, argv.slice(1), { cwd: opts.cwd, timeout: opts.timeoutMs });
@@ -45,74 +53,96 @@ const guest: Guest = {
 };
 
 const step = (name: string, value: unknown) => console.log(`${name}: ${JSON.stringify(value, null, 2)}`);
-const herdr = (...args: string[]) => guest.exec(["herdr", "--session", herdrSession, ...args], { cwd, timeoutMs: 70_000 });
+/** `script` in sh, with `args` as $1 and on. */
+const sh = (script: string, ...args: string[]) => guest.exec(["sh", "-c", script, "check", ...args], { cwd, timeoutMs: 70_000 });
+const coreUp = async () => (await sh(coreRunning)).exitCode === 0;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** A failed outcome's message carries the pane's screen, which a rollback has already closed, so print it raw. */
+/** A failed outcome's message carries the terminal's screen, which a rollback has already closed, so print it raw. */
 function stepRelaunch(name: string, outcomes: readonly RelaunchOutcome[]): void {
   step(name, outcomes);
   for (const o of outcomes) if (o.result === "failed") console.log(`${name}_FAILED ${o.record.title}:\n${o.message}`);
 }
 
-/** Polls until every agent pane among `panes` reports a harness session ID, so the facts are settled. */
-async function settledFacts(panes: readonly string[]): Promise<readonly SessionFact[]> {
+/** Polls until every agent terminal among `terminals` reports a harness session ID, so the facts are settled. */
+async function settledFacts(terminals: readonly string[]): Promise<readonly SessionFact[]> {
   let facts = await sessionFacts(guest);
   for (let deadline = Date.now() + 30_000; Date.now() < deadline; facts = await sessionFacts(guest)) {
-    const mine = facts.filter((f) => f.herdrPane !== null && panes.includes(f.herdrPane));
-    if (mine.length === panes.length && mine.every((f) => f.harness === "shell" || f.harnessSessionId !== null)) break;
+    const mine = facts.filter((f) => f.herdrPane !== null && terminals.includes(f.herdrPane));
+    if (mine.length === terminals.length && mine.every((f) => f.harness === "shell" || f.harnessSessionId !== null)) break;
     await sleep(500);
   }
   return facts;
 }
 
 /**
- * The shell and foreground PIDs Herdr reports for a pane. A pane Herdr is still restoring may not answer
- * yet, so an error reply is retried for 10 s, and every raw reply that is not a process_info is logged.
+ * A terminal as `herdr-core get --json` gives it whole, which core.ts slims to what the probe reads: the check also
+ * needs its `keep` and its foreground's `pid`. Guarded as core.ts is, so it never starts a core.
  */
-async function panePids(pane: string): Promise<number[]> {
-  for (const deadline = Date.now() + 10_000; ;) {
-    const reply = await herdr("pane", "process-info", "--pane", pane);
-    const line = reply.output.trim().split("\n").findLast((l) => l.startsWith("{"));
-    const parsed = line === undefined ? undefined : JSON.parse(line);
-    const info = parsed?.result?.process_info;
-    if (info !== undefined) {
-      const foreground: { pid: number }[] = info.foreground_processes ?? [];
-      return [info.shell_pid, ...foreground.map((p) => p.pid)].filter((pid): pid is number => typeof pid === "number");
-    }
-    step(`PROCESS_INFO_${pane}`, reply);
-    if (Date.now() >= deadline) throw new Error(`herdr pane process-info --pane ${pane} gave no process_info within 10 s: ${reply.output}`);
-    await sleep(500);
+async function terminalJson(terminal: string): Promise<{ keep?: unknown; foreground?: { pid?: unknown } | null }> {
+  const { exitCode, output } = await sh(`${coreRunning} || exit 69; exec herdr-core get "$1" --json 2>/dev/null`, terminal);
+  const at = output.indexOf("{");
+  if (exitCode !== 0 || at === -1) throw new Error(`herdr-core get ${terminal} --json exited ${exitCode}: ${output}`);
+  return JSON.parse(output.slice(at));
+}
+
+/** The fields of /proc/<pid>/stat after the command name, which sits in parentheses and may itself hold spaces or parentheses. */
+function statOf(pid: number): string[] | null {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    return stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+  } catch {
+    return null;
   }
 }
 
 /**
- * `ps -o pid,ppid,pgid,sid,stat,args` for one PID, read from /proc as ps does, because the image may not
- * ship procps. Null once the process is gone.
+ * The PIDs of the terminal's own program and foreground job, which a core stop ends: its foreground process group, read
+ * from /proc. A terminal the core is still bringing back may name no foreground yet, so that is retried for 10 s, and
+ * every reply without one is logged.
  */
+async function terminalPids(terminal: string): Promise<number[]> {
+  for (const deadline = Date.now() + 10_000; ;) {
+    const got = await terminalJson(terminal);
+    const pid = got.foreground?.pid;
+    if (typeof pid === "number") {
+      const pgid = statOf(pid)?.[2];
+      return readdirSync("/proc").filter((d) => /^\d+$/.test(d)).map(Number).filter((p) => p === pid || (pgid !== undefined && statOf(p)?.[2] === pgid));
+    }
+    step(`GET_${terminal}`, got);
+    if (Date.now() >= deadline) throw new Error(`herdr-core get ${terminal} named no foreground PID within 10 s`);
+    await sleep(500);
+  }
+}
+
+/** `ps -o pid,ppid,pgid,sid,stat,args` for one PID, read from /proc as ps does, because the image may not ship procps. Null once the process is gone. */
 function psRow(pid: number): string | null {
-  let stat: string, cmdline: string;
+  const stat = statOf(pid);
+  let cmdline: string;
   try {
-    stat = readFileSync(`/proc/${pid}/stat`, "utf8");
     cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8");
   } catch {
     return null;
   }
-  // The command name sits in parentheses and may itself contain spaces or parentheses.
-  const [state, ppid, pgid, sid] = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+  if (stat === null) return null;
+  const [state, ppid, pgid, sid] = stat;
   const args = cmdline.split("\0").join(" ").trim();
   return [pid, ppid, pgid, sid, state, args].join(" ");
 }
 
-async function stopServer(stage: string, panes: readonly string[]): Promise<void> {
-  const pids = [...new Set((await Promise.all(panes.map(panePids))).flat())];
+async function stopCore(stage: string, terminals: readonly string[]): Promise<void> {
+  const pids = [...new Set((await Promise.all(terminals.map(terminalPids))).flat())];
   step(`${stage}_PS_BEFORE_STOP`, ["PID PPID PGID SID STAT ARGS", ...pids.flatMap((pid) => psRow(pid) ?? [])]);
-  step(`${stage}_SERVER_STOP`, await herdr("server", "stop"));
-  assert.deepEqual(await sessionFacts(guest), [], "no Herdr server reads as no sessions");
+  step(`${stage}_CORE_STOP`, await guest.exec(["herdr-core", "server", "stop"], { cwd, timeoutMs: 70_000 }));
+  for (const deadline = Date.now() + 10_000; await coreUp() && Date.now() < deadline;) await sleep(100);
+  assert.equal(await coreUp(), false, `${stage}: herdr-core server stop ends the core`);
+  assert.deepEqual(await sessionFacts(guest), [], "with no core, no session reads as running");
+  assert.equal(await coreUp(), false, `${stage}: reading the sessions with no core starts none`);
   const remaining = () => pids.filter((pid) => psRow(pid) !== null);
   for (let deadline = Date.now() + 5_000; remaining().length > 0 && Date.now() < deadline;) await sleep(100);
   step(`${stage}_PS_AFTER_STOP`, ["PID PPID PGID SID STAT ARGS", ...pids.flatMap((pid) => psRow(pid) ?? [])]);
-  // Gone means reaped too: a zombie here would mean tini is not the subreaper over Herdr's panes.
-  assert.deepEqual(remaining(), [], `${stage}: stopping the server ends and reaps every pane's processes`);
+  // Gone means reaped too: a zombie here would mean nothing reaps what the core's terminals leave, which tini does.
+  assert.deepEqual(remaining(), [], `${stage}: stopping the core ends and reaps every terminal's program and foreground job`);
 }
 
 function assertResumed(stage: string, recorded: readonly RecordedSession[], facts: readonly SessionFact[]): void {
@@ -125,7 +155,7 @@ function assertResumed(stage: string, recorded: readonly RecordedSession[], fact
 /**
  * Agent sessions that have a session ID but were never prompted, so neither has a session file: Claude
  * Code has written no transcript and pi no session file. What a user would see is the test: after a
- * relaunch each pane runs a live agent under the same session ID, not an agent's exit at a shell prompt.
+ * relaunch each terminal runs a live agent under the same session ID, not an agent that exited at its start.
  * Findings are collected rather than asserted at once, so one run reports both stages.
  */
 const unprompted = { claude: "check-claude-unprompted", pi: "check-pi-unprompted" } as const;
@@ -138,6 +168,9 @@ const sessionFiles = (harness: SessionRecord["harness"], id: string): string[] =
   ? existsSync(id) ? [id] : []
   : existsSync(projects) ? readdirSync(projects).map((dir) => join(projects, dir, `${id}.jsonl`)).filter((file) => existsSync(file)) : [];
 
+/** The terminal's screen, or why it could not be read. */
+const screenOf = (terminal: string) => core(guest, "terminal.read", { terminal }).then((r) => r.text.trimEnd(), (err: Error) => `(unreadable: ${err.message})`);
+
 async function checkUnprompted(stage: string, title: string, outcomes: readonly RelaunchOutcome[], facts: readonly SessionFact[]): Promise<void> {
   const o = outcomes.find((x) => x.record.title === title);
   if (o === undefined) return void findings.push(`${stage}: no record of ${title}`);
@@ -145,25 +178,18 @@ async function checkUnprompted(stage: string, title: string, outcomes: readonly 
   const fact = facts.find((f) => f.herdrPane === o.herdrPane);
   const sameSessionId = fact?.harnessSessionId === o.record.harnessSessionId;
   step(`${stage}_${title}`, { outcome: o.result, fact, sameSessionId });
-  // Always, because Herdr can call an agent idle while it shows an error or a session picker.
-  step(`${stage}_${title}_PS`, ["PID PPID PGID SID STAT ARGS", ...(await panePids(o.herdrPane)).flatMap((pid) => psRow(pid) ?? [])]);
-  const read = (await herdr("pane", "read", o.herdrPane, "--source", "recent-unwrapped", "--lines", "40")).output.trim();
-  let text: unknown = read;
-  try {
-    text = JSON.parse(read.split("\n").at(-1)!).result?.read?.text ?? read;
-  } catch {
-    // Not a JSON reply, so the raw output is the screen.
-  }
-  console.log(`${stage}_${title}_SCREEN:\n${text}`);
-  if (fact?.harness !== o.record.harness) findings.push(`${stage}: ${title}'s pane ${o.herdrPane} reads as ${fact?.harness ?? "nothing"}, not ${o.record.harness}`);
+  // Always, because an agent can report idle while it shows an error or a session picker.
+  step(`${stage}_${title}_PS`, ["PID PPID PGID SID STAT ARGS", ...(await terminalPids(o.herdrPane)).flatMap((pid) => psRow(pid) ?? [])]);
+  console.log(`${stage}_${title}_SCREEN:\n${await screenOf(o.herdrPane)}`);
+  if (fact?.harness !== o.record.harness) findings.push(`${stage}: ${title}'s terminal ${o.herdrPane} reads as ${fact?.harness ?? "nothing"}, not ${o.record.harness}`);
   else if (!sameSessionId) findings.push(`${stage}: ${title} came back as ${fact.harnessSessionId}, not ${o.record.harnessSessionId}`);
 }
 
 /**
- * What a user sees in each agent's pane: the agent runs its recorded session. Herdr's agent fact is not
- * evidence, because it stays `claude` after Claude exits. A Claude must run with the flag that resumes its
- * session. pi's flags cannot be read back, because its CLI sets process.title, which overwrites its argv
- * in /proc, so a pi must instead write a prompt into the session file at the recorded path.
+ * What a user sees in each agent's terminal: the agent runs its recorded session. The terminal's facts are not
+ * evidence, because they read the same command line the launch wrote. A Claude must run with the flag that resumes its
+ * session, as /proc shows it. pi's flags cannot be read back, because its CLI sets process.title, which overwrites its
+ * argv in /proc, so a pi must instead write a prompt into the session file at the recorded path.
  */
 async function expectRuns(stage: string, outcomes: readonly RelaunchOutcome[]): Promise<ReadonlySet<string>> {
   const broken = new Set<string>();
@@ -184,27 +210,33 @@ async function expectRuns(stage: string, outcomes: readonly RelaunchOutcome[]): 
       continue;
     }
     const flag = title === unprompted.claude ? "--session-id" : "--resume";
-    const rows = (await panePids(o.herdrPane)).flatMap((pid) => psRow(pid) ?? []);
+    const rows = (await terminalPids(o.herdrPane)).flatMap((pid) => psRow(pid) ?? []);
     step(`${stage}_RUNS_${title}`, ["PID PPID PGID SID STAT ARGS", ...rows]);
-    if (!rows.some((row) => row.includes(` ${flag} ${id}`))) fail(title, `${stage}: ${title}'s pane runs no ${harness} with ${flag} ${id}`);
+    if (!rows.some((row) => row.includes(` ${flag} ${id}`))) fail(title, `${stage}: ${title}'s terminal runs no ${harness} with ${flag} ${id}`);
   }
   return broken;
 }
 
+/** Polls up to `withinMs` until `test` holds, and says whether it did. */
+async function within(withinMs: number, test: () => boolean): Promise<boolean> {
+  for (const deadline = Date.now() + withinMs; !test() && Date.now() < deadline;) await sleep(250);
+  return test();
+}
+
 /**
- * Prompts a pi pane and waits for the message to reach `file`: a resumed session's file grows, and an
- * unprompted session's file first appears. The placeholder key makes the reply fail, but pi writes the
- * user message first. Returns the finding, or null.
+ * Sends a prompt to a pi terminal and waits for the message to reach `file`: a resumed session's file grows, and an
+ * unprompted session's file first appears. The placeholder key makes the reply fail, but pi writes the user message
+ * first. Returns the finding, or null.
  */
-async function piWrites(stage: string, title: string, pane: string, file: string): Promise<string | null> {
+async function piWrites(stage: string, title: string, terminal: string, file: string): Promise<string | null> {
   const size = () => existsSync(file) ? statSync(file).size : null;
   const before = size();
-  step(`${stage}_PROMPT_${title}`, await herdr("agent", "prompt", pane, "Reply with OK.", "--wait", "--timeout", "60000"));
+  step(`${stage}_PROMPT_${title}`, await core(guest, "terminal.send", { terminal, text: "Reply with OK." }, 75_000));
   const wrote = () => {
     const after = size();
     return after !== null && (before === null || after > before);
   };
-  for (const deadline = Date.now() + 10_000; !wrote() && Date.now() < deadline;) await sleep(250);
+  await within(60_000, wrote);
   step(`${stage}_${title}_SESSION_FILE`, { file, before, after: size() });
   if (title === unprompted.pi ? before !== null : before === null) return `${stage}: ${title}'s session file ${before === null ? "was missing" : "already existed"} before the prompt`;
   return wrote() ? null : `${stage}: a prompt to ${title} never reached its session file ${file}`;
@@ -239,11 +271,8 @@ const transcripts = () => existsSync(projects)
   ? readdirSync(projects).flatMap((dir) => readdirSync(join(projects, dir)).filter((f) => f.endsWith(".jsonl")).map((f) => `${dir}/${f} ${statSync(join(projects, dir, f)).size}`))
   : [];
 
-// Herdr's own agent resume would run `claude --resume` for an unprompted Claude, which exits to a bare shell.
-const herdrConfig = process.env.HERDR_CONFIG_PATH ?? "/home/user/.config/herdr/config.toml";
-const herdrToml = existsSync(herdrConfig) ? readFileSync(herdrConfig, "utf8") : "";
-step("HERDR_CONFIG", { path: herdrConfig, content: herdrToml });
-assert.match(herdrToml, /^\[session\][^[]*^\s*resume_agents_on_restore\s*=\s*false\s*$/m, `${herdrConfig} turns off Herdr's own agent resume`);
+assert.equal(process.env.HC_TERMINAL_ID, undefined, "the check runs outside a Core terminal, which stopping the core would end");
+assert.ok(await coreUp(), "the pylon's boot started its Herdr Core");
 
 await mkdir(shellCwd, { recursive: true });
 const opened = {
@@ -258,37 +287,56 @@ const facts = await settledFacts(Object.values(opened));
 step("FACTS", facts);
 const byPane = new Map(facts.map((f) => [f.herdrPane, f]));
 assert.equal(byPane.get(opened.shell)?.harness, "shell");
-assert.equal(byPane.get(opened.claude)?.harness, "claude-code", "Herdr detects Claude Code in its pane");
-assert.equal(byPane.get(opened.pi)?.harness, "pi", "Herdr detects pi in its pane");
-assert.ok(byPane.get(opened.claude)?.harnessSessionId, "Claude Code reports its session ID through Herdr's integration");
-assert.ok(byPane.get(opened.pi)?.harnessSessionId, "pi reports its session file through Herdr's integration");
-assert.ok(byPane.get(opened.unpromptedClaude)?.harnessSessionId, "an unprompted Claude Code reports its session ID too");
-assert.equal(byPane.get(opened.unpromptedPi)?.harness, "pi", "Herdr detects an unprompted pi in its pane");
-assert.ok(byPane.get(opened.unpromptedPi)?.harnessSessionId, "an unprompted pi reports its session file too");
+assert.equal(byPane.get(opened.claude)?.harness, "claude-code", "Claude Code is its terminal's foreground");
+assert.equal(byPane.get(opened.pi)?.harness, "pi", "pi is its terminal's foreground");
+assert.ok(byPane.get(opened.claude)?.harnessSessionId, "Claude Code's terminal names its session ID");
+assert.ok(byPane.get(opened.pi)?.harnessSessionId, "pi's terminal names its session file");
+assert.ok(byPane.get(opened.unpromptedClaude)?.harnessSessionId, "an unprompted Claude Code's terminal names its session ID too");
+assert.equal(byPane.get(opened.unpromptedPi)?.harness, "pi", "an unprompted pi is its terminal's foreground");
+assert.ok(byPane.get(opened.unpromptedPi)?.harnessSessionId, "an unprompted pi's terminal names its session file too");
+// What RESTORE turns on: the core gives a kept terminal a shell when its program is lost, so only the shell is kept,
+// and an agent's terminal ends with it rather than coming back as a shell the next record would take for a session.
+for (const [title, terminal] of Object.entries(opened)) {
+  const { keep } = await terminalJson(terminal);
+  assert.equal(keep, title === "shell", `${title}'s terminal ${terminal} is ${title === "shell" ? "" : "not "}kept`);
+}
 
 // A session is only worth resuming once it has a conversation, and Claude Code cannot resume an ID with
 // no transcript. The placeholder key makes the reply fail, but the prompt is still written down.
-for (const pane of [opened.claude, opened.pi]) step(`PROMPT_${pane}`, await herdr("agent", "prompt", pane, "Reply with OK.", "--wait", "--timeout", "60000"));
-step("TRANSCRIPTS", {
-  claude: sessionFiles("claude-code", byPane.get(opened.claude)!.harnessSessionId!),
-  pi: sessionFiles("pi", byPane.get(opened.pi)!.harnessSessionId!),
-  all: transcripts(),
-});
+const claudeId = byPane.get(opened.claude)!.harnessSessionId!;
+const piFile = byPane.get(opened.pi)!.harnessSessionId!;
+const sent = await sendToClaude(guest, { session: claudeId, text: "Reply with OK." });
+step(`PROMPT_${opened.claude}`, sent);
+assert.ok(sent.outcome === "sent" || sent.outcome === "queued", `Claude Code takes the first prompt: ${sent.outcome}`);
+step(`PROMPT_${opened.pi}`, await core(guest, "terminal.send", { terminal: opened.pi, text: "Reply with OK." }, 75_000));
+assert.ok(await within(60_000, () => sessionFiles("claude-code", claudeId).length > 0 && sessionFiles("pi", piFile).length > 0), "each prompt reaches its session's file");
+step("TRANSCRIPTS", { claude: sessionFiles("claude-code", claudeId), pi: sessionFiles("pi", piFile), all: transcripts() });
 
-// RESTORE: Herdr's own state survives, as it does in a checkpoint.
+// RESTORE: the core's own state survives, as it does in a checkpoint.
 const recorded = await recordSessions(guest);
 step("RESTORE_RECORDED", recorded);
 assert.ok(recorded !== null && recorded.length === 5, "the five sessions are recorded");
 expectNoSessionFiles("RESTORE", recorded);
-await stopServer("RESTORE", Object.values(opened));
+await stopCore("RESTORE", Object.values(opened));
 dropAppearedSessionFiles("RESTORE", recorded);
 const restored = await relaunchSessions(guest, unlocked);
 stepRelaunch("RESTORE_RELAUNCH_1", restored);
 assert.ok(others(restored).every((o) => o.result !== "failed"), "every recorded session comes back");
-// Herdr keeps the layout, so each session is back in its own pane, and only the relaunch started agents.
+// The core keeps the shell, so it is back in its own terminal, and only the relaunch started agents, each in a new one.
 for (const o of restored) {
-  const want = o.record.harness === "shell" ? "present" : "relaunched";
-  if (o.result !== want || o.herdrPane !== o.record.herdrPane) findings.push(`RESTORE: ${o.record.title} is ${o.result} in ${"herdrPane" in o ? o.herdrPane : "no pane"}, not ${want} in its restored pane ${o.record.herdrPane}`);
+  const shell = o.record.harness === "shell";
+  const want = shell ? "present" : "relaunched";
+  if (o.result !== want || (o.herdrPane === o.record.herdrPane) !== shell) {
+    findings.push(`RESTORE: ${o.record.title} is ${o.result} in ${o.herdrPane ?? "no terminal"}, not ${want} ${shell ? `in its kept terminal ${o.record.herdrPane}` : "in a new terminal"}`);
+  }
+}
+// An agent's terminal from before the stop is neither live, which the next record would take for a session, nor left
+// finished, which the relaunch removes so it does not crowd herdr-app's list.
+const afterRelaunch = (await core(guest, "terminal.list", { all: true })).terminals;
+step("RESTORE_TERMINALS", afterRelaunch.map(({ address, state, labels }) => ({ address, state, labels })));
+for (const r of recorded) {
+  const left = r.harness === "shell" ? undefined : afterRelaunch.find((t) => t.address === r.herdrPane);
+  if (left !== undefined) findings.push(`RESTORE: ${r.title}'s terminal ${r.herdrPane} from before the stop is still there, ${left.state}`);
 }
 const brokenByRestore = await expectRuns("RESTORE", restored);
 const restoredAgain = await relaunchSessions(guest, unlocked);
@@ -300,21 +348,25 @@ step("RESTORE_FACTS", afterRestore);
 assertResumed("RESTORE", recorded, afterRestore);
 for (const title of unpromptedTitles) await checkUnprompted("RESTORE", title, restoredAgain, afterRestore);
 // FRESH needs unprompted sessions of its own: RESTORE's prompt gave the unprompted pi a session file, and
-// an unprompted Claude that RESTORE broke would be recorded as a shell.
+// an unprompted Claude that RESTORE broke may be left as a failed record or a terminal that runs nothing it can resume.
 for (const [harness, title] of [["claude-code", unprompted.claude], ["pi", unprompted.pi]] as const) {
   if (harness === "claude-code" && !brokenByRestore.has(title)) continue;
-  // Every pane left under its title, including a restored shell that a failed relaunch leaves behind.
+  // Every record under its title: one in a terminal is closed with it, and a failed one in none is dropped.
   for (const r of (await recordSessions(guest)) ?? []) {
-    if (r.title !== title || r.herdrPane === null) continue;
+    if (r.title !== title) continue;
+    if (r.herdrPane === null) {
+      assert.ok(await dropFailedSession(guest, r.id), `FRESH: the failed record of ${title} is dropped`);
+      continue;
+    }
     await closeSession(guest, r.herdrPane);
     if (restoredPanes.includes(r.herdrPane)) restoredPanes.splice(restoredPanes.indexOf(r.herdrPane), 1);
   }
-  const pane = await openSession(guest, { harness, title, cwd });
-  restoredPanes.push(pane);
-  step(`FRESH_${title}_REOPENED`, (await settledFacts([pane])).find((f) => f.herdrPane === pane));
+  const terminal = await openSession(guest, { harness, title, cwd });
+  restoredPanes.push(terminal);
+  step(`FRESH_${title}_REOPENED`, (await settledFacts([terminal])).find((f) => f.herdrPane === terminal));
 }
 
-// FRESH: Herdr's state is gone, so only the sessions file can bring the sessions back.
+// FRESH: the core's state is gone, so only the sessions file can bring the sessions back.
 const recordedAgain = await recordSessions(guest);
 step("FRESH_RECORDED", recordedAgain);
 assert.ok(recordedAgain !== null && recordedAgain.length === 5);
@@ -322,14 +374,15 @@ const restoredShell = recordedAgain.find((r) => r.harness === "shell");
 if (restoredShell?.title !== "check-shell" || restoredShell.cwd !== shellCwd) findings.push(`RESTORE: the shell came back as ${JSON.stringify(restoredShell)}`);
 for (const title of unpromptedTitles) assert.ok(recordedAgain.find((r) => r.title === title)?.harnessSessionId, `${title} is recorded with its ID`);
 expectNoSessionFiles("FRESH", recordedAgain);
-await stopServer("FRESH", restoredPanes);
-const deleted = await herdr("session", "delete", herdrSession, "--json");
-step("FRESH_SESSION_DELETE", deleted);
-assert.equal(deleted.exitCode, 0, "Herdr deletes the stopped session's state");
+await stopCore("FRESH", restoredPanes);
+assert.ok(existsSync(coreState), `the stopped core's state is at ${coreState}`);
+step("FRESH_CORE_STATE", (await sh('find "$1"', coreState)).output.trim().split("\n"));
+rmSync(coreState, { recursive: true });
 dropAppearedSessionFiles("FRESH", recordedAgain);
 const fresh = await relaunchSessions(guest, unlocked);
 stepRelaunch("FRESH_RELAUNCH_1", fresh);
-assert.deepEqual(others(fresh).map((o) => o.result), ["relaunched", "relaunched", "relaunched"], "with no Herdr state, every session is recreated");
+// A shell found present here would mean the deleted directory was not all of the core's state.
+assert.deepEqual(others(fresh).map((o) => o.result), ["relaunched", "relaunched", "relaunched"], "with no core state, every session is reopened, the kept shell included");
 const freshPanes = fresh.flatMap((o) => o.result === "relaunched" ? [o.herdrPane] : []);
 const afterFresh = await settledFacts(freshPanes);
 step("FRESH_FACTS", afterFresh);
@@ -346,10 +399,10 @@ stepRelaunch("FRESH_RELAUNCH_2", freshAgain);
 assert.ok(others(freshAgain).every((o) => o.result === "present"), "a second relaunch after a fresh one opens nothing");
 
 for (const o of freshAgain) if (o.result === "present" || o.result === "relaunched") await closeSession(guest, o.herdrPane);
-await closeSession(guest, "w999:p999");
+assert.equal(await closeSession(guest, "tzzzzzz"), "not-open", "closing a terminal the core never had closes nothing");
 const closed = await sessionFacts(guest);
 step("FACTS_AFTER_CLOSE", closed);
 assert.deepEqual(closed.filter((f) => f.herdrPane !== null && freshPanes.includes(f.herdrPane)), [], "closed sessions are gone");
 step("FINDINGS", findings);
-assert.deepEqual(findings, [], "after both wakes every agent pane runs its agent, resumed with the right flag");
+assert.deepEqual(findings, [], "after both wakes every agent's terminal runs its agent, resumed with the right flag");
 console.log("SESSIONS_CHECK_PASS");

@@ -1,5 +1,5 @@
 /**
- * `nexus attach`: this terminal on a pylon's Herdr session, through the control plane's attach route, which wakes the
+ * `nexus attach`: this terminal on a pylon's Herdr Core, through the control plane's attach route, which wakes the
  * pylon and waits for it. The CLI only owns the terminal: raw mode while attached, its size, and putting it back the
  * way it was on every way out. contract/attach.ts is the protocol.
  */
@@ -31,7 +31,7 @@ export function processTty(): Tty {
 
 /**
  * Leaves the alternate screen and turns the cursor back on, and mouse reports, focus reports, bracketed paste and
- * the kitty keyboard protocol off. Herdr does this when it detaches, but not when the link drops under it, and
+ * the kitty keyboard protocol off. Core's client does this when it detaches, but not when the link drops under it, and
  * without it the shell after attach would read mouse moves and keys as escape sequences.
  */
 const screenReset = "\x1b[?1049l\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1004l\x1b[?2004l\x1b[<u";
@@ -43,7 +43,7 @@ export interface Retry {
   readonly tries: number;
   delayMs(retry: number): number;
   /**
-   * `attached` comes before Herdr's client runs, so a pylon whose sshd takes the link and drops it at once would
+   * `attached` comes before Core's client runs, so a pylon whose sshd takes the link and drops it at once would
    * otherwise be tried again every second for good.
    */
   readonly steadyMs: number;
@@ -57,7 +57,7 @@ type LinkEnd = { kind: "over"; message: Extract<ServerMessage, { type: "exit" | 
 interface Link { readonly ws: WebSocket; attached: boolean }
 
 /**
- * Resolves when Herdr exits 0, which is its own detach, and throws a CliError on every other end. A link that drops,
+ * Resolves when Core's client exits 0, which is its own detach, and throws a CliError on every other end. A link that drops,
  * or ends with an unreachable error, such as the control plane stopping for a deploy, links again while the terminal
  * stays raw, dropping the keys typed in between. Raw mode starts at the first `attached`, so Ctrl-C still quits while
  * the pylon wakes. `connect` gives a paused WebSocket to the API, as transport.upgrade does.
@@ -74,7 +74,7 @@ export async function attachTerminal(connect: (path: string) => Promise<WebSocke
   };
 
   let raw = false;
-  /** Whether Herdr ended the attach itself, and so put back the screen modes it set. */
+  /** Whether Core's client ended the attach itself, and so put back the screen modes it set. */
   let clean = false;
   let current: Link | null = null;
   let tries = 0;
@@ -115,7 +115,7 @@ export async function attachTerminal(connect: (path: string) => Promise<WebSocke
     let steady: NodeJS.Timeout | undefined;
     let cause: Error | null = null;
     const unwritten = () => {
-      // A terminal that takes output slower than Herdr makes it holds the socket, and so Herdr, back.
+      // A terminal that takes output slower than Core's client makes it holds the socket, and so the client, back.
       ws.pause();
       output.once("drain", () => ws.resume());
     };
@@ -168,10 +168,10 @@ export async function attachTerminal(connect: (path: string) => Promise<WebSocke
       end = await Promise.race([link(), quitting]);
       if (end.kind !== "lost") break;
       if (tries === retries.tries) {
-        throw new CliError("unreachable", `${end.why}, and attaching again failed ${tries} times. Herdr keeps the session, so \`nexus attach ${thread}\` again`);
+        throw new CliError("unreachable", `${end.why}, and attaching again failed ${tries} times. Herdr Core keeps the session, so \`nexus attach ${thread}\` again`);
       }
       const delay = retries.delayMs(tries++);
-      // Herdr set its screen modes and did not get to put them back, so the line below lands on the shell's screen.
+      // Core's client set its screen modes and did not get to put them back, so the line below lands on the shell's screen.
       if (raw && !clean) output.write(screenReset);
       tty.status(`${end.why}. Attaching again in ${delay / 1000} s, Ctrl-C quits`);
       const waited = await Promise.race([new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), delay); }), quitting]);
@@ -197,7 +197,7 @@ export async function attachTerminal(connect: (path: string) => Promise<WebSocke
   const { message } = end;
   if (message.type === "exit") {
     if (message.code === 0) return;
-    throw new CliError("failed", `Herdr in the pylon of ${thread} exited ${message.code}`);
+    throw new CliError("failed", `Herdr Core in the pylon of ${thread} exited ${message.code}`);
   }
   throw new CliError(message.kind, message.message);
 }

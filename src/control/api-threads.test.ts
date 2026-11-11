@@ -69,7 +69,7 @@ test("thread detail derives the actual state from the node's last observation", 
     attention: null, seenAt: null, lastReplyAt: null, noChange: null,
     desired: "running",
     pylon: { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null, resources: project.resources },
-    sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], reviewView: null, keptPastDay: null, questions: [], judgments: [], planning: false, attach: "herdr --session nexus", agent: { parkedTasks: 0 },
+    sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], reviewView: null, keptPastDay: null, questions: [], judgments: [], planning: false, attach: "hc", agent: { parkedTasks: 0 },
     said: { guest: null, disk: null, usage: null, paused: "paused, resumes on wake", prWatch: "PR watch: off (no control-plane GitHub token configured)", review: null },
   });
 

@@ -4,7 +4,7 @@ import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { tempDir } from "../test-support/kit.ts";
+import { coreHome, tempDir, unixSockets } from "../test-support/kit.ts";
 import { bootHooks, commitMissing, setupRemoved, templateCheckout } from "./pylon-boot.ts";
 import { bakedDotfilesDir, home } from "../../images/pylon/nexus-contract.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
@@ -60,11 +60,29 @@ test("a boot pulls the dotfiles repository it names, and keeps the image's baked
     await mkdir(join(user, ".nexus"), { recursive: true });
     const hook = bootHooks({ network: { allowedHosts: [], secrets: [] }, ...dotfiles === undefined ? {} : { dotfiles } })[0]!
       .replaceAll(bakedDotfilesDir, baked).replaceAll(home, user);
-    const { stdout } = await run("bash", ["-c", `runuser() { bash -c "herdr() { :; }; $4"; }; ${hook}`]);
+    const { stdout } = await run("bash", ["-c", `runuser() { bash -c "$4"; }; ${hook}`]);
     return { log: stdout.trim().split("\n").filter((line) => line.startsWith("dotfiles:")), layer: await run("cat", [join(user, ".nexus/layer")]).then((r) => r.stdout.trim()) };
   };
   assert.deepEqual(await boot(undefined), { log: [`dotfiles: no repository is set, keeping ${bakedAt}`, "dotfiles: installed"], layer: "baked" });
   assert.deepEqual(await boot({ repo: remote, ref: "main" }), { log: [`dotfiles: pulled ${remote} main at ${remoteAt}`, "dotfiles: installed"], layer: "pulled" });
   const typo = join(dir, "typo");
   assert.deepEqual(await boot({ repo: typo, ref: "main" }), { log: [`dotfiles: the pull of ${typo} main failed, keeping ${bakedAt}`, "dotfiles: installed"], layer: "baked" });
+});
+
+test("every boot starts Herdr Core last, as user and detached, unless one runs", { skip: unixSockets !== true && unixSockets }, async (t) => {
+  const dir = await tempDir("nexus-pylon-boot-core-", t);
+  const user = await coreHome(t);
+  const bin = join(dir, "bin");
+  await mkdir(bin);
+  // The core setsid starts listens at the socket its lock names, for a few seconds.
+  await writeFile(join(bin, "setsid"), `#!/bin/sh\necho "$*" >> ${dir}/setsid\n${process.execPath} -e 'require("net").createServer().listen(process.argv[1]); setTimeout(() => process.exit(), 5000)' ${user.socket} </dev/null >/dev/null 2>&1 &\necho $! > ${dir}/core\n`, { mode: 0o755 });
+  t.after(() => sh(`kill $(cat ${dir}/core) 2>/dev/null`));
+  const hooks = bootHooks({ network: { allowedHosts: [], secrets: [] } });
+  const boot = () => run("bash", ["-c", `runuser() { echo "$1 $2 $3" > ${dir}/as; PATH=${bin}:$PATH bash -c "$4"; }; ${hooks.at(-1)!.replaceAll(home, dir)}`], { env: user.env }).then((r) => r.stdout.trim());
+  assert.equal(await boot(), "herdr-core: running");
+  assert.equal(await run("cat", [join(dir, "setsid"), join(dir, "as")]).then((r) => r.stdout), "-f tini -s -- herdr-core serve\n-l user -c\n");
+  await sh(`kill $(cat ${dir}/core); rm -f ${user.socket} ${dir}/setsid`);
+  await user.listen("core");
+  assert.equal(await boot(), "herdr-core: running");
+  assert.equal(await sh(`test -e ${dir}/setsid`), 1, "a core that runs is not started again");
 });

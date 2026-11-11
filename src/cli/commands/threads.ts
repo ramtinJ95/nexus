@@ -231,8 +231,8 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
       return { json: opened, text: `Opened ${opened.harness} session ${JSON.stringify(opened.title)} in pane ${opened.herdrPane} of ${id}. \`nexus attach ${id}\` attaches to it.` };
     },
   },
-  // Not tried again on a 409: a paused session comes back with its pylon's wake, and a pane asked for before the wake
-  // may name another session after it.
+  // Not tried again on a 409: a paused session comes back with its pylon's wake, and a terminal asked for before the
+  // wake may name another session after it.
   "session close": {
     help: ["  nexus session close <thread> <pane|id>       a session in no pane by its ID, which `nexus show` gives"],
     thread: true,

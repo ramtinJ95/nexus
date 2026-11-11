@@ -22,7 +22,7 @@ A thread is one unit of work. It always has exactly one pi-durable conversation 
 You use a thread in either of two ways, or both at once:
 
 - **Autonomous.** You give the thread a prompt. The pi-durable agent works while you are away.
-- **Hands-on.** You open sessions inside the pylon with Herdr: interactive Claude Code, interactive pi, or a plain shell. These sessions play the role of Amp's Terminal pane. The conversation stays empty if you never prompt the pi-durable agent.
+- **Hands-on.** You open sessions inside the pylon with Herdr Core: interactive Claude Code, interactive pi, or a plain shell. These sessions play the role of Amp's Terminal pane. The conversation stays empty if you never prompt the pi-durable agent.
 
 A Claude Code session is a session inside a thread, not a separate kind of thread. A second thread kind would need its own code paths in the dashboard, the outputs, and the wake rules, and would save only one empty record.
 
@@ -32,11 +32,11 @@ A Claude Code session is a session inside a thread, not a separate kind of threa
 - **The harness.** pi-durable, running inside or beside the control plane. It reaches a pylon through pi-env's Rust daemon inside the pylon, over a byte stream the probe carries. Spike S3 chose the daemon over a new adapter.
 - **Probes.** One node agent per machine, today `rj-firebat` and `infra-testbench`. A probe runs pylon jobs, reports what it observes about its pylons and sessions, and carries terminal streams. The control plane opens every connection to it over HTTP and WebSockets on the home tailnet. The probe accepts a caller only if `tailscaled` names it as the expected node. The tailnet policy is unchanged, with no tags and no ACL edits. The control plane follows the nodes `control.json` names and every node that joined with a token, and adds a joined node's probe without a restart. It tells each probe the tailnet node IDs of the other nodes, its peers, which may fetch its images and templates, and the probe keeps `auth.peers` from `probe.json` until then.
 - **Backends.** A probe never creates a VM itself. It drives an in-process backend interface. Amp's provider uses one dispatch program per job, but a pylon cannot dial out the way an orb does, so the probe also carries exec, terminals and services, and those do not fit one short program per job. The jobs keep Amp's `spawn`, `pause` and `delete` shape. The first backend is `pylon-vm`, a hard fork of pi-sandbox that drives Gondolin and QEMU. A Docker backend is a cheap test double. A Firecracker backend can come later without changing the control plane.
-- **The pylon image.** A Debian root filesystem with Amp's conventions: a non-root `user` with passwordless sudo, the checkout at `/home/user/workspace/repo`, git, `gh`, Neovim, Node, Python 3, Herdr, Claude Code, and pi, with your Claude Code and pi setup baked in (see Configuration). Herdr Core (`hc`) ships beside Herdr, so a later change can move sessions onto it, and nothing in Nexus uses it yet. Gondolin supplies its own kernel and takes the root filesystem from an OCI image. Spike S1 checks this.
-- **Sessions.** Sessions run in Herdr inside the pylon, which starts when the first session opens or a terminal attaches. Nexus does not use tmux. Herdr reports pi status through its pi integration, and Claude Code hooks report Claude Code status. Two tables keyed by the same names hold what differs between the harnesses a session runs, `claude-code`, `pi` and `shell`. `src/protocol/agent-kinds.ts` holds the dashboard label, whether Herdr's working status is its agent activity, and which open-session fields it takes. The probe's command schema, the API, the dashboard, the CLI's usage line and the registry's ingest read it, and it imports nothing but zod. `src/probe/guest/launchers.ts` holds Herdr's agent kind, the launch arguments, the state it seeds and whether a session runs in one pane only, and its type requires the prompt and model arguments exactly where the kind table says a session takes them. A new harness is one row in each plus any launch code of its own.
+- **The pylon image.** A Debian root filesystem with Amp's conventions: a non-root `user` with passwordless sudo, the checkout at `/home/user/workspace/repo`, git, `gh`, Neovim, Node, Python 3, Herdr, Claude Code, and pi, with your Claude Code and pi setup baked in (see Configuration). Every session runs in Herdr Core (`hc`), which ships beside Herdr. Herdr stays in the image for now, and Nexus no longer uses it. Gondolin supplies its own kernel and takes the root filesystem from an OCI image. Spike S1 checks this.
+- **Sessions.** Each session is one Herdr Core terminal inside the pylon. Every boot starts the core as `user`, after the dotfiles pull and the logins, with `setsid -f tini -s -- herdr-core serve`, so its terminals get the login environment and not that of whatever reaches the core first. Opening a session and attaching start the core too when none runs, and a read never starts one: every Core command starts a core, so each read checks first that one runs. Nexus does not use tmux. Nexus launches each session with the labels `nexus.title` and `nexus.harness`. A shell is a kept `bash -l`, which Core brings back in place, at its address and with its labels, when the core starts again after a wake. An agent's terminal runs the agent itself and is not kept, so a wake's relaunch resumes the agent in a new terminal. Claude Code's SessionStart hook labels its terminal `claude.session_id`, and a fresh pi session starts with `--session ~/.pi/agent/sessions/nexus-<uuid>.jsonl`. A terminal another one started, such as a shepherdr reviewer, is reported but never recorded or relaunched. Core reports each terminal's status, and Claude Code hooks report Claude Code activity. Two tables keyed by the same names hold what differs between the harnesses a session runs, `claude-code`, `pi` and `shell`. `src/protocol/agent-kinds.ts` holds the dashboard label, whether Core's working status is its agent activity, and which open-session fields it takes. The probe's command schema, the API, the dashboard, the CLI's usage line and the registry's ingest read it, and it imports nothing but zod. `src/probe/guest/launchers.ts` holds the agent's executable, which a terminal's foreground process names, the launch arguments, the state it seeds and whether a session runs in one terminal only, and its type requires the prompt and model arguments exactly where the kind table says a session takes them. A new harness is one row in each plus any launch code of its own.
 - **Previews.** Each probe publishes a pylon's previews with `tailscale serve`, so any device on the home tailnet opens them over HTTPS. A preview belongs to a declared service, or to a port something in the pylon listens on, which a person or the agent publishes and can unpublish. Gondolin's ingress reaches a pylon only through its 127.0.0.1, so each preview goes through a relay in the pylon that connects to the server on 127.0.0.1 or `::1`. A server bound only to `::1`, as Node servers that bind `localhost` are, is previewed like any other. Spike S4 checks this. The app gets plain HTTP from the probe's gateway, with the public `Host` and `X-Forwarded-Proto: https`. An app that ignores that header names its own scheme, so it redirects the browser to `http://`, which the preview's port does not answer, and links its assets and live-reload socket over `http://` and `ws://`, which the browser blocks as mixed content. The gateway therefore rewrites a `Location` that points at the preview's own `http://` address to `https://`. It also adds `Content-Security-Policy: upgrade-insecure-requests` to every response, as a policy of its own, so the browser fetches the rest over HTTPS and WSS. The browser upgrades a navigation to an `http://` address on the node's tailnet name too, whatever its port, so a preview's link to a plain-HTTP port on that name, such as the dashboard's HTTP listener, fails with a TLS error. No CSP setting upgrades a page's own subresources but not those navigations, and rewriting bodies to do it would be far more work, so previews accept that cost. The gateway sends no HSTS, because HSTS covers every port of the node's tailnet name, and the dashboard still serves plain HTTP there. A preview of a pylon that cannot serve it yet, such as a paused one, gets a page that reloads every 3 seconds, and the visit wakes the pylon. A fault in finding the preview's origin, such as a status file the probe cannot parse, gets 502 with the reason, which also goes to the probe's log.
 - **Clients.** You drive Nexus from four places, which show the same things: the `nexus` CLI on the Mac, the control plane's web dashboard, a Claude Code mod in the `claude-mods` repository, and the `pi-nexus` pi extension. The two extensions run the CLI and read its JSON, so the CLI is the contract they share. The control plane streams each thread's conversation to them over server-sent events as the harness commits it.
-- **The thread page.** A terminal is the closest thing to working in the agent's own session, so the dashboard makes it the easy path and carries what a terminal does badly: the overview of threads, diffs, images and questions. Every thread page that can attach shows `nexus attach <thread>` with a copy button, as `nexus show` prints it, and a Terminal tab beside the conversation that attaches over the attach route in the page, with xterm.js. Both land in a Claude worker's Claude Code pane, ready to type into. The attach focuses that pane in Herdr before Herdr's client starts, and Herdr's focus is the server's, so every client lands there. The Pylon tab's Sessions list opens a shell, pi or Claude Code session, shows each running one in the terminal, and closes any but the worker's own after a confirm. Show in terminal attaches a terminal that is not attached yet in that session's pane, and asks Herdr to focus the pane for one that is, which moves every attached terminal, `nexus attach` included, as the list says. The terminal stays the whole Herdr session rather than one pane, so it is the same thing `nexus attach` gives. The tab behaves like a desktop terminal. Shift+Enter or Option+Enter makes a newline, and Option otherwise types the layout's characters, such as @ and | on a Swedish keyboard. Option-drag selects natively, and Herdr's own mouse selection copies to the clipboard through OSC 52, so output in the pylon can set the person's clipboard but never read it, and never unseen. A clipboard write lands only while the terminal has focus, which showing the tab or a click or drag in it gives, and only up to 262,144 characters. A line above the terminal says each copy's length and how it starts, and a line of its own says why a write did not land, so a refused write cannot hide one that landed. A link opens in a new tab. A printed URL is its own text, and an OSC 8 link whose text is not its target names the target and opens only once the person agrees. A dropped connection attaches again with backoff while the page shows, for about two minutes, which rides through a deploy's restart of the control plane and the probes, and lands in the pane the first attach did. Keys typed while it waits go nowhere, so nothing the person typed then reaches the session unseen. `nexus attach` does the same since 0.55.0. A page hidden for 10 minutes detaches so the pylon can pause, then attaches again when it shows. The state bar and questions stay under the terminal, and the composer gives way to it, since a Claude worker's terminal is its prompt. A Nexus agent runs on the control plane, so its thread's terminal is the pylon's Herdr session, and its conversation is the composer's. Above the composer, one line says whether the agent is working, waiting for the person and why, or idle, and the composer works the same for both agents: ⌘↵ sends, or steers a run that works, and ⌥↵ queues a message after a Nexus agent's run. Off a Mac those keys are Ctrl+Enter and Alt+Enter, and each button shows the keys of the platform the page runs on. A Claude worker takes any message at its next step, so it has nothing to queue after. The address's hash names the tab beside the conversation that shows: `#timeline`, or `#tl-<step>` for a step of it, `#terminal`, or `#file=<path>` for an open file's tab, and no hash for the conversation. A reload shows the same tab, each change of tab is an entry in the browser's history, so Back and Forward go between them, and a reload of a file's tab draws its diff with the rows the person loaded, at the place they left it. Back to a file whose tab a step from file to file took, or a link to a changed file in another browser tab, opens it once the page has read the changes.
+- **The thread page.** A terminal is the closest thing to working in the agent's own session, so the dashboard makes it the easy path and carries what a terminal does badly: the overview of threads, diffs, images and questions. Every thread page that can attach shows `nexus attach <thread>` with a copy button, as `nexus show` prints it, and a Terminal tab beside the conversation that attaches over the attach route in the page, with xterm.js. Both show a Claude worker's Claude Code terminal, ready to type into, and otherwise a session Nexus opened in the pylon, or any live terminal, and Core's picker only when none is live. The Pylon tab's Sessions list opens a shell, pi or Claude Code session, shows each running one in the terminal, and closes any but the worker's own after a confirm. Show in terminal detaches the tab's terminal and attaches it again to that session's terminal alone, so the tab shows one session at a time, and every other attached terminal stays where it is. herdr-app, with the pylon added as a machine through `nexus exec`, shows every session at once. The tab behaves like a desktop terminal. Shift+Enter or Option+Enter makes a newline, and Option otherwise types the layout's characters, such as @ and | on a Swedish keyboard. Option-drag selects natively, and a program in the pylon can copy to the clipboard through OSC 52, so output in the pylon can set the person's clipboard but never read it, and never unseen. A clipboard write lands only while the terminal has focus, which showing the tab or a click or drag in it gives, and only up to 262,144 characters. A line above the terminal says each copy's length and how it starts, and a line of its own says why a write did not land, so a refused write cannot hide one that landed. A link opens in a new tab. A printed URL is its own text, and an OSC 8 link whose text is not its target names the target and opens only once the person agrees. A dropped connection attaches again with backoff while the page shows, for about two minutes, which rides through a deploy's restart of the control plane and the probes, and lands where the first attach did. Keys typed while it waits go nowhere, so nothing the person typed then reaches the session unseen. `nexus attach` does the same since 0.55.0. A page hidden for 10 minutes detaches so the pylon can pause, then attaches again when it shows. The state bar and questions stay under the terminal, and the composer gives way to it, since a Claude worker's terminal is its prompt. A Nexus agent runs on the control plane, so its thread's terminal is the pylon's Herdr Core, and its conversation is the composer's. Above the composer, one line says whether the agent is working, waiting for the person and why, or idle, and the composer works the same for both agents: ⌘↵ sends, or steers a run that works, and ⌥↵ queues a message after a Nexus agent's run. Off a Mac those keys are Ctrl+Enter and Alt+Enter, and each button shows the keys of the platform the page runs on. A Claude worker takes any message at its next step, so it has nothing to queue after. The address's hash names the tab beside the conversation that shows: `#timeline`, or `#tl-<step>` for a step of it, `#terminal`, or `#file=<path>` for an open file's tab, and no hash for the conversation. A reload shows the same tab, each change of tab is an entry in the browser's history, so Back and Forward go between them, and a reload of a file's tab draws its diff with the rows the person loaded, at the place they left it. Back to a file whose tab a step from file to file took, or a link to a changed file in another browser tab, opens it once the page has read the changes.
 - **Themes.** The sidebar's footer picks the dashboard's theme on every page: System, which follows the device's light or dark, Light, Dark, and the person's own Tokyo Night, Catppuccin Mocha and Kanagawa Wave, as [macarchy](https://github.com/ramtinJ95/macarchy) defines them. A toggle beside it switches between Light and the last dark theme picked. The choice stays in the browser's localStorage, so each device keeps its own, and the control plane holds no setting. A theme is one block of `src/control/dashboard/style.css`: its colours, the Shiki theme the diff panel highlights with, and the terminal tab's palette. A script in the page's head, which the content security policy allows by its hash, names the stored theme on `<html>` before the first paint, and folds the sidebar where the device keeps it folded, and a change applies at once, to an open diff and terminal too.
 
 ## Shared attention and dashboard notifications
@@ -100,11 +100,11 @@ A new reply waits on no one, so it gets no card, but it does not hide a dialog i
 ## Lifecycle follows Amp
 
 - Starting a thread boots a fresh pylon from the current image, on the node the request names, on the node where it fits best when the request asks for `auto`, or else on the project's default node, which may itself be `auto`, as [Placement](#placement) describes. When the node holds a ready template of the project's setup at the thread's commit, the pylon copies the template's disk, checks out that commit and runs `.nexus/resume`, so `.nexus/setup` does not run. Otherwise it clones the repository and runs `.nexus/setup` itself, and the first such start of a setup on a node builds a template of it for later threads. `nexus show` says which path a thread took and why. The read of `.nexus/setup` that picks the path also tells the control plane when the remote has no branch the start names, and then the start is refused before anything boots, since the pylon could not check the branch out. A remote it cannot read at all still boots the thread fresh.
-- A pylon sleeps when its agents are idle and nobody has used it for a while. Amp uses 5 minutes of agent idleness and 20 minutes without a human. Nexus starts with the same numbers. A reviewer's round outlasts the 5 idle minutes, so a builder's pylon also stays up while its review's reviewer reads a round and until the findings are delivered, for at most 30 minutes after the request reached the reviewer, and findings reach it running rather than spend about 25 seconds waking it. Only a builder still up when the round starts is held, so a review started late wakes no one. Nothing holds it once the reviewer's model failed in that round, while the review waits on the person, or once the review ended. The hold never takes room from other work: placement counts a pylon up only for it as room a start may take, and each reconcile pass on a node short of memory releases its held builders, the soonest to end first, so they pause. A terminal attached to the pylon's Herdr session, such as `nexus attach` through the control plane, counts as a human for as long as it stays attached, because the probe counts the guest's Herdr clients in every observation. Close the terminal to let the pylon pause. The dashboard's Terminal tab detaches on its own once its page has been hidden for 10 minutes.
+- A pylon sleeps when its agents are idle and nobody has used it for a while. Amp uses 5 minutes of agent idleness and 20 minutes without a human. Nexus starts with the same numbers. A reviewer's round outlasts the 5 idle minutes, so a builder's pylon also stays up while its review's reviewer reads a round and until the findings are delivered, for at most 30 minutes after the request reached the reviewer, and findings reach it running rather than spend about 25 seconds waking it. Only a builder still up when the round starts is held, so a review started late wakes no one. Nothing holds it once the reviewer's model failed in that round, while the review waits on the person, or once the review ended. The hold never takes room from other work: placement counts a pylon up only for it as room a start may take, and each reconcile pass on a node short of memory releases its held builders, the soonest to end first, so they pause. A terminal viewing the pylon's Herdr Core, such as `nexus attach` through the control plane or Core's picker, counts as a human for as long as it stays attached, because the probe counts the guest's Core viewers, its `herdr-core attach` and picker processes, with `pgrep` in every observation. herdr-app connected through `nexus exec` is no viewer, so it keeps no pylon up. Close the terminal to let the pylon pause. The dashboard's Terminal tab detaches on its own once its page has been hidden for 10 minutes.
 - Sleep is a disk checkpoint. The VM stops and memory is lost.
-- Waking boots the pylon from its checkpoint, runs `.nexus/resume`, restarts services, and relaunches every recorded Herdr session into its prompt. Claude Code runs `claude --resume <session id>` and finds its transcript on disk, or starts afresh under the same ID when the session was never prompted. The command that was running at sleep time shows as cut off.
-- A Claude Code session runs in one pane, whatever the number of wakes. Herdr restores each workspace as a shell, because the image turns off its own agent resume, and the relaunch starts Claude in the restored pane. The probe runs a wake's relaunch, the launches and the sends of one Claude session one at a time, so a message that comes while the relaunch runs waits for it. A send that finds the session in no pane uses the restored pane the sessions file records for it before it opens a new workspace. A sessions file that names one Claude session in several panes, as wakes before this fix left behind, brings it back in the first and closes the others. Captures are in [`docs/verification/one-claude-session/`](https://github.com/ramtinJ95/nexus/tree/2c88196d10cd9108d655a05153efa7f72dfdf394/docs/verification/one-claude-session/).
-- A session is `paused` only while its pylon is. The pylon's first running observation after a wake resumes its sessions in their panes with status `unknown`, before the probe has read them, so a read that fails or comes late never leaves a running Claude labelled paused. The probe logs a failed sessions read once, until one succeeds. Captures are in [`docs/verification/session-state-after-wake/`](https://github.com/ramtinJ95/nexus/tree/2c88196d10cd9108d655a05153efa7f72dfdf394/docs/verification/session-state-after-wake/).
+- Waking boots the pylon from its checkpoint, runs `.nexus/resume`, restarts services, and relaunches every recorded session into its prompt. Claude Code runs `claude --resume <session id>` and finds its transcript on disk, or starts afresh under the same ID when the session was never prompted. The command that was running at sleep time shows as cut off.
+- A Claude Code session runs in one terminal, whatever the number of wakes. Core does not keep an agent's terminal, so the relaunch resumes Claude in a new one. The probe runs a wake's relaunch, the launches and the sends of one Claude session one at a time, so a message that comes while the relaunch runs waits for it. A send that finds the session in no live terminal resumes it in a new one, with the title, cwd and model the sessions file records for it. A sessions file that names one Claude session in several terminals brings it back in the first whose terminal still runs it, or else at its first record, and closes the others. Captures from Herdr, before Core, are in [`docs/verification/one-claude-session/`](https://github.com/ramtinJ95/nexus/tree/2c88196d10cd9108d655a05153efa7f72dfdf394/docs/verification/one-claude-session/).
+- A session is `paused` only while its pylon is. The pylon's first running observation after a wake resumes its sessions in their terminals with status `unknown`, before the probe has read them, so a read that fails or comes late never leaves a running Claude labelled paused. The probe logs a failed sessions read once, until one succeeds. Captures are in [`docs/verification/session-state-after-wake/`](https://github.com/ramtinJ95/nexus/tree/2c88196d10cd9108d655a05153efa7f72dfdf394/docs/verification/session-state-after-wake/).
 - Archiving a thread puts its pylon to sleep at once. Its pylon is deleted once three things hold: the thread has been archived 24 hours, every transcript on the disk was read to its end after the pylon's last pause, and a backup that began after that read verified, so the disk goes only once its token usage is in the registry and in a backup of it ([decisions](#decisions), 2026-11-02). Until then the pylon stays paused with its disk, and the thread's timeline, `nexus show` and the `archived-disks` check say why. A pylon whose usage cannot be read, one that failed or whose image no online node holds, is not kept for it: its disk goes 24 hours after the archive, as before, and the timeline and `nexus show` record its usage as unread. The thread and its conversation stay, and an unarchive then boots a fresh pylon from the thread's recorded image and commit, so unpushed work is gone and a Claude worker's session starts without its history. If no online node still holds that image, the pylon fails with `artifact-missing`, and the person retries it or starts a new thread. Deleting a thread deletes its pylon.
 - A clean shutdown or reboot of a node pauses its pylons before the machine goes down. systemd stops the probe with SIGTERM, and the probe asks `systemctl is-system-running`. Only when the answer is `stopping`, so the whole machine is going down, does the probe refuse new jobs and pause every running pylon as an archive does. It gives the pauses 150 s, and the unit's `TimeoutStopSec` of 180 s makes systemd wait for them and the close. Before the first pause starts, the probe writes the pylons it found running to `/var/lib/nexus/shutdown.json`. The probe that starts after the boot reports each of them, and the control plane counts that report as agent activity, so the thread runs again as after any new activity and sleeps later under the idle policy. A thread that was already paused or archived is not in the file, and stays as it was. A pylon whose pause failed, or did not finish in time, comes back broken, and the planner fails it with the reason the shutdown recorded until a person retries it. A node whose encrypted root waits for its unlock over SSH only boots later, and its pylons wake once its probe reports in. A restart of the probe alone, as every deploy makes, pauses nothing.
 - A stopped pylon could move to another node by copying its disk. Disk checkpoints do not depend on the CPU, so moving between the Intel and the AMD node works. Spike S7 tested one round trip by hand. Nexus has no move job yet, so a pylon stays on the node it started on.
@@ -262,7 +262,6 @@ These parts come from IgorWarzocha's `howaboua-pi-stuff`, which is MIT-licensed:
 	- `src/launch.ts` starts a session in Herdr, waits until it is ready, and rolls back on failure.
 	- `src/remote/shepherdr-session.mjs` reads a pi session file backwards to find the latest reply.
 	- `src/monitor-events.ts` reports agent status from Herdr events.
-- `herdr integration install pi` supplies pi status inside pylons.
 - `packages/pi-notes-compaction` keeps long sessions inside their context window.
 
 Nexus lives in its own repository, `ramtinJ95/nexus` on GitHub.
@@ -287,6 +286,7 @@ The control plane's machine backs up its own state once a day, to `/var/backups/
 
 | Date | Decision |
 |---|---|
+| 2026-11-11 | A pylon's sessions move from Herdr 0.9.5 onto Herdr Core 0.1.20, which every boot starts as `user`. Each session is one Core terminal, labelled `nexus.title` and `nexus.harness`, and found by its labels and its foreground process rather than by Herdr's workspaces and integrations. Core's `terminal.run` takes argv, so a prompted Claude launch passes its prompt as an argument and claims its terminal by name, where Herdr made Nexus type a bash-quoted launch line behind a claim-once marker. Core never gives an address out again, so a failed session's ID is the address it was recorded at rather than a hash. A send is one `terminal.send` rather than 64-character pieces, and Claude Code wraps a long one in `<pasted_content>` tags. An attach to Core shows one terminal, or Core's picker, for that viewer alone, so the focus route goes, and the dashboard's Show in terminal reattaches its tab to the session's terminal. herdr-app reaches the same core through `nexus exec` and shows every session. Herdr 0.9.5 stays in the image until a later change removes it. The wire and registry names `herdrPane`, `HerdrStatus` and the attach route's `pane` stay as they are and hold Core terminal addresses, and renaming them is a later change. The checks are in [`spikes/herdr-core/`](../spikes/herdr-core/README.md) |
 | 2026-11-11 | A prompt submitted in any Claude Code session of a pylon is human activity, at its hook's stamp, so a person working in a terminal of the pylon keeps it awake as a dashboard visitor does. Nexus types its own messages as a person would, so the UserPromptSubmit hook sends the SHA-256 of the prompt, without Claude Code's paste tags, and the control plane leaves out a prompt whose hash matches a message it typed into the thread or the prompt it launched the worker with. A window after each send would have miscounted a person who wrote within it and a send that reached Claude late. Claude Code chooses a paste's tag ID as it pastes, so the control plane cannot hash the wrapped form ahead of time, and the hook strips the tags with the same `unpasted` the transcript reader uses, from the contract file both import. The match is per thread, since `claude_senders` records no session and adding one is a migration, so a person who types exactly what Nexus sent the thread is not counted. Claude Code also starts a turn, and runs UserPromptSubmit, for prompts no one typed: a finished background task's `<task-notification>`, another session's `<cross-session-message>`, and Herdr Core's `<hc>` notes and messages. Their hooks send no hash, since the hook's input has no origin, which the transcript records, to tell them apart. |
 | 2026-11-10 | One tab of the browser raises a thread's system notification, and none does while any tab has focus, since that tab shows the notice itself, as a toast or as the thread. Every hidden tab had raised its own, so three tabs gave three notifications, and a click opened the notice's page in whichever tab raised it, which lost that tab's draft or terminal. The tab that follows the events decides, and hands the notice to a tab on the thread where there is one, so the click only brings that tab forward. It takes the notice back when that tab is gone or does not answer within a second, since a tab that had just opened, or that closed as the rows came, had left notices with no tab to raise them |
 | 2026-11-10 | Room that frees goes to the gate pylon that has waited longest: while a review's check or verify pylon waits for room, no other review starts a reviewer, second reviewer, check or live check, and waiting gates start oldest first. Placement could instead hold room on one node for the oldest gate, but the review loop's starts beside a builder place there all the same when no node has room, so only holding the starts keeps the room free. The hold is coarse: it also holds a start that would go to a node the gate cannot use, such as one without nested KVM |
@@ -600,17 +600,17 @@ explicit conflict, not a silent jump. Filtering and cursor validation live with
 the event model in `src/control/events.ts`.
 
 Claude workers run inside the pylon, not in the Nexus harness. Thread creation
-persists a first prompt; reconciliation opens a Herdr Claude session when the
+persists a first prompt; reconciliation opens a Claude terminal in Herdr Core when the
 pylon runs. The initial argument preserves the prompt literally and avoids a
 terminal-readiness/keystroke race. `/poteto-mode` is added unless already present.
-Herdr 0.9.5's `agent start` refuses an argument holding a newline, tab or other
-control character, so a multi-line prompt never reached Claude and the launch
-stalled at the shell prompt. A prompted launch therefore types its own command
-with `herdr pane run`, each argument a bash ANSI-C quoted word. Control
-characters, `'` and `!` are escapes, so the typed line holds nothing the terminal,
-readline or history expansion acts on, and Claude receives the exact text. A NUL
-cannot be an argument, so the API refuses a prompt with one. Unprompted and
-resumed sessions still use `agent start` and its readiness wait.
+Core's `terminal.run` takes the command as argv, so the prompt is the last
+argument of Claude's command line, newlines included, and nothing is typed. The
+terminal is named `claude-` and the first 25 hex digits of the session ID, and
+Core's names are unique among live terminals, so a launch sent again finds the
+first one's terminal rather than starting a second Claude. A NUL cannot be an
+argument, so the API refuses a prompt with one. Unprompted and resumed sessions
+wait up to 30 seconds with `terminal.wait` for Claude to say it is ready, and one
+whose Claude exits as it starts is rolled back.
 An uncertain launch is not retried automatically, since starting two coding
 agents is worse than asking the person to inspect a possibly started session. A
 launch cut off by a probe restart is the exception, as described under
@@ -622,19 +622,19 @@ trust state for the real checkout into its user files; retain credentials and
 unrelated keys and file modes. Already-seeded files are not written. When a
 write is needed, re-read before rename and re-merge changed content, up to five
 attempts; fail rather than replacing a repeatedly changing file. Trust only the
-pylon checkout, never a restored pane cwd, root or HOME. Theme and bypass acceptance live in settings.json on Claude
+pylon checkout, never a restored terminal's cwd, root or HOME. Theme and bypass acceptance live in settings.json on Claude
 2.1.308, while onboarding and project trust live in .claude.json.
 A worker is normally started after a launch-specific UserPromptSubmit hook writes a
 local receipt. This avoids depending on best-effort network event delivery and
 cannot confuse another session's event with the worker's first submission.
-Herdr 0.9.5 offers only an interactive-readiness wait, not a submission wait,
-and a prompted launch does not use it. Even when typing the command errors, allow
-30 seconds for the receipt. A live Claude
+Core's wait is for a status, not a submission, and a prompted launch does not use
+it. Even when `terminal.run` errors, a launch whose named terminal is live by then
+waits 30 seconds for the receipt. A live Claude
 process plus working status is fallback startup evidence. Never roll back an
-uncertain first-prompt launch: retaining an empty pane is safer than killing work.
+uncertain first-prompt launch: retaining an empty terminal is safer than killing work.
 For unprompted launches, close only after confirming no Claude process runs. Missing proof leaves the
-pane open and records stalled state, pane text, thread.failed and failed attention.
-The probe answers such a launch with its pane and a `stalled` diagnostic in the
+terminal open and records stalled state, the terminal's screen, thread.failed and failed attention.
+The probe answers such a launch with its terminal and a `stalled` diagnostic in the
 open-session result, not an error, so the control plane never reads a stall from
 error text. A probe from before that field reports a stall as a failed launch.
 The launch fence forbids any other automatic retry.
@@ -784,7 +784,9 @@ worker still works. The hook reports, and snapshots a turn, only for a Claude un
 the pylon user's own HOME whose process started without `CLAUDE_CODE_SESSION_ID`, which Claude Code puts
 in the environment of everything it runs, even after `env -u CLAUDECODE`, and only in a pylon with `~/.nexus/pylon.json`,
 which a template build lacks. Sessions
-Nexus opens in Herdr panes, the worker's and the person's, start without it.
+Nexus opens in Herdr Core terminals, the worker's and the person's, start without it:
+their launch drops it with `env -u CLAUDE_CODE_SESSION_ID`, and the core starts at boot
+rather than from inside a Claude.
 Captures are in [`docs/verification/claude-activity-accuracy/`](https://github.com/ramtinJ95/nexus/tree/2c88196d10cd9108d655a05153efa7f72dfdf394/docs/verification/claude-activity-accuracy/).
 
 Filtered stream reads use indexed registry columns, not decoding then filtering
@@ -823,20 +825,17 @@ per thread, as a job does. The pass skips that pylon's tick while its launch run
 and so a wait for a launch, or for its probe to come back, holds up no other
 pylon on the node. The launch asks for a pass when it ends.
 
-Sending a prompted launch again is safe because the launch records its progress in
-the pylon, in `~/.nexus/claude-launches/<session>/`: `opened` names its workspace
-and pane once they exist, `typed` is the claim of the guest command that types the
-launch, and `submitted` is the UserPromptSubmit receipt. That command creates
-`typed` with `mkdir` and types only if it created it, so of two typing commands,
-such as one the stopped probe's guest started late and one from the probe that
-replaced it, only one types and the other waits for the receipt. A launch sent again
-reads them. If the command was typed, it only waits for the receipt, as the first
-one would have, and reports a stall the same way. If nothing was typed, it types
-into the pane the first one opened, or opens one if that pane is gone. A launch
-from a probe older than these files leaves none, so a session with a transcript
-but no running Claude fails without typing, since its prompt already went in. One that an
-older probe lost before typing gets a new workspace, and the older probe's empty
-shell workspace stays beside it. Captures are in
+Sending a prompted launch again is safe because the launch claims its terminal by
+name, `claude-` and the first 25 hex digits of the session ID, and Core refuses a
+second live terminal of one name with `name_taken`. Its UserPromptSubmit hook writes
+the receipt, `submitted`, in `~/.nexus/claude-launches/<session>/`. A launch sent
+again first looks for a live terminal of its name. If there is one, it only waits for
+the receipt, as the first one would have, and reports a stall the same way. If
+there is none, a session with a transcript fails without starting anything, since
+its prompt already went in, and any other starts Claude. Of two launches that start
+Claude at once, such as one the stopped probe's guest started late and one from the
+probe that replaced it, Core starts one, and the other waits for its receipt.
+Captures from Herdr, before Core, are in
 [`docs/verification/launch-survives-deploy/`](https://github.com/ramtinJ95/nexus/tree/2c88196d10cd9108d655a05153efa7f72dfdf394/docs/verification/launch-survives-deploy/). The probe
 runs the launches, the sends and a wake's relaunch of one session one at a time, so
 a launch sent again while the first still runs waits for it and reads what it did.
@@ -869,7 +868,7 @@ Other calls a probe restart can cut:
   uncertain, though nothing may have been typed. An agent's message is logged and
   not typed again. Surviving a restart needs the same treatment as a launch: a
   record of the request in the pylon, written by the command that types it.
-- Opening a session for a person, with no prompt, opens a second workspace if the
+- Opening a session for a person, with no prompt, opens a second terminal if the
   person asks again after a lost answer.
 
 ### Claude worker conversations and steering
@@ -917,27 +916,26 @@ from a page that streams a conversation, a Claude worker's or a harness thread's
 names the view it would show instead of rendering it
 ([`docs/verification/transcript-render-once/`](https://github.com/ramtinJ95/nexus/tree/2c88196d10cd9108d655a05153efa7f72dfdf394/docs/verification/transcript-render-once/)).
 
-Steering types the person's message into the worker's Claude session through the
-probe command `send-claude`. Typing is the only input Claude Code's terminal takes,
-and it behaves as the person at the terminal would expect. While Claude is busy, the
+Steering pastes the person's message into the worker's Claude session through the
+probe command `send-claude`, as one Herdr Core `terminal.send`, which pastes the
+text and submits it as `hc send` does. While Claude is busy, the
 message joins Claude Code's own queue. Claude reads it at its next tool step within
-the same turn (recorded as `absorbed_mid_turn`), or takes it after the turn. A
-bracketed paste, or any long burst of input, is wrapped by Claude Code in
-`<pasted_content>` tags. So the probe types the text in pieces of at most 64
-characters, one Herdr `send-text` each, within one guest exec. It then waits half a
-second and presses Enter, because Claude reads an Enter that directly follows a burst of
-input as a newline. A newline types a line break without submitting, so multi-line
-text arrives exactly.
-Claude's prompt swallows a tab, and a carriage return submits early, so a message
-holding them is refused rather than changed. The probe finds the session's pane by
-Herdr's session ID or by Claude's command line. It resumes the session in place, or
-in a new workspace, when no live Claude runs it, and it types nothing while Claude
-waits at a dialog, because typing would answer that dialog. Right before typing, it
-checks again that the pane runs Claude under the session's ID, and types nothing if
-another agent or session took the pane meanwhile. The probe runs one send per session
-at a time, from finding the pane to the Enter, so two sends never interleave their
-pieces and never resume the session twice. Every outcome in which nothing was typed is
-a result, not an error. A failed command may have typed part of
+the same turn (recorded as `absorbed_mid_turn`), or takes it after the turn. Claude
+Code wraps a long paste in `<pasted_content>` tags, and a message of a few lines
+arrives as written. While a person has an unfinished draft in an attached
+terminal, Core waits for it, up to its `draft_wait` of 60 seconds, before it pastes,
+so the probe gives the send 75 seconds.
+The API refuses a message holding a tab, a carriage return or another control
+character but the newline, rather than change it. The probe finds the session's terminal by
+its `claude.session_id` label or by Claude's command line. It resumes the session
+in a new terminal when no live Claude runs it, and it sends nothing while Claude
+waits at a dialog, because the text would answer that dialog, and Core itself refuses
+a send to a program that reports itself blocked. Right before the send, it
+checks again that the terminal runs Claude under the session's ID, and sends nothing if
+another session took the terminal meanwhile. The probe runs one send per session
+at a time, from finding the terminal to the send, so two sends never interleave
+and never resume the session twice. Every outcome in which nothing was sent is
+a result, not an error. A failed command may have pasted
 the message, so it is never retried automatically: the request ID is fenced as
 sending first, and a repeat of a fenced one is never typed. The probe remembers each
 send by its request ID until an hour after it settles, so a repeat asks it with
@@ -947,31 +945,31 @@ what the send did. A send queued behind a slow one can outlast the control plane
 still typed. The repeat reports it. The control plane handles one send per request ID
 at a time, so a repeat made while the first is still asked waits for it rather than
 sharing its answer. Only a repeat the probe cannot answer, because the
-send failed partway or the probe restarted or forgot it, is refused.
+send failed or the probe restarted or forgot it, is refused.
 
 Interrupting a Claude worker goes through the probe command `interrupt-claude`, which
-finds the session's pane as a send does and presses Esc there with Herdr's `send-keys`,
+finds the session's terminal as a send does and presses Esc there with Core's `terminal.keys`,
 the key a person at the terminal presses to stop a turn. It takes no key from the
-caller. It presses nothing unless Herdr reports Claude working: a dialog would be
-cancelled by Esc, and two quick presses at an idle prompt open Claude's rewind picker,
-which Herdr still reports as idle. It reads Claude's state again right before the key, since finding the pane
-inspects its processes first, but Herdr has no conditional key press, so a dialog that opens between that read and the
+caller. It presses nothing unless Core reports Claude working: a dialog would be
+cancelled by Esc, and two quick presses at an idle prompt open Claude's rewind picker.
+It reads Claude's state from the same `terminal.list` that finds the terminal, and
+presses the key with no condition, so a dialog that opens between that read and the
 key would still get the Esc. It never resumes a session that no live Claude runs,
 since that session runs no turn. It waits behind the session's sends, so Esc never
-lands between the pieces of a typed message. The person-only abort route sends it for a
+lands in the middle of a send. The person-only abort route sends it for a
 Claude worker thread, and never wakes a paused pylon.
 
 Nexus follows a Claude worker by the session ID its launch gave it. `/clear` starts a
-new session in the same pane: Claude's SessionStart hook reports the new ID to Herdr,
-and Claude writes a new transcript, but the worker record, the conversation view and
-the AskUserQuestion questions stay on the old ID. A send after it then finds no pane
-running the old session and resumes it in a new workspace, beside the new one.
+new session in the same terminal: Claude's SessionStart hook labels the terminal with
+the new ID, and Claude writes a new transcript, but the worker record, the conversation view and
+the AskUserQuestion questions stay on the old ID. A send after it then finds no terminal
+running the old session and resumes it in a new terminal, beside the new one.
 `/resume`, `/branch` and `/exit` change or end the session the same way. Following a
 new session would mean moving the worker record, its transcript cursor and its asks
 to the new ID, so the dashboard's composer refuses these commands instead and points
 to the terminal, where the person sees what happens. It also refuses commands that
-open a picker, such as a bare `/model` or `/config`, because Herdr reports Claude idle
-while the picker is open, and the next message would be typed into it
+open a picker, such as a bare `/model` or `/config`, because only keys drive the
+picker, and the next message would go into it
 ([`docs/verification/claude-interrupt/`](https://github.com/ramtinJ95/nexus/tree/2c88196d10cd9108d655a05153efa7f72dfdf394/docs/verification/claude-interrupt/)).
 
 The API decides by the thread's Claude worker record before anything else, so no

@@ -12,7 +12,6 @@ import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation } fr
 import type { TailnetNodeId } from "../ids.ts";
 import type { PausedSession, ServiceFact } from "../protocol/observations.ts";
 import { node, laptop, withThread, observeRunning, git, localCheckout, pngBytes } from "../test-support/api-kit.ts";
-import { focusScript } from "../guest-contract.ts";
 import { checkoutDir } from "../../images/pylon/nexus-contract.ts";
 
 test("thread detail lists the pylon's listening ports with the service and preview of each", async (t) => {
@@ -410,22 +409,14 @@ test("closing a session goes through the node's probe, and a pane that is not op
   s.probeAnswers(async () => ({ kind: "close-session", outcome: "not-open" }));
   const stale = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {});
   assert.equal(stale.status, 404);
-  assert.match(stale.body.error, /no session is open in pane w1:p1 .* A wake may have moved it/);
+  assert.match(stale.body.error, /no session is open in terminal w1:p1 .* A wake may have moved it/);
 });
 
-test("focusing a session runs Herdr's focus on its pane in the pylon as an argument, a pane that is not open is a 404, and anything but a pane ID is a 400", async (t) => {
+test("a session has no focus route: the terminal tab attaches to one session at a time", async (t) => {
   const s = await withThread(t);
-  const focus = (pane: string) => s.call("POST", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent(pane)}/focus`, {});
-  assert.deepEqual(await focus("w3:p1"), { status: 204, body: null });
-  assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "exec", argv: ["sh", "-c", focusScript, "focus", "w3:p1"], cwd: "/", timeoutMs: 15_000 }]]);
-  s.probeAnswers(async () => ({ kind: "exec", exitCode: 1, output: "", truncated: false }));
-  assert.deepEqual(await focus("w9:p1"), { status: 404, body: { error: `no pane w9:p1 is open in pylon ${s.thread.pylonId}`, code: null, retryable: false } });
-  for (const pane of ["p1", "w1:p1;reboot", "$(id)", "w1:p1 w2:p1"]) {
-    const refused = await focus(pane);
-    assert.equal(refused.status, 400, pane);
-    assert.match(refused.body.error, /^pane must be a Herdr pane ID such as w1:p1/);
-  }
-  assert.equal(s.commands.length, 2, "no refused pane reached the probe");
+  const focus = await s.call("POST", `/v1/threads/${s.thread.id}/sessions/t3/focus`, {});
+  assert.equal(focus.status, 404);
+  assert.deepEqual(s.commands, [], "nothing reached the probe");
 });
 
 test("closing a listed session names it, and a pane that runs another session now is a 404 that leaves it open", async (t) => {
@@ -437,7 +428,7 @@ test("closing a listed session names it, and a pane that runs another session no
   const moved = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {});
   assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "close-session", herdrPane: "w1:p1", session: { harness: "claude-code", harnessSessionId: "s1", title: "review" } }]]);
   assert.equal(moved.status, 404);
-  assert.match(moved.body.error, /pane w1:p1 of pylon \S+ runs another session now, so it was left open. A wake moved session w1:p1 to another pane/);
+  assert.match(moved.body.error, /terminal w1:p1 of pylon \S+ runs another session now, so it was left open. A wake moved session w1:p1 to another terminal/);
 });
 
 /** Records the thread's pylon stopped with these sessions, as the loop would from the node's observation. */

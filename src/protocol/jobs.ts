@@ -28,7 +28,7 @@ import { imageId, nodeNameSchema, objectAs, pylonIdField, sha256, templateId } f
  * so the planner sends spawn again. Unlinking a port withdraws its preview route at once and heals the same way.
  * `relaunch: false` boots without bringing back the pylon's sessions, and leaves them for the next spawn to bring back.
  *
- * pause records the open Herdr sessions in /home/user/.nexus/sessions.json, stops services, writes the
+ * pause records the live Herdr Core sessions in /home/user/.nexus/sessions.json, stops services, writes the
  * disk checkpoint and stops the VM. The session list is on the disk, so the checkpoint carries it and a
  * session opened a second before the pause is still relaunched. The backend keeps a copy of the list beside the
  * checkpoint, which the stopped pylon's observation reports. delete removes the VM, its checkpoint,

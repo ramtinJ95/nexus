@@ -12,7 +12,6 @@ const before = [
   ["DELETE", /^\/v1\/threads\/([^/]+)\/previews\/([^/]+)$/, pylonRoutes.unpreview, ["thread", "port"]],
   ["POST", /^\/v1\/threads\/([^/]+)\/sessions$/, pylonRoutes.openSession, ["thread"]],
   ["DELETE", /^\/v1\/threads\/([^/]+)\/sessions\/([^/]+)$/, pylonRoutes.closeSession, ["thread", "session"]],
-  ["POST", /^\/v1\/threads\/([^/]+)\/sessions\/([^/]+)\/focus$/, pylonRoutes.focusSession, ["thread", "session"]],
   ["GET", /^\/v1\/threads\/([^/]+)\/files$/, pylonRoutes.files, ["thread"]],
   ["GET", /^\/v1\/threads\/([^/]+)\/files\/content$/, pylonRoutes.file, ["thread"]],
   ["GET", /^\/v1\/threads\/([^/]+)\/image$/, pylonRoutes.image, ["thread"]],
@@ -68,7 +67,6 @@ test("a checkout read's query decodes on the server to what the client gave", ()
   assert.equal(diff, "/v1/threads/th-1/diff?base=start&path=new.txt&path=old+name.txt");
   assert.deepEqual(decoded(diff, pylonRoutes.diff), { base: "start", paths: ["new.txt", "old name.txt"] });
   assert.equal(callOf(pylonRoutes.unpreview, { thread: "th-1", port: "3000" }).path, "/v1/threads/th-1/previews/3000");
-  assert.equal(callOf(pylonRoutes.focusSession, { thread: "th-1", session: "w1:p1" }).path, "/v1/threads/th-1/sessions/w1%3Ap1/focus");
 });
 
 test("the events query decodes on the server to what the client gave", () => {

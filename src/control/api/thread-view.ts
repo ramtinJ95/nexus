@@ -19,7 +19,7 @@ import type { Project } from "../project.ts";
 import { observedPylon } from "../observed.ts";
 import { watchStopped } from "../pr-watch-model.ts";
 import { noChangeOf } from "../work-model.ts";
-import { herdrClient } from "../../guest-contract.ts";
+import { coreAttach } from "../../guest-contract.ts";
 import { threadSaid } from "../wording.ts";
 
 function networkGrantsKey(network: BootInputs["network"]): string {
@@ -114,7 +114,7 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
       questions,
       judgments: registry.judgments.judgments(t.id).map(judgmentView),
       planning: registry.planning.planning(t.id) !== null,
-      attach: herdrClient,
+      attach: coreAttach,
       agent,
     };
     return { ...d, said: threadSaid(d) };

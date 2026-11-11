@@ -1,10 +1,11 @@
 /**
  * One attached terminal's life on the control plane, after the attach route's 101: it waits for the thread's pylon,
- * opens Herdr's client on a pty in it, and pumps bytes until one side ends. contract/attach.ts is the protocol.
+ * opens Herdr Core's client on a pty in it, on one terminal or Core's picker as attachScript decides, and pumps bytes
+ * until one side ends. contract/attach.ts is the protocol.
  *
  * Waiting, each try records human activity and wakes the node, as a CLI command that needs the pylon running does,
- * so a paused pylon wakes on attach. Attached, the probe's count of Herdr clients keeps the human present. Every end
- * hangs the terminal up, which detaches Herdr's client and keeps its session, and waits for the guest's process to
+ * so a paused pylon wakes on attach. Attached, the probe's count of Core viewers keeps the human present. Every end
+ * hangs the terminal up, which detaches Core's client and keeps its session, and waits for the guest's process to
  * exit, so nothing is left running in the pylon once serveAttach resolves. A node that does not let it exit within
  * hangUpMs has its stream dropped, which frees the stream's slot and hangs the relay up from the probe's side.
  *
@@ -127,7 +128,7 @@ export async function serveAttach(ws: WebSocket, door: PylonDoor, opening: Attac
   };
   const endedBy = (): AttachError => signal.reason === "deleted"
     ? { kind: "conflict", message: `thread ${door.thread} is deleted` }
-    : { kind: "unreachable", message: "the control plane is stopping. Herdr keeps the session, so attach again once it is back" };
+    : { kind: "unreachable", message: "the control plane is stopping. Herdr Core keeps the session, so attach again once it is back" };
   const closeCode = () => signal.aborted && signal.reason === "stopping" ? 1001 : 1000;
 
   try {
@@ -153,14 +154,14 @@ export async function serveAttach(ws: WebSocket, door: PylonDoor, opening: Attac
     if (endedFirst) return await finish(left.signal.aborted ? null : { type: "error", ...endedBy() }, closeCode());
     if (end.kind === "exited" && end.code === 0) return await finish({ type: "exit", code: 0 });
     // A pylon VM's stream is ssh to the guest, which exits 255 when its connection ends, as when an archive pauses
-    // the pylon or the guest goes away. So a 255 is the link's, not Herdr's.
+    // the pylon or the guest goes away. So a 255 is the link's, not Core's.
     const look = door.look();
     if (look.kind !== "over" && end.kind === "exited" && end.code !== sshLost) return await finish({ type: "exit", code: end.code });
     await finish({
       type: "error",
       ...look.kind === "over" ? look.error : {
         kind: "unreachable",
-        message: `the link to the pylon of ${door.thread} was lost, as a pause or a restart of its node's probe does. Herdr keeps the session, so attach again`,
+        message: `the link to the pylon of ${door.thread} was lost, as a pause or a restart of its node's probe does. Herdr Core keeps the session, so attach again`,
       },
     });
   } catch (err) {

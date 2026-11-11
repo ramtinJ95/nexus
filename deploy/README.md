@@ -418,7 +418,7 @@ Add `/etc/nexus/git_ed25519.pub` to the GitHub account the pylons push as. The k
 
 ### Attach goes through the control plane
 
-`nexus attach <thread>` reaches the pylon's Herdr session through the control plane's attach route, and the control plane runs Herdr's client on a pty in the pylon through the node's probe (see `docs/cli.md`). The node needs nothing for it, and nobody needs ssh access to the node. Before CLI 0.9.0, attach ran ssh to the node and a helper, `nexus-attach`, through a sudo rule for the group `nexus-attach`. Earlier installers removed the helper, the rule and the group on every run, so neither node has them. On a machine that never ran one, remove them by hand: `sudo rm -f /usr/local/bin/nexus-attach /etc/sudoers.d/nexus-attach && sudo groupdel nexus-attach`.
+`nexus attach <thread>` reaches the pylon's Herdr Core through the control plane's attach route, and the control plane runs Core's client on a pty in the pylon through the node's probe (see `docs/cli.md`). The node needs nothing for it, and nobody needs ssh access to the node. Before CLI 0.9.0, attach ran ssh to the node and a helper, `nexus-attach`, through a sudo rule for the group `nexus-attach`. Earlier installers removed the helper, the rule and the group on every run, so neither node has them. On a machine that never ran one, remove them by hand: `sudo rm -f /usr/local/bin/nexus-attach /etc/sudoers.d/nexus-attach && sudo groupdel nexus-attach`.
 
 Upgrade the control plane before the CLI. An older control plane has no attach route, and `nexus attach` says to upgrade it. Any probe works, old or new.
 

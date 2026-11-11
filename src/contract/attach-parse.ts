@@ -3,7 +3,7 @@ import { z } from "zod";
 import { defaultTerm, type AttachRequest, type ClientMessage, type ServerMessage } from "./attach.ts";
 import { terminalSize } from "../guest-terminal.ts";
 import type { ActualState } from "../control/reconcile.ts";
-import { herdrPanePattern } from "../guest-contract.ts";
+import { terminalPattern } from "../guest-contract.ts";
 
 const termPattern = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
 
@@ -20,7 +20,7 @@ export function parseAttachQuery(query: URLSearchParams): AttachRequest {
   const term = query.get("term") ?? defaultTerm;
   if (!termPattern.test(term)) throw new Error(`term must be a terminal type such as ${defaultTerm}, got ${JSON.stringify(term.slice(0, 80))}`);
   const pane = query.get("pane");
-  if (pane !== null && !herdrPanePattern.test(pane)) throw new Error(`pane must be a Herdr pane ID such as w1:p1, got ${JSON.stringify(pane.slice(0, 80))}`);
+  if (pane !== null && !terminalPattern.test(pane)) throw new Error(`pane must be a Herdr Core terminal such as t7, got ${JSON.stringify(pane.slice(0, 80))}`);
   return { size, term, ...(pane === null ? {} : { pane }) };
 }
 

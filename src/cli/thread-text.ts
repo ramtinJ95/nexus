@@ -78,7 +78,7 @@ export function detailText({ thread: t, pylon: p, agent, sessions, previews, por
     ...p.failed === null ? [] : [`failed: ${p.failed.replaceAll("\n", "\n  ")}`],
     ...p.retryRefused === null ? [] : [`retry refused: ${p.retryRefused}`],
     ...(agent?.parkedTasks ?? 0) === 0 ? [] : [`parked tasks: ${agent!.parkedTasks}. \`nexus retry ${t.id}\` runs them again`],
-    // A session in no pane is closed by its ID.
+    // A session in no terminal is closed by its ID.
     ...sessions.map((s) => `session: ${s.harness}${s.title === null ? "" : ` ${JSON.stringify(s.title)}`} ${s.herdrPane === null ? `as ${s.id}` : `in pane ${s.herdrPane}`}, ${s.state === "paused" ? said.paused
       : s.state === "failed" ? `failed: ${s.message}` : s.status}`),
     ...previews.map((v) => `preview: ${v.service} at ${v.url}${v.failed !== null ? `, not ready: ${v.failed}` : v.ready ? "" : ", not ready"}`),

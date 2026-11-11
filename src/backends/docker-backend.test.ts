@@ -13,8 +13,9 @@ import { dockerServiceGuest } from "./docker-service-guest.ts";
 import { GuestServices } from "../pylon-vm/services.ts";
 import { checkedIn } from "../pylon-vm/guest.ts";
 import type { PylonId } from "../ids.ts";
+import { coreCall } from "../probe/guest/core.ts";
 import { deadPort, freePort } from "../test-support/kit.ts";
-import { checkoutDir, servicesFile, workspaceDir } from "../../images/pylon/nexus-contract.ts";
+import { checkoutDir, home, servicesFile, workspaceDir } from "../../images/pylon/nexus-contract.ts";
 import { bootHooks, diskSetup, resumeCommands } from "./pylon-boot.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
 
@@ -32,7 +33,7 @@ async function fakeDocker(t: TestContext, replies: Record<string, Reply> = {}) {
   // A docker call can still be running when the call beside it fails the operation, and it writes here until it exits.
   t.after(() => rm(bin, { recursive: true, force: true, maxRetries: 10 }));
   const root = join(bin, "container");
-  await mkdir(root);
+  await mkdir(join(root, "home"), { recursive: true });
   await writeFile(join(bin, "replies.json"), JSON.stringify(replies));
   await writeFile(join(bin, "docker"), `#!${process.execPath}
 const { appendFileSync, readFileSync } = require("node:fs");
@@ -57,6 +58,7 @@ if (argv[0] === "exec") {
   process.exitCode = reply.code ?? 0;
 }
 function remap(arg) {
+  if (arg === ${JSON.stringify(home)}) return ${JSON.stringify(join(root, "home"))};
   return arg.replaceAll(${JSON.stringify(checkoutDir)}, ${JSON.stringify(join(root, "checkout"))}).replaceAll(${JSON.stringify(workspaceDir)}, ${JSON.stringify(join(root, "workspace"))}).replaceAll("/run/nexus-services", ${JSON.stringify(join(root, "run"))}).replaceAll("/var/lib/pi-sandbox", ${JSON.stringify(join(root, "pi-sandbox"))})
     .replaceAll("/var/lib/nexus", ${JSON.stringify(join(root, "var"))}).replaceAll("/home/user/.nexus", ${JSON.stringify(join(root, "nexus"))})
     .replaceAll("/proc/1/fd/1", ${JSON.stringify(join(root, "container.log"))});
@@ -330,7 +332,7 @@ test("a spawn for reading leaves a checkpoint's relaunch mark, and the pause aft
 
   await backend.ensurePaused(pylon, "ckpt-a-2", AbortSignal.timeout(60_000));
   const calls = await docker.calls();
-  assert.ok(!calls.some((argv) => argv.includes("herdr") || argv.some((arg) => arg.includes("sessions.json"))), "nothing read or recorded the sessions");
+  assert.ok(!calls.some((argv) => argv.includes(coreCall) || argv.some((arg) => arg.includes("sessions.json"))), "nothing read or recorded the sessions");
   const commit = calls.find((argv) => argv[0] === "commit")!;
   assert.ok(hasPair(commit, "--change", `LABEL nexus.sessions="${paused}"`) && hasPair(commit, "--change", 'LABEL nexus.checkpoint="ckpt-a-2"'), commit.join(" "));
 });
@@ -339,11 +341,12 @@ test("a pause whose session record fails keeps the sessions its checkpoint's pau
   const paused = Buffer.from(JSON.stringify([{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }])).toString("base64url");
   const labels = { "nexus.pylon": pylon, "nexus.image": "img-test00000000", "nexus.booted-from": "ckpt-a-1", "nexus.checkpoint": "ckpt-a-1", "nexus.sessions": paused };
   const docker = await fakeDocker(t, { ps: { stdout: "c1\n" }, "container inspect c1": running("c1", labels) });
-  // First on the PATH the container's commands run with, so the record fails as a guest without Herdr's server would.
-  await writeFile(join(docker.root, "..", "herdr"), "#!/bin/sh\necho 'herdr: broken on purpose' >&2\nexit 1\n", { mode: 0o755 });
+  // First on the PATH the container's commands run with: a core runs, as pgrep finds it, but its API fails every call.
+  await writeFile(join(docker.root, "..", "pgrep"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  await writeFile(join(docker.root, "..", "herdr-core"), "#!/bin/sh\necho 'herdr-core: broken on purpose' >&2\nexit 1\n", { mode: 0o755 });
   await createDockerBackend({ images }).ensurePaused(pylon, "ckpt-a-2", AbortSignal.timeout(60_000));
   const calls = await docker.calls();
-  assert.match(await readFile(join(docker.root, "container.log"), "utf8"), /^sessions: recording failed, so the wake relaunches what the last record holds: .*herdr: broken on purpose/);
+  assert.match(await readFile(join(docker.root, "container.log"), "utf8"), /^sessions: recording failed, so the wake relaunches what the last record holds: .*herdr-core: broken on purpose/);
   const commit = calls.find((argv) => argv[0] === "commit")!;
   assert.ok(hasPair(commit, "--change", `LABEL nexus.sessions="${paused}"`) && hasPair(commit, "--change", 'LABEL nexus.checkpoint="ckpt-a-2"'), commit.join(" "));
 });
