@@ -793,11 +793,11 @@ test("commands run in a running pylon's guest and return its result", async (t) 
 
   assert.deepEqual(await client.command(pylonId, { kind: "exec", argv: ["git", "status"], cwd: "/home/user/workspace/repo", timeoutMs: 5000 }),
     { kind: "exec", exitCode: 0, output: "ran git status", truncated: false });
-  assert.deepEqual(await client.command(pylonId, { kind: "open-session", harness: "claude-code", title: "review" }), { kind: "open-session", herdrPane: "t1" });
+  assert.deepEqual(await client.command(pylonId, { kind: "open-session", harness: "claude-code", title: "review" }), { kind: "open-session", terminal: "t1" });
   const run = core.calls.find((c) => c.method === "terminal.run")!.params as { cwd: string; labels: Record<string, string> };
   assert.deepEqual([run.cwd, run.labels["nexus.title"]], ["/home/user/workspace/repo", "review"], "sessions open in the checkout");
-  assert.deepEqual(await client.command(pylonId, { kind: "close-session", herdrPane: "t1" }), { kind: "close-session", outcome: "closed" });
-  assert.deepEqual(await client.command(pylonId, { kind: "close-session", herdrPane: "t1" }), { kind: "close-session", outcome: "not-open" }, "a terminal that is not open is not reported closed");
+  assert.deepEqual(await client.command(pylonId, { kind: "close-session", terminal: "t1" }), { kind: "close-session", outcome: "closed" });
+  assert.deepEqual(await client.command(pylonId, { kind: "close-session", terminal: "t1" }), { kind: "close-session", outcome: "not-open" }, "a terminal that is not open is not reported closed");
 });
 
 test("a command for a pylon that is not running is refused as not-running", async (t) => {
@@ -805,7 +805,7 @@ test("a command for a pylon that is not running is refused as not-running", asyn
   const { client, fake } = await setup(t, {}, guest);
   await assert.rejects(client.command(pylonId, { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 }), { code: "not-running" });
   fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-unit-1", image, sessions: null });
-  await assert.rejects(client.command(pylonId, { kind: "close-session", herdrPane: "w1:p1" }), { code: "not-running" });
+  await assert.rejects(client.command(pylonId, { kind: "close-session", terminal: "t1" }), { code: "not-running" });
   assert.deepEqual(guest.execs, []);
 });
 
@@ -855,8 +855,8 @@ test("malformed commands get 400 and reach no guest", async (t) => {
   assert.equal(await post({ kind: "open-session", harness: "codex", title: "x" }), 400);
   assert.equal(await post({ kind: "open-session", harness: "shell", title: "x", resume: "abc" }), 400);
   assert.equal(await post({ kind: "drop-failed-session" }), 400);
-  assert.equal(await post({ kind: "close-session", herdrPane: "w1:p1", session: { harness: "codex", harnessSessionId: null, title: null } }), 400);
-  assert.equal(await post({ kind: "close-session", herdrPane: "w1:p1", session: { harness: "pi", title: null } }), 400);
+  assert.equal(await post({ kind: "close-session", terminal: "t1", session: { harness: "codex", harnessSessionId: null, title: null } }), 400);
+  assert.equal(await post({ kind: "close-session", terminal: "t1", session: { harness: "pi", title: null } }), 400);
   assert.equal(await post({ kind: "reboot" }), 400);
   const send = { kind: "send-claude", session: "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90", text: "hi" };
   for (const bad of [{ session: undefined }, { session: "../etc" }, { session: "a".repeat(201) }, { text: "" }, { text: "x".repeat(16_385) }, { text: "a\tb" }, { text: "a\rb" }, { model: "" }, { model: "m".repeat(201) }, { requestId: "" }, { requestId: 1 }]) {
@@ -866,7 +866,7 @@ test("malformed commands get 400 and reach no guest", async (t) => {
   assert.deepEqual(guest.execs, []);
 });
 
-test("a message that resumes its Claude session publishes the session's new pane at once", async (t) => {
+test("a message that resumes its Claude session publishes the session's new terminal at once", async (t) => {
   const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
   const core = fakeCore();
   // The seed and the transcript lookup succeed, so the session resumes, and the pylon never paused.
@@ -878,7 +878,7 @@ test("a message that resumes its Claude session publishes the session's new pane
   t.after(() => abort.abort());
   const events = client.observe(abort.signal)[Symbol.asyncIterator]();
   assert.equal((await events.next()).value?.type, "snapshot");
-  assert.deepEqual(await client.command(pylonId, { kind: "send-claude", session, text: "carry on" }), { kind: "send-claude", outcome: "sent", herdrPane: "t1", resumed: true });
+  assert.deepEqual(await client.command(pylonId, { kind: "send-claude", session, text: "carry on" }), { kind: "send-claude", outcome: "sent", terminal: "t1", resumed: true });
   const e = (await events.next()).value;
   const p = e?.type === "snapshot" ? e.observation.pylons[0] : assert.fail(`a snapshot, not ${e?.type}`);
   assert.deepEqual(p?.phase === "running" ? p.sessions?.map((f: { harnessSessionId: string | null }) => f.harnessSessionId) : assert.fail("the pylon runs"), [session], "the control plane sees the resumed session without waiting a minute");
@@ -892,7 +892,7 @@ test("a message for a Claude session is sent to its terminal, and the result say
   const { client } = await setup(t, {}, guest);
   await running(client);
   const text = "line one\n\"quoted\" `ticks` $HOME";
-  assert.deepEqual(await client.command(pylonId, { kind: "send-claude", session, text }), { kind: "send-claude", outcome: "queued", herdrPane: "t1", resumed: false });
+  assert.deepEqual(await client.command(pylonId, { kind: "send-claude", session, text }), { kind: "send-claude", outcome: "queued", terminal: "t1", resumed: false });
   assert.deepEqual(claude.sent, [text]);
   await assert.rejects(client.command(pylonId, { kind: "send-claude", session, text: "a\tb" }), /HTTP 400: .*Replace tabs with spaces/);
 });
@@ -950,7 +950,7 @@ test("the outcome of a Claude send waits for one queued behind a slow send, type
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(settled, false, "the outcome waits while the send waits behind the slow one");
   slow.resolve();
-  const queued = { outcome: "queued", herdrPane: "t1", resumed: false };
+  const queued = { outcome: "queued", terminal: "t1", resumed: false };
   assert.deepEqual(await outcome, { kind: "send-claude-outcome", send: queued });
   assert.deepEqual(await Promise.all(sending), [{ kind: "send-claude", ...queued }, { kind: "send-claude", ...queued }]);
   assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:queued" }), { kind: "send-claude-outcome", send: queued }, "a settled send is still known");
@@ -1030,7 +1030,7 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
     "open-session": { kind: "open-session", harness: "shell", title: "shell" },
     "open-session with resume": { kind: "open-session", harness: "claude-code", title: "Claude Code", resume: session },
     "open-session with prompt and resume": { kind: "open-session", harness: "claude-code", title: "Claude Code", resume: session, prompt: "go" },
-    "close-session": { kind: "close-session", herdrPane: "t99" },
+    "close-session": { kind: "close-session", terminal: "t99" },
     "drop-failed-session": { kind: "drop-failed-session", id: "s1" },
     "send-claude": { kind: "send-claude", session, text: "hi" },
     "send-claude-outcome": { kind: "send-claude-outcome", requestId: "msg:never" },
@@ -1128,7 +1128,7 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
 
   const kept = working();
   await client.command(pylonId, { kind: "send-claude", session, text: "kept", requestId: "msg:kept" });
-  assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:kept" }), { kind: "send-claude-outcome", send: { outcome: "queued", herdrPane: kept.address, resumed: false } }, "a send-claude is remembered under its request ID");
+  assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:kept" }), { kind: "send-claude-outcome", send: { outcome: "queued", terminal: kept.address, resumed: false } }, "a send-claude is remembered under its request ID");
   await client.command(pylonId, { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 });
   assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:never" }), { kind: "send-claude-outcome", send: "unknown" });
 });
@@ -1138,7 +1138,7 @@ test("a failing command rejects with the guest's error", async (t) => {
   const guest = fakeGuest((argv) => core.reply(argv) ?? { exitCode: 0, output: "" });
   const { client } = await setup(t, {}, guest);
   await running(client);
-  await assert.rejects(client.command(pylonId, { kind: "close-session", herdrPane: "t9" }), /HTTP 500: terminal.get: terminal t9 is malformed/);
+  await assert.rejects(client.command(pylonId, { kind: "close-session", terminal: "t9" }), /HTTP 500: terminal.get: terminal t9 is malformed/);
 });
 
 test("observations carry session facts from Herdr Core, and null when Core cannot be read", async (t) => {
@@ -1162,7 +1162,7 @@ test("observations carry session facts from Herdr Core, and null when Core canno
       return p?.phase === "running" ? p.sessions : assert.fail("the pylon runs");
     }
   };
-  assert.deepEqual(await sessionsSeen(), [{ id: "t1", state: "running", herdrPane: "t1", harness: "claude-code", harnessSessionId: "bd2c2d6b", status: "working", title: "review" }]);
+  assert.deepEqual(await sessionsSeen(), [{ id: "t1", state: "running", terminal: "t1", harness: "claude-code", harnessSessionId: "bd2c2d6b", status: "working", title: "review" }]);
   readable = false;
   assert.equal(await sessionsSeen(), null);
   assert.equal(await sessionsSeen(), null);
@@ -1171,7 +1171,7 @@ test("observations carry session facts from Herdr Core, and null when Core canno
 
 test("a stopped pylon's observation carries the sessions its backend kept from the pause", async (t) => {
   const { client, fake } = await setup(t, {}, fakeGuest(() => { throw new Error("a stopped pylon has no guest"); }));
-  const recorded = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "claude-code" as const, harnessSessionId: "bd2c2d6b", title: "review" }];
+  const recorded = [{ id: "t1", terminal: "t1", harness: "claude-code" as const, harnessSessionId: "bd2c2d6b", title: "review" }];
   const seen = async () => {
     for await (const e of client.observe(AbortSignal.timeout(60_000))) return e.type === "snapshot" ? e.observation.pylons[0] : assert.fail("the first event is a snapshot");
   };
@@ -1672,9 +1672,9 @@ test("opening or closing a session publishes a snapshot that lists the change", 
     const p = e?.type === "snapshot" ? e.observation.pylons[0] : assert.fail(`a snapshot, not ${e?.type}`);
     return p?.phase === "running" ? p.sessions?.map((f: { title?: string }) => f.title) : assert.fail("the pylon runs");
   };
-  assert.deepEqual(await client.command(pylonId, { kind: "open-session", harness: "claude-code", title: "review" }), { kind: "open-session", herdrPane: "t1" });
+  assert.deepEqual(await client.command(pylonId, { kind: "open-session", harness: "claude-code", title: "review" }), { kind: "open-session", terminal: "t1" });
   assert.deepEqual(await sessions(), ["review"], "the control plane sees the new session without waiting a minute");
-  await client.command(pylonId, { kind: "close-session", herdrPane: "t1" });
+  await client.command(pylonId, { kind: "close-session", terminal: "t1" });
   assert.deepEqual(await sessions(), []);
 });
 

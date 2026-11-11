@@ -615,7 +615,7 @@ test("feedback reaches a Claude worker thread typed into its session once its py
   const claude = f.add("th-claude", true);
   const typed: PylonCommand[] = [];
   let outcome: "sent" | "blocked" = "blocked";
-  const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command); return { kind: "send-claude", outcome, herdrPane: "w1:p1", resumed: false }; } };
+  const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command); return { kind: "send-claude", outcome, terminal: "t1", resumed: false }; } };
   const woken: ThreadId[] = [];
   const watcher = prWatcher({ ...f.options, inbox: agentInbox({ log: assert.fail, registry: f.registry, harness: f.harness, probes: new Map([[f.node, probe]]), wake(t) { woken.push(t.id); } }) });
   await watcher.poll();

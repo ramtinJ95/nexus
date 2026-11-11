@@ -684,7 +684,7 @@ test("a pause keeps what it recorded beside the checkpoint, which the stopped py
   });
   assert.equal(field((await backend.list())[0], "sessions"), undefined, "a running pylon's sessions come from its guest");
   await backend.ensurePaused("pylon-kept" as PylonId, "ckpt-kept-1", signal());
-  const recorded = [{ id: "t1", herdrPane: "t1", harness: "shell", harnessSessionId: null, title: "sh" }];
+  const recorded = [{ id: "t1", terminal: "t1", harness: "shell", harnessSessionId: null, title: "sh" }];
   assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-kept-1", sessions: recorded });
   assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint, field(p, "sessions")]), [["stopped", "ckpt-kept-1", recorded]]);
 });
@@ -723,7 +723,7 @@ test("the artifacts list holds images and templates and no checkpoints, and has 
 test("a spawn of a running pylon applies the preview URLs, and finishes a relaunch a wake left pending, once", async () => {
   const { backend, instances } = await backendWith({ previewHost: "node.example.ts.net" });
   const dir = await leftInstance(instances, "pylon-wake", "running");
-  const paused = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }];
+  const paused = [{ id: "t1", terminal: "t1", harness: "shell", harnessSessionId: null, title: "sh" }];
   await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-wake-1", relaunch: true, sessions: paused }));
   const { actions } = await fakeController(dir, "pylon-wake", (action) => {
     if (action.action === "write-files" || action.action === "public-urls") return {};
@@ -745,7 +745,7 @@ test("a spawn of a running pylon applies the preview URLs, and finishes a relaun
 test("a spawn for reading leaves the relaunch a wake left pending, with the paused list, and the next spawn finishes it", async () => {
   const { backend, instances } = await backendWith();
   const dir = await leftInstance(instances, "pylon-read", "running");
-  const paused = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }];
+  const paused = [{ id: "t1", terminal: "t1", harness: "shell", harnessSessionId: null, title: "sh" }];
   await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-read-1", relaunch: true, sessions: paused }));
   const { actions } = await fakeController(dir, "pylon-read", (action) => {
     if (action.action === "write-files" || action.action === "public-urls") return {};
@@ -765,7 +765,7 @@ test("a pause of a pylon whose sessions never came back records nothing, also wh
   const { backend, instances } = await backendWith();
   const dir = await leftInstance(instances, "pylon-unread", "running");
   await writeFile(join(dir, "controller.log"), "");
-  const paused = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }];
+  const paused = [{ id: "t1", terminal: "t1", harness: "shell", harnessSessionId: null, title: "sh" }];
   await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-unread-1", relaunch: true, sessions: paused }));
   let stops = 0;
   const controller = await fakeController(dir, "pylon-unread", (action) => {
@@ -780,6 +780,23 @@ test("a pause of a pylon whose sessions never came back records nothing, also wh
   assert.equal(await readFile(join(dir, "controller.log"), "utf8"), "");
   assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-unread-2", sessions: paused });
   assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint, field(p, "sessions")]), [["stopped", "ckpt-unread-2", paused]]);
+});
+
+test("sessions a probe of contract 1 kept beside the checkpoint under herdrPane are listed under terminal, and the next pause keeps them so", async () => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-renamed", "running");
+  await writeFile(join(dir, "controller.log"), "");
+  const kept = [{ id: "t1", herdrPane: "t1", harness: "shell", harnessSessionId: null, title: "sh" }, { id: "t9", herdrPane: null, harness: "pi", harnessSessionId: "/s.jsonl", title: "plan" }];
+  const paused = [{ id: "t1", terminal: "t1", harness: "shell", harnessSessionId: null, title: "sh" }, { id: "t9", terminal: null, harness: "pi", harnessSessionId: "/s.jsonl", title: "plan" }];
+  await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-renamed-1", relaunch: true, sessions: kept }));
+  const controller = await fakeController(dir, "pylon-renamed", (action) => {
+    if (action.action !== "stop") return assert.fail(`unexpected ${action.action}`);
+    controller.state.current = "stopped";
+    return { name: "pylon-renamed", state: "stopped" };
+  });
+  await backend.ensurePaused("pylon-renamed" as PylonId, "ckpt-renamed-2", signal());
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-renamed-2", sessions: paused });
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, field(p, "sessions")]), [["stopped", paused]]);
 });
 
 test("a pylon boots only from a template on this node that is a disk over its own image", async () => {
@@ -1066,7 +1083,7 @@ test("a retry bounds session recording on a stuck guest, converges, and launches
   const { backend, instances } = await backendWith({ retrySessions });
   const id = "pylon-retry" as PylonId;
   const dir = await leftInstance(instances, id, "running");
-  const saved = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "saved shell" }];
+  const saved = [{ id: "t1", terminal: "t1", harness: "shell", harnessSessionId: null, title: "saved shell" }];
   await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-retry-0", sessions: saved }));
   const controller = await fakeController(dir, id, (action) => {
     if (action.action === "exec") { execSeen.resolve(); return new Promise(() => {}); }
@@ -1266,7 +1283,7 @@ test("a retry records the sessions of a guest whose controller answers everythin
   const controller = await stuckController(t, dir, id, "error", "hang", { list: oneShell("new shell"), other: finished(3) });
   await backend.ensurePaused(id, "ckpt-slowinspect-2", AbortSignal.timeout(60_000), true);
   await controller.exited;
-  const recorded = [{ id: "t1", herdrPane: "t1", harness: "shell", harnessSessionId: null, title: "new shell" }];
+  const recorded = [{ id: "t1", terminal: "t1", harness: "shell", harnessSessionId: null, title: "new shell" }];
   assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-slowinspect-2", sessions: recorded });
 });
 
@@ -1370,7 +1387,7 @@ test("retry records a responsive guest's sessions opened since its last pause", 
     return assert.fail(`unexpected ${action.action}`);
   });
   await backend.ensurePaused(id, "ckpt-retryrec-2", signal(), true);
-  const recorded = [{ id: "t1", herdrPane: "t1", harness: "shell", harnessSessionId: null, title: "new shell" }];
+  const recorded = [{ id: "t1", terminal: "t1", harness: "shell", harnessSessionId: null, title: "new shell" }];
   assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-retryrec-2", sessions: recorded });
   assert.deepEqual((await backend.list()).map((p) => [p.vm, field(p, "sessions")]), [["stopped", recorded]]);
   const actions = controller.actions.map((a) => a.action);

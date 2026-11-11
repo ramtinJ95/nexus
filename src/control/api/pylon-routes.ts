@@ -98,8 +98,8 @@ export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortR
    */
   async function openSession(t: Thread, body: unknown): Promise<OpenedSession> {
     const { harness, title = harness } = parse(sessionSchema, body);
-    const { herdrPane } = await pylonCommand(t, { kind: "open-session", harness, title });
-    return { herdrPane, harness, title };
+    const { terminal } = await pylonCommand(t, { kind: "open-session", harness, title });
+    return { terminal, harness, title };
   }
 
   /**
@@ -115,13 +115,13 @@ export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortR
       const resumes = t.status === "archived" ? `when \`nexus unarchive ${t.id}\` wakes its pylon` : "when its pylon wakes";
       throw new HttpError(409, `session ${id} is paused with its pylon and resumes ${resumes}. Close it once it runs`);
     }
-    if (session?.state === "failed" && session.herdrPane === null) {
+    if (session?.state === "failed" && session.terminal === null) {
       const { dropped } = await pylonCommand(t, { kind: "drop-failed-session", id });
       if (!dropped) throw new HttpError(404, `pylon ${t.pylonId} holds no failed session ${id}`);
       return;
     }
     const listed = session === undefined ? {} : { session: { harness: session.harness, harnessSessionId: session.harnessSessionId, title: session.title } };
-    const { outcome } = await pylonCommand(t, { kind: "close-session", herdrPane: id, ...listed });
+    const { outcome } = await pylonCommand(t, { kind: "close-session", terminal: id, ...listed });
     if (outcome === "not-open") throw new HttpError(404, `no session is open in terminal ${id} of pylon ${t.pylonId}. A wake may have moved it to another terminal, which the thread's sessions list`);
     if (outcome === "moved") throw new HttpError(404, `terminal ${id} of pylon ${t.pylonId} runs another session now, so it was left open. A wake moved session ${id} to another terminal, which the thread's sessions list`);
   }

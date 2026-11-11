@@ -203,7 +203,7 @@ try {
   console.log(`session-open: ${JSON.stringify(opened)}`);
 
   const attached = await inTerminal("attach", terminalSize(100, 30), attachScript());
-  await landsInSession(attached, opened.herdrPane, 60_000);
+  await landsInSession(attached, opened.terminal, 60_000);
   echo("attach", attached.printed(), /attached-to=/);
 
   const before = await shellSize(attached);
@@ -252,7 +252,7 @@ try {
     const woken = await inTerminal("attach-woken", terminalSize(100, 30), attachScript());
     await woken.until("attach waits for the paused pylon", (printed) => plain(printed).includes(`waiting for the pylon of ${thread}, which is paused`), 60_000);
     // The shell is kept, so the woken core brings it back at its address, where the relaunch finds it.
-    await landsInSession(woken, opened.herdrPane, 3 * 60_000);
+    await landsInSession(woken, opened.terminal, 3 * 60_000);
     echo("attach-woken", woken.printed(), /nexus: waiting|attached-to=/);
     await detach("attach-woken", woken);
   }

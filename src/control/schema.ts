@@ -316,4 +316,7 @@ export const migrations: readonly string[] = [
   `ALTER TABLE threads ADD COLUMN deleted_at INTEGER;
    UPDATE threads SET deleted_at = CAST(strftime('%s', 'now') AS INTEGER) * 1000 WHERE status = 'deleted' AND deleted_at IS NULL;
    INSERT OR IGNORE INTO settings (key, value) VALUES ('retention-since', CAST(CAST(strftime('%s', 'now') AS INTEGER) * 1000 AS TEXT));`,
+  // A session's terminal is the address of its Herdr Core terminal, so the column named for Herdr's panes is renamed.
+  // SQLite renames it in the table's check too, and every row keeps its value.
+  `ALTER TABLE sessions RENAME COLUMN herdr_pane TO terminal;`,
 ];

@@ -1,7 +1,7 @@
 /**
  * docs/cli.md describes the same protocol. It imports nothing at run time, so a browser can bundle it.
  *
- * GET /v1/threads/<thread>/attach?cols=C&rows=R&term=T[&pane=P] upgrades to a plain RFC 6455 WebSocket, with no subprotocol
+ * GET /v1/threads/<thread>/attach?cols=C&rows=R&term=T[&terminal=A] upgrades to a plain RFC 6455 WebSocket, with no subprotocol
  * and no extensions. After the 101, binary messages carry terminal bytes both ways, and text messages carry one JSON
  * object each, whose `type` says what it is. Either end ignores a type it does not know.
  */
@@ -12,12 +12,12 @@ export const defaultTerm = "xterm-256color";
 
 /**
  * The opening size and TERM of the terminal. Both go in the URL, because Herdr Core's client needs a size before it
- * starts. `pane` is the address of the Core terminal it shows, in place of the Claude worker's.
+ * starts. `terminal` is the address of the Core terminal it shows, in place of the Claude worker's.
  */
-export interface AttachRequest { size: TerminalSize; term: string; pane?: string }
+export interface AttachRequest { size: TerminalSize; term: string; terminal?: string }
 
-export function attachPath(thread: string, { size, term, pane }: AttachRequest): string {
-  return `/v1/threads/${encodeURIComponent(thread)}/attach?cols=${size.cols}&rows=${size.rows}&term=${encodeURIComponent(term)}${pane === undefined ? "" : `&pane=${encodeURIComponent(pane)}`}`;
+export function attachPath(thread: string, { size, term, terminal }: AttachRequest): string {
+  return `/v1/threads/${encodeURIComponent(thread)}/attach?cols=${size.cols}&rows=${size.rows}&term=${encodeURIComponent(term)}${terminal === undefined ? "" : `&terminal=${encodeURIComponent(terminal)}`}`;
 }
 
 /** Before `attached`, a resize replaces the size the terminal opens with. */

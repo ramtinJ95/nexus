@@ -703,7 +703,7 @@ h4.md-h { font-size: 1.07em; }
 .outs code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 11.5px; min-width: 0; }
 .outs a code { color: var(--accent); }
 .outs code.dim { color: var(--text-3); }
-.outs .pane { margin-left: auto; }
+.outs .addr { margin-left: auto; }
 .outs .s-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; color: var(--text); }
 .outs .sid { flex-basis: 100%; padding-left: 60px; }
 .outs .s-why { flex-basis: 100%; }

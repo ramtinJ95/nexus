@@ -57,8 +57,8 @@ const program = (t: FakeTerminal) => launchedProgram(t.argv);
 const exits = (t: FakeTerminal, exitCode: number | null, screen: string) => Object.assign(t, { state: "finished" as const, foreground: null, status: null, exitCode, screen });
 const status = (state: string | null) => state === null ? null : { state };
 const labels = (harness: string, title: string) => ({ "nexus.title": title, "nexus.harness": harness });
-const placed = (outcomes: readonly RelaunchOutcome[]) => outcomes.map((o) => [o.record.title, o.result, o.herdrPane]);
-const lastFile = (guest: { written: readonly { path: string; content: string }[] }) => JSON.parse(guest.written.findLast((f) => f.path === sessionsFile)!.content) as { sessions: SessionRecord[]; failed: { record: SessionRecord; inPane: boolean; message: string }[] };
+const placed = (outcomes: readonly RelaunchOutcome[]) => outcomes.map((o) => [o.record.title, o.result, o.terminal]);
+const lastFile = (guest: { written: readonly { path: string; content: string }[] }) => JSON.parse(guest.written.findLast((f) => f.path === sessionsFile)!.content) as { sessions: SessionRecord[]; failed: { record: SessionRecord; inTerminal: boolean; message: string }[] };
 const settingsOf = (argv: readonly string[]) => JSON.parse(argv[argv.indexOf("--settings") + 1]!) as unknown;
 const hook = (command: string) => [{ hooks: [{ type: "command", command }] }];
 const launchWrapper = ["env", "-u", "CLAUDE_CODE_SESSION_ID", "-u", "CLAUDECODE", "bash", "-lc", 'exec "$0" "$@"'];
@@ -160,7 +160,7 @@ test("a readiness wait that fails keeps a terminal that runs Claude, stalls on o
 
   const unreadable = failingWait(false);
   await assert.rejects(openSession(pylon(unreadable), { harness: "claude-code", title: "t", cwd: "/home/user" }),
-    (err) => err instanceof LaunchStalled && err.herdrPane === "t1" && /Claude Code launch stalled: terminal\.wait did not finish/.test(err.message));
+    (err) => err instanceof LaunchStalled && err.terminal === "t1" && /Claude Code launch stalled: terminal\.wait did not finish/.test(err.message));
   assert.deepEqual(unreadable.terminals.map((t) => t.state), ["live"], "a launch that may have started Claude is left for the person");
 
   const shell = failingWait(true, (t) => { t.foreground = { argv: ["-bash"], cwd: t.cwd, name: "bash" }; });
@@ -250,7 +250,7 @@ test("a launch sent again once a wake's relaunch runs its session, in a terminal
 test("a launch whose receipt never comes stalls and leaves its terminal for the person, unless Claude is working on it", async () => {
   const idle = fakeCore({ start: (t) => { t.screen = "Choose the text style\n"; } });
   await assert.rejects(openSession(pylon(idle, { transcripts: false, submitted: false }), prompted),
-    (err) => err instanceof LaunchStalled && err.herdrPane === "t1" && /Claude launch stalled: no UserPromptSubmit within 30 seconds; attach.*Choose the text style/s.test(err.message));
+    (err) => err instanceof LaunchStalled && err.terminal === "t1" && /Claude launch stalled: no UserPromptSubmit within 30 seconds; attach.*Choose the text style/s.test(err.message));
   assert.deepEqual(idle.terminals.map((t) => t.state), ["live"]);
 
   const working = fakeCore({ start: (t) => { t.status = status("working"); } });
@@ -274,7 +274,7 @@ test("session facts read each terminal's harness from its foreground, its sessio
   core.add({ argv: ["codex", "resume", "cccc"], labels: { "nexus.title": "codex" }, status: status("idle") });
   core.add({ argv: ["bash", "-l"] });
   core.add({ argv: ["claude", "--resume", "dddd"], status: status("asleep") });
-  const running = (herdrPane: string, harness: string, harnessSessionId: string | null, s: string, title: string) => ({ id: herdrPane, state: "running", herdrPane, harness, harnessSessionId, status: s, title });
+  const running = (terminal: string, harness: string, harnessSessionId: string | null, s: string, title: string) => ({ id: terminal, state: "running", terminal, harness, harnessSessionId, status: s, title });
   assert.deepEqual(await sessionFacts(pylon(core)), [
     running("t1", "claude-code", "after-clear", "working", "review"),
     running("t2", "pi", "/s.jsonl", "idle", "plan"),
@@ -294,13 +294,13 @@ test("a terminal Nexus started an agent in is that agent's while its launch's en
   const handRun = core.add({ argv: ["bash", "-l"], labels: labels("shell", "sh"), keep: true, foreground: { argv: ["claude", "--resume", "bbbb"], cwd: "/home/user", name: "claude" }, status: status("idle") });
   const guest = pylon(core);
   for (const foreground of [null, "env", "bash"]) {
-    assert.deepEqual((await sessionFacts(guest)).map((f) => [f.herdrPane, f.harness, f.harnessSessionId, f.status]), [
+    assert.deepEqual((await sessionFacts(guest)).map((f) => [f.terminal, f.harness, f.harnessSessionId, f.status]), [
       [starting.address, "claude-code", session, "unknown"],
       [handRun.address, "claude-code", "bbbb", "idle"],
     ], `while its foreground is ${foreground ?? "none"}`);
   }
   slowStart(starting);
-  assert.deepEqual((await recordSessions(guest))!.map((r) => [r.herdrPane, r.harness, r.harnessSessionId, r.model]), [
+  assert.deepEqual((await recordSessions(guest))!.map((r) => [r.terminal, r.harness, r.harnessSessionId, r.model]), [
     [starting.address, "claude-code", session, "opus"],
     [handRun.address, "claude-code", "bbbb", undefined],
   ], "a Claude a person started in a shell is that Claude's, by its foreground");
@@ -332,20 +332,20 @@ test("recording writes every live terminal of this machine but those another ter
   const { path, owner, mode } = guest.written[0]!;
   assert.deepEqual([path, owner, mode], [sessionsFile, "user", 0o644]);
   const sessions: SessionRecord[] = [
-    { herdrPane: "t1", harness: "claude-code", title: "review", cwd: "/home/user/app/src", model: "opus", harnessSessionId: "aaaa" },
-    { herdrPane: "t2", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" },
-    { herdrPane: "t3", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
+    { terminal: "t1", harness: "claude-code", title: "review", cwd: "/home/user/app/src", model: "opus", harnessSessionId: "aaaa" },
+    { terminal: "t2", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" },
+    { terminal: "t3", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
   ];
-  assert.deepEqual(lastFile(guest), { version: 1, recordedAt: JSON.parse(guest.written[0]!.content).recordedAt, sessions, failed: [] });
-  assert.deepEqual(recorded, sessions.map((r) => ({ ...r, id: r.herdrPane })), "each is reported under its terminal");
-  assert.deepEqual((await sessionFacts(guest)).map((f) => f.herdrPane), ["t1", "t2", "t3", "t4"], "the child is reported, and no other machine's terminal is");
+  assert.deepEqual(lastFile(guest), { version: 2, recordedAt: JSON.parse(guest.written[0]!.content).recordedAt, sessions, failed: [] });
+  assert.deepEqual(recorded, sessions.map((r) => ({ ...r, id: r.terminal })), "each is reported under its terminal");
+  assert.deepEqual((await sessionFacts(guest)).map((f) => f.terminal), ["t1", "t2", "t3", "t4"], "the child is reported, and no other machine's terminal is");
 });
 
 test("a read never starts a core: with none, a pylon reports only its failed sessions, records nothing and interrupts nothing", async () => {
-  const failed = { record: { herdrPane: "t91", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" }, inPane: false, message: "pi did not start" };
+  const failed = { record: { terminal: "t91", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" }, inTerminal: false, message: "pi did not start" };
   const core = fakeCore({ running: false });
-  const guest = pylon(core, { file: JSON.stringify({ version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: [], failed: [failed] }) });
-  assert.deepEqual(await sessionFacts(guest), [{ id: "t91", state: "failed", herdrPane: null, harness: "pi", harnessSessionId: "/s.jsonl", status: "unknown", title: "plan", message: "pi did not start" }]);
+  const guest = pylon(core, { file: JSON.stringify({ version: 2, recordedAt: "2027-01-01T00:00:00Z", sessions: [], failed: [failed] }) });
+  assert.deepEqual(await sessionFacts(guest), [{ id: "t91", state: "failed", terminal: null, harness: "pi", harnessSessionId: "/s.jsonl", status: "unknown", title: "plan", message: "pi did not start" }]);
   assert.equal(await recordSessions(guest), null);
   assert.deepEqual(guest.written, [], "the last sessions file stays in place");
   assert.equal(await interruptClaude(guest, "bd2c2d6b"), "not-running");
@@ -365,7 +365,7 @@ test("after a core crash Claude runs on without a core: a read is unknown and re
   await assert.rejects(sessionFacts(guest), (err) => err instanceof Error && /no Herdr Core runs, but the programs of one that crashed still do/.test(err.message));
   await assert.rejects(recordSessions(guest), /crashed/);
   assert.deepEqual(guest.written, [], "the last record stands");
-  assert.deepEqual(await sendToClaude(guest, { session, text: "still there?" }), { outcome: "sent", herdrPane: t, resumed: false });
+  assert.deepEqual(await sendToClaude(guest, { session, text: "still there?" }), { outcome: "sent", terminal: t, resumed: false });
   core.crash();
   assert.equal(await openSession(guest, { harness: "claude-code", title: "review", cwd: "/home/user", resume: session }), t);
   assert.equal(runs(core).length, 1, "one Claude runs the session");
@@ -377,7 +377,7 @@ test("a message reaches Claude exactly as written in one send, queued behind a t
   for (const [state, outcome] of [["idle", "sent"], ["done", "sent"], ["error", "sent"], ["working", "queued"]] as const) {
     const core = fakeCore();
     const t = claudeRunning(core, state);
-    assert.deepEqual(await sendToClaude(pylon(core), { session, text }), { outcome, herdrPane: "t1", resumed: false }, state);
+    assert.deepEqual(await sendToClaude(pylon(core), { session, text }), { outcome, terminal: "t1", resumed: false }, state);
     assert.deepEqual(t.sent, [text], state);
   }
 });
@@ -385,12 +385,12 @@ test("a message reaches Claude exactly as written in one send, queued behind a t
 test("a message to a blocked Claude sends nothing, whether its status says so or Core refuses it", async () => {
   const core = fakeCore();
   const t = claudeRunning(core, "blocked");
-  assert.deepEqual(await sendToClaude(pylon(core), { session, text: "yes" }), { outcome: "blocked", herdrPane: "t1", resumed: false });
+  assert.deepEqual(await sendToClaude(pylon(core), { session, text: "yes" }), { outcome: "blocked", terminal: "t1", resumed: false });
   assert.deepEqual(t.sent, [], "the text would answer the dialog");
 
   const refusing = fakeCore({ answer: (method) => method === "terminal.send" ? coreError("blocked", "t1 is blocked") : undefined });
   const r = claudeRunning(refusing, "idle");
-  assert.deepEqual(await sendToClaude(pylon(refusing), { session, text: "yes" }), { outcome: "blocked", herdrPane: "t1", resumed: false });
+  assert.deepEqual(await sendToClaude(pylon(refusing), { session, text: "yes" }), { outcome: "blocked", terminal: "t1", resumed: false });
   assert.deepEqual(r.sent, []);
 });
 
@@ -398,12 +398,12 @@ test("a send Core refuses as still starting, which types nothing, is sent again 
   let refusals = 2;
   const settling = fakeCore({ answer: (method, params) => method === "terminal.send" && refusals-- > 0 ? stillStarting(params.terminal as string) : undefined });
   const t = claudeRunning(settling, "idle");
-  assert.deepEqual(await sendToClaude(pylon(settling), { session, text: "go" }, 5_000), { outcome: "sent", herdrPane: "t1", resumed: false });
+  assert.deepEqual(await sendToClaude(pylon(settling), { session, text: "go" }, 5_000), { outcome: "sent", terminal: "t1", resumed: false });
   assert.deepEqual([t.sent, settling.calls.filter((c) => c.method === "terminal.send").length], [["go"], 3]);
 
   const unsettled = fakeCore({ answer: (method, params) => method === "terminal.send" ? stillStarting(params.terminal as string) : undefined });
   const never = claudeRunning(unsettled, "idle");
-  assert.deepEqual(await sendToClaude(pylon(unsettled), { session, text: "go" }, 300), { outcome: "starting", herdrPane: "t1", resumed: false });
+  assert.deepEqual(await sendToClaude(pylon(unsettled), { session, text: "go" }, 300), { outcome: "starting", terminal: "t1", resumed: false });
   assert.deepEqual(never.sent, []);
 });
 
@@ -411,13 +411,13 @@ test("a Claude that has said nothing yet is waited for, and one still silent is 
   let gets = 0;
   const late = fakeCore({ answer: (method, _, fake) => { if (method === "terminal.get" && ++gets === 2) fake.terminals[0]!.status = status("idle"); return undefined; } });
   const answered = claudeRunning(late, null);
-  assert.deepEqual(await sendToClaude(pylon(late), { session, text: "go" }, 5_000), { outcome: "sent", herdrPane: "t1", resumed: false });
+  assert.deepEqual(await sendToClaude(pylon(late), { session, text: "go" }, 5_000), { outcome: "sent", terminal: "t1", resumed: false });
   assert.deepEqual(answered.sent, ["go"]);
 
   for (const [screen, outcome] of [["Do you trust the files in this folder?\n❯ 1. Yes, I trust this folder\n", "blocked"], ["", "starting"]] as const) {
     const core = fakeCore();
     const t = claudeRunning(core, null, { screen });
-    assert.deepEqual(await sendToClaude(pylon(core), { session, text: "go" }, 300), { outcome, herdrPane: "t1", resumed: false }, outcome);
+    assert.deepEqual(await sendToClaude(pylon(core), { session, text: "go" }, 300), { outcome, terminal: "t1", resumed: false }, outcome);
     assert.deepEqual(t.sent, [], outcome);
   }
 });
@@ -430,7 +430,7 @@ test("a terminal that stops running the session before the send is sent nothing 
     let changed = false;
     const core = fakeCore({ answer: (method, _, fake) => { if (method === "terminal.get" && !changed) { changed = true; change(fake.terminals[0]!); } return undefined; } });
     const t = claudeRunning(core, "idle");
-    assert.deepEqual(await sendToClaude(pylon(core), { session, text: "go" }), { outcome: "moved", herdrPane: "t1", resumed: false }, why);
+    assert.deepEqual(await sendToClaude(pylon(core), { session, text: "go" }), { outcome: "moved", terminal: "t1", resumed: false }, why);
     assert.deepEqual(t.sent, [], why);
   }
 });
@@ -440,14 +440,14 @@ test("a Claude terminal with no session label is found by the session its comman
   const moved = claudeRunning(core, "idle", { labels: { "claude.session_id": "another-session" } });
   const other = core.add({ argv: ["claude", "--session-id", "another-one"], status: status("idle") });
   const found = core.add({ argv: ["node", "/usr/local/bin/claude", "--resume", session], status: status("idle") });
-  assert.deepEqual(await sendToClaude(pylon(core), { session, text: "hi" }), { outcome: "sent", herdrPane: "t3", resumed: false });
+  assert.deepEqual(await sendToClaude(pylon(core), { session, text: "hi" }), { outcome: "sent", terminal: "t3", resumed: false });
   assert.deepEqual([moved.sent, other.sent, found.sent], [[], [], ["hi"]], "a terminal whose Claude moved on to another session, as after /clear, is not sent to");
 });
 
 test("a session in no live terminal is resumed in a new terminal in the checkout, then given the message", async () => {
   const core = fakeCore();
   claudeRunning(core, "idle", { labels: { "claude.session_id": "another-session" } });
-  assert.deepEqual(await sendToClaude(pylon(core), { session, text: "pick it back up", model: "claude-opus-5-5" }), { outcome: "sent", herdrPane: "t2", resumed: true });
+  assert.deepEqual(await sendToClaude(pylon(core), { session, text: "pick it back up", model: "claude-opus-5-5" }), { outcome: "sent", terminal: "t2", resumed: true });
   const t = core.terminals[1]!;
   assert.deepEqual([t.cwd, t.labels], [checkoutDir, { ...labels("claude-code", "Claude Code"), "claude.session_id": session }]);
   assert.deepEqual(program(t).slice(0, 5), ["claude", "--resume", session, "--model", "claude-opus-5-5"]);
@@ -455,11 +455,11 @@ test("a session in no live terminal is resumed in a new terminal in the checkout
 });
 
 test("a message reaching a recorded session before the relaunch resumes it as it was recorded, under the message's model if it names one", async () => {
-  const file: SessionRecord[] = [{ herdrPane: "t91", harness: "claude-code", title: "review", cwd: "/home/user/app", harnessSessionId: session, model: "opus" }];
+  const file: SessionRecord[] = [{ terminal: "t91", harness: "claude-code", title: "review", cwd: "/home/user/app", harnessSessionId: session, model: "opus" }];
   for (const [model, started] of [[undefined, "opus"], ["sonnet", "sonnet"]] as const) {
     const core = fakeCore({ running: false });
     const guest = pylon(core, { file });
-    assert.deepEqual(await sendToClaude(guest, { session, text: "go", ...(model === undefined ? {} : { model }) }), { outcome: "sent", herdrPane: "t1", resumed: true });
+    assert.deepEqual(await sendToClaude(guest, { session, text: "go", ...(model === undefined ? {} : { model }) }), { outcome: "sent", terminal: "t1", resumed: true });
     const t = core.terminals[0]!;
     assert.deepEqual([t.cwd, t.labels, program(t).slice(0, 5)], ["/home/user/app", { ...labels("claude-code", "review"), "claude.session_id": session }, ["claude", "--resume", session, "--model", started]], started);
   }
@@ -561,7 +561,7 @@ test("a wake brings a kept shell back in place and relaunches each agent in a ne
   assert.deepEqual([at("t5").cwd, at("t5").labels, program(at("t5")).slice(0, 7)], ["/home/user/app", { ...labels("claude-code", "review"), "claude.session_id": "aaaa" }, ["claude", "--resume", "aaaa", "--model", "opus", "--permission-mode", "bypassPermissions"]]);
   assert.deepEqual([at("t6").labels, program(at("t6"))], [{ ...labels("pi", "plan"), "pi.session_file": "/home/user/.pi/agent/sessions/s.jsonl" }, ["pi", "--session", "/home/user/.pi/agent/sessions/s.jsonl"]]);
   assert.deepEqual(core.terminals.map((t) => t.address), ["t3", byHand.address, "t5", "t6"], "the finished terminals Nexus opened are removed, and one opened by hand is left");
-  assert.deepEqual(lastFile(guest).sessions.map((r) => r.herdrPane), ["t5", "t6", "t3"]);
+  assert.deepEqual(lastFile(guest).sessions.map((r) => r.terminal), ["t5", "t6", "t3"]);
 
   assert.deepEqual(placed(await relaunchSessions(guest, unlocked)), [["review", "present", "t5"], ["plan", "present", "t6"], ["sh", "present", "t3"]]);
   assert.equal(runs(core).length, 5, "the second relaunch started nothing");
@@ -569,8 +569,8 @@ test("a wake brings a kept shell back in place and relaunches each agent in a ne
 
 test("a relaunch seeds Claude's state once for every Claude session it starts", async () => {
   const records: SessionRecord[] = [
-    { herdrPane: "t91", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" },
-    { herdrPane: "t92", harness: "claude-code", title: "plan", cwd: "/home/user", harnessSessionId: "bbbb" },
+    { terminal: "t91", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" },
+    { terminal: "t92", harness: "claude-code", title: "plan", cwd: "/home/user", harnessSessionId: "bbbb" },
   ];
   const guest = pylon(fakeCore(), { file: records });
   assert.deepEqual(placed(await relaunchSessions(guest, unlocked)), [["review", "relaunched", "t1"], ["plan", "relaunched", "t2"]]);
@@ -579,8 +579,8 @@ test("a relaunch seeds Claude's state once for every Claude session it starts", 
 
 test("a relaunch whose Claude seed fails fails only its Claude sessions", async () => {
   const records: SessionRecord[] = [
-    { herdrPane: "t91", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" },
-    { herdrPane: "t92", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
+    { terminal: "t91", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" },
+    { terminal: "t92", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
   ];
   const outcomes = await relaunchSessions(pylon(fakeCore(), { file: records, seed: { exitCode: 1, output: "invalid JSON" } }), unlocked);
   assert.deepEqual(outcomes.map((o) => [o.record.title, o.result, o.result === "failed" ? o.message : null]), [["review", "failed", "seeding Claude state failed: invalid JSON"], ["sh", "relaunched", null]]);
@@ -588,23 +588,23 @@ test("a relaunch whose Claude seed fails fails only its Claude sessions", async 
 
 test("a core that does not start fails every session for its reason, and records them all as failed", async () => {
   const records: SessionRecord[] = [
-    { herdrPane: "t91", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" },
-    { herdrPane: "t92", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
+    { terminal: "t91", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" },
+    { terminal: "t92", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
   ];
   for (const [output, message] of [["", "Herdr Core did not start within 5 seconds"], ["tini: not found\n", "Herdr Core did not start within 5 seconds: tini: not found"]] as const) {
     const core = fakeCore({ running: false });
     const guest = pylon(core, { file: records, coreStart: { exitCode: 1, output } });
     const outcomes = await relaunchSessions(guest, unlocked);
-    assert.deepEqual(outcomes.map((o) => [o.result, o.herdrPane, o.result === "failed" ? o.message : null]), [["failed", null, message], ["failed", null, message]]);
-    assert.deepEqual(lastFile(guest), { ...lastFile(guest), sessions: [], failed: records.map((record) => ({ record, inPane: false, message })) });
+    assert.deepEqual(outcomes.map((o) => [o.result, o.terminal, o.result === "failed" ? o.message : null]), [["failed", null, message], ["failed", null, message]]);
+    assert.deepEqual(lastFile(guest), { ...lastFile(guest), sessions: [], failed: records.map((record) => ({ record, inTerminal: false, message })) });
     assert.deepEqual(core.calls, [], "no core call ran");
   }
 });
 
 test("shells that share a title are told apart by their cwd", async () => {
   const records: SessionRecord[] = [
-    { herdrPane: "t91", harness: "shell", title: "sh", cwd: "/a", harnessSessionId: null },
-    { herdrPane: "t92", harness: "shell", title: "sh", cwd: "/b", harnessSessionId: null },
+    { terminal: "t91", harness: "shell", title: "sh", cwd: "/a", harnessSessionId: null },
+    { terminal: "t92", harness: "shell", title: "sh", cwd: "/b", harnessSessionId: null },
   ];
   const core = fakeCore();
   core.add({ argv: ["bash", "-l"], labels: labels("shell", "sh"), cwd: "/b", keep: true });
@@ -613,7 +613,7 @@ test("shells that share a title are told apart by their cwd", async () => {
 });
 
 test("an agent running another session is not the recorded one, even under the same title", async () => {
-  const records: SessionRecord[] = [{ herdrPane: "t91", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" }];
+  const records: SessionRecord[] = [{ terminal: "t91", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" }];
   const core = fakeCore();
   const other = core.add({ argv: ["claude", "--resume", "bbbb"], labels: labels("claude-code", "review"), status: status("idle") });
   assert.deepEqual(placed(await relaunchSessions(pylon(core, { file: records }), unlocked)), [["review", "relaunched", "t2"]]);
@@ -622,7 +622,7 @@ test("an agent running another session is not the recorded one, even under the s
 });
 
 test("a terminal another terminal started is neither claimed nor closed by a relaunch", async () => {
-  const records: SessionRecord[] = [{ herdrPane: "t91", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" }];
+  const records: SessionRecord[] = [{ terminal: "t91", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" }];
   const core = fakeCore();
   const child = core.add({ argv: ["claude", "--resume", "aaaa"], labels: labels("claude-code", "review"), parent: "t50", status: status("idle") });
   assert.deepEqual(placed(await relaunchSessions(pylon(core, { file: records }), unlocked)), [["review", "relaunched", "t2"]]);
@@ -631,8 +631,8 @@ test("a terminal another terminal started is neither claimed nor closed by a rel
 
 test("a second record of one Claude session is dropped, and its terminal closed", async () => {
   const records: SessionRecord[] = [
-    { herdrPane: "t91", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" },
-    { herdrPane: "t92", harness: "claude-code", title: "Claude Code", cwd: "/home/user", harnessSessionId: "aaaa" },
+    { terminal: "t91", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" },
+    { terminal: "t92", harness: "claude-code", title: "Claude Code", cwd: "/home/user", harnessSessionId: "aaaa" },
   ];
   const both = fakeCore();
   both.add({ argv: ["claude", "--resume", "aaaa"], labels: labels("claude-code", "review"), status: status("idle") });
@@ -649,10 +649,10 @@ test("a second record of one Claude session is dropped, and its terminal closed"
 
 test("pi records of one session each come back in a terminal of their own, and only Claude Code sessions are held while the relaunch runs", async () => {
   const records: SessionRecord[] = [
-    { herdrPane: "t91", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" },
-    { herdrPane: "t92", harness: "pi", title: "plan again", cwd: "/home/user", harnessSessionId: "/s.jsonl" },
-    { herdrPane: "t93", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "bd2c2d6b" },
-    { herdrPane: "t94", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
+    { terminal: "t91", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" },
+    { terminal: "t92", harness: "pi", title: "plan again", cwd: "/home/user", harnessSessionId: "/s.jsonl" },
+    { terminal: "t93", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "bd2c2d6b" },
+    { terminal: "t94", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
   ];
   const held: (readonly string[])[] = [];
   const outcomes = await relaunchSessions(pylon(fakeCore(), { file: records }), (sessions, work) => {
@@ -665,8 +665,8 @@ test("pi records of one session each come back in a terminal of their own, and o
 
 test("a session whose relaunch failed is recorded under its old address until a relaunch brings it back", async () => {
   const records: SessionRecord[] = [
-    { herdrPane: "t91", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" },
-    { herdrPane: "t92", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
+    { terminal: "t91", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" },
+    { terminal: "t92", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
   ];
   let failing = true;
   const core = fakeCore({ start: (t) => { if (failing && t.foreground?.argv[0] === "pi") exits(t, 1, "pi: cannot open /s.jsonl\n"); } });
@@ -674,39 +674,39 @@ test("a session whose relaunch failed is recorded under its old address until a 
   assert.deepEqual(placed(await relaunchSessions(guest, unlocked)), [["plan", "failed", null], ["sh", "relaunched", "t2"]]);
   const recorded = (await recordSessions(guest))!;
   assert.deepEqual(recorded, [
-    { id: "t2", herdrPane: "t2", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
-    { ...records[0], id: "t91", herdrPane: null },
+    { id: "t2", terminal: "t2", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
+    { ...records[0], id: "t91", terminal: null },
   ], "Core never gives an address out again, so its old one names it");
   assert.deepEqual(pausedSessionsIn(guest.written.at(-1)!.content), recorded.map(({ cwd: _, ...s }) => s), "the file it wrote says the same, as a stopped disk's does");
   assert.deepEqual((await sessionFacts(guest)).at(-1), {
-    id: "t91", state: "failed", herdrPane: null, harness: "pi", harnessSessionId: "/s.jsonl", status: "unknown", title: "plan", message: "pi exited with 1 as it started. The terminal showed:\npi: cannot open /s.jsonl",
+    id: "t91", state: "failed", terminal: null, harness: "pi", harnessSessionId: "/s.jsonl", status: "unknown", title: "plan", message: "pi exited with 1 as it started. The terminal showed:\npi: cannot open /s.jsonl",
   });
   assert.equal((await recordSessions(guest))![1]!.id, "t91", "the ID holds from one record to the next");
   failing = false;
   assert.deepEqual(placed(await relaunchSessions(guest, unlocked)), [["sh", "present", "t2"], ["plan", "relaunched", "t3"]]);
-  assert.deepEqual((await recordSessions(guest))!.map((r) => r.herdrPane), ["t2", "t3"]);
+  assert.deepEqual((await recordSessions(guest))!.map((r) => r.terminal), ["t2", "t3"]);
   assert.deepEqual(lastFile(guest).failed, []);
 });
 
 test("a stalled relaunch keeps its terminal as the failed session's, until a relaunch finds it running", async () => {
-  const records: SessionRecord[] = [{ herdrPane: "t91", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" }];
+  const records: SessionRecord[] = [{ terminal: "t91", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" }];
   let stalling = true;
   const core = fakeCore({ answer: (method) => stalling && (method === "terminal.wait" || method === "terminal.get") ? { exitCode: null, output: "" } : undefined });
   const guest = pylon(core, { file: records });
   const [outcome] = await relaunchSessions(guest, unlocked);
-  assert.deepEqual([outcome!.result, outcome!.herdrPane], ["failed", "t1"]);
+  assert.deepEqual([outcome!.result, outcome!.terminal], ["failed", "t1"]);
   assert.match(outcome!.result === "failed" ? outcome!.message : "", /Claude Code launch stalled/);
   stalling = false;
   assert.equal(await dropFailedSession(guest, "t1"), false, "one in a terminal is dropped by closing the terminal, not by its ID");
-  assert.deepEqual(await recordSessions(guest), [{ ...records[0], herdrPane: "t1", id: "t1" }]);
-  assert.deepEqual((await sessionFacts(guest)).map((f) => [f.id, f.state, f.herdrPane, f.harness, f.harnessSessionId, f.status]), [["t1", "failed", "t1", "claude-code", "aaaa", "idle"]], "its terminal is the failed session, with its status");
+  assert.deepEqual(await recordSessions(guest), [{ ...records[0], terminal: "t1", id: "t1" }]);
+  assert.deepEqual((await sessionFacts(guest)).map((f) => [f.id, f.state, f.terminal, f.harness, f.harnessSessionId, f.status]), [["t1", "failed", "t1", "claude-code", "aaaa", "idle"]], "its terminal is the failed session, with its status");
   assert.deepEqual(placed(await relaunchSessions(guest, unlocked)), [["review", "present", "t1"]]);
   assert.equal(runs(core).length, 1, "the session is not started twice");
-  assert.deepEqual(lastFile(guest), { ...lastFile(guest), sessions: [{ ...records[0], herdrPane: "t1" }], failed: [] });
+  assert.deepEqual(lastFile(guest), { ...lastFile(guest), sessions: [{ ...records[0], terminal: "t1" }], failed: [] });
 });
 
 test("a failed session left in its terminal is dropped by closing that terminal", async () => {
-  const records: SessionRecord[] = [{ herdrPane: "t91", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" }];
+  const records: SessionRecord[] = [{ terminal: "t91", harness: "claude-code", title: "review", cwd: "/home/user", harnessSessionId: "aaaa" }];
   let stalling = true;
   const core = fakeCore({ answer: (method) => stalling && (method === "terminal.wait" || method === "terminal.get") ? { exitCode: null, output: "" } : undefined });
   const guest = pylon(core, { file: records });
@@ -718,7 +718,7 @@ test("a failed session left in its terminal is dropped by closing that terminal"
 });
 
 test("dropping a failed session in no terminal removes it from the sessions file, so no wake tries it again", async () => {
-  const records: SessionRecord[] = [{ herdrPane: "t91", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" }];
+  const records: SessionRecord[] = [{ terminal: "t91", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" }];
   const guest = pylon(fakeCore({ start: (t) => exits(t, 1, "") }), { file: records });
   assert.deepEqual(placed(await relaunchSessions(guest, unlocked)), [["plan", "failed", null]]);
   assert.equal(await dropFailedSession(guest, "t1"), false, "another address does not name it");
@@ -804,7 +804,7 @@ test("Claude seeding refuses root and HOME, including aliases", async (t) => {
 
 test("resuming a session at root or HOME seeds only the pylon checkout", async () => {
   for (const cwd of ["/", "/home/user"]) {
-    const records: SessionRecord[] = [{ herdrPane: "t91", harness: "claude-code", title: "review", cwd, harnessSessionId: "bd2c2d6b" }];
+    const records: SessionRecord[] = [{ terminal: "t91", harness: "claude-code", title: "review", cwd, harnessSessionId: "bd2c2d6b" }];
     const guest = pylon(fakeCore(), { file: records });
     assert.equal((await relaunchSessions(guest, unlocked))[0]!.result, "relaunched");
     assert.deepEqual(guest.execs.filter((argv) => argv[2] === seedClaudeState).map((argv) => argv[3]), [checkoutDir]);
@@ -825,25 +825,49 @@ test("a message Claude's prompt cannot take exactly is refused with a reason, an
 
 test("a sessions file is read as the sessions it records, without its models or fields Nexus does not know, and one that fails a check is refused", () => {
   const unknown = { zzUnknown: 1 };
-  const claude = { herdrPane: "t1", harness: "claude-code", title: "review", cwd: "/home/user/workspace/repo", harnessSessionId: "s-1", model: "opus" };
-  const shell = { herdrPane: "t2", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null };
-  const failed = { record: { herdrPane: "t3", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" }, inPane: false, message: "pi did not start" };
-  const file = { version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: [{ ...claude, ...unknown }, { ...shell, ...unknown }], failed: [{ ...failed, record: { ...failed.record, ...unknown }, ...unknown }], ...unknown };
+  const claude = { terminal: "t1", harness: "claude-code", title: "review", cwd: "/home/user/workspace/repo", harnessSessionId: "s-1", model: "opus" };
+  const shell = { terminal: "t2", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null };
+  const failed = { record: { terminal: "t3", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" }, inTerminal: false, message: "pi did not start" };
+  const file = { version: 2, recordedAt: "2027-01-01T00:00:00Z", sessions: [{ ...claude, ...unknown }, { ...shell, ...unknown }], failed: [{ ...failed, record: { ...failed.record, ...unknown }, ...unknown }], ...unknown };
   assert.deepEqual(pausedSessionsIn(JSON.stringify(file)), [
-    { id: "t1", herdrPane: "t1", harness: "claude-code", title: "review", harnessSessionId: "s-1" },
-    { id: "t2", herdrPane: "t2", harness: "shell", title: "sh", harnessSessionId: null },
-    { id: "t3", herdrPane: null, harness: "pi", title: "plan", harnessSessionId: "/s.jsonl" },
+    { id: "t1", terminal: "t1", harness: "claude-code", title: "review", harnessSessionId: "s-1" },
+    { id: "t2", terminal: "t2", harness: "shell", title: "sh", harnessSessionId: null },
+    { id: "t3", terminal: null, harness: "pi", title: "plan", harnessSessionId: "/s.jsonl" },
   ]);
   const { harnessSessionId: _, ...noSessionId } = shell;
   const bad: unknown[] = [
-    null, [], { ...file, version: 2 }, { ...file, recordedAt: "" }, { ...file, sessions: null }, { ...file, failed: undefined },
-    { ...file, sessions: [{ ...shell, harness: "codex" }] }, { ...file, sessions: [{ ...shell, title: "" }] }, { ...file, sessions: [{ ...shell, cwd: 1 }] }, { ...file, sessions: [{ ...shell, herdrPane: undefined }] },
+    null, [], { ...file, version: 3 }, { ...file, recordedAt: "" }, { ...file, sessions: null }, { ...file, failed: undefined },
+    { ...file, sessions: [{ ...shell, harness: "codex" }] }, { ...file, sessions: [{ ...shell, title: "" }] }, { ...file, sessions: [{ ...shell, cwd: 1 }] }, { ...file, sessions: [{ ...shell, terminal: undefined }] },
     { ...file, sessions: [{ ...claude, model: "" }] }, { ...file, sessions: [{ ...shell, harnessSessionId: "" }] }, { ...file, sessions: [null] },
     { ...file, sessions: [{ ...shell, harness: "toString" }] }, { ...file, sessions: [{ ...shell, harness: "constructor" }] },
-    { ...file, failed: [{ ...failed, inPane: "no" }] }, { ...file, failed: [{ ...failed, message: "" }] }, { ...file, failed: [{ ...failed, record: null }] },
+    { ...file, failed: [{ ...failed, inTerminal: "no" }] }, { ...file, failed: [{ ...failed, message: "" }] }, { ...file, failed: [{ ...failed, record: null }] },
   ];
   for (const value of bad) assert.throws(() => pausedSessionsIn(JSON.stringify(value)), Error, JSON.stringify(value));
-  assert.deepEqual(pausedSessionsIn(JSON.stringify({ ...file, sessions: [noSessionId], failed: [] })), [{ id: "t2", herdrPane: "t2", harness: "shell", title: "sh", harnessSessionId: null }], "a missing session ID reads as none");
+  assert.deepEqual(pausedSessionsIn(JSON.stringify({ ...file, sessions: [noSessionId], failed: [] })), [{ id: "t2", terminal: "t2", harness: "shell", title: "sh", harnessSessionId: null }], "a missing session ID reads as none");
+});
+
+test("a sessions file a probe of contract 1 wrote under herdrPane and inPane is read as its sessions, and the wake's record writes version 2", async () => {
+  const shell = { herdrPane: "t1", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null };
+  const pi = { herdrPane: "t2", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" };
+  const failed = { record: { herdrPane: "t3", harness: "pi", title: "notes", cwd: "/home/user", harnessSessionId: "/n.jsonl" }, inPane: false, message: "pi did not start" };
+  const old = { version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: [shell, pi], failed: [failed] };
+  assert.deepEqual(pausedSessionsIn(JSON.stringify(old)), [
+    { id: "t1", terminal: "t1", harness: "shell", title: "sh", harnessSessionId: null },
+    { id: "t2", terminal: "t2", harness: "pi", title: "plan", harnessSessionId: "/s.jsonl" },
+    { id: "t3", terminal: null, harness: "pi", title: "notes", harnessSessionId: "/n.jsonl" },
+  ]);
+  const { herdrPane, ...renamed } = shell;
+  for (const value of [{ ...old, sessions: [{ ...renamed, terminal: herdrPane }] }, { ...old, version: 2 }, { ...old, failed: [{ record: failed.record, inTerminal: false, message: failed.message }] }]) {
+    assert.throws(() => pausedSessionsIn(JSON.stringify(value)), Error, `each version takes only its own names: ${JSON.stringify(value)}`);
+  }
+
+  const core = fakeCore();
+  const guest = pylon(core, { file: JSON.stringify(old) });
+  assert.deepEqual((await relaunchSessions(guest, unlocked)).map((o) => [o.record.title, o.result]), [["sh", "relaunched"], ["plan", "relaunched"], ["notes", "relaunched"]]);
+  const file = JSON.parse(guest.written.findLast((f) => f.path === sessionsFile)!.content) as { version: number; sessions: Record<string, unknown>[]; failed: unknown[] };
+  assert.equal(file.version, 2);
+  assert.deepEqual(file.sessions.map((r) => [r["title"], typeof r["terminal"], "herdrPane" in r]), [["sh", "string", false], ["plan", "string", false], ["notes", "string", false]]);
+  assert.deepEqual(file.failed, []);
 });
 
 test("attached terminals are the core's viewers, which pgrep counts, and a count pgrep did not give rejects", async () => {

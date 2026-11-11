@@ -24,8 +24,7 @@ function operationText(o: ImageOperation): string {
 function imagesText(view: ImagesView): string {
   const role = (id: string) => id === view.current ? "current" : id === view.previous ? "previous" : "-";
   const images = view.images.length === 0 ? "No images." : table(imageHead, view.images.map((image) => imageRow(image, role(image.id))));
-  // A control plane older than 0.79.0 sends no fetches.
-  const fetches = view.fetches ?? [];
+  const { fetches } = view;
   return [
     images,
     ...fetches.length === 0 ? [] : [`Fetches of the current image ${view.current}:`, ...fetches.map((f) => `  ${f.node}: ${f.state}${f.failures > 0 ? `, ${f.failures} failed` : ""}${f.reason === null ? "" : `: ${f.reason}`}`)],

@@ -59,7 +59,7 @@ export function localPipes(): { open: OpenPipe; requests: (readonly string[])[];
 
 /** The read of a sessions file that records `records` and no failed sessions. */
 export function sessionsFileReply(records: readonly SessionRecord[]): ExecReply {
-  return { exitCode: 0, output: JSON.stringify({ version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: records, failed: [] }) };
+  return { exitCode: 0, output: JSON.stringify({ version: 2, recordedAt: "2027-01-01T00:00:00Z", sessions: records, failed: [] }) };
 }
 
 /** A core call as core.ts makes it, read back as its method and params, or null for any other exec. */

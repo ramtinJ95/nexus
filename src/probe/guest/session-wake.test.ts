@@ -34,8 +34,8 @@ function keptShell(title: string, cwd: string, options: Parameters<typeof fakeCo
   return core;
 }
 
-const shell: SessionRecord = { herdrPane: "t1", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null };
-const broken: SessionRecord = { herdrPane: "t2", harness: "shell", title: "broken", cwd: "/gone", harnessSessionId: null };
+const shell: SessionRecord = { terminal: "t1", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null };
+const broken: SessionRecord = { terminal: "t2", harness: "shell", title: "broken", cwd: "/gone", harnessSessionId: null };
 
 test("a wake logs each session's outcome, and one that does not come back fails neither the others nor the wake", async () => {
   const core = keptShell("sh", "/home/user", { answer: (method, params) => method === "terminal.run" && params.cwd === "/gone" ? coreError("invalid_params", "no such directory /gone") : undefined });
@@ -60,10 +60,10 @@ test("a wake whose Herdr Core does not start still succeeds, and its pylon lists
   });
   const { lines, log } = logged();
   const why = "Herdr Core did not start within 5 seconds: tini: not found";
-  assert.deepEqual(await relaunchAfterWake(pylonId, guest, log), [{ record: shell, result: "failed", herdrPane: null, message: why }]);
+  assert.deepEqual(await relaunchAfterWake(pylonId, guest, log), [{ record: shell, result: "failed", terminal: null, message: why }]);
   assert.deepEqual(lines, [`sessions: "sh" (shell) did not come back: ${why}`]);
-  assert.deepEqual(await sessionFacts(guest), [{ id: "t1", state: "failed", herdrPane: null, harness: "shell", harnessSessionId: null, status: "unknown", title: "sh", message: why }]);
-  assert.deepEqual(await relaunchAfterWake(pylonId, guest, log), [{ record: shell, result: "failed", herdrPane: null, message: why }], "the next wake tries it again");
+  assert.deepEqual(await sessionFacts(guest), [{ id: "t1", state: "failed", terminal: null, harness: "shell", harnessSessionId: null, status: "unknown", title: "sh", message: why }]);
+  assert.deepEqual(await relaunchAfterWake(pylonId, guest, log), [{ record: shell, result: "failed", terminal: null, message: why }], "the next wake tries it again");
 });
 
 test("a wake whose sessions file cannot be read logs it and leaves the file as it was", async () => {
@@ -82,7 +82,7 @@ const upWithShell = () => {
   const core = keptShell("sh", "/home/user");
   return fakeGuest((argv) => core.reply(argv) ?? { exitCode: 3, output: "" });
 };
-const recordedShell: PausedSession[] = [{ id: "t1", herdrPane: "t1", harness: "shell", harnessSessionId: null, title: "sh" }];
+const recordedShell: PausedSession[] = [{ id: "t1", terminal: "t1", harness: "shell", harnessSessionId: null, title: "sh" }];
 
 test("a pause logs what it recorded and returns it for the backend to keep, and one that cannot record still pauses", async () => {
   const recorded = logged();
@@ -108,7 +108,7 @@ function markOf(pending: boolean, lastRecorded: readonly PausedSession[] | null)
   };
   return { state, mark };
 }
-const lastRecord: PausedSession[] = [{ id: "t9", herdrPane: "t9", harness: "shell", harnessSessionId: null, title: "kept" }];
+const lastRecord: PausedSession[] = [{ id: "t9", terminal: "t9", harness: "shell", harnessSessionId: null, title: "kept" }];
 
 test("a pause whose relaunch is still pending keeps the last record without recording", async () => {
   const guest = fakeGuest(() => assert.fail("nothing is recorded"));
@@ -198,7 +198,7 @@ for (const keeps of [true, false]) {
       const { sent } = await wakeWithMessage(p, `wake ${wake}`);
       const running = p.running(worker);
       assert.equal(running.length, 1, `after wake ${wake}, one Claude runs the worker's session, not ${running.length}`);
-      assert.equal(sent.herdrPane, running[0], `the message of wake ${wake} went to it`);
+      assert.equal(sent.terminal, running[0], `the message of wake ${wake} went to it`);
     }
     assert.deepEqual(p.titles(), ["Fix the login page"]);
   });
@@ -226,6 +226,6 @@ test("a pylon whose earlier wakes left the worker in several terminals comes bac
   assert.notEqual(running, first);
   assert.ok(!others.includes(running!));
   const file = JSON.parse(p.guest.written.findLast((f) => f.path === sessionsFile)!.content);
-  assert.deepEqual(file.sessions.map((r: SessionRecord) => r.herdrPane), [running], "the next pause records one");
+  assert.deepEqual(file.sessions.map((r: SessionRecord) => r.terminal), [running], "the next pause records one");
   assert.deepEqual(file.failed, []);
 });

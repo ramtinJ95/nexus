@@ -138,9 +138,8 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
         return { json: queued, text: queued.length === 0 ? "No queued threads." : queuedTable(queued, colour) };
       }
       const listing = request(api, routes.list, { query: { project, ...v.open === true ? { deleted: false, status: "open" } : v.all === true ? {} : { deleted: false } } });
-      // A control plane older than 0.77.0 ignores status=open and answers every thread but the deleted ones.
       const [queued, listed] = await Promise.all([queuing, listing]);
-      const shown = listed.filter((r) => (v.open !== true || r.status === "active" || r.status === "idle") && (v.active !== true || r.status === "active") && (v["needs-me"] !== true || needsPerson(r.attention)));
+      const shown = listed.filter((r) => (v.active !== true || r.status === "active") && (v["needs-me"] !== true || needsPerson(r.attention)));
       const threads = shown.slice(0, limit);
       return { json: threads, text: threadsText(threads, queued.slice(0, limit - threads.length), colour) };
     },
@@ -228,13 +227,13 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
       const body = Object.fromEntries((["harness", "title"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]]));
       // The API answers once the agent is ready or waits for its human, which can take a minute.
       const opened = await whenRunning(api, io, id!, () => request(api, pylonRoutes.openSession, { thread: id!, body }), "no session was opened");
-      return { json: opened, text: `Opened ${opened.harness} session ${JSON.stringify(opened.title)} in pane ${opened.herdrPane} of ${id}. \`nexus attach ${id}\` attaches to it.` };
+      return { json: opened, text: `Opened ${opened.harness} session ${JSON.stringify(opened.title)} in terminal ${opened.terminal} of ${id}. \`nexus attach ${id}\` attaches to it.` };
     },
   },
   // Not tried again on a 409: a paused session comes back with its pylon's wake, and a terminal asked for before the
   // wake may name another session after it.
   "session close": {
-    help: ["  nexus session close <thread> <pane|id>       a session in no pane by its ID, which `nexus show` gives"],
+    help: ["  nexus session close <thread> <terminal|id>   a session in no terminal by its ID, which `nexus show` gives"],
     thread: true,
     args: [2, 2],
     async run(api, [id, session]) {
@@ -243,7 +242,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     },
   },
   attach: {
-    help: ["  nexus attach <thread>                        this terminal on the pylon's Herdr sessions, through the control plane"],
+    help: ["  nexus attach <thread>                        this terminal on the pylon's Herdr Core terminals, through the control plane"],
     thread: true,
     args: [1, 1],
     async run(_api, [id], _values, _follow, local) {

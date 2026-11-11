@@ -23,7 +23,7 @@ export type PylonCommand =
    * `session` is who the control plane last saw in the terminal, so a terminal that runs another session since a wake
    * is left open. None for a terminal no observation has listed yet, such as one opened a moment ago.
    */
-  | { kind: "close-session"; herdrPane: string; session?: SessionIdentity }
+  | { kind: "close-session"; terminal: string; session?: SessionIdentity }
   /** Forgets a failed session the last wake left in no terminal, so no wake tries it again. */
   | { kind: "drop-failed-session"; id: string }
   /**
@@ -61,7 +61,7 @@ export type CommandResult =
    * `stalled`: a prompted launch showed no sign its first prompt went in, so its terminal stays open for a person to check,
    * and this says why.
    */
-  | { kind: "open-session"; herdrPane: string; stalled?: string }
+  | { kind: "open-session"; terminal: string; stalled?: string }
   /**
    * `not-open`: no such terminal is live. `moved`: the terminal runs another session than the command names, such as
    * one a `/clear` started there. Both leave every terminal as it was.
@@ -76,15 +76,15 @@ export type CommandResult =
    * answer. `starting`: Claude had reported no state yet. `moved`: the terminal stopped running the session before
    * anything was typed, as when a `/clear` started another session in it. These mean nothing was typed, so the message
    * can be sent again. A failed command may have typed the message.
-   * `herdrPane` is the terminal Claude runs in, and `resumed` says the session had no live terminal and was resumed into
+   * `terminal` is the terminal Claude runs in, and `resumed` says the session had no live terminal and was resumed into
    * one first.
    */
-  | { kind: "send-claude"; outcome: SendClaudeOutcome; herdrPane: string; resumed: boolean }
+  | { kind: "send-claude"; outcome: SendClaudeOutcome; terminal: string; resumed: boolean }
   /**
    * The send's own result, `failed` for a send that failed and so may have typed part of the message, or `unknown`
    * when the probe holds no send under the ID: it never got one, or forgot it in a restart or an hour after it settled.
    */
-  | { kind: "send-claude-outcome"; send: { outcome: SendClaudeOutcome; herdrPane: string; resumed: boolean } | "failed" | "unknown" }
+  | { kind: "send-claude-outcome"; send: { outcome: SendClaudeOutcome; terminal: string; resumed: boolean } | "failed" | "unknown" }
   /**
    * `interrupted`: Esc was pressed while Claude worked. The rest press nothing. `idle`: Claude was not working, and a second
    * Esc there opens its rewind picker. `blocked`: Claude waits at a dialog, which Esc would cancel. `unknown`:
@@ -120,7 +120,7 @@ const pylonCommandSchema = z.discriminatedUnion("kind", [
   z.looseObject({ kind: z.literal("exec"), argv: z.array(z.string()).min(1), cwd: z.string().startsWith("/", "expected an absolute path"), timeoutMs: z.int().min(1).max(60_000) }),
   z.discriminatedUnion("harness", sessionHarnessSchema.options.map(openSession) as [ReturnType<typeof openSession>, ...ReturnType<typeof openSession>[]]),
   z.looseObject({
-    kind: z.literal("close-session"), herdrPane: nonEmpty,
+    kind: z.literal("close-session"), terminal: nonEmpty,
     session: z.looseObject({ harness: sessionHarnessSchema, harnessSessionId: nonEmpty.nullable(), title: nonEmpty.nullable() }).exactOptional(),
   }),
   z.looseObject({ kind: z.literal("drop-failed-session"), id: nonEmpty }),
@@ -152,10 +152,10 @@ export function parsePylonCommand(body: string): PylonCommand {
   return parseJson(asSent(pylonCommandSchema), body, "command");
 }
 
-const sendSchema = z.looseObject({ outcome: z.enum(sendClaudeOutcomes), herdrPane: nonEmpty, resumed: z.boolean() });
+const sendSchema = z.looseObject({ outcome: z.enum(sendClaudeOutcomes), terminal: nonEmpty, resumed: z.boolean() });
 const commandResultSchema = z.discriminatedUnion("kind", [
   z.looseObject({ kind: z.literal("exec"), exitCode: unchecked<number | null>(), output: unchecked<string>(), truncated: unchecked<boolean>() }),
-  z.looseObject({ kind: z.literal("open-session"), herdrPane: nonEmpty, stalled: nonEmpty.exactOptional() }),
+  z.looseObject({ kind: z.literal("open-session"), terminal: nonEmpty, stalled: nonEmpty.exactOptional() }),
   z.looseObject({ kind: z.literal("close-session"), outcome: z.enum(closeSessionOutcomes) }),
   z.looseObject({ kind: z.literal("drop-failed-session"), dropped: z.boolean() }),
   z.looseObject({ kind: z.literal("send-claude"), ...sendSchema.shape }),

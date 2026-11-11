@@ -97,9 +97,9 @@ export async function relaunchAfterWake(pylonId: PylonId, guest: Guest, log: Pyl
 function outcomeLine(o: RelaunchOutcome): string {
   const session = `${JSON.stringify(o.record.title)} (${o.record.harness})`;
   switch (o.result) {
-    case "present": return `sessions: ${session} was already running in ${o.herdrPane}`;
-    case "relaunched": return `sessions: relaunched ${session} in ${o.herdrPane}`;
-    case "failed": return `sessions: ${session} did not come back${o.herdrPane === null ? "" : `, and its terminal ${o.herdrPane} stays open`}: ${o.message}`;
-    case "dropped": return `sessions: dropped ${session}, a second record of ${agentKinds[o.record.harness].label} session ${o.record.harnessSessionId}${o.herdrPane === null ? "" : `, and closed its terminal ${o.herdrPane}`}`;
+    case "present": return `sessions: ${session} was already running in ${o.terminal}`;
+    case "relaunched": return `sessions: relaunched ${session} in ${o.terminal}`;
+    case "failed": return `sessions: ${session} did not come back${o.terminal === null ? "" : `, and its terminal ${o.terminal} stays open`}: ${o.message}`;
+    case "dropped": return `sessions: dropped ${session}, a second record of ${agentKinds[o.record.harness].label} session ${o.record.harnessSessionId}${o.terminal === null ? "" : `, and closed its terminal ${o.terminal}`}`;
   }
 }

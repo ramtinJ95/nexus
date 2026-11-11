@@ -2,9 +2,13 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), except in the commands [Version skew](cli.md#version-skew) names, so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.86.0
+
+Renames a session's `herdrPane` to `terminal` in `ThreadDetail.sessions`, which `GET /v1/threads/<thread>` and `show --json` answer, and in the `OpenedSession` that `POST /v1/threads/<thread>/sessions` and `session open --json` answer. The attach route's `pane` is `terminal`, and the status type `HerdrStatus` is `TerminalStatus`. Each still holds the address of a Herdr Core terminal, such as `t7`. `show` prints a session `in terminal <address>`, `session open` prints `Opened <harness> session "<title>" in terminal <address> of <thread>.`, and `session close` takes `<terminal|id>`. The CLI now needs a control plane of 0.86.0 or later, since an older one names the field `herdrPane`, which this CLI would read as no terminal. A CLI older than 0.86.0 finds no `herdrPane` in this control plane's sessions, so `show` and `session open` print `in pane undefined` for each session's terminal. Its `nexus attach` sends no `pane`, so it attaches as before. A client that reads `herdrPane` from the CLI's JSON, such as the Claude Code mod in `claude-mods`, finds none.
+
 ## 0.85.0
 
-`POST /v1/threads` and `POST /v1/items` answer 400 to a Claude worker's `model` that names a Fable model, `claude-fable-*` or the alias `fable` in any case, with or without a suffix such as `[1m]`, saying Fable models are not available in pylons, since the pylon image's Claude Code refuses Fable and would run Opus while the thread recorded Fable. `start --claude --model` and `item add --claude --model` refuse such a model with exit code 64 before they send a request, so they refuse it against any control plane. A control plane older than 0.85.0 accepts the model from other callers, such as its dashboard's start form, and records it while the worker runs Opus on an image that denies Fable. Every other model is as before.
+`POST /v1/threads` and `POST /v1/items` answer 400 to a Claude worker's `model` that names a Fable model, `claude-fable-*` or the alias `fable` in any case, with or without a suffix such as `[1m]`, saying Fable models are not available in pylons, since the pylon image's Claude Code refuses Fable and would run Opus while the thread recorded Fable. `start --claude --model` and `item add --claude --model` refuse such a model with exit code 64 before they send a request, so they refuse it against any control plane. Every other model is as before.
 
 ## 0.84.0
 
@@ -12,7 +16,7 @@ A pylon's sessions are Herdr Core terminals, so a session's `herdrPane` is a Cor
 
 ## 0.83.0
 
-Adds `nexus exec <thread> <line>`, which runs a shell line in a running pylon with stdin and stdout piped to it untouched, as `ssh` does, from the WebSocket `GET /v1/threads/<thread>/exec`, so `hc machine add --via 'nexus exec <thread>'` makes the pylon a Herdr Core machine, as [the exec route](cli.md#the-exec-route) describes. It never wakes a pylon. A control plane older than 0.83.0 answers the route 404, so `exec` fails there.
+Adds `nexus exec <thread> <line>`, which runs a shell line in a running pylon with stdin and stdout piped to it untouched, as `ssh` does, from the WebSocket `GET /v1/threads/<thread>/exec`, so `hc machine add --via 'nexus exec <thread>'` makes the pylon a Herdr Core machine, as [the exec route](cli.md#the-exec-route) describes. It never wakes a pylon.
 
 ## 0.82.0
 
@@ -20,7 +24,7 @@ Adds `nexus cat <thread> <path>`, which writes one file of the pylon's checkout 
 
 ## 0.81.0
 
-Adds `nexus answer <question|thread> [option]`, which prints a question and its options, or a thread's open questions, and with an option answers it through `POST /v1/questions/<id>/answer` once the person types `yes` in a terminal, as [Answering from the CLI](cli.md#answering-from-the-cli) describes. Without a terminal it refuses before it sends anything. Adds `GET /v1/questions/<id>`, which answers the `Question` as stored. A control plane older than 0.81.0 answers that route 404, so `answer` there finds a question only by its thread.
+Adds `nexus answer <question|thread> [option]`, which prints a question and its options, or a thread's open questions, and with an option answers it through `POST /v1/questions/<id>/answer` once the person types `yes` in a terminal, as [Answering from the CLI](cli.md#answering-from-the-cli) describes. Without a terminal it refuses before it sends anything. Adds `GET /v1/questions/<id>`, which answers the `Question` as stored.
 
 ## 0.80.0
 
@@ -28,15 +32,15 @@ Adds `nexus answer <question|thread> [option]`, which prints a question and its 
 
 ## 0.79.0
 
-Adds `fetches` to `ImagesView`, which `GET /v1/images` and `image list --json` answer: one `ImageFetch` per online node that lacks the current image, which the control plane copies it to outside a rollout, as [Images](cli.md#images) describes. Plain `image list` prints them under the images. A control plane older than 0.79.0 omits the field, and `image list` prints no fetches. A rollout step a node skips now says the control plane sends it the image once it is back online. `nexus doctor` gains an `image` check per node.
+Adds `fetches` to `ImagesView`, which `GET /v1/images` and `image list --json` answer: one `ImageFetch` per online node that lacks the current image, which the control plane copies it to outside a rollout, as [Images](cli.md#images) describes. Plain `image list` prints them under the images. A rollout step a node skips now says the control plane sends it the image once it is back online. `nexus doctor` gains an `image` check per node.
 
 ## 0.78.0
 
-Adds `templateInputs` to `Project`, a list of repository paths whose git object IDs at the thread's commit join the template key beside `.nexus/setup`'s, as [Templates at thread start](cli.md#templates-at-thread-start) describes. `project edit --template-input PATH` sets it, and `--clear-template-inputs` empties it. `PATCH /v1/projects/<id>` and `POST /v1/projects` accept it. A project that lists none keeps the template keys it had. A control plane older than 0.78.0 answers an edit that sets it with 400, so `project edit --template-input` fails there with exit code 64.
+Adds `templateInputs` to `Project`, a list of repository paths whose git object IDs at the thread's commit join the template key beside `.nexus/setup`'s, as [Templates at thread start](cli.md#templates-at-thread-start) describes. `project edit --template-input PATH` sets it, and `--clear-template-inputs` empties it. `PATCH /v1/projects/<id>` and `POST /v1/projects` accept it. A project that lists none keeps the template keys it had.
 
 ## 0.77.0
 
-Adds `status=open` to `GET /v1/threads`, which lists only active and idle threads, and answers 400 to any other `status`. The dashboard reads it for its notifications. `threads --open` asks for it, and prints only the active and idle threads. A control plane older than 0.77.0 ignores `status` and answers every thread but the deleted ones, so `--open` leaves out the archived ones itself. Every other query answers as before.
+Adds `status=open` to `GET /v1/threads`, which lists only active and idle threads, and answers 400 to any other `status`. The dashboard reads it for its notifications. `threads --open` asks for it, and prints only the active and idle threads. Every other query answers as before.
 
 ## 0.76.0
 

@@ -12,7 +12,7 @@ import { json, jsonOrNull, type Db, type Holding, type Row } from "./db.ts";
 import { desiredPhase, finalCodes, isOpenStatus, maxAttempts, noAttempts, type ActivityFacts, type ArchiveFacts, type FailedAttempt, type RegistryWrite, type ThreadStatus } from "./reconcile.ts";
 import { pylonIdOf, type NodeName, type PylonId, type ThreadId } from "../ids.ts";
 import type { JobStatus, Subject } from "../protocol/jobs.ts";
-import { pylonEventSchema, type HerdrStatus, type NodeObservation, type ReportedEvent } from "../protocol/observations.ts";
+import { pylonEventSchema, type TerminalStatus, type NodeObservation, type ReportedEvent } from "../protocol/observations.ts";
 import type { ProjectId } from "../ids.ts";
 import type { SessionHarness } from "../protocol/agent-kinds.ts";
 import { defaultClaudeModel } from "../protocol/models.ts";
@@ -71,17 +71,17 @@ export interface ListedPylon { node: NodeName; failed: string | null; job: JobSt
  * A session of a pylon. `id` names it, and is what closes it: the address of its Herdr Core terminal, such as `t7`,
  * or for a failed session in no terminal the address it was recorded at. A `paused` session comes back when its pylon
  * wakes. A `failed` one did not come back from the last wake, `message` says why, and the next wake tries it again. A
- * paused session's `herdrPane` is the terminal it had, and a failed one's the terminal it left behind, such as a
+ * paused session's `terminal` is the terminal it had, and a failed one's the terminal it left behind, such as a
  * Claude whose launch stalled. `harness` is `shell` for an agent Nexus does not launch, such as Codex run by hand.
  * `harnessSessionId` is the Claude Code session ID or the pi session file, which a wake resumes. `status` is Core's
  * status of the terminal when last read running, `unknown` if never. `title` is its terminal's `nexus.title` label,
  * or for a terminal opened by hand its name or its harness's label, and null for a session last observed from a probe
  * that did not report titles.
  */
-export type Session = { pylon: PylonId; id: string; harness: SessionHarness; harnessSessionId: string | null; title: string | null; status: HerdrStatus } & (
-  | { state: "running"; herdrPane: string; message: null }
-  | { state: "paused"; herdrPane: string | null; message: null }
-  | { state: "failed"; herdrPane: string | null; message: string });
+export type Session = { pylon: PylonId; id: string; harness: SessionHarness; harnessSessionId: string | null; title: string | null; status: TerminalStatus } & (
+  | { state: "running"; terminal: string; message: null }
+  | { state: "paused"; terminal: string | null; message: null }
+  | { state: "failed"; terminal: string | null; message: string });
 /**
  * `url` is what the data model calls a preview's URL, on its node's tailnet name. `failed` says why the preview
  * cannot answer while its node's last observation reports its service failed or its port without a route into the
@@ -120,8 +120,8 @@ function threadRow(r: Row): StoredThread {
 /** The table's checks hold each state to its fields. */
 function sessionRow(r: Row): Session {
   return {
-    pylon: r.pylon as PylonId, id: r.id as string, herdrPane: r.herdr_pane as string | null, harness: r.harness as SessionHarness,
-    harnessSessionId: r.harness_session_id as string | null, title: r.title as string | null, status: r.status as HerdrStatus,
+    pylon: r.pylon as PylonId, id: r.id as string, terminal: r.terminal as string | null, harness: r.harness as SessionHarness,
+    harnessSessionId: r.harness_session_id as string | null, title: r.title as string | null, status: r.status as TerminalStatus,
     state: r.state as Session["state"], message: r.message as string | null,
   } as Session;
 }
@@ -662,7 +662,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         if (event.kind !== "session.waiting") agentActivity(clock(), thread);
         // A side session that finishes while the Claude worker's own session still has a turn is no reply, so the thread
         // never waits on the person while the builder works. Any other session's turn end is one, as Claude gives the
-        // worker's pane a new session after /clear and a person may run Claude by hand after a failed launch.
+        // worker's terminal a new session after /clear and a person may run Claude by hand after a failed launch.
         const own = claude.claudeWorker(thread)?.session ?? null;
         const side = own !== null && own !== session
           && sql("SELECT 1 FROM session_activity WHERE thread = ? AND session = ? AND (state = 'session.waiting' OR updated_at > ?)").get(thread, own, clock() - sessionActivityTtlMs) !== undefined;
@@ -964,11 +964,11 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         const listed = new Set(write.sessions.map((s) => s.id));
         for (const { id } of sessions(write.pylonId)) if (!listed.has(id)) sql("DELETE FROM sessions WHERE pylon = ? AND id = ?").run(write.pylonId, id);
         for (const s of write.sessions) {
-          sql(`INSERT INTO sessions (pylon, id, herdr_pane, harness, harness_session_id, status, title, state, message)
-            VALUES ($pylon, $id, $herdrPane, $harness, $harnessSessionId, coalesce($status, 'unknown'), $title, $state, $message)
-            ON CONFLICT (pylon, id) DO UPDATE SET herdr_pane = excluded.herdr_pane, harness = excluded.harness, harness_session_id = excluded.harness_session_id,
+          sql(`INSERT INTO sessions (pylon, id, terminal, harness, harness_session_id, status, title, state, message)
+            VALUES ($pylon, $id, $terminal, $harness, $harnessSessionId, coalesce($status, 'unknown'), $title, $state, $message)
+            ON CONFLICT (pylon, id) DO UPDATE SET terminal = excluded.terminal, harness = excluded.harness, harness_session_id = excluded.harness_session_id,
             status = coalesce($status, sessions.status), title = excluded.title, state = excluded.state, message = excluded.message`).run({
-            $pylon: write.pylonId, $id: s.id, $herdrPane: s.herdrPane, $harness: s.harness, $harnessSessionId: s.harnessSessionId,
+            $pylon: write.pylonId, $id: s.id, $terminal: s.terminal, $harness: s.harness, $harnessSessionId: s.harnessSessionId,
             $status: s.status, $title: s.title, $state: s.state, $message: s.message,
           });
         }
@@ -978,8 +978,8 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         sql("UPDATE sessions SET state = 'paused', message = NULL WHERE pylon = ?").run(write.pylonId);
         return;
       case "sessions-resumed":
-        sql(`UPDATE sessions SET status = 'unknown', state = CASE WHEN herdr_pane IS NULL THEN 'failed' ELSE 'running' END,
-          message = CASE WHEN herdr_pane IS NULL THEN 'its last wake did not bring it back, and whether this one did is not read yet' END
+        sql(`UPDATE sessions SET status = 'unknown', state = CASE WHEN terminal IS NULL THEN 'failed' ELSE 'running' END,
+          message = CASE WHEN terminal IS NULL THEN 'its last wake did not bring it back, and whether this one did is not read yet' END
           WHERE pylon = ? AND state = 'paused'`).run(write.pylonId);
         return;
       case "output": {

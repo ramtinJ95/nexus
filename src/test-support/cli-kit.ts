@@ -145,7 +145,7 @@ export async function setup(t: TestContext, setupOptions: { queue?: boolean; htt
   /** What the node's probe answers a guest command with. Tests replace it. */
   let answer = async (command: PylonCommand): Promise<CommandResult> =>
     command.kind === "unlink-port" ? { kind: "unlink-port", refused: null }
-    : command.kind === "open-session" ? { kind: "open-session", herdrPane: "w1:p1" }
+    : command.kind === "open-session" ? { kind: "open-session", terminal: "t1" }
     : command.kind === "close-session" ? { kind: "close-session", outcome: "closed" }
     : { kind: "link-port", service: `port-${(command as { port: number }).port}` };
   const commands: PylonCommand[] = [];

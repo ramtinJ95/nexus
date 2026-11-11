@@ -26,7 +26,7 @@ export type Inbox = (t: Thread, message: AutomatedMessage) => Promise<"delivered
 type ClaudeTyped =
   | { kind: "sent"; sent: ClaudeSent }
   /** Nothing was typed and the request ID is forgotten, so a resend types it. */
-  | { kind: "nothing"; outcome: "blocked" | "starting" | "moved"; herdrPane: string }
+  | { kind: "nothing"; outcome: "blocked" | "starting" | "moved"; terminal: string }
   /**
    * An earlier send under this ID failed partway, or its probe no longer knows what became of it, so Claude may have
    * some or all of it. It is never typed again.
@@ -82,7 +82,7 @@ async function typeOnce(registry: InboxRegistry, thread: ThreadId, session: stri
   }
   if (result.outcome === "blocked" || result.outcome === "starting" || result.outcome === "moved") {
     registry.threads.setClaudeMessage(thread, requestId, null);
-    return { kind: "nothing", outcome: result.outcome, herdrPane: result.herdrPane };
+    return { kind: "nothing", outcome: result.outcome, terminal: result.terminal };
   }
   const sent: ClaudeSent = { session, outcome: result.outcome, resumed: result.resumed };
   registry.threads.setClaudeMessage(thread, requestId, { state: "sent", result: sent });

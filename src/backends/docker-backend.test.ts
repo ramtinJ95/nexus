@@ -313,7 +313,7 @@ test("a boot runs the boot policy in the container: the hooks on every boot, a n
 });
 
 test("a spawn for reading leaves a checkpoint's relaunch mark, and the pause after it keeps the sessions that checkpoint carried, recording none", async (t) => {
-  const paused = Buffer.from(JSON.stringify([{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }])).toString("base64url");
+  const paused = Buffer.from(JSON.stringify([{ id: "t1", terminal: "t1", harness: "shell", harnessSessionId: null, title: "sh" }])).toString("base64url");
   const labels = { "nexus.pylon": pylon, "nexus.image": "img-test00000000", "nexus.booted-from": "ckpt-a-1", "nexus.checkpoint": "ckpt-a-1", "nexus.sessions": paused };
   const docker = await fakeDocker(t, { ps: { stdout: "c1\n" }, "container inspect c1": running("c1", labels) });
   const mark = join(docker.root, "var", "relaunch");
@@ -338,7 +338,7 @@ test("a spawn for reading leaves a checkpoint's relaunch mark, and the pause aft
 });
 
 test("a pause whose session record fails keeps the sessions its checkpoint's pause recorded", async (t) => {
-  const paused = Buffer.from(JSON.stringify([{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }])).toString("base64url");
+  const paused = Buffer.from(JSON.stringify([{ id: "t1", terminal: "t1", harness: "shell", harnessSessionId: null, title: "sh" }])).toString("base64url");
   const labels = { "nexus.pylon": pylon, "nexus.image": "img-test00000000", "nexus.booted-from": "ckpt-a-1", "nexus.checkpoint": "ckpt-a-1", "nexus.sessions": paused };
   const docker = await fakeDocker(t, { ps: { stdout: "c1\n" }, "container inspect c1": running("c1", labels) });
   // First on the PATH the container's commands run with: a core runs, as pgrep finds it, but its API fails every call.
@@ -372,10 +372,14 @@ test("a checkpoint's sessions label is parsed, and one that does not parse is re
   const checkpoint = (sessions: string) => ({
     stdout: JSON.stringify([{ Id: "i1", Created: "2026-10-27T00:00:00Z", Config: { Labels: { "nexus.pylon": pylon, "nexus.image": "img-test00000000", "nexus.checkpoint": "ckpt-a-1", "nexus.sessions": sessions } } }]),
   });
-  const session = { id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" };
+  const session = { id: "t1", terminal: "t1", harness: "shell", harnessSessionId: null, title: "sh" };
   const docker = await fakeDocker(t, { images: { stdout: "i1\n" }, "image inspect i1": checkpoint(label([session])) });
   const backend = createDockerBackend({ images });
   assert.deepEqual(await backend.list(), [{ pylonId: pylon, vm: "stopped", checkpoint: "ckpt-a-1", image: "img-test00000000", sessions: [session] }]);
+
+  const { terminal, ...rest } = session;
+  await docker.answer({ images: { stdout: "i1\n" }, "image inspect i1": checkpoint(label([{ ...rest, herdrPane: terminal }])) });
+  assert.deepEqual(await backend.list(), [{ pylonId: pylon, vm: "stopped", checkpoint: "ckpt-a-1", image: "img-test00000000", sessions: [session] }], "a probe of contract 1 labelled the terminal herdrPane");
 
   await docker.answer({ images: { stdout: "i1\n" }, "image inspect i1": checkpoint(label([{ ...session, harness: "nobody" }])) });
   await assert.rejects(backend.list(), { message: /^label nexus\.sessions\[0\]\.harness: / });

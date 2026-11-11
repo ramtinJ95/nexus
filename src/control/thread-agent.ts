@@ -135,7 +135,7 @@ export function threadAgents(options: {
           const [refusal, code] = ({
             blocked: [`Claude waits at a prompt in its terminal, so nothing was typed. Attach to the pylon (\`nexus attach ${t.id}\`) and answer it, then send again`, "blocked"],
             starting: [`Claude is not ready to take a message yet, so nothing was typed. Ask again in a moment`, "not-ready"],
-            moved: [`Terminal ${typed.herdrPane} stopped running Claude session ${session} before the message was typed, so nothing was typed. Send again to resume the session`, "moved"],
+            moved: [`Terminal ${typed.terminal} stopped running Claude session ${session} before the message was typed, so nothing was typed. Send again to resume the session`, "moved"],
           } as const)[typed.outcome];
           throw new Refusal("conflict", refusal, code);
         }
@@ -156,7 +156,7 @@ export function threadAgents(options: {
           blocked: `Claude waits at a prompt in its terminal, which Esc would cancel, so nothing was pressed. Attach to the pylon (\`nexus attach ${t.id}\`) and answer it`,
           idle: `Claude is not working, so there is no turn to interrupt, and nothing was pressed`,
           unknown: `Herdr Core cannot tell yet whether Claude works or waits at a prompt, so nothing was pressed. Ask again in a moment`,
-          "not-running": `no pane runs Claude session ${session}, so there is no turn to interrupt`,
+          "not-running": `no terminal runs Claude session ${session}, so there is no turn to interrupt`,
         }[outcome], outcome === "blocked" ? "blocked" : undefined);
       },
       latestTurn: async (t) => registry.threads.latestClaudeTurn(t.id),

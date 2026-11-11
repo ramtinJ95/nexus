@@ -17,7 +17,7 @@ import { heldSecrets, logTailBounds } from "../protocol/observations.ts";
 import type { ArtifactId, CheckpointId, JobId, LiveHash, NodeName, PylonId } from "../ids.ts";
 import type { Job, JobEnvelope, JobErrorCode, JobStatus } from "../protocol/jobs.ts";
 import type {
-  HerdrStatus, NodeObservation, PausedSession, ProbeEvent, PylonObservation, RunningFacts, SessionFact,
+  TerminalStatus, NodeObservation, PausedSession, ProbeEvent, PylonObservation, RunningFacts, SessionFact,
 } from "../protocol/observations.ts";
 import { requiredArtifacts, type BootInputs, type LiveSpec, type PylonSource } from "../protocol/spawn.ts";
 import { harnessNamed, type SessionHarness } from "../protocol/agent-kinds.ts";
@@ -329,9 +329,9 @@ export type RegistryWrite =
  * status it last had.
  */
 export type SessionRow = { id: string; harness: SessionHarness; harnessSessionId: string | null; title: string | null } & (
-  | { state: "running"; herdrPane: string; status: HerdrStatus; message: null }
-  | { state: "paused"; herdrPane: string | null; status: null; message: null }
-  | { state: "failed"; herdrPane: string | null; status: null; message: string });
+  | { state: "running"; terminal: string; status: TerminalStatus; message: null }
+  | { state: "paused"; terminal: string | null; status: null; message: null }
+  | { state: "failed"; terminal: string | null; status: null; message: string });
 
 /**
  * `node` is the probe the event came from. `known` maps each registry pylon on that node the pass would tick to the
@@ -400,11 +400,11 @@ function sessionsOf(o: PylonObservation | "absent"): readonly SessionRow[] | "pa
   const common = (s: SessionFact | PausedSession) => ({ id: s.id, harness: s.harness, harnessSessionId: s.harnessSessionId, title: s.title ?? null });
   switch (o.phase) {
     case "running": return o.sessions?.map((s): SessionRow => s.state === "failed"
-      ? { ...common(s), state: "failed", herdrPane: s.herdrPane, status: null, message: s.message }
-      : { ...common(s), state: "running", herdrPane: s.herdrPane, status: s.status, message: null }) ?? null;
+      ? { ...common(s), state: "failed", terminal: s.terminal, status: null, message: s.message }
+      : { ...common(s), state: "running", terminal: s.terminal, status: s.status, message: null }) ?? null;
     case "stopped": {
       const paused = o.sessions;
-      return paused === null ? "paused" : paused.map((s): SessionRow => ({ ...common(s), state: "paused", herdrPane: s.herdrPane, status: null, message: null }));
+      return paused === null ? "paused" : paused.map((s): SessionRow => ({ ...common(s), state: "paused", terminal: s.terminal, status: null, message: null }));
     }
     default: return null;
   }

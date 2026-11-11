@@ -1,7 +1,7 @@
 /** The view kit every dashboard page renders with: safe markup and the page's headers, icons, tones and badges. */
 import { createHash } from "node:crypto";
 import { isOpenStatus, type ActualState, type DesiredPhase } from "../reconcile.ts";
-import type { HerdrStatus } from "../../protocol/observations.ts";
+import type { TerminalStatus } from "../../protocol/observations.ts";
 import type { ThreadRow } from "../wire.ts";
 import { needsPerson, type Attention } from "../attention.ts";
 import { agentIdle, attentionLabels } from "../plain-wording.ts";
@@ -59,7 +59,7 @@ export const actualBadge: Record<ActualState, [label: string, tone: Tone]> = {
   paused: ["paused", "idle"], absent: ["not on its node", "muted"], failed: ["failed", "bad"], unknown: ["unknown", "muted"],
 };
 export const desiredTone: Record<DesiredPhase, Tone> = { running: "ok", reading: "work", paused: "idle", deleted: "muted" };
-export const sessionTone: Record<HerdrStatus, Tone> = { working: "work", idle: "idle", blocked: "bad", done: "ok", unknown: "muted" };
+export const sessionTone: Record<TerminalStatus, Tone> = { working: "work", idle: "idle", blocked: "bad", done: "ok", unknown: "muted" };
 export const outputLabel: Record<Output["kind"], string> = { branch: "branch", diff: "diff", preview: "preview", file: "file", "pull-request": "pull request" };
 
 /** A dot alone carries its meaning in its accessible name. One beside its label is decoration. */

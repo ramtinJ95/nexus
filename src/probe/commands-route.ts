@@ -24,8 +24,8 @@ export function createCommands(deps: ProbeDeps, publishSnapshot: () => void): (p
       const sending = sendsById.get(`${pylonId} ${requestId}`);
       if (sending === undefined) return { kind: "send-claude-outcome", send: "unknown" };
       try {
-        const { outcome, herdrPane, resumed } = await sending as Extract<CommandResult, { kind: "send-claude" }>;
-        return { kind: "send-claude-outcome", send: { outcome, herdrPane, resumed } };
+        const { outcome, terminal, resumed } = await sending as Extract<CommandResult, { kind: "send-claude" }>;
+        return { kind: "send-claude-outcome", send: { outcome, terminal, resumed } };
       } catch {
         return { kind: "send-claude-outcome", send: "failed" };
       }

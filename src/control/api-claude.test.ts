@@ -155,7 +155,7 @@ test("a Claude worker's message is typed once per request ID, a send that typed 
   assert.equal((await send("msg:2")).status, 202);
   assert.equal(s.commands.length, 6);
 
-  answer = async () => { throw new Error("typing into Claude's pane w1:p1 failed, so part of the message may sit unsent in its prompt"); };
+  answer = async () => { throw new Error("typing into Claude's terminal t1 failed, so part of the message may sit unsent in its prompt"); };
   assert.equal((await send("msg:3")).status, 500);
   answer = async () => ({ kind: "send-claude-outcome", send: "failed" });
   const again = await send("msg:3");
@@ -173,7 +173,7 @@ test("a Claude worker's message whose probe wait ran out is typed once, and a re
   assert.equal(slow.status, 503);
   assert.match(slow.body.error, /no answer within 90000 ms. The message may still reach Claude, as one queued in the pylon behind an earlier send does, and reaches it at most once. Send it again under request ID msg:1 to learn what became of it/);
 
-  answer = async (command) => command.kind === "send-claude-outcome" ? { kind: "send-claude-outcome", send: { outcome: "queued", herdrPane: "w1:p1", resumed: false } } : assert.fail(`${command.kind} would type it again`);
+  answer = async (command) => command.kind === "send-claude-outcome" ? { kind: "send-claude-outcome", send: { outcome: "queued", terminal: "t1", resumed: false } } : assert.fail(`${command.kind} would type it again`);
   const queued = { status: 202, body: { claude: { session: claudeSession, outcome: "queued", resumed: false } } };
   assert.deepEqual(await send("msg:1"), queued, "the resend answers how Claude took the first");
   assert.deepEqual(await send("msg:1"), queued);
@@ -182,7 +182,7 @@ test("a Claude worker's message whose probe wait ran out is typed once, and a re
     { kind: "send-claude-outcome", requestId: "msg:1" },
   ], "the probe was asked about it once, and the message typed once");
 
-  answer = async (command) => { if (command.kind === "send-claude") throw Object.assign(new Error(`${node}: no answer within 90000 ms`), { code: "unreachable" }); return { kind: "send-claude-outcome", send: { outcome: "blocked", herdrPane: "w1:p1", resumed: false } }; };
+  answer = async (command) => { if (command.kind === "send-claude") throw Object.assign(new Error(`${node}: no answer within 90000 ms`), { code: "unreachable" }); return { kind: "send-claude-outcome", send: { outcome: "blocked", terminal: "t1", resumed: false } }; };
   assert.equal((await send("msg:2")).status, 503);
   assert.equal((await send("msg:2")).status, 409, "the first send typed nothing after all");
   answer = async () => sent("sent");
@@ -236,7 +236,7 @@ test("a Claude worker thread takes no messages while archived, deleted or before
   assert.deepEqual(s.calls.filter(([call]) => call === "send" || call === "abort"), []);
 });
 
-test("a Claude worker thread's abort presses Esc in its session's pane through the probe, and says why when nothing was pressed", async (t) => {
+test("a Claude worker thread's abort presses Esc in its session's terminal through the probe, and says why when nothing was pressed", async (t) => {
   const s = await withClaude(t);
   let outcome: InterruptClaudeOutcome = "interrupted";
   s.probeAnswers(async (command) => command.kind === "interrupt-claude" ? { kind: "interrupt-claude", outcome } : assert.fail(`unexpected ${command.kind}`));
@@ -249,7 +249,7 @@ test("a Claude worker thread's abort presses Esc in its session's pane through t
     ["blocked", new RegExp(`waits at a prompt in its terminal, which Esc would cancel, so nothing was pressed.*nexus attach ${s.thread.id}`)],
     ["idle", /not working, so there is no turn to interrupt/],
     ["unknown", /cannot tell yet/],
-    ["not-running", new RegExp(`no pane runs Claude session ${claudeSession}`)],
+    ["not-running", new RegExp(`no terminal runs Claude session ${claudeSession}`)],
   ];
   for ([outcome] of refusals) {
     const refused = await abort();

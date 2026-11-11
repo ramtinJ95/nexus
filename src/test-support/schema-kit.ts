@@ -18,7 +18,8 @@ export function versionBefore(pattern: RegExp): number {
 /**
  * Rebuilds the closed registry file at `path` at schema `version`. The new file has the first `version` migrations,
  * applied in order as db.ts's migrate applies them, and every row `path` held of each table and column that exists
- * at `version`. Later tables and columns are dropped, as the hand-written chains dropped them.
+ * at `version`. Later tables and columns are dropped, as the hand-written chains dropped them. A column a later
+ * migration renamed gets its rows from the column under its later name.
  */
 export function rewindTo(path: string, version: number): void {
   const rewound = `${path}.rewound`;
@@ -32,17 +33,20 @@ export function rewindTo(path: string, version: number): void {
     db.prepare("ATTACH ? AS current").run(path);
     const columns = (schema: string, table: string) => db.prepare('SELECT name, "notnull", dflt_value FROM pragma_table_info(?, ?)').all(table, schema) as Column[];
     const tables = db.prepare("SELECT name FROM main.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY rowid").all() as { name: string }[];
+    const { user_version: current } = db.prepare("PRAGMA current.user_version").get() as { user_version: number };
+    const renames = migrations.slice(version, current).flatMap((sql) => [...sql.matchAll(/\bALTER TABLE (\w+) RENAME COLUMN (\w+) TO (\w+)/gi)]);
+    const laterName = (table: string, column: string) => renames.reduce((name, [, t, from, to]) => t === table && from === name ? to! : name, column);
     db.exec("BEGIN IMMEDIATE");
     // Some migrations seed a row, such as judgment_since's watermark, and the file's own row replaces it.
     for (const { name: table } of tables.toReversed()) db.exec(`DELETE FROM main."${table}"`);
     for (const { name: table } of tables) {
       const source = new Set(columns("current", table).map((c) => c.name));
       if (source.size === 0) continue;
-      const old = columns("main", table);
-      const missing = old.find((c) => c.notnull && c.dflt_value === null && !source.has(c.name));
+      const old = columns("main", table).map((c) => ({ ...c, later: laterName(table, c.name) }));
+      const missing = old.find((c) => c.notnull && c.dflt_value === null && !source.has(c.later));
       if (missing !== undefined) throw new Error(`${table}.${missing.name} is NOT NULL at schema ${version}, and the current file has no such column`);
-      const shared = old.filter((c) => source.has(c.name)).map((c) => `"${c.name}"`).join(", ");
-      db.exec(`INSERT INTO main."${table}" (${shared}) SELECT ${shared} FROM current."${table}"`);
+      const shared = old.filter((c) => source.has(c.later));
+      db.exec(`INSERT INTO main."${table}" (${shared.map((c) => `"${c.name}"`).join(", ")}) SELECT ${shared.map((c) => `"${c.later}"`).join(", ")} FROM current."${table}"`);
     }
     db.exec("COMMIT");
   } catch (err) {

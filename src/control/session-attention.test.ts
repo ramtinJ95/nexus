@@ -56,7 +56,7 @@ test("the builder's turn ending after a side session ended is a reply", async (t
   assert.equal(await attention(), "reply");
 });
 
-test("a new session in the worker's pane after /clear replies when its turn ends", async (t) => {
+test("a new session in the worker's terminal after /clear replies when its turn ends", async (t) => {
   const { report, attention, registry, thread } = await claudeThread(t);
   report("session.turn-started", "builder");
   report("session.turn-ended", "builder");

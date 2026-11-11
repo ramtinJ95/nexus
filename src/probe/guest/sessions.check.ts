@@ -68,7 +68,7 @@ function stepRelaunch(name: string, outcomes: readonly RelaunchOutcome[]): void 
 async function settledFacts(terminals: readonly string[]): Promise<readonly SessionFact[]> {
   let facts = await sessionFacts(guest);
   for (let deadline = Date.now() + 30_000; Date.now() < deadline; facts = await sessionFacts(guest)) {
-    const mine = facts.filter((f) => f.herdrPane !== null && terminals.includes(f.herdrPane));
+    const mine = facts.filter((f) => f.terminal !== null && terminals.includes(f.terminal));
     if (mine.length === terminals.length && mine.every((f) => f.harness === "shell" || f.harnessSessionId !== null)) break;
     await sleep(500);
   }
@@ -175,13 +175,13 @@ async function checkUnprompted(stage: string, title: string, outcomes: readonly 
   const o = outcomes.find((x) => x.record.title === title);
   if (o === undefined) return void findings.push(`${stage}: no record of ${title}`);
   if (o.result === "failed" || o.result === "dropped") return void findings.push(`${stage}: ${title} did not come back: ${o.result === "failed" ? o.message : "dropped"}`);
-  const fact = facts.find((f) => f.herdrPane === o.herdrPane);
+  const fact = facts.find((f) => f.terminal === o.terminal);
   const sameSessionId = fact?.harnessSessionId === o.record.harnessSessionId;
   step(`${stage}_${title}`, { outcome: o.result, fact, sameSessionId });
   // Always, because an agent can report idle while it shows an error or a session picker.
-  step(`${stage}_${title}_PS`, ["PID PPID PGID SID STAT ARGS", ...(await terminalPids(o.herdrPane)).flatMap((pid) => psRow(pid) ?? [])]);
-  console.log(`${stage}_${title}_SCREEN:\n${await screenOf(o.herdrPane)}`);
-  if (fact?.harness !== o.record.harness) findings.push(`${stage}: ${title}'s terminal ${o.herdrPane} reads as ${fact?.harness ?? "nothing"}, not ${o.record.harness}`);
+  step(`${stage}_${title}_PS`, ["PID PPID PGID SID STAT ARGS", ...(await terminalPids(o.terminal)).flatMap((pid) => psRow(pid) ?? [])]);
+  console.log(`${stage}_${title}_SCREEN:\n${await screenOf(o.terminal)}`);
+  if (fact?.harness !== o.record.harness) findings.push(`${stage}: ${title}'s terminal ${o.terminal} reads as ${fact?.harness ?? "nothing"}, not ${o.record.harness}`);
   else if (!sameSessionId) findings.push(`${stage}: ${title} came back as ${fact.harnessSessionId}, not ${o.record.harnessSessionId}`);
 }
 
@@ -205,12 +205,12 @@ async function expectRuns(stage: string, outcomes: readonly RelaunchOutcome[]): 
       continue;
     }
     if (harness === "pi") {
-      const finding = await piWrites(stage, title, o.herdrPane, id);
+      const finding = await piWrites(stage, title, o.terminal, id);
       if (finding !== null) fail(title, finding);
       continue;
     }
     const flag = title === unprompted.claude ? "--session-id" : "--resume";
-    const rows = (await terminalPids(o.herdrPane)).flatMap((pid) => psRow(pid) ?? []);
+    const rows = (await terminalPids(o.terminal)).flatMap((pid) => psRow(pid) ?? []);
     step(`${stage}_RUNS_${title}`, ["PID PPID PGID SID STAT ARGS", ...rows]);
     if (!rows.some((row) => row.includes(` ${flag} ${id}`))) fail(title, `${stage}: ${title}'s terminal runs no ${harness} with ${flag} ${id}`);
   }
@@ -285,15 +285,15 @@ const opened = {
 step("OPENED", opened);
 const facts = await settledFacts(Object.values(opened));
 step("FACTS", facts);
-const byPane = new Map(facts.map((f) => [f.herdrPane, f]));
-assert.equal(byPane.get(opened.shell)?.harness, "shell");
-assert.equal(byPane.get(opened.claude)?.harness, "claude-code", "Claude Code is its terminal's foreground");
-assert.equal(byPane.get(opened.pi)?.harness, "pi", "pi is its terminal's foreground");
-assert.ok(byPane.get(opened.claude)?.harnessSessionId, "Claude Code's terminal names its session ID");
-assert.ok(byPane.get(opened.pi)?.harnessSessionId, "pi's terminal names its session file");
-assert.ok(byPane.get(opened.unpromptedClaude)?.harnessSessionId, "an unprompted Claude Code's terminal names its session ID too");
-assert.equal(byPane.get(opened.unpromptedPi)?.harness, "pi", "an unprompted pi is its terminal's foreground");
-assert.ok(byPane.get(opened.unpromptedPi)?.harnessSessionId, "an unprompted pi's terminal names its session file too");
+const byTerminal = new Map(facts.map((f) => [f.terminal, f]));
+assert.equal(byTerminal.get(opened.shell)?.harness, "shell");
+assert.equal(byTerminal.get(opened.claude)?.harness, "claude-code", "Claude Code is its terminal's foreground");
+assert.equal(byTerminal.get(opened.pi)?.harness, "pi", "pi is its terminal's foreground");
+assert.ok(byTerminal.get(opened.claude)?.harnessSessionId, "Claude Code's terminal names its session ID");
+assert.ok(byTerminal.get(opened.pi)?.harnessSessionId, "pi's terminal names its session file");
+assert.ok(byTerminal.get(opened.unpromptedClaude)?.harnessSessionId, "an unprompted Claude Code's terminal names its session ID too");
+assert.equal(byTerminal.get(opened.unpromptedPi)?.harness, "pi", "an unprompted pi is its terminal's foreground");
+assert.ok(byTerminal.get(opened.unpromptedPi)?.harnessSessionId, "an unprompted pi's terminal names its session file too");
 // What RESTORE turns on: the core gives a kept terminal a shell when its program is lost, so only the shell is kept,
 // and an agent's terminal ends with it rather than coming back as a shell the next record would take for a session.
 for (const [title, terminal] of Object.entries(opened)) {
@@ -303,8 +303,8 @@ for (const [title, terminal] of Object.entries(opened)) {
 
 // A session is only worth resuming once it has a conversation, and Claude Code cannot resume an ID with
 // no transcript. The placeholder key makes the reply fail, but the prompt is still written down.
-const claudeId = byPane.get(opened.claude)!.harnessSessionId!;
-const piFile = byPane.get(opened.pi)!.harnessSessionId!;
+const claudeId = byTerminal.get(opened.claude)!.harnessSessionId!;
+const piFile = byTerminal.get(opened.pi)!.harnessSessionId!;
 const sent = await sendToClaude(guest, { session: claudeId, text: "Reply with OK." });
 step(`PROMPT_${opened.claude}`, sent);
 assert.ok(sent.outcome === "sent" || sent.outcome === "queued", `Claude Code takes the first prompt: ${sent.outcome}`);
@@ -326,8 +326,8 @@ assert.ok(others(restored).every((o) => o.result !== "failed"), "every recorded 
 for (const o of restored) {
   const shell = o.record.harness === "shell";
   const want = shell ? "present" : "relaunched";
-  if (o.result !== want || (o.herdrPane === o.record.herdrPane) !== shell) {
-    findings.push(`RESTORE: ${o.record.title} is ${o.result} in ${o.herdrPane ?? "no terminal"}, not ${want} ${shell ? `in its kept terminal ${o.record.herdrPane}` : "in a new terminal"}`);
+  if (o.result !== want || (o.terminal === o.record.terminal) !== shell) {
+    findings.push(`RESTORE: ${o.record.title} is ${o.result} in ${o.terminal ?? "no terminal"}, not ${want} ${shell ? `in its kept terminal ${o.record.terminal}` : "in a new terminal"}`);
   }
 }
 // An agent's terminal from before the stop is neither live, which the next record would take for a session, nor left
@@ -335,15 +335,15 @@ for (const o of restored) {
 const afterRelaunch = (await core(guest, "terminal.list", { all: true })).terminals;
 step("RESTORE_TERMINALS", afterRelaunch.map(({ address, state, labels }) => ({ address, state, labels })));
 for (const r of recorded) {
-  const left = r.harness === "shell" ? undefined : afterRelaunch.find((t) => t.address === r.herdrPane);
-  if (left !== undefined) findings.push(`RESTORE: ${r.title}'s terminal ${r.herdrPane} from before the stop is still there, ${left.state}`);
+  const left = r.harness === "shell" ? undefined : afterRelaunch.find((t) => t.address === r.terminal);
+  if (left !== undefined) findings.push(`RESTORE: ${r.title}'s terminal ${r.terminal} from before the stop is still there, ${left.state}`);
 }
 const brokenByRestore = await expectRuns("RESTORE", restored);
 const restoredAgain = await relaunchSessions(guest, unlocked);
 stepRelaunch("RESTORE_RELAUNCH_2", restoredAgain);
 assert.ok(others(restoredAgain).every((o) => o.result === "present"), "a second relaunch opens nothing");
-const restoredPanes = restoredAgain.flatMap((o) => o.result === "present" || o.result === "relaunched" ? [o.herdrPane] : []);
-const afterRestore = await settledFacts(restoredPanes);
+const restoredTerminals = restoredAgain.flatMap((o) => o.result === "present" || o.result === "relaunched" ? [o.terminal] : []);
+const afterRestore = await settledFacts(restoredTerminals);
 step("RESTORE_FACTS", afterRestore);
 assertResumed("RESTORE", recorded, afterRestore);
 for (const title of unpromptedTitles) await checkUnprompted("RESTORE", title, restoredAgain, afterRestore);
@@ -354,16 +354,16 @@ for (const [harness, title] of [["claude-code", unprompted.claude], ["pi", unpro
   // Every record under its title: one in a terminal is closed with it, and a failed one in none is dropped.
   for (const r of (await recordSessions(guest)) ?? []) {
     if (r.title !== title) continue;
-    if (r.herdrPane === null) {
+    if (r.terminal === null) {
       assert.ok(await dropFailedSession(guest, r.id), `FRESH: the failed record of ${title} is dropped`);
       continue;
     }
-    await closeSession(guest, r.herdrPane);
-    if (restoredPanes.includes(r.herdrPane)) restoredPanes.splice(restoredPanes.indexOf(r.herdrPane), 1);
+    await closeSession(guest, r.terminal);
+    if (restoredTerminals.includes(r.terminal)) restoredTerminals.splice(restoredTerminals.indexOf(r.terminal), 1);
   }
   const terminal = await openSession(guest, { harness, title, cwd });
-  restoredPanes.push(terminal);
-  step(`FRESH_${title}_REOPENED`, (await settledFacts([terminal])).find((f) => f.herdrPane === terminal));
+  restoredTerminals.push(terminal);
+  step(`FRESH_${title}_REOPENED`, (await settledFacts([terminal])).find((f) => f.terminal === terminal));
 }
 
 // FRESH: the core's state is gone, so only the sessions file can bring the sessions back.
@@ -374,7 +374,7 @@ const restoredShell = recordedAgain.find((r) => r.harness === "shell");
 if (restoredShell?.title !== "check-shell" || restoredShell.cwd !== shellCwd) findings.push(`RESTORE: the shell came back as ${JSON.stringify(restoredShell)}`);
 for (const title of unpromptedTitles) assert.ok(recordedAgain.find((r) => r.title === title)?.harnessSessionId, `${title} is recorded with its ID`);
 expectNoSessionFiles("FRESH", recordedAgain);
-await stopCore("FRESH", restoredPanes);
+await stopCore("FRESH", restoredTerminals);
 assert.ok(existsSync(coreState), `the stopped core's state is at ${coreState}`);
 step("FRESH_CORE_STATE", (await sh('find "$1"', coreState)).output.trim().split("\n"));
 rmSync(coreState, { recursive: true });
@@ -383,8 +383,8 @@ const fresh = await relaunchSessions(guest, unlocked);
 stepRelaunch("FRESH_RELAUNCH_1", fresh);
 // A shell found present here would mean the deleted directory was not all of the core's state.
 assert.deepEqual(others(fresh).map((o) => o.result), ["relaunched", "relaunched", "relaunched"], "with no core state, every session is reopened, the kept shell included");
-const freshPanes = fresh.flatMap((o) => o.result === "relaunched" ? [o.herdrPane] : []);
-const afterFresh = await settledFacts(freshPanes);
+const freshTerminals = fresh.flatMap((o) => o.result === "relaunched" ? [o.terminal] : []);
+const afterFresh = await settledFacts(freshTerminals);
 step("FRESH_FACTS", afterFresh);
 assertResumed("FRESH", recordedAgain, afterFresh);
 for (const title of unpromptedTitles) await checkUnprompted("FRESH", title, fresh, afterFresh);
@@ -392,17 +392,17 @@ await expectRuns("FRESH", fresh);
 const freshRecords = await recordSessions(guest);
 step("FRESH_RECORDS", freshRecords);
 const freshShell = fresh.find((o) => o.record.harness === "shell");
-const shell = freshRecords?.find((r) => freshShell?.result === "relaunched" && r.herdrPane === freshShell.herdrPane);
+const shell = freshRecords?.find((r) => freshShell?.result === "relaunched" && r.terminal === freshShell.terminal);
 assert.deepEqual(shell && { harness: shell.harness, title: shell.title, cwd: shell.cwd }, { harness: "shell", title: "check-shell", cwd: shellCwd }, "the shell comes back with its title and cwd");
 const freshAgain = await relaunchSessions(guest, unlocked);
 stepRelaunch("FRESH_RELAUNCH_2", freshAgain);
 assert.ok(others(freshAgain).every((o) => o.result === "present"), "a second relaunch after a fresh one opens nothing");
 
-for (const o of freshAgain) if (o.result === "present" || o.result === "relaunched") await closeSession(guest, o.herdrPane);
+for (const o of freshAgain) if (o.result === "present" || o.result === "relaunched") await closeSession(guest, o.terminal);
 assert.equal(await closeSession(guest, "tzzzzzz"), "not-open", "closing a terminal the core never had closes nothing");
 const closed = await sessionFacts(guest);
 step("FACTS_AFTER_CLOSE", closed);
-assert.deepEqual(closed.filter((f) => f.herdrPane !== null && freshPanes.includes(f.herdrPane)), [], "closed sessions are gone");
+assert.deepEqual(closed.filter((f) => f.terminal !== null && freshTerminals.includes(f.terminal)), [], "closed sessions are gone");
 step("FINDINGS", findings);
 assert.deepEqual(findings, [], "after both wakes every agent's terminal runs its agent, resumed with the right flag");
 console.log("SESSIONS_CHECK_PASS");

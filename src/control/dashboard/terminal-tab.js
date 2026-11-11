@@ -27,11 +27,11 @@ holdReload(() => terminal !== null);
 const fading = new Map();
 
 /**
- * Shows the session in `pane` in the terminal tab, which shows one terminal at a time: an attached one detaches, and
+ * Shows the session in the terminal at `address` in the terminal tab, which shows one terminal at a time: an attached one detaches, and
  * the tab attaches again there. herdr-app shows every session of the pylon at once.
  */
-export async function showSession(thread, pane) {
-  landing = pane;
+export async function showSession(thread, address) {
+  landing = address;
   (await terminal)?.close();
   showTab(terminalTab);
 }
@@ -55,12 +55,12 @@ export async function showTerminal() {
     clearTimeout(fading.get(line.id));
     fading.set(line.id, setTimeout(() => { line.hidden = true; }, 15_000));
   };
-  const pane = landing;
+  const address = landing;
   landing = null;
   terminal = chunk(import("./term-view.js")).then(({ openTerminal }) => {
     lastTerminal?.close();
     document.getElementById("term-host").replaceChildren();
-    lastTerminal = openTerminal(document.getElementById("term-host"), thread, shown, pane, copied);
+    lastTerminal = openTerminal(document.getElementById("term-host"), thread, shown, address, copied);
     return lastTerminal;
   }).catch((err) => {
     shown({ text: `The terminal did not load: ${err.message}`, over: true });

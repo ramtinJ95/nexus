@@ -135,8 +135,8 @@ const threads: ThreadSpec[] = [
       talk(d, t, longConversation(t.createdAt).messages);
       linkPr(d, t, pr("nexus", 402, "feat: graph each node's health on its page"));
       d.registry.threads.apply({ record: "sessions", pylonId: t.pylonId, sessions: [
-        { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "pi", harnessSessionId: "/home/user/.pi/sessions/graphs.jsonl", status: "working", title: "agent", message: null },
-        { id: "w2:p1", state: "running", herdrPane: "w2:p1", harness: "shell", harnessSessionId: null, status: "idle", title: "dev server", message: null },
+        { id: "t1", state: "running", terminal: "t1", harness: "pi", harnessSessionId: "/home/user/.pi/sessions/graphs.jsonl", status: "working", title: "agent", message: null },
+        { id: "t2", state: "running", terminal: "t2", harness: "shell", harnessSessionId: null, status: "idle", title: "dev server", message: null },
       ] });
       d.registry.threads.allocatePreviews(t.pylonId, ["web"], { first: 10200, last: 10299 });
       d.registry.threads.apply({ record: "preview", pylonId: t.pylonId, service: "web", httpsPort: 10200, ready: true });
@@ -161,7 +161,7 @@ const threads: ThreadSpec[] = [
       claudeTranscript(d, t, c.entries);
       linkPr(d, t, pr("nexus", 401, "feat: the dashboard's terminal and nexus attach survive a deploy and a slow pylon", { checks: "pending" }));
       d.registry.threads.apply({ record: "sessions", pylonId: t.pylonId, sessions: [
-        { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: `${t.id}-s1`, status: "working", title: "worker", message: null },
+        { id: "t1", state: "running", terminal: "t1", harness: "claude-code", harnessSessionId: `${t.id}-s1`, status: "working", title: "worker", message: null },
       ] });
       w.live.working.push(t);
     },
@@ -395,7 +395,7 @@ Each is a question card below. Accept the ones you want in the pipeline.`).messa
     key: "inventory", project: "storefront", title: "Inventory sync webhook", ago: 3 * hour, worker: "harness", pylon: "running", replied: 40 * minute, seen: true,
     extra(d, t) {
       talk(d, t, harnessTalk(t.createdAt).person("Sync inventory from the warehouse webhook into Postgres.").say("The webhook signs with HMAC-SHA256, but the docs don't say which header carries it. Can you check the warehouse dashboard, or should I log the headers of the next delivery?").messages);
-      d.registry.threads.reportSession(firebat, { sequence: 1, pylon: t.pylonId, time: now() - 40 * minute, event: { kind: "session.waiting", session: "w1:p1", message: "Asked which header carries the signature" } });
+      d.registry.threads.reportSession(firebat, { sequence: 1, pylon: t.pylonId, time: now() - 40 * minute, event: { kind: "session.waiting", session: "t1", message: "Asked which header carries the signature" } });
     },
   },
   {
@@ -472,10 +472,10 @@ const answer = async (command: { kind: string; port?: number }): Promise<Command
   switch (command.kind) {
     case "link-port": return { kind: "link-port", service: `port-${command.port}` };
     case "unlink-port": return { kind: "unlink-port", refused: null };
-    case "open-session": return { kind: "open-session", herdrPane: "w9:p1" };
+    case "open-session": return { kind: "open-session", terminal: "t9" };
     case "close-session": return { kind: "close-session", outcome: "closed" };
     case "drop-failed-session": return { kind: "drop-failed-session", dropped: true };
-    case "send-claude": return { kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed: false };
+    case "send-claude": return { kind: "send-claude", outcome: "sent", terminal: "t1", resumed: false };
     default: return { kind: "exec", exitCode: 0, output: "", truncated: false } as CommandResult;
   }
 };

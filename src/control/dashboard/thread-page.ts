@@ -285,7 +285,7 @@ ${d.claudeWorker === undefined ? "" : html`<section><h2>Claude worker</h2><p>${d
 ${d.sessions.length === 0 ? html`<p class="empty">No sessions.</p>` : html`<ul class="list outs">${d.sessions.map((s) => html`<li>
 <span class="o-kind">${harnessNamed(s.harness)?.label}</span>${s.title !== null && html`<span class="s-title">${s.title}</span>`}${s.state === "running" ? state(s.status, sessionTone[s.status])
   : s.state === "paused" ? state(sessionPaused(t), "idle")
-  : state("failed", "bad")}${s.herdrPane !== null && html`<code class="dim pane">${s.herdrPane}</code>`}
+  : state("failed", "bad")}${s.terminal !== null && html`<code class="dim addr">${s.terminal}</code>`}
 ${s.harnessSessionId !== null && html`<code class="dim sid" title="${s.harnessSessionId}">session ${s.harnessSessionId}</code>`}
 ${s.state === "failed" && html`<p class="error s-why">It did not come back from the last wake, which the next tries again: ${s.message}</p>`}
 ${t.status === "active" && sessionActions(t.id, s, worker !== null && s.harness === "claude-code" && s.harnessSessionId === worker)}
@@ -306,5 +306,5 @@ const newSessions = [["shell", "New shell"], ["pi", "New pi"], ["claude-code", "
  */
 function sessionActions(thread: string, s: ThreadDetail["sessions"][number], own: boolean): Html {
   const named = `${harnessNamed(s.harness)?.label ?? s.harness} session${s.title === null ? "" : ` "${s.title}"`}`;
-  return html`<span class="s-acts">${s.state === "running" && html`<button type="button" class="btn btn-xs"${act("show-session")} data-thread="${thread}" data-pane="${s.herdrPane}">${icon("terminal")}Show in terminal</button>`}${s.state !== "paused" && !own && html`<button type="button" class="btn btn-xs btn-ghost danger"${act("close-session")} data-thread="${thread}" data-session="${s.id}" data-confirm="${`Close the ${named}? ${s.state === "running" ? "Its pane closes, and what runs there ends." : "No wake tries it again."}`}">Close</button>`}</span>`;
+  return html`<span class="s-acts">${s.state === "running" && html`<button type="button" class="btn btn-xs"${act("show-session")} data-thread="${thread}" data-address="${s.terminal}">${icon("terminal")}Show in terminal</button>`}${s.state !== "paused" && !own && html`<button type="button" class="btn btn-xs btn-ghost danger"${act("close-session")} data-thread="${thread}" data-session="${s.id}" data-confirm="${`Close the ${named}? ${s.state === "running" ? "Its terminal closes, and what runs there ends." : "No wake tries it again."}`}">Close</button>`}</span>`;
 }
