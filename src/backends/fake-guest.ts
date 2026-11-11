@@ -116,7 +116,10 @@ export interface FakeCore {
   readonly calls: { method: string; params: Record<string, unknown> }[];
   /** A live terminal, as one opened by hand or kept through a wake. */
   add(t: Partial<FakeTerminal>): FakeTerminal;
-  /** A core stop and start: each kept terminal comes back live as a shell, at its address and with its labels, and the rest finish. */
+  /**
+   * A core stop and start: each kept terminal comes back live as a shell, at its address and with its labels, and the
+   * rest finish. Core gives the shell as the terminal's argv too, as a pylon's wake showed: `["/bin/bash"]`.
+   */
   restart(): void;
   /**
    * A core killed outright: its holder keeps every program running, a call gets the guard's core-lost exit, and the
@@ -186,7 +189,7 @@ export function fakeCore(options: {
     restart() {
       for (const t of terminals) {
         if (t.state !== "live") continue;
-        if (t.keep) Object.assign(t, { argv: ["/bin/bash"], foreground: { argv: ["-bash"], cwd: t.cwd, name: "bash" }, status: null });
+        if (t.keep) Object.assign(t, { argv: ["/bin/bash"], foreground: { argv: ["/bin/bash"], cwd: t.cwd, name: "bash" }, status: null, starting: [] });
         else finish(t, null);
       }
     },
@@ -238,6 +241,10 @@ export function fakeCore(options: {
           }
           t!.sent.push(params.text as string);
           return coreOk({ started: null, status: t!.status?.state ?? null, turn: 0, wait: null });
+        case "terminal.keep":
+          if (t!.state !== "live") return coreError("invalid_params", "only live terminals can be kept");
+          t!.keep = params.keep === true;
+          return coreOk(view(t!));
         case "terminal.keys":
           t!.keys.push(params.keys as string[]);
           return coreOk({ status: t!.status?.state ?? null, turn: 0 });
