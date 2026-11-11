@@ -138,6 +138,7 @@ test("a queue record is checked as a start is, and freezes the size the project 
   refused(() => q.add(f.request({ node: "nowhere" }), null, [a], laptop), "invalid", /no node nowhere/);
   refused(() => q.add(f.request({ commit: "abc" }), null, [a], laptop), "invalid", /scratch project/);
   refused(() => q.add(f.request({ claude: "fix it" }), "Fix it.", [a], laptop), "invalid", /message is for a Nexus agent thread/);
+  refused(() => q.add(f.request({ claude: "fix it", model: "claude-fable-5-1" }), null, [a], laptop), "invalid", /Fable models are not available in pylons/);
   refused(() => q.add(f.request(), null, [f.thread("th-review", reviewerCaller)], laptop), "invalid", /reviewer, check or verify thread/);
   refused(() => q.add(f.request(), null, [f.thread("th-check", checkCaller)], laptop), "invalid", /reviewer, check or verify thread/);
   refused(() => q.add(f.request(), null, [f.thread("th-verify", verifyCaller)], laptop), "invalid", /reviewer, check or verify thread/);

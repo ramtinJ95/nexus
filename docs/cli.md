@@ -1313,7 +1313,10 @@ This orders delivery without trusting a pylon timestamp to keep its lease alive.
 Claude sessions default to `claude-opus-5-5`. `start --claude PROMPT --model ID`
 selects a model for that thread; the API accepts `model` alongside `claude`, and
 the dashboard start form offers the same optional field. `--model` without
-`--claude` is rejected. Nexus records the requested model, not a claim about a
+`--claude` is rejected, and so is a Fable model, `claude-fable-*` or `fable` in
+any case, which the API answers with 400 and the CLI refuses with exit code 64
+before it sends a request: Fable models are not available in pylons, whose
+Claude Code would run Opus in their place. Nexus records the requested model, not a claim about a
 provider's routing; old workers without a recorded model show unknown.
 Explicit overrides survive checkpoint relaunches. Subscription/model refusals
 remain visible in the terminal; Nexus does not silently choose a cheaper model.
@@ -1762,7 +1765,7 @@ interface ItemPhase { kind: "planned" | "queued" | "building" | "reviewing" | "l
 | 3 | `item add`, `item approve` or `item cancel` from a caller that is not a person (403) |
 | 4 | No such item, or an item in `--after` does not exist (404) |
 | 5 | The project's pipeline is off, the control plane has no GitHub token, `item cancel` or `item approve` of an item that is a thread or was cancelled, or `item approve` in a project that needs no approval (409) |
-| 64 | No brief, `--message` with `--claude`, `--model` without `--claude`, an `--after` that names no item, which the CLI refuses without a request, or `--after` naming an item of another project (400) |
+| 64 | No brief, `--message` with `--claude`, `--model` without `--claude` or naming a Fable model, an `--after` that names no item, which the CLI refuses without a request, or `--after` naming an item of another project (400) |
 
 ## Failure judgments
 

@@ -94,3 +94,16 @@ test("a start or item without a title parses to the fields a caller that sent it
   }
   assert.equal(startSchema.parse({ project: "p", claude: "x".repeat(90) }).title, `${"x".repeat(80)}...`);
 });
+
+test("a start or item refuses a Fable model by ID or alias in any case, and takes the other Claude models", () => {
+  for (const schema of [startSchema, itemSchema]) {
+    for (const model of ["claude-fable-5-1", "CLAUDE-FABLE-5-2[1m]", "fable", "Fable", " fable[1m] "]) {
+      const parsed = schema.safeParse({ project: "p", claude: "fix it", model });
+      assert.equal(parsed.success, false, model);
+      assert.match(parsed.error!.issues[0]!.message, /^model \S+ is a Fable model, and Fable models are not available in pylons/, model);
+    }
+    for (const model of ["claude-opus-5-5", "opus", "claude-sonnet-5-5[1m]", "haiku", "fabled-model", "claude-opus-fable"]) {
+      assert.equal(schema.parse({ project: "p", claude: "fix it", model }).model, model, model);
+    }
+  }
+});

@@ -1,6 +1,7 @@
 /** These schemas need zod, so they stay out of threads.ts, which a browser can bundle. */
 import { z } from "zod";
 import { maxPromptChars } from "../protocol/commands.ts";
+import { defaultClaudeModel } from "../protocol/models.ts";
 import { minPylonMemoryGiB, minPylonMemoryReason } from "../protocol/spawn.ts";
 import { titleOf } from "../thread-title.ts";
 
@@ -8,10 +9,20 @@ export const resourcesSchema = z.strictObject({ cpus: z.int().positive(), memory
 
 interface Brief { title?: string | undefined; message?: string | null | undefined; claude?: string | undefined; model?: string | undefined; after?: readonly string[] | undefined; planning?: true | undefined }
 /** `name` gives a field as the caller knows it: the API's field, or the CLI's flag. */
-interface BriefRule { broken(b: Brief): boolean; message(name: (field: keyof Brief) => string): string }
+interface BriefRule { broken(b: Brief): boolean; message(name: (field: keyof Brief) => string, b: Brief): string }
+
+/**
+ * A Fable model by ID or alias, with or without a context suffix such as `[1m]`. The pylon image's managed settings
+ * deny Fable to Claude Code, which then runs Opus without a word, so the thread would record a model it never ran.
+ */
+const fableModel = /^(?:claude-)?fable(?:$|[-[])/i;
 
 const workerRules: readonly BriefRule[] = [
   { broken: (b) => b.model !== undefined && b.claude === undefined, message: (name) => `${name("model")} requires ${name("claude")}` },
+  {
+    broken: (b) => b.model !== undefined && fableModel.test(b.model.trim()),
+    message: (name, b) => `${name("model")} ${b.model!.trim()} is a Fable model, and Fable models are not available in pylons: their Claude Code would run Opus in its place. Name an Opus, Sonnet or Haiku model, or leave out ${name("model")} for ${defaultClaudeModel}`,
+  },
   { broken: (b) => b.message != null && b.claude !== undefined, message: (name) => `${name("message")} is for a Nexus agent thread. A Claude worker's first prompt is its ${name("claude")}` },
 ];
 export const startRules: readonly BriefRule[] = [
@@ -23,7 +34,7 @@ export const itemRules: readonly BriefRule[] = [
   ...workerRules,
   { broken: (b) => b.message == null && b.claude === undefined, message: (name) => `an item needs a brief: ${name("message")} for a Nexus agent thread, or ${name("claude")} for a Claude worker` },
 ];
-export const brokenRule = (rules: readonly BriefRule[], b: Brief, name = (field: keyof Brief): string => field) => rules.find((rule) => rule.broken(b))?.message(name);
+export const brokenRule = (rules: readonly BriefRule[], b: Brief, name = (field: keyof Brief): string => field) => rules.find((rule) => rule.broken(b))?.message(name, b);
 
 /**
  * Without a title, it takes its brief's first line, which the rules make sure it has, in
