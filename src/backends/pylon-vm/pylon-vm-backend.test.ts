@@ -782,6 +782,23 @@ test("a pause of a pylon whose sessions never came back records nothing, also wh
   assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint, field(p, "sessions")]), [["stopped", "ckpt-unread-2", paused]]);
 });
 
+test("sessions a probe of contract 1 kept beside the checkpoint under herdrPane are listed under terminal, and the next pause keeps them so", async () => {
+  const { backend, instances } = await backendWith();
+  const dir = await leftInstance(instances, "pylon-renamed", "running");
+  await writeFile(join(dir, "controller.log"), "");
+  const kept = [{ id: "t1", herdrPane: "t1", harness: "shell", harnessSessionId: null, title: "sh" }, { id: "t9", herdrPane: null, harness: "pi", harnessSessionId: "/s.jsonl", title: "plan" }];
+  const paused = [{ id: "t1", terminal: "t1", harness: "shell", harnessSessionId: null, title: "sh" }, { id: "t9", terminal: null, harness: "pi", harnessSessionId: "/s.jsonl", title: "plan" }];
+  await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-renamed-1", relaunch: true, sessions: kept }));
+  const controller = await fakeController(dir, "pylon-renamed", (action) => {
+    if (action.action !== "stop") return assert.fail(`unexpected ${action.action}`);
+    controller.state.current = "stopped";
+    return { name: "pylon-renamed", state: "stopped" };
+  });
+  await backend.ensurePaused("pylon-renamed" as PylonId, "ckpt-renamed-2", signal());
+  assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-renamed-2", sessions: paused });
+  assert.deepEqual((await backend.list()).map((p) => [p.vm, field(p, "sessions")]), [["stopped", paused]]);
+});
+
 test("a pylon boots only from a template on this node that is a disk over its own image", async () => {
   const { backend, instances } = await backendWith();
   const missing = bootOf("pylon-tpl", { source: { kind: "template", template: "tpl-absent000000" } });

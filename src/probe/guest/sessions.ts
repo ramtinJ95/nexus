@@ -58,7 +58,7 @@ function standing(file: SessionsFile | null, live: readonly LiveTerminal[]): { f
   return { failed, standsFor: new Set(failed.flatMap((f) => f.inTerminal ? [f.record.terminal] : [])) };
 }
 
-interface SessionsFile { version: 1; recordedAt: string; sessions: readonly SessionRecord[]; failed: readonly FailedRecord[] }
+interface SessionsFile { version: 2; recordedAt: string; sessions: readonly SessionRecord[]; failed: readonly FailedRecord[] }
 
 export type RelaunchOutcome =
   | { record: SessionRecord; result: "present" | "relaunched"; terminal: string }
@@ -423,7 +423,7 @@ export async function recordSessions(guest: Guest): Promise<readonly RecordedSes
   const { failed, standsFor } = standing(await readSessionsFile(guest), terminals);
   const sessions = terminals.filter((p) => !p.child && !standsFor.has(p.terminal))
     .map(({ terminal, harness, title, cwd, harnessSessionId, model }): SessionRecord => ({ terminal, harness, title, cwd, ...(model === undefined ? {} : { model }), harnessSessionId }));
-  const file: SessionsFile = { version: 1, recordedAt: new Date().toISOString(), sessions, failed };
+  const file: SessionsFile = { version: 2, recordedAt: new Date().toISOString(), sessions, failed };
   await writeSessionsFile(guest, file);
   return relaunchedFrom(file);
 }
@@ -661,12 +661,28 @@ const sessionRecordSchema = z.object({
   harnessSessionId: nonEmpty.nullish().transform((id) => id ?? null),
   model: nonEmpty.exactOptional(),
 }) satisfies z.ZodType<SessionRecord>;
-const sessionsFileSchema = z.object({
-  version: z.literal(1),
-  recordedAt: nonEmpty,
-  sessions: z.array(sessionRecordSchema),
-  failed: z.array(z.object({ record: sessionRecordSchema, inTerminal: z.boolean(), message: nonEmpty })),
-}) satisfies z.ZodType<SessionsFile>;
+/**
+ * A probe of contract 1 wrote version 1, which names a record's terminal `herdrPane` and a failed one's `inPane`. A pylon
+ * paused since keeps it on its disk, so it is read as version 2, which the next record writes.
+ */
+const recordBeforeRename = sessionRecordSchema.omit({ terminal: true }).extend({ herdrPane: nonEmpty })
+  .transform(({ herdrPane, ...r }): SessionRecord => ({ terminal: herdrPane, ...r }));
+const sessionsFileSchema = z.discriminatedUnion("version", [
+  z.object({
+    version: z.literal(2),
+    recordedAt: nonEmpty,
+    sessions: z.array(sessionRecordSchema),
+    failed: z.array(z.object({ record: sessionRecordSchema, inTerminal: z.boolean(), message: nonEmpty })),
+  }),
+  z.object({
+    version: z.literal(1),
+    recordedAt: nonEmpty,
+    sessions: z.array(recordBeforeRename),
+    failed: z.array(z.object({ record: recordBeforeRename, inPane: z.boolean(), message: nonEmpty })),
+  }).transform(({ recordedAt, sessions, failed }): SessionsFile => ({
+    version: 2, recordedAt, sessions, failed: failed.map(({ record, inPane, message }) => ({ record, inTerminal: inPane, message })),
+  })),
+]) satisfies z.ZodType<SessionsFile, unknown>;
 
 function parseSessionsFile(text: string): SessionsFile {
   return parseJson(sessionsFileSchema, text, sessionsFile);

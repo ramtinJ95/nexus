@@ -336,7 +336,7 @@ test("recording writes every live terminal of this machine but those another ter
     { terminal: "t2", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" },
     { terminal: "t3", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null },
   ];
-  assert.deepEqual(lastFile(guest), { version: 1, recordedAt: JSON.parse(guest.written[0]!.content).recordedAt, sessions, failed: [] });
+  assert.deepEqual(lastFile(guest), { version: 2, recordedAt: JSON.parse(guest.written[0]!.content).recordedAt, sessions, failed: [] });
   assert.deepEqual(recorded, sessions.map((r) => ({ ...r, id: r.terminal })), "each is reported under its terminal");
   assert.deepEqual((await sessionFacts(guest)).map((f) => f.terminal), ["t1", "t2", "t3", "t4"], "the child is reported, and no other machine's terminal is");
 });
@@ -344,7 +344,7 @@ test("recording writes every live terminal of this machine but those another ter
 test("a read never starts a core: with none, a pylon reports only its failed sessions, records nothing and interrupts nothing", async () => {
   const failed = { record: { terminal: "t91", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" }, inTerminal: false, message: "pi did not start" };
   const core = fakeCore({ running: false });
-  const guest = pylon(core, { file: JSON.stringify({ version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: [], failed: [failed] }) });
+  const guest = pylon(core, { file: JSON.stringify({ version: 2, recordedAt: "2027-01-01T00:00:00Z", sessions: [], failed: [failed] }) });
   assert.deepEqual(await sessionFacts(guest), [{ id: "t91", state: "failed", terminal: null, harness: "pi", harnessSessionId: "/s.jsonl", status: "unknown", title: "plan", message: "pi did not start" }]);
   assert.equal(await recordSessions(guest), null);
   assert.deepEqual(guest.written, [], "the last sessions file stays in place");
@@ -828,7 +828,7 @@ test("a sessions file is read as the sessions it records, without its models or 
   const claude = { terminal: "t1", harness: "claude-code", title: "review", cwd: "/home/user/workspace/repo", harnessSessionId: "s-1", model: "opus" };
   const shell = { terminal: "t2", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null };
   const failed = { record: { terminal: "t3", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" }, inTerminal: false, message: "pi did not start" };
-  const file = { version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: [{ ...claude, ...unknown }, { ...shell, ...unknown }], failed: [{ ...failed, record: { ...failed.record, ...unknown }, ...unknown }], ...unknown };
+  const file = { version: 2, recordedAt: "2027-01-01T00:00:00Z", sessions: [{ ...claude, ...unknown }, { ...shell, ...unknown }], failed: [{ ...failed, record: { ...failed.record, ...unknown }, ...unknown }], ...unknown };
   assert.deepEqual(pausedSessionsIn(JSON.stringify(file)), [
     { id: "t1", terminal: "t1", harness: "claude-code", title: "review", harnessSessionId: "s-1" },
     { id: "t2", terminal: "t2", harness: "shell", title: "sh", harnessSessionId: null },
@@ -836,7 +836,7 @@ test("a sessions file is read as the sessions it records, without its models or 
   ]);
   const { harnessSessionId: _, ...noSessionId } = shell;
   const bad: unknown[] = [
-    null, [], { ...file, version: 2 }, { ...file, recordedAt: "" }, { ...file, sessions: null }, { ...file, failed: undefined },
+    null, [], { ...file, version: 3 }, { ...file, recordedAt: "" }, { ...file, sessions: null }, { ...file, failed: undefined },
     { ...file, sessions: [{ ...shell, harness: "codex" }] }, { ...file, sessions: [{ ...shell, title: "" }] }, { ...file, sessions: [{ ...shell, cwd: 1 }] }, { ...file, sessions: [{ ...shell, terminal: undefined }] },
     { ...file, sessions: [{ ...claude, model: "" }] }, { ...file, sessions: [{ ...shell, harnessSessionId: "" }] }, { ...file, sessions: [null] },
     { ...file, sessions: [{ ...shell, harness: "toString" }] }, { ...file, sessions: [{ ...shell, harness: "constructor" }] },
@@ -844,6 +844,30 @@ test("a sessions file is read as the sessions it records, without its models or 
   ];
   for (const value of bad) assert.throws(() => pausedSessionsIn(JSON.stringify(value)), Error, JSON.stringify(value));
   assert.deepEqual(pausedSessionsIn(JSON.stringify({ ...file, sessions: [noSessionId], failed: [] })), [{ id: "t2", terminal: "t2", harness: "shell", title: "sh", harnessSessionId: null }], "a missing session ID reads as none");
+});
+
+test("a sessions file a probe of contract 1 wrote under herdrPane and inPane is read as its sessions, and the wake's record writes version 2", async () => {
+  const shell = { herdrPane: "t1", harness: "shell", title: "sh", cwd: "/home/user", harnessSessionId: null };
+  const pi = { herdrPane: "t2", harness: "pi", title: "plan", cwd: "/home/user", harnessSessionId: "/s.jsonl" };
+  const failed = { record: { herdrPane: "t3", harness: "pi", title: "notes", cwd: "/home/user", harnessSessionId: "/n.jsonl" }, inPane: false, message: "pi did not start" };
+  const old = { version: 1, recordedAt: "2027-01-01T00:00:00Z", sessions: [shell, pi], failed: [failed] };
+  assert.deepEqual(pausedSessionsIn(JSON.stringify(old)), [
+    { id: "t1", terminal: "t1", harness: "shell", title: "sh", harnessSessionId: null },
+    { id: "t2", terminal: "t2", harness: "pi", title: "plan", harnessSessionId: "/s.jsonl" },
+    { id: "t3", terminal: null, harness: "pi", title: "notes", harnessSessionId: "/n.jsonl" },
+  ]);
+  const { herdrPane, ...renamed } = shell;
+  for (const value of [{ ...old, sessions: [{ ...renamed, terminal: herdrPane }] }, { ...old, version: 2 }, { ...old, failed: [{ record: failed.record, inTerminal: false, message: failed.message }] }]) {
+    assert.throws(() => pausedSessionsIn(JSON.stringify(value)), Error, `each version takes only its own names: ${JSON.stringify(value)}`);
+  }
+
+  const core = fakeCore();
+  const guest = pylon(core, { file: JSON.stringify(old) });
+  assert.deepEqual((await relaunchSessions(guest, unlocked)).map((o) => [o.record.title, o.result]), [["sh", "relaunched"], ["plan", "relaunched"], ["notes", "relaunched"]]);
+  const file = JSON.parse(guest.written.findLast((f) => f.path === sessionsFile)!.content) as { version: number; sessions: Record<string, unknown>[]; failed: unknown[] };
+  assert.equal(file.version, 2);
+  assert.deepEqual(file.sessions.map((r) => [r["title"], typeof r["terminal"], "herdrPane" in r]), [["sh", "string", false], ["plan", "string", false], ["notes", "string", false]]);
+  assert.deepEqual(file.failed, []);
 });
 
 test("attached terminals are the core's viewers, which pgrep counts, and a count pgrep did not give rejects", async () => {

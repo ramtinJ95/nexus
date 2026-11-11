@@ -167,8 +167,15 @@ const pausedSessionSchema = z.strictObject({
 });
 /** A session a stopped pylon's wake brings back, under the `id` it had while the pylon ran. */
 export type PausedSession = z.infer<typeof pausedSessionSchema>;
-/** What a backend keeps beside a checkpoint: the pylon VM's sidecar file, a Docker checkpoint's sessions label. */
-export const pausedSessionsSchema = z.array(pausedSessionSchema).readonly();
+/**
+ * What a backend keeps beside a checkpoint: the pylon VM's sidecar file, a Docker checkpoint's sessions label. A probe
+ * of contract 1 kept a session's terminal as `herdrPane`, which a node still holds beside a checkpoint from before, so
+ * that name reads as `terminal`.
+ */
+export const pausedSessionsSchema = z.array(z.preprocess(
+  (v) => typeof v === "object" && v !== null && "herdrPane" in v && !("terminal" in v) ? (({ herdrPane, ...rest }) => ({ ...rest, terminal: herdrPane }))(v) : v,
+  pausedSessionSchema,
+)).readonly();
 export interface GitFacts { head: string; branch: string | null; dirty: boolean; branches: readonly { name: string; head: string; pushedAs: string | null }[] }
 /** How long the probe reuses a pylon's git read, so a snapshot holds the branches pushed that long before it was taken. */
 export const gitPollMs = 60_000;

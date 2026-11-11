@@ -377,6 +377,10 @@ test("a checkpoint's sessions label is parsed, and one that does not parse is re
   const backend = createDockerBackend({ images });
   assert.deepEqual(await backend.list(), [{ pylonId: pylon, vm: "stopped", checkpoint: "ckpt-a-1", image: "img-test00000000", sessions: [session] }]);
 
+  const { terminal, ...rest } = session;
+  await docker.answer({ images: { stdout: "i1\n" }, "image inspect i1": checkpoint(label([{ ...rest, herdrPane: terminal }])) });
+  assert.deepEqual(await backend.list(), [{ pylonId: pylon, vm: "stopped", checkpoint: "ckpt-a-1", image: "img-test00000000", sessions: [session] }], "a probe of contract 1 labelled the terminal herdrPane");
+
   await docker.answer({ images: { stdout: "i1\n" }, "image inspect i1": checkpoint(label([{ ...session, harness: "nobody" }])) });
   await assert.rejects(backend.list(), { message: /^label nexus\.sessions\[0\]\.harness: / });
 });
