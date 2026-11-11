@@ -1,5 +1,5 @@
 /**
- * How the probe starts the agent of each session kind in its pane, and how a pylon signs it in at boot, keyed by
+ * How the probe starts the agent of each session kind in its terminal, and how a pylon signs it in at boot, keyed by
  * protocol/agent-kinds.ts's names. A kind whose sessions take a prompt or a model has the launch arguments for them
  * here, and one that takes neither has none.
  */
@@ -10,10 +10,10 @@ import { defaultClaudeModel } from "../../protocol/models.ts";
 import { chatgptTokenGrant } from "../../protocol/secret-grants.ts";
 import { shellQuote as q } from "../../shell.ts";
 import { callTimeoutMs, onClaudeTranscript } from "../../guest-contract.ts";
-import { checkoutDir, claudeProjects, home } from "../../../images/pylon/nexus-contract.ts";
+import { checkoutDir, claudeProjects, home, piSessions } from "../../../images/pylon/nexus-contract.ts";
 
 export interface Launcher {
-  /** Herdr's agent kind, which Herdr names after the agent's executable. */
+  /** The agent's executable, which its terminal's foreground process is, so the name a session's harness is read from. */
   kind: string;
   /** The launch arguments that resume a harness session ID, and whether the session already took a prompt, which a prompted launch must not repeat. */
   resume(guest: Guest, id: string): Promise<{ args: readonly string[]; hasHistory: boolean }>;
@@ -22,25 +22,30 @@ export interface Launcher {
   flags: readonly string[];
   /** The flag a launch passes a model with, which recordSessions reads back. */
   modelFlag?: string;
-  /** The flags its command line names its session ID with, which recordSessions reads when Herdr has learned none. */
+  /** The flags its command line names its session ID with, which recordSessions reads when its terminal has no session label. */
   sessionFlags?: readonly string[];
-  /** Launch arguments that make the agent run `command` as it takes its first prompt. */
-  promptReceipt?(command: string): readonly string[];
+  /** The terminal label the session the agent runs now is under, which outlasts its command line, as after a /clear. */
+  sessionLabel?: string;
+  /**
+   * Launch arguments for the agent's hooks, which label its terminal with its session and, given `receipt`, run that
+   * command as it takes its first prompt.
+   */
+  hooks?(receipt?: string): readonly string[];
   /** Runs before a start. It is idempotent, so one run serves every start after it. */
   seed?(guest: Guest): Promise<void>;
   /** A shell command that runs as user on every boot of a pylon granted one of its kind's sign-in grants, after the dotfiles pull. */
   login?: string;
   /**
-   * A session runs in one pane only. A relaunch brings it back in one and holds it from sends and launches meanwhile,
-   * and a start Herdr reports failed is kept while its pane runs the agent, so the session is never started twice.
+   * A session runs in one terminal only. A relaunch brings it back in one and holds it from sends and launches
+   * meanwhile, and a start that fails is kept while its terminal runs the agent, so the session is never started twice.
    */
   onePane: boolean;
 }
 
 type Takes<H extends SessionHarness> = (typeof agentKinds)[H]["takes"];
-/** A kind that resumes nothing starts nothing. One has the prompt and model arguments exactly when its sessions take them. */
+/** A kind that resumes nothing starts nothing. One has the prompt receipt's hooks and the model argument exactly when its sessions take them. */
 type LauncherOf<H extends SessionHarness> = Takes<H>["resume"] extends false ? null : Launcher
-  & (Takes<H>["prompt"] extends true ? Required<Pick<Launcher, "promptReceipt">> : { promptReceipt?: never })
+  & (Takes<H>["prompt"] extends true ? Required<Pick<Launcher, "hooks">> : { hooks?: never })
   & (Takes<H>["model"] extends true ? Required<Pick<Launcher, "modelFlag">> : { modelFlag?: never });
 
 /**
@@ -75,29 +80,40 @@ fs.renameSync(file + ".nexus-tmp", file);
 console.log("pi: signed in to ChatGPT as its openai provider");
 `;
 
+/**
+ * Claude's SessionStart hook: labels its terminal with the session it runs, as it starts and after a /clear or a
+ * /resume, under the label shepherdr uses. Outside a Herdr Core terminal it does nothing.
+ */
+export const labelClaudeSession = `test -z "$HC_TERMINAL_ID" || herdr-core label "$HC_TERMINAL_ID" "claude.session_id=$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(0, "utf8")).session_id))')" >/dev/null 2>&1; exit 0`;
+
+const claudeHook = (command: string) => [{ hooks: [{ type: "command", command }] }];
+
 const table = {
   "claude-code": {
     kind: "claude",
     resume: claudeResume,
-    // Herdr learns a Claude Code session's ID from Claude's SessionStart hook, which does not run while Claude
-    // waits at its login or trust screen, nor again once the human is past it. So every Claude Code start
-    // names its ID, and recordSessions reads it back from the pane's command line when Herdr has none.
+    // Claude's SessionStart hook does not run while Claude waits at its login or trust screen, nor again once the
+    // human is past it. So every Claude Code start names its ID, which recordSessions reads back from the terminal's
+    // command line while it has no label.
     fresh: () => ["--session-id", randomUUID()],
     flags: ["--permission-mode", "bypassPermissions"],
     modelFlag: "--model",
     sessionFlags: ["--session-id", "--resume"],
-    promptReceipt: (command) => ["--settings", JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command }] }] } })],
+    sessionLabel: "claude.session_id",
+    hooks: (receipt) => ["--settings", JSON.stringify({ hooks: { SessionStart: claudeHook(labelClaudeSession), ...receipt === undefined ? {} : { UserPromptSubmit: claudeHook(receipt) } } })],
     seed: seedClaude,
     onePane: true,
   },
   // pi 1.4.0 opens a missing --session path as a new session that it first writes there on its first
-  // message, so unlike a Claude Code ID the path needs no check, and its history is not looked for. pi reports its
-  // session file at once.
+  // message, so unlike a Claude Code ID the path needs no check, and its history is not looked for. A fresh session
+  // gets a path of its own, which its command line names until pi-shepherdr labels the terminal with it.
   pi: {
     kind: "pi",
     resume: async (_guest, sessionFile) => ({ args: ["--session", sessionFile], hasHistory: true }),
-    fresh: () => [],
+    fresh: () => ["--session", `${piSessions}/nexus-${randomUUID()}.jsonl`],
     flags: [],
+    sessionFlags: ["--session"],
+    sessionLabel: "pi.session_file",
     login: `node -e ${q(piChatgptLogin)}`,
     onePane: false,
   },

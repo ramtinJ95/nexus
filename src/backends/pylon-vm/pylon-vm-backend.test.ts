@@ -30,7 +30,10 @@ import type { BrokenCause, ProbeEvent } from "../../protocol/observations.ts";
 import { connectProbe } from "../../protocol/client.ts";
 import { startProbe } from "../../probe/server.ts";
 import { nodeSecrets } from "../../probe/config.ts";
-import { herdrOk, herdrPane, herdrSnapshot } from "../fake-guest.ts";
+import { coreOk } from "../fake-guest.ts";
+import { coreCall, noCoreExit } from "../../probe/guest/core.ts";
+import { shellQuote as q } from "../../shell.ts";
+import { checkoutDir } from "../../../images/pylon/nexus-contract.ts";
 import type { TemplateBuildInputs, TemplateManifest } from "../../protocol/images.ts";
 
 // Under /tmp, not os.tmpdir(): macOS's per-user temp dir is too long for the controllers' Unix sockets.
@@ -138,7 +141,13 @@ async function fakeController(dir: string, pylonId: string, answer: (action: Rec
 
 /** The reply to an exec that finished, as the fork's process supervisor gives it. */
 const finished = (exitCode: number, output = "") => ({ pid: "00000000-0000-4000-8000-000000000000", running: false, output, exitCode, truncated: false });
-const herdrNoServer = JSON.stringify({ id: "cli:x", error: { code: "server_not_running", message: "no server" } }) + "\n";
+/** Core's terminal.list reply with one shell at t1, titled `title`. */
+const oneShell = (title: string) => finished(0, coreOk({
+  terminals: [{
+    address: "t1", name: null, state: "live", labels: { "nexus.title": title, "nexus.harness": "shell" }, argv: ["bash", "-l"], cwd: checkoutDir, parent: null,
+    foreground: { argv: ["bash", "-l"], cwd: checkoutDir, name: "bash" }, status: null,
+  }],
+}).output);
 
 test("a state root too long for a pylon's control socket is refused when the backend is created", () => {
   const stateRoot = `/var/lib/${"n".repeat(40)}`;
@@ -645,7 +654,7 @@ test("a pause records the sessions while the guest runs, before it stops the VM,
   const dir = await leftInstance(instances, "pylon-rec", "running");
   await writeFile(join(dir, "controller.log"), "");
   const controller = await fakeController(dir, "pylon-rec", (action) => {
-    if (action.action === "exec") return finished(1, herdrNoServer);
+    if (action.action === "exec") return finished(noCoreExit);
     if (action.action === "stop") {
       controller.state.current = "stopped";
       return { name: "pylon-rec", state: "stopped" };
@@ -654,8 +663,9 @@ test("a pause records the sessions while the guest runs, before it stops the VM,
   });
   await backend.ensurePaused("pylon-rec" as PylonId, "ckpt-rec-1", signal());
   assert.deepEqual(controller.actions.map((a) => a.action), ["exec", "stop"]);
-  assert.match(String(controller.actions[0]!.cmd).replace(/['\\]/g, ""), /^runuser -l user -c cd \/home\/user && herdr --session nexus api snapshot$/);
-  assert.match(await readFile(join(dir, "controller.log"), "utf8"), /^\d{4}-\d\d-\d\dT[\d:.]+Z sessions: no Herdr server runs, so the last record stands\n$/);
+  const listing = ["sh", "-c", coreCall, "core", JSON.stringify({ jsonrpc: "2.0", id: 1, method: "terminal.list", params: {} })].map(q).join(" ");
+  assert.ok(String(controller.actions[0]!.cmd).startsWith(`${asUserIn(listing, "/home/user").slice(0, -1)} `), "the pause lists Core's terminals as user, in its home");
+  assert.match(await readFile(join(dir, "controller.log"), "utf8"), /^\d{4}-\d\d-\d\dT[\d:.]+Z sessions: no Herdr Core runs, so the last record stands\n$/);
   assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint]), [["stopped", "ckpt-rec-1"]]);
 });
 
@@ -663,9 +673,8 @@ test("a pause keeps what it recorded beside the checkpoint, which the stopped py
   const { backend, instances } = await backendWith();
   const dir = await leftInstance(instances, "pylon-kept", "running");
   await writeFile(join(dir, "controller.log"), "");
-  const snapshot = herdrSnapshot([{ id: "w1", label: "sh" }], [herdrPane("w1:p1", "w1", null, "idle")]);
   const controller = await fakeController(dir, "pylon-kept", (action) => {
-    if (action.action === "exec") return String(action.cmd).replace(/['\\]/g, "").includes("api snapshot") ? finished(0, herdrOk(snapshot).output) : finished(3); // no sessions file yet
+    if (action.action === "exec") return String(action.cmd).includes("terminal.list") ? oneShell("sh") : finished(3); // no sessions file yet
     if (action.action === "write-files") return {};
     if (action.action === "stop") {
       controller.state.current = "stopped";
@@ -675,7 +684,7 @@ test("a pause keeps what it recorded beside the checkpoint, which the stopped py
   });
   assert.equal(field((await backend.list())[0], "sessions"), undefined, "a running pylon's sessions come from its guest");
   await backend.ensurePaused("pylon-kept" as PylonId, "ckpt-kept-1", signal());
-  const recorded = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }];
+  const recorded = [{ id: "t1", herdrPane: "t1", harness: "shell", harnessSessionId: null, title: "sh" }];
   assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-kept-1", sessions: recorded });
   assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint, field(p, "sessions")]), [["stopped", "ckpt-kept-1", recorded]]);
 });
@@ -1126,9 +1135,9 @@ function expiresOnceSeen(file: string): AbortSignal {
 
 /**
  * A detached controller and a child in its group. Neither cooperates with SIGTERM or shutdown, and a hung one answers no
- * inspect either. With `exec`, it answers an exec of Herdr's snapshot and any other exec with those, and write-files.
+ * inspect either. With `exec`, it answers an exec of Core's terminal.list and any other exec with those, and write-files.
  */
-async function stuckController(t: TestContext, dir: string, id: PylonId, stop: "silent" | "error", inspect: "answer" | "hang" = "answer", exec?: { snapshot: unknown; other: unknown }) {
+async function stuckController(t: TestContext, dir: string, id: PylonId, stop: "silent" | "error", inspect: "answer" | "hang" = "answer", exec?: { list: unknown; other: unknown }) {
   const child = spawn(process.execPath, ["--input-type=module", "-e", `
     import { spawn } from "node:child_process";
     import { once } from "node:events";
@@ -1153,7 +1162,7 @@ async function stuckController(t: TestContext, dir: string, id: PylonId, stop: "
         res.end(JSON.stringify({ ok: true, result: { name: id, labels: { "nexus.image": ${JSON.stringify(image)} }, status: { name: id, state, bootedAt: "2026-10-22T00:00:00Z" } } }));
       } else if (${JSON.stringify(exec !== undefined)} && action.action === "exec") {
         const exec = ${JSON.stringify(exec ?? null)};
-        res.end(JSON.stringify({ ok: true, result: String(action.cmd).replace(/['\\\\]/g, "").includes("api snapshot") ? exec.snapshot : exec.other }));
+        res.end(JSON.stringify({ ok: true, result: String(action.cmd).replace(/['\\\\]/g, "").includes("terminal.list") ? exec.list : exec.other }));
       } else if (${JSON.stringify(exec !== undefined)} && action.action === "write-files") {
         res.end(JSON.stringify({ ok: true, result: {} }));
       } else if (action.action === "stop") {
@@ -1254,11 +1263,10 @@ test("a retry records the sessions of a guest whose controller answers everythin
   const id = "pylon-slowinspect" as PylonId;
   const dir = await leftInstance(instances, id, "running");
   await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-slowinspect-1", sessions: [] }));
-  const snapshot = herdrSnapshot([{ id: "w1", label: "new shell" }], [herdrPane("w1:p1", "w1", null, "idle")]);
-  const controller = await stuckController(t, dir, id, "error", "hang", { snapshot: finished(0, herdrOk(snapshot).output), other: finished(3) });
+  const controller = await stuckController(t, dir, id, "error", "hang", { list: oneShell("new shell"), other: finished(3) });
   await backend.ensurePaused(id, "ckpt-slowinspect-2", AbortSignal.timeout(60_000), true);
   await controller.exited;
-  const recorded = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "new shell" }];
+  const recorded = [{ id: "t1", herdrPane: "t1", harness: "shell", harnessSessionId: null, title: "new shell" }];
   assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-slowinspect-2", sessions: recorded });
 });
 
@@ -1352,9 +1360,8 @@ test("retry records a responsive guest's sessions opened since its last pause", 
   const id = "pylon-retryrec" as PylonId;
   const dir = await leftInstance(instances, id, "running");
   await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-retryrec-1", sessions: [] }));
-  const snapshot = herdrSnapshot([{ id: "w1", label: "new shell" }], [herdrPane("w1:p1", "w1", null, "idle")]);
   const controller = await fakeController(dir, id, (action) => {
-    if (action.action === "exec") return String(action.cmd).replace(/['\\]/g, "").includes("api snapshot") ? finished(0, herdrOk(snapshot).output) : finished(3);
+    if (action.action === "exec") return String(action.cmd).includes("terminal.list") ? oneShell("new shell") : finished(3);
     if (action.action === "write-files") return {};
     if (action.action === "stop") {
       controller.state.current = "stopped";
@@ -1363,7 +1370,7 @@ test("retry records a responsive guest's sessions opened since its last pause", 
     return assert.fail(`unexpected ${action.action}`);
   });
   await backend.ensurePaused(id, "ckpt-retryrec-2", signal(), true);
-  const recorded = [{ id: "w1:p1", herdrPane: "w1:p1", harness: "shell", harnessSessionId: null, title: "new shell" }];
+  const recorded = [{ id: "t1", herdrPane: "t1", harness: "shell", harnessSessionId: null, title: "new shell" }];
   assert.deepEqual(JSON.parse(await readFile(join(dir, "nexus-checkpoint.json"), "utf8")), { checkpoint: "ckpt-retryrec-2", sessions: recorded });
   assert.deepEqual((await backend.list()).map((p) => [p.vm, field(p, "sessions")]), [["stopped", recorded]]);
   const actions = controller.actions.map((a) => a.action);

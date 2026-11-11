@@ -28,7 +28,8 @@ import { fakeTailscale, nodeHost, viaGateway } from "./fake-tailscale.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
 import type { ProjectId } from "../ids.ts";
 import type { ArtifactManifest, ImageManifest, TemplateManifest } from "../protocol/images.ts";
-import { fakeGuest, herdrArgs, herdrCall, herdrError, herdrOk, herdrPane, herdrSnapshot } from "../backends/fake-guest.ts";
+import { coreError, coreNotRunning, coreOk, coreRequest, fakeCore, fakeGuest, type FakeTerminal } from "../backends/fake-guest.ts";
+import { ensureCore } from "../guest-contract.ts";
 import { checkoutReader } from "../checkout-files.ts";
 import type { HostBridge, HostBridgeAnswer } from "../host-bridge.ts";
 import { tempDir, testImage, until } from "../test-support/kit.ts";
@@ -779,25 +780,24 @@ async function running(client: ReturnType<typeof connectProbe>) {
   assert.equal((await finished(client, env.jobId)).state, "succeeded");
 }
 
+/** The terminal of a Claude Code session Nexus opened, with `status` as Claude last said it. */
+const claudeTerminal = (session: string, status: string): Partial<FakeTerminal> => ({
+  argv: ["claude", "--resume", session], labels: { "nexus.title": "Claude Code", "nexus.harness": "claude-code" }, status: { state: status, app: "claude-code" },
+});
+
 test("commands run in a running pylon's guest and return its result", async (t) => {
-  const guest = fakeGuest((argv, herdr) => {
-    if (!herdr) return { exitCode: 0, output: `ran ${argv.join(" ")}` };
-    const sub = herdrArgs(argv).command;
-    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
-    if (sub === "workspace create") return herdrOk({ type: "workspace_created", workspace: { workspace_id: "w1" }, tab: { tab_id: "w1:t1" }, root_pane: { pane_id: "w1:p1" } });
-    if (sub === "agent start") return herdrOk({ type: "agent_started", agent: {}, argv: [] });
-    if (sub === "pane close") return herdrError("pane_not_found");
-    throw new Error(`unscripted ${sub}`);
-  });
+  const core = fakeCore();
+  const guest = fakeGuest((argv) => core.reply(argv) ?? { exitCode: 0, output: `ran ${argv.join(" ")}` });
   const { client } = await setup(t, {}, guest);
   await running(client);
 
   assert.deepEqual(await client.command(pylonId, { kind: "exec", argv: ["git", "status"], cwd: "/home/user/workspace/repo", timeoutMs: 5000 }),
     { kind: "exec", exitCode: 0, output: "ran git status", truncated: false });
-  assert.deepEqual(await client.command(pylonId, { kind: "open-session", harness: "claude-code", title: "review" }), { kind: "open-session", herdrPane: "w1:p1" });
-  const create = guest.execs.map(herdrCall).find((c) => c?.command === "workspace create")!;
-  assert.deepEqual([create.flags["--cwd"], create.flags["--label"]], ["/home/user/workspace/repo", "review"], "sessions open in the checkout");
-  assert.deepEqual(await client.command(pylonId, { kind: "close-session", herdrPane: "w1:p1" }), { kind: "close-session", outcome: "not-open" }, "a pane that is not open is not reported closed");
+  assert.deepEqual(await client.command(pylonId, { kind: "open-session", harness: "claude-code", title: "review" }), { kind: "open-session", herdrPane: "t1" });
+  const run = core.calls.find((c) => c.method === "terminal.run")!.params as { cwd: string; labels: Record<string, string> };
+  assert.deepEqual([run.cwd, run.labels["nexus.title"]], ["/home/user/workspace/repo", "review"], "sessions open in the checkout");
+  assert.deepEqual(await client.command(pylonId, { kind: "close-session", herdrPane: "t1" }), { kind: "close-session", outcome: "closed" });
+  assert.deepEqual(await client.command(pylonId, { kind: "close-session", herdrPane: "t1" }), { kind: "close-session", outcome: "not-open" }, "a terminal that is not open is not reported closed");
 });
 
 test("a command for a pylon that is not running is refused as not-running", async (t) => {
@@ -868,74 +868,50 @@ test("malformed commands get 400 and reach no guest", async (t) => {
 
 test("a message that resumes its Claude session publishes the session's new pane at once", async (t) => {
   const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
-  let panes: ReturnType<typeof herdrPane>[] = [];
-  const guest = fakeGuest((argv, herdr) => {
-    if (!herdr) return argv[3] === "claude-type" || argv[0] === "node" || argv[0] === "sh" ? { exitCode: argv.at(-1) === sessionsFile ? 3 : 0, output: "" } : assert.fail(`unexpected exec ${argv.join(" ")}`);
-    const sub = herdrArgs(argv).command;
-    if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "Claude Code" }], panes));
-    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
-    if (sub === "workspace create") return herdrOk({ type: "workspace_created", workspace: { workspace_id: "w1" }, tab: { tab_id: "w1:t1" }, root_pane: { pane_id: "w1:p1" } });
-    if (sub === "pane process-info") return herdrOk({ type: "pane_process_info", process_info: { pane_id: "w1:p1", shell_pid: 100, foreground_processes: [{ pid: 101, name: "claude", argv: ["claude", "--session-id", session] }] } });
-    if (sub === "agent start") {
-      panes = [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: session })];
-      return herdrOk({ type: "agent_started", agent: {}, argv: [] });
-    }
-    throw new Error(`unscripted ${sub}`);
-  });
+  const core = fakeCore();
+  // The seed and the transcript lookup succeed, so the session resumes, and the pylon never paused.
+  const guest = fakeGuest((argv) => core.reply(argv)
+    ?? (argv[0] === "node" || argv[0] === "sh" ? { exitCode: argv.at(-1) === sessionsFile ? 3 : 0, output: "" } : assert.fail(`unexpected exec ${argv.join(" ")}`)));
   const { client } = await setup(t, {}, guest);
   await running(client);
   const abort = new AbortController();
   t.after(() => abort.abort());
   const events = client.observe(abort.signal)[Symbol.asyncIterator]();
   assert.equal((await events.next()).value?.type, "snapshot");
-  assert.deepEqual(await client.command(pylonId, { kind: "send-claude", session, text: "carry on" }), { kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed: true });
+  assert.deepEqual(await client.command(pylonId, { kind: "send-claude", session, text: "carry on" }), { kind: "send-claude", outcome: "sent", herdrPane: "t1", resumed: true });
   const e = (await events.next()).value;
   const p = e?.type === "snapshot" ? e.observation.pylons[0] : assert.fail(`a snapshot, not ${e?.type}`);
   assert.deepEqual(p?.phase === "running" ? p.sessions?.map((f: { harnessSessionId: string | null }) => f.harnessSessionId) : assert.fail("the pylon runs"), [session], "the control plane sees the resumed session without waiting a minute");
 });
 
-test("a message for a Claude session is typed into its pane, and the result says how Claude took it", async (t) => {
+test("a message for a Claude session is sent to its terminal, and the result says how Claude took it", async (t) => {
   const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
-  const guest = fakeGuest((argv, herdr) => {
-    if (!herdr) return argv[3] === "claude-type" ? { exitCode: 0, output: "" } : assert.fail(`unexpected exec ${argv.join(" ")}`);
-    const sub = herdrArgs(argv).command;
-    if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "Claude Code" }], [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: session })]));
-    if (sub === "pane process-info") return herdrOk({ type: "pane_process_info", process_info: { pane_id: "w1:p1", shell_pid: 100, foreground_processes: [{ pid: 101, name: "claude", argv: ["claude", "--resume", session] }] } });
-    throw new Error(`unscripted ${sub}`);
-  });
+  const core = fakeCore();
+  const claude = core.add(claudeTerminal(session, "working"));
+  const guest = fakeGuest((argv) => core.reply(argv) ?? assert.fail(`unexpected exec ${argv.join(" ")}`));
   const { client } = await setup(t, {}, guest);
   await running(client);
   const text = "line one\n\"quoted\" `ticks` $HOME";
-  assert.deepEqual(await client.command(pylonId, { kind: "send-claude", session, text }), { kind: "send-claude", outcome: "queued", herdrPane: "w1:p1", resumed: false });
-  assert.deepEqual(guest.execs.find((a) => a[3] === "claude-type")!.slice(4), ["w1:p1", text]);
+  assert.deepEqual(await client.command(pylonId, { kind: "send-claude", session, text }), { kind: "send-claude", outcome: "queued", herdrPane: "t1", resumed: false });
+  assert.deepEqual(claude.sent, [text]);
   await assert.rejects(client.command(pylonId, { kind: "send-claude", session, text: "a\tb" }), /HTTP 400: .*Replace tabs with spaces/);
 });
 
 test("two messages for one Claude session run one after the other, so the session opens once and their typing never overlaps", async (t) => {
   const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
-  let panes: ReturnType<typeof herdrPane>[] = [];
-  const base = fakeGuest((argv, herdr) => {
-    if (!herdr) return argv[3] === "claude-type" || argv[0] === "node" || argv[0] === "sh" ? { exitCode: argv.at(-1) === sessionsFile ? 3 : 0, output: "" } : assert.fail(`unexpected exec ${argv.join(" ")}`);
-    const sub = herdrArgs(argv).command;
-    if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "Claude Code" }], panes));
-    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
-    if (sub === "workspace create") return herdrOk({ type: "workspace_created", workspace: { workspace_id: "w1" }, tab: { tab_id: "w1:t1" }, root_pane: { pane_id: "w1:p1" } });
-    if (sub === "pane process-info") return herdrOk({ type: "pane_process_info", process_info: { pane_id: "w1:p1", shell_pid: 100, foreground_processes: [{ pid: 101, name: "claude", argv: ["claude", "--session-id", session] }] } });
-    if (sub === "agent start") {
-      panes = [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: session })];
-      return herdrOk({ type: "agent_started", agent: {}, argv: [] });
-    }
-    throw new Error(`unscripted ${sub}`);
-  });
+  const core = fakeCore();
+  const base = fakeGuest((argv) => core.reply(argv)
+    ?? (argv[0] === "node" || argv[0] === "sh" ? { exitCode: argv.at(-1) === sessionsFile ? 3 : 0, output: "" } : assert.fail(`unexpected exec ${argv.join(" ")}`)));
   let typing = 0;
   const typed: string[] = [];
   const guest: Guest = {
     ...base,
     async exec(argv, options) {
-      if (argv[3] !== "claude-type") return base.exec(argv, options);
-      assert.equal(typing++, 0, "no message is typed while another is");
+      const request = coreRequest(argv);
+      if (request?.method !== "terminal.send") return base.exec(argv, options);
+      assert.equal(typing++, 0, "no message is sent while another is");
       await new Promise((resolve) => setTimeout(resolve, 50));
-      typed.push(argv[5]!);
+      typed.push(request.params.text as string);
       typing--;
       return base.exec(argv, options);
     },
@@ -944,28 +920,26 @@ test("two messages for one Claude session run one after the other, so the sessio
   await running(client);
   const sends = await Promise.all(["first", "second"].map((text) => client.command(pylonId, { kind: "send-claude", session, text })));
   assert.deepEqual(sends.map((r) => r.kind === "send-claude" && r.resumed), [true, false], "the second message finds the session the first resumed");
-  assert.equal(base.herdrCalls().filter((c) => c === "workspace create").length, 1);
+  assert.equal(core.calls.filter((c) => c.method === "terminal.run").length, 1);
   assert.deepEqual(typed, ["first", "second"]);
 });
 
 test("the outcome of a Claude send waits for one queued behind a slow send, types nothing, and says when a send failed or is unknown", async (t) => {
   const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
-  const base = fakeGuest((argv, herdr) => {
-    if (!herdr) return argv[3] === "claude-type" ? { exitCode: 0, output: "" } : assert.fail(`unexpected exec ${argv.join(" ")}`);
-    const sub = herdrArgs(argv).command;
-    if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "Claude Code" }], [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: session })]));
-    if (sub === "pane process-info") return herdrOk({ type: "pane_process_info", process_info: { pane_id: "w1:p1", shell_pid: 100, foreground_processes: [{ pid: 101, name: "claude", argv: ["claude", "--resume", session] }] } });
-    throw new Error(`unscripted ${sub}`);
-  });
+  const core = fakeCore();
+  core.add(claudeTerminal(session, "working"));
+  const base = fakeGuest((argv) => core.reply(argv) ?? assert.fail(`unexpected exec ${argv.join(" ")}`));
   const slow = Promise.withResolvers<void>();
   const typed: string[] = [];
   const guest: Guest = {
     ...base,
     async exec(argv, options) {
-      if (argv[3] !== "claude-type") return base.exec(argv, options);
-      if (argv[5] === "slow") await slow.promise;
-      typed.push(argv[5]!);
-      return argv[5] === "breaks" ? { exitCode: 1, output: "herdr: pane w1:p1 went away", truncated: false } : base.exec(argv, options);
+      const request = coreRequest(argv);
+      if (request?.method !== "terminal.send") return base.exec(argv, options);
+      const text = request.params.text as string;
+      if (text === "slow") await slow.promise;
+      typed.push(text);
+      return text === "breaks" ? { exitCode: 1, output: "herdr-core: connection to the core closed", truncated: false } : base.exec(argv, options);
     },
   };
   const { client } = await setup(t, {}, guest);
@@ -976,26 +950,27 @@ test("the outcome of a Claude send waits for one queued behind a slow send, type
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.equal(settled, false, "the outcome waits while the send waits behind the slow one");
   slow.resolve();
-  const queued = { outcome: "queued", herdrPane: "w1:p1", resumed: false };
+  const queued = { outcome: "queued", herdrPane: "t1", resumed: false };
   assert.deepEqual(await outcome, { kind: "send-claude-outcome", send: queued });
   assert.deepEqual(await Promise.all(sending), [{ kind: "send-claude", ...queued }, { kind: "send-claude", ...queued }]);
   assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:queued" }), { kind: "send-claude-outcome", send: queued }, "a settled send is still known");
 
-  await assert.rejects(client.command(pylonId, { kind: "send-claude", session, text: "breaks", requestId: "msg:breaks" }), /part of the message may sit unsent/);
+  await assert.rejects(client.command(pylonId, { kind: "send-claude", session, text: "breaks", requestId: "msg:breaks" }), /whether the message went in is unknown/);
   assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:breaks" }), { kind: "send-claude-outcome", send: "failed" });
   assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:never" }), { kind: "send-claude-outcome", send: "unknown" });
-  assert.deepEqual(typed, ["slow", "queued", "breaks"], "asking for an outcome types nothing");
+  assert.deepEqual(typed, ["slow", "queued", "breaks"], "asking for an outcome sends nothing");
 });
 
 test("a prompted Claude launch sent again while the first still runs waits for it", async (t) => {
   const execs: string[] = [];
   let release!: () => void;
   const held = new Promise<void>((resolve) => { release = resolve; });
-  const base = fakeGuest((argv, herdr) => herdr ? herdrError("server_not_running") : { exitCode: 1, output: "no Herdr in this guest" });
+  const core = fakeCore();
+  const base = fakeGuest((argv) => core.reply(argv) ?? { exitCode: 1, output: "no node in this guest" });
   const guest: Guest = {
     ...base,
     async exec(argv, options) {
-      execs.push(argv.join(" "));
+      execs.push(argv[2] === ensureCore ? "ensureCore" : coreRequest(argv)?.method ?? argv[0]!);
       if (execs.length === 1) await held;
       return base.exec(argv, options);
     },
@@ -1010,41 +985,28 @@ test("a prompted Claude launch sent again while the first still runs waits for i
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(execs.length, 1, "the second launch ran nothing while the first held the guest");
   release();
-  await Promise.all([assert.rejects(first, /starting the Herdr server failed/), assert.rejects(again, /starting the Herdr server failed/)]);
-  assert.equal(execs.length, 4);
-  assert.deepEqual(execs.slice(0, 2).map((e) => e.split(" ")[0]), ["herdr", "sh"], "the first launch ran to its end before the second began");
+  await Promise.all([assert.rejects(first, /seeding Claude state failed: no node in this guest/), assert.rejects(again, /seeding Claude state failed/)]);
+  assert.deepEqual(execs, ["ensureCore", "terminal.get", "node", "ensureCore", "terminal.get", "node"], "the first launch ran to its end before the second began");
 });
 
 test("each command kind waits for the reads or its Claude session or nothing, publishes a snapshot or not, and a send is remembered by its request ID", async (t) => {
   const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
-  const working = [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: session })];
-  let panes: ReturnType<typeof herdrPane>[] = working;
-  const base = fakeGuest((argv, herdr) => {
-    if (!herdr) {
-      if (argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
-      // A prompted launch fails at once on reading its record, so it never polls for a submission here.
-      if (argv[0] === "sh" && argv[2]?.includes("/opened")) return { exitCode: 1, output: "no launch records in this guest" };
-      return { exitCode: 0, output: "" };
-    }
-    const sub = herdrArgs(argv).command;
-    if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "Claude Code" }], panes));
-    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
-    if (sub === "workspace create") return herdrOk({ type: "workspace_created", workspace: { workspace_id: "w1" }, tab: { tab_id: "w1:t1" }, root_pane: { pane_id: "w1:p1" } });
-    if (sub === "pane process-info") return herdrOk({ type: "pane_process_info", process_info: { pane_id: "w1:p1", shell_pid: 100, foreground_processes: [{ pid: 101, name: "claude", argv: ["claude", "--resume", session] }] } });
-    if (sub === "agent start") {
-      panes = [herdrPane("w1:p1", "w1", "claude", "idle", { kind: "id", value: session })];
-      return herdrOk({ type: "agent_started", agent: {}, argv: [] });
-    }
-    if (sub === "pane close") return herdrError("pane_not_found");
-    if (sub === "pane send-keys") return { exitCode: 0, output: "" };
-    throw new Error(`unscripted ${sub}`);
-  });
+  const core = fakeCore();
+  /** Leaves one live terminal, Claude working on the session. */
+  const working = () => {
+    core.terminals.splice(0);
+    return core.add(claudeTerminal(session, "working"));
+  };
+  working();
+  // The seed succeeds and the session has a transcript, so a prompted launch fails at once and never waits for a submission here.
+  const base = fakeGuest((argv) => core.reply(argv) ?? { exitCode: argv.at(-1) === sessionsFile ? 3 : 0, output: "" });
   let typing: PromiseWithResolvers<void> | null = null;
   const typingHeld = Promise.withResolvers<void>();
   const guest: Guest = {
     ...base,
     async exec(argv, options) {
-      if (argv[3] === "claude-type" && argv[5] === "hold") {
+      const request = coreRequest(argv);
+      if (request?.method === "terminal.send" && request.params.text === "hold") {
         typingHeld.resolve();
         await typing?.promise;
       }
@@ -1068,7 +1030,7 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
     "open-session": { kind: "open-session", harness: "shell", title: "shell" },
     "open-session with resume": { kind: "open-session", harness: "claude-code", title: "Claude Code", resume: session },
     "open-session with prompt and resume": { kind: "open-session", harness: "claude-code", title: "Claude Code", resume: session, prompt: "go" },
-    "close-session": { kind: "close-session", herdrPane: "w1:p9" },
+    "close-session": { kind: "close-session", herdrPane: "t99" },
     "drop-failed-session": { kind: "drop-failed-session", id: "s1" },
     "send-claude": { kind: "send-claude", session, text: "hi" },
     "send-claude-outcome": { kind: "send-claude-outcome", requestId: "msg:never" },
@@ -1115,7 +1077,7 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
   reads.abort();
   assert.deepEqual(readsWait, readsWaiting, "a link or unlink waits for a read in flight, and nothing else does");
 
-  panes = working;
+  working();
   const sessionWaiting = ["open-session with prompt and resume", "send-claude", "interrupt-claude"];
   const sessionWaits = await waiting(sessionWaiting, async () => {
     typing = Promise.withResolvers<void>();
@@ -1154,40 +1116,41 @@ test("each command kind waits for the reads or its Claude session or nothing, pu
   }
   const published: Record<string, boolean> = {};
   for (const name of ["exec", "open-session", "close-session", "drop-failed-session", "send-claude-outcome", "service", "link-port", "unlink-port"]) published[name] = await publishes(commands[name]!);
-  panes = working;
+  working();
   published["interrupt-claude"] = await publishes(commands["interrupt-claude"]!);
   published["send-claude to a running session"] = await publishes(commands["send-claude"]!);
-  panes = [];
+  core.terminals.splice(0);
   published["send-claude that resumes its session"] = await publishes(commands["send-claude"]!);
   assert.deepEqual(published, {
     "exec": false, "open-session": true, "close-session": true, "drop-failed-session": false, "send-claude-outcome": false, "service": false, "link-port": true, "unlink-port": true,
     "send-claude to a running session": false, "send-claude that resumes its session": true, "interrupt-claude": false,
   });
 
-  panes = working;
+  const kept = working();
   await client.command(pylonId, { kind: "send-claude", session, text: "kept", requestId: "msg:kept" });
-  assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:kept" }), { kind: "send-claude-outcome", send: { outcome: "queued", herdrPane: "w1:p1", resumed: false } }, "a send-claude is remembered under its request ID");
+  assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:kept" }), { kind: "send-claude-outcome", send: { outcome: "queued", herdrPane: kept.address, resumed: false } }, "a send-claude is remembered under its request ID");
   await client.command(pylonId, { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 });
   assert.deepEqual(await client.command(pylonId, { kind: "send-claude-outcome", requestId: "msg:never" }), { kind: "send-claude-outcome", send: "unknown" });
 });
 
 test("a failing command rejects with the guest's error", async (t) => {
-  const guest = fakeGuest((_argv, herdr) => herdr ? herdrError("invalid_params", "pane w9:p9 is malformed") : { exitCode: 0, output: "" });
+  const core = fakeCore({ answer: () => coreError("invalid_params", "terminal t9 is malformed") });
+  const guest = fakeGuest((argv) => core.reply(argv) ?? { exitCode: 0, output: "" });
   const { client } = await setup(t, {}, guest);
   await running(client);
-  await assert.rejects(client.command(pylonId, { kind: "close-session", herdrPane: "w9:p9" }), /HTTP 500: herdr pane close: pane w9:p9 is malformed/);
+  await assert.rejects(client.command(pylonId, { kind: "close-session", herdrPane: "t9" }), /HTTP 500: terminal.get: terminal t9 is malformed/);
 });
 
-test("observations carry session facts from Herdr, and null when Herdr cannot be read", async (t) => {
+test("observations carry session facts from Herdr Core, and null when Core cannot be read", async (t) => {
   let readable = true;
-  const guest = fakeGuest((argv, herdr) => {
-    if (!herdr && argv[2]?.includes(outputsDir)) return { exitCode: 0, output: "" };
-    if (!herdr && argv[0] === "pgrep") return { exitCode: 1, output: "0\n" };
-    if (!herdr && argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" }; // never paused, so no failed sessions
-    assert.ok(herdr && herdrArgs(argv).command === "api snapshot", "observing runs only herdr api snapshot, the sessions file read, the outputs listing and the count of attached terminals");
-    return readable
-      ? herdrOk(herdrSnapshot([{ id: "w1", label: "review" }], [herdrPane("w1:p1", "w1", "claude", "working", { kind: "id", value: "bd2c2d6b" })]))
-      : { exitCode: 1, output: "Error: exec failed" };
+  const core = fakeCore();
+  core.add({ argv: ["claude"], labels: { "nexus.title": "review", "nexus.harness": "claude-code", "claude.session_id": "bd2c2d6b" }, status: { state: "working", app: "claude-code" } });
+  const guest = fakeGuest((argv) => {
+    if (argv[2]?.includes(outputsDir)) return { exitCode: 0, output: "" };
+    if (argv[0] === "pgrep") return { exitCode: 1, output: "0\n" };
+    if (argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" }; // never paused, so no failed sessions
+    assert.equal(coreRequest(argv)?.method, "terminal.list", "observing runs only a terminal.list, the sessions file read, the outputs listing and the count of attached terminals");
+    return readable ? core.reply(argv)! : { exitCode: 1, output: "Error: exec failed" };
   });
   const logged: string[] = [];
   const { client } = await setup(t, { log: (line) => logged.push(line) }, guest);
@@ -1199,11 +1162,11 @@ test("observations carry session facts from Herdr, and null when Herdr cannot be
       return p?.phase === "running" ? p.sessions : assert.fail("the pylon runs");
     }
   };
-  assert.deepEqual(await sessionsSeen(), [{ id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "bd2c2d6b", status: "working", title: "review" }]);
+  assert.deepEqual(await sessionsSeen(), [{ id: "t1", state: "running", herdrPane: "t1", harness: "claude-code", harnessSessionId: "bd2c2d6b", status: "working", title: "review" }]);
   readable = false;
   assert.equal(await sessionsSeen(), null);
   assert.equal(await sessionsSeen(), null);
-  assert.deepEqual(logged.filter((l) => l.includes("sessions")), [`${pylonId} sessions: herdr api snapshot exited 1 without a JSON reply: Error: exec failed. The control plane keeps the last list read until a read succeeds`], "logged once");
+  assert.deepEqual(logged.filter((l) => l.includes("sessions")), [`${pylonId} sessions: terminal.list exited 1 without a JSON reply: Error: exec failed. The control plane keeps the last list read until a read succeeds`], "logged once");
 });
 
 test("a stopped pylon's observation carries the sessions its backend kept from the pause", async (t) => {
@@ -1246,8 +1209,8 @@ test("NEXUS_API calls reach the API as the pylon the bridge named, get the URL o
 
 test("observations carry the pylon's declared outputs", async (t) => {
   const output: DeclaredOutput = { id: "out-1-00000000", kind: "diff", base: "c".repeat(40), sha256: "0".repeat(64), title: null };
-  const guest = fakeGuest((argv, herdr) => {
-    if (herdr) return herdrOk(herdrSnapshot([], []));
+  const guest = fakeGuest((argv) => {
+    if (coreRequest(argv) !== null) return coreOk({ terminals: [] });
     assert.ok(argv[2]?.includes(outputsDir));
     return { exitCode: 0, output: `${output.id}.json\t${JSON.stringify(output)}\n` };
   });
@@ -1447,7 +1410,7 @@ test("a stream request with a pty is refused with 400, and one without the pty k
 });
 
 test("terminals attached to Herdr in the guest, such as nexus attach, count as attached clients", async (t) => {
-  const guest = fakeGuest((argv, herdr) => herdr ? herdrError("server_not_running")
+  const guest = fakeGuest((argv) => coreRequest(argv) !== null ? coreNotRunning
     : argv[0] === "pgrep" ? { exitCode: 0, output: "2\n" } : { exitCode: 0, output: "" });
   const { client } = await setup(t, {}, guest);
   await running(client);
@@ -1461,7 +1424,7 @@ test("terminals attached to Herdr in the guest, such as nexus attach, count as a
 test("a count of attached terminals that fails reads as none, is logged once, and fails nothing else of the observation", async (t) => {
   const logged: string[] = [];
   let counted = false;
-  const guest = fakeGuest((argv, herdr) => herdr ? herdrError("server_not_running")
+  const guest = fakeGuest((argv) => coreRequest(argv) !== null ? coreNotRunning
     : argv[0] === "pgrep" ? (counted ? { exitCode: 0, output: "1\n" } : { exitCode: 127, output: "sh: pgrep: not found" }) : { exitCode: 0, output: "" });
   const { client } = await setup(t, { log: (line) => logged.push(line) }, guest);
   await running(client);
@@ -1481,7 +1444,7 @@ test("a count of attached terminals that fails reads as none, is logged once, an
 
 test("a count of attached terminals that fails is logged again after its pylon was seen stopped and running again", async (t) => {
   const logged: string[] = [];
-  const guest = fakeGuest((argv, herdr) => herdr ? herdrError("server_not_running")
+  const guest = fakeGuest((argv) => coreRequest(argv) !== null ? coreNotRunning
     : argv[0] === "pgrep" ? { exitCode: 127, output: "sh: pgrep: not found" } : { exitCode: 0, output: "" });
   const { client, fake } = await setup(t, { log: (line) => logged.push(line) }, guest);
   await running(client);
@@ -1618,10 +1581,10 @@ const procTcp = (...ports: number[]) => [
   ...ports.map((port, i) => `   ${i}: 00000000:${port.toString(16).toUpperCase().padStart(4, "0")} 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 ${2000 + i} 1 0000000000000000 100 0 0 10 0`),
 ].join("\n");
 
-/** A guest whose only answers are /proc/net/tcp with `ports()`, Herdr with no server, and `linkPort`. */
+/** A guest whose only answers are /proc/net/tcp with `ports()`, no Herdr Core running, and `linkPort`. */
 function listeningGuest(ports: () => number[], linked: number[] = []): Guest {
   return {
-    ...fakeGuest((argv, herdr) => herdr ? herdrError("server_not_running")
+    ...fakeGuest((argv) => coreRequest(argv) !== null ? coreNotRunning
       : argv[0] === "sh" && argv[2]!.includes("/proc/net/tcp") ? { exitCode: 0, output: procTcp(...ports()) }
       : { exitCode: 1, output: `unexpected ${argv.join(" ")}` }),
     services: async () => ({ services: [] }),
@@ -1695,24 +1658,9 @@ test("a link-port command links the port in the guest, answers its service, and 
 });
 
 test("opening or closing a session publishes a snapshot that lists the change", async (t) => {
-  let panes: ReturnType<typeof herdrPane>[] = [];
-  const guest = fakeGuest((argv, herdr) => {
-    if (!herdr && argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
-    if (!herdr) return { exitCode: 0, output: "" };
-    const sub = herdrArgs(argv).command;
-    if (sub === "api snapshot") return herdrOk(herdrSnapshot([{ id: "w1", label: "review" }], panes));
-    if (sub === "workspace list") return herdrOk({ type: "workspace_list", workspaces: [] });
-    if (sub === "workspace create") {
-      panes = [herdrPane("w1:p1", "w1", "claude", "blocked")];
-      return herdrOk({ type: "workspace_created", workspace: { workspace_id: "w1" }, tab: { tab_id: "w1:t1" }, root_pane: { pane_id: "w1:p1" } });
-    }
-    if (sub === "agent start") return herdrError("agent_not_ready", "waiting at login");
-    if (sub === "pane close") {
-      panes = [];
-      return herdrOk({ type: "ok" });
-    }
-    throw new Error(`unscripted ${sub}`);
-  });
+  // Claude waits at its login, which keeps the session open for its human.
+  const core = fakeCore({ start: (t) => { t.status = { state: "blocked", app: "claude-code" }; } });
+  const guest = fakeGuest((argv) => core.reply(argv) ?? { exitCode: argv.at(-1) === sessionsFile ? 3 : 0, output: "" });
   const { client } = await setup(t, {}, guest);
   await running(client);
   const abort = new AbortController();
@@ -1724,9 +1672,9 @@ test("opening or closing a session publishes a snapshot that lists the change", 
     const p = e?.type === "snapshot" ? e.observation.pylons[0] : assert.fail(`a snapshot, not ${e?.type}`);
     return p?.phase === "running" ? p.sessions?.map((f: { title?: string }) => f.title) : assert.fail("the pylon runs");
   };
-  await client.command(pylonId, { kind: "open-session", harness: "claude-code", title: "review" });
+  assert.deepEqual(await client.command(pylonId, { kind: "open-session", harness: "claude-code", title: "review" }), { kind: "open-session", herdrPane: "t1" });
   assert.deepEqual(await sessions(), ["review"], "the control plane sees the new session without waiting a minute");
-  await client.command(pylonId, { kind: "close-session", herdrPane: "w1:p1" });
+  await client.command(pylonId, { kind: "close-session", herdrPane: "t1" });
   assert.deepEqual(await sessions(), []);
 });
 
@@ -1960,12 +1908,12 @@ test("probe git observations derive pushed-branch outputs and bound reads across
   let reads = 0;
   let readable = true;
   const facts: GitFacts = { head: "a".repeat(40), branch: "agent-deploys", dirty: true, branches: [{ name: "agent-deploys", head: "a".repeat(40), pushedAs: "origin/agent-deploys" }] };
-  const guest = fakeGuest((argv, herdr) => {
+  const guest = fakeGuest((argv) => {
     if (argv[0] === "python3" && argv[2]?.includes("for-each-ref")) {
       reads++;
       return readable ? { exitCode: 0, output: JSON.stringify(facts) } : { exitCode: null, output: "" };
     }
-    if (herdr) return herdrOk(herdrSnapshot([], []));
+    if (coreRequest(argv) !== null) return coreOk({ terminals: [] });
     if (argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
     if (argv[2]?.includes(outputsDir)) return { exitCode: 0, output: "" };
     return { exitCode: 1, output: "" };
@@ -2024,9 +1972,9 @@ test("a branch pushed just after a git read reaches the snapshots only once that
   t.mock.method(Date, "now", () => now);
   const before: GitFacts = { head: "a".repeat(40), branch: "feat/x", dirty: false, branches: [{ name: "feat/x", head: "a".repeat(40), pushedAs: null }] };
   let facts = before;
-  const guest = fakeGuest((argv, herdr) => {
+  const guest = fakeGuest((argv) => {
     if (argv[0] === "python3" && argv[2]?.includes("for-each-ref")) return { exitCode: 0, output: JSON.stringify(facts) };
-    if (herdr) return herdrOk(herdrSnapshot([], []));
+    if (coreRequest(argv) !== null) return coreOk({ terminals: [] });
     if (argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
     if (argv[2]?.includes(outputsDir)) return { exitCode: 0, output: "" };
     return { exitCode: 1, output: "" };
@@ -2053,9 +2001,9 @@ test("a git read again is answered once a snapshot that read it is published, th
   t.mock.method(Date, "now", () => now);
   const before: GitFacts = { head: "a".repeat(40), branch: "feat/x", dirty: false, branches: [{ name: "feat/x", head: "a".repeat(40), pushedAs: null }] };
   let facts = before;
-  const guest = fakeGuest((argv, herdr) => {
+  const guest = fakeGuest((argv) => {
     if (argv[0] === "python3" && argv[2]?.includes("for-each-ref")) return { exitCode: 0, output: JSON.stringify(facts) };
-    if (herdr) return herdrOk(herdrSnapshot([], []));
+    if (coreRequest(argv) !== null) return coreOk({ terminals: [] });
     if (argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
     if (argv[2]?.includes(outputsDir)) return { exitCode: 0, output: "" };
     return { exitCode: 1, output: "" };
@@ -2098,9 +2046,9 @@ test("stalled controller RPCs cannot hold healthy pylon facts or pile up behind 
   const stalled = "pylon-stalled" as PylonId;
   const gitStalled = "pylon-git-stalled" as PylonId;
   const facts: GitFacts = { head: "a".repeat(40), branch: "main", dirty: false, branches: [] };
-  const healthy = fakeGuest((argv, herdr) => {
+  const healthy = fakeGuest((argv) => {
     if (argv[0] === "python3") return { exitCode: 0, output: JSON.stringify(facts) };
-    if (herdr) return herdrOk(herdrSnapshot([], []));
+    if (coreRequest(argv) !== null) return coreOk({ terminals: [] });
     if (argv.at(-1) === sessionsFile) return { exitCode: 3, output: "" };
     if (argv[0] === "pgrep") return { exitCode: 1, output: "0\n" };
     return { exitCode: 0, output: "" };

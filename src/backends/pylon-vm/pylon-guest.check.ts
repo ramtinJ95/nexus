@@ -43,7 +43,7 @@ import { launchers } from "../../probe/guest/launchers.ts";
 import { loginHosts } from "../../control/project.ts";
 import { type BootInputs, type LiveSpec, type OverlayFile } from "../../protocol/spawn.ts";
 import { freePort } from "../../test-support/kit.ts";
-import { herdrSession } from "../../guest-contract.ts";
+import { core } from "../../probe/guest/core.ts";
 import { checkoutDir, sessionsFile } from "../../../images/pylon/nexus-contract.ts";
 
 const [assets, stateRoot] = process.argv.slice(2);
@@ -166,10 +166,10 @@ async function piEnv(): Promise<void> {
   }
 }
 
-async function agentRuns(pane: string, kind: string): Promise<boolean> {
-  const { output } = await backend.guest(pylonId).exec(["herdr", "--session", herdrSession, "pane", "process-info", "--pane", pane], { cwd: "/home/user", timeoutMs: 10_000 });
-  const info = JSON.parse(output.trim().split("\n").findLast((l) => l.startsWith("{"))!).result.process_info;
-  return (info.foreground_processes as { argv?: string[]; name?: string }[]).some((p) => (p.argv ?? [p.name ?? ""]).slice(0, 2).some((a) => a.split("/").at(-1) === kind));
+/** Whether the Core terminal at `address` is live with the agent `kind` in its foreground. */
+async function agentRuns(address: string, kind: string): Promise<boolean> {
+  const terminal = await core(backend.guest(pylonId), "terminal.get", { terminal: address });
+  return terminal.state === "live" && (terminal.foreground?.argv ?? []).slice(0, 2).some((a) => a.split("/").at(-1) === kind);
 }
 
 let failure: unknown = null;
@@ -190,7 +190,7 @@ try {
   assert.ok(observed?.phase === "running" && observed.services?.some((f) => f.name === "web" && f.state === "ready" && f.wantsPreview), "the observation reports web as ready with a preview");
 
   for (const harness of harnesses) step(`OPEN_${harness}`, await client.command(pylonId, { kind: "open-session", harness, title: `check ${harness}` }));
-  await sleep(5_000); // the agents report their session IDs through Herdr's hooks
+  await sleep(5_000); // Claude labels its terminal with its session ID from a SessionStart hook
   step("FACTS_BEFORE_PAUSE", await sessionFacts(backend.guest(pylonId)));
 
   await job({ kind: "pause", pylonId, checkpoint: checkpointId(threadOfPylon(pylonId), 1) });
@@ -214,7 +214,7 @@ try {
   for (const record of file.sessions as { herdrPane: string; harness: SessionHarness }[]) {
     const agent = launchers[record.harness];
     if (agent === null) continue;
-    assert.ok(await agentRuns(record.herdrPane, agent.kind), `${record.harness}'s pane ${record.herdrPane} runs its agent`);
+    assert.ok(await agentRuns(record.herdrPane, agent.kind), `${record.harness}'s terminal ${record.herdrPane} runs its agent`);
   }
   const again = await visit(web.httpsPort);
   assert.deepEqual(answer(again), [200, expected], "the wake started the service again");
