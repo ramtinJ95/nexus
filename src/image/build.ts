@@ -439,8 +439,7 @@ export function smokeChecks(recipe: ImageRecipe & { pins: BuildPins }): readonly
       expect: "unloaded\n",
     },
     {
-      // The check reruns Herdr's integrations first, as the install's last step does, so it proves that the settings.json they
-      // rewrite still holds the plugins. The layout comes from the recipe's manifest, not the copy in the image.
+      // The layout comes from the recipe's manifest, not the copy in the image.
       name: "agent setup",
       argv: userSmoke(`node ${agentSetupInstaller} check ${shellQuote(JSON.stringify(agentSetup))}`),
       expect: "ok\n",

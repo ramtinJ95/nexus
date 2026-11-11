@@ -22,7 +22,7 @@ import type { ImageId, NodeName, ProjectId, TemplateId } from "../ids.ts";
  *   4. Node from the checksum-verified official tarball into /usr/local.
  *   5. Claude Code and pi from npm, Herdr from its checksum-verified release binary into /usr/local/bin, Herdr Core
  *      beside it as /usr/local/bin/herdr-core and `hc` from its checksum-verified release tarball, which every session runs in,
- *      `herdr integration install` for pi and Claude Code as user, which Nexus no longer reads, the pi-env daemon at /usr/local/libexec/nexus/pi-env, the in-pylon `nexus` CLI,
+ *      the pi-env daemon at /usr/local/libexec/nexus/pi-env, the in-pylon `nexus` CLI,
  *      nexus-kvm at /usr/local/libexec/nexus/nexus-kvm, claude-managed-settings.json as root's
  *      /etc/claude-code/managed-settings.json, which allows Claude Code Opus, Sonnet and Haiku, denies Fable, and holds
  *      the Default model to the allowed ones, and
@@ -33,7 +33,7 @@ import type { ImageId, NodeName, ProjectId, TemplateId } from "../ids.ts";
  *      https://github.com, so a GH_TOKEN grant pushes over HTTPS, and Neovim from its checksum-verified release
  *      tarball into /usr/local.
  *   7. The agent setup in agent-setup/manifest.json (images/pylon/agent-setup/manifest.ts), installed as user by
- *      agent-setup/install.ts, then Herdr's integrations, then ~/.claude/CLAUDE.md importing ~/.nexus/PYLON.md and
+ *      agent-setup/install.ts, then Nexus's Claude hooks, then ~/.claude/CLAUDE.md importing ~/.nexus/PYLON.md and
  *      ~/.pi/agent/AGENTS.md linking to it.
  * - gondolin.json: distro alpine for the kernel and initramfs, and env with PATH including /usr/local/bin
  *   (Gondolin's exec PATH lacks it, S1), NODE_EXTRA_CA_CERTS=/run/gondolin/ca-certificates.crt (the mitm

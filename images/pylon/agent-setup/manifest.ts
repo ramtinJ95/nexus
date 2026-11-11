@@ -155,7 +155,7 @@ export interface InstalledAgentSetup {
   claudeSkills: readonly string[];
   /** Directory names under ~/.agents/skills, sorted. */
   piSkills: readonly string[];
-  /** Entries under ~/.pi/agent/extensions, Herdr's herdr-agent-state.ts included, sorted. */
+  /** Entries under ~/.pi/agent/extensions, sorted. */
   piExtensions: readonly string[];
   /** ~/.pi/agent/settings.json `packages` as pi install writes them, in order, each npm one at its installed version and each local one with all it declares. */
   piPackages: readonly string[];
@@ -163,16 +163,13 @@ export interface InstalledAgentSetup {
   shepherdrProfiles: readonly string[];
 }
 
-/** `herdr integration install pi` writes this extension, at build time and on every boot. */
-export const herdrPiExtension = "herdr-agent-state.ts";
-
 export function installedLayout(setup: AgentSetup): InstalledAgentSetup {
   const skillsFor = (harness: Harness) => sorted(setup.skills.filter((s) => s.for.includes(harness)).map((s) => basename(s.path)), (name) => name);
   return {
     plugins: sorted(setup.claude.plugins.map((p) => `${p.id} ${p.version} enabled`), (line) => line),
     claudeSkills: skillsFor("claude"),
     piSkills: skillsFor("pi"),
-    piExtensions: sorted([...setup.pi.extensions.map(basename), herdrPiExtension], (name) => name),
+    piExtensions: sorted(setup.pi.extensions.map(basename), (name) => name),
     piPackages: setup.pi.packages.map((p) => (p.kind === "npm" ? `npm:${p.name}@${p.version}` : `packages/${basename(p.path)}`)),
     shepherdrProfiles: sorted(setup.pi.shepherdrProfiles.map(basename), (name) => name),
   };

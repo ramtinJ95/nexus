@@ -10,5 +10,5 @@ The image owns two files that a layer must not replace without keeping what they
 holds `@~/.nexus/PYLON.md`, and `~/.pi/agent/AGENTS.md` is a link to `/home/user/.nexus/PYLON.md`, which each
 spawn rewrites. A layer that installs either file keeps that import or link. Skills, Claude Code plugins and pi
 packages and extensions do not belong here: the image bakes them from `../agent-setup/manifest.json`, and its
-installs record them in ~/.claude/settings.json and ~/.pi/agent/settings.json. A layer merges into those two
-files rather than replacing or linking them, as Herdr's integrations do on every boot.
+installs record them in ~/.claude/settings.json, beside Nexus's Claude hooks, and ~/.pi/agent/settings.json. A
+layer merges into those two files rather than replacing or linking them.

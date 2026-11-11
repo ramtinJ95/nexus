@@ -129,10 +129,9 @@ RUN cd /opt/nexus/dotfiles \
  && GIT_AUTHOR_DATE=2000-01-01T00:00:00Z GIT_COMMITTER_DATE=2000-01-01T00:00:00Z \
     git -c user.name=nexus -c user.email=nexus@pylon commit -q -m "dotfiles common layer at ${DOTFILES_COMMIT}"
 # This Mac's Claude Code plugins, skills, pi packages and pi extensions, which src/image/agent-setup.ts captured into
-# agent-setup/manifest.json. The installer fetches and installs what the manifest pins, then runs Herdr's
-# integrations, the order every boot repeats, so Herdr's hook merges into the settings.json that the plugin
-# installs wrote. It fails the build on any difference from the manifest. pi and Claude Code make their config
-# directories on first run, and Herdr's installers refuse to run before that.
+# agent-setup/manifest.json. The installer fetches and installs what the manifest pins, then merges Nexus's
+# Claude hooks into the settings.json that the plugin installs wrote. It fails the build on any difference from
+# the manifest. It writes into pi's and Claude Code's config directories before either has run and made them.
 COPY --chown=user:user agent-setup/ /opt/nexus/agent-setup/
 RUN mkdir -p /home/user/.pi/agent/extensions /home/user/.claude /home/user/.agents/skills \
  && node /opt/nexus/agent-setup/install.ts \
