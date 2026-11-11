@@ -139,7 +139,7 @@ type InPlace = Pick<SessionRecord, "harness" | "cwd" | "harnessSessionId">;
 /**
  * Why `t` is not the shell Core gave in place of the agent that ran `session`, idle and ready to take the agent's
  * launch, or null when it is: live and kept, running the lone shell Core restores and nothing else, at the session's
- * cwd, and labelled with the session's harness and its session.
+ * cwd, and labelled with the session's session, and with its harness or, as a hand-run agent's terminal is, none.
  */
 function notInPlace(t: Terminal, session: InPlace): string | null {
   const agent = launchers[session.harness];
@@ -154,7 +154,9 @@ function notInPlace(t: Terminal, session: InPlace): string | null {
   if (foreground.length === 0) return `${t.address}'s shell has no foreground yet`;
   if (foreground.length !== 1 || foreground[0] !== shell) return `${t.address}'s shell is running ${JSON.stringify(foreground)}`;
   if (t.foreground?.cwd !== session.cwd) return `${t.address}'s shell is in ${t.foreground?.cwd}, not the session's ${session.cwd}`;
-  if (t.labels[harnessLabel] !== session.harness) return `${t.address} is labelled ${JSON.stringify(t.labels[harnessLabel] ?? null)}, not ${session.harness}`;
+  // A hand-run agent's terminal has no harness label. Its session label is the harness's own, so it names the harness.
+  const harness = t.labels[harnessLabel];
+  if (harness !== undefined && harness !== session.harness) return `${t.address} is labelled ${JSON.stringify(harness)}, not ${session.harness}`;
   if (t.labels[sessionLabel] !== session.harnessSessionId) return `${t.address} is labelled with session ${JSON.stringify(t.labels[sessionLabel] ?? null)}, not ${session.harnessSessionId}`;
   return null;
 }

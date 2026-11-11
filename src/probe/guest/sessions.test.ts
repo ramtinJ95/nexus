@@ -657,6 +657,22 @@ test("a wake resumes an agent in a new terminal, typing nothing, when the termin
   }
 });
 
+test("a wake resumes a hand-run agent in place in its kept terminal, which has no harness label, and labels nothing", async () => {
+  const core = fakeCore();
+  const guest = pylon(core);
+  const cwd = "/home/user/app";
+  const byHand = core.add({ argv: ["claude"], cwd, name: "byhand", keep: true, labels: { "claude.session_id": "cccc" }, foreground: { argv: ["claude"], cwd, name: "claude" }, status: status("idle") });
+  await recordSessions(guest);
+  core.restart();
+
+  assert.deepEqual(placed(await relaunchSessions(guest, unlocked)), [["byhand", "resumed-in-place", byHand.address]]);
+  assert.equal(byHand.sent.length, 1, "the launch was typed once");
+  assert.deepEqual(shellWords(byHand.sent[0]!).slice(0, 3), ["exec", "env", "-u"]);
+  assert.ok(shellWords(byHand.sent[0]!).includes("cccc"), "the launch runs the recorded session");
+  assert.deepEqual(byHand.labels, { "claude.session_id": "cccc" }, "no Nexus label makes the person's terminal Nexus's to remove");
+  assert.deepEqual(core.terminals.map((t) => t.address), [byHand.address], "nothing new was opened");
+});
+
 test("a shell that starts running something after the relaunch first read it is typed nothing", async () => {
   let gets = 0;
   const core = fakeCore({ answer: (method, params, c) => {
