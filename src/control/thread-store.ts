@@ -120,7 +120,7 @@ function threadRow(r: Row): StoredThread {
 /** The table's checks hold each state to its fields. */
 function sessionRow(r: Row): Session {
   return {
-    pylon: r.pylon as PylonId, id: r.id as string, herdrPane: r.herdr_pane as string | null, harness: r.harness as SessionHarness,
+    pylon: r.pylon as PylonId, id: r.id as string, herdrPane: r.terminal as string | null, harness: r.harness as SessionHarness,
     harnessSessionId: r.harness_session_id as string | null, title: r.title as string | null, status: r.status as HerdrStatus,
     state: r.state as Session["state"], message: r.message as string | null,
   } as Session;
@@ -964,9 +964,9 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         const listed = new Set(write.sessions.map((s) => s.id));
         for (const { id } of sessions(write.pylonId)) if (!listed.has(id)) sql("DELETE FROM sessions WHERE pylon = ? AND id = ?").run(write.pylonId, id);
         for (const s of write.sessions) {
-          sql(`INSERT INTO sessions (pylon, id, herdr_pane, harness, harness_session_id, status, title, state, message)
+          sql(`INSERT INTO sessions (pylon, id, terminal, harness, harness_session_id, status, title, state, message)
             VALUES ($pylon, $id, $herdrPane, $harness, $harnessSessionId, coalesce($status, 'unknown'), $title, $state, $message)
-            ON CONFLICT (pylon, id) DO UPDATE SET herdr_pane = excluded.herdr_pane, harness = excluded.harness, harness_session_id = excluded.harness_session_id,
+            ON CONFLICT (pylon, id) DO UPDATE SET terminal = excluded.terminal, harness = excluded.harness, harness_session_id = excluded.harness_session_id,
             status = coalesce($status, sessions.status), title = excluded.title, state = excluded.state, message = excluded.message`).run({
             $pylon: write.pylonId, $id: s.id, $herdrPane: s.herdrPane, $harness: s.harness, $harnessSessionId: s.harnessSessionId,
             $status: s.status, $title: s.title, $state: s.state, $message: s.message,
@@ -978,8 +978,8 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         sql("UPDATE sessions SET state = 'paused', message = NULL WHERE pylon = ?").run(write.pylonId);
         return;
       case "sessions-resumed":
-        sql(`UPDATE sessions SET status = 'unknown', state = CASE WHEN herdr_pane IS NULL THEN 'failed' ELSE 'running' END,
-          message = CASE WHEN herdr_pane IS NULL THEN 'its last wake did not bring it back, and whether this one did is not read yet' END
+        sql(`UPDATE sessions SET status = 'unknown', state = CASE WHEN terminal IS NULL THEN 'failed' ELSE 'running' END,
+          message = CASE WHEN terminal IS NULL THEN 'its last wake did not bring it back, and whether this one did is not read yet' END
           WHERE pylon = ? AND state = 'paused'`).run(write.pylonId);
         return;
       case "output": {

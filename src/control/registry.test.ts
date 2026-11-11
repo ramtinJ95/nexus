@@ -228,6 +228,29 @@ test("a paused pylon's sessions keep their rows and last status, and the first l
   assert.deepEqual(registry.threads.sessions(pylonId), [], "a deleted pylon drops its rows");
 });
 
+test("a session recorded under herdr_pane keeps its terminal once the column is renamed", (t) => {
+  const path = tempDb();
+  seed(openRegistry(path)).close();
+  rewindTo(path, versionBefore(/RENAME COLUMN herdr_pane TO terminal/));
+  const db = new DatabaseSync(path);
+  db.prepare(`INSERT INTO sessions (pylon, id, herdr_pane, harness, harness_session_id, status, title, state, message) VALUES
+    (?, 't3', 't3', 'claude-code', 's1', 'working', 'review', 'running', NULL),
+    (?, 't5', NULL, 'pi', NULL, 'unknown', 'plan', 'failed', 'pi exited 1'),
+    (?, 't7', 't7', 'shell', NULL, 'idle', 'shell', 'paused', NULL)`).run(pylonId, pylonId, pylonId);
+  db.close();
+  const registry = testRegistry(t, path);
+  assert.deepEqual(registry.threads.sessions(pylonId), [
+    { pylon: pylonId, id: "t3", herdrPane: "t3", harness: "claude-code", harnessSessionId: "s1", title: "review", status: "working", state: "running", message: null },
+    { pylon: pylonId, id: "t5", herdrPane: null, harness: "pi", harnessSessionId: null, title: "plan", status: "unknown", state: "failed", message: "pi exited 1" },
+    { pylon: pylonId, id: "t7", herdrPane: "t7", harness: "shell", harnessSessionId: null, title: "shell", status: "idle", state: "paused", message: null },
+  ]);
+  registry.threads.apply({ record: "sessions-resumed", pylonId });
+  assert.deepEqual(registry.threads.sessions(pylonId).map((s) => [s.id, s.state]), [["t3", "running"], ["t5", "failed"], ["t7", "running"]], "the renamed column still decides which resumes");
+  const raw = new DatabaseSync(path);
+  assert.throws(() => raw.exec("UPDATE sessions SET terminal = NULL WHERE id = 't3'"), /CHECK constraint failed/, "a running session still needs a terminal");
+  raw.close();
+});
+
 test("a job's result is not undone by an older report of it running", async (t) => {
   const registry = seeded(t, tempDb());
   const job = (jobId: string, state: "running" | "succeeded") => ({
