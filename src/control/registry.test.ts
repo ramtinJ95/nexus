@@ -662,6 +662,14 @@ test("a long message Nexus typed is still Nexus's when Claude hands its hook the
   assert.equal(registry.threads.thread(threadId)!.lastHumanActivityAt, thread.lastHumanActivityAt);
 });
 
+test("a person's prompt stamped in the future by the pylon's clock counts as now", (t) => {
+  const now = 10_000_000;
+  const registry = seeded(t, tempDb(), () => now, "Fix the checkout");
+  const promptSha256 = createHash("sha256").update("Try the other approach").digest("hex");
+  registry.threads.reportSession(node, { sequence: 1, pylon: pylonId, time: now, event: { kind: "session.turn-started", session: "s1", at: now + 24 * 60 * 60_000, promptSha256 } });
+  assert.equal(registry.threads.thread(threadId)!.lastHumanActivityAt, now);
+});
+
 test("the turn Claude starts for a finished background task is no one's activity", async (t) => {
   const { hookReport } = await import("../../images/pylon/nexus-heartbeat.ts");
   const registry = seeded(t, tempDb(), undefined, "Fix the checkout");

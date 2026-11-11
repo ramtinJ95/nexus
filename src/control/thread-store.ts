@@ -630,9 +630,10 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         if (event.kind === "session.heartbeat" && current?.state !== "session.turn-started" && current?.state !== "session.waiting") return;
         if (event.kind === "session.turn-started") {
           turnStarted(thread, session, at, event.session !== undefined);
-          // A prompt submitted in any of the pylon's Claudes is the person's, at the time the hook stamped it, unless Nexus
-          // typed it or launched the worker with it. An image from before hashes no prompt, so its turns count for nobody.
-          if (event.promptSha256 !== undefined && !claude.typedByNexus(thread, event.promptSha256)) humanActivity(at, thread);
+          // A prompt submitted in any of the pylon's Claudes is the person's, at the time the hook stamped it but never
+          // later than now, unless Nexus typed it or launched the worker with it. An image from before hashes no prompt,
+          // so its turns count for nobody.
+          if (event.promptSha256 !== undefined && !claude.typedByNexus(thread, event.promptSha256)) humanActivity(Math.min(at, clock()), thread);
         }
         // Only reports at the cursor's own stamp can still be resent and pass the stamp checks, so only their IDs are kept.
         const ids = [...(previous !== undefined && at === previous.at ? previousIds : []), ...(event.id === undefined ? [] : [event.id])];
