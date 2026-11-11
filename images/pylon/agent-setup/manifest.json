@@ -42,7 +42,6 @@
     {"path":"common-config/common-dotfiles/agents/.agents/skills/grill-me","for":["claude","pi"]},
     {"path":"common-config/common-dotfiles/agents/.agents/skills/grilling","for":["claude","pi"]},
     {"path":"common-config/common-dotfiles/agents/.agents/skills/grok","for":["claude","pi"]},
-    {"path":"common-config/common-dotfiles/agents/.agents/skills/herdr","for":["claude","pi"]},
     {"path":"common-config/common-dotfiles/agents/.agents/skills/nexus-new-project","for":["claude","pi"]},
     {"path":"common-config/common-dotfiles/agents/.agents/skills/pr-diary","for":["claude","pi"]},
     {"path":"common-config/common-dotfiles/agents/.agents/skills/practice","for":["claude","pi"]},

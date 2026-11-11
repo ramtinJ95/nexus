@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { chmod, copyFile, mkdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
-  agentSetupManifest, formatAgentSetup, herdrPiExtension, installedLayout, parseAgentSetup, type AgentSetup, type InstalledAgentSetup,
+  agentSetupManifest, formatAgentSetup, installedLayout, parseAgentSetup, type AgentSetup, type InstalledAgentSetup,
 } from "../../images/pylon/agent-setup/manifest.ts";
 import { claudeHooks, installedPackage, installMismatches, pylonProfile } from "../../images/pylon/agent-setup/install.ts";
 import { captureSummary, httpsRemote, leaveOuts, parseLeaveOut, planAgentSetup, readPiSetup, type Capture, type LeaveOut, type MacSetup, type PluginFiles } from "./agent-setup.ts";
@@ -79,7 +79,7 @@ test("the installed layout names each plugin, skill directory, extension, pi set
     plugins: ["notes@mods 0.2.11 enabled"],
     claudeSkills: ["show-me"],
     piSkills: ["grok", "show-me"],
-    piExtensions: ["herdr-agent-state.ts", "pi-vim", "silly.ts"],
+    piExtensions: ["pi-vim", "silly.ts"],
     piPackages: ["npm:@me/pi-ask@0.0.16", "packages/pi-viz"],
     shepherdrProfiles: ["general", "reviewer"],
   });
@@ -240,14 +240,13 @@ test("the plan ships what the Mac runs and reports each settled leave-out, and a
     },
     skills: [
       { path: `${agentSkills}/grok`, for: ["pi"] },
-      { path: `${agentSkills}/herdr`, for: ["claude", "pi"] },
       { path: `${agentSkills}/teach`, for: ["claude"] },
       { path: `${claudeSkills}/show-me`, for: ["claude"] },
     ],
   }));
   assert.deepEqual(setup, expected);
   assert.deepEqual(leftOut.map((rule) => `${rule.kind}:${rule.name}`), [
-    "claude-plugin:nexus@claude-mods", "pi-package:npm:@ramtinj95/pi-nexus", "skill:anki-cards", "pi-extension:atuin.ts",
+    "claude-plugin:nexus@claude-mods", "pi-package:npm:@ramtinj95/pi-nexus", "skill:anki-cards", "skill:herdr", "pi-extension:atuin.ts",
     "pi-extension:herdr-agent-state.ts", "skill:ramtin-mode", "pi-extension:pi-better-openai-lite",
   ]);
   assert.deepEqual(notes, [
@@ -277,8 +276,8 @@ test("uncommitted skills and an unpushed dotfiles HEAD are refused together, and
 
 test("a committed skill with uncommitted changes, or one outside the dotfiles, is refused", () => {
   const mac = thisMac();
-  const changed = { ...mac, dotfiles: { ...mac.dotfiles, changed: new Set([`${agentSkills}/herdr/SKILL.md`]) } };
-  assert.deepEqual(problemsOf(plan(changed)), [`skill herdr: ${agentSkills}/herdr has uncommitted changes in ${root}`]);
+  const changed = { ...mac, dotfiles: { ...mac.dotfiles, changed: new Set([`${agentSkills}/grok/SKILL.md`]) } };
+  assert.deepEqual(problemsOf(plan(changed)), [`skill grok: ${agentSkills}/grok has uncommitted changes in ${root}`]);
   const outside = { ...mac, claude: { ...mac.claude, skills: [...mac.claude.skills, { name: "loose", realPath: "/Users/me/loose" }] } };
   assert.deepEqual(problemsOf(plan(outside)), [`skill loose: /Users/me/loose is outside ${root}`]);
 });
@@ -470,8 +469,7 @@ test("--leave-out takes every kind, and refuses another, an inherited name inclu
   for (const bad of ["plugin:x", "toString:x"]) assert.throws(() => parseLeaveOut(bad), { message: `--leave-out takes <kind>:<name> with kind one of ${kinds.join(", ")}, such as skill:ramtin-mode` });
 });
 
-test("the capture summary labels each kind of leave-out, and the Herdr pi extension is left out by the manifest's name", () => {
-  assert.ok(leaveOuts.some((rule) => rule.kind === "pi-extension" && rule.name === herdrPiExtension));
+test("the capture summary labels each kind of leave-out", () => {
   const capture = { ...captured(plan(thisMac())), leftOut: kinds.map((kind) => ({ kind, name: "x", why: "y" })), notes: [] };
   const pins = { claudeCode: "2.1.310", pi: "1.4.0" } as ImageRecipe["pins"];
   const leftOut = captureSummary(capture, thisMac(), pins).split("\n").filter((line) => line.includes(" x: y"));
@@ -583,19 +581,19 @@ test("pi skills: a -path entry is matched as pi matches it, from the root pi fou
   const { setup } = captured(await piCapture({
     ".pi/agent/settings.json": piSettings({ skills: ["-skills/teach/SKILL.md", "-~/.pi/agent/skills/linked", "-~/.agents/skills/both"] }),
     ".agents/skills/teach": { link: "../../dotfiles/skills/teach" },
-    ".agents/skills/herdr": { link: "../../dotfiles/skills/herdr" },
+    ".agents/skills/grill": { link: "../../dotfiles/skills/grill" },
     ".agents/skills/linked": { link: "../../dotfiles/skills/linked" },
     ".agents/skills/both": { link: "../../dotfiles/skills/both" },
     ".pi/agent/skills/linked": { link: "../../../dotfiles/skills/linked" },
     ".pi/agent/skills/both": { link: "../../../dotfiles/skills/both" },
     "dotfiles/skills/teach/SKILL.md": "teach",
-    "dotfiles/skills/herdr/SKILL.md": "herdr",
+    "dotfiles/skills/grill/SKILL.md": "grill",
     "dotfiles/skills/linked/SKILL.md": "linked",
     "dotfiles/skills/both/SKILL.md": "both",
   }));
-  // pi 1.4.0's own resolver, run on this home, loads herdr and both: teach is excluded relative to ~/.agents, and a
+  // pi 1.4.0's own resolver, run on this home, loads grill and both: teach is excluded relative to ~/.agents, and a
   // skill linked into both roots is decided by its ~/.pi/agent/skills link, which pi finds first.
-  assert.deepEqual(setup.skills, [{ path: "skills/both", for: ["pi"] }, { path: "skills/herdr", for: ["pi"] }]);
+  assert.deepEqual(setup.skills, [{ path: "skills/both", for: ["pi"] }, { path: "skills/grill", for: ["pi"] }]);
 });
 
 test("the install check names a local pi package whose directory, declared resources or skills' SKILL.md files are missing", async () => {
@@ -638,17 +636,18 @@ echo "$(basename "$0") $*" >> ${root}/calls
 case "$(basename "$0") $*" in
   git*" rev-parse HEAD") echo ${small.dotfiles.commit} ;;
   "claude plugin list --json") echo [] ;;
-  "herdr integration install pi") mkdir -p "$HOME/.pi/agent/extensions" && touch "$HOME/.pi/agent/extensions/herdr-agent-state.ts" ;;
   pi*) echo "No API key found" ;;
 esac
 `;
-  for (const tool of ["git", "claude", "pi", "herdr"]) {
+  for (const tool of ["git", "claude", "pi"]) {
     await writeFile(join(root, "bin", tool), stub);
     await chmod(join(root, "bin", tool), 0o755);
   }
   const output = execFileSync(process.execPath, [join(setup, "install.ts")], { env: { ...process.env, HOME: home, PATH: `${join(root, "bin")}:${process.env.PATH}` }, encoding: "utf8" });
   assert.equal(output, "ok\n");
   const calls = (await readFile(join(root, "calls"), "utf8")).trim().split("\n");
-  assert.ok(calls.includes("herdr integration install claude"), "the build installed the hooks an agent run would fire");
+  const hooks = (JSON.parse(await readFile(join(home, ".claude", "settings.json"), "utf8")) as { hooks: Record<string, { hooks: { command: string }[] }[]> }).hooks;
+  const installed = Object.entries(hooks).flatMap(([hook, entries]) => entries.flatMap((entry) => entry.hooks.map((h) => `${hook} ${h.command}`)));
+  assert.deepEqual(installed, claudeHooks.map(([hook, kind]) => `${hook} /usr/local/bin/nexus-claude-hook ${kind}`), "the build installed the hooks an agent run would fire");
   assert.deepEqual(calls.filter((call) => /^(claude|pi) /.test(call)), ["claude plugin list --json"]);
 });

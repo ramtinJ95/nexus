@@ -4,8 +4,6 @@
   "nodeSha256": "d28a96af6c38596f6d9d97c0ee531c13d238d757742387d1928de822d959e997",
   "claudeCode": "2.1.321",
   "pi": "1.5.0",
-  "herdr": "0.9.5",
-  "herdrSha256": "14d9e8bc8b4a9e0118d77c32266f76d461f09b40342eb23752960bd89f59929d",
   "herdrCore": "0.1.20",
   "herdrCoreSha256": "ac6b86890c451a37584620aaa438b71bc0d0bd430a2e7c1d7e095f052c414e74",
   "piEnv": "1.5.0",

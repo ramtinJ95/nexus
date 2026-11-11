@@ -13,7 +13,6 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile }
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHttpHooks, parseBuildConfig, verifyAssets, VM, type AlpineConfig, type BuildConfig } from "@earendil-works/gondolin";
 import { z } from "zod";
@@ -87,8 +86,6 @@ function dockerBuildArgs(pins: BuildPins): Record<string, string> {
     NODE_SHA256: pins.nodeSha256,
     CLAUDE_CODE_VERSION: pins.claudeCode,
     PI_VERSION: pins.pi,
-    HERDR_VERSION: pins.herdr,
-    HERDR_SHA256: pins.herdrSha256,
     HERDR_CORE_VERSION: pins.herdrCore,
     HERDR_CORE_SHA256: pins.herdrCoreSha256,
     PI_ENV_VERSION: pins.piEnv,
@@ -115,15 +112,14 @@ function dockerBuildArgs(pins: BuildPins): Record<string, string> {
  * 4. Smoke boot at 4 GiB (2 GiB hangs): plain exec PATH, CA and the offline switches for pi and Claude Code's
  *    official marketplace, `user` with a setuid sudo that prints no warning and the hostname pylon, which
  *    resolves through /etc/hosts, a home with no hook outbox and no Claude or pi session from the build, the exact
- *    pinned versions of node, claude, pi, herdr, herdr-core, pi-env and nvim and the nexus CLI's declared version as user,
- *    sshd and sandboxssh, Herdr's pi integration with its own resume turned off, Herdr Core as hc with its notes
- *    turned off, no KVM module loaded,
+ *    pinned versions of node, claude, pi, herdr-core, pi-env and nvim and the nexus CLI's declared version as user,
+ *    sshd and sandboxssh, Herdr Core as hc with its notes turned off, no KVM module loaded,
  *    the agent setup installed exactly as the recipe's manifest says with pi loading every extension offline,
  *    the PYLON.md import for Claude Code and pi, Claude Code's managed settings as the recipe has them, root's and
  *    read-only to user, gh at its pin answering git's credential requests from GH_TOKEN,
  *    curl and Node fetch to an allowed host through TLS interception, tini reaping an orphan it adopts as
  *    subreaper and as PID 1, nexus-kvm giving user /dev/kvm, which needs a build node that passes nested
- *    virtualization through, sandboxd stdout and stderr on /dev/null, sandboxd surviving a write to an exec's closed stdin, and a Herdr server as user. Any failure is setup-failed and publishes nothing.
+ *    virtualization through, sandboxd stdout and stderr on /dev/null, and sandboxd surviving a write to an exec's closed stdin. Any failure is setup-failed and publishes nothing.
  * 5. The store hashes the directory, writes image.json and renames it in (ArtifactDirectory.publish).
  * A crash leaves only the .partial, which the next attempt removes. An image the store holds is the finished
  * image, because its ID names its inputs.
@@ -366,7 +362,6 @@ interface GondolinManifest {
 }
 
 const smokeHost = "api.anthropic.com";
-const smokeSession = "nexus-smoke";
 
 interface SmokeCheck {
   name: string;
@@ -396,7 +391,6 @@ function versionChecks(recipe: ImageRecipe & { pins: BuildPins }): SmokeCheck[] 
     ["node", "node --version", `v${pins.node}`],
     ["claude", "claude --version", `${pins.claudeCode} (Claude Code)`],
     ["pi", "pi --version", pins.pi],
-    ["herdr", "herdr --version", `herdr ${pins.herdr}`],
     ["herdr-core", "herdr-core --version", `hc ${pins.herdrCore}`],
     ["pi-env", `${piEnv} --version`, `pi-env ${pins.piEnv}`],
     ["nexus", "nexus --version", `nexus ${nexusCliVersion(recipe)}`],
@@ -405,7 +399,7 @@ function versionChecks(recipe: ImageRecipe & { pins: BuildPins }): SmokeCheck[] 
   return versions.map(([tool, script, output]) => ({ name: `${tool} version`, argv: userSmoke(script), expect: `${output}\n` }));
 }
 
-/** Plain execs run with sandboxd's environment, and `runuser -l` gives the login shell that SSH and Herdr panes get. */
+/** Plain execs run with sandboxd's environment, and `runuser -l` gives the login shell that SSH and Herdr Core terminals get. */
 export function smokeChecks(recipe: ImageRecipe & { pins: BuildPins }): readonly SmokeCheck[] {
   const { pins } = recipe;
   const agentSetup = installedLayout(agentSetupOf(recipe));
@@ -429,8 +423,8 @@ export function smokeChecks(recipe: ImageRecipe & { pins: BuildPins }): readonly
     ...versionChecks(recipe),
     {
       name: "guest tools",
-      argv: userSmoke("command -v ssh sshd sandboxssh rg fd; grep -c '^Include /etc/ssh/ssh_config.d/\\*.conf' /etc/ssh/ssh_config; herdr integration status | grep -E '^(pi|claude):'"),
-      expect: /^\/usr\/bin\/ssh\n\/usr\/sbin\/sshd\n\/usr\/bin\/sandboxssh\n\/usr\/bin\/rg\n\/usr\/local\/bin\/fd\n1\npi: current[^\n]*\nclaude: current/,
+      argv: userSmoke("command -v ssh sshd sandboxssh rg fd; grep -c '^Include /etc/ssh/ssh_config.d/\\*.conf' /etc/ssh/ssh_config"),
+      expect: "/usr/bin/ssh\n/usr/sbin/sshd\n/usr/bin/sandboxssh\n/usr/bin/rg\n/usr/local/bin/fd\n1\n",
     },
     {
       // nexus-kvm runs only when the boot spec asks for it, and this boot did not.
@@ -439,8 +433,7 @@ export function smokeChecks(recipe: ImageRecipe & { pins: BuildPins }): readonly
       expect: "unloaded\n",
     },
     {
-      // The check reruns Herdr's integrations first, as the install's last step does, so it proves that the settings.json they
-      // rewrite still holds the plugins. The layout comes from the recipe's manifest, not the copy in the image.
+      // The layout comes from the recipe's manifest, not the copy in the image.
       name: "agent setup",
       argv: userSmoke(`node ${agentSetupInstaller} check ${shellQuote(JSON.stringify(agentSetup))}`),
       expect: "ok\n",
@@ -463,11 +456,6 @@ export function smokeChecks(recipe: ImageRecipe & { pins: BuildPins }): readonly
       name: "gh and git credentials",
       argv: userSmoke("gh --version | head -n 1; printf 'protocol=https\\nhost=github.com\\n\\n' | GIT_TERMINAL_PROMPT=0 GH_TOKEN=nexus-smoke git credential fill"),
       expect: new RegExp(`^gh version ${literal(pins.gh)} \\(\\d{4}-\\d{2}-\\d{2}\\)\\n(?:[^\\n]*\\n)*password=nexus-smoke\\n$`),
-    },
-    {
-      name: "Herdr leaves resume to Nexus and skips onboarding",
-      argv: userSmoke("cat ~/.config/herdr/config.toml"),
-      expect: /^onboarding = false\n\n\[session\]\nresume_agents_on_restore = false\n$/,
     },
     {
       name: "Herdr Core answers as hc and types nothing on its own",
@@ -545,7 +533,6 @@ async function smokeBoot(assets: string, checks: readonly SmokeCheck[], id: Imag
     httpHooks: createHttpHooks({ allowedHosts: [smokeHost] }).httpHooks,
     sessionLabel: `nexus-image-smoke:${id}`,
   }).catch((err: Error) => fail("boot", err.message));
-  const stopServer = new AbortController();
   try {
     const exec = async (argv: readonly string[]) => {
       const result = await vm.exec([...argv], { signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]) });
@@ -567,19 +554,7 @@ async function smokeBoot(assets: string, checks: readonly SmokeCheck[], id: Imag
     if (result.exitCode !== 0) fail("stdin to a closed pipe", `exited ${result.exitCode}`, result.stdout + result.stderr);
     const after = await exec(["true"]).catch((err: Error) => fail("stdin to a closed pipe", `the next exec failed: ${err.message}`));
     if (after.exitCode !== 0) fail("stdin to a closed pipe", `the next exec exited ${after.exitCode}`, after.output);
-
-    const server = vm.exec([...userSmoke(`exec herdr --session ${smokeSession} server`)], { signal: AbortSignal.any([signal, stopServer.signal]) });
-    server.catch(() => {});
-    let status = { exitCode: -1, output: "" };
-    for (let attempt = 0; attempt < 50 && status.exitCode !== 0; attempt++) {
-      await delay(200);
-      status = await exec(userSmoke(`herdr --session ${smokeSession} status server`));
-    }
-    if (status.exitCode !== 0) fail("Herdr server as user", "not running after 10 s", status.output);
-    const stop = await exec(userSmoke(`herdr --session ${smokeSession} server stop`));
-    if (stop.exitCode !== 0) fail("Herdr server as user", `stop exited ${stop.exitCode}`, stop.output);
   } finally {
-    stopServer.abort();
     await vm.close();
   }
 }

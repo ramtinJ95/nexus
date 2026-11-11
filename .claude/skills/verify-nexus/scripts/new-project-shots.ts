@@ -42,7 +42,7 @@ const image = "img-0123456789ab";
 await post("POST", "/v1/images", {
   id: image, gondolinBuildId: "b1", builtOn: online, builtAt: "2027-01-01T00:00:00Z", sha256: "a".repeat(64),
   pins: {
-    debianDigest: `sha256:${"d".repeat(64)}`, node: "24.22.1", nodeSha256: "e".repeat(64), claudeCode: "c", pi: "p", herdr: "h", piEnv: "e",
+    debianDigest: `sha256:${"d".repeat(64)}`, node: "24.22.1", nodeSha256: "e".repeat(64), claudeCode: "c", pi: "p", piEnv: "e",
     piEnvSha256: "f".repeat(64), gondolin: "0.13.0", alpineKernel: "k", dotfilesCommon: "f", gh: "2.103.2", ghSha256: "a".repeat(64),
     neovim: "0.12.6", neovimSha256: "b".repeat(64),
   },

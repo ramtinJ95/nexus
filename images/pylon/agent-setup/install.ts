@@ -36,7 +36,7 @@ const env = { ...process.env, CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTA
  * 2. Claude: each marketplace fetched the same way into marketplaces/<name> beside this file and added as a
  *    local directory marketplace, which nothing in a pylon tries to update from GitHub. Then each plugin.
  * 3. pi: each package with `pi install`, in manifest order, because pi loads packages in that order.
- * 4. Herdr's integrations, after the plugin installs wrote ~/.claude/settings.json, the order every boot repeats.
+ * 4. Nexus's Claude hooks, merged into the ~/.claude/settings.json that the plugin installs wrote.
  * A plugin whose marketplace at its commit carries another version fails the check that follows, on the node.
  */
 async function install(setup: AgentSetup): Promise<void> {
@@ -69,7 +69,7 @@ async function install(setup: AgentSetup): Promise<void> {
   for (const pkg of setup.pi.packages) {
     await run("pi", ["install", pkg.kind === "npm" ? `npm:${pkg.name}@${pkg.version}` : join(piPackages, basename(pkg.path))]);
   }
-  await herdrIntegrations();
+  await installClaudeHooks();
 }
 
 /**
@@ -100,9 +100,7 @@ export const claudeHooks = [
   ["PermissionRequest", "ask", "AskUserQuestion", 86_400],
 ] as const;
 
-async function herdrIntegrations(): Promise<void> {
-  await run("herdr", ["integration", "install", "pi"]);
-  await run("herdr", ["integration", "install", "claude"]);
+async function installClaudeHooks(): Promise<void> {
   const path = join(home, ".claude/settings.json");
   const settings = JSON.parse(await readFile(path, "utf8"));
   settings.hooks ??= {};
@@ -263,7 +261,6 @@ if (import.meta.main) {
     await install(setup);
     mismatches = installMismatches(installedLayout(setup), await observe());
   } else if (command === "check" && layout !== undefined) {
-    await herdrIntegrations();
     mismatches = await check(JSON.parse(layout) as InstalledAgentSetup);
   } else {
     console.error("usage: node install.ts [check '<InstalledAgentSetup as JSON>']");

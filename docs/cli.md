@@ -1278,7 +1278,7 @@ Inside a pylon, `nexus event <kind> [--session ID] [--message TEXT] [--at MS]` r
 for that pylon's own thread. The image installs UserPromptSubmit, throttled PostToolUse, Stop, StopFailure (which
 Claude Code runs instead of Stop when an API error ends the turn),
 Notification (permission and input prompts), and SessionEnd hooks,
-merged alongside Herdr's hooks on every agent-setup install. It also installs
+merged into the settings the agent-setup install wrote. It also installs
 PreToolUse and PermissionRequest hooks for AskUserQuestion alone, which report no
 event and let the dashboard answer the dialog, as
 [A Claude worker's AskUserQuestion](#a-claude-workers-askuserquestion)

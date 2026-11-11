@@ -46,17 +46,8 @@ RUN cd /tmp \
  && install -D -o root -g root -m 0755 package/bin/pi-env-linux-x64/pi-env /usr/local/libexec/nexus/pi-env \
  && rm -r pi-env.tgz package
 
-# Herdr's release binary, checked like Node. herdr.dev's installer would fetch only the latest release.
-ARG HERDR_VERSION
-ARG HERDR_SHA256
-RUN cd /tmp \
- && curl -fsSLo herdr "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-x86_64" \
- && echo "${HERDR_SHA256}  herdr" | sha256sum -c - \
- && install -m 0755 herdr /usr/local/bin/herdr \
- && rm herdr
-
-# Herdr Core beside Herdr, from its release tarball, checked like Node. Nothing in Nexus runs it yet. hc is the
-# name its installer links and its help uses.
+# Herdr Core, which every session runs in, from its release tarball, checked like Node. hc is the name its
+# installer links and its help uses.
 ARG HERDR_CORE_VERSION
 ARG HERDR_CORE_SHA256
 RUN cd /tmp \
@@ -129,10 +120,9 @@ RUN cd /opt/nexus/dotfiles \
  && GIT_AUTHOR_DATE=2000-01-01T00:00:00Z GIT_COMMITTER_DATE=2000-01-01T00:00:00Z \
     git -c user.name=nexus -c user.email=nexus@pylon commit -q -m "dotfiles common layer at ${DOTFILES_COMMIT}"
 # This Mac's Claude Code plugins, skills, pi packages and pi extensions, which src/image/agent-setup.ts captured into
-# agent-setup/manifest.json. The installer fetches and installs what the manifest pins, then runs Herdr's
-# integrations, the order every boot repeats, so Herdr's hook merges into the settings.json that the plugin
-# installs wrote. It fails the build on any difference from the manifest. pi and Claude Code make their config
-# directories on first run, and Herdr's installers refuse to run before that.
+# agent-setup/manifest.json. The installer fetches and installs what the manifest pins, then merges Nexus's
+# Claude hooks into the settings.json that the plugin installs wrote. It fails the build on any difference from
+# the manifest. It writes into pi's and Claude Code's config directories before either has run and made them.
 COPY --chown=user:user agent-setup/ /opt/nexus/agent-setup/
 RUN mkdir -p /home/user/.pi/agent/extensions /home/user/.claude /home/user/.agents/skills \
  && node /opt/nexus/agent-setup/install.ts \
@@ -141,12 +131,6 @@ RUN mkdir -p /home/user/.pi/agent/extensions /home/user/.claude /home/user/.agen
 # it through the link. A dotfiles layer that installs either file must keep this.
 RUN printf '@~/.nexus/PYLON.md\n' > /home/user/.claude/CLAUDE.md \
  && ln -s /home/user/.nexus/PYLON.md /home/user/.pi/agent/AGENTS.md
-# Nexus relaunches each pane's agent on wake (src/probe/guest/sessions.ts) and checks that it runs. Herdr's own resume on
-# restore would start it first, and when that start fails, as `claude --resume` does for a session never
-# prompted, Herdr still reports the agent as running. Without `onboarding = false`, Herdr's first-run dialog covers
-# the session on the first attach to every new pylon.
-RUN mkdir -p /home/user/.config/herdr \
- && printf 'onboarding = false\n\n[session]\nresume_agents_on_restore = false\n' > /home/user/.config/herdr/config.toml
 # Without `notes = false`, Herdr Core types notes to parent agents and <hc> tags into messages on its own.
 RUN mkdir -p /home/user/.config/herdr-core \
  && printf 'notes = false\n' > /home/user/.config/herdr-core/config.toml
