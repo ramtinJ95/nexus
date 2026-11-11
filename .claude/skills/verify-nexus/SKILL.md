@@ -14,7 +14,7 @@ This skill never drives the home-lab deployment on `rj-firebat` and `infra-testb
 `scripts/verify-nexus up` starts one process, `scripts/stack.ts`. It uses the same wiring as `src/checks/control/thread-on-node.ts`:
 
 - The real control plane comes from `startControlPlane`: the registry, the reconcile loop, the pi-durable harness, the API and the dashboard. It listens on `http://127.0.0.1:7470`.
-- A real probe comes from `startProbe`, on `127.0.0.1:7480`, with the Docker backend (`src/backends/docker-backend.ts`). Each pylon is a container named `pylon-<thread>`, built from an image the stack builds: Node 24, git, Herdr, the pi-env daemon, the in-pylon CLI and a one-commit bare repository at `/srv/verify.git`. Each pylon's first boot clones it into `/home/user/workspace/repo` and records `refs/nexus/base` at its commit, as a pylon-vm does.
+- A real probe comes from `startProbe`, on `127.0.0.1:7480`, with the Docker backend (`src/backends/docker-backend.ts`). Each pylon is a container named `pylon-<thread>`, built from an image the stack builds: Node 24, git, Herdr Core, the pi-env daemon, the in-pylon CLI and a one-commit bare repository at `/srv/verify.git`. Each pylon's first boot clones it into `/home/user/workspace/repo` and records `refs/nexus/base` at its commit, as a pylon-vm does.
 - Only the production boundaries are replaced:
   - tailscaled's whois is a fake LocalAPI socket. It names port 7480 as the probe and every other caller as the person's laptop, which the API allows and counts as a person, so the CLI and the dashboard may start and message threads. The probe's whois names every caller as the control plane.
   - The model is scripted (`src/control/harness/test-fixture.ts`). A message `bash: <command>` makes exactly one bash tool call in the pylon, then the answer `scripted answer after toolResult`. A message `stream: <n>` gets the answer `word0 word1 ...` of n words, written one word every 20 ms, so it streams as a real model's does. Any other message gets `scripted answer after user`.
@@ -27,7 +27,7 @@ All state lives under `<repo>/.verify/nexus/`, which `.gitignore` ignores. A run
 
 ## Launch
 
-Prerequisites: Docker Desktop running, Node 26 or newer, `npm ci` and `npm run build` done in the repo, and network access for the first image build, which pulls `node:24-bookworm-slim` and installs Herdr from herdr.dev. The Claude Code sandbox blocks both the Docker socket and local port binding. If a command fails with `permission denied ... docker.sock` or `listen EPERM`, the sandbox stopped it. Hand the run to a worker outside the sandbox, or ask the user to run it with `!`.
+Prerequisites: Docker Desktop running, Node 26 or newer, `npm ci` and `npm run build` done in the repo, and network access for the first image build, which pulls `node:24-bookworm-slim` and installs Herdr Core from releases.herdr.dev. The Claude Code sandbox blocks both the Docker socket and local port binding. If a command fails with `permission denied ... docker.sock` or `listen EPERM`, the sandbox stopped it. Hand the run to a worker outside the sandbox, or ask the user to run it with `!`.
 
 ```sh
 V=.claude/skills/verify-nexus/scripts/verify-nexus   # from the repo root
