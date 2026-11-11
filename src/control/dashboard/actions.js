@@ -84,7 +84,7 @@ export const handlers = {
   },
   // As `nexus session close`.
   "close-session": (thread, { session }) => request(pylonRoutes.closeSession, { thread, session }),
-  "show-session": (thread, { terminal }) => showSession(thread, terminal),
+  "show-session": (thread, { address }) => showSession(thread, address),
 };
 
 document.addEventListener("click", async (event) => {

@@ -1251,7 +1251,7 @@ test("the thread page's sessions open, show in the terminal and close from the p
     { id: "failed-0123456789ab", state: "failed", terminal: null, harness: "claude-code", harnessSessionId: "9a1b", title: "review", status: null, message: "claude exited 1" },
   ] });
   const buttons = async () => [...sectionOf((await s.call("GET", `/threads/${worker.id}`)).text, "sessions-h").matchAll(/<button [^>]*data-action="([^"]+)"[^>]*>/g)]
-    .map(([button, action]) => [action, ...["harness", "terminal", "session", "confirm"].flatMap((key) => new RegExp(`data-${key}="([^"]*)"`).exec(button!)?.slice(1).map(textOf) ?? [])].join(" "));
+    .map(([button, action]) => [action, ...["harness", "address", "session", "confirm"].flatMap((key) => new RegExp(`data-${key}="([^"]*)"`).exec(button!)?.slice(1).map(textOf) ?? [])].join(" "));
   assert.deepEqual(await buttons(), [
     'close-session failed-0123456789ab Close the Claude Code session "review"? No wake tries it again.',
     "show-session w1:p1",
