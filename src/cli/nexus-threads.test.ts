@@ -147,7 +147,7 @@ test("show exposes the registry's failed worker and its selected model", async (
   const message = "Claude launch did not complete: agent executable missing";
   claudeWorkerAt(s.registry, thread.id, "failed", { message });
   const detail = await s.json(["show", thread.id]);
-  assert.deepEqual(detail.claudeWorker, { state: "failed", model: "claude-sonnet-5-5", message });
+  assert.deepEqual(detail.claudeWorker, { state: "failed", model: "claude-sonnet-5-5", session: "launch", message });
   assert.equal(detail.attention, "failed");
   assert.deepEqual(detail.sessions, []);
   const text = (await s.nexus(["show", thread.id])).stdout;
@@ -225,6 +225,14 @@ test("wake says it recorded the person's activity and what that does to the pylo
   assert.equal((await s.nexus(["wake", thread.id])).stdout, `Recorded your activity on ${thread.id}, but its pylon failed, and activity does not retry it. \`nexus retry-pylon ${thread.id}\` does.\n`);
   await s.json(["archive", thread.id]);
   assert.equal((await s.nexus(["wake", thread.id])).stdout, `Recorded your activity on ${thread.id}, but it is archived, so its pylon stays paused. \`nexus unarchive ${thread.id}\` wakes it.\n`);
+});
+
+test("show --json names the session a started Claude worker runs, so a client can tell it from other Claude sessions", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
+  assert.equal((await s.json(["show", thread.id])).claudeWorker.session, null);
+  claudeWorkerAt(s.registry, thread.id, "started", { session: "s1" });
+  assert.equal((await s.json(["show", thread.id])).claudeWorker.session, "s1");
 });
 
 test("threads and show say a Claude worker is working while its session's turn runs", async (t) => {
