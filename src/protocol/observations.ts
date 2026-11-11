@@ -205,6 +205,9 @@ export const heldSecrets: readonly string[] = Object.values(agentKinds).flatMap(
 export const probeContract = 2;
 export const minProbeContract = 2;
 
+/** A snapshot from a probe below `minProbeContract`, which this control plane would read wrong. */
+export class OlderProbe extends Error {}
+
 /** One line of the observe stream, newline included. */
 export function encodeProbeEvent(event: ProbeEvent): string {
   return JSON.stringify(event.type === "snapshot" ? { ...event, contract: probeContract } : event) + "\n";
@@ -263,7 +266,7 @@ export function parseProbeEvent(frame: string): ProbeEvent {
       const { contract } = event;
       if (!(typeof contract === "number" && contract >= minProbeContract)) {
         const node = (event.observation as { node?: unknown } | null)?.node;
-        throw new Error(`${typeof node === "string" ? node : "the node"} runs a probe of ${typeof contract === "number" ? `contract ${contract}` : "no contract"}, older than the ${minProbeContract} this control plane reads. Upgrade it with nexus deploy`);
+        throw new OlderProbe(`${typeof node === "string" ? node : "the node"} runs a probe of ${typeof contract === "number" ? `contract ${contract}` : "no contract"}, older than the ${minProbeContract} this control plane reads. Upgrade it with nexus deploy`);
       }
       const observation = parse(asSent(observationSchema), event.observation, "event.observation");
       return { type: "snapshot", observation: { ...observation, pylons: observation.pylons.map(knownCause) } };

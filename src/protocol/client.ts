@@ -11,7 +11,7 @@ import { asSent, named, parseJson, unchecked } from "../parse.ts";
 import type { ArtifactManifest } from "./images.ts";
 import type { JobId, NodeName, PortableArtifactId, PylonId, TailnetNodeId } from "../ids.ts";
 import { jobStatusSchema, parseSubmitReply, type JobEnvelope, type JobStatus, type SubmitReply } from "./jobs.ts";
-import { parseProbeEvent, type DiskFact, type ProbeEvent } from "./observations.ts";
+import { OlderProbe, parseProbeEvent, type DiskFact, type ProbeEvent } from "./observations.ts";
 import { parseCommandResult, type CommandResult, type PylonCommand } from "./commands.ts";
 import { clientByteStream, streamAnswerMs, streamPath, type ByteStream } from "./streams.ts";
 import { parseArtifactManifest } from "./artifacts.ts";
@@ -32,6 +32,10 @@ export interface ProbeClient {
   job(jobId: JobId): Promise<JobStatus | "unknown">;
   /** Ends when the link drops. The registry marks the node offline after 30 s without a reconnect. */
   observe(signal: AbortSignal): AsyncIterable<ProbeEvent>;
+  /**
+   * Rejects as not-running, sending nothing, while the last snapshot observe read was below `minProbeContract`, since
+   * such a probe would act on the command and answer in a shape this control plane cannot read.
+   */
   command(pylonId: PylonId, command: PylonCommand): Promise<CommandResult>;
   stream(pylonId: PylonId, argv: readonly string[]): Promise<ByteStream>;
   /** GET /v1/manifests/{id}: the manifest of an image or template the node holds, or null when it holds none. */
@@ -93,6 +97,8 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
   const { whois } = options;
   const agent = new Agent({ keepAlive: false });
   const streamTimeoutMs = options.streamTimeoutMs ?? streamAnswerMs;
+  /** Why the last snapshot was refused, until one at or above the contract arrives. */
+  let older: string | null = null;
 
   /** A silent socket for `requestTimeoutMs` fails the call as unreachable. Observe lifts the limit once its stream starts. */
   function open(method: ProbeRoute["method"], path: string, body: string | null, signal?: AbortSignal, timeoutMs = requestTimeoutMs, contentType = "application/json"): Promise<IncomingMessage> {
@@ -167,10 +173,21 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
       if (res.statusCode !== 200) expectStatus({ method, path, status: res.statusCode ?? 0, body: await text(res) }, 200);
       // The first snapshot arrives with the headers. After that, events can be a minute apart.
       res.socket.setTimeout(0);
-      for await (const line of lines(res)) yield parseProbeEvent(line);
+      for await (const line of lines(res)) {
+        let event: ProbeEvent;
+        try {
+          event = parseProbeEvent(line);
+        } catch (err) {
+          if (err instanceof OlderProbe) older = err.message;
+          throw err;
+        }
+        if (event.type === "snapshot") older = null;
+        yield event;
+      }
     },
     /** Never retried here. */
     async command(pylonId, command) {
+      if (older !== null) throw probeError("not-running", older);
       const res = await call(probeRoutes.command.method, routePath(probeRoutes.command, { pylonId }), JSON.stringify(command), commandTimeoutMs);
       expectStatus(res, 200, "not-running");
       return parseCommandResult(command, res.body);

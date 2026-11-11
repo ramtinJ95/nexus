@@ -360,6 +360,34 @@ test("a status a method gives no meaning rejects with its status, and with a Pro
   }
 });
 
+test("a probe whose last snapshot is below the contract is sent no command until it sends one at or above it", async (t) => {
+  let contract = probeContract - 1;
+  const commanded: string[] = [];
+  const server = createServer((req, res) => {
+    if (req.url === "/v1/observe") return res.writeHead(200).end(`${JSON.stringify({ type: "snapshot", contract, observation: testObservation(node as NodeName) })}\n`);
+    req.resume().on("end", () => {
+      commanded.push(req.url!);
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ kind: "open-session", terminal: "t1" }));
+    });
+  }).listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => server.close());
+  const client = connectProbe(node as NodeName, "127.0.0.1", "nPROBE" as TailnetNodeId, { port: (server.address() as AddressInfo).port, whois: async () => "nPROBE" as TailnetNodeId });
+  const observe = async () => { for await (const event of client.observe(AbortSignal.timeout(5_000))) return event.type; };
+  const open: PylonCommand = { kind: "open-session", harness: "shell", title: "sh" };
+  await assert.rejects(observe(), { message: new RegExp(`runs a probe of contract ${contract}, older than`) });
+  await assert.rejects(client.command(pylonId as PylonId, open), (err: Error & Partial<ProbeError>) => {
+    assert.equal(err.code, "not-running", "refused as for a pylon not running, having sent nothing");
+    assert.match(err.message, /older than the \d+ this control plane reads\. Upgrade it with nexus deploy$/);
+    return true;
+  });
+  assert.deepEqual(commanded, [], "the older probe got no command");
+  contract = probeContract;
+  assert.equal(await observe(), "snapshot");
+  assert.deepEqual(await client.command(pylonId as PylonId, open), { kind: "open-session", terminal: "t1" });
+  assert.deepEqual(commanded, [`/v1/pylons/${pylonId}/commands`], "the upgraded probe gets it");
+});
+
 test("a stream the probe took but did not answer in time blames the probe, and the probe's 504 for a slow guest reads as unreachable with its words", async (t) => {
   let answer: ((socket: import("node:stream").Duplex) => void) | null = null;
   const server = createServer().listen(0, "127.0.0.1");
