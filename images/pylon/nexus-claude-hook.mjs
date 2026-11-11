@@ -4,7 +4,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { homedir, userInfo } from "node:os";
 import { join } from "node:path";
 import { alive, askDecision, awaitAnswer, deliverAnswer, forgetAsk, forgetSession, hookInput, parseAskAnswer, recordCall, waitingAsks } from "./nexus-ask.ts";
-import { backgroundGroups, backgroundWatch, claimHold, claudeEnviron, heartbeatDue, holdSuperseded, holdTurnEnd, releaseHold, reportedKind, reportsIntoThread } from "./nexus-heartbeat.ts";
+import { backgroundGroups, backgroundWatch, claimHold, claudeEnviron, heartbeatDue, holdSuperseded, holdTurnEnd, hookReport, releaseHold, reportsIntoThread } from "./nexus-heartbeat.ts";
 import { answerDelivered, answerExits, checkoutDir, claudeTurn, maxSessionLength } from "./nexus-contract.ts";
 import { enqueue, startSender } from "./nexus-outbox.ts";
 import { snapshotTurn } from "./nexus-turn.ts";
@@ -20,7 +20,7 @@ async function report() {
   if (typeof session !== "string" || session.length > maxSessionLength) return null;
   const answered = payload.hook_event_name === "PostToolUse" && payload.tool_name === "AskUserQuestion";
   if (answered) await forgetAsk(asks, session, payload.tool_input).catch(() => {});
-  const { kind, shells } = reportedKind(process.argv[2], payload);
+  const { kind, shells, promptSha256 } = hookReport(process.argv[2], payload);
   // Before the event is queued, so the control plane's pull of the asks after it lists none of the session's.
   if (kind === "session.turn-started" || kind === "session.turn-ended" || kind === "session.ended") await forgetSession(asks, session).catch(() => {});
   if (shells !== undefined) {
@@ -38,7 +38,7 @@ async function report() {
     await rm(path, { force: true });
   }
   // A failed write must not lose the session, which names this turn's snapshot.
-  await enqueue({ kind, at, session }).catch(() => {});
+  await enqueue({ kind, at, session, ...(promptSha256 === undefined ? {} : { promptSha256 }) }).catch(() => {});
   startSender();
   return session;
 }

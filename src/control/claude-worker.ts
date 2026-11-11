@@ -3,6 +3,7 @@
  * death, Nexus resuming a turn that died, its transcript as read so far, what stopped its latest turn, and the
  * messages typed into it. The thread store makes it, and hands it the thread's reconcile, attention and turn.
  */
+import { createHash } from "node:crypto";
 import { claudeTurn } from "../../images/pylon/nexus-contract.ts";
 import type { ThreadId } from "../ids.ts";
 import type { Sender } from "./agent-protocol.ts";
@@ -92,6 +93,12 @@ export interface ClaudeWorkerThread {
   /** Ends the turn of `session` that started no later than `at`, by the pylon's clock, as its session's hook would. */
   endTurn(thread: ThreadId, session: string, at: number): void;
 }
+
+/**
+ * The SHA-256 of a text Nexus typed into a Claude, as claude_senders keeps it. The pylon's UserPromptSubmit hook sends
+ * the same hash of each prompt, so a prompt is Nexus's only when the two match.
+ */
+export const textSha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
 
 export function claudeWorkerStore(db: Db, on: ClaudeWorkerThread) {
   const { transaction, sql } = db;
@@ -264,6 +271,11 @@ export function claudeWorkerStore(db: Db, on: ClaudeWorkerThread) {
           .run(thread, requestId, message.state, message.state === "sent" ? JSON.stringify(message.result) : null);
         if (typed !== undefined) sql("INSERT OR IGNORE INTO claude_senders (thread, request_id, sender, text_sha256) VALUES (?, ?, ?, ?)").run(thread, requestId, typed.sender, typed.sha256);
       });
+    },
+    /** Whether Nexus typed the text whose textSha256 this is into the thread's Claude worker, or launched the worker with it. */
+    typedByNexus(thread: ThreadId, sha256: string): boolean {
+      const worker = claudeWorker(thread);
+      return (worker !== undefined && textSha256(worker.prompt) === sha256) || sql("SELECT 1 FROM claude_senders WHERE thread = ? AND text_sha256 = ?").get(thread, sha256) !== undefined;
     },
     /** Who typed each message recorded for the thread's Claude worker, and the hash of its text, null for one recorded before senders were. */
     claudeMessageSenders: (thread: ThreadId) => sql("SELECT coalesce(s.sender, 'unknown') AS sender, s.text_sha256 FROM claude_messages m LEFT JOIN claude_senders s USING (thread, request_id) WHERE m.thread = ?").all(thread)

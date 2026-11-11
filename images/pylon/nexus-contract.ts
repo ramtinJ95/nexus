@@ -90,3 +90,26 @@ export const maxAsksBytes = 1 << 20;
 
 /** The control plane expects this ID for the latest session.turn-started it recorded, so the hook stamps both with `at`. */
 export const claudeTurn = (session: string, at: number): string => `claude:${session}:${at}`;
+
+/**
+ * The text inside a prompt Claude Code took as a paste, which it hands its hooks and records as one
+ * `<pasted_content id="…">` block between newlines, or `text` as it is. Tags anywhere else are the text's own.
+ */
+export function unpasted(text: string): string {
+  const match = /^\n*<pasted_content id="([^"\n]+)">\n([\s\S]*)\n<\/pasted_content id="\1">\n*$/.exec(text);
+  return match === null || match[2]!.includes(`</pasted_content id="${match[1]}">`) ? text : match[2]!;
+}
+
+/**
+ * The tags that open a prompt no one typed. Claude Code 2.1.322 hands its UserPromptSubmit hook `<task-notification>`
+ * as a background shell or subagent finishes, `<cross-session-message …>` for another session's message, as Shepherdr
+ * sends a worker its task, and Herdr Core's `<hc>` note or `<hc from="…">` for a message `hc send` typed from another
+ * terminal. The rest are the other message envelopes Claude Code's own list names, not seen here.
+ */
+const untypedTags = new Set(["task-notification", "cross-session-message", "hc", "teammate-message", "agent-message", "coordinator-relay", "channel", "tick", "remote-review", "slack-ping", "slack-tag-message"]);
+
+/** The prompt as the person or Nexus wrote it, without paste tags, or null for one Claude Code or another agent made. */
+export function typedPrompt(prompt: string): string | null {
+  const tag = /^<([a-z][a-z_-]*)[\s>]/.exec(prompt)?.[1];
+  return tag !== undefined && untypedTags.has(tag) ? null : unpasted(prompt);
+}

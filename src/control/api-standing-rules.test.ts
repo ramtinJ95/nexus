@@ -7,7 +7,7 @@ import type { PipelineItem } from "./pipeline.ts";
 import type { QueuedThread } from "../contract/threads.ts";
 import type { Thread } from "./thread-store.ts";
 import type { ThreadDetail, ThreadRow } from "./wire.ts";
-import type { ImageId, ProjectId, ThreadId } from "../ids.ts";
+import { pylonIdOf, type ImageId, type ProjectId, type ThreadId } from "../ids.ts";
 import { node, project, image, observeNode, testApi, withImage, withQueue } from "../test-support/api-kit.ts";
 import { seedRegistry, testPylon, testRegistry, testThread } from "../test-support/registry-kit.ts";
 
@@ -72,6 +72,32 @@ test("a Claude worker's first prompt carries the project's standing rules after 
   assert.equal(s.registry.threads.claudeWorker(started.body.id)!.prompt, `/poteto-mode fix the bug${section(rules)}`, "a started thread keeps what it got");
   assert.equal(await revisionOf(s, started.body.id), 1);
   assert.equal(await revisionOf(s, plain.body.id), undefined, "a thread started before the rules gets none later");
+});
+
+test("the prompt Claude's hook gets for a worker's launch is Nexus's, rules and whitespace as the control plane composed them", async (t) => {
+  const { hookReport } = await import("../../images/pylon/nexus-heartbeat.ts");
+  let now = 1_800_000_000_000;
+  const s = await testApi(t, { clock: () => now });
+  assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
+  assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
+  s.registry.images.setCurrentImage(image.id as ImageId);
+  await setRules(s, "- Keep commits small.  \n- Never push.\n\n```sh\nnpm test\n```");
+  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Launch", claude: "Reply with exactly LAUNCH-OK and nothing else. Do not read any file.  \nSecond line\twith a tab and trailing spaces   \n\n  indented line, unicode: café — 日本" });
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+  const id = started.body.id as ThreadId;
+  const before = s.registry.threads.thread(id)!.lastHumanActivityAt;
+  // The prompt Claude Code 2.1.322 handed its UserPromptSubmit hook when launched with this composition as its last
+  // argument: as given, the slash command unexpanded and no whitespace trimmed.
+  const observed = "/poteto-mode Reply with exactly LAUNCH-OK and nothing else. Do not read any file.  \nSecond line\twith a tab and trailing spaces   \n\n  indented line, unicode: café — 日本\n\n## Standing rules for this project\n\n- Keep commits small.  \n- Never push.\n\n```sh\nnpm test\n```";
+  let sequence = 0;
+  const submitted = (prompt: string) => {
+    now += 1_000;
+    s.registry.threads.reportSession(node, { sequence: ++sequence, pylon: pylonIdOf(id), time: now, event: { kind: "session.turn-started", session: "s1", at: now, promptSha256: hookReport("session.turn-started", { prompt }).promptSha256 } });
+  };
+  submitted(observed);
+  assert.equal(s.registry.threads.thread(id)!.lastHumanActivityAt, before);
+  submitted("Now the other file");
+  assert.equal(s.registry.threads.thread(id)!.lastHumanActivityAt, now, "the person's next prompt counts");
 });
 
 test("a Claude prompt that the project's standing rules push past 16384 characters is refused before anything starts", async (t) => {

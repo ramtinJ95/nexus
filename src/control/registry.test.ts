@@ -2,7 +2,7 @@ import { test, type TestContext } from "node:test";
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { openRegistry, type Registry } from "./registry.ts";
@@ -21,7 +21,7 @@ import type { ConversationId, DocumentObserver, LiveState, TaskId } from "@earen
 import type { JobId, LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { NodeObservation, ServiceFact } from "../protocol/observations.ts";
 import type { TemplateRecord } from "./templates.ts";
-import { transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
+import { parseRecord, transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
 import { maxEntries } from "../contract/streams.ts";
 import { runningPylon, stoppedPylon, tempDir, testCapacity, testImage, testObservation } from "../test-support/kit.ts";
 import type { WaitingAsk } from "./questions.ts";
@@ -122,6 +122,15 @@ test("a Claude message recorded before senders were reads as unknown, and only i
   assert.equal(promptSenders(fresh, threadId)(review), null, "on a thread whose every send is recorded, an unrecorded prompt is the person's");
   await typeIntoClaude(fresh, threadId, "s1", null, "rv-1:1", review, async () => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed: false }), "review");
   assert.equal(promptSenders(fresh, threadId)(review), "review");
+});
+
+test("a long message Nexus typed, which Claude recorded as a paste, is still Nexus's", async (t) => {
+  const registry = seeded(t, tempDb());
+  const review = `${senders.review.prefix}\n${"Review pull request #7, every file of it.\n".repeat(100).trim()}`;
+  await typeIntoClaude(registry, threadId, "s1", null, "rv-1:1", review, async () => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed: false }), "review");
+  const record = JSON.stringify({ type: "user", timestamp: "2026-11-10T12:00:00.000Z", origin: { kind: "human" }, message: { role: "user", content: `\n\n<pasted_content id="cbe0">\n${review}\n</pasted_content id="cbe0">\n` } });
+  const [entry] = parseRecord(record);
+  assert.equal(entry?.kind === "prompt" && promptSenders(registry, threadId)(entry.text), "review");
 });
 
 test("an image recorded before images carried their release reads as of no known release", async (t) => {
@@ -621,6 +630,56 @@ test("Claude turn events keep a pylon awake until it ends, independently of harn
   assert.equal(registry.threads.events("0", { kinds: ["session.turn-ended"] }).length, 1);
 });
 
+test("a prompt submitted in any of the pylon's Claudes is the person's at its hook's stamp, unless Nexus typed it or launched the worker with it", async (t) => {
+  const registry = seeded(t, tempDb(), undefined, "Fix the checkout");
+  const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+  let sequence = 0;
+  const started = (session: string, at: number, prompt?: string) => registry.threads.reportSession(node, {
+    sequence: ++sequence, pylon: pylonId, time: Date.now(), event: { kind: "session.turn-started", session, at, ...prompt === undefined ? {} : { promptSha256: sha256(prompt) } },
+  });
+  const human = () => registry.threads.thread(threadId)!.lastHumanActivityAt;
+  const feedback = `${senders["pr-watch"].prefix} CI failed`;
+  await typeIntoClaude(registry, threadId, "s1", null, "pr-1", feedback, async () => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed: false }), "pr-watch");
+  started("s1", 5_000, "Fix the checkout");
+  assert.equal(human(), thread.lastHumanActivityAt, "the worker's launch prompt is Nexus's");
+  started("s1", 6_000, feedback);
+  assert.equal(human(), thread.lastHumanActivityAt, "a message Nexus typed is Nexus's");
+  started("s1", 7_000);
+  assert.equal(human(), thread.lastHumanActivityAt, "an image from before hashes no prompt, so its turn counts for nobody");
+  started("by-hand", 9_000, "Try the other approach");
+  assert.equal(human(), 9_000, "a prompt of the person's counts at its hook's stamp, not when it arrived");
+  started("side", 8_000, "An older prompt the outbox sent late");
+  assert.equal(human(), 9_000, "a late report never moves it back");
+});
+
+test("a long message Nexus typed is still Nexus's when Claude hands its hook the message as a paste", async (t) => {
+  const { hookReport } = await import("../../images/pylon/nexus-heartbeat.ts");
+  const registry = seeded(t, tempDb(), undefined, "Fix the checkout");
+  const findings = `${senders.review.prefix} ${"finding ".repeat(600)}`;
+  await typeIntoClaude(registry, threadId, "s1", null, "rv-1:1", findings, async () => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed: false }), "review");
+  const { promptSha256 } = hookReport("session.turn-started", { prompt: `\n\n<pasted_content id="7">\n${findings}\n</pasted_content id="7">\n` });
+  registry.threads.reportSession(node, { sequence: 1, pylon: pylonId, time: Date.now(), event: { kind: "session.turn-started", session: "s1", at: 5_000, promptSha256 } });
+  assert.equal(registry.threads.thread(threadId)!.lastHumanActivityAt, thread.lastHumanActivityAt);
+});
+
+test("a person's prompt stamped in the future by the pylon's clock counts as now", (t) => {
+  const now = 10_000_000;
+  const registry = seeded(t, tempDb(), () => now, "Fix the checkout");
+  const promptSha256 = createHash("sha256").update("Try the other approach").digest("hex");
+  registry.threads.reportSession(node, { sequence: 1, pylon: pylonId, time: now, event: { kind: "session.turn-started", session: "s1", at: now + 24 * 60 * 60_000, promptSha256 } });
+  assert.equal(registry.threads.thread(threadId)!.lastHumanActivityAt, now);
+});
+
+test("the turn Claude starts for a finished background task is no one's activity", async (t) => {
+  const { hookReport } = await import("../../images/pylon/nexus-heartbeat.ts");
+  const registry = seeded(t, tempDb(), undefined, "Fix the checkout");
+  const report = (sequence: number, at: number, prompt: string) => registry.threads.reportSession(node, { sequence, pylon: pylonId, time: Date.now(), event: { kind: "session.turn-started", at, session: "s1", promptSha256: hookReport("session.turn-started", { prompt }).promptSha256 } });
+  report(1, 5_000, "<task-notification>\n<task-id>bmo4drl8q</task-id>\n<status>completed</status>\n<summary>Background command \"Sleep 20 seconds\" completed (exit code 0)</summary>\n</task-notification>");
+  assert.equal(registry.threads.thread(threadId)!.lastHumanActivityAt, thread.lastHumanActivityAt);
+  report(2, 6_000, "Now the other file");
+  assert.equal(registry.threads.thread(threadId)!.lastHumanActivityAt, 6_000, "the person's next prompt counts");
+});
+
 test("a lost turn end expires while heartbeats keep a long turn awake", async (t) => {
   const { desiredPhase } = await import("./reconcile.ts");
   const { sessionActivityTtlMs } = await import("./events.ts");
@@ -992,7 +1051,7 @@ test("a turn running before turn starts were recorded has no known start", (t) =
  * listed background shells, on the test's clock, and calls `exited` once the command exits.
  */
 async function claudeHooks(registry: ReturnType<typeof seeded>, clock: { now: number }) {
-  const { holdTurnEnd, reportedKind } = await import("../../images/pylon/nexus-heartbeat.ts");
+  const { holdTurnEnd, hookReport } = await import("../../images/pylon/nexus-heartbeat.ts");
   type Kind = import("../protocol/observations.ts").PylonEvent["kind"];
   let sequence = 0;
   const held: number[] = [];
@@ -1000,7 +1059,7 @@ async function claudeHooks(registry: ReturnType<typeof seeded>, clock: { now: nu
     sequence: ++sequence, time: clock.now, pylon: pylonId, event: { kind, session: "c1", at, ...(message === undefined ? {} : { message }) },
   });
   const hook = (kind: Kind, input: { background_tasks?: unknown } = {}, at = (clock.now += 1000)) => {
-    const reported = reportedKind(kind, input);
+    const reported = hookReport(kind, input);
     if (reported.shells !== undefined) held.push(at);
     send(reported.kind as Kind, at);
   };

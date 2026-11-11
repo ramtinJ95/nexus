@@ -25,9 +25,34 @@ test("the first person prompt opens the conversation, kept exactly as typed", ()
   assert.equal(first.kind === "prompt" && first.from, "person");
   assert.match(first.kind === "prompt" ? first.text : "", /^Do these steps one at a time, each as its own tool call: 1\) write hello\.py/);
   assert.equal(first.at, Date.parse("2026-10-25T22:14:50.563Z"));
-  // Claude wraps a long paste in <pasted_content>, and the prompt keeps the wrapper.
-  const pasted = JSON.parse(lines.find((l) => l.includes("Steer one"))!).message.content as string;
-  assert.ok(only("prompt").some((p) => p.from === "person" && p.text === pasted));
+});
+
+/** The text Claude Code 2.1.x records for a message it took as a paste, as the fixture's "Steer one" record holds it. */
+const asPasted = (text: string, id = "cbe0") => `\n\n<pasted_content id="${id}">\n${text}\n</pasted_content id="${id}">\n`;
+
+test("a message Claude took as a paste reads as the text pasted, wherever Claude records a prompt", () => {
+  const steer = "Steer one: reply with exactly this text quoted back in a code block:\nline two has \"double\" and 'single' quotes";
+  assert.equal(JSON.parse(lines.find((l) => l.includes("Steer one"))!).message.content, asPasted(only("prompt").find((p) => p.text.startsWith("Steer one"))!.text), "the fixture's record is one wrapped block");
+  assert.ok(only("prompt").some((p) => p.from === "person" && p.text.startsWith(steer)), "the fixture's pasted prompt reads without its tags");
+
+  const at = "2026-11-10T12:00:00.000Z";
+  const typed = (content: string) => parseRecord(JSON.stringify({ type: "user", timestamp: at, origin: { kind: "human" }, message: { role: "user", content } }));
+  const long = "Review pull request #7.\n\n<pasted_content id=\"x\"> is quoted here, not a paste.\nThe end.";
+  assert.deepEqual(typed(asPasted(long)), [{ kind: "prompt", at: Date.parse(at), text: long, from: "person" }]);
+  assert.deepEqual(parseRecord(JSON.stringify({ type: "queue-operation", operation: "enqueue", timestamp: at, content: asPasted(long) })), [{ kind: "queue", at: Date.parse(at), op: "enqueue", text: long }]);
+  const queued = parseRecord(JSON.stringify({ type: "attachment", timestamp: at, attachment: { type: "queued_command", commandMode: "prompt", prompt: asPasted(long), origin: { kind: "human" } } }));
+  assert.deepEqual(queued, [{ kind: "prompt", at: Date.parse(at), text: long, from: "person" }]);
+  const withImage = parseRecord(JSON.stringify({ type: "user", timestamp: at, origin: { kind: "human" }, message: { role: "user", content: [{ type: "text", text: asPasted(long) }] } }));
+  assert.deepEqual(withImage, [{ kind: "prompt", at: Date.parse(at), text: long, from: "person" }]);
+
+  const kept = (content: string) => assert.equal((typed(content)[0] as Extract<ClaudeEntry, { kind: "prompt" }>).text, content);
+  kept(`Look at this:${asPasted(long)}`);
+  kept(`${asPasted(long)}and that is all`);
+  kept(`${asPasted("one", "a")}${asPasted("two", "b")}`);
+  kept(`${asPasted("one", "a")}${asPasted("two", "a")}`);
+  kept(asPasted(long).replace('</pasted_content id="cbe0">', '</pasted_content id="cbe1">'));
+  kept(asPasted(long).replace(/\n<\/pasted_content[^]*$/, "…"));
+  assert.ok(only("prompt").some((p) => p.text.startsWith('\n\n<pasted_content id="cbe0">\nSteer three')), "the fixture's cut paste, which lost its closing tag, keeps its opening one");
 });
 
 test("a slash command the person typed, as a Claude worker's first /poteto-mode prompt is, shows as typed", () => {

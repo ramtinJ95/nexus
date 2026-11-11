@@ -4,7 +4,6 @@
  * person's message is, but they count only as agent activity, so they wake a paused pylon without holding it awake
  * for the twenty minutes a human visit does.
  */
-import { createHash } from "node:crypto";
 import { type Sender, senders } from "./agent-protocol.ts";
 import type { HarnessHost } from "./harness/host.ts";
 import type { Log } from "./log-once.ts";
@@ -14,7 +13,7 @@ import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { runningProbe } from "./locator.ts";
 import type { Registry } from "./registry.ts";
-import type { ClaudeSent } from "./claude-worker.ts";
+import { textSha256, type ClaudeSent } from "./claude-worker.ts";
 import type { Thread } from "./thread-store.ts";
 
 type InboxRegistry = Pick<Registry, "threads" | "nodes">;
@@ -73,7 +72,7 @@ async function typeOnce(registry: InboxRegistry, thread: ThreadId, session: stri
     if (earlier.send === "failed" || earlier.send === "unknown") return { kind: "uncertain" };
     result = earlier.send;
   } else {
-    registry.threads.setClaudeMessage(thread, requestId, { state: "sending" }, { sender, sha256: textHash(text) });
+    registry.threads.setClaudeMessage(thread, requestId, { state: "sending" }, { sender, sha256: textSha256(text) });
     try {
       result = await ask({ kind: "send-claude", session, text, requestId, ...(model === null ? {} : { model }) }) as Extract<CommandResult, { kind: "send-claude" }>;
     } catch (err) {
@@ -89,8 +88,6 @@ async function typeOnce(registry: InboxRegistry, thread: ThreadId, session: stri
   registry.threads.setClaudeMessage(thread, requestId, { state: "sent", result: sent });
   return { kind: "sent", sent };
 }
-
-const textHash = (text: string) => createHash("sha256").update(text).digest("hex");
 
 /** Who typed a prompt a Claude transcript reads as the person's: a Nexus sender, or null for the person. */
 export type PromptSenders = (text: string) => Sender | null;
@@ -110,7 +107,7 @@ export function promptSenders(registry: InboxRegistry, thread: ThreadId): Prompt
     else if (sha256 !== null && typed.get(sha256) !== "person") typed.set(sha256, sender);
   }
   return (text) => {
-    const sender = typed.get(textHash(text));
+    const sender = typed.get(textSha256(text));
     if (sender !== undefined) return sender === "person" ? null : sender;
     return before ? prefixSender(text) : null;
   };
