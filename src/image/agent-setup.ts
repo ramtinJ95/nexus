@@ -105,6 +105,7 @@ export const leaveOuts: readonly LeaveOut[] = [
   { kind: "skill", name: "anki-cards", why: "Mac-only" },
   { kind: "skill", name: "voxcraft-remote", why: "Mac-only" },
   { kind: "skill", name: "macmini-handoff", why: "Mac-only" },
+  { kind: "skill", name: "herdr", why: "drives Herdr 0.9.5, which a pylon does not run" },
   { kind: "pi-extension", name: "atuin.ts", why: "needs the atuin binary" },
   { kind: "pi-extension", name: "herdr-agent-state.ts", why: "reports to Herdr 0.9.5, which a pylon does not run" },
 ];

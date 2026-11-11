@@ -240,14 +240,13 @@ test("the plan ships what the Mac runs and reports each settled leave-out, and a
     },
     skills: [
       { path: `${agentSkills}/grok`, for: ["pi"] },
-      { path: `${agentSkills}/herdr`, for: ["claude", "pi"] },
       { path: `${agentSkills}/teach`, for: ["claude"] },
       { path: `${claudeSkills}/show-me`, for: ["claude"] },
     ],
   }));
   assert.deepEqual(setup, expected);
   assert.deepEqual(leftOut.map((rule) => `${rule.kind}:${rule.name}`), [
-    "claude-plugin:nexus@claude-mods", "pi-package:npm:@ramtinj95/pi-nexus", "skill:anki-cards", "pi-extension:atuin.ts",
+    "claude-plugin:nexus@claude-mods", "pi-package:npm:@ramtinj95/pi-nexus", "skill:anki-cards", "skill:herdr", "pi-extension:atuin.ts",
     "pi-extension:herdr-agent-state.ts", "skill:ramtin-mode", "pi-extension:pi-better-openai-lite",
   ]);
   assert.deepEqual(notes, [
@@ -277,8 +276,8 @@ test("uncommitted skills and an unpushed dotfiles HEAD are refused together, and
 
 test("a committed skill with uncommitted changes, or one outside the dotfiles, is refused", () => {
   const mac = thisMac();
-  const changed = { ...mac, dotfiles: { ...mac.dotfiles, changed: new Set([`${agentSkills}/herdr/SKILL.md`]) } };
-  assert.deepEqual(problemsOf(plan(changed)), [`skill herdr: ${agentSkills}/herdr has uncommitted changes in ${root}`]);
+  const changed = { ...mac, dotfiles: { ...mac.dotfiles, changed: new Set([`${agentSkills}/grok/SKILL.md`]) } };
+  assert.deepEqual(problemsOf(plan(changed)), [`skill grok: ${agentSkills}/grok has uncommitted changes in ${root}`]);
   const outside = { ...mac, claude: { ...mac.claude, skills: [...mac.claude.skills, { name: "loose", realPath: "/Users/me/loose" }] } };
   assert.deepEqual(problemsOf(plan(outside)), [`skill loose: /Users/me/loose is outside ${root}`]);
 });
@@ -582,19 +581,19 @@ test("pi skills: a -path entry is matched as pi matches it, from the root pi fou
   const { setup } = captured(await piCapture({
     ".pi/agent/settings.json": piSettings({ skills: ["-skills/teach/SKILL.md", "-~/.pi/agent/skills/linked", "-~/.agents/skills/both"] }),
     ".agents/skills/teach": { link: "../../dotfiles/skills/teach" },
-    ".agents/skills/herdr": { link: "../../dotfiles/skills/herdr" },
+    ".agents/skills/grill": { link: "../../dotfiles/skills/grill" },
     ".agents/skills/linked": { link: "../../dotfiles/skills/linked" },
     ".agents/skills/both": { link: "../../dotfiles/skills/both" },
     ".pi/agent/skills/linked": { link: "../../../dotfiles/skills/linked" },
     ".pi/agent/skills/both": { link: "../../../dotfiles/skills/both" },
     "dotfiles/skills/teach/SKILL.md": "teach",
-    "dotfiles/skills/herdr/SKILL.md": "herdr",
+    "dotfiles/skills/grill/SKILL.md": "grill",
     "dotfiles/skills/linked/SKILL.md": "linked",
     "dotfiles/skills/both/SKILL.md": "both",
   }));
-  // pi 1.4.0's own resolver, run on this home, loads herdr and both: teach is excluded relative to ~/.agents, and a
+  // pi 1.4.0's own resolver, run on this home, loads grill and both: teach is excluded relative to ~/.agents, and a
   // skill linked into both roots is decided by its ~/.pi/agent/skills link, which pi finds first.
-  assert.deepEqual(setup.skills, [{ path: "skills/both", for: ["pi"] }, { path: "skills/herdr", for: ["pi"] }]);
+  assert.deepEqual(setup.skills, [{ path: "skills/both", for: ["pi"] }, { path: "skills/grill", for: ["pi"] }]);
 });
 
 test("the install check names a local pi package whose directory, declared resources or skills' SKILL.md files are missing", async () => {
