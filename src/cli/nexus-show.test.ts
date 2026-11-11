@@ -327,19 +327,19 @@ test("unpreview unpublishes a port, waits for a paused pylon to run, and fails w
   await fails(["unpreview", thread.id, "3000"], 5);
 });
 
-test("session open opens Claude Code by default, waits for a paused pylon, and session close closes a pane or says why not", async (t) => {
+test("session open opens Claude Code by default, waits for a paused pylon, and session close closes a terminal or says why not", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--title", "sessions"]);
-  assert.deepEqual(await s.json(["session", "open", thread.id]), { herdrPane: "w1:p1", harness: "claude-code", title: "claude-code" });
+  assert.deepEqual(await s.json(["session", "open", thread.id]), { terminal: "w1:p1", harness: "claude-code", title: "claude-code" });
   assert.equal((await s.nexus(["session", "open", thread.id, "--harness", "pi", "--title", "plan"])).stdout,
-    `Opened pi session "plan" in pane w1:p1 of ${thread.id}. \`nexus attach ${thread.id}\` attaches to it.\n`);
+    `Opened pi session "plan" in terminal w1:p1 of ${thread.id}. \`nexus attach ${thread.id}\` attaches to it.\n`);
   assert.deepEqual(s.commands, [{ kind: "open-session", harness: "claude-code", title: "claude-code" }, { kind: "open-session", harness: "pi", title: "plan" }]);
 
   s.commands.length = 0;
   assert.equal((await s.nexus(["session", "close", thread.id, "w1:p1"])).stdout, `Closed session w1:p1 of ${thread.id}.\n`);
-  assert.deepEqual(s.commands, [{ kind: "close-session", herdrPane: "w1:p1" }]);
+  assert.deepEqual(s.commands, [{ kind: "close-session", terminal: "w1:p1" }]);
 
-  // Not asked again: after the wake the pane may name another session.
+  // Not asked again: after the wake the terminal may name another session.
   s.probeAnswers(async () => { throw Object.assign(new Error("rj-firebat: pylon-x is stopped, not running"), { code: "not-running" }); });
   s.commands.length = 0;
   const waking = await s.nexus(["session", "close", thread.id, "w1:p1"]);
@@ -353,8 +353,8 @@ test("session open opens Claude Code by default, waits for a paused pylon, and s
 
   // A paused session is refused at once, and its pylon is not asked.
   s.registry.threads.apply({ record: "sessions", pylonId: thread.pylonId, sessions: [
-    { id: "w1:p1", state: "paused", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: null, title: "review", status: null, message: null },
-    { id: "failed-0123456789ab", state: "failed", herdrPane: null, harness: "pi", harnessSessionId: null, title: "plan", status: null, message: "pi exited 1" },
+    { id: "w1:p1", state: "paused", terminal: "w1:p1", harness: "claude-code", harnessSessionId: null, title: "review", status: null, message: null },
+    { id: "failed-0123456789ab", state: "failed", terminal: null, harness: "pi", harnessSessionId: null, title: "plan", status: null, message: "pi exited 1" },
   ] });
   s.commands.length = 0;
   const paused = await s.nexus(["session", "close", thread.id, "w1:p1"]);
@@ -362,7 +362,7 @@ test("session open opens Claude Code by default, waits for a paused pylon, and s
   assert.match(paused.stderr, /session w1:p1 is paused with its pylon and resumes when its pylon wakes/);
   assert.deepEqual(s.commands, []);
   const shown = (await s.nexus(["show", thread.id])).stdout;
-  assert.match(shown, /^session: claude-code "review" in pane w1:p1, paused, resumes on wake$/m);
+  assert.match(shown, /^session: claude-code "review" in terminal w1:p1, paused, resumes on wake$/m);
   assert.match(shown, /^session: pi "plan" as failed-0123456789ab, failed: pi exited 1$/m);
   s.probeAnswers(async () => ({ kind: "drop-failed-session", dropped: true }));
   assert.equal((await s.nexus(["session", "close", thread.id, "failed-0123456789ab"])).code, 0);
@@ -376,7 +376,7 @@ test("session open opens Claude Code by default, waits for a paused pylon, and s
   assert.equal(archived.code, 5);
   assert.match(archived.stderr, /is archived, so its pylon stays paused/);
   assert.deepEqual(s.commands, []);
-  assert.match((await s.nexus(["show", thread.id])).stdout, /^session: claude-code "review" in pane w1:p1, paused, resumes on unarchive$/m);
+  assert.match((await s.nexus(["show", thread.id])).stdout, /^session: claude-code "review" in terminal w1:p1, paused, resumes on unarchive$/m);
 });
 
 test("start --node auto picks the node with room, show says why, and nodes prints what pylons hold", async (t) => {

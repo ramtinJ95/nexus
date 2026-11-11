@@ -71,7 +71,7 @@ const diffQuery: QueryCodec<DiffQuery, { base: string | undefined; paths: string
 /** The terminal's `nexus.title` label is the harness's name by default, and the harness is Claude Code's. */
 export interface SessionRequest { harness?: SessionHarness | undefined; title?: string | undefined }
 /** A session the route opened, which `nexus session open` prints. Its observed state shows in ThreadDetail.sessions. */
-export interface OpenedSession { herdrPane: string; harness: SessionHarness; title: string }
+export interface OpenedSession { terminal: string; harness: SessionHarness; title: string }
 
 export const pylonRoutes = {
   preview: route<Preview, { port: number }>()("POST", "/v1/threads/{thread}/previews"),

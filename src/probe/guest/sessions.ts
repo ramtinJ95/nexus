@@ -15,7 +15,7 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import type { Guest } from "../../backends/backend.ts";
-import type { HerdrStatus, PausedSession, SessionFact, SessionIdentity } from "../../protocol/observations.ts";
+import type { TerminalStatus, PausedSession, SessionFact, SessionIdentity } from "../../protocol/observations.ts";
 import type { CommandResult, InterruptClaudeOutcome } from "../../protocol/commands.ts";
 import { nonEmpty, parseJson } from "../../parse.ts";
 import { claudeCode, launchers, type Launcher } from "./launchers.ts";
@@ -28,7 +28,7 @@ const agentStartTimeoutMs = 30_000;
 
 /** What ~/.nexus/sessions.json holds for each session. The checkpoint carries the file. */
 export interface SessionRecord {
-  herdrPane: string;
+  terminal: string;
   harness: SessionHarness;
   title: string;
   cwd: string;
@@ -42,29 +42,29 @@ export type RecordedSession = PausedSession & { cwd: string; model?: string };
 /**
  * A session the last relaunch did not bring back. It stays in the file, through any number of records, until a
  * relaunch brings it back. When the relaunch left it in a terminal, such as a Claude whose launch stalled,
- * `record.herdrPane` is that terminal and the record stands for it, so closing the terminal is what drops the session.
+ * `record.terminal` is that terminal and the record stands for it, so closing the terminal is what drops the session.
  * One in no terminal is dropped by its ID (dropFailedSession), which is the address it was recorded at: Core never
  * gives an address out again, so no later session takes it.
  */
-interface FailedRecord { record: SessionRecord; inPane: boolean; message: string }
+interface FailedRecord { record: SessionRecord; inTerminal: boolean; message: string }
 
 /**
  * The failed records that still stand for a session: every one in no terminal, and each in a terminal that is still
  * live. `standsFor` holds the terminals of the second kind, which are those failed sessions rather than sessions of their own.
  */
-function standing(file: SessionsFile | null, live: readonly LivePane[]): { failed: FailedRecord[]; standsFor: Set<string> } {
-  const panes = new Set(live.map((p) => p.herdrPane));
-  const failed = (file?.failed ?? []).filter((f) => !f.inPane || panes.has(f.record.herdrPane));
-  return { failed, standsFor: new Set(failed.flatMap((f) => f.inPane ? [f.record.herdrPane] : [])) };
+function standing(file: SessionsFile | null, live: readonly LiveTerminal[]): { failed: FailedRecord[]; standsFor: Set<string> } {
+  const addresses = new Set(live.map((p) => p.terminal));
+  const failed = (file?.failed ?? []).filter((f) => !f.inTerminal || addresses.has(f.record.terminal));
+  return { failed, standsFor: new Set(failed.flatMap((f) => f.inTerminal ? [f.record.terminal] : [])) };
 }
 
 interface SessionsFile { version: 1; recordedAt: string; sessions: readonly SessionRecord[]; failed: readonly FailedRecord[] }
 
 export type RelaunchOutcome =
-  | { record: SessionRecord; result: "present" | "relaunched"; herdrPane: string }
-  | { record: SessionRecord; result: "failed"; herdrPane: string | null; message: string }
+  | { record: SessionRecord; result: "present" | "relaunched"; terminal: string }
+  | { record: SessionRecord; result: "failed"; terminal: string | null; message: string }
   /** A second record of a Claude Code session another record brings back. Its terminal, if live, is closed. */
-  | { record: SessionRecord; result: "dropped"; herdrPane: string | null };
+  | { record: SessionRecord; result: "dropped"; terminal: string | null };
 
 const titleLabel = "nexus.title";
 const harnessLabel = "nexus.harness";
@@ -103,7 +103,7 @@ export async function openSession(guest: Guest, session: { harness: SessionHarne
   const labels = labelsOf(session.harness, session.title);
   if (agent === null) return (await core(guest, "terminal.run", { argv: ["bash", "-l"], cwd: session.cwd, labels, no_parent: true, keep: true })).address;
   if (session.prompt !== undefined && agent.hooks !== undefined) return promptedLaunch(guest, agent, session.harness, { ...session, prompt: session.prompt });
-  const running = agent.onePane && session.resume !== undefined ? await startedAlready(guest, agent, session.resume) : null;
+  const running = agent.oneTerminal && session.resume !== undefined ? await startedAlready(guest, agent, session.resume) : null;
   if (running !== null) return running;
   const { args } = await launchArgs(guest, agent, session);
   const { address } = await core(guest, "terminal.run", { argv: launchArgv(agent, args), cwd: session.cwd, labels: agentLabels(agent, session.harness, session.title, args), no_parent: true });
@@ -138,7 +138,7 @@ async function awaitReady(guest: Guest, agent: Launcher, harness: SessionHarness
     if (waited.reason !== "exit") return;
     failure = `${agentKinds[harness].label} exited${waited.exit_code == null ? "" : ` with ${waited.exit_code}`} as it started`;
   } catch (err) {
-    if (agent.onePane) {
+    if (agent.oneTerminal) {
       // Its label names the harness from the start, so only its foreground says whether the agent got as far as running.
       const running = await core(guest, "terminal.get", { terminal }).then((t) => t.state === "live" && harnessOf(t.foreground?.argv ?? []) === harness, () => null);
       if (running === true) return;
@@ -215,17 +215,17 @@ async function liveNamed(guest: Guest, name: string): Promise<string | null> {
 async function awaitSubmission(guest: Guest, terminal: string, launchDir: string, note: string): Promise<void> {
   const submitted = await guest.exec(["sh", "-c", 'i=0; until test -f "$1"; do i=$((i+1)); test "$i" -lt 300 || exit 1; sleep 0.1; done', "claude-submitted", `${launchDir}/submitted`], { cwd: home, timeoutMs: 35_000 }).catch(() => ({ exitCode: null }));
   if (submitted.exitCode === 0) return;
-  const pane = await terminalPane(guest, terminal).catch(() => null);
-  if (pane?.harness === "claude-code" && pane.status === "working") return;
+  const live = await liveTerminalAt(guest, terminal).catch(() => null);
+  if (live?.harness === "claude-code" && live.status === "working") return;
   throw new LaunchStalled(`Claude launch stalled: no UserPromptSubmit within 30 seconds${note}; attach before starting another session. The terminal showed:\n${await screen(guest, terminal)}`, terminal);
 }
 
 /** A launch whose terminal stays live because it may have started the agent, so it is not rolled back. */
 export class LaunchStalled extends Error {
-  readonly herdrPane: string;
-  constructor(message: string, herdrPane: string) {
+  readonly terminal: string;
+  constructor(message: string, terminal: string) {
     super(message);
-    this.herdrPane = herdrPane;
+    this.terminal = terminal;
   }
 }
 
@@ -243,17 +243,17 @@ async function screen(guest: Guest, terminal: string): Promise<string> {
  * sessionFacts reports there. A caller holding a terminal from before a wake must not read any of those as its
  * session closed, since the wake may have brought the session back in another terminal.
  */
-export async function closeSession(guest: Guest, herdrPane: string, expected?: SessionIdentity): Promise<"closed" | "not-open" | "moved"> {
+export async function closeSession(guest: Guest, terminal: string, expected?: SessionIdentity): Promise<"closed" | "not-open" | "moved"> {
   if (expected !== undefined) {
-    const there = (await sessionFacts(guest)).find((f) => f.herdrPane === herdrPane);
+    const there = (await sessionFacts(guest)).find((f) => f.terminal === terminal);
     if (there === undefined) return "not-open";
     // An ID or title either side has not learned yet, such as a Claude Code ID before its SessionStart hook, tells nothing.
     const differ = (a: string | null | undefined, b: string | null) => a != null && b !== null && a !== b;
     if (there.harness !== expected.harness || differ(there.harnessSessionId, expected.harnessSessionId) || differ(there.title, expected.title)) return "moved";
   }
   try {
-    if ((await core(guest, "terminal.get", { terminal: herdrPane })).state !== "live") return "not-open";
-    await remove(guest, herdrPane);
+    if ((await core(guest, "terminal.get", { terminal })).state !== "live") return "not-open";
+    await remove(guest, terminal);
     return "closed";
   } catch (err) {
     if (err instanceof CoreError && (err.kind === "not_found" || err.kind === "no_core")) return "not-open";
@@ -285,29 +285,29 @@ export async function sendToClaude(guest: Guest, message: { session: string; tex
   await ensureCoreRuns(guest);
   const found = await claudeTerminal(guest, message.session);
   const resumed = found === null;
-  const herdrPane = found?.herdrPane ?? await openSession(guest, await resumeOf(guest, message.session, message.model));
-  const closed = () => new Error(`Claude's terminal ${herdrPane} closed before it could take the message, so nothing was sent`);
+  const terminal = found?.terminal ?? await openSession(guest, await resumeOf(guest, message.session, message.model));
+  const closed = () => new Error(`Claude's terminal ${terminal} closed before it could take the message, so nothing was sent`);
   const deadline = Date.now() + readyWithinMs;
-  let pane = await terminalPane(guest, herdrPane, closed);
-  while (pane.status === "unknown" && Date.now() < deadline) {
+  let live = await liveTerminalAt(guest, terminal, closed);
+  while (live.status === "unknown" && Date.now() < deadline) {
     await delay(claudeReadyPollMs);
-    pane = await terminalPane(guest, herdrPane, closed);
+    live = await liveTerminalAt(guest, terminal, closed);
   }
-  if (pane.status === "unknown") return { outcome: await atDialog(guest, herdrPane) ? "blocked" : "starting", herdrPane, resumed };
-  if (pane.status === "blocked") return { outcome: "blocked", herdrPane, resumed };
-  if (!runsSession(pane, claudeCode, message.session)) return { outcome: "moved", herdrPane, resumed };
+  if (live.status === "unknown") return { outcome: await atDialog(guest, terminal) ? "blocked" : "starting", terminal, resumed };
+  if (live.status === "blocked") return { outcome: "blocked", terminal, resumed };
+  if (!runsSession(live, claudeCode, message.session)) return { outcome: "moved", terminal, resumed };
   for (;;) {
     try {
-      const sent = await core(guest, "terminal.send", { terminal: herdrPane, text: message.text }, sendTimeoutMs);
-      return { outcome: sent.status === "working" ? "queued" : "sent", herdrPane, resumed };
+      const sent = await core(guest, "terminal.send", { terminal, text: message.text }, sendTimeoutMs);
+      return { outcome: sent.status === "working" ? "queued" : "sent", terminal, resumed };
     } catch (err) {
       // Core refuses before it pastes anything a blocked program, and as `unavailable` one whose output has not
       // settled, saying nothing was typed (spikes/herdr-core/README.md, send-starting), so that send can be tried again.
-      if (err instanceof CoreError && err.kind === "blocked") return { outcome: "blocked", herdrPane, resumed };
+      if (err instanceof CoreError && err.kind === "blocked") return { outcome: "blocked", terminal, resumed };
       if (!(err instanceof CoreError && err.kind === "unavailable")) {
-        throw new Error(`sending to Claude's terminal ${herdrPane} failed, so whether the message went in is unknown: ${(err as Error).message}`, { cause: err });
+        throw new Error(`sending to Claude's terminal ${terminal} failed, so whether the message went in is unknown: ${(err as Error).message}`, { cause: err });
       }
-      if (Date.now() >= deadline) return { outcome: "starting", herdrPane, resumed };
+      if (Date.now() >= deadline) return { outcome: "starting", terminal, resumed };
       await delay(claudeReadyPollMs);
     }
   }
@@ -346,7 +346,7 @@ export async function interruptClaude(guest: Guest, session: string): Promise<In
   if (found === null) return "not-running";
   if (found.status !== "working") return found.status === "blocked" || found.status === "unknown" ? found.status : "idle";
   try {
-    await core(guest, "terminal.keys", { terminal: found.herdrPane, keys: ["esc"] });
+    await core(guest, "terminal.keys", { terminal: found.terminal, keys: ["esc"] });
   } catch (err) {
     if (err instanceof CoreError && (err.kind === "not_found" || err.kind === "finished" || err.kind === "no_core")) return "not-running";
     throw err;
@@ -355,35 +355,35 @@ export async function interruptClaude(guest: Guest, session: string): Promise<In
 }
 
 /** The live terminal that runs the Claude Code session `session`. */
-async function claudeTerminal(guest: Guest, session: string): Promise<LivePane | null> {
-  return (await livePanes(guest).catch(noCore([]))).find((p) => runsSession(p, claudeCode, session)) ?? null;
+async function claudeTerminal(guest: Guest, session: string): Promise<LiveTerminal | null> {
+  return (await liveTerminals(guest).catch(noCore([]))).find((p) => runsSession(p, claudeCode, session)) ?? null;
 }
 
 /** The live terminal of no other one that runs `session`, which a start of the session must not start it beside. */
 async function startedAlready(guest: Guest, agent: Launcher, session: string): Promise<string | null> {
-  return (await livePanes(guest)).find((p) => !p.child && runsSession(p, agent, session))?.herdrPane ?? null;
+  return (await liveTerminals(guest)).find((p) => !p.child && runsSession(p, agent, session))?.terminal ?? null;
 }
 
 /** Whether the agent runs `session` in the terminal: the terminal is the agent's, and its label or command line names the session. */
-function runsSession(pane: LivePane, agent: Launcher, session: string): boolean {
-  return launchers[pane.harness] === agent && pane.harnessSessionId === session;
+function runsSession(live: LiveTerminal, agent: Launcher, session: string): boolean {
+  return launchers[live.harness] === agent && live.harnessSessionId === session;
 }
 
 /** The live terminal at `address`. Throws `gone()` when it is not live. */
-async function terminalPane(guest: Guest, address: string, gone = () => new Error(`terminal ${address} is not live`)): Promise<LivePane> {
+async function liveTerminalAt(guest: Guest, address: string, gone = () => new Error(`terminal ${address} is not live`)): Promise<LiveTerminal> {
   const t = await core(guest, "terminal.get", { terminal: address }).catch((err: unknown) => {
     if (err instanceof CoreError && (err.kind === "not_found" || err.kind === "no_core")) throw gone();
     throw err;
   });
   if (t.state !== "live") throw gone();
-  return livePane(t);
+  return liveTerminal(t);
 }
 
 /** Forgets a failed session in no terminal, by its ID, so no wake tries it again. False when the file holds no such session. */
 export async function dropFailedSession(guest: Guest, id: string): Promise<boolean> {
   const file = await readSessionsFile(guest);
   if (file === null) return false;
-  const failed = file.failed.filter((f) => f.inPane || f.record.herdrPane !== id);
+  const failed = file.failed.filter((f) => f.inTerminal || f.record.terminal !== id);
   if (failed.length === file.failed.length) return false;
   await writeSessionsFile(guest, { ...file, failed });
   return true;
@@ -396,16 +396,16 @@ export async function dropFailedSession(guest: Guest, id: string): Promise<boole
  * crashed, whose programs still run until the next core takes them back.
  */
 export async function sessionFacts(guest: Guest, timeoutMs = callTimeoutMs): Promise<readonly SessionFact[]> {
-  const [panes, file] = await Promise.all([livePanes(guest, timeoutMs).catch(noCore([])), readSessionsFile(guest, timeoutMs)]);
-  const { failed, standsFor } = standing(file, panes);
-  const statusOf = new Map(panes.map((p) => [p.herdrPane, p.status]));
+  const [terminals, file] = await Promise.all([liveTerminals(guest, timeoutMs).catch(noCore([])), readSessionsFile(guest, timeoutMs)]);
+  const { failed, standsFor } = standing(file, terminals);
+  const statusOf = new Map(terminals.map((p) => [p.terminal, p.status]));
   return [
-    ...panes.filter((p) => !standsFor.has(p.herdrPane)).map(({ herdrPane, harness, harnessSessionId, status, title }): SessionFact => ({
-      id: herdrPane, state: "running", herdrPane, harness, harnessSessionId, status, title,
+    ...terminals.filter((p) => !standsFor.has(p.terminal)).map(({ terminal, harness, harnessSessionId, status, title }): SessionFact => ({
+      id: terminal, state: "running", terminal, harness, harnessSessionId, status, title,
     })),
     ...failed.map((f): SessionFact => ({
-      id: f.record.herdrPane, state: "failed", herdrPane: f.inPane ? f.record.herdrPane : null, harness: f.record.harness, harnessSessionId: f.record.harnessSessionId,
-      status: f.inPane ? statusOf.get(f.record.herdrPane)! : "unknown", title: f.record.title, message: f.message,
+      id: f.record.terminal, state: "failed", terminal: f.inTerminal ? f.record.terminal : null, harness: f.record.harness, harnessSessionId: f.record.harnessSessionId,
+      status: f.inTerminal ? statusOf.get(f.record.terminal)! : "unknown", title: f.record.title, message: f.message,
     })),
   ];
 }
@@ -418,11 +418,11 @@ export async function sessionFacts(guest: Guest, timeoutMs = callTimeoutMs): Pro
  * crashed rejects, so the last record stands then too.
  */
 export async function recordSessions(guest: Guest): Promise<readonly RecordedSession[] | null> {
-  const panes = await livePanes(guest).catch(noCore(null));
-  if (panes === null) return null;
-  const { failed, standsFor } = standing(await readSessionsFile(guest), panes);
-  const sessions = panes.filter((p) => !p.child && !standsFor.has(p.herdrPane))
-    .map(({ herdrPane, harness, title, cwd, harnessSessionId, model }): SessionRecord => ({ herdrPane, harness, title, cwd, ...(model === undefined ? {} : { model }), harnessSessionId }));
+  const terminals = await liveTerminals(guest).catch(noCore(null));
+  if (terminals === null) return null;
+  const { failed, standsFor } = standing(await readSessionsFile(guest), terminals);
+  const sessions = terminals.filter((p) => !p.child && !standsFor.has(p.terminal))
+    .map(({ terminal, harness, title, cwd, harnessSessionId, model }): SessionRecord => ({ terminal, harness, title, cwd, ...(model === undefined ? {} : { model }), harnessSessionId }));
   const file: SessionsFile = { version: 1, recordedAt: new Date().toISOString(), sessions, failed };
   await writeSessionsFile(guest, file);
   return relaunchedFrom(file);
@@ -436,13 +436,13 @@ export function pausedSessionsIn(text: string): readonly PausedSession[] {
   return relaunchedFrom(parseSessionsFile(text)).map(toPaused);
 }
 
-export function toPaused({ id, herdrPane, harness, harnessSessionId, title }: RecordedSession): PausedSession {
-  return { id, herdrPane, harness, harnessSessionId, title };
+export function toPaused({ id, terminal, harness, harnessSessionId, title }: RecordedSession): PausedSession {
+  return { id, terminal, harness, harnessSessionId, title };
 }
 
 function relaunchedFrom(file: SessionsFile): RecordedSession[] {
-  const recorded = (r: SessionRecord, inPane: boolean): RecordedSession => ({ ...r, id: r.herdrPane, herdrPane: inPane ? r.herdrPane : null });
-  return [...file.sessions.map((r) => recorded(r, true)), ...file.failed.map((f) => recorded(f.record, f.inPane))];
+  const recorded = (r: SessionRecord, inTerminal: boolean): RecordedSession => ({ ...r, id: r.terminal, terminal: inTerminal ? r.terminal : null });
+  return [...file.sessions.map((r) => recorded(r, true)), ...file.failed.map((f) => recorded(f.record, f.inTerminal))];
 }
 
 /**
@@ -462,38 +462,38 @@ export async function relaunchSessions(guest: Guest, lock: ClaudeSessionLock): P
   if (file === null) return [];
   const records = [...file.sessions, ...file.failed.map((f) => f.record)];
   if (records.length === 0) return [];
-  return lock(records.flatMap((r) => launchers[r.harness]?.onePane && r.harnessSessionId !== null ? [r.harnessSessionId] : []), () => relaunch(guest, file, records));
+  return lock(records.flatMap((r) => launchers[r.harness]?.oneTerminal && r.harnessSessionId !== null ? [r.harnessSessionId] : []), () => relaunch(guest, file, records));
 }
 
 /** Runs `work` while no other work holds any of `claudeSessions`, and holds them until it settles. */
 export type ClaudeSessionLock = <T>(claudeSessions: readonly string[], work: () => Promise<T>) => Promise<T>;
 
 async function relaunch(guest: Guest, file: SessionsFile, records: readonly SessionRecord[]): Promise<readonly RelaunchOutcome[]> {
-  let unclaimed: LivePane[];
+  let unclaimed: LiveTerminal[];
   try {
     await ensureCoreRuns(guest);
-    unclaimed = (await livePanes(guest)).filter((p) => !p.child);
+    unclaimed = (await liveTerminals(guest)).filter((p) => !p.child);
   } catch (err) {
-    const outcomes = records.map((record): RelaunchOutcome => ({ record, result: "failed", herdrPane: null, message: (err as Error).message }));
+    const outcomes = records.map((record): RelaunchOutcome => ({ record, result: "failed", terminal: null, message: (err as Error).message }));
     await recordOutcomes(guest, file, outcomes);
     return outcomes;
   }
   const recordedIds = new Set(records.flatMap((r) => r.harnessSessionId ?? []));
   // A terminal whose agent runs another session is that session, not this one. A record with no ID can take a
   // terminal whose ID no record has, such as the one an earlier relaunch of it started.
-  const sameSession = (r: SessionRecord, p: LivePane) => p.harnessSessionId === null || p.harnessSessionId === r.harnessSessionId
+  const sameSession = (r: SessionRecord, p: LiveTerminal) => p.harnessSessionId === null || p.harnessSessionId === r.harnessSessionId
     || (r.harnessSessionId === null && !recordedIds.has(p.harnessSessionId));
   // In order of confidence. Each pass gives every unmatched record the first unclaimed terminal it accepts. A terminal
   // runs a record's session only if it is the record's harness's.
-  const matchers: ((r: SessionRecord, p: LivePane) => boolean)[] = [
+  const matchers: ((r: SessionRecord, p: LiveTerminal) => boolean)[] = [
     (r, p) => r.harnessSessionId !== null && p.harnessSessionId === r.harnessSessionId,
     // A kept shell the core brought back in place.
-    (r, p) => p.herdrPane === r.herdrPane && p.title === r.title && sameSession(r, p),
+    (r, p) => p.terminal === r.terminal && p.title === r.title && sameSession(r, p),
     // An earlier relaunch, or an agent whose session is not known yet, in a new terminal. Shells have no session to
     // tell them apart, so a shell also needs its cwd.
     (r, p) => p.title === r.title && sameSession(r, p) && (r.harness !== "shell" || p.cwd === r.cwd),
   ];
-  const claimed = new Map<SessionRecord, LivePane>();
+  const claimed = new Map<SessionRecord, LiveTerminal>();
   for (const matches of matchers) {
     for (const r of records) {
       if (claimed.has(r)) continue;
@@ -501,7 +501,7 @@ async function relaunch(guest: Guest, file: SessionsFile, records: readonly Sess
       if (i !== -1) claimed.set(r, unclaimed.splice(i, 1)[0]!);
     }
   }
-  const recordsOf = (r: SessionRecord) => launchers[r.harness]?.onePane && r.harnessSessionId !== null
+  const recordsOf = (r: SessionRecord) => launchers[r.harness]?.oneTerminal && r.harnessSessionId !== null
     ? records.filter((other) => other.harness === r.harness && other.harnessSessionId === r.harnessSessionId) : [r];
   const kept = (r: SessionRecord) => r === (recordsOf(r).find((other) => claimed.has(other)) ?? recordsOf(r)[0]);
   // One seed before the starts serves them all. A seed that fails fails only the sessions of its agent.
@@ -513,22 +513,22 @@ async function relaunch(guest: Guest, file: SessionsFile, records: readonly Sess
 
   const outcomes: RelaunchOutcome[] = [];
   for (const r of records) {
-    const pane = claimed.get(r);
+    const live = claimed.get(r);
     const resume = r.harnessSessionId ?? undefined;
     try {
       if (!kept(r)) {
-        if (pane) await closeSession(guest, pane.herdrPane);
-        outcomes.push({ record: r, result: "dropped", herdrPane: pane?.herdrPane ?? null });
-      } else if (pane) {
-        outcomes.push({ record: r, result: "present", herdrPane: pane.herdrPane });
+        if (live) await closeSession(guest, live.terminal);
+        outcomes.push({ record: r, result: "dropped", terminal: live?.terminal ?? null });
+      } else if (live) {
+        outcomes.push({ record: r, result: "present", terminal: live.terminal });
       } else {
         const unseeded = seeds.get(launchers[r.harness]?.seed);
         if (unseeded) throw unseeded;
-        const herdrPane = await openSession(guest, { harness: r.harness, title: r.title, cwd: r.cwd, seeded: true, ...(r.model === undefined ? {} : { model: r.model }), ...(resume === undefined ? {} : { resume }) });
-        outcomes.push({ record: r, result: "relaunched", herdrPane });
+        const terminal = await openSession(guest, { harness: r.harness, title: r.title, cwd: r.cwd, seeded: true, ...(r.model === undefined ? {} : { model: r.model }), ...(resume === undefined ? {} : { resume }) });
+        outcomes.push({ record: r, result: "relaunched", terminal });
       }
     } catch (err) {
-      outcomes.push({ record: r, result: "failed", herdrPane: err instanceof LaunchStalled ? err.herdrPane : null, message: (err as Error).message });
+      outcomes.push({ record: r, result: "failed", terminal: err instanceof LaunchStalled ? err.terminal : null, message: (err as Error).message });
     }
   }
   await recordOutcomes(guest, file, outcomes);
@@ -552,9 +552,9 @@ async function removeFinished(guest: Guest): Promise<void> {
 async function recordOutcomes(guest: Guest, file: SessionsFile, outcomes: readonly RelaunchOutcome[]): Promise<void> {
   await writeSessionsFile(guest, {
     ...file,
-    sessions: outcomes.flatMap((o) => o.result === "present" || o.result === "relaunched" ? [{ ...o.record, herdrPane: o.herdrPane }] : []),
+    sessions: outcomes.flatMap((o) => o.result === "present" || o.result === "relaunched" ? [{ ...o.record, terminal: o.terminal }] : []),
     failed: outcomes.flatMap((o): FailedRecord[] => o.result !== "failed" ? []
-      : [{ record: { ...o.record, herdrPane: o.herdrPane ?? o.record.herdrPane }, inPane: o.herdrPane !== null, message: o.message }]),
+      : [{ record: { ...o.record, terminal: o.terminal ?? o.record.terminal }, inTerminal: o.terminal !== null, message: o.message }]),
   });
 }
 
@@ -577,13 +577,13 @@ async function ensureCoreRuns(guest: Guest): Promise<void> {
   if (exitCode !== 0) throw new Error(`Herdr Core did not start within ${coreStartMs / 1000} seconds${output.trim() === "" ? "" : `: ${output.trim().slice(-500)}`}`);
 }
 
-interface LivePane {
-  herdrPane: string;
+interface LiveTerminal {
+  terminal: string;
   harness: SessionHarness;
   title: string;
   cwd: string;
   harnessSessionId: string | null;
-  status: HerdrStatus;
+  status: TerminalStatus;
   /** The model its agent was started with, which a relaunch keeps. */
   model?: string;
   /** Another terminal started it, and it belongs to that one. */
@@ -600,14 +600,14 @@ function harnessOf(argv: readonly string[]): SessionHarness {
  * Core's status words, which are the program's own. `done` is a turn over that no one has looked at yet, and `error`
  * one that ended in an error, which a send may follow. A program that has said nothing is `unknown`, as every shell is.
  */
-const statusWords: Readonly<Record<string, HerdrStatus>> = { working: "working", idle: "idle", done: "idle", error: "idle", blocked: "blocked" };
+const statusWords: Readonly<Record<string, TerminalStatus>> = { working: "working", idle: "idle", done: "idle", error: "idle", blocked: "blocked" };
 
 /**
  * A terminal Nexus started an agent in is that agent's from its start, by its label, while its foreground is still
  * the launch's env and login shell, since it ends with the agent. Any other terminal runs what its foreground does,
  * such as a Claude a person started in a shell.
  */
-function livePane(t: Terminal): LivePane {
+function liveTerminal(t: Terminal): LiveTerminal {
   const labelled = sessionHarnessSchema.safeParse(t.labels[harnessLabel]).data;
   const started = labelled !== undefined && launchers[labelled] !== null;
   const argv = started ? t.argv : t.foreground?.argv ?? [];
@@ -616,7 +616,7 @@ function livePane(t: Terminal): LivePane {
   const args = agent === null ? { session: null } : startedWith(argv, agent);
   const sessionLabelled = agent?.sessionLabel === undefined ? undefined : t.labels[agent.sessionLabel];
   return {
-    herdrPane: t.address,
+    terminal: t.address,
     harness,
     title: t.labels[titleLabel] ?? t.name ?? agentKinds[harness].label,
     cwd: t.foreground?.cwd ?? t.cwd,
@@ -628,8 +628,8 @@ function livePane(t: Terminal): LivePane {
 }
 
 /** Each live terminal on this machine. A machine the person added to the pylon's core has terminals of its own, which are not the pylon's. */
-async function livePanes(guest: Guest, timeoutMs = callTimeoutMs): Promise<LivePane[]> {
-  return (await core(guest, "terminal.list", {}, timeoutMs)).terminals.filter((t) => !t.address.includes("/")).map(livePane);
+async function liveTerminals(guest: Guest, timeoutMs = callTimeoutMs): Promise<LiveTerminal[]> {
+  return (await core(guest, "terminal.list", {}, timeoutMs)).terminals.filter((t) => !t.address.includes("/")).map(liveTerminal);
 }
 
 /**
@@ -654,7 +654,7 @@ async function readSessionsFile(guest: Guest, timeoutMs = callTimeoutMs): Promis
 }
 
 const sessionRecordSchema = z.object({
-  herdrPane: nonEmpty,
+  terminal: nonEmpty,
   harness: sessionHarnessSchema,
   title: nonEmpty,
   cwd: nonEmpty,
@@ -665,7 +665,7 @@ const sessionsFileSchema = z.object({
   version: z.literal(1),
   recordedAt: nonEmpty,
   sessions: z.array(sessionRecordSchema),
-  failed: z.array(z.object({ record: sessionRecordSchema, inPane: z.boolean(), message: nonEmpty })),
+  failed: z.array(z.object({ record: sessionRecordSchema, inTerminal: z.boolean(), message: nonEmpty })),
 }) satisfies z.ZodType<SessionsFile>;
 
 function parseSessionsFile(text: string): SessionsFile {

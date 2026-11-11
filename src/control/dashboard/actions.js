@@ -79,12 +79,12 @@ export const handlers = {
   answer: (_, { question, option }) => request(questionRoutes.answer, { question, body: { option } }),
   // As `nexus session open`, then shows the session in the terminal.
   "open-session": async (thread, { harness }) => {
-    const { herdrPane } = await whenRunning(thread, () => request(pylonRoutes.openSession, { thread, body: { harness } }));
-    await showSession(thread, herdrPane);
+    const { terminal } = await whenRunning(thread, () => request(pylonRoutes.openSession, { thread, body: { harness } }));
+    await showSession(thread, terminal);
   },
   // As `nexus session close`.
   "close-session": (thread, { session }) => request(pylonRoutes.closeSession, { thread, session }),
-  "show-session": (thread, { pane }) => showSession(thread, pane),
+  "show-session": (thread, { terminal }) => showSession(thread, terminal),
 };
 
 document.addEventListener("click", async (event) => {

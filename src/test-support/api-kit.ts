@@ -100,7 +100,7 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
   let answer = async (command: PylonCommand): Promise<CommandResult> => {
     if (command.kind === "link-port") return { kind: "link-port", service: `port-${command.port}` };
     if (command.kind === "unlink-port") return { kind: "unlink-port", refused: null };
-    if (command.kind === "open-session") return { kind: "open-session", herdrPane: "w1:p1" };
+    if (command.kind === "open-session") return { kind: "open-session", terminal: "w1:p1" };
     if (command.kind === "close-session") return { kind: "close-session", outcome: "closed" };
     if (command.kind === "drop-failed-session") return { kind: "drop-failed-session", dropped: true };
     if (command.kind === "exec") return { kind: "exec", exitCode: 0, output: "", truncated: false };
@@ -348,7 +348,7 @@ export async function withClaude(t: import("node:test").TestContext) {
   return { ...c, pylon, transcript: join(projects, "-home-user-workspace-repo", `${claudeSession}.jsonl`) };
 }
 
-export const sent = (outcome: "sent" | "queued", resumed = false): CommandResult => ({ kind: "send-claude", outcome, herdrPane: "w1:p1", resumed });
+export const sent = (outcome: "sent" | "queued", resumed = false): CommandResult => ({ kind: "send-claude", outcome, terminal: "w1:p1", resumed });
 
 export async function withQueue(t: import("node:test").TestContext) {
   const s = await testApi(t, { queue: true });

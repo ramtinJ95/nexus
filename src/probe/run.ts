@@ -192,15 +192,15 @@ export async function runCommand(pylonId: PylonId, command: PylonCommand, deps: 
     case "open-session": {
       const { harness, title, resume, prompt, model } = command;
       try {
-        return { kind: "open-session", herdrPane: await openSession(guest, { harness, title, cwd: checkoutDir, ...(model === undefined ? {} : { model }), ...(prompt === undefined ? {} : { prompt }), ...(resume === undefined ? {} : { resume }) }) };
+        return { kind: "open-session", terminal: await openSession(guest, { harness, title, cwd: checkoutDir, ...(model === undefined ? {} : { model }), ...(prompt === undefined ? {} : { prompt }), ...(resume === undefined ? {} : { resume }) }) };
       } catch (err) {
         // An unprompted open's caller reads only the terminal, so it would take a stall for a session that started.
         if (!(err instanceof LaunchStalled) || prompt === undefined) throw err;
-        return { kind: "open-session", herdrPane: err.herdrPane, stalled: err.message };
+        return { kind: "open-session", terminal: err.terminal, stalled: err.message };
       }
     }
     case "close-session":
-      return { kind: "close-session", outcome: await closeSession(guest, command.herdrPane, command.session) };
+      return { kind: "close-session", outcome: await closeSession(guest, command.terminal, command.session) };
     case "drop-failed-session":
       return { kind: "drop-failed-session", dropped: await dropFailedSession(guest, command.id) };
     case "send-claude": {

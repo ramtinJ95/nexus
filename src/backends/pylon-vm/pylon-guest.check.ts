@@ -12,7 +12,7 @@
  * 2. A declared service with a preview runs as `user` with its https PUBLIC_URL, through the preview gateway,
  *    and the probe's observation reports it ready.
  * 3. The sessions NEXUS_CHECK_SESSIONS names (default shell,claude-code,pi) survive a pause and a wake: each
- *    comes back, its pane runs its agent, and the controller log has one `sessions:` line for each.
+ *    comes back, its terminal runs its agent, and the controller log has one `sessions:` line for each.
  *
  * It deletes the pylon at the end, also after a failure, unless NEXUS_CHECK_KEEP=1. It prints PYLON_GUEST_CHECK_PASS last.
  */
@@ -211,10 +211,10 @@ try {
   const facts = await sessionFacts(backend.guest(pylonId));
   step("FACTS_AFTER_WAKE", facts);
   assert.deepEqual(facts.map((f) => f.harness).sort(), [...harnesses].sort());
-  for (const record of file.sessions as { herdrPane: string; harness: SessionHarness }[]) {
+  for (const record of file.sessions as { terminal: string; harness: SessionHarness }[]) {
     const agent = launchers[record.harness];
     if (agent === null) continue;
-    assert.ok(await agentRuns(record.herdrPane, agent.kind), `${record.harness}'s terminal ${record.herdrPane} runs its agent`);
+    assert.ok(await agentRuns(record.terminal, agent.kind), `${record.harness}'s terminal ${record.terminal} runs its agent`);
   }
   const again = await visit(web.httpsPort);
   assert.deepEqual(answer(again), [200, expected], "the wake started the service again");

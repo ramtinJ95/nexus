@@ -277,10 +277,10 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   /** The Core terminal an attach to the thread shows: its Claude worker's, while the node reports it running. */
-  function agentPane(t: Thread): string | null {
+  function agentTerminal(t: Thread): string | null {
     const session = registry.threads.claudeWorker(t.id)?.session ?? null;
     if (session === null) return null;
-    return registry.threads.sessions(t.pylonId).find((s) => s.state === "running" && s.harness === "claude-code" && s.harnessSessionId === session)?.herdrPane ?? null;
+    return registry.threads.sessions(t.pylonId).find((s) => s.state === "running" && s.harness === "claude-code" && s.harnessSessionId === session)?.terminal ?? null;
   }
 
   function door(t: Thread, { pylonId, node }: StoredPylon, probe: Pick<ProbeClient, "stream">): PylonDoor {
@@ -294,12 +294,12 @@ export async function startApi(options: ApiOptions): Promise<Api> {
         if (actualState === "failed") return { kind: "over", error: { kind: "failed", message: `the pylon of ${t.id} failed: ${pylon.failed ?? "no reason given"}` } };
         return { kind: "pylon", state: actualState };
       },
-      open({ size, term, pane }) {
+      open({ size, term, terminal }) {
         registry.threads.recordActivity(t.id, { human: Date.now() });
         wake(node);
         // A sealed boot runs no work, so the attach waits for the boot after its pause.
         if (runsSealed(registry, { node, pylonId })) return Promise.reject(probeError("not-running", `pylon ${pylonId} is pausing a boot that ran no work, and opens on the next`));
-        return openTerminal((argv) => probe.stream(pylonId, argv), size, term, ["sh", "-c", attachScript, "attach", pane ?? agentPane(t) ?? ""]);
+        return openTerminal((argv) => probe.stream(pylonId, argv), size, term, ["sh", "-c", attachScript, "attach", terminal ?? agentTerminal(t) ?? ""]);
       },
     };
   }

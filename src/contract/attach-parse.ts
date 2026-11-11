@@ -19,9 +19,9 @@ export function parseAttachQuery(query: URLSearchParams): AttachRequest {
   const size = terminalSize(side("cols"), side("rows"));
   const term = query.get("term") ?? defaultTerm;
   if (!termPattern.test(term)) throw new Error(`term must be a terminal type such as ${defaultTerm}, got ${JSON.stringify(term.slice(0, 80))}`);
-  const pane = query.get("pane");
-  if (pane !== null && !terminalPattern.test(pane)) throw new Error(`pane must be a Herdr Core terminal such as t7, got ${JSON.stringify(pane.slice(0, 80))}`);
-  return { size, term, ...(pane === null ? {} : { pane }) };
+  const terminal = query.get("terminal");
+  if (terminal !== null && !terminalPattern.test(terminal)) throw new Error(`terminal must be a Herdr Core terminal such as t7, got ${JSON.stringify(terminal.slice(0, 80))}`);
+  return { size, term, ...(terminal === null ? {} : { terminal }) };
 }
 
 export function termOf(env: string | undefined): string {

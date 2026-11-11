@@ -43,7 +43,7 @@ interface Listed { address: string; state?: string; labels?: Record<string, stri
  * `terminal.list` of the live ones of `terminals`, as Core lists them, or a reply as given. Returns what herdr-core was exec'd with last and where, or null
  * when it was not, with the script's exit code and stderr.
  */
-async function attach(t: { after: (fn: () => Promise<void>) => void }, pane: string, terminals: readonly Listed[] | string, core: "listening" | "down" = "listening") {
+async function attach(t: { after: (fn: () => Promise<void>) => void }, address: string, terminals: readonly Listed[] | string, core: "listening" | "down" = "listening") {
   const user = await coreHome(t);
   if (core === "listening") await user.listen("core");
   const bin = await tempDir("nexus-attach-", t);
@@ -53,7 +53,7 @@ async function attach(t: { after: (fn: () => Promise<void>) => void }, pane: str
   await writeFile(join(bin, "reply"), `a warning first\n${list}\n`);
   await writeFile(join(bin, "herdr-core"), `#!/bin/sh\nif [ "$1" = connect ]; then cat >/dev/null; exec cat ${join(bin, "reply")}; fi\necho "$PWD: $*" > ${log}\n`, { mode: 0o755 });
   await writeFile(join(bin, "setsid"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-  const run = spawnSync("sh", ["-c", contract.attachScript, "attach", pane], { cwd: "/", env: { ...user.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin` }, encoding: "utf8" });
+  const run = spawnSync("sh", ["-c", contract.attachScript, "attach", address], { cwd: "/", env: { ...user.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin` }, encoding: "utf8" });
   return { exec: existsSync(log) ? readFileSync(log, "utf8").trim().replace(user.home, "~") : null, exitCode: run.status, stderr: run.stderr };
 }
 

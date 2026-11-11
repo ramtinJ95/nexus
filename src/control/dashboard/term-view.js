@@ -29,11 +29,11 @@ function terminalTheme() {
 const openLink = (event, uri) => window.open(uri, "_blank", "noopener");
 
 /**
- * A terminal in `host` attached to the thread's pylon, landing in `pane` when it is not null, and fitted to `host`
+ * A terminal in `host` attached to the thread's pylon, landing in the terminal at `address` when it is not null, and fitted to `host`
  * whenever it shows at a new size. An attach again after a drop lands as the first one did. `told` hears what each
  * clipboard write from the pylon did.
  */
-export function openTerminal(host, thread, status, pane, told) {
+export function openTerminal(host, thread, status, address, told) {
   const term = new Terminal({
     cursorBlink: true, fontSize: 13, scrollback: 5000,
     fontFamily: getComputedStyle(host).fontFamily,
@@ -58,7 +58,7 @@ export function openTerminal(host, thread, status, pane, told) {
   term.open(host);
   const unstyle = adoptStyles(host.querySelector(".xterm-screen"));
   fit.fit();
-  const detach = keepAttached(term, () => new WebSocket(attachUrl(location, thread, { cols: term.cols, rows: term.rows }, pane)), status, document, (socket) => refusalAt(refusalUrl(socket.url)));
+  const detach = keepAttached(term, () => new WebSocket(attachUrl(location, thread, { cols: term.cols, rows: term.rows }, address)), status, document, (socket) => refusalAt(refusalUrl(socket.url)));
   const sized = new ResizeObserver(() => { if (host.offsetParent !== null) fit.fit(); });
   sized.observe(host);
   const unwatch = onThemeChange(() => { term.options.theme = terminalTheme(); });

@@ -163,8 +163,8 @@ test("opening a session goes through the node's probe, defaults to Claude Code t
   const s = await withThread(t);
   s.registry.threads.recordActivity(s.thread.id, { human: 1 });
   s.woken.length = 0;
-  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, {}), { status: 201, body: { herdrPane: "w1:p1", harness: "claude-code", title: "claude-code" } });
-  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, { harness: "pi", title: " plan " }), { status: 201, body: { herdrPane: "w1:p1", harness: "pi", title: "plan" } });
+  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, {}), { status: 201, body: { terminal: "w1:p1", harness: "claude-code", title: "claude-code" } });
+  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, { harness: "pi", title: " plan " }), { status: 201, body: { terminal: "w1:p1", harness: "pi", title: "plan" } });
   assert.deepEqual(s.commands, [
     [s.thread.pylonId, { kind: "open-session", harness: "claude-code", title: "claude-code" }],
     [s.thread.pylonId, { kind: "open-session", harness: "pi", title: "plan" }],
@@ -402,10 +402,10 @@ test("a checkout read whose thread is deleted while it runs answers the delete, 
   assert.match(read.body.error, /is deleted/);
 });
 
-test("closing a session goes through the node's probe, and a pane that is not open, such as one from before a wake, is a 404", async (t) => {
+test("closing a session goes through the node's probe, and a terminal that is not live, such as one from before a wake, is a 404", async (t) => {
   const s = await withThread(t);
   assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {}), { status: 204, body: null });
-  assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "close-session", herdrPane: "w1:p1" }]]);
+  assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "close-session", terminal: "w1:p1" }]]);
   s.probeAnswers(async () => ({ kind: "close-session", outcome: "not-open" }));
   const stale = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {});
   assert.equal(stale.status, 404);
@@ -419,14 +419,14 @@ test("a session has no focus route: the terminal tab attaches to one session at 
   assert.deepEqual(s.commands, [], "nothing reached the probe");
 });
 
-test("closing a listed session names it, and a pane that runs another session now is a 404 that leaves it open", async (t) => {
+test("closing a listed session names it, and a terminal that runs another session now is a 404 that leaves it open", async (t) => {
   const s = await withThread(t);
   s.registry.threads.apply({ record: "sessions", pylonId: s.thread.pylonId, sessions: [
-    { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", title: "review", status: "idle", message: null },
+    { id: "w1:p1", state: "running", terminal: "w1:p1", harness: "claude-code", harnessSessionId: "s1", title: "review", status: "idle", message: null },
   ] });
   s.probeAnswers(async () => ({ kind: "close-session", outcome: "moved" }));
   const moved = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {});
-  assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "close-session", herdrPane: "w1:p1", session: { harness: "claude-code", harnessSessionId: "s1", title: "review" } }]]);
+  assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "close-session", terminal: "w1:p1", session: { harness: "claude-code", harnessSessionId: "s1", title: "review" } }]]);
   assert.equal(moved.status, 404);
   assert.match(moved.body.error, /terminal w1:p1 of pylon \S+ runs another session now, so it was left open. A wake moved session w1:p1 to another terminal/);
 });
@@ -439,11 +439,11 @@ function observeStopped(s: Awaited<ReturnType<typeof withThread>>, sessions: rea
     ingest({ type: "pylon", pylon: stopped }, node, new Map([[s.thread.pylonId, "absent"]]), Date.now()));
 }
 
-const pausedReview: PausedSession = { id: "w1:p1", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "s1", title: "review" };
+const pausedReview: PausedSession = { id: "w1:p1", terminal: "w1:p1", harness: "claude-code", harnessSessionId: "s1", title: "review" };
 
 test("an idle-paused or archived thread lists the sessions its wake brings back, as paused", async (t) => {
   const s = await withThread(t);
-  s.registry.threads.apply({ record: "sessions", pylonId: s.thread.pylonId, sessions: [{ ...pausedReview, herdrPane: "w1:p1", state: "running", status: "working", message: null }] });
+  s.registry.threads.apply({ record: "sessions", pylonId: s.thread.pylonId, sessions: [{ ...pausedReview, terminal: "w1:p1", state: "running", status: "working", message: null }] });
   observeStopped(s, [pausedReview]);
   const sessions = async () => ((await s.call("GET", `/v1/threads/${s.thread.id}`)).body as ThreadDetail).sessions;
   const paused = [{ pylon: s.thread.pylonId, ...pausedReview, state: "paused", status: "working", message: null }];
@@ -472,11 +472,11 @@ test("closing a paused session is refused with 409 without asking the probe or w
   assert.equal(s.registry.threads.thread(s.thread.id)!.lastHumanActivityAt, human, "a refused close is not activity");
 });
 
-test("closing a failed session in no pane drops it from the pylon, by its ID", async (t) => {
+test("closing a failed session in no terminal drops it from the pylon, by its ID", async (t) => {
   const s = await withThread(t);
   const id = "failed-0123456789ab";
   s.registry.threads.apply({ record: "sessions", pylonId: s.thread.pylonId, sessions: [
-    { id, state: "failed", herdrPane: null, harness: "pi", harnessSessionId: null, title: "plan", status: null, message: "pi exited 1" },
+    { id, state: "failed", terminal: null, harness: "pi", harnessSessionId: null, title: "plan", status: null, message: "pi exited 1" },
   ] });
   assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${id}`, {}), { status: 204, body: null });
   assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "drop-failed-session", id }]]);

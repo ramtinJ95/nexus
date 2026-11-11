@@ -4,10 +4,10 @@ import { attachPath, defaultTerm, encodeMessage } from "../../contract/attach.ts
 
 /**
  * The attach route for a terminal of `size` on the page's own host, which the route checks against the Origin. It
- * lands in `pane` when that is given, and otherwise where `nexus attach` does.
+ * lands in the terminal at `address` when that is given, and otherwise where `nexus attach` does.
  */
-export function attachUrl(location, thread, { cols, rows }, pane = null) {
-  const path = attachPath(thread, { size: { cols, rows }, term: defaultTerm, ...(pane === null ? {} : { pane }) });
+export function attachUrl(location, thread, { cols, rows }, address = null) {
+  const path = attachPath(thread, { size: { cols, rows }, term: defaultTerm, ...(address === null ? {} : { terminal: address }) });
   return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${path}`;
 }
 

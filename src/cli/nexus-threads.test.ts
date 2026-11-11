@@ -318,7 +318,7 @@ test("conversation prints a Claude worker's transcript, and send types into its 
   let refusals = 2;
   s.probeAnswers(async () => {
     if (refusals-- > 0) throw Object.assign(new Error("rj-firebat: pylon-x is stopped, not running"), { code: "not-running" });
-    return { kind: "send-claude", outcome: "queued", herdrPane: "w1:p1", resumed: true };
+    return { kind: "send-claude", outcome: "queued", terminal: "w1:p1", resumed: true };
   });
   s.commands.length = 0;
   const queued = await s.nexus(["send", thread.id, "and", "then", '"deploy"', "--request-id", "msg:fixed"]);
@@ -327,7 +327,7 @@ test("conversation prints a Claude worker's transcript, and send types into its 
   assert.deepEqual(s.commands, Array(3).fill({ kind: "send-claude", session: "s1", text: 'and then "deploy"', requestId: "msg:fixed", model: "claude-opus-5-5" }), "a paused pylon is woken and asked again until it runs");
   assert.deepEqual(await s.json(["send", thread.id, "and", "then", '"deploy"', "--request-id", "msg:fixed"]), { claude: { session: "s1", outcome: "queued", resumed: true } });
   assert.equal(s.commands.length, 3, "a resend under the same request ID is not typed again");
-  s.probeAnswers(async () => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed: false }));
+  s.probeAnswers(async () => ({ kind: "send-claude", outcome: "sent", terminal: "w1:p1", resumed: false }));
   assert.equal((await s.nexus(["send", thread.id, "go", "--steer"])).stdout, `Sent to Claude in ${thread.id}.\n`);
   assert.deepEqual(s.fake.calls.filter(([call]) => call === "send"), [], "the harness is sent nothing");
   assert.match((await s.nexus(["send", "--help"])).stdout, /typed into the Claude worker's session/);
@@ -336,7 +336,7 @@ test("conversation prints a Claude worker's transcript, and send types into its 
 test("send to a Claude worker that waits at a prompt in its terminal fails at once with exit code 5, and is typed once", { timeout: 60_000 }, async (t) => {
   const s = await setup(t);
   const { thread } = await claudeWatched(t, s);
-  s.probeAnswers(async () => ({ kind: "send-claude", outcome: "blocked", herdrPane: "w1:p1", resumed: false }));
+  s.probeAnswers(async () => ({ kind: "send-claude", outcome: "blocked", terminal: "w1:p1", resumed: false }));
   s.commands.length = 0;
   const blocked = await s.nexus(["send", thread.id, "deploy", "--json"]);
   assert.equal(blocked.code, 5, blocked.stderr);
@@ -346,7 +346,7 @@ test("send to a Claude worker that waits at a prompt in its terminal fails at on
   assert.equal(s.commands.filter((c) => c.kind === "send-claude").length, 1);
 });
 
-test("abort interrupts a Claude worker's turn with Esc in its pane, and fails with exit code 5 when Claude was not working", async (t) => {
+test("abort interrupts a Claude worker's turn with Esc in its terminal, and fails with exit code 5 when Claude was not working", async (t) => {
   const s = await setup(t);
   const { thread } = await claudeWatched(t, s);
   let outcome: InterruptClaudeOutcome = "interrupted";

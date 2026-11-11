@@ -33,7 +33,7 @@ function fixture(t: import("node:test").TestContext, limit: { resetsAt: number |
   registry.threads.ingested(testObservation(node, { pylons: threads.map((th) => runningPylon(th.pylonId, { liveHash: "hash" as LiveHash })) }), []);
   const typed: Extract<PylonCommand, { kind: "send-claude" }>[] = [];
   let outcome: "sent" | "blocked" = "sent";
-  const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command as Extract<PylonCommand, { kind: "send-claude" }>); return { kind: "send-claude", outcome, herdrPane: "w1:p1", resumed: false }; } };
+  const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command as Extract<PylonCommand, { kind: "send-claude" }>); return { kind: "send-claude", outcome, terminal: "w1:p1", resumed: false }; } };
   const inbox = agentInbox({ log: assert.fail, registry, harness: { async send() { throw new Error("a Claude worker's message never reaches the harness"); } }, probes: new Map([[node, probe]]), wake() {} });
   let now = resetsAt + graceMs;
   let gate: Promise<void> | null = null;

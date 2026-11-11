@@ -42,11 +42,11 @@ for (const pylon of registry.livePylons()) {
 ### Call site: opening a terminal from the dashboard
 
 ```ts
-const pane = await probes.get(node).command(pylonId, {
+const opened = await probes.get(node).command(pylonId, {
   kind: "open-session", harness: "claude-code", title: "review",
 });
 const terminal = await openTerminal(
-  (argv) => probes.get(node).stream(pylonId, argv), terminalSize(120, 40), "xterm-256color", ["sh", "-c", attachScript, "attach", pane.herdrPane],
+  (argv) => probes.get(node).stream(pylonId, argv), terminalSize(120, 40), "xterm-256color", ["sh", "-c", attachScript, "attach", opened.terminal],
 );
 for await (const bytes of terminal) browserSocket.send(bytes);
 ```

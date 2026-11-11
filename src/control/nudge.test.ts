@@ -53,7 +53,7 @@ function fixture(t: import("node:test").TestContext) {
   const fake = fakeHarness();
   const typed: Extract<PylonCommand, { kind: "send-claude" }>[] = [];
   let outcome: "sent" | "blocked" = "sent";
-  const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command as Extract<PylonCommand, { kind: "send-claude" }>); return { kind: "send-claude", outcome, herdrPane: "w1:p1", resumed: false }; } };
+  const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command as Extract<PylonCommand, { kind: "send-claude" }>); return { kind: "send-claude", outcome, terminal: "w1:p1", resumed: false }; } };
   const inbox: Inbox = agentInbox({ log: assert.fail, registry, harness: fake.harness, probes: new Map([[node, probe]]), wake() {} });
   const prs = new Map<string, { number: number; state: PullRequest["state"] }[]>();
   const finds: string[] = [];

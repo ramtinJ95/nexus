@@ -39,7 +39,7 @@ export interface Launcher {
    * A session runs in one terminal only. A relaunch brings it back in one and holds it from sends and launches
    * meanwhile, and a start that fails is kept while its terminal runs the agent, so the session is never started twice.
    */
-  onePane: boolean;
+  oneTerminal: boolean;
 }
 
 type Takes<H extends SessionHarness> = (typeof agentKinds)[H]["takes"];
@@ -102,7 +102,7 @@ const table = {
     sessionLabel: "claude.session_id",
     hooks: (receipt) => ["--settings", JSON.stringify({ hooks: { SessionStart: claudeHook(labelClaudeSession), ...receipt === undefined ? {} : { UserPromptSubmit: claudeHook(receipt) } } })],
     seed: seedClaude,
-    onePane: true,
+    oneTerminal: true,
   },
   // pi 1.4.0 opens a missing --session path as a new session that it first writes there on its first
   // message, so unlike a Claude Code ID the path needs no check, and its history is not looked for. A fresh session
@@ -115,7 +115,7 @@ const table = {
     sessionFlags: ["--session"],
     sessionLabel: "pi.session_file",
     login: `node -e ${q(piChatgptLogin)}`,
-    onePane: false,
+    oneTerminal: false,
   },
   shell: null,
 } satisfies { [H in SessionHarness]: LauncherOf<H> };

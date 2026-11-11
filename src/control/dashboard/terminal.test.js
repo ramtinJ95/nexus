@@ -23,17 +23,17 @@ function fakeSocket() {
   return { socket, open: () => socket.dispatchEvent(new Event("open")), text: (value) => message(JSON.stringify(value)), bytes: (text) => message(new TextEncoder().encode(text).buffer), close: () => socket.dispatchEvent(new Event("close")) };
 }
 
-test("the attach route is on the page's own host, over wss behind HTTPS, with the terminal's size and the pane it lands in", () => {
+test("the attach route is on the page's own host, over wss behind HTTPS, with the terminal's size and the terminal it lands in", () => {
   assert.equal(attachUrl({ protocol: "https:", host: "nexus.example.ts.net" }, "th-0123456789ab", { cols: 120, rows: 40 }), "wss://nexus.example.ts.net/v1/threads/th-0123456789ab/attach?cols=120&rows=40&term=xterm-256color");
   assert.equal(attachUrl({ protocol: "http:", host: "127.0.0.1:7470" }, "th-x", { cols: 80, rows: 24 }), "ws://127.0.0.1:7470/v1/threads/th-x/attach?cols=80&rows=24&term=xterm-256color");
-  assert.equal(attachUrl({ protocol: "http:", host: "127.0.0.1:7470" }, "th-x", { cols: 80, rows: 24 }, "t2"), "ws://127.0.0.1:7470/v1/threads/th-x/attach?cols=80&rows=24&term=xterm-256color&pane=t2", "a session's Show in terminal lands in its terminal");
+  assert.equal(attachUrl({ protocol: "http:", host: "127.0.0.1:7470" }, "th-x", { cols: 80, rows: 24 }, "t2"), "ws://127.0.0.1:7470/v1/threads/th-x/attach?cols=80&rows=24&term=xterm-256color&terminal=t2", "a session's Show in terminal lands in its terminal");
 });
 
-test("the attach URL's path is the route's attachPath for the same size and pane", () => {
+test("the attach URL's path is the route's attachPath for the same size and terminal", () => {
   const size = { cols: 100, rows: 30 };
-  for (const pane of [null, "w1:p2"]) {
-    const url = new URL(attachUrl({ protocol: "https:", host: "nexus.example.ts.net" }, "th-0123456789ab", size, pane));
-    assert.equal(url.pathname + url.search, attachPath("th-0123456789ab", { size, term: defaultTerm, ...(pane === null ? {} : { pane }) }), `pane ${pane}`);
+  for (const terminal of [null, "t2"]) {
+    const url = new URL(attachUrl({ protocol: "https:", host: "nexus.example.ts.net" }, "th-0123456789ab", size, terminal));
+    assert.equal(url.pathname + url.search, attachPath("th-0123456789ab", { size, term: defaultTerm, ...(terminal === null ? {} : { terminal }) }), `terminal ${terminal}`);
   }
 });
 

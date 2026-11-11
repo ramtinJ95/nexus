@@ -141,29 +141,29 @@ export interface ListeningFact { port: number }
  * probe reads Core's `done` as `idle`, so it no longer reports `done`, which a control plane may still hold from an
  * older probe.
  */
-export type HerdrStatus = "working" | "idle" | "blocked" | "done" | "unknown";
+export type TerminalStatus = "working" | "idle" | "blocked" | "done" | "unknown";
 /**
  * A session in a running pylon. `id` names it: the address of its Herdr Core terminal, or for a session the last wake
  * left in no terminal the address it was recorded at (sessions.ts). `failed` is one the last wake did not bring back,
- * which the next wake tries again: `message` says why, and `herdrPane` is the terminal it left behind, such as a
+ * which the next wake tries again: `message` says why, and `terminal` is the terminal it left behind, such as a
  * Claude whose launch stalled, or null. `status` is Core's for the terminal, unknown with none: a control plane older
  * than session states stores one for every session. It cannot store a session in no terminal, so the control plane is
  * upgraded before the probes (deploy/README.md).
  */
 export type SessionFact =
   | {
-    id: string; state: "running"; herdrPane: string; harness: SessionHarness; harnessSessionId: string | null; status: HerdrStatus;
+    id: string; state: "running"; terminal: string; harness: SessionHarness; harnessSessionId: string | null; status: TerminalStatus;
     /**
      * The session's title: its terminal's `nexus.title` label, or for a terminal opened by hand its name or its
      * harness's label. A probe from before titles were reported sends none.
      */
     title?: string;
   }
-  | { id: string; state: "failed"; herdrPane: string | null; harness: SessionHarness; harnessSessionId: string | null; status: HerdrStatus; title: string; message: string };
+  | { id: string; state: "failed"; terminal: string | null; harness: SessionHarness; harnessSessionId: string | null; status: TerminalStatus; title: string; message: string };
 /** What tells sessions apart. `title` is null where it is not known, as from a probe before titles were reported. */
 export interface SessionIdentity { harness: SessionHarness; harnessSessionId: string | null; title: string | null }
 const pausedSessionSchema = z.strictObject({
-  id: z.string(), herdrPane: z.string().nullable(), harness: sessionHarnessSchema, harnessSessionId: z.string().nullable(), title: z.string(),
+  id: z.string(), terminal: z.string().nullable(), harness: sessionHarnessSchema, harnessSessionId: z.string().nullable(), title: z.string(),
 });
 /** A session a stopped pylon's wake brings back, under the `id` it had while the pylon ran. */
 export type PausedSession = z.infer<typeof pausedSessionSchema>;
@@ -192,10 +192,11 @@ export const heldSecrets: readonly string[] = Object.values(agentKinds).flatMap(
  * The probe-to-control contract this probe speaks, sent with every snapshot. The control plane refuses a snapshot below
  * `minProbeContract`, and reads every field from one at or above it as sent. A probe that starts sending something the
  * control plane will rely on raises `probeContract`. Once every probe runs it, `minProbeContract` follows, and the code
- * that read older probes goes.
+ * that read older probes goes. Contract 2 names a session's terminal `terminal`, where 1 named it `herdrPane`, so it
+ * raised both at once.
  */
-export const probeContract = 1;
-export const minProbeContract = 1;
+export const probeContract = 2;
+export const minProbeContract = 2;
 
 /** One line of the observe stream, newline included. */
 export function encodeProbeEvent(event: ProbeEvent): string {

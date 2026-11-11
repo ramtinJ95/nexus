@@ -41,7 +41,7 @@ Preconditions:
 
 ## Gotchas
 
-- Docker's pause records the Herdr sessions, then runs `docker stop`, `docker commit` and `docker rm`, so running processes and memory are lost, as on a real pylon. Prove survival with a file, not a process.
+- Docker's pause records the Herdr Core sessions, then runs `docker stop`, `docker commit` and `docker rm`, so running processes and memory are lost, as on a real pylon. Prove survival with a file, not a process.
 - Unarchiving is the only path that wakes an archived thread. `nexus wake` records activity but never unarchives it, and opening an archived thread's page records no activity at all.
 - Each pause adds a checkpoint image, including the idle pause after 20 minutes without human activity and 5 without agent activity, and a wake keeps the old ones. Only a delete, the 24-hour cleanup of an archived thread, or `$V down` removes them, so a run that archives many threads holds their layers until then.
 - The closed line counts archived and deleted threads together, such as `2 archived, 1 deleted`, so its text depends on what ran earlier in the run.

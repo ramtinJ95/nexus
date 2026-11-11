@@ -1224,8 +1224,8 @@ test("the thread page shows a paused session as resuming on wake, or on unarchiv
   const fix = await s.start("acme", "Fix checkout");
   s.observe(fix);
   s.registry.threads.apply({ record: "sessions", pylonId: fix.pylonId, sessions: [
-    { id: "w1:p1", state: "paused", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: null, title: "review", status: null, message: null },
-    { id: "failed-0123456789ab", state: "failed", herdrPane: null, harness: "pi", harnessSessionId: null, title: "plan", status: null, message: "pi exited 1" },
+    { id: "w1:p1", state: "paused", terminal: "w1:p1", harness: "claude-code", harnessSessionId: null, title: "review", status: null, message: null },
+    { id: "failed-0123456789ab", state: "failed", terminal: null, harness: "pi", harnessSessionId: null, title: "plan", status: null, message: "pi exited 1" },
   ] });
   const sessions = async () => {
     const section = sectionOf((await s.call("GET", `/threads/${fix.id}`)).text, "sessions-h");
@@ -1234,7 +1234,7 @@ test("the thread page shows a paused session as resuming on wake, or on unarchiv
   const shown = await sessions();
   assert.match(shown.text, /Claude Code review paused, resumes on wake w1:p1/);
   assert.match(shown.text, /pi plan failed It did not come back from the last wake, which the next tries again: pi exited 1/);
-  assert.ok(!shown.text.includes("failed-0123456789ab"), "a session in no pane shows no pane");
+  assert.ok(!shown.text.includes("failed-0123456789ab"), "a session in no terminal shows no terminal");
   assert.equal((await s.call("POST", `/v1/threads/${fix.id}/archive`)).status, 200);
   assert.match((await sessions()).text, /Claude Code review paused, resumes on unarchive w1:p1/);
 });
@@ -1245,18 +1245,18 @@ test("the thread page's sessions open, show in the terminal and close from the p
   claudeWorkerAt(s.registry, worker.id, "started", { session: "5f0c" });
   s.observe(worker);
   s.registry.threads.apply({ record: "sessions", pylonId: worker.pylonId, sessions: [
-    { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: "5f0c", title: "Port the CLI", status: "working", message: null },
-    { id: "w2:p1", state: "running", herdrPane: "w2:p1", harness: "shell", harnessSessionId: null, title: "shell", status: "idle", message: null },
-    { id: "w3:p1", state: "paused", herdrPane: "w3:p1", harness: "pi", harnessSessionId: null, title: "plan", status: null, message: null },
-    { id: "failed-0123456789ab", state: "failed", herdrPane: null, harness: "claude-code", harnessSessionId: "9a1b", title: "review", status: null, message: "claude exited 1" },
+    { id: "w1:p1", state: "running", terminal: "w1:p1", harness: "claude-code", harnessSessionId: "5f0c", title: "Port the CLI", status: "working", message: null },
+    { id: "w2:p1", state: "running", terminal: "w2:p1", harness: "shell", harnessSessionId: null, title: "shell", status: "idle", message: null },
+    { id: "w3:p1", state: "paused", terminal: "w3:p1", harness: "pi", harnessSessionId: null, title: "plan", status: null, message: null },
+    { id: "failed-0123456789ab", state: "failed", terminal: null, harness: "claude-code", harnessSessionId: "9a1b", title: "review", status: null, message: "claude exited 1" },
   ] });
   const buttons = async () => [...sectionOf((await s.call("GET", `/threads/${worker.id}`)).text, "sessions-h").matchAll(/<button [^>]*data-action="([^"]+)"[^>]*>/g)]
-    .map(([button, action]) => [action, ...["harness", "pane", "session", "confirm"].flatMap((key) => new RegExp(`data-${key}="([^"]*)"`).exec(button!)?.slice(1).map(textOf) ?? [])].join(" "));
+    .map(([button, action]) => [action, ...["harness", "terminal", "session", "confirm"].flatMap((key) => new RegExp(`data-${key}="([^"]*)"`).exec(button!)?.slice(1).map(textOf) ?? [])].join(" "));
   assert.deepEqual(await buttons(), [
     'close-session failed-0123456789ab Close the Claude Code session "review"? No wake tries it again.',
     "show-session w1:p1",
     "show-session w2:p1",
-    'close-session w2:p1 Close the Shell session "shell"? Its pane closes, and what runs there ends.',
+    'close-session w2:p1 Close the Shell session "shell"? Its terminal closes, and what runs there ends.',
     "open-session shell",
     "open-session pi",
     "open-session claude-code",
@@ -1267,7 +1267,7 @@ test("the thread page's sessions open, show in the terminal and close from the p
   const plain = await s.start("acme", "Fix checkout");
   s.observe(plain);
   s.registry.threads.apply({ record: "sessions", pylonId: plain.pylonId, sessions: [
-    { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "claude-code", harnessSessionId: null, title: "login", status: "blocked", message: null },
+    { id: "w1:p1", state: "running", terminal: "w1:p1", harness: "claude-code", harnessSessionId: null, title: "login", status: "blocked", message: null },
   ] });
   const closes = [...sectionOf((await s.call("GET", `/threads/${plain.id}`)).text, "sessions-h").matchAll(/data-action="close-session" [^>]*data-session="([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(closes, ["w1:p1"], "a Claude session with no ID yet closes on a thread with no Claude worker");
@@ -1278,7 +1278,7 @@ test("the thread page lists a session of a harness this control plane does not k
   const fix = await s.start("acme", "Fix checkout");
   s.observe(fix);
   s.registry.threads.apply({ record: "sessions", pylonId: fix.pylonId, sessions: [
-    { id: "w1:p1", state: "running", herdrPane: "w1:p1", harness: "codex" as never, harnessSessionId: null, title: "agent", status: "working", message: null },
+    { id: "w1:p1", state: "running", terminal: "w1:p1", harness: "codex" as never, harnessSessionId: null, title: "agent", status: "working", message: null },
   ] });
   const res = await s.call("GET", `/threads/${fix.id}`);
   assert.equal(res.status, 200);
@@ -1289,12 +1289,12 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   s.observe(fix);
-  const pane = (herdrPane: string, harness: "claude-code" | "pi" | "shell", status: "working" | "idle", harnessSessionId: string | null = null, title: string | null = null) =>
-    ({ id: herdrPane, state: "running", herdrPane, harness, harnessSessionId, status, title, message: null }) as const;
+  const running = (terminal: string, harness: "claude-code" | "pi" | "shell", status: "working" | "idle", harnessSessionId: string | null = null, title: string | null = null) =>
+    ({ id: terminal, state: "running", terminal, harness, harnessSessionId, status, title, message: null }) as const;
   s.registry.threads.apply({ record: "sessions", pylonId: fix.pylonId, sessions: [
-    pane("w1:p1", "claude-code", "working", "5f0c", "review"),
-    pane("w2:p1", "pi", "idle", "/home/user/.pi/sessions/a.jsonl"),
-    pane("w3:p1", "shell", "idle"),
+    running("w1:p1", "claude-code", "working", "5f0c", "review"),
+    running("w2:p1", "pi", "idle", "/home/user/.pi/sessions/a.jsonl"),
+    running("w3:p1", "shell", "idle"),
   ] });
   s.registry.threads.allocatePreviews(fix.pylonId, ["web", "api"], { first: 8443, last: 8444 });
   s.registry.threads.apply({ record: "preview", pylonId: fix.pylonId, service: "web", httpsPort: 8443, ready: true });
@@ -2290,7 +2290,7 @@ test("a Claude worker that works shows its turn's call running, the turn's clock
   const since = s.registry.threads.thread(thread.id)!.workingSince;
   assert.equal(html.split(`<time data-since="${since}">`).length - 1, 4, "the run bar, the sidebar row, the inspector and the timeline tick the same clock");
   assert.match(html, new RegExp(`<div class="state-bar state-working" id="agent-state" data-state="working" role="status">.*<span aria-hidden="true"><time data-since="${since}">`), "the run bar announces its state, and not its clock each second");
-  assert.match(html, new RegExp(`<button [^>]*data-action="abort" data-thread="${thread.id}"[^>]*>Interrupt</button>`), "Interrupt takes the abort route, which presses Esc in Claude's pane");
+  assert.match(html, new RegExp(`<button [^>]*data-action="abort" data-thread="${thread.id}"[^>]*>Interrupt</button>`), "Interrupt takes the abort route, which presses Esc in Claude's terminal");
   assert.match(html, /placeholder="Steer the run…"/);
   assert.doesNotMatch(html, /id="queue"/, "Claude takes a message at its next step whatever its mode, so nothing queues after the turn");
   s.registry.threads.reportSession(node, { sequence: 2, pylon: thread.pylonId, time: Date.now(), event: { kind: "session.waiting", session: "s1", message: "Claude needs your permission to use Bash" } });
@@ -2457,7 +2457,7 @@ test("a Claude worker's prompt is Nexus's only when Nexus typed it, the usage li
   const theirs = "[Nexus review] got this wrong, so leave the cache as it is.";
   const entries: ClaudeEntry[] = [{ kind: "prompt", at: 1, text: continued, from: "person" }, { kind: "prompt", at: 2, text: theirs, from: "person" }];
   const thread = await claudeThread(s, entries);
-  const typed = await typeIntoClaude(s.registry, thread.id, "s1", null, "usage-limit:s1:1", continued, async () => ({ kind: "send-claude", outcome: "sent", herdrPane: "w1:p1", resumed: false }), "usage-limit");
+  const typed = await typeIntoClaude(s.registry, thread.id, "s1", null, "usage-limit:s1:1", continued, async () => ({ kind: "send-claude", outcome: "sent", terminal: "w1:p1", resumed: false }), "usage-limit");
   assert.equal(typed.kind, "sent");
   const rows = conversationOf((await s.call("GET", `/threads/${thread.id}`)).text).rows;
   assert.ok(rows.includes(`Nexus usage limit ${continued}`), rows.join("\n"));

@@ -228,13 +228,13 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
       const body = Object.fromEntries((["harness", "title"] as const).flatMap((key) => v[key] === undefined ? [] : [[key, v[key]]]));
       // The API answers once the agent is ready or waits for its human, which can take a minute.
       const opened = await whenRunning(api, io, id!, () => request(api, pylonRoutes.openSession, { thread: id!, body }), "no session was opened");
-      return { json: opened, text: `Opened ${opened.harness} session ${JSON.stringify(opened.title)} in pane ${opened.herdrPane} of ${id}. \`nexus attach ${id}\` attaches to it.` };
+      return { json: opened, text: `Opened ${opened.harness} session ${JSON.stringify(opened.title)} in terminal ${opened.terminal} of ${id}. \`nexus attach ${id}\` attaches to it.` };
     },
   },
   // Not tried again on a 409: a paused session comes back with its pylon's wake, and a terminal asked for before the
   // wake may name another session after it.
   "session close": {
-    help: ["  nexus session close <thread> <pane|id>       a session in no pane by its ID, which `nexus show` gives"],
+    help: ["  nexus session close <thread> <terminal|id>   a session in no terminal by its ID, which `nexus show` gives"],
     thread: true,
     args: [2, 2],
     async run(api, [id, session]) {
@@ -243,7 +243,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     },
   },
   attach: {
-    help: ["  nexus attach <thread>                        this terminal on the pylon's Herdr sessions, through the control plane"],
+    help: ["  nexus attach <thread>                        this terminal on the pylon's Herdr Core terminals, through the control plane"],
     thread: true,
     args: [1, 1],
     async run(_api, [id], _values, _follow, local) {
