@@ -30,6 +30,17 @@ test("a Claude worker start stores its first prompt without starting a harness c
   assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "a\0b" })).status, 400);
 });
 
+test("a Claude worker start or item on a Fable model is refused with 400 and records nothing", async (t) => {
+  const s = await withThread(t);
+  for (const [path, model] of [["/v1/threads", "claude-fable-5-1"], ["/v1/items", "Fable"]] as const) {
+    const refused = await s.call("POST", path, { project: "acme", title: "Claude worker", claude: "fix the bug", model });
+    assert.equal(refused.status, 400, path);
+    assert.match(refused.body.error, new RegExp(`model ${model} is a Fable model, and Fable models are not available in pylons`), path);
+  }
+  assert.deepEqual([s.registry.threads.threads().length, s.registry.pipeline.items().length], [1, 0], "only withThread's thread exists");
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "fix the bug", model: "claude-sonnet-5-5" })).status, 201);
+});
+
 test("a Claude worker's pasted image is served from its transcript while the pylon runs, by the place its entry names", async (t) => {
   const s = await withClaude(t);
   const record = JSON.stringify({

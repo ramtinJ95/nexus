@@ -27,7 +27,7 @@ import { loadImageRecipe } from "./recipe.ts";
 import { shellQuote } from "../shell.ts";
 import type { ImageId, NodeName } from "../ids.ts";
 import { asUser } from "../guest-contract.ts";
-import { agentSetupInstaller, bakedDotfilesDir, home, nexusKvm, nexusTurn, piEnv, pylonGuideFile } from "../../images/pylon/nexus-contract.ts";
+import { agentSetupInstaller, bakedDotfilesDir, claudeManagedSettings, home, nexusKvm, nexusTurn, piEnv, pylonGuideFile } from "../../images/pylon/nexus-contract.ts";
 
 const gondolinBuild = fileURLToPath(new URL("./gondolin-build.ts", import.meta.url));
 
@@ -119,7 +119,8 @@ function dockerBuildArgs(pins: BuildPins): Record<string, string> {
  *    sshd and sandboxssh, Herdr's pi integration with its own resume turned off, Herdr Core as hc with its notes
  *    turned off, no KVM module loaded,
  *    the agent setup installed exactly as the recipe's manifest says with pi loading every extension offline,
- *    the PYLON.md import for Claude Code and pi, gh at its pin answering git's credential requests from GH_TOKEN,
+ *    the PYLON.md import for Claude Code and pi, Claude Code's managed settings as the recipe has them, root's and
+ *    read-only to user, gh at its pin answering git's credential requests from GH_TOKEN,
  *    curl and Node fetch to an allowed host through TLS interception, tini reaping an orphan it adopts as
  *    subreaper and as PID 1, nexus-kvm giving user /dev/kvm, which needs a build node that passes nested
  *    virtualization through, sandboxd stdout and stderr on /dev/null, sandboxd surviving a write to an exec's closed stdin, and a Herdr server as user. Any failure is setup-failed and publishes nothing.
@@ -450,6 +451,12 @@ export function smokeChecks(recipe: ImageRecipe & { pins: BuildPins }): readonly
       name: "pylon guide",
       argv: userSmoke("cat ~/.claude/CLAUDE.md; realpath -m ~/.pi/agent/AGENTS.md"),
       expect: `@~${pylonGuideFile.slice(home.length)}\n${pylonGuideFile}\n`,
+    },
+    {
+      // The recipe's copy is the policy, which build.test.ts holds to Opus, Sonnet and Haiku without Fable.
+      name: "Claude Code's managed model policy",
+      argv: userSmoke(`stat -c '%U %G %a' ${dirname(claudeManagedSettings)} ${claudeManagedSettings}; test -w ${claudeManagedSettings} || echo read-only; cat ${claudeManagedSettings}`),
+      expect: `root root 755\nroot root 644\nread-only\n${recipeFile(recipe, "claude-managed-settings.json")}`,
     },
     {
       // gh's version line carries a release date that the pin does not know. The token is read when git asks.

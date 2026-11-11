@@ -221,6 +221,7 @@ test("an item is checked as a start is, and its pass records why a queue refused
   refused(() => f.items.add(f.request("X", { claude: "Go" }), "Go.", [], laptop), "invalid", /message is for a Nexus agent thread/);
   refused(() => f.items.add(f.request("X"), null, [], laptop), "invalid", /an item needs a brief/);
   refused(() => f.items.add(f.request("X", { model: "m" }), "Go.", [], laptop), "invalid", /model requires claude/);
+  refused(() => f.items.add(f.request("X", { claude: "Go", model: "fable" }), null, [], laptop), "invalid", /Fable models are not available in pylons/);
   refused(() => f.items.approve(f.add("A"), laptop), "conflict", /starts its items on their own/);
   assert.equal(f.registry.pipeline.items().length, 1, "a refused item records nothing");
 

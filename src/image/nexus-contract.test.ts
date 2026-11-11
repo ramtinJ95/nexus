@@ -31,6 +31,7 @@ test("each guest path, name and limit equals the literal it replaced", () => {
     nexusOutbox: "/usr/local/bin/nexus-outbox.ts",
     nexusTurn: "/usr/local/bin/nexus-turn.ts",
     checkoutHelper: "/usr/local/lib/nexus/checkout-files.py",
+    claudeManagedSettings: "/etc/claude-code/managed-settings.json",
     bridgeHost: "nexus.pylon",
     nexusApi: "http://nexus.pylon",
     bridgeRequestPath: "/v1/request",
@@ -56,6 +57,7 @@ test("the Dockerfile copies each image file to where the contract says, and noth
     "nexus-turn.ts": contract.nexusTurn,
     "nexus-kvm": contract.nexusKvm,
     "checkout-files.py": contract.checkoutHelper,
+    "claude-managed-settings.json": contract.claudeManagedSettings,
     "dotfiles/": `${contract.bakedDotfilesDir}/`,
     "agent-setup/": `${dirname(contract.agentSetupInstaller)}/`,
   });

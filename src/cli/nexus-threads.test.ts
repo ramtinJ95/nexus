@@ -464,11 +464,16 @@ test("start --after against a control plane without its GitHub token exits 5 and
   assert.equal((await s.nexus(["threads", "--queued"])).stdout, "No queued threads.\n");
 });
 
-test("start and item add check their worker flags alike, and item add refuses an --after that names nothing without a request", async (t) => {
+test("start and item add check their worker flags alike, a Fable model included, and item add refuses an --after that names nothing without a request", async (t) => {
   const s = await setup(t, { queue: true });
   for (const command of [["start"], ["item", "add"]]) {
     const res = await s.nexus([...command, "--project", "acme", "--message", "Build A", "--model", "claude-opus-5-5"]);
     assert.deepEqual([res.code, res.stderr], [64, `nexus: --model requires --claude. Run nexus ${command.join(" ")} --help for usage\n`], command.join(" "));
+    const asked = s.requests();
+    const fable = await s.nexus([...command, "--project", "acme", "--claude", "Build A", "--model", "claude-fable-5-1"]);
+    assert.equal(fable.code, 64, command.join(" "));
+    assert.match(fable.stderr, /^nexus: --model claude-fable-5-1 is a Fable model, and Fable models are not available in pylons: .* or leave out --model for claude-opus-5-5\./, command.join(" "));
+    assert.equal(s.requests(), asked, "a Fable model is refused before any request");
   }
   await s.nexus(["project", "edit", "acme", "--pipeline", "start"]);
   const asked = s.requests();
