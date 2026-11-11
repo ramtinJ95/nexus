@@ -37,6 +37,7 @@ const pins: BuildPins = {
   neovimSha256: "e".repeat(64),
 };
 const manifest: ImageRecipe["files"][number] = { path: agentSetupManifest, mode: 0o644, content: await readFile(join(pylonRecipeDir, agentSetupManifest), "utf8") };
+const modelPolicy: ImageRecipe["files"][number] = { path: "claude-managed-settings.json", mode: 0o644, content: await readFile(join(pylonRecipeDir, "claude-managed-settings.json"), "utf8") };
 
 async function recipeDir(t: { after(fn: () => Promise<void>): void }, files: Record<string, string>): Promise<string> {
   const dir = await tempDir("nexus-recipe-", t);
@@ -220,7 +221,7 @@ test("the smoke boot expects each tool's exact pinned version, and whatever the 
 });
 
 test("a version check fails on any other version, naming the expected and actual output", () => {
-  const checks = smokeChecks({ files: [{ path: "nexus", mode: 0o644, content: 'const version = "0.7.3";\n' }, manifest], pins });
+  const checks = smokeChecks({ files: [{ path: "nexus", mode: 0o644, content: 'const version = "0.7.3";\n' }, manifest, modelPolicy], pins });
   const check = (name: string) => checks.find((c) => c.name === name)!;
   assert.equal(smokeFailure(check("claude version"), 0, "2.1.308 (Claude Code)\n"), undefined);
   assert.equal(smokeFailure(check("claude version"), 0, "2.1.309 (Claude Code)\n"), 'expected "2.1.308 (Claude Code)\\n", got "2.1.309 (Claude Code)\\n"');
@@ -256,6 +257,18 @@ test("the smoke boot expects the offline switches in every exec, and the PYLON.m
   assert.notEqual(smokeFailure(check("exec environment"), 0, "v26.12.1 /run/gondolin/ca-certificates.crt undefined 1\n"), undefined);
   assert.equal(smokeFailure(check("pylon guide"), 0, "@~/.nexus/PYLON.md\n/home/user/.nexus/PYLON.md\n"), undefined);
   assert.notEqual(smokeFailure(check("pylon guide"), 0, "@~/.nexus/PYLON.md\n"), undefined);
+});
+
+test("the image's managed settings allow Claude Code only Opus, Sonnet and Haiku, deny Fable, and hold Default to them", () => {
+  assert.deepEqual(JSON.parse(modelPolicy.content), { availableModels: ["opus", "sonnet", "haiku"], deniedModels: ["fable"], enforceAvailableModels: true });
+});
+
+test("the smoke boot expects the recipe's managed settings installed root's and read-only to user", async () => {
+  const check = smokeChecks({ ...(await loadImageRecipe()), pins }).find((c) => c.name === "Claude Code's managed model policy")!;
+  assert.equal(smokeFailure(check, 0, `root root 755\nroot root 644\nread-only\n${modelPolicy.content}`), undefined);
+  assert.notEqual(smokeFailure(check, 0, `root root 755\nuser user 644\n${modelPolicy.content}`), undefined, "a policy user may rewrite");
+  assert.notEqual(smokeFailure(check, 0, `root root 755\nroot root 644\nread-only\n${modelPolicy.content.replace('"fable"', '"opusplan"')}`), undefined, "another policy");
+  assert.notEqual(smokeFailure(check, 1, "stat: cannot statx '/etc/claude-code': No such file or directory\n"), undefined, "no policy");
 });
 
 test("the smoke boot expects gh at its pin, answering git's credential request with GH_TOKEN", async () => {

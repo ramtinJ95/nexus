@@ -39,6 +39,8 @@ export const nexusOutbox = `${helpersDir}/nexus-outbox.ts`;
 export const nexusTurn = `${helpersDir}/nexus-turn.ts`;
 /** The image's copy of checkout-files.py, which the control plane reads a turn's snapshot back with. */
 export const checkoutHelper = "/usr/local/lib/nexus/checkout-files.py";
+/** Claude Code's managed settings, which no user, project or --settings file overrides. */
+export const claudeManagedSettings = "/etc/claude-code/managed-settings.json";
 
 /** The host the guest's NEXUS_API names. Each backend's host bridge answers it on the node, so it needs no allowlist entry or DNS name. */
 export const bridgeHost = "nexus.pylon";

@@ -111,6 +111,9 @@ COPY nexus-outbox.ts /usr/local/bin/nexus-outbox.ts
 COPY nexus-turn.ts /usr/local/bin/nexus-turn.ts
 COPY nexus-kvm /usr/local/libexec/nexus/nexus-kvm
 COPY checkout-files.py /usr/local/lib/nexus/checkout-files.py
+# Root's, so that Claude Code running as user cannot edit it. It keeps every model Claude Code selects, for the
+# main session, subagents, skills and hooks, to Opus, Sonnet and Haiku, never Fable.
+COPY claude-managed-settings.json /etc/claude-code/managed-settings.json
 # The common dotfiles layer as a git repository, which the boot path clones into ~/.nexus/dotfiles and then
 # updates by fetch. It is owned by user because git refuses to clone a local repository another user owns.
 # The recipe carries files, not git objects, so its one commit names the upstream commit instead of being it,

@@ -20,6 +20,7 @@ export const recipePaths = [
   "agent-setup/manifest.json",
   "agent-setup/manifest.ts",
   "checkout-files.py",
+  "claude-managed-settings.json",
   "dotfiles/README.md",
   "gondolin.json",
   "nexus",

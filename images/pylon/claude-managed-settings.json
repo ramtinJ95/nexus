@@ -1,0 +1,1 @@
+{"availableModels": ["opus", "sonnet", "haiku"], "deniedModels": ["fable"], "enforceAvailableModels": true}

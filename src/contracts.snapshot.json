@@ -38,6 +38,7 @@
     "images/pylon/agent-setup/manifest.ts: reserved-path:image-rebuild",
     "images/pylon/build.sh: reserved-path:image-rebuild",
     "images/pylon/checkout-files.py: reserved-path:image-rebuild",
+    "images/pylon/claude-managed-settings.json: reserved-path:image-rebuild",
     "images/pylon/dotfiles/README.md: reserved-path:image-rebuild",
     "images/pylon/gondolin.json: reserved-path:image-rebuild",
     "images/pylon/nexus: reserved-path:image-rebuild",
