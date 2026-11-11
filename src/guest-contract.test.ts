@@ -14,7 +14,6 @@ test("each name and limit equals the literal it replaced", () => {
     maxServiceLogLines: 500,
     execOutputMaxBytes: 65_536,
     callTimeoutMs: 10_000,
-    herdrSession: "nexus",
     coreAttach: "hc",
     coreViewer: "([^ ]*/)?(herdr-core|hc)( attach( .*)?)?",
     coreStartMs: 5_000,

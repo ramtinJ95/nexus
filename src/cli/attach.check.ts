@@ -1,23 +1,30 @@
 /**
  * Real-node validation of `nexus attach` through the control plane, run by hand on a Mac from a checkout:
- *   node src/cli/attach.check.ts --project P [--prefix ctrl+b] [--keep] [--skip-idle-pause] [--evidence DIR]
- *     [--url URL] [--socks HOST:PORT|none]
+ *   node src/cli/attach.check.ts --project P [--keep] [--skip-idle-pause] [--evidence DIR] [--url URL] [--socks HOST:PORT|none]
  *
  * It drives the real CLI, `node src/cli/nexus.ts`, which finds the control plane and the proxy as it always does,
  * from the flags given here, its environment or its config file. Each attach runs on a real pty on this Mac, which
  * openTerminal makes with the same relay the control plane runs in a pylon, so the CLI sees a terminal of a known
  * size that the check can resize and type into. It starts one thread in project P and touches no other thread.
  *
- * Steps: start the thread and open a shell session titled attach-check; attach at 100x30 and see the session on
- * Herdr's screen; resize to 140x40 and see Herdr draw past row 30; stay attached past a probe snapshot and see the
- * thread's human activity advance, which only the attached terminal can do; detach with Herdr's prefix and `q` and
- * see the CLI exit 0 and the terminal's modes restored; archive the thread and see attach exit 5; unarchive it;
- * unless --skip-idle-pause, wait up to 30 minutes for the pylon to pause for idleness, and see attach wait for its
- * wake and then show the session; delete the thread unless --keep. A failed step keeps the thread and prints its ID.
+ * The thread has no Claude worker, so `nexus attach` opens Herdr Core's picker of the pylon's terminals
+ * (guest-contract.ts attachScript). Steps: start the thread and open a shell session titled attach-check; attach at
+ * 100x30, pick the session in the picker and see the shell there answer from the session's terminal; resize to
+ * 140x40 and see that shell's size grow; stay attached past a probe snapshot and see the thread's human activity
+ * advance, which only the attached terminal can do; detach with Core's Ctrl+\ and see the CLI exit 0 and the
+ * terminal's modes restored; archive the thread and see attach exit 5; unarchive it; unless --skip-idle-pause, wait
+ * up to 30 minutes for the pylon to pause for idleness, and see attach wait for its wake and then pick the kept shell,
+ * back at its address; delete the thread unless --keep. A failed step keeps the thread and prints its ID.
  *
- * --prefix is Herdr's prefix key, ctrl+b by default, which a pylon's dotfiles can change. Every CLI call's output
- * and every terminal's transcript goes to the evidence directory, a new temporary one by default. It prints
- * ATTACH_CHECK_PASS last.
+ * Assumed, not seen in spikes/herdr-core, which saw only `herdr-core attach <t>` exit 0 on Ctrl+\ and the picker's
+ * command line: the picker lists each live terminal by its address; Enter in it attaches to the first one listed,
+ * here the thread's only terminal, rather than to the "new…" entry its help puts on top; a detach from a terminal
+ * picked there ends the picker with exit 0 rather than going back to its list; the shell sees the size of the one
+ * terminal attached to it; and a kept shell's terminal comes back at its address after a VM restore as after the
+ * spike's core stop and start, with HC_TERMINAL_ID set to it.
+ *
+ * Every CLI call's output and every terminal's transcript goes to the evidence directory, a new temporary one by
+ * default. It prints ATTACH_CHECK_PASS last.
  */
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -28,6 +35,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import type { Thread, ThreadDetail } from "../contract/threads.ts";
+import type { OpenedSession } from "../contract/pylon.ts";
 import { openTerminal, terminalSize, type Terminal, type TerminalSize } from "../guest-terminal.ts";
 import { processStream } from "../process-stream.ts";
 import { shellQuote } from "../shell.ts";
@@ -38,7 +46,6 @@ const untouchable: readonly string[] = ["th-884e6960c34f", "th-9d91e1aa1625"];
 const { values: flags } = parseArgs({
   options: {
     project: { type: "string" },
-    prefix: { type: "string", default: "ctrl+b" },
     keep: { type: "boolean", default: false },
     "skip-idle-pause": { type: "boolean", default: false },
     evidence: { type: "string" },
@@ -48,18 +55,13 @@ const { values: flags } = parseArgs({
   strict: true,
 });
 if (flags.project === undefined) throw new Error("name the project to start the check's thread in with --project");
-const prefix = prefixKey(flags.prefix);
+/** Core's detach key, Ctrl+\, as the byte a terminal sends for it. */
+const detachKey = "\x1c";
 const evidence = flags.evidence ?? await mkdtemp(join(tmpdir(), "nexus-attach-check-"));
 await mkdir(evidence, { recursive: true });
 console.log(`evidence: ${evidence}`);
 const cli = fileURLToPath(new URL("./nexus.ts", import.meta.url));
 const endpoint = [...flags.url === undefined ? [] : ["--url", flags.url], ...flags.socks === undefined ? [] : ["--socks", flags.socks]];
-
-/** `ctrl+<letter>` as the byte a terminal sends for it, or any other key as it is. */
-function prefixKey(key: string): string {
-  const ctrl = /^ctrl\+([a-z])$/i.exec(key);
-  return ctrl === null ? key : String.fromCharCode(ctrl[1]!.toLowerCase().charCodeAt(0) - 96);
-}
 
 function refuseUntouchable(words: readonly string[]): void {
   const named = untouchable.filter((id) => words.some((word) => word.includes(id)));
@@ -136,6 +138,8 @@ async function inTerminal(name: string, size: TerminalSize, script: string) {
   };
 }
 
+type Attached = Awaited<ReturnType<typeof inTerminal>>;
+
 /** Prints the lines of a transcript that match, as the terminal showed them. */
 function echo(name: string, printed: string, line: RegExp): void {
   for (const text of plain(printed).split(/\r?\n/)) if (line.test(text)) console.log(`${name}: ${text.trim()}`);
@@ -145,32 +149,43 @@ function echo(name: string, printed: string, line: RegExp): void {
 const attachScript = () => `${nexusLine(["attach", thread])}; echo "attach-exit=$?"; stty -a`;
 
 /**
- * Waits for Herdr's screen to show the session. A pylon built before its image set `onboarding = false` shows Herdr's
- * first-run dialog over the session, which would take the detach keys. Enter passes it and opens Herdr's settings,
- * which Escape closes.
+ * Types `line` into the attached shell and returns the first match of `answer` in what follows, which the typed line
+ * itself must not match, since the terminal echoes it.
  */
-async function seesSession(t: Awaited<ReturnType<typeof inTerminal>>, withinMs: number): Promise<void> {
-  await t.until("Herdr's screen shows the session attach-check", (printed) => plain(printed).includes("attach-check"), withinMs);
-  // The dialog comes in the frame that draws the session or soon after it.
-  await sleep(2_000);
-  if (!plain(t.printed()).includes("mouse-first terminal")) return;
-  console.log("Herdr shows its first-run onboarding over the session, so the check passes it with Enter and closes the settings after it with Escape");
-  const onboarding = t.mark();
-  await t.terminal.write(Buffer.from("\r"));
-  await t.until("Herdr opens its settings after the onboarding", (printed) => plain(printed).includes("agent integrations"), 20_000, onboarding);
-  await t.terminal.write(Buffer.from("\x1b"));
-  await sleep(2_000);
+async function ask(t: Attached, what: string, line: string, answer: RegExp, withinMs = 20_000): Promise<RegExpExecArray> {
+  const from = t.mark();
+  await t.terminal.write(Buffer.from(`${line}\r`));
+  await t.until(what, (printed) => answer.test(plain(printed)), withinMs, from);
+  return answer.exec(plain(t.printed(from)))!;
 }
 
-/** Detaches with Herdr's prefix and `q`, and checks the CLI exits 0 and leaves the terminal's modes as they were. */
-async function detach(name: string, t: Awaited<ReturnType<typeof inTerminal>>): Promise<void> {
-  await t.terminal.write(Buffer.from(prefix));
-  await sleep(300);
-  await t.terminal.write(Buffer.from("q"));
+/**
+ * Waits for Core's picker to list the session's terminal, picks it with Enter, and checks the shell it lands in runs in
+ * that terminal, by the address Core gives its programs.
+ */
+async function picksSession(t: Attached, terminal: string, withinMs: number): Promise<void> {
+  const listed = new RegExp(`\\b${terminal}\\b`);
+  await t.until(`Core's picker lists the session's terminal ${terminal}`, (printed) => listed.test(plain(printed)), withinMs);
+  await sleep(1_000);
+  await t.terminal.write(Buffer.from("\r"));
+  await sleep(1_000);
+  const [, landed] = await ask(t, "the picked terminal's shell says where it runs", 'echo "attached-to=$HC_TERMINAL_ID"', /attached-to=(t[0-9a-z]+)/);
+  assert.equal(landed, terminal, `the picker attaches to the session's terminal ${terminal}`);
+}
+
+/** The attached shell's size, as `stty size` gives it. */
+async function shellSize(t: Attached): Promise<{ rows: number; cols: number }> {
+  const [, rows, cols] = await ask(t, "the shell gives its size", 'echo "size=$(stty size | tr " " x)"', /size=(\d+)x(\d+)/);
+  return { rows: Number(rows), cols: Number(cols) };
+}
+
+/** Detaches with Core's Ctrl+\, and checks the CLI exits 0 and leaves the terminal's modes as they were. */
+async function detach(name: string, t: Attached): Promise<void> {
+  await t.terminal.write(Buffer.from(detachKey));
   const end = await t.end(60_000);
   const printed = t.printed();
   echo(name, printed, /attach-exit=|lflags:/);
-  assert.match(plain(printed), /attach-exit=0\b/, `${name}: Herdr's detach ends nexus attach with exit code 0`);
+  assert.match(plain(printed), /attach-exit=0\b/, `${name}: Core's detach ends nexus attach with exit code 0`);
   const modes = plain(printed.slice(printed.lastIndexOf("attach-exit=")));
   assert.match(modes, /(^|\s)icanon(\s|$)/m, `${name}: stty -a after the attach shows icanon, so the terminal is no longer raw`);
   assert.match(modes, /(^|\s)echo(\s|$)/m, `${name}: stty -a after the attach shows echo`);
@@ -184,22 +199,26 @@ console.log(`thread: ${thread}`);
 let passed = false;
 try {
   await pylonIs("running", "running", 10 * 60_000);
-  const opened = await json<unknown>("session-open", ["session", "open", thread, "--harness", "shell", "--title", "attach-check"]);
+  const opened = await json<OpenedSession>("session-open", ["session", "open", thread, "--harness", "shell", "--title", "attach-check"]);
   console.log(`session-open: ${JSON.stringify(opened)}`);
 
   const attached = await inTerminal("attach", terminalSize(100, 30), attachScript());
-  await seesSession(attached, 60_000);
-  echo("attach", attached.printed(), /attach-check/);
+  await picksSession(attached, opened.herdrPane, 60_000);
+  echo("attach", attached.printed(), /attached-to=/);
 
-  const rowsBefore = cursorRows(attached.printed());
-  assert.ok(rowsBefore.every((row) => row <= 30), `Herdr draws within 30 rows before the resize, and drew on rows up to ${Math.max(...rowsBefore)}`);
-  const beforeResize = attached.mark();
+  const before = await shellSize(attached);
+  assert.ok(before.rows <= 30 && before.cols <= 100, `the shell sees at most 100x30 before the resize, and sees ${before.cols}x${before.rows}`);
   await attached.terminal.resize(terminalSize(140, 40));
-  await attached.until("Herdr redraws past row 30 after the resize to 140x40", (printed) => cursorRows(printed).some((row) => row > 30), 20_000, beforeResize);
-  console.log(`resize: Herdr drew on rows up to ${Math.max(...cursorRows(attached.printed(beforeResize)))} after the resize to 140x40`);
+  let after = before;
+  for (const deadline = Date.now() + 20_000; after.rows <= 30 || after.cols <= 100;) {
+    assert.ok(Date.now() < deadline, `the shell sees more than 100x30 within 20 s of the resize to 140x40, and sees ${after.cols}x${after.rows}`);
+    await sleep(1_000);
+    after = await shellSize(attached);
+  }
+  console.log(`resize: the shell saw ${before.cols}x${before.rows}, then ${after.cols}x${after.rows} after the resize to 140x40`);
 
   // Only GETs reach the control plane from here until the detach, and a GET records no activity. The probe counts
-  // attached Herdr clients in its snapshot every 60 s, so 75 s spans one.
+  // attached Core viewers in its snapshot every 60 s, so 75 s spans one.
   const humanBefore = (await show("presence-before")).thread.lastHumanActivityAt;
   await sleep(75_000);
   const humanAfter = (await show("presence-after")).thread.lastHumanActivityAt;
@@ -232,8 +251,9 @@ try {
     await pylonIs("idle-paused", "paused", 30 * 60_000, 30_000);
     const woken = await inTerminal("attach-woken", terminalSize(100, 30), attachScript());
     await woken.until("attach waits for the paused pylon", (printed) => plain(printed).includes(`waiting for the pylon of ${thread}, which is paused`), 60_000);
-    await seesSession(woken, 3 * 60_000);
-    echo("attach-woken", woken.printed(), /nexus: waiting|attach-check/);
+    // The shell is kept, so the woken core brings it back at its address, where the relaunch finds it.
+    await picksSession(woken, opened.herdrPane, 3 * 60_000);
+    echo("attach-woken", woken.printed(), /nexus: waiting|attached-to=/);
     await detach("attach-woken", woken);
   }
 
@@ -244,8 +264,3 @@ try {
   else if (flags.keep) console.log(`kept ${thread}, as --keep asks`);
 }
 console.log("ATTACH_CHECK_PASS");
-
-/** The rows of every cursor position the terminal was sent, `CSI row ; col H`. */
-function cursorRows(printed: string): number[] {
-  return [...printed.matchAll(/\x1b\[(\d+)(?:;\d+)?[Hf]/g)].map((m) => Number(m[1]));
-}

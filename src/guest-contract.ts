@@ -44,9 +44,6 @@ export const startCore = "setsid -f tini -s -- herdr-core serve </dev/null >/dev
  */
 export const ensureCore = `{ ${coreRunning} || { ${startCore}; i=0; until ${coreRunning}; do i=$((i + 1)); [ $i -lt ${coreStartMs / 100} ] || break; sleep 0.1; done; ${coreRunning}; }; }`;
 
-/** The named Herdr session the pylon's live checks of Herdr 0.9.5 ran in. */
-export const herdrSession = "nexus";
-
 /** A Core terminal's address on its own machine, such as t7. */
 export const terminalPattern = /^t[0-9a-z]{1,12}$/;
 /** What a person runs in a shell in the pylon to attach: Core's picker of the pylon's terminals. */
