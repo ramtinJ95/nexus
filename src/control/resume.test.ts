@@ -26,7 +26,7 @@ function fixture(t: import("node:test").TestContext) {
   registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
   const typed: Extract<PylonCommand, { kind: "send-claude" }>[] = [];
   let outcome: "sent" | "blocked" = "sent";
-  const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command as Extract<PylonCommand, { kind: "send-claude" }>); return { kind: "send-claude", outcome, terminal: "w1:p1", resumed: true }; } };
+  const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command as Extract<PylonCommand, { kind: "send-claude" }>); return { kind: "send-claude", outcome, terminal: "t1", resumed: true }; } };
   const harness = { async send() { throw new Error("a Claude worker's message never reaches the harness"); } };
   const inbox = agentInbox({ log: assert.fail, registry, harness, probes: new Map([[node, probe]]), wake() {} });
   const resumer = deadTurnResumer({ registry, inbox, personWroteTo: agentReader(registry, { async watch() { throw new Error("no harness thread here"); } }, storedTranscripts).personWrote, clock: () => now, log() {} });

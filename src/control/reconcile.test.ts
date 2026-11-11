@@ -367,11 +367,11 @@ test("a snapshot from a probe below the contract this control plane reads is ref
   }
 });
 
-const working: SessionFact = { id: "w1:p1", state: "running", terminal: "w1:p1", harness: "claude-code", harnessSessionId: "s1", status: "working", title: "review" };
-const idleShell: SessionFact = { id: "w2:p1", state: "running", terminal: "w2:p1", harness: "shell", harnessSessionId: null, status: "idle" };
-const workingRow: SessionRow = { id: "w1:p1", state: "running", terminal: "w1:p1", harness: "claude-code", harnessSessionId: "s1", title: "review", status: "working", message: null };
-const idleShellRow: SessionRow = { id: "w2:p1", state: "running", terminal: "w2:p1", harness: "shell", harnessSessionId: null, title: null, status: "idle", message: null };
-const pausedReview: PausedSession = { id: "w1:p1", terminal: "w1:p1", harness: "claude-code", harnessSessionId: "s1", title: "review" };
+const working: SessionFact = { id: "t1", state: "running", terminal: "t1", harness: "claude-code", harnessSessionId: "s1", status: "working", title: "review" };
+const idleShell: SessionFact = { id: "t2", state: "running", terminal: "t2", harness: "shell", harnessSessionId: null, status: "idle" };
+const workingRow: SessionRow = { id: "t1", state: "running", terminal: "t1", harness: "claude-code", harnessSessionId: "s1", title: "review", status: "working", message: null };
+const idleShellRow: SessionRow = { id: "t2", state: "running", terminal: "t2", harness: "shell", harnessSessionId: null, title: null, status: "idle", message: null };
+const pausedReview: PausedSession = { id: "t1", terminal: "t1", harness: "claude-code", harnessSessionId: "s1", title: "review" };
 const pausedReviewRow: SessionRow = { ...pausedReview, state: "paused", status: null, message: null };
 const runningWith = (facts: Partial<RunningFacts>): PylonObservation => ({ ...running(liveHash), ...facts } as PylonObservation);
 const knows = (previous: PylonObservation | "absent" = "absent") => new Map([[pylonId, previous]]);
@@ -494,12 +494,12 @@ test("ingest: an unlisted pylon's list is written though the previous observatio
 });
 
 test("ingest: the first list after a wake replaces the paused sessions with their terminals, and reports a failed one as failed", () => {
-  const moved: SessionFact = { ...working, id: "w3:p1", terminal: "w3:p1", status: "idle" };
+  const moved: SessionFact = { ...working, id: "t3", terminal: "t3", status: "idle" };
   const failed: SessionFact = { id: "failed-0123456789ab", state: "failed", terminal: null, harness: "pi", harnessSessionId: "/s.jsonl", status: "unknown", title: "plan", message: "pi exited 1" };
   assert.deepEqual(ingest({ type: "pylon", pylon: phase("booting") }, node, knows(stopped(lastCheckpoint, [pausedReview])), now), []);
   assert.deepEqual(ingest({ type: "pylon", pylon: runningWith({ sessions: [moved, failed] }) }, node, knows(phase("booting")), now), [
     { record: "sessions", pylonId, sessions: [
-      { ...workingRow, id: "w3:p1", terminal: "w3:p1", status: "idle" },
+      { ...workingRow, id: "t3", terminal: "t3", status: "idle" },
       { id: "failed-0123456789ab", state: "failed", terminal: null, harness: "pi", harnessSessionId: "/s.jsonl", title: "plan", status: null, message: "pi exited 1" },
     ] },
   ] satisfies RegistryWrite[]);

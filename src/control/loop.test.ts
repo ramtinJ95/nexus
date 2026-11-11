@@ -1365,7 +1365,7 @@ test("with the real ingest, a paused pylon lists its sessions as paused, and onc
   const fake = fakeNode({ autoFinish: true });
   run(t, registry, fake.probe, { ingest: realIngest });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
-  const review: SessionFact = { id: "w1:p1", state: "running", terminal: "w1:p1", harness: "claude-code", harnessSessionId: "s1", status: "working", title: "review" };
+  const review: SessionFact = { id: "t1", state: "running", terminal: "t1", harness: "claude-code", harnessSessionId: "s1", status: "working", title: "review" };
   fake.setSessions(thread.pylonId, [review]);
   await until("the session is recorded", () => registry.threads.sessions(thread.pylonId).length === 1);
 
@@ -1381,9 +1381,9 @@ test("with the real ingest, a paused pylon lists its sessions as paused, and onc
   assert.ok(stored?.phase === "running" && stored.sessions === null);
   assert.deepEqual(registry.threads.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...review, status: "unknown", message: null }]);
 
-  const moved: SessionFact = { ...review, id: "w3:p1", terminal: "w3:p1", status: "working" };
+  const moved: SessionFact = { ...review, id: "t3", terminal: "t3", status: "working" };
   fake.setSessions(thread.pylonId, [moved]);
-  await until("the relaunched session replaces the resumed one", () => registry.threads.sessions(thread.pylonId)[0]?.id === "w3:p1");
+  await until("the relaunched session replaces the resumed one", () => registry.threads.sessions(thread.pylonId)[0]?.id === "t3");
   assert.deepEqual(registry.threads.sessions(thread.pylonId), [{ pylon: thread.pylonId, ...moved, message: null }]);
   fake.setSessions(thread.pylonId, [{ ...moved, status: "idle" }]);
   await until("its turn ends", () => registry.threads.sessions(thread.pylonId)[0]?.status === "idle");
@@ -1397,7 +1397,7 @@ test("a restarted control plane writes each pylon's session list on its first ob
   const thread = seed(before);
   const first = polled(startLoop({ registry: before, probes: [fake.probe], ingest: realIngest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail }));
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
-  const review: SessionFact = { id: "w1:p1", state: "running", terminal: "w1:p1", harness: "claude-code", harnessSessionId: "s1", status: "idle", title: "review" };
+  const review: SessionFact = { id: "t1", state: "running", terminal: "t1", harness: "claude-code", harnessSessionId: "s1", status: "idle", title: "review" };
   fake.setSessions(thread.pylonId, [review]);
   await until("the session is recorded", () => before.threads.sessions(thread.pylonId).length === 1);
   before.threads.setThreadStatus(thread.id, "archived");
@@ -1410,7 +1410,7 @@ test("a restarted control plane writes each pylon's session list on its first ob
   const after = openRegistry(path);
   run(t, after, fake.probe, { ingest: realIngest });
   await until("the paused list is written again", () => after.threads.sessions(thread.pylonId).length === 1);
-  assert.deepEqual(after.threads.sessions(thread.pylonId).map((s) => [s.id, s.state]), [["w1:p1", "paused"]]);
+  assert.deepEqual(after.threads.sessions(thread.pylonId).map((s) => [s.id, s.state]), [["t1", "paused"]]);
 });
 
 test("with the real ingest, sessions the probe could not read record no agent activity", async (t) => {
@@ -1916,7 +1916,7 @@ test("a deleted thread's pylon removed by hand while the control plane was down 
   const thread = seed(before);
   const first = polled(startLoop({ registry: before, probes: [fake.probe], ingest: realIngest, previewPorts, intervalMs: 10, reconnectMs: 10, log: assert.fail }));
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
-  fake.setSessions(thread.pylonId, [{ id: "w1:p1", state: "running", terminal: "w1:p1", harness: "claude-code", harnessSessionId: "s1", status: "idle", title: "review" }]);
+  fake.setSessions(thread.pylonId, [{ id: "t1", state: "running", terminal: "t1", harness: "claude-code", harnessSessionId: "s1", status: "idle", title: "review" }]);
   before.threads.setThreadStatus(thread.id, "archived");
   await until("the pause is folded in", () => before.threads.pylon(thread.pylonId)?.pauses === 1 && before.threads.sessions(thread.pylonId)[0]?.state === "paused");
   await first.close();
@@ -2208,7 +2208,7 @@ test("a queued Claude worker launches once after its pylon runs", async (t) => {
     assert.equal(pylonId, thread.pylonId);
     assert.equal(fake.pylons.get(pylonId)?.phase, "running");
     commands.push(command);
-    return { kind: "open-session", terminal: "w1:p1" };
+    return { kind: "open-session", terminal: "t1" };
   } };
   const loop = run(t, registry, probe);
   await until("worker started", () => registry.threads.claudeWorker(thread.id)?.state === "started");
@@ -2223,7 +2223,7 @@ test("a stalled Claude launch reports its screen and failed attention without re
   let launches = 0;
   const probe: ProbeClient = { ...fake.probe, command: async () => {
     launches++;
-    return { kind: "open-session", terminal: "w1:p1", stalled: "no UserPromptSubmit within 30 seconds. The terminal showed:\nChoose the text style" };
+    return { kind: "open-session", terminal: "t1", stalled: "no UserPromptSubmit within 30 seconds. The terminal showed:\nChoose the text style" };
   } };
   const loop = run(t, registry, probe, { log: () => {} });
   await until("worker stalled", () => registry.threads.claudeWorker(thread.id)?.state === "stalled");
@@ -2274,7 +2274,7 @@ test("a submission receipt wins over a late stalled result without a contradicto
   const probe: ProbeClient = { ...fake.probe, command: async (_pylon, command) => {
     if (command.kind !== "open-session") throw new Error("wrong command");
     registry.threads.reportSession(node, { sequence: 1, pylon: thread.pylonId, time: Date.now(), event: { kind: "session.turn-started", session: command.resume! } });
-    return { kind: "open-session", terminal: "w1:p1", stalled: "no UserPromptSubmit within 30 seconds" };
+    return { kind: "open-session", terminal: "t1", stalled: "no UserPromptSubmit within 30 seconds" };
   } };
   const loop = run(t, registry, probe);
   await until("worker submitted", () => registry.threads.claudeWorker(thread.id)?.state === "started");
@@ -2323,7 +2323,7 @@ test("a Claude launch whose probe restarts mid-way is sent again under its sessi
   const fake = fakeNode({ autoFinish: true });
   const commands: PylonCommand[] = [];
   const logged: string[] = [];
-  run(t, registry, restartingProbe(fake, ["restart", "restart", { kind: "open-session", terminal: "w1:p1" }], commands), { log: (line) => logged.push(line) });
+  run(t, registry, restartingProbe(fake, ["restart", "restart", { kind: "open-session", terminal: "t1" }], commands), { log: (line) => logged.push(line) });
   await until("worker started", () => registry.threads.claudeWorker(thread.id)?.state === "started");
   assert.equal(commands.length, 3);
   assert.deepEqual(new Set(commands.map((c) => c.kind === "open-session" && c.resume)), new Set([registry.threads.claudeWorker(thread.id)!.session]), "every send names the session recorded before the first");
@@ -2339,7 +2339,7 @@ test("a pass wakes a paused pylon while another's Claude launch on its node wait
   const commands: PylonCommand[] = [];
   const { promise: answered, resolve: answer } = Promise.withResolvers<void>();
   t.after(() => answer());
-  const restarting = restartingProbe(fake, ["restart", { kind: "open-session", terminal: "w1:p1" }], commands);
+  const restarting = restartingProbe(fake, ["restart", { kind: "open-session", terminal: "t1" }], commands);
   const probe: ProbeClient = { ...restarting, command: async (pylonId, command) => {
     if (commands.length === 0) await answered;
     return restarting.command(pylonId, command);
@@ -2388,7 +2388,7 @@ test("a Claude launch a control plane restart cut off goes again under its sessi
   claudeWorkerAt(registry, thread.id, "starting", { session: "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30" });
   const fake = fakeNode({ autoFinish: true });
   const commands: PylonCommand[] = [];
-  run(t, registry, restartingProbe(fake, [{ kind: "open-session", terminal: "w1:p1" }], commands));
+  run(t, registry, restartingProbe(fake, [{ kind: "open-session", terminal: "t1" }], commands));
   await until("worker started", () => registry.threads.claudeWorker(thread.id)?.state === "started");
   assert.deepEqual(commands.map((c) => c.kind === "open-session" && c.resume), ["6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30"]);
 });

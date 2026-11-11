@@ -107,7 +107,7 @@ test("a probe names the harness field a session open or close fails on, and why"
     { kind: "open-session", harness: "pi", title: "x", prompt: "p" },
     { kind: "open-session", harness: "shell", title: "x", model: "m" },
     { kind: "open-session", harness: "shell", title: "x", resume: "s" },
-    { kind: "close-session", terminal: "w1:p1", session: { harness: "codex", harnessSessionId: null, title: null } },
+    { kind: "close-session", terminal: "t1", session: { harness: "codex", harnessSessionId: null, title: null } },
   ].map((command) => {
     try {
       parsePylonCommand(JSON.stringify(command));
@@ -132,9 +132,9 @@ const commands: PylonCommand[] = [
   { kind: "open-session", harness: "claude-code", title: "review", resume: "s-1", prompt: "p".repeat(16_384), model: "m".repeat(200) },
   { kind: "open-session", harness: "pi", title: "plan", resume: "/home/user/.pi/s.jsonl" },
   { kind: "open-session", harness: "shell", title: "sh" },
-  { kind: "close-session", terminal: "w1:p1" },
-  { kind: "close-session", terminal: "w1:p1", session: { harness: "claude-code", harnessSessionId: "s-1", title: "review" } },
-  { kind: "close-session", terminal: "w1:p1", session: { harness: "shell", harnessSessionId: null, title: null } },
+  { kind: "close-session", terminal: "t1" },
+  { kind: "close-session", terminal: "t1", session: { harness: "claude-code", harnessSessionId: "s-1", title: "review" } },
+  { kind: "close-session", terminal: "t1", session: { harness: "shell", harnessSessionId: null, title: null } },
   { kind: "drop-failed-session", id: "failed-0123456789ab" },
   { kind: "send-claude", session: "s".repeat(200), text: "t".repeat(16_383) + "\n", model: "opus", requestId: "r-1" },
   { kind: "send-claude", session: "0b1c-2d3e", text: "hi" },
@@ -149,7 +149,7 @@ const commands: PylonCommand[] = [
 test("a probe takes a command of every kind as it was sent, with the fields it does not know", () => {
   for (const command of commands) assert.deepEqual(parsePylonCommand(JSON.stringify(command)), command);
   for (const command of commands) assert.deepEqual(parsePylonCommand(JSON.stringify({ ...command, ...unknown })), { ...command, ...unknown });
-  const named = { kind: "close-session", terminal: "w1:p1", session: { harness: "pi", harnessSessionId: null, title: "plan", ...unknown } };
+  const named = { kind: "close-session", terminal: "t1", session: { harness: "pi", harnessSessionId: null, title: "plan", ...unknown } };
   assert.deepEqual(parsePylonCommand(JSON.stringify(named)), named);
 });
 
@@ -162,8 +162,8 @@ test("a probe refuses a command that fails any check of its fields", () => {
     { kind: "open-session", harness: "codex", title: "x" }, { kind: "open-session", harness: "shell" }, { kind: "open-session", harness: "shell", title: "" }, { kind: "open-session", harness: "shell", title: "x", resume: "s" },
     { kind: "open-session", harness: "pi", title: "x", model: "m" }, { kind: "open-session", harness: "pi", title: "x", prompt: "p" }, { kind: "open-session", harness: "claude-code", title: "x", model: "m".repeat(201) },
     { kind: "open-session", harness: "claude-code", title: "x", prompt: "p".repeat(16_385) }, { kind: "open-session", harness: "claude-code", title: "x", prompt: "" }, { kind: "open-session", harness: "pi", title: "x", resume: 1 },
-    { kind: "close-session" }, { kind: "close-session", terminal: "w1:p1", session: null }, { kind: "close-session", terminal: "w1:p1", session: { harness: "codex", harnessSessionId: null, title: null } },
-    { kind: "close-session", terminal: "w1:p1", session: { harness: "pi", title: null } }, { kind: "close-session", terminal: "w1:p1", session: { harness: "pi", harnessSessionId: null } },
+    { kind: "close-session" }, { kind: "close-session", terminal: "t1", session: null }, { kind: "close-session", terminal: "t1", session: { harness: "codex", harnessSessionId: null, title: null } },
+    { kind: "close-session", terminal: "t1", session: { harness: "pi", title: null } }, { kind: "close-session", terminal: "t1", session: { harness: "pi", harnessSessionId: null } },
     { kind: "drop-failed-session" }, { kind: "drop-failed-session", id: "" },
     { ...send, session: "a/b" }, { ...send, session: "s".repeat(201) }, { ...send, session: 1 }, { ...send, text: "" }, { ...send, text: "t".repeat(16_385) }, { ...send, text: "a\tb" }, { ...send, text: "a\u001b[31mb" },
     { ...send, model: "m".repeat(201) }, { ...send, model: "" }, { ...send, requestId: "" }, { kind: "send-claude-outcome" },
@@ -282,11 +282,11 @@ async function stubProbe(t: import("node:test").TestContext) {
 test("a command result is read as the probe sent it, and a close without an outcome or a result for another command is refused", async (t) => {
   const { client, answer } = await stubProbe(t);
   const at = pylonId as PylonId;
-  const send = { outcome: "queued", terminal: "w1:p1", resumed: false };
+  const send = { outcome: "queued", terminal: "t1", resumed: false };
   const results: [PylonCommand, unknown][] = [
     [commands[0]!, { kind: "exec", exitCode: null, output: "", truncated: true, ...unknown }],
-    [commands[4]!, { kind: "open-session", terminal: "w2:p1", ...unknown }],
-    [commands[4]!, { kind: "open-session", terminal: "w2:p1", stalled: "Claude launch stalled: no UserPromptSubmit within 30 seconds" }],
+    [commands[4]!, { kind: "open-session", terminal: "t2", ...unknown }],
+    [commands[4]!, { kind: "open-session", terminal: "t2", stalled: "Claude launch stalled: no UserPromptSubmit within 30 seconds" }],
     [commands[5]!, { kind: "close-session", outcome: "moved" }],
     [commands[8]!, { kind: "drop-failed-session", dropped: false }],
     [commands[9]!, { kind: "send-claude", ...send, ...unknown }],
@@ -304,7 +304,7 @@ test("a command result is read as the probe sent it, and a close without an outc
     assert.deepEqual(await client.command(at, command), result);
   }
   const bad: [PylonCommand, unknown][] = [
-    [commands[0]!, { kind: "open-session", terminal: "w1:p1" }], [commands[0]!, null], [commands[4]!, { kind: "open-session" }], [commands[4]!, { kind: "open-session", terminal: "w2:p1", stalled: "" }], [commands[5]!, { kind: "close-session", outcome: "gone" }], [commands[5]!, { kind: "close-session" }], [commands[5]!, { kind: "close-session", outcome: null }],
+    [commands[0]!, { kind: "open-session", terminal: "t1" }], [commands[0]!, null], [commands[4]!, { kind: "open-session" }], [commands[4]!, { kind: "open-session", terminal: "t2", stalled: "" }], [commands[5]!, { kind: "close-session", outcome: "gone" }], [commands[5]!, { kind: "close-session" }], [commands[5]!, { kind: "close-session", outcome: null }],
     [commands[8]!, { kind: "drop-failed-session" }], [commands[9]!, { kind: "send-claude", ...send, outcome: "lost" }], [commands[9]!, { kind: "send-claude", ...send, terminal: "" }],
     [commands[9]!, { kind: "send-claude", ...send, resumed: "no" }], [commands[11]!, { kind: "send-claude-outcome", send: "pending" }], [commands[11]!, { kind: "send-claude-outcome" }],
     [commands[14]!, { kind: "link-port", service: "" }], [commands[15]!, { kind: "unlink-port" }], [commands[15]!, { kind: "unlink-port", refused: "" }],
@@ -391,7 +391,7 @@ test("each union's list holds exactly its type's members, and the parser that re
 
   const { client, answer } = await stubProbe(t);
   const at = pylonId as PylonId;
-  const send = { terminal: "w1:p1", resumed: false };
+  const send = { terminal: "t1", resumed: false };
   for (const outcome of sendClaudeOutcomes) {
     answer({ kind: "send-claude", outcome, ...send });
     assert.equal((await client.command(at, commands[9]!) as { outcome: string }).outcome, outcome);

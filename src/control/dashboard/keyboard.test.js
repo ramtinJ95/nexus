@@ -170,7 +170,7 @@ test("a button with no ID keeps focus when its region is swapped: an answer, a s
   assert.equal(focused(), "Not now (in the page)", "the answer the person was on");
 
   button('[data-harness="shell"]').focus();
-  await poll({ sessions: sessions("w-1:p-1") });
+  await poll({ sessions: sessions("t1") });
   assert.equal(focused(), "New shell (in the page)", "the session button");
 
   button('[data-mode="review"]').focus();

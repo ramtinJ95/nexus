@@ -1224,7 +1224,7 @@ test("the thread page shows a paused session as resuming on wake, or on unarchiv
   const fix = await s.start("acme", "Fix checkout");
   s.observe(fix);
   s.registry.threads.apply({ record: "sessions", pylonId: fix.pylonId, sessions: [
-    { id: "w1:p1", state: "paused", terminal: "w1:p1", harness: "claude-code", harnessSessionId: null, title: "review", status: null, message: null },
+    { id: "t1", state: "paused", terminal: "t1", harness: "claude-code", harnessSessionId: null, title: "review", status: null, message: null },
     { id: "failed-0123456789ab", state: "failed", terminal: null, harness: "pi", harnessSessionId: null, title: "plan", status: null, message: "pi exited 1" },
   ] });
   const sessions = async () => {
@@ -1232,11 +1232,11 @@ test("the thread page shows a paused session as resuming on wake, or on unarchiv
     return { section, text: textOf(section) };
   };
   const shown = await sessions();
-  assert.match(shown.text, /Claude Code review paused, resumes on wake w1:p1/);
+  assert.match(shown.text, /Claude Code review paused, resumes on wake t1/);
   assert.match(shown.text, /pi plan failed It did not come back from the last wake, which the next tries again: pi exited 1/);
   assert.ok(!shown.text.includes("failed-0123456789ab"), "a session in no terminal shows no terminal");
   assert.equal((await s.call("POST", `/v1/threads/${fix.id}/archive`)).status, 200);
-  assert.match((await sessions()).text, /Claude Code review paused, resumes on unarchive w1:p1/);
+  assert.match((await sessions()).text, /Claude Code review paused, resumes on unarchive t1/);
 });
 
 test("the thread page's sessions open, show in the terminal and close from the page, but not the Claude worker's own, and an archived thread's do none", async (t) => {
@@ -1245,18 +1245,18 @@ test("the thread page's sessions open, show in the terminal and close from the p
   claudeWorkerAt(s.registry, worker.id, "started", { session: "5f0c" });
   s.observe(worker);
   s.registry.threads.apply({ record: "sessions", pylonId: worker.pylonId, sessions: [
-    { id: "w1:p1", state: "running", terminal: "w1:p1", harness: "claude-code", harnessSessionId: "5f0c", title: "Port the CLI", status: "working", message: null },
-    { id: "w2:p1", state: "running", terminal: "w2:p1", harness: "shell", harnessSessionId: null, title: "shell", status: "idle", message: null },
-    { id: "w3:p1", state: "paused", terminal: "w3:p1", harness: "pi", harnessSessionId: null, title: "plan", status: null, message: null },
+    { id: "t1", state: "running", terminal: "t1", harness: "claude-code", harnessSessionId: "5f0c", title: "Port the CLI", status: "working", message: null },
+    { id: "t2", state: "running", terminal: "t2", harness: "shell", harnessSessionId: null, title: "shell", status: "idle", message: null },
+    { id: "t3", state: "paused", terminal: "t3", harness: "pi", harnessSessionId: null, title: "plan", status: null, message: null },
     { id: "failed-0123456789ab", state: "failed", terminal: null, harness: "claude-code", harnessSessionId: "9a1b", title: "review", status: null, message: "claude exited 1" },
   ] });
   const buttons = async () => [...sectionOf((await s.call("GET", `/threads/${worker.id}`)).text, "sessions-h").matchAll(/<button [^>]*data-action="([^"]+)"[^>]*>/g)]
     .map(([button, action]) => [action, ...["harness", "address", "session", "confirm"].flatMap((key) => new RegExp(`data-${key}="([^"]*)"`).exec(button!)?.slice(1).map(textOf) ?? [])].join(" "));
   assert.deepEqual(await buttons(), [
     'close-session failed-0123456789ab Close the Claude Code session "review"? No wake tries it again.',
-    "show-session w1:p1",
-    "show-session w2:p1",
-    'close-session w2:p1 Close the Shell session "shell"? Its terminal closes, and what runs there ends.',
+    "show-session t1",
+    "show-session t2",
+    'close-session t2 Close the Shell session "shell"? Its terminal closes, and what runs there ends.',
     "open-session shell",
     "open-session pi",
     "open-session claude-code",
@@ -1267,10 +1267,10 @@ test("the thread page's sessions open, show in the terminal and close from the p
   const plain = await s.start("acme", "Fix checkout");
   s.observe(plain);
   s.registry.threads.apply({ record: "sessions", pylonId: plain.pylonId, sessions: [
-    { id: "w1:p1", state: "running", terminal: "w1:p1", harness: "claude-code", harnessSessionId: null, title: "login", status: "blocked", message: null },
+    { id: "t1", state: "running", terminal: "t1", harness: "claude-code", harnessSessionId: null, title: "login", status: "blocked", message: null },
   ] });
   const closes = [...sectionOf((await s.call("GET", `/threads/${plain.id}`)).text, "sessions-h").matchAll(/data-action="close-session" [^>]*data-session="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(closes, ["w1:p1"], "a Claude session with no ID yet closes on a thread with no Claude worker");
+  assert.deepEqual(closes, ["t1"], "a Claude session with no ID yet closes on a thread with no Claude worker");
 });
 
 test("the thread page lists a session of a harness this control plane does not know, such as a newer probe's, with no label", async (t) => {
@@ -1278,7 +1278,7 @@ test("the thread page lists a session of a harness this control plane does not k
   const fix = await s.start("acme", "Fix checkout");
   s.observe(fix);
   s.registry.threads.apply({ record: "sessions", pylonId: fix.pylonId, sessions: [
-    { id: "w1:p1", state: "running", terminal: "w1:p1", harness: "codex" as never, harnessSessionId: null, title: "agent", status: "working", message: null },
+    { id: "t1", state: "running", terminal: "t1", harness: "codex" as never, harnessSessionId: null, title: "agent", status: "working", message: null },
   ] });
   const res = await s.call("GET", `/threads/${fix.id}`);
   assert.equal(res.status, 200);
@@ -1292,9 +1292,9 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
   const running = (terminal: string, harness: "claude-code" | "pi" | "shell", status: "working" | "idle", harnessSessionId: string | null = null, title: string | null = null) =>
     ({ id: terminal, state: "running", terminal, harness, harnessSessionId, status, title, message: null }) as const;
   s.registry.threads.apply({ record: "sessions", pylonId: fix.pylonId, sessions: [
-    running("w1:p1", "claude-code", "working", "5f0c", "review"),
-    running("w2:p1", "pi", "idle", "/home/user/.pi/sessions/a.jsonl"),
-    running("w3:p1", "shell", "idle"),
+    running("t1", "claude-code", "working", "5f0c", "review"),
+    running("t2", "pi", "idle", "/home/user/.pi/sessions/a.jsonl"),
+    running("t3", "shell", "idle"),
   ] });
   s.registry.threads.allocatePreviews(fix.pylonId, ["web", "api"], { first: 8443, last: 8444 });
   s.registry.threads.apply({ record: "preview", pylonId: fix.pylonId, service: "web", httpsPort: 8443, ready: true });
@@ -1310,9 +1310,9 @@ test("the thread page shows its pylon, sessions with how to attach, previews as 
 
   const sessions = textOf(sectionOf(res.text, "sessions-h"));
   assert.match(sessions, /^Sessions 3 /);
-  assert.match(sessions, /Claude Code review working w1:p1 session 5f0c/);
-  assert.match(sessions, /pi idle w2:p1 session \/home\/user\/\.pi\/sessions\/a\.jsonl/);
-  assert.match(sessions, /Shell idle w3:p1 Show in terminal Close New shell New pi New Claude Show in terminal attaches the terminal tab to that session alone\. herdr-app shows them all\. Attach from a shell in the pylon hc Copy$/);
+  assert.match(sessions, /Claude Code review working t1 session 5f0c/);
+  assert.match(sessions, /pi idle t2 session \/home\/user\/\.pi\/sessions\/a\.jsonl/);
+  assert.match(sessions, /Shell idle t3 Show in terminal Close New shell New pi New Claude Show in terminal attaches the terminal tab to that session alone\. herdr-app shows them all\. Attach from a shell in the pylon hc Copy$/);
 
   const previews = sectionOf(res.text, "previews-h");
   assert.ok(previews.includes('href="https://rj-firebat.tail.ts.net:8443/"'), "a ready preview links to its tailnet HTTPS URL");
@@ -2457,7 +2457,7 @@ test("a Claude worker's prompt is Nexus's only when Nexus typed it, the usage li
   const theirs = "[Nexus review] got this wrong, so leave the cache as it is.";
   const entries: ClaudeEntry[] = [{ kind: "prompt", at: 1, text: continued, from: "person" }, { kind: "prompt", at: 2, text: theirs, from: "person" }];
   const thread = await claudeThread(s, entries);
-  const typed = await typeIntoClaude(s.registry, thread.id, "s1", null, "usage-limit:s1:1", continued, async () => ({ kind: "send-claude", outcome: "sent", terminal: "w1:p1", resumed: false }), "usage-limit");
+  const typed = await typeIntoClaude(s.registry, thread.id, "s1", null, "usage-limit:s1:1", continued, async () => ({ kind: "send-claude", outcome: "sent", terminal: "t1", resumed: false }), "usage-limit");
   assert.equal(typed.kind, "sent");
   const rows = conversationOf((await s.call("GET", `/threads/${thread.id}`)).text).rows;
   assert.ok(rows.includes(`Nexus usage limit ${continued}`), rows.join("\n"));

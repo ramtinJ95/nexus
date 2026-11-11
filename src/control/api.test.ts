@@ -564,7 +564,7 @@ test("only a person acts on a thread, its pylon or a project, never the control 
     ["retry a thread's turn", "POST", `/v1/threads/${id}/retry`, undefined, 204],
     ["retry a thread's pylon", "POST", `/v1/threads/${id}/pylon/retry`, undefined, 204],
     ["open a session in a thread's pylon", "POST", `/v1/threads/${id}/sessions`, { harness: "shell" }, 201],
-    ["close a session in a thread's pylon", "DELETE", `/v1/threads/${id}/sessions/${encodeURIComponent("w1:p1")}`, {}, 204],
+    ["close a session in a thread's pylon", "DELETE", `/v1/threads/${id}/sessions/${encodeURIComponent("t1")}`, {}, 204],
     ["publish a preview", "POST", `/v1/threads/${id}/previews`, { port: 3000 }, 200],
     ["unpublish a preview", "DELETE", `/v1/threads/${id}/previews/3000`, {}, 204],
     ["start a review", "POST", `/v1/threads/${id}/review`, {}, 201],

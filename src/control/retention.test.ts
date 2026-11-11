@@ -39,7 +39,7 @@ function deletedWithEverything(registry: Registry): ThreadId {
   const { id, pylonId } = t;
   registry.threads.createThread(t, testPylon(t), { claude: { prompt: "fix it" }, key: { requestId: "req-1", body: "{}" } });
   claudeWorkerAt(registry, id, "started", { session: "s1" });
-  registry.threads.apply({ record: "sessions", pylonId, sessions: [{ id: "w1:p1", terminal: "w1:p1", harness: "claude-code", harnessSessionId: "s1", title: null, state: "running", status: "idle", message: null }] });
+  registry.threads.apply({ record: "sessions", pylonId, sessions: [{ id: "t1", terminal: "t1", harness: "claude-code", harnessSessionId: "s1", title: null, state: "running", status: "idle", message: null }] });
   registry.threads.apply({ record: "output", pylonId, kind: "branch", ref: "origin/fix" });
   registry.threads.apply({ record: "job", status: { subject: pylonId, jobId: "j1" as JobId, kind: "pause", state: "succeeded", finishedAt: "2027-01-01T00:00:00Z" } });
   registry.threads.allocatePreviews(pylonId, ["web"], { first: 10200, last: 10299 }, null);

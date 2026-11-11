@@ -98,13 +98,13 @@ const until = (what, signal) => Promise.race([signal, new Promise((_, reject) =>
 
 test("a button whose action changes no region takes another press once the action settles", async () => {
   fetchImpl = async (url) => url.startsWith("/v1/") ? json(204) : Promise.reject(new Error("offline"));
-  const button = new FakeElement("button", { selectors: ["button[data-action]"], dataset: { action: "close-session", thread: "th-x", session: "w2:p1" } });
+  const button = new FakeElement("button", { selectors: ["button[data-action]"], dataset: { action: "close-session", thread: "th-x", session: "t2" } });
   alert.hidden = false;
   await dispatch("click", { target: button });
-  assert.deepEqual(fetched.slice(-2).map((f) => f.url), ["/v1/threads/th-x/sessions/w2%3Ap1", "http://nexus.test/threads/th-x"], "the action went through and the page refreshed after it");
+  assert.deepEqual(fetched.slice(-2).map((f) => f.url), ["/v1/threads/th-x/sessions/t2", "http://nexus.test/threads/th-x"], "the action went through and the page refreshed after it");
   assert.equal(alert.hidden, true, "a success clears the alert");
   assert.equal(button.disabled, false, "the action settled and the button is still in the page");
-  const gone = new FakeElement("button", { selectors: ["button[data-action]"], isConnected: false, dataset: { action: "close-session", thread: "th-x", session: "w2:p1" } });
+  const gone = new FakeElement("button", { selectors: ["button[data-action]"], isConnected: false, dataset: { action: "close-session", thread: "th-x", session: "t2" } });
   await dispatch("click", { target: gone });
   assert.equal(gone.disabled, true, "a button a swap replaced is left as it was");
 });

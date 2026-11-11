@@ -120,14 +120,14 @@ test("a Claude message recorded before senders were reads as unknown, and only i
 
   const fresh = seeded(t, tempDb());
   assert.equal(promptSenders(fresh, threadId)(review), null, "on a thread whose every send is recorded, an unrecorded prompt is the person's");
-  await typeIntoClaude(fresh, threadId, "s1", null, "rv-1:1", review, async () => ({ kind: "send-claude", outcome: "sent", terminal: "w1:p1", resumed: false }), "review");
+  await typeIntoClaude(fresh, threadId, "s1", null, "rv-1:1", review, async () => ({ kind: "send-claude", outcome: "sent", terminal: "t1", resumed: false }), "review");
   assert.equal(promptSenders(fresh, threadId)(review), "review");
 });
 
 test("a long message Nexus typed, which Claude recorded as a paste, is still Nexus's", async (t) => {
   const registry = seeded(t, tempDb());
   const review = `${senders.review.prefix}\n${"Review pull request #7, every file of it.\n".repeat(100).trim()}`;
-  await typeIntoClaude(registry, threadId, "s1", null, "rv-1:1", review, async () => ({ kind: "send-claude", outcome: "sent", terminal: "w1:p1", resumed: false }), "review");
+  await typeIntoClaude(registry, threadId, "s1", null, "rv-1:1", review, async () => ({ kind: "send-claude", outcome: "sent", terminal: "t1", resumed: false }), "review");
   const record = JSON.stringify({ type: "user", timestamp: "2026-11-10T12:00:00.000Z", origin: { kind: "human" }, message: { role: "user", content: `\n\n<pasted_content id="cbe0">\n${review}\n</pasted_content id="cbe0">\n` } });
   const [entry] = parseRecord(record);
   assert.equal(entry?.kind === "prompt" && promptSenders(registry, threadId)(entry.text), "review");
@@ -196,7 +196,7 @@ test("an observation is stored only together with the writes derived from it", a
 
 test("a paused pylon's sessions keep their rows and last status, and the first list after its wake replaces them", async (t) => {
   const registry = seeded(t, tempDb());
-  const review = { id: "w1:p1", terminal: "w1:p1", harness: "claude-code", harnessSessionId: "s1", title: "review" } as const;
+  const review = { id: "t1", terminal: "t1", harness: "claude-code", harnessSessionId: "s1", title: "review" } as const;
   const plan = { id: "failed-0123456789ab", terminal: null, harness: "pi", harnessSessionId: null, title: "plan" } as const;
   registry.threads.apply({ record: "sessions", pylonId, sessions: [{ ...review, state: "running", status: "working", message: null }] });
   registry.threads.apply({ record: "sessions", pylonId, sessions: [{ ...review, state: "paused", status: null, message: null }, { ...plan, state: "paused", status: null, message: null }] });
@@ -204,24 +204,24 @@ test("a paused pylon's sessions keep their rows and last status, and the first l
     { pylon: pylonId, ...plan, state: "paused", status: "unknown", message: null },
     { pylon: pylonId, ...review, state: "paused", status: "working", message: null },
   ], "a paused row keeps the status it last ran with, and one never seen running has none");
-  assert.deepEqual(registry.threads.session(pylonId, "w1:p1"), { pylon: pylonId, ...review, state: "paused", status: "working", message: null });
-  assert.equal(registry.threads.session(pylonId, "w9:p9"), undefined);
+  assert.deepEqual(registry.threads.session(pylonId, "t1"), { pylon: pylonId, ...review, state: "paused", status: "working", message: null });
+  assert.equal(registry.threads.session(pylonId, "t99"), undefined);
 
   registry.threads.apply({ record: "sessions", pylonId, sessions: [
-    { ...review, id: "w3:p1", terminal: "w3:p1", state: "running", status: "idle", message: null },
+    { ...review, id: "t3", terminal: "t3", state: "running", status: "idle", message: null },
     { ...plan, state: "failed", status: null, message: "pi exited 1" },
   ] });
   assert.deepEqual(registry.threads.sessions(pylonId), [
     { pylon: pylonId, ...plan, state: "failed", status: "unknown", message: "pi exited 1" },
-    { pylon: pylonId, ...review, id: "w3:p1", terminal: "w3:p1", state: "running", status: "idle", message: null },
+    { pylon: pylonId, ...review, id: "t3", terminal: "t3", state: "running", status: "idle", message: null },
   ], "the pre-pause terminal is gone and the failed session says why");
 
   registry.threads.apply({ record: "sessions-paused", pylonId });
-  assert.deepEqual(registry.threads.sessions(pylonId).map((s) => [s.id, s.state, s.message]), [["failed-0123456789ab", "paused", null], ["w3:p1", "paused", null]]);
+  assert.deepEqual(registry.threads.sessions(pylonId).map((s) => [s.id, s.state, s.message]), [["failed-0123456789ab", "paused", null], ["t3", "paused", null]]);
   registry.threads.apply({ record: "sessions-resumed", pylonId });
   assert.deepEqual(registry.threads.sessions(pylonId).map((s) => [s.id, s.state, s.status, s.message]), [
     ["failed-0123456789ab", "failed", "unknown", "its last wake did not bring it back, and whether this one did is not read yet"],
-    ["w3:p1", "running", "unknown", null],
+    ["t3", "running", "unknown", null],
   ], "a pylon that runs again before a read has no paused session");
   registry.threads.apply({ record: "sessions-paused", pylonId });
   registry.threads.apply({ record: "sessions", pylonId, sessions: [] });
@@ -662,7 +662,7 @@ test("a prompt submitted in any of the pylon's Claudes is the person's at its ho
   });
   const human = () => registry.threads.thread(threadId)!.lastHumanActivityAt;
   const feedback = `${senders["pr-watch"].prefix} CI failed`;
-  await typeIntoClaude(registry, threadId, "s1", null, "pr-1", feedback, async () => ({ kind: "send-claude", outcome: "sent", terminal: "w1:p1", resumed: false }), "pr-watch");
+  await typeIntoClaude(registry, threadId, "s1", null, "pr-1", feedback, async () => ({ kind: "send-claude", outcome: "sent", terminal: "t1", resumed: false }), "pr-watch");
   started("s1", 5_000, "Fix the checkout");
   assert.equal(human(), thread.lastHumanActivityAt, "the worker's launch prompt is Nexus's");
   started("s1", 6_000, feedback);
@@ -679,7 +679,7 @@ test("a long message Nexus typed is still Nexus's when Claude hands its hook the
   const { hookReport } = await import("../../images/pylon/nexus-heartbeat.ts");
   const registry = seeded(t, tempDb(), undefined, "Fix the checkout");
   const findings = `${senders.review.prefix} ${"finding ".repeat(600)}`;
-  await typeIntoClaude(registry, threadId, "s1", null, "rv-1:1", findings, async () => ({ kind: "send-claude", outcome: "sent", terminal: "w1:p1", resumed: false }), "review");
+  await typeIntoClaude(registry, threadId, "s1", null, "rv-1:1", findings, async () => ({ kind: "send-claude", outcome: "sent", terminal: "t1", resumed: false }), "review");
   const { promptSha256 } = hookReport("session.turn-started", { prompt: `\n\n<pasted_content id="7">\n${findings}\n</pasted_content id="7">\n` });
   registry.threads.reportSession(node, { sequence: 1, pylon: pylonId, time: Date.now(), event: { kind: "session.turn-started", session: "s1", at: 5_000, promptSha256 } });
   assert.equal(registry.threads.thread(threadId)!.lastHumanActivityAt, thread.lastHumanActivityAt);

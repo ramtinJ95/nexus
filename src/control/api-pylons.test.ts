@@ -163,8 +163,8 @@ test("opening a session goes through the node's probe, defaults to Claude Code t
   const s = await withThread(t);
   s.registry.threads.recordActivity(s.thread.id, { human: 1 });
   s.woken.length = 0;
-  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, {}), { status: 201, body: { terminal: "w1:p1", harness: "claude-code", title: "claude-code" } });
-  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, { harness: "pi", title: " plan " }), { status: 201, body: { terminal: "w1:p1", harness: "pi", title: "plan" } });
+  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, {}), { status: 201, body: { terminal: "t1", harness: "claude-code", title: "claude-code" } });
+  assert.deepEqual(await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, { harness: "pi", title: " plan " }), { status: 201, body: { terminal: "t1", harness: "pi", title: "plan" } });
   assert.deepEqual(s.commands, [
     [s.thread.pylonId, { kind: "open-session", harness: "claude-code", title: "claude-code" }],
     [s.thread.pylonId, { kind: "open-session", harness: "pi", title: "plan" }],
@@ -404,12 +404,12 @@ test("a checkout read whose thread is deleted while it runs answers the delete, 
 
 test("closing a session goes through the node's probe, and a terminal that is not live, such as one from before a wake, is a 404", async (t) => {
   const s = await withThread(t);
-  assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {}), { status: 204, body: null });
-  assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "close-session", terminal: "w1:p1" }]]);
+  assert.deepEqual(await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("t1")}`, {}), { status: 204, body: null });
+  assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "close-session", terminal: "t1" }]]);
   s.probeAnswers(async () => ({ kind: "close-session", outcome: "not-open" }));
-  const stale = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {});
+  const stale = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("t1")}`, {});
   assert.equal(stale.status, 404);
-  assert.match(stale.body.error, /no session is open in terminal w1:p1 .* A wake may have moved it/);
+  assert.match(stale.body.error, /no session is open in terminal t1 .* A wake may have moved it/);
 });
 
 test("a session has no focus route: the terminal tab attaches to one session at a time", async (t) => {
@@ -422,13 +422,13 @@ test("a session has no focus route: the terminal tab attaches to one session at 
 test("closing a listed session names it, and a terminal that runs another session now is a 404 that leaves it open", async (t) => {
   const s = await withThread(t);
   s.registry.threads.apply({ record: "sessions", pylonId: s.thread.pylonId, sessions: [
-    { id: "w1:p1", state: "running", terminal: "w1:p1", harness: "claude-code", harnessSessionId: "s1", title: "review", status: "idle", message: null },
+    { id: "t1", state: "running", terminal: "t1", harness: "claude-code", harnessSessionId: "s1", title: "review", status: "idle", message: null },
   ] });
   s.probeAnswers(async () => ({ kind: "close-session", outcome: "moved" }));
-  const moved = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {});
-  assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "close-session", terminal: "w1:p1", session: { harness: "claude-code", harnessSessionId: "s1", title: "review" } }]]);
+  const moved = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("t1")}`, {});
+  assert.deepEqual(s.commands, [[s.thread.pylonId, { kind: "close-session", terminal: "t1", session: { harness: "claude-code", harnessSessionId: "s1", title: "review" } }]]);
   assert.equal(moved.status, 404);
-  assert.match(moved.body.error, /terminal w1:p1 of pylon \S+ runs another session now, so it was left open. A wake moved session w1:p1 to another terminal/);
+  assert.match(moved.body.error, /terminal t1 of pylon \S+ runs another session now, so it was left open. A wake moved session t1 to another terminal/);
 });
 
 /** Records the thread's pylon stopped with these sessions, as the loop would from the node's observation. */
@@ -439,11 +439,11 @@ function observeStopped(s: Awaited<ReturnType<typeof withThread>>, sessions: rea
     ingest({ type: "pylon", pylon: stopped }, node, new Map([[s.thread.pylonId, "absent"]]), Date.now()));
 }
 
-const pausedReview: PausedSession = { id: "w1:p1", terminal: "w1:p1", harness: "claude-code", harnessSessionId: "s1", title: "review" };
+const pausedReview: PausedSession = { id: "t1", terminal: "t1", harness: "claude-code", harnessSessionId: "s1", title: "review" };
 
 test("an idle-paused or archived thread lists the sessions its wake brings back, as paused", async (t) => {
   const s = await withThread(t);
-  s.registry.threads.apply({ record: "sessions", pylonId: s.thread.pylonId, sessions: [{ ...pausedReview, terminal: "w1:p1", state: "running", status: "working", message: null }] });
+  s.registry.threads.apply({ record: "sessions", pylonId: s.thread.pylonId, sessions: [{ ...pausedReview, terminal: "t1", state: "running", status: "working", message: null }] });
   observeStopped(s, [pausedReview]);
   const sessions = async () => ((await s.call("GET", `/v1/threads/${s.thread.id}`)).body as ThreadDetail).sessions;
   const paused = [{ pylon: s.thread.pylonId, ...pausedReview, state: "paused", status: "working", message: null }];
@@ -458,13 +458,13 @@ test("closing a paused session is refused with 409 without asking the probe or w
   // Timestamps only move forward, so this is the thread's start.
   const human = s.registry.threads.thread(s.thread.id)!.lastHumanActivityAt;
   s.woken.length = 0;
-  const idle = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {});
+  const idle = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("t1")}`, {});
   assert.equal(idle.status, 409);
-  assert.match(idle.body.error, /session w1:p1 is paused with its pylon and resumes when its pylon wakes. Close it once it runs/);
+  assert.match(idle.body.error, /session t1 is paused with its pylon and resumes when its pylon wakes. Close it once it runs/);
   assert.deepEqual(s.woken, []);
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/archive`)).status, 200);
   s.woken.length = 0;
-  const archived = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("w1:p1")}`, {});
+  const archived = await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/${encodeURIComponent("t1")}`, {});
   assert.equal(archived.status, 409);
   assert.match(archived.body.error, /resumes when `nexus unarchive .*` wakes its pylon/);
   assert.deepEqual(s.commands, []);
@@ -492,13 +492,13 @@ test("a session of a pylon that is not running, or of an archived or deleted thr
   assert.equal(paused.status, 409);
   assert.match(paused.body.error, /is not running yet. This request wakes it/);
   assert.ok(s.woken.includes(node), "the request wakes the pylon");
-  assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/w1:p1`, {})).status, 409);
+  assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/t1`, {})).status, 409);
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/archive`)).status, 200);
   s.commands.length = 0;
   const archived = await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, {});
   assert.equal(archived.status, 409);
   assert.match(archived.body.error, /is archived, so its pylon stays paused/);
-  assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/w1:p1`, {})).status, 409);
+  assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}/sessions/t1`, {})).status, 409);
   assert.equal((await s.call("DELETE", `/v1/threads/${s.thread.id}`)).status, 200);
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/sessions`, {})).status, 409);
   assert.deepEqual(s.commands, [], "an archived or deleted thread's probe is never asked");

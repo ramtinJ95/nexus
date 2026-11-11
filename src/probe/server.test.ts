@@ -805,7 +805,7 @@ test("a command for a pylon that is not running is refused as not-running", asyn
   const { client, fake } = await setup(t, {}, guest);
   await assert.rejects(client.command(pylonId, { kind: "exec", argv: ["true"], cwd: "/", timeoutMs: 1000 }), { code: "not-running" });
   fake.pylons.set(pylonId, { pylonId, vm: "stopped", checkpoint: "ckpt-unit-1", image, sessions: null });
-  await assert.rejects(client.command(pylonId, { kind: "close-session", terminal: "w1:p1" }), { code: "not-running" });
+  await assert.rejects(client.command(pylonId, { kind: "close-session", terminal: "t1" }), { code: "not-running" });
   assert.deepEqual(guest.execs, []);
 });
 
@@ -855,8 +855,8 @@ test("malformed commands get 400 and reach no guest", async (t) => {
   assert.equal(await post({ kind: "open-session", harness: "codex", title: "x" }), 400);
   assert.equal(await post({ kind: "open-session", harness: "shell", title: "x", resume: "abc" }), 400);
   assert.equal(await post({ kind: "drop-failed-session" }), 400);
-  assert.equal(await post({ kind: "close-session", terminal: "w1:p1", session: { harness: "codex", harnessSessionId: null, title: null } }), 400);
-  assert.equal(await post({ kind: "close-session", terminal: "w1:p1", session: { harness: "pi", title: null } }), 400);
+  assert.equal(await post({ kind: "close-session", terminal: "t1", session: { harness: "codex", harnessSessionId: null, title: null } }), 400);
+  assert.equal(await post({ kind: "close-session", terminal: "t1", session: { harness: "pi", title: null } }), 400);
   assert.equal(await post({ kind: "reboot" }), 400);
   const send = { kind: "send-claude", session: "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90", text: "hi" };
   for (const bad of [{ session: undefined }, { session: "../etc" }, { session: "a".repeat(201) }, { text: "" }, { text: "x".repeat(16_385) }, { text: "a\tb" }, { text: "a\rb" }, { model: "" }, { model: "m".repeat(201) }, { requestId: "" }, { requestId: 1 }]) {
@@ -1171,7 +1171,7 @@ test("observations carry session facts from Herdr Core, and null when Core canno
 
 test("a stopped pylon's observation carries the sessions its backend kept from the pause", async (t) => {
   const { client, fake } = await setup(t, {}, fakeGuest(() => { throw new Error("a stopped pylon has no guest"); }));
-  const recorded = [{ id: "w1:p1", terminal: "w1:p1", harness: "claude-code" as const, harnessSessionId: "bd2c2d6b", title: "review" }];
+  const recorded = [{ id: "t1", terminal: "t1", harness: "claude-code" as const, harnessSessionId: "bd2c2d6b", title: "review" }];
   const seen = async () => {
     for await (const e of client.observe(AbortSignal.timeout(60_000))) return e.type === "snapshot" ? e.observation.pylons[0] : assert.fail("the first event is a snapshot");
   };

@@ -723,7 +723,7 @@ test("the artifacts list holds images and templates and no checkpoints, and has 
 test("a spawn of a running pylon applies the preview URLs, and finishes a relaunch a wake left pending, once", async () => {
   const { backend, instances } = await backendWith({ previewHost: "node.example.ts.net" });
   const dir = await leftInstance(instances, "pylon-wake", "running");
-  const paused = [{ id: "w1:p1", terminal: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }];
+  const paused = [{ id: "t1", terminal: "t1", harness: "shell", harnessSessionId: null, title: "sh" }];
   await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-wake-1", relaunch: true, sessions: paused }));
   const { actions } = await fakeController(dir, "pylon-wake", (action) => {
     if (action.action === "write-files" || action.action === "public-urls") return {};
@@ -745,7 +745,7 @@ test("a spawn of a running pylon applies the preview URLs, and finishes a relaun
 test("a spawn for reading leaves the relaunch a wake left pending, with the paused list, and the next spawn finishes it", async () => {
   const { backend, instances } = await backendWith();
   const dir = await leftInstance(instances, "pylon-read", "running");
-  const paused = [{ id: "w1:p1", terminal: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }];
+  const paused = [{ id: "t1", terminal: "t1", harness: "shell", harnessSessionId: null, title: "sh" }];
   await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-read-1", relaunch: true, sessions: paused }));
   const { actions } = await fakeController(dir, "pylon-read", (action) => {
     if (action.action === "write-files" || action.action === "public-urls") return {};
@@ -765,7 +765,7 @@ test("a pause of a pylon whose sessions never came back records nothing, also wh
   const { backend, instances } = await backendWith();
   const dir = await leftInstance(instances, "pylon-unread", "running");
   await writeFile(join(dir, "controller.log"), "");
-  const paused = [{ id: "w1:p1", terminal: "w1:p1", harness: "shell", harnessSessionId: null, title: "sh" }];
+  const paused = [{ id: "t1", terminal: "t1", harness: "shell", harnessSessionId: null, title: "sh" }];
   await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-unread-1", relaunch: true, sessions: paused }));
   let stops = 0;
   const controller = await fakeController(dir, "pylon-unread", (action) => {
@@ -1083,7 +1083,7 @@ test("a retry bounds session recording on a stuck guest, converges, and launches
   const { backend, instances } = await backendWith({ retrySessions });
   const id = "pylon-retry" as PylonId;
   const dir = await leftInstance(instances, id, "running");
-  const saved = [{ id: "w1:p1", terminal: "w1:p1", harness: "shell", harnessSessionId: null, title: "saved shell" }];
+  const saved = [{ id: "t1", terminal: "t1", harness: "shell", harnessSessionId: null, title: "saved shell" }];
   await writeFile(join(dir, "nexus-checkpoint.json"), JSON.stringify({ checkpoint: "ckpt-retry-0", sessions: saved }));
   const controller = await fakeController(dir, id, (action) => {
     if (action.action === "exec") { execSeen.resolve(); return new Promise(() => {}); }
