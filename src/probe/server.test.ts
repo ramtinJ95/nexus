@@ -986,7 +986,7 @@ test("a prompted Claude launch sent again while the first still runs waits for i
   assert.equal(execs.length, 1, "the second launch ran nothing while the first held the guest");
   release();
   await Promise.all([assert.rejects(first, /seeding Claude state failed: no node in this guest/), assert.rejects(again, /seeding Claude state failed/)]);
-  assert.deepEqual(execs, ["ensureCore", "terminal.get", "node", "ensureCore", "terminal.get", "node"], "the first launch ran to its end before the second began");
+  assert.deepEqual(execs, ["ensureCore", "terminal.get", "terminal.list", "node", "ensureCore", "terminal.get", "terminal.list", "node"], "the first launch ran to its end before the second began");
 });
 
 test("each command kind waits for the reads or its Claude session or nothing, publishes a snapshot or not, and a send is remembered by its request ID", async (t) => {

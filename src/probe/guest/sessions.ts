@@ -91,9 +91,11 @@ const launchArgv = (agent: Launcher, args: readonly string[]) =>
 /**
  * Returns the new session's terminal. Rolls the terminal back if the harness exits as it starts.
  *
- * A prompted Claude Code launch is safe to send again under the same `resume` ID, as after the probe restarted under
- * it: its terminal is named after the session, and Core's names are unique among live terminals, so a second launch
- * finds the first one's terminal instead of starting Claude in another.
+ * A session of a one-terminal harness, such as Claude Code, that a live terminal runs already is not started again,
+ * and its terminal is returned: a core that crashed leaves its programs running, and the core this starts takes them
+ * back. A prompted Claude Code launch is safe to send again under the same `resume` ID, as after the probe restarted
+ * under it: its terminal is named after the session, and Core's names are unique among live terminals, so a second
+ * launch finds the first one's terminal instead of starting Claude in another.
  */
 export async function openSession(guest: Guest, session: { harness: SessionHarness; title: string; cwd: string; resume?: string; prompt?: string; model?: string; seeded?: boolean }): Promise<string> {
   await ensureCoreRuns(guest);
@@ -101,6 +103,8 @@ export async function openSession(guest: Guest, session: { harness: SessionHarne
   const labels = labelsOf(session.harness, session.title);
   if (agent === null) return (await core(guest, "terminal.run", { argv: ["bash", "-l"], cwd: session.cwd, labels, no_parent: true, keep: true })).address;
   if (session.prompt !== undefined && agent.hooks !== undefined) return promptedLaunch(guest, agent, session.harness, { ...session, prompt: session.prompt });
+  const running = agent.onePane && session.resume !== undefined ? await startedAlready(guest, agent, session.resume) : null;
+  if (running !== null) return running;
   const { args } = await launchArgs(guest, agent, session);
   const { address } = await core(guest, "terminal.run", { argv: launchArgv(agent, args), cwd: session.cwd, labels: agentLabels(agent, session.harness, session.title, args), no_parent: true });
   await awaitReady(guest, agent, session.harness, address);
@@ -135,7 +139,8 @@ async function awaitReady(guest: Guest, agent: Launcher, harness: SessionHarness
     failure = `${agentKinds[harness].label} exited${waited.exit_code == null ? "" : ` with ${waited.exit_code}`} as it started`;
   } catch (err) {
     if (agent.onePane) {
-      const running = await terminalPane(guest, terminal).then((p) => p.harness === harness, () => null);
+      // Its label names the harness from the start, so only its foreground says whether the agent got as far as running.
+      const running = await core(guest, "terminal.get", { terminal }).then((t) => t.state === "live" && harnessOf(t.foreground?.argv ?? []) === harness, () => null);
       if (running === true) return;
       if (running === null) throw new LaunchStalled(`${agentKinds[harness].label} launch stalled: ${(err as Error).message}; attach before starting another session`, terminal);
     }
@@ -162,7 +167,8 @@ const launchName = (session: string) => `claude-${session.toLowerCase().replaceA
 /**
  * Starts Claude with `prompt` as its first prompt, the last argument of its command line, and waits for the
  * UserPromptSubmit receipt in its launch directory instead of its readiness. A launch whose terminal is live under its
- * name, an earlier launch of the session or one running beside it, waits for that one's receipt instead. One that
+ * name, an earlier launch of the session or one running beside it, waits for that one's receipt instead, as does one
+ * whose session a live terminal runs under no name, such as a wake's relaunch of it. One that
  * fails after Core may have started Claude does the same if the name is live by then, and is otherwise as uncertain
  * as a stalled one.
  */
@@ -171,7 +177,7 @@ async function promptedLaunch(guest: Guest, agent: Launcher, harness: SessionHar
   if (!claudeSessionId.test(id)) throw new Error(`a prompted Claude launch needs a session ID of letters, digits and dashes, not ${JSON.stringify(id)}`);
   const launchDir = `${claudeLaunchesDir}/${id}`;
   const name = launchName(id);
-  const earlier = await liveNamed(guest, name);
+  const earlier = await liveNamed(guest, name) ?? (session.resume === undefined ? null : await startedAlready(guest, agent, id));
   if (earlier !== null) {
     await awaitSubmission(guest, earlier, launchDir, " before the probe lost the launch");
     return earlier;
@@ -265,34 +271,46 @@ const sendTimeoutMs = 75_000;
  * A session in no live terminal is resumed first, under `message.model` if given. The text goes in exactly as written,
  * so a leading `!` runs it as a shell command and a leading `/` as a slash command. Core waits for a person's
  * unfinished draft in an attached terminal before it pastes. Claude wraps a long paste in `<pasted_content>` tags,
- * which the conversation readers unwrap.
+ * which the conversation readers unwrap only from PR #651 (feat/activity-pasted-content) on, which this change needs.
  *
  * Claude taking nothing is an outcome: `blocked` when Claude waits at a dialog in its terminal, which the text would
- * answer, `starting` when Claude has said nothing yet after `readyWithinMs`, and `moved` when the terminal no longer
- * runs the session by the time it is ready. The caller runs one send per session at a time.
+ * answer, `starting` when Claude has said nothing yet after `readyWithinMs`, or Core still refuses the text as
+ * starting by then, and `moved` when the terminal no longer runs the session by the time it is ready. The caller runs
+ * one send per session at a time.
+ *
+ * The core starts first: a session in no terminal is resumed in one, and a core that crashed left its Claude running
+ * for this one to take back, so the send finds it rather than resuming it beside itself.
  */
 export async function sendToClaude(guest: Guest, message: { session: string; text: string; model?: string }, readyWithinMs = claudeReadyMs): Promise<Omit<Extract<CommandResult, { kind: "send-claude" }>, "kind">> {
+  await ensureCoreRuns(guest);
   const found = await claudeTerminal(guest, message.session);
   const resumed = found === null;
   const herdrPane = found?.herdrPane ?? await openSession(guest, await resumeOf(guest, message.session, message.model));
   const closed = () => new Error(`Claude's terminal ${herdrPane} closed before it could take the message, so nothing was sent`);
+  const deadline = Date.now() + readyWithinMs;
   let pane = await terminalPane(guest, herdrPane, closed);
-  for (const deadline = Date.now() + readyWithinMs; pane.status === "unknown" && Date.now() < deadline;) {
+  while (pane.status === "unknown" && Date.now() < deadline) {
     await delay(claudeReadyPollMs);
     pane = await terminalPane(guest, herdrPane, closed);
   }
   if (pane.status === "unknown") return { outcome: await atDialog(guest, herdrPane) ? "blocked" : "starting", herdrPane, resumed };
   if (pane.status === "blocked") return { outcome: "blocked", herdrPane, resumed };
   if (!runsSession(pane, claudeCode, message.session)) return { outcome: "moved", herdrPane, resumed };
-  let sent: { status?: string | null | undefined };
-  try {
-    sent = await core(guest, "terminal.send", { terminal: herdrPane, text: message.text }, sendTimeoutMs);
-  } catch (err) {
-    // Core refuses a blocked program before it pastes anything.
-    if (err instanceof CoreError && err.kind === "blocked") return { outcome: "blocked", herdrPane, resumed };
-    throw new Error(`sending to Claude's terminal ${herdrPane} failed, so whether the message went in is unknown: ${(err as Error).message}`, { cause: err });
+  for (;;) {
+    try {
+      const sent = await core(guest, "terminal.send", { terminal: herdrPane, text: message.text }, sendTimeoutMs);
+      return { outcome: sent.status === "working" ? "queued" : "sent", herdrPane, resumed };
+    } catch (err) {
+      // Core refuses before it pastes anything a blocked program, and as `unavailable` one whose output has not
+      // settled, saying nothing was typed (spikes/herdr-core/README.md, send-starting), so that send can be tried again.
+      if (err instanceof CoreError && err.kind === "blocked") return { outcome: "blocked", herdrPane, resumed };
+      if (!(err instanceof CoreError && err.kind === "unavailable")) {
+        throw new Error(`sending to Claude's terminal ${herdrPane} failed, so whether the message went in is unknown: ${(err as Error).message}`, { cause: err });
+      }
+      if (Date.now() >= deadline) return { outcome: "starting", herdrPane, resumed };
+      await delay(claudeReadyPollMs);
+    }
   }
-  return { outcome: sent.status === "working" ? "queued" : "sent", herdrPane, resumed };
 }
 
 /**
@@ -341,7 +359,12 @@ async function claudeTerminal(guest: Guest, session: string): Promise<LivePane |
   return (await livePanes(guest).catch(noCore([]))).find((p) => runsSession(p, claudeCode, session)) ?? null;
 }
 
-/** Whether the agent runs `session` in the terminal: its foreground is the agent, and its label or command line names the session. */
+/** The live terminal of no other one that runs `session`, which a start of the session must not start it beside. */
+async function startedAlready(guest: Guest, agent: Launcher, session: string): Promise<string | null> {
+  return (await livePanes(guest)).find((p) => !p.child && runsSession(p, agent, session))?.herdrPane ?? null;
+}
+
+/** Whether the agent runs `session` in the terminal: the terminal is the agent's, and its label or command line names the session. */
 function runsSession(pane: LivePane, agent: Launcher, session: string): boolean {
   return launchers[pane.harness] === agent && pane.harnessSessionId === session;
 }
@@ -369,7 +392,8 @@ export async function dropFailedSession(guest: Guest, id: string): Promise<boole
 /**
  * The facts an observation carries: each live terminal, from one `terminal.list` exec, and each session the last wake
  * failed to bring back, from the sessions file. A terminal a failed record stands for is that failed session. No core
- * means no terminals. Any other failure rejects, so the caller can tell "none" from "unknown".
+ * means no terminals. Any other failure rejects, so the caller can tell "none" from "unknown", such as a core that
+ * crashed, whose programs still run until the next core takes them back.
  */
 export async function sessionFacts(guest: Guest, timeoutMs = callTimeoutMs): Promise<readonly SessionFact[]> {
   const [panes, file] = await Promise.all([livePanes(guest, timeoutMs).catch(noCore([])), readSessionsFile(guest, timeoutMs)]);
@@ -390,7 +414,8 @@ export async function sessionFacts(guest: Guest, timeoutMs = callTimeoutMs): Pro
  * Writes every live session to ~/.nexus/sessions.json, before the disk checkpoint, and returns every session a
  * relaunch would bring back, under the IDs sessionFacts gave them. Sessions the last relaunch failed to bring back are
  * kept, except one whose terminal has since closed. With no core the file is left as it is and this returns null: a
- * core that never came up after the last wake must not erase the sessions that wake failed to relaunch.
+ * core that never came up after the last wake must not erase the sessions that wake failed to relaunch. A core that
+ * crashed rejects, so the last record stands then too.
  */
 export async function recordSessions(guest: Guest): Promise<readonly RecordedSession[] | null> {
   const panes = await livePanes(guest).catch(noCore(null));
@@ -459,7 +484,7 @@ async function relaunch(guest: Guest, file: SessionsFile, records: readonly Sess
   const sameSession = (r: SessionRecord, p: LivePane) => p.harnessSessionId === null || p.harnessSessionId === r.harnessSessionId
     || (r.harnessSessionId === null && !recordedIds.has(p.harnessSessionId));
   // In order of confidence. Each pass gives every unmatched record the first unclaimed terminal it accepts. A terminal
-  // runs a record's session only if its foreground is the record's harness.
+  // runs a record's session only if it is the record's harness's.
   const matchers: ((r: SessionRecord, p: LivePane) => boolean)[] = [
     (r, p) => r.harnessSessionId !== null && p.harnessSessionId === r.harnessSessionId,
     // A kept shell the core brought back in place.
@@ -565,7 +590,7 @@ interface LivePane {
   child: boolean;
 }
 
-/** Agents Nexus does not launch, such as Codex started by hand, read as shells. An agent run by node, such as pi, shows its script as the second argument. */
+/** The harness a command line runs. Agents Nexus does not launch, such as Codex started by hand, read as shells. An agent run by node, such as pi, shows its script as the second argument. */
 function harnessOf(argv: readonly string[]): SessionHarness {
   const names = argv.slice(0, 2).map((arg) => arg.split("/").at(-1));
   return sessionHarnessSchema.options.find((h) => launchers[h] !== null && names.includes(launchers[h].kind)) ?? "shell";
@@ -577,20 +602,27 @@ function harnessOf(argv: readonly string[]): SessionHarness {
  */
 const statusWords: Readonly<Record<string, HerdrStatus>> = { working: "working", idle: "idle", done: "idle", error: "idle", blocked: "blocked" };
 
+/**
+ * A terminal Nexus started an agent in is that agent's from its start, by its label, while its foreground is still
+ * the launch's env and login shell, since it ends with the agent. Any other terminal runs what its foreground does,
+ * such as a Claude a person started in a shell.
+ */
 function livePane(t: Terminal): LivePane {
-  const argv = t.foreground?.argv ?? [];
-  const harness = harnessOf(argv);
+  const labelled = sessionHarnessSchema.safeParse(t.labels[harnessLabel]).data;
+  const started = labelled !== undefined && launchers[labelled] !== null;
+  const argv = started ? t.argv : t.foreground?.argv ?? [];
+  const harness = started ? labelled : harnessOf(argv);
   const agent = launchers[harness];
-  const started = agent === null ? { session: null } : startedWith(argv, agent);
-  const labelled = agent?.sessionLabel === undefined ? undefined : t.labels[agent.sessionLabel];
+  const args = agent === null ? { session: null } : startedWith(argv, agent);
+  const sessionLabelled = agent?.sessionLabel === undefined ? undefined : t.labels[agent.sessionLabel];
   return {
     herdrPane: t.address,
     harness,
     title: t.labels[titleLabel] ?? t.name ?? agentKinds[harness].label,
     cwd: t.foreground?.cwd ?? t.cwd,
-    harnessSessionId: labelled || started.session,
+    harnessSessionId: sessionLabelled || args.session,
     status: t.status === null ? "unknown" : statusWords[t.status.state] ?? "unknown",
-    ...(started.model === undefined ? {} : { model: started.model }),
+    ...(args.model === undefined ? {} : { model: args.model }),
     child: t.parent !== null,
   };
 }

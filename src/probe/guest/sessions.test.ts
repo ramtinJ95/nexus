@@ -7,7 +7,7 @@ import { join } from "node:path";
 import assert from "node:assert/strict";
 import { attachedTerminals, closeSession, dropFailedSession, interruptClaude, LaunchStalled, openSession, pausedSessionsIn, recordSessions, relaunchSessions, sendToClaude, sessionFacts, type ClaudeSessionLock, type RelaunchOutcome, type SessionRecord } from "./sessions.ts";
 import { claudeTextProblem } from "../../protocol/agent-kinds.ts";
-import { coreError, coreOk, fakeCore, fakeGuest, launchedProgram, sessionsFileReply, type ExecReply, type FakeCore, type FakeTerminal } from "../../backends/fake-guest.ts";
+import { coreError, coreOk, fakeCore, fakeGuest, launchedProgram, sessionsFileReply, slowStart, stillStarting, type ExecReply, type FakeCore, type FakeTerminal } from "../../backends/fake-guest.ts";
 import { coreViewer, ensureCore } from "../../guest-contract.ts";
 import { checkoutDir, claudeLaunchesDir, claudeProjects, piSessions, sessionsFile } from "../../../images/pylon/nexus-contract.ts";
 
@@ -238,6 +238,15 @@ test("a launch that loses its name to one started beside it takes that one's ter
   assert.equal(core.terminals.length, 1);
 });
 
+test("a launch sent again once a wake's relaunch runs its session, in a terminal of no name, waits for its receipt there and starts nothing", async () => {
+  for (const transcripts of [false, [launched]]) {
+    const core = fakeCore();
+    const relaunched = core.add({ argv: [...launchWrapper, "claude", "--resume", launched], labels: { ...labels("claude-code", "worker"), "claude.session_id": launched }, status: status("idle") });
+    assert.equal(await openSession(pylon(core, { transcripts }), prompted), relaunched.address, `transcripts ${String(transcripts)}`);
+    assert.deepEqual(runs(core), [], `transcripts ${String(transcripts)}`);
+  }
+});
+
 test("a launch whose receipt never comes stalls and leaves its terminal for the person, unless Claude is working on it", async () => {
   const idle = fakeCore({ start: (t) => { t.screen = "Choose the text style\n"; } });
   await assert.rejects(openSession(pylon(idle, { transcripts: false, submitted: false }), prompted),
@@ -276,6 +285,25 @@ test("session facts read each terminal's harness from its foreground, its sessio
     running("t7", "shell", null, "unknown", "Shell"),
     running("t8", "claude-code", "dddd", "unknown", "Claude Code"),
   ]);
+});
+
+test("a terminal Nexus started an agent in is that agent's while its launch's env and login shell still start it, so a pause then records the agent", async () => {
+  const core = fakeCore();
+  const starting = core.add({ argv: [...launchWrapper, "claude", "--resume", session, "--model", "opus"], labels: { ...labels("claude-code", "review"), "claude.session_id": session }, cwd: "/home/user/app" });
+  slowStart(starting);
+  const handRun = core.add({ argv: ["bash", "-l"], labels: labels("shell", "sh"), keep: true, foreground: { argv: ["claude", "--resume", "bbbb"], cwd: "/home/user", name: "claude" }, status: status("idle") });
+  const guest = pylon(core);
+  for (const foreground of [null, "env", "bash"]) {
+    assert.deepEqual((await sessionFacts(guest)).map((f) => [f.herdrPane, f.harness, f.harnessSessionId, f.status]), [
+      [starting.address, "claude-code", session, "unknown"],
+      [handRun.address, "claude-code", "bbbb", "idle"],
+    ], `while its foreground is ${foreground ?? "none"}`);
+  }
+  slowStart(starting);
+  assert.deepEqual((await recordSessions(guest))!.map((r) => [r.herdrPane, r.harness, r.harnessSessionId, r.model]), [
+    [starting.address, "claude-code", session, "opus"],
+    [handRun.address, "claude-code", "bbbb", undefined],
+  ], "a Claude a person started in a shell is that Claude's, by its foreground");
 });
 
 test("a core that cannot be read rejects rather than reading as no sessions", async () => {
@@ -329,6 +357,21 @@ test("a read never starts a core: with none, a pylon reports only its failed ses
 const session = "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90";
 const claudeRunning = (core: FakeCore, state: string | null, extra: Partial<FakeTerminal> = {}) => core.add({ argv: ["claude", "--resume", session], status: status(state), ...extra });
 
+test("after a core crash Claude runs on without a core: a read is unknown and records nothing, and a send or start takes it back where it runs rather than resume it beside itself", async () => {
+  const core = fakeCore();
+  const guest = pylon(core, { transcripts: true });
+  const t = await openSession(guest, { harness: "claude-code", title: "review", cwd: "/home/user", resume: session });
+  core.crash();
+  await assert.rejects(sessionFacts(guest), (err) => err instanceof Error && /no Herdr Core runs, but the programs of one that crashed still do/.test(err.message));
+  await assert.rejects(recordSessions(guest), /crashed/);
+  assert.deepEqual(guest.written, [], "the last record stands");
+  assert.deepEqual(await sendToClaude(guest, { session, text: "still there?" }), { outcome: "sent", herdrPane: t, resumed: false });
+  core.crash();
+  assert.equal(await openSession(guest, { harness: "claude-code", title: "review", cwd: "/home/user", resume: session }), t);
+  assert.equal(runs(core).length, 1, "one Claude runs the session");
+  assert.deepEqual(core.terminals.map((x) => [x.address, x.state, x.sent]), [[t, "live", ["still there?"]]]);
+});
+
 test("a message reaches Claude exactly as written in one send, queued behind a turn Claude is working on", async () => {
   const text = "x".repeat(63) + "😀" + "-n is no flag\n\"double\" 'single' `ticks` $HOME $(whoami) \\ backslash \\n\n!ls\n\n  indented\n";
   for (const [state, outcome] of [["idle", "sent"], ["done", "sent"], ["error", "sent"], ["working", "queued"]] as const) {
@@ -349,6 +392,19 @@ test("a message to a blocked Claude sends nothing, whether its status says so or
   const r = claudeRunning(refusing, "idle");
   assert.deepEqual(await sendToClaude(pylon(refusing), { session, text: "yes" }), { outcome: "blocked", herdrPane: "t1", resumed: false });
   assert.deepEqual(r.sent, []);
+});
+
+test("a send Core refuses as still starting, which types nothing, is sent again until Claude is ready, and reports starting once that runs out", async () => {
+  let refusals = 2;
+  const settling = fakeCore({ answer: (method, params) => method === "terminal.send" && refusals-- > 0 ? stillStarting(params.terminal as string) : undefined });
+  const t = claudeRunning(settling, "idle");
+  assert.deepEqual(await sendToClaude(pylon(settling), { session, text: "go" }, 5_000), { outcome: "sent", herdrPane: "t1", resumed: false });
+  assert.deepEqual([t.sent, settling.calls.filter((c) => c.method === "terminal.send").length], [["go"], 3]);
+
+  const unsettled = fakeCore({ answer: (method, params) => method === "terminal.send" ? stillStarting(params.terminal as string) : undefined });
+  const never = claudeRunning(unsettled, "idle");
+  assert.deepEqual(await sendToClaude(pylon(unsettled), { session, text: "go" }, 300), { outcome: "starting", herdrPane: "t1", resumed: false });
+  assert.deepEqual(never.sent, []);
 });
 
 test("a Claude that has said nothing yet is waited for, and one still silent is reported blocked at a dialog or starting, with nothing sent", async () => {

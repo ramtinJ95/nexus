@@ -159,6 +159,7 @@ function pylon(keeps = true) {
   const live = () => core.terminals.filter((t) => t.state === "live");
   return {
     guest,
+    core,
     pause() {
       core.restart();
       if (!keeps) core.terminals.length = 0;
@@ -207,7 +208,9 @@ test("a pylon whose earlier wakes left the worker in several terminals comes bac
   const p = pylon();
   const first = await launched(p);
   const others = [];
-  for (const title of ["Claude Code", "Claude Code"]) others.push(await openSession(p.guest, { harness: "claude-code", title, cwd: "/home/user/workspace/repo", resume: worker }));
+  // A launch finds a live terminal that runs the session, so only an earlier pylon's wakes could leave these.
+  const { argv, cwd, labels } = p.core.terminals[0]!;
+  for (const title of ["Claude Code", "Claude Code"]) others.push(p.core.add({ argv, cwd, labels: { ...labels, "nexus.title": title }, status: { state: "idle" } }).address);
   await recordBeforePause(p.guest, quiet);
   p.pause();
   const { lines, log } = logged();
