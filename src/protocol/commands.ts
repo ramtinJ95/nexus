@@ -20,15 +20,15 @@ export type PylonCommand =
   | { kind: "exec"; argv: readonly string[]; cwd: string; timeoutMs: number }
   | { kind: "open-session"; harness: SessionHarness; title: string; resume?: string; prompt?: string; model?: string }
   /**
-   * `session` is who the control plane last saw in the pane, so a pane a wake has since given to another session is
-   * left open. None for a pane no observation has listed yet, such as one opened a moment ago.
+   * `session` is who the control plane last saw in the terminal, so a terminal that runs another session since a wake
+   * is left open. None for a terminal no observation has listed yet, such as one opened a moment ago.
    */
   | { kind: "close-session"; herdrPane: string; session?: SessionIdentity }
-  /** Forgets a failed session the last wake left in no pane, so no wake tries it again. */
+  /** Forgets a failed session the last wake left in no terminal, so no wake tries it again. */
   | { kind: "drop-failed-session"; id: string }
   /**
-   * Types `text` into the Claude Code session `session` as a prompt and submits it, resuming the session first, under
-   * `model` if given, when no live pane runs it. `text` holds no control character but newlines (claudeTextProblem).
+   * Pastes `text` into the Claude Code session `session` as a prompt and submits it, resuming the session first, under
+   * `model` if given, when no live terminal runs it. `text` holds no control character but newlines (claudeTextProblem).
    * The probe remembers the send under `requestId`, for send-claude-outcome. A control plane older than it sends none.
    */
   | { kind: "send-claude"; session: string; text: string; model?: string; requestId?: string }
@@ -38,7 +38,7 @@ export type PylonCommand =
    */
   | { kind: "send-claude-outcome"; requestId: string }
   /**
-   * Presses Esc in the pane that runs the Claude Code session `session`, which interrupts its turn as it does at the
+   * Presses Esc in the terminal that runs the Claude Code session `session`, which interrupts its turn as it does at the
    * terminal. It presses no other key, and none at all unless Claude is working.
    */
   | { kind: "interrupt-claude"; session: string }
@@ -58,13 +58,13 @@ export type CloseSessionOutcome = typeof closeSessionOutcomes[number];
 export type CommandResult =
   | { kind: "exec"; exitCode: number | null; output: string; truncated: boolean }
   /**
-   * `stalled`: a prompted launch showed no sign its first prompt went in, so its pane stays open for a person to check,
+   * `stalled`: a prompted launch showed no sign its first prompt went in, so its terminal stays open for a person to check,
    * and this says why.
    */
   | { kind: "open-session"; herdrPane: string; stalled?: string }
   /**
-   * `not-open`: no such pane is open. `moved`: the pane runs another session than the command names, such as one a wake
-   * put there after moving the named one. Both leave every pane as it was.
+   * `not-open`: no such terminal is live. `moved`: the terminal runs another session than the command names, such as
+   * one a `/clear` started there. Both leave every terminal as it was.
    */
   | { kind: "close-session"; outcome: CloseSessionOutcome }
   /** `dropped` is false when the pylon holds no such failed session. */
@@ -73,10 +73,11 @@ export type CommandResult =
    * `sent`: Claude was idle, so the message starts a turn. `queued`: Claude was working, so Claude Code queues the message
    * as it queues input typed during a turn, and takes it at its next tool boundary or after the turn. Both mean it was
    * typed. `blocked`: Claude waits at a prompt in its terminal, such as a trust or permission dialog, which typing would
-   * answer. `starting`: Herdr could not yet tell Claude's state. `moved`: the pane stopped running the session before
-   * anything was typed, as when another agent started in it. These mean nothing was typed, so the message can be sent
-   * again. A failed command may have typed part of the message.
-   * `herdrPane` is the pane Claude runs in, and `resumed` says the session had no live pane and was resumed into it first.
+   * answer. `starting`: Claude had reported no state yet. `moved`: the terminal stopped running the session before
+   * anything was typed, as when a `/clear` started another session in it. These mean nothing was typed, so the message
+   * can be sent again. A failed command may have typed the message.
+   * `herdrPane` is the terminal Claude runs in, and `resumed` says the session had no live terminal and was resumed into
+   * one first.
    */
   | { kind: "send-claude"; outcome: SendClaudeOutcome; herdrPane: string; resumed: boolean }
   /**
@@ -87,7 +88,7 @@ export type CommandResult =
   /**
    * `interrupted`: Esc was pressed while Claude worked. The rest press nothing. `idle`: Claude was not working, and a second
    * Esc there opens its rewind picker. `blocked`: Claude waits at a dialog, which Esc would cancel. `unknown`:
-   * Herdr could not tell Claude's state. `not-running`: no live pane runs the session.
+   * Claude had reported no state yet. `not-running`: no live terminal runs the session.
    */
   | { kind: "interrupt-claude"; outcome: InterruptClaudeOutcome }
   | { kind: "service"; services: readonly ServiceFact[]; logs?: string }

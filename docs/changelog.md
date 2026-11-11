@@ -4,7 +4,7 @@ What each version of the API contract and the Mac `nexus` CLI changed, newest fi
 
 ## 0.84.0
 
-A pylon's sessions are Herdr Core terminals, so a session's `herdrPane` is a Core terminal address such as `t7`, the attach route's `pane` matches `^t[0-9a-z]{1,12}$` and attaches to that terminal alone, and `ThreadDetail.attach` is `hc`. A failed session in no terminal keeps the address it was recorded at as its `id`, in place of a `failed-` hash. Removes `POST /v1/threads/<thread>/sessions/<session>/focus`, which a control plane older than 0.84.0 still serves: the dashboard's Show in terminal attaches its terminal tab to the session instead. The CLI never called it. Herdr sessions a pylon ran before are not carried over: the probe reads and opens only Core terminals, so a pylon on an image without Herdr Core lists no sessions and opens none.
+A pylon's sessions are Herdr Core terminals, so a session's `herdrPane` is a Core terminal address such as `t7`, the attach route's `pane` matches `^t[0-9a-z]{1,12}$` and attaches to that terminal alone, and `ThreadDetail.attach` is `hc`. A failed session in no terminal keeps the address it was recorded at as its `id`, in place of a `failed-` hash. Removes `POST /v1/threads/<thread>/sessions/<session>/focus`, which a control plane older than 0.84.0 still serves: the dashboard's Show in terminal attaches its terminal tab to the session instead. The CLI never called it. The probe reads and opens only Core terminals, so a pylon on an image without Herdr Core lists no sessions, keeps its last sessions file through a pause, and fails to open or relaunch a session. On an image with Herdr Core, a wake relaunches each session the sessions file records in a new terminal, one recorded under Herdr included.
 
 ## 0.83.0
 

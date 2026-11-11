@@ -44,7 +44,7 @@ export interface ThreadDetail {
     /** Set while its node reports the running pylon's guest gives no answer to its guest commands. */
     notAnswering?: GuestNotAnswering;
   };
-  /** Every Herdr pane in the pylon and every failed session, as its node last reported them, or what its wake brings back while it is paused. */
+  /** Every Herdr Core terminal in the pylon and every failed session, as its node last reported them, or what its wake brings back while it is paused. */
   sessions: readonly Session[];
   /** Every preview of the thread, served or not, listening or not. */
   previews: readonly Preview[];
@@ -66,7 +66,7 @@ export interface ThreadDetail {
   judgments: readonly JudgmentView[];
   /** A planning thread's proposals become questions, and the items the person accepts. */
   planning: boolean;
-  /** The command that attaches to the pylon's Herdr sessions from a shell in the pylon. */
+  /** The command that opens Herdr Core's picker of the pylon's terminals from a shell in the pylon. */
   attach: string;
   /** Null for a thread that has no conversation. A parked task holds the run until it is retried. */
   agent: { parkedTasks: number } | null;

@@ -1,9 +1,10 @@
 /**
  * One attached terminal's life on the control plane, after the attach route's 101: it waits for the thread's pylon,
- * opens Herdr Core's client on a pty in it, and pumps bytes until one side ends. contract/attach.ts is the protocol.
+ * opens Herdr Core's client on a pty in it, on one terminal or Core's picker as attachScript decides, and pumps bytes
+ * until one side ends. contract/attach.ts is the protocol.
  *
  * Waiting, each try records human activity and wakes the node, as a CLI command that needs the pylon running does,
- * so a paused pylon wakes on attach. Attached, the probe's count of Core clients keeps the human present. Every end
+ * so a paused pylon wakes on attach. Attached, the probe's count of Core viewers keeps the human present. Every end
  * hangs the terminal up, which detaches Core's client and keeps its session, and waits for the guest's process to
  * exit, so nothing is left running in the pylon once serveAttach resolves. A node that does not let it exit within
  * hangUpMs has its stream dropped, which frees the stream's slot and hangs the relay up from the probe's side.

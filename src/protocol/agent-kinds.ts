@@ -15,9 +15,9 @@ export const claudeSessionId = /^[A-Za-z0-9-]{1,200}$/;
 interface AgentKind {
   /** Its name on the dashboard. */
   label: string;
-  /** What tells the control plane its agent is working: Herdr's status of the pane, or the agent's own hooks. */
+  /** What tells the control plane its agent is working: Herdr Core's status of the terminal, or the agent's own hooks. */
   activity: "herdr" | "hooks";
-  /** The open-session fields it takes. A shell is the pane's own login shell, so it starts nothing and resumes nothing. */
+  /** The open-session fields it takes. A shell is its terminal's own login shell, so it starts nothing and resumes nothing. */
   takes: { readonly resume: boolean; readonly prompt: boolean; readonly model: boolean };
   /**
    * The secret grants that sign its agent in, any one of which serves. The control plane holds the value of a `held`
@@ -27,7 +27,7 @@ interface AgentKind {
 }
 
 export const agentKinds = {
-  // Herdr can retain a dead Claude's working status; only its expiring hook lease keeps it awake.
+  // Herdr could keep a dead Claude's working status, so only its expiring hook lease keeps it awake.
   // deploy/credentials.ts's claudeNames, which the deployer reads without zod, names the same two grants.
   "claude-code": {
     label: "Claude Code", activity: "hooks", takes: { resume: true, prompt: true, model: true },

@@ -55,7 +55,7 @@ function working(d: ThreadDetail, items: readonly Item[], asks: (item: UserItem)
 export function stateBar(t: Thread, run: Run, now: number): Html {
   const open = isOpenStatus(t.status);
   const abort = html`<button type="button" class="btn btn-xs btn-abort" id="abort"${act("abort")} data-thread="${t.id}">Abort</button>`;
-  // The abort route presses Esc in a Claude worker's pane, as a person at its terminal interrupts a turn.
+  // The abort route presses Esc in a Claude worker's terminal, as a person there interrupts a turn.
   const interrupt = html`<button type="button" class="btn btn-xs btn-abort" id="abort"${act("abort")} data-thread="${t.id}" title="Presses Esc in Claude's terminal">Interrupt</button>`;
   const terminal = html`<button type="button" class="btn btn-xs" data-terminal>${icon("terminal")}Open terminal</button>`;
   const attach = open && html`<span class="attach-line"><code id="attach-line">nexus attach ${t.id}</code><button type="button" class="btn btn-xs btn-ghost" data-copy="attach-line" aria-label="Copy nexus attach ${t.id}">Copy</button></span>`;

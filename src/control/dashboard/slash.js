@@ -3,8 +3,7 @@
 
 /**
  * `session` commands end or replace Claude's session, which Nexus follows only by the ID the worker's launch gave it.
- * `picker` commands open a picker or panel that only keys drive, and Herdr reports Claude idle while one is open, so the
- * next message would be typed into it. `bare-picker` commands open one only when typed without an argument.
+ * `picker` commands open a picker or panel that only keys drive, so the next message would be typed into it. `bare-picker` commands open one only when typed without an argument.
  */
 const terminalOnly = {
   clear: "session", reset: "session", new: "session", resume: "session", continue: "session", exit: "session", quit: "session", branch: "session", fork: "session",

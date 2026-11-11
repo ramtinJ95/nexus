@@ -11,7 +11,7 @@
  * Claude worker's transcript, and sends what changed since its last event, so a slow client gets fewer, larger
  * events and never holds the harness up.
  *
- * A thread's pylon also gives a terminal on its Herdr session, over a WebSocket on the attach route, which
+ * A thread's pylon also gives a terminal on its Herdr Core, over a WebSocket on the attach route, which
  * control/attach.ts serves.
  *
  * Like the probe, it trusts tailnet identity: each caller's stable node ID, from tailscaled's whois, must be
@@ -276,7 +276,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     else await send(req, res, reply.status, reply.body);
   }
 
-  /** The pane a terminal attached to the thread lands in: its Claude worker's, while the node reports it. */
+  /** The Core terminal an attach to the thread shows: its Claude worker's, while the node reports it running. */
   function agentPane(t: Thread): string | null {
     const session = registry.threads.claudeWorker(t.id)?.session ?? null;
     if (session === null) return null;

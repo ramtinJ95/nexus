@@ -46,7 +46,7 @@ const pane = await probes.get(node).command(pylonId, {
   kind: "open-session", harness: "claude-code", title: "review",
 });
 const terminal = await openTerminal(
-  (argv) => probes.get(node).stream(pylonId, argv), terminalSize(120, 40), "xterm-256color", ["herdr", "--session", "nexus"],
+  (argv) => probes.get(node).stream(pylonId, argv), terminalSize(120, 40), "xterm-256color", ["sh", "-c", attachScript, "attach", pane.herdrPane],
 );
 for await (const bytes of terminal) browserSocket.send(bytes);
 ```

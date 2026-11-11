@@ -308,13 +308,14 @@ export function envelope(job: Job, node: NodeName, now: number): JobEnvelope {
 /** Record writes derived from one probe event. The control plane is the only writer of every record. */
 export type RegistryWrite =
   | { record: "node"; node: NodeName; state: "online" | "offline"; capacity: NodeObservation["capacity"] }
-  /** The pylon's whole list: a session it does not list is gone. Adopts panes opened by hand in Herdr. */
+  /** The pylon's whole list: a session it does not list is gone. Adopts terminals opened by hand, such as in herdr-app. */
   | { record: "sessions"; pylonId: PylonId; sessions: readonly SessionRow[] }
   /** The pylon paused without saying what its wake brings back, so every session it had is paused. */
   | { record: "sessions-paused"; pylonId: PylonId }
   /**
-   * The pylon runs again, but its sessions are not read yet. Each paused one runs in the pane it had, with its status
-   * unknown, and one that had no pane, which its last wake failed to bring back, is failed until a read says otherwise.
+   * The pylon runs again, but its sessions are not read yet. Each paused one runs in the terminal it had, with its
+   * status unknown, and one that had no terminal, which its last wake failed to bring back, is failed until a read says
+   * otherwise.
    */
   | { record: "sessions-resumed"; pylonId: PylonId }
   | { record: "output"; pylonId: PylonId; kind: "branch" | "diff" | "preview" | "file"; ref: string }
@@ -323,8 +324,8 @@ export type RegistryWrite =
   | { record: "job"; status: JobStatus };
 
 /**
- * A session as the registry keeps it, but its pylon: running in a pane, paused with its pylon, or failed to come back
- * from the last wake (SessionFact). `status` is null where the observation has none, so the row keeps the Herdr
+ * A session as the registry keeps it, but its pylon: running in a terminal, paused with its pylon, or failed to come
+ * back from the last wake (SessionFact). `status` is null where the observation has none, so the row keeps the
  * status it last had.
  */
 export type SessionRow = { id: string; harness: SessionHarness; harnessSessionId: string | null; title: string | null } & (
@@ -343,7 +344,7 @@ export type SessionRow = { id: string; harness: SessionHarness; harnessSessionId
  *   the pylon is in `unlisted`, as loop.ts names each pylon whose list this control plane has not written since it
  *   started or since it was last left out of `known`. The previous observation may be one an older control plane stored, whose rows do not match it: one from
  *   before paused sessions deleted a paused pylon's rows. A running
- *   pylon lists its panes and the sessions its last wake failed to bring back. A stopped one lists, as paused, what
+ *   pylon lists its terminals and the sessions its last wake failed to bring back. A stopped one lists, as paused, what
  *   its pause recorded, under the IDs they ran under, or says nothing (null), and then every session it had is
  *   paused. A booting, stopping, deleting or broken pylon says nothing, so its rows stand until the next list. An
  *   absent pylon has none. Running sessions the probe could not read (null) write nothing, and loop.ts stores the last

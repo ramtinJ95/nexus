@@ -25,7 +25,7 @@ export const streamAnswerMs = 10_000;
  * resolves to `lost`. The pi-env daemon then kills every command it started. A tool call whose pipe was lost
  * fails with pi-env's "connection lost" error, which the model sees as an ordinary error result. pi-durable's
  * `interrupted` result appears only when the harness process itself died mid-call. A terminal's relay hangs up
- * when its stdin ends, so Herdr's client detaches and the session stays.
+ * when its stdin ends, so Herdr Core's client detaches and the session stays.
  */
 export type StreamEnd = { kind: "exited"; code: number } | { kind: "lost" };
 export interface ByteStream extends AsyncIterable<Uint8Array> {

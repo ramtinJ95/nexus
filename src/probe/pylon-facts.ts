@@ -108,8 +108,8 @@ export function createPylonStates({ backend, log, redacted }: FactDeps) {
   }
 
   /**
-   * Costs one guest exec (`herdr api snapshot`) per running pylon per snapshot, so a snapshot waits for the
-   * slowest pylon, up to sessionReadTimeoutMs. A failed read reports null, never "no sessions".
+   * Costs one guest exec of Core's `terminal.list` per running pylon per snapshot, beside a read of its sessions file,
+   * so a snapshot waits for the slowest pylon, up to sessionReadTimeoutMs. A failed read reports null, never "no sessions".
    */
   const sessions = (pylonId: PylonId): Promise<readonly SessionFact[] | null> =>
     readFact(pylonId, "sessions", sessionReadTimeoutMs, () => sessionFacts(backend.guest(pylonId), sessionReadTimeoutMs), {
@@ -117,7 +117,7 @@ export function createPylonStates({ backend, log, redacted }: FactDeps) {
     });
 
   /**
-   * Terminals attached to the pylon's Herdr session. A count that fails reads as none, so it never keeps a pylon
+   * Terminals viewing the pylon's Herdr Core, such as `nexus attach`'s. A count that fails reads as none, so it never keeps a pylon
    * awake nor fails the rest of the observation.
    */
   const attached = (pylonId: PylonId): Promise<number> =>

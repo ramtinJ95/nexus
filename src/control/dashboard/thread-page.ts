@@ -301,7 +301,7 @@ ${t.status === "active" && html`<div class="s-new">${newSessions.map(([harness, 
 const newSessions = [["shell", "New shell"], ["pi", "New pi"], ["claude-code", "New Claude"]] as const satisfies readonly (readonly [SessionHarness, string])[];
 
 /**
- * A running session shows in the terminal. Any but the worker's own closes, and a failed one in no pane is dropped by
+ * A running session shows in the terminal. Any but the worker's own closes, and a failed one in no terminal is dropped by
  * its ID. A paused one does neither until its pylon wakes.
  */
 function sessionActions(thread: string, s: ThreadDetail["sessions"][number], own: boolean): Html {
