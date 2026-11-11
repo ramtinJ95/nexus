@@ -1,12 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFile, spawnSync } from "node:child_process";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { promisify } from "node:util";
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import * as contract from "./guest-contract.ts";
-import { coreHome, unixSockets } from "./test-support/kit.ts";
+import { coreHome, tempDir, unixSockets } from "./test-support/kit.ts";
 
 test("each name and limit equals the literal it replaced", () => {
   const { asUser, onClaudeTranscript, coreRunning, coreHeld, startCore, ensureCore, terminalPattern, attachScript, ...values } = contract;
@@ -25,7 +24,6 @@ test("each name and limit equals the literal it replaced", () => {
   assert.equal(terminalPattern.flags, "");
   assert.deepEqual(asUser("id"), ["runuser", "-l", "user", "-c", "id"]);
   assert.equal(onClaudeTranscript("cat \"$f\"", 3), 'for f in "$1"/*/"$0".jsonl; do [ -e "$f" ] || continue; cat "$f"; exit 0; done; exit 3');
-  assert.equal(attachScript, `${ensureCore}; t=$1; [ -n "$t" ] && herdr-core get "$t" --json 2>/dev/null | grep -q '"state": *"live"' && exec herdr-core attach "$t"; exec herdr-core`);
 });
 
 test("a viewer is Core's picker or an attach, not the core, a held terminal, or an app's connect and events", () => {
@@ -38,29 +36,49 @@ test("a viewer is Core's picker or an attach, not the core, a held terminal, or 
   assert.deepEqual(not.filter((line) => viewer.test(line)), []);
 });
 
+interface Listed { address: string; state?: string; labels?: Record<string, string>; parent?: string }
+
 /**
- * Runs attachScript against a fake core on PATH, as a user whose core listens: `herdr-core get` prints the JSON
- * `states` holds for a terminal, or fails for one it does not. It answers the argv herdr-core was exec'd with last.
+ * Runs attachScript as a user whose core listens, against a fake herdr-core on PATH whose `connect` answers a
+ * `terminal.list` of the live ones of `terminals`, as Core lists them, or a reply as given. Returns what herdr-core was exec'd with last and where, or null
+ * when it was not, with the script's exit code and stderr.
  */
-async function attachArgv(t: { after: (fn: () => Promise<void>) => void }, pane: string, states: Record<string, string>): Promise<string> {
-  const bin = await mkdtemp(join(tmpdir(), "nexus-attach-"));
-  t.after(() => rm(bin, { recursive: true, force: true }));
-  const log = join(bin, "argv");
+async function attach(t: { after: (fn: () => Promise<void>) => void }, pane: string, terminals: readonly Listed[] | string, core: "listening" | "down" = "listening") {
   const user = await coreHome(t);
-  await user.listen("core");
-  const cases = Object.entries(states).map(([address, state]) => `${address}) printf '{"address": "${address}", "state": "${state}"}\\n'; exit 0;;`).join("\n  ");
-  await writeFile(join(bin, "herdr-core"), `#!/bin/sh\nif [ "$1" = get ]; then case "$2" in\n  ${cases}\n  *) echo "no terminal $2" >&2; exit 1;;\nesac; fi\necho "$*" > ${log}\n`);
-  await chmod(join(bin, "herdr-core"), 0o755);
-  await promisify(execFile)("sh", ["-c", contract.attachScript, "attach", pane], { env: { ...user.env, PATH: `${bin}:/usr/bin:/bin` } });
-  return (await readFile(log, "utf8")).trim();
+  if (core === "listening") await user.listen("core");
+  const bin = await tempDir("nexus-attach-", t);
+  const log = join(bin, "argv");
+  const list = typeof terminals === "string" ? terminals
+    : JSON.stringify({ id: 1, jsonrpc: "2.0", result: { terminals: terminals.filter((x) => x.state !== "finished").map((x) => ({ state: "live", labels: {}, parent: null, ...x })) } });
+  await writeFile(join(bin, "reply"), `a warning first\n${list}\n`);
+  await writeFile(join(bin, "herdr-core"), `#!/bin/sh\nif [ "$1" = connect ]; then cat >/dev/null; exec cat ${join(bin, "reply")}; fi\necho "$PWD: $*" > ${log}\n`, { mode: 0o755 });
+  await writeFile(join(bin, "setsid"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const run = spawnSync("sh", ["-c", contract.attachScript, "attach", pane], { cwd: "/", env: { ...user.env, PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin` }, encoding: "utf8" });
+  return { exec: existsSync(log) ? readFileSync(log, "utf8").trim().replace(user.home, "~") : null, exitCode: run.status, stderr: run.stderr };
 }
 
-test("the attach attaches to a live terminal it names, and opens Core's picker for none, a finished one or a gone one", { skip: unixSockets !== true && unixSockets }, async (t) => {
-  const states = { t1: "live", t2: "finished" };
-  assert.equal(await attachArgv(t, "t1", states), "attach t1");
-  assert.equal(await attachArgv(t, "", states), "");
-  assert.equal(await attachArgv(t, "t2", states), "", "a finished terminal, as a wake leaves its session's old one");
-  assert.equal(await attachArgv(t, "t9", states), "", "a terminal the core does not know");
+const worker = { address: "t3", labels: { "nexus.harness": "claude-code" } };
+const handOpened = { address: "t1" };
+const reviewer = { address: "t2", parent: "t3", labels: { "nexus.harness": "claude-code" } };
+const shell = { address: "t4", labels: { "nexus.harness": "shell" } };
+
+test("the attach attaches to the live terminal it names, else to a session Nexus opened, else to any live one", { skip: unixSockets !== true && unixSockets }, async (t) => {
+  assert.equal((await attach(t, "t3", [handOpened, reviewer, worker, shell])).exec, "/: attach t3");
+  assert.equal((await attach(t, "t3", [handOpened, reviewer, { ...worker, state: "finished" }, shell])).exec, "/: attach t4", "a finished terminal, as a wake leaves its session's old one");
+  assert.equal((await attach(t, "t9", [handOpened, reviewer, shell])).exec, "/: attach t4", "a terminal the core does not know");
+  assert.equal((await attach(t, "", [handOpened, reviewer, shell])).exec, "/: attach t4", "no terminal named, and a reviewer belongs to its builder");
+  assert.equal((await attach(t, "", [{ address: "laptop/t1", labels: { "nexus.harness": "shell" } }, handOpened])).exec, "/: attach t1", "a terminal of another machine is not the pylon's");
+});
+
+test("the attach opens Core's picker in the home folder only when no terminal is live, or when the list cannot be read, which it says", { skip: unixSockets !== true && unixSockets }, async (t) => {
+  assert.deepEqual(await attach(t, "t3", [{ ...worker, state: "finished" }]), { exec: "~:", exitCode: 0, stderr: "" });
+  const unread = await attach(t, "t3", "not json");
+  assert.equal(unread.exec, "~:");
+  assert.match(unread.stderr, /nexus attach: no terminal list, so the picker opens/);
+});
+
+test("an attach whose core does not start fails, saying so, and runs no Core command that would start one", { skip: unixSockets !== true && unixSockets }, async (t) => {
+  assert.deepEqual(await attach(t, "t3", [worker], "down"), { exec: null, exitCode: 1, stderr: "nexus attach: Herdr Core did not start\n" });
 });
 
 test("a core runs while it listens at the socket its lock names, for the session Core's commands reach, and its holder outlives a crash", { skip: unixSockets !== true && unixSockets }, async (t) => {

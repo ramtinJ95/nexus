@@ -67,8 +67,19 @@ export const coreAttach = "hc";
 export const coreViewer = "([^ ]*/)?(herdr-core|hc)( attach( .*)?)?";
 
 /**
- * The shell command a human's terminal runs in the pylon to attach to its core, which it starts first as a boot does
- * when none runs. Its first argument, when not empty, is the terminal it attaches to, such as a Claude worker's. One
- * that is not live, as after a wake moved its session, opens Core's picker instead, as an empty one does.
+ * Prints the terminal of this machine to attach to, from a `terminal.list` reply, which lists live ones: `$1` when
+ * listed, else the first a Nexus session runs in, else the first. It prints nothing when none is listed, and fails
+ * when the reply cannot be read.
  */
-export const attachScript = `${ensureCore}; t=$1; [ -n "$t" ] && herdr-core get "$t" --json 2>/dev/null | grep -q '"state": *"live"' && exec herdr-core attach "$t"; exec herdr-core`;
+const attachTarget = `jq -rn --arg t "$1" 'input|[.result.terminals[]|select(.address|test("/")|not)]|(map(select(.address==$t))+map(select(.parent==null and .labels."nexus.harness"))+.)[0].address//empty'`;
+/**
+ * The shell command a human's terminal runs in the pylon to attach to its core, which it starts first as a boot does
+ * when none runs, and fails without. Its first argument, when not empty, is the terminal it attaches to, such as a
+ * Claude worker's. When that one is not live, as after a wake moved its session, or none is named, it attaches to a
+ * session Nexus opened, or else any live terminal. Core's picker opens only when no terminal is live. Its Enter starts
+ * a new shell, since its first entry is "new", so the picker starts in the home folder, where that shell opens.
+ */
+export const attachScript = `${ensureCore} || { echo 'nexus attach: Herdr Core did not start' >&2; exit 1; }; `
+  + `t=$(echo '{"id":1,"method":"terminal.list"}' | herdr-core connect | grep '^{' | ${attachTarget}) `
+  + `|| echo 'nexus attach: no terminal list, so the picker opens' >&2; `
+  + `[ -n "$t" ] && exec herdr-core attach "$t"; cd && exec herdr-core`;

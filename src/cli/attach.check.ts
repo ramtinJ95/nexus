@@ -7,21 +7,19 @@
  * openTerminal makes with the same relay the control plane runs in a pylon, so the CLI sees a terminal of a known
  * size that the check can resize and type into. It starts one thread in project P and touches no other thread.
  *
- * The thread has no Claude worker, so `nexus attach` opens Herdr Core's picker of the pylon's terminals
- * (guest-contract.ts attachScript). Steps: start the thread and open a shell session titled attach-check; attach at
- * 100x30, pick the session in the picker and see the shell there answer from the session's terminal; resize to
+ * The thread has no Claude worker, so `nexus attach` attaches to the session Nexus opened in the pylon, its only live
+ * terminal (guest-contract.ts attachScript). Steps: start the thread and open a shell session titled attach-check;
+ * attach at 100x30 and see the shell answer from the session's terminal; resize to
  * 140x40 and see that shell's size grow; stay attached past a probe snapshot and see the thread's human activity
  * advance, which only the attached terminal can do; detach with Core's Ctrl+\ and see the CLI exit 0 and the
  * terminal's modes restored; archive the thread and see attach exit 5; unarchive it; unless --skip-idle-pause, wait
- * up to 30 minutes for the pylon to pause for idleness, and see attach wait for its wake and then pick the kept shell,
- * back at its address; delete the thread unless --keep. A failed step keeps the thread and prints its ID.
+ * up to 30 minutes for the pylon to pause for idleness, and see attach wait for its wake and then land in the kept
+ * shell, back at its address; delete the thread unless --keep. A failed step keeps the thread and prints its ID.
  *
- * Assumed, not seen in spikes/herdr-core, which saw only `herdr-core attach <t>` exit 0 on Ctrl+\ and the picker's
- * command line: the picker lists each live terminal by its address; Enter in it attaches to the first one listed,
- * here the thread's only terminal, rather than to the "new…" entry its help puts on top; a detach from a terminal
- * picked there ends the picker with exit 0 rather than going back to its list; the shell sees the size of the one
- * terminal attached to it; and a kept shell's terminal comes back at its address after a VM restore as after the
- * spike's core stop and start, with HC_TERMINAL_ID set to it.
+ * Assumed, not seen in spikes/herdr-core, which saw `herdr-core attach <t>` exit 0 on Ctrl+\: the shell sees the size
+ * of the one terminal attached to it, and a kept shell's terminal comes back at its address after a VM restore as
+ * after the spike's core stop and start, with HC_TERMINAL_ID set to it. Core's picker, which the attach opens only
+ * when no terminal is live, is not exercised: its Enter starts a new shell, and Ctrl+\ does nothing in it.
  *
  * Every CLI call's output and every terminal's transcript goes to the evidence directory, a new temporary one by
  * default. It prints ATTACH_CHECK_PASS last.
@@ -160,17 +158,19 @@ async function ask(t: Attached, what: string, line: string, answer: RegExp, with
 }
 
 /**
- * Waits for Core's picker to list the session's terminal, picks it with Enter, and checks the shell it lands in runs in
- * that terminal, by the address Core gives its programs.
+ * Checks the attach lands in the session's terminal, by the address Core gives its programs. The shell answers only
+ * once the attach is up, which a wake delays, so it asks again until then.
  */
-async function picksSession(t: Attached, terminal: string, withinMs: number): Promise<void> {
-  const listed = new RegExp(`\\b${terminal}\\b`);
-  await t.until(`Core's picker lists the session's terminal ${terminal}`, (printed) => listed.test(plain(printed)), withinMs);
-  await sleep(1_000);
-  await t.terminal.write(Buffer.from("\r"));
-  await sleep(1_000);
-  const [, landed] = await ask(t, "the picked terminal's shell says where it runs", 'echo "attached-to=$HC_TERMINAL_ID"', /attached-to=(t[0-9a-z]+)/);
-  assert.equal(landed, terminal, `the picker attaches to the session's terminal ${terminal}`);
+async function landsInSession(t: Attached, terminal: string, withinMs: number): Promise<void> {
+  let landed: string | undefined;
+  for (const deadline = Date.now() + withinMs; landed === undefined;) {
+    try {
+      [, landed] = await ask(t, "the attached shell says where it runs", 'echo "attached-to=$HC_TERMINAL_ID"', /attached-to=(t[0-9a-z]+)/, 5_000);
+    } catch (err) {
+      if (Date.now() >= deadline) throw err;
+    }
+  }
+  assert.equal(landed, terminal, `the attach lands in the session's terminal ${terminal}`);
 }
 
 /** The attached shell's size, as `stty size` gives it. */
@@ -203,7 +203,7 @@ try {
   console.log(`session-open: ${JSON.stringify(opened)}`);
 
   const attached = await inTerminal("attach", terminalSize(100, 30), attachScript());
-  await picksSession(attached, opened.herdrPane, 60_000);
+  await landsInSession(attached, opened.herdrPane, 60_000);
   echo("attach", attached.printed(), /attached-to=/);
 
   const before = await shellSize(attached);
@@ -252,7 +252,7 @@ try {
     const woken = await inTerminal("attach-woken", terminalSize(100, 30), attachScript());
     await woken.until("attach waits for the paused pylon", (printed) => plain(printed).includes(`waiting for the pylon of ${thread}, which is paused`), 60_000);
     // The shell is kept, so the woken core brings it back at its address, where the relaunch finds it.
-    await picksSession(woken, opened.herdrPane, 3 * 60_000);
+    await landsInSession(woken, opened.herdrPane, 3 * 60_000);
     echo("attach-woken", woken.printed(), /nexus: waiting|attached-to=/);
     await detach("attach-woken", woken);
   }
