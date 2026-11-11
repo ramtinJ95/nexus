@@ -23,7 +23,8 @@ export type ThreadNeed = PersonNeed & { d: ServerDetail };
 /** A thread's detail as the control plane's dashboard and inbox read it: what the API serves, and the stored review, which it does not serve. */
 export type ServerDetail = ThreadDetail & { review: Review | null };
 export interface ThreadDetail {
-  claudeWorker?: { model: string | null; state: ClaudeWorkerState; message?: string };
+  /** `session` is the Claude Code session ID Nexus started the worker with, which its session's `harnessSessionId` matches, or null before its launch. */
+  claudeWorker?: { model: string | null; state: ClaudeWorkerState; session: string | null; message?: string };
   /** Nexus resuming the Claude worker after its turns died, or null. */
   resume?: ClaudeResume | null;
   /** Why the builder found that its task needs no change, as it declared instead of opening a pull request, or null. */

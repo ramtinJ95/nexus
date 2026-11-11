@@ -161,8 +161,8 @@ export function threadAgents(options: {
       },
       latestTurn: async (t) => registry.threads.latestClaudeTurn(t.id),
       detail(t) {
-        const { model, state, message } = worker(t);
-        return { claudeWorker: { model, state, ...message === undefined ? {} : { message } }, agent: null };
+        const { model, state, session, message } = worker(t);
+        return { claudeWorker: { model, state, session, ...message === undefined ? {} : { message } }, agent: null };
       },
       // A read that finds the thread deleted lets its reader go.
       delete: async (t) => { void claude.refresh(t); },

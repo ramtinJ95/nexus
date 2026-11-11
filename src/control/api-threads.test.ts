@@ -628,7 +628,7 @@ test("a harness, a Claude worker and a bare thread each answer every agent route
     page: "200 stream", message: '202 {"submission":7}', abort: "204 ", retry: "204 ",
   });
   assert.deepEqual(await routes(threads.claude, "msg:c"), {
-    detail: { claudeWorker: { model: "claude-opus-5-5", state: "pending" }, agent: null }, conversation: "200 claude view", events: noConversation(threads.claude), claudeEvents: "200 stream",
+    detail: { claudeWorker: { model: "claude-opus-5-5", state: "pending", session: null }, agent: null }, conversation: "200 claude view", events: noConversation(threads.claude), claudeEvents: "200 stream",
     page: "200 stream", message: `409 the Claude worker of ${threads.claude.id} has not started a session yet, so it takes no messages. Send it once it has started`,
     abort: `409 the Claude worker of ${threads.claude.id} has not started a session yet, so it has no turn to interrupt`, retry: noConversation(threads.claude),
   });
@@ -647,7 +647,7 @@ test("a harness, a Claude worker and a bare thread each answer every agent route
   assert.deepEqual(s.calls, [["delete", { threadId: threads.harness.id, pylonId: threads.harness.pylonId }]], "only the harness thread's conversation is deleted");
   for (const t of Object.values(threads)) {
     assert.deepEqual(await routes(t, "msg:deleted"), {
-      detail: { claudeWorker: t === claude ? { model: "claude-opus-5-5", state: "pending" } : null, agent: null }, conversation: deleted(t), events: deleted(t), claudeEvents: deleted(t),
+      detail: { claudeWorker: t === claude ? { model: "claude-opus-5-5", state: "pending", session: null } : null, agent: null }, conversation: deleted(t), events: deleted(t), claudeEvents: deleted(t),
       page: deleted(t), message: deleted(t), abort: deleted(t), retry: deleted(t),
     }, t.title);
   }

@@ -2,6 +2,10 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), except in the commands [Version skew](cli.md#version-skew) names, so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.87.0
+
+Adds `session` to a Claude worker thread's `ThreadDetail.claudeWorker`, which `GET /v1/threads/<thread>` and `show --json` answer: the Claude Code session ID the worker runs, which the worker's entry in `sessions` has as its `harnessSessionId`, or null before its launch. A client can then tell the worker's session from another Claude Code session in the pylon. A control plane older than 0.87.0 answers no `session`.
+
 ## 0.86.0
 
 Renames a session's `herdrPane` to `terminal` in `ThreadDetail.sessions`, which `GET /v1/threads/<thread>` and `show --json` answer, and in the `OpenedSession` that `POST /v1/threads/<thread>/sessions` and `session open --json` answer. The attach route's `pane` is `terminal`, and the status type `HerdrStatus` is `TerminalStatus`. Each still holds the address of a Herdr Core terminal, such as `t7`. `show` prints a session `in terminal <address>`, `session open` prints `Opened <harness> session "<title>" in terminal <address> of <thread>.`, and `session close` takes `<terminal|id>`. The CLI now needs a control plane of 0.86.0 or later, since an older one names the field `herdrPane`, which this CLI would read as no terminal. A CLI older than 0.86.0 finds no `herdrPane` in this control plane's sessions, so `show` and `session open` print `in pane undefined` for each session's terminal. Its `nexus attach` sends no `pane`, so it attaches as before. A client that reads `herdrPane` from the CLI's JSON, such as the Claude Code mod in `claude-mods`, finds none.
