@@ -71,6 +71,15 @@ const harnessLabel = "nexus.harness";
 const labelsOf = (harness: SessionHarness, title: string) => ({ [titleLabel]: title, [harnessLabel]: harness });
 
 /**
+ * An agent's labels at its start, with the session its arguments name under its session label, so its terminal says
+ * its session before the agent itself does: Claude's SessionStart hook and pi-shepherdr label it again as it changes.
+ */
+function agentLabels(agent: Launcher, harness: SessionHarness, title: string, args: readonly string[]): Record<string, string> {
+  const { session } = startedWith(args, agent);
+  return { ...labelsOf(harness, title), ...(agent.sessionLabel === undefined || session === null ? {} : { [agent.sessionLabel]: session }) };
+}
+
+/**
  * The argv of an agent's terminal. A login shell gives it the environment a person's shell has, and execs the agent,
  * so the agent is the terminal's foreground process. A core started from inside a Claude would hand that Claude's
  * session to every terminal, whose Claude would then report into it (images/pylon/nexus-heartbeat.ts), so the
@@ -93,7 +102,7 @@ export async function openSession(guest: Guest, session: { harness: SessionHarne
   if (agent === null) return (await core(guest, "terminal.run", { argv: ["bash", "-l"], cwd: session.cwd, labels, no_parent: true, keep: true })).address;
   if (session.prompt !== undefined && agent.hooks !== undefined) return promptedLaunch(guest, agent, session.harness, { ...session, prompt: session.prompt });
   const { args } = await launchArgs(guest, agent, session);
-  const { address } = await core(guest, "terminal.run", { argv: launchArgv(agent, args), cwd: session.cwd, labels, no_parent: true });
+  const { address } = await core(guest, "terminal.run", { argv: launchArgv(agent, args), cwd: session.cwd, labels: agentLabels(agent, session.harness, session.title, args), no_parent: true });
   await awaitReady(guest, agent, session.harness, address);
   return address;
 }
@@ -172,7 +181,7 @@ async function promptedLaunch(guest: Guest, agent: Launcher, harness: SessionHar
   if (hasHistory) throw new Error(`${label} session ${id} already has a transcript, so its first prompt went in before this launch, which started nothing. Attach to check before starting another session`);
   let address: string;
   try {
-    address = (await core(guest, "terminal.run", { argv: launchArgv(agent, [...args, session.prompt]), cwd: session.cwd, name, labels: labelsOf(harness, session.title), no_parent: true })).address;
+    address = (await core(guest, "terminal.run", { argv: launchArgv(agent, [...args, session.prompt]), cwd: session.cwd, name, labels: agentLabels(agent, harness, session.title, args), no_parent: true })).address;
   } catch (err) {
     const claimed = await liveNamed(guest, name).catch(() => null);
     if (claimed === null) throw err;

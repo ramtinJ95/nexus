@@ -71,7 +71,7 @@ test("a Claude Code session opens in a terminal of its own that resumes the give
   assert.equal(core.terminals.length, 1);
   const t = core.terminals[0]!;
   assert.equal(address, t.address);
-  assert.deepEqual([t.state, t.cwd, t.labels, t.keep], ["live", "/home/user/app", labels("claude-code", "review"), false]);
+  assert.deepEqual([t.state, t.cwd, t.labels, t.keep], ["live", "/home/user/app", { ...labels("claude-code", "review"), "claude.session_id": "bd2c2d6b" }, false]);
   assert.deepEqual(t.argv.slice(0, -1), [...launchWrapper, "claude", "--resume", "bd2c2d6b", "--permission-mode", "bypassPermissions", "--settings"]);
   assert.deepEqual(settingsOf(t.argv), { hooks: { SessionStart: hook(labelClaudeSession) } }, "an unprompted launch labels its session and takes no receipt");
   assert.equal(runs(core)[0]!.params.no_parent, true, "the terminal belongs to no other");
@@ -100,6 +100,7 @@ test("a fresh Claude Code session starts under an ID of its own and its model, a
   assert.deepEqual(pi.slice(0, 2), ["pi", "--session"]);
   assert.match(pi[2]!, new RegExp(`^${piSessions}/nexus-[0-9a-f-]{36}\\.jsonl$`));
   assert.equal(pi.length, 3);
+  assert.deepEqual(core.terminals.map((t) => t.labels["claude.session_id"] ?? t.labels["pi.session_file"]), [first![2], second![2], pi[2]], "each terminal names its session from its start");
 });
 
 test("a pi session resumes from its session file, and a shell is a kept login shell that starts no agent", async () => {
@@ -182,7 +183,7 @@ test("a worker starts Claude with its first prompt as the last argument, in a te
   assert.equal(await openSession(guest, { ...prompted, prompt: tricky, model: "claude-opus-5-5" }), "t1");
   const t = core.terminals[0]!;
   assert.equal(t.name, "claude-6f1c2a9e3b7d4e058c219d4b7");
-  assert.deepEqual([t.cwd, t.labels], ["/home/user/workspace/repo", labels("claude-code", "worker")]);
+  assert.deepEqual([t.cwd, t.labels], ["/home/user/workspace/repo", { ...labels("claude-code", "worker"), "claude.session_id": "6f1c2a9e-3b7d-4e05-8c21-9d4b7a1e5f30" }]);
   const argv = program(t);
   assert.deepEqual(argv.slice(0, -2), ["claude", "--session-id", launched, "--model", "claude-opus-5-5", "--permission-mode", "bypassPermissions", "--settings"]);
   assert.equal(argv.at(-1), tricky);
@@ -392,7 +393,7 @@ test("a session in no live terminal is resumed in a new terminal in the checkout
   claudeRunning(core, "idle", { labels: { "claude.session_id": "another-session" } });
   assert.deepEqual(await sendToClaude(pylon(core), { session, text: "pick it back up", model: "claude-opus-5-5" }), { outcome: "sent", herdrPane: "t2", resumed: true });
   const t = core.terminals[1]!;
-  assert.deepEqual([t.cwd, t.labels], [checkoutDir, labels("claude-code", "Claude Code")]);
+  assert.deepEqual([t.cwd, t.labels], [checkoutDir, { ...labels("claude-code", "Claude Code"), "claude.session_id": session }]);
   assert.deepEqual(program(t).slice(0, 5), ["claude", "--resume", session, "--model", "claude-opus-5-5"]);
   assert.deepEqual(t.sent, ["pick it back up"]);
 });
@@ -404,7 +405,7 @@ test("a message reaching a recorded session before the relaunch resumes it as it
     const guest = pylon(core, { file });
     assert.deepEqual(await sendToClaude(guest, { session, text: "go", ...(model === undefined ? {} : { model }) }), { outcome: "sent", herdrPane: "t1", resumed: true });
     const t = core.terminals[0]!;
-    assert.deepEqual([t.cwd, t.labels, program(t).slice(0, 5)], ["/home/user/app", labels("claude-code", "review"), ["claude", "--resume", session, "--model", started]], started);
+    assert.deepEqual([t.cwd, t.labels, program(t).slice(0, 5)], ["/home/user/app", { ...labels("claude-code", "review"), "claude.session_id": session }, ["claude", "--resume", session, "--model", started]], started);
   }
 });
 
@@ -501,8 +502,8 @@ test("a wake brings a kept shell back in place and relaunches each agent in a ne
 
   assert.deepEqual(placed(await relaunchSessions(guest, unlocked)), [["review", "relaunched", "t5"], ["plan", "relaunched", "t6"], ["sh", "present", "t3"]]);
   const at = (address: string) => core.terminals.find((t) => t.address === address)!;
-  assert.deepEqual([at("t5").cwd, at("t5").labels, program(at("t5")).slice(0, 7)], ["/home/user/app", labels("claude-code", "review"), ["claude", "--resume", "aaaa", "--model", "opus", "--permission-mode", "bypassPermissions"]]);
-  assert.deepEqual([at("t6").labels, program(at("t6"))], [labels("pi", "plan"), ["pi", "--session", "/home/user/.pi/agent/sessions/s.jsonl"]]);
+  assert.deepEqual([at("t5").cwd, at("t5").labels, program(at("t5")).slice(0, 7)], ["/home/user/app", { ...labels("claude-code", "review"), "claude.session_id": "aaaa" }, ["claude", "--resume", "aaaa", "--model", "opus", "--permission-mode", "bypassPermissions"]]);
+  assert.deepEqual([at("t6").labels, program(at("t6"))], [{ ...labels("pi", "plan"), "pi.session_file": "/home/user/.pi/agent/sessions/s.jsonl" }, ["pi", "--session", "/home/user/.pi/agent/sessions/s.jsonl"]]);
   assert.deepEqual(core.terminals.map((t) => t.address), ["t3", byHand.address, "t5", "t6"], "the finished terminals Nexus opened are removed, and one opened by hand is left");
   assert.deepEqual(lastFile(guest).sessions.map((r) => r.herdrPane), ["t5", "t6", "t3"]);
 
