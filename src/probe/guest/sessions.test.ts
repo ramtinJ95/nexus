@@ -9,6 +9,7 @@ import { attachedTerminals, closeSession, dropFailedSession, interruptClaude, La
 import { claudeTextProblem } from "../../protocol/agent-kinds.ts";
 import { coreError, coreOk, fakeCore, fakeGuest, launchedProgram, sessionsFileReply, slowStart, stillStarting, type ExecReply, type FakeCore, type FakeTerminal } from "../../backends/fake-guest.ts";
 import { coreViewer, ensureCore } from "../../guest-contract.ts";
+import { coreCall } from "./core.ts";
 import { checkoutDir, claudeLaunchesDir, claudeProjects, piSessions, sessionsFile } from "../../../images/pylon/nexus-contract.ts";
 
 /** Nothing else runs here, so no call needs to wait for the relaunch. */
@@ -61,6 +62,8 @@ const placed = (outcomes: readonly RelaunchOutcome[]) => outcomes.map((o) => [o.
 const lastFile = (guest: { written: readonly { path: string; content: string }[] }) => JSON.parse(guest.written.findLast((f) => f.path === sessionsFile)!.content) as { sessions: SessionRecord[]; failed: { record: SessionRecord; inTerminal: boolean; message: string }[] };
 const settingsOf = (argv: readonly string[]) => JSON.parse(argv[argv.indexOf("--settings") + 1]!) as unknown;
 const hook = (command: string) => [{ hooks: [{ type: "command", command }] }];
+/** A `terminal.keep` from outside Nexus, as herdr-app's Nexus mod makes to show a terminal in a pane. */
+const keptByHand = (core: FakeCore, terminal: string) => assert.equal(core.reply(["sh", "-c", coreCall, "core", JSON.stringify({ jsonrpc: "2.0", id: 1, method: "terminal.keep", params: { terminal, keep: true } })])?.exitCode, 0);
 const launchWrapper = ["env", "-u", "CLAUDE_CODE_SESSION_ID", "-u", "CLAUDECODE", "bash", "-lc", 'exec "$0" "$@"'];
 
 test("a Claude Code session opens in a terminal of its own that resumes the given session, labelled with its title and harness, starting a core when none runs", async () => {
@@ -245,6 +248,16 @@ test("a launch sent again once a wake's relaunch runs its session, in a terminal
     assert.equal(await openSession(pylon(core, { transcripts }), prompted), relaunched.address, `transcripts ${String(transcripts)}`);
     assert.deepEqual(runs(core), [], `transcripts ${String(transcripts)}`);
   }
+});
+
+test("a launch sent again never takes the shell Core gave in its kept Claude's place, which keeps the launch's name, for that Claude", async () => {
+  const core = fakeCore();
+  const guest = pylon(core, { transcripts: false });
+  const t = await openSession(guest, prompted);
+  keptByHand(core, t);
+  core.restart();
+  await assert.rejects(openSession(guest, prompted), /name_taken|already named/);
+  assert.deepEqual(core.terminals.map((x) => [x.address, x.argv, x.sent]), [[t, ["/bin/bash"], []]]);
 });
 
 test("a launch whose receipt never comes stalls and leaves its terminal for the person, unless Claude is working on it", async () => {
@@ -454,6 +467,24 @@ test("a session in no live terminal is resumed in a new terminal in the checkout
   assert.deepEqual(t.sent, ["pick it back up"]);
 });
 
+test("an agent's terminal a person kept is the agent's while it runs it, and the shell Core gives in its place is no session: a send resumes the agent and types into it only, and an interrupt or a close leaves the shell alone", async () => {
+  const core = fakeCore();
+  const guest = pylon(core, { transcripts: true });
+  const t = await openSession(guest, { harness: "claude-code", title: "review", cwd: "/home/user", resume: session });
+  keptByHand(core, t);
+  assert.deepEqual((await sessionFacts(guest)).map((f) => [f.terminal, f.harness, f.harnessSessionId]), [[t, "claude-code", session]], "a kept Claude that runs is Claude's");
+  core.restart();
+  const shell = core.terminals[0]!;
+  assert.deepEqual([shell.state, shell.argv, shell.labels["nexus.harness"], shell.labels["claude.session_id"]], ["live", ["/bin/bash"], "claude-code", session], "Core gave a shell in Claude's place, under Claude's labels");
+  assert.deepEqual(await sessionFacts(guest), [], "the shell is no session");
+  assert.equal(await interruptClaude(guest, session), "not-running");
+  assert.equal(await closeSession(guest, t, { harness: "claude-code", harnessSessionId: session, title: "review" }), "not-open");
+  assert.deepEqual(await sendToClaude(guest, { session, text: "rm -rf ~/app" }), { outcome: "sent", terminal: "t2", resumed: true });
+  assert.deepEqual([shell.state, shell.sent, shell.keys], ["live", [], []], "nothing was typed into the shell");
+  const resumed = core.terminals.find((x) => x.address === "t2")!;
+  assert.deepEqual([program(resumed).slice(0, 3), resumed.sent], [["claude", "--resume", session], ["rm -rf ~/app"]]);
+});
+
 test("a message reaching a recorded session before the relaunch resumes it as it was recorded, under the message's model if it names one", async () => {
   const file: SessionRecord[] = [{ terminal: "t91", harness: "claude-code", title: "review", cwd: "/home/user/app", harnessSessionId: session, model: "opus" }];
   for (const [model, started] of [[undefined, "opus"], ["sonnet", "sonnet"]] as const) {
@@ -565,6 +596,22 @@ test("a wake brings a kept shell back in place and relaunches each agent in a ne
 
   assert.deepEqual(placed(await relaunchSessions(guest, unlocked)), [["review", "present", "t5"], ["plan", "present", "t6"], ["sh", "present", "t3"]]);
   assert.equal(runs(core).length, 5, "the second relaunch started nothing");
+});
+
+test("a wake resumes, once, an agent whose kept terminal Core brought back as a shell, and removes that shell", async () => {
+  const core = fakeCore();
+  const guest = pylon(core, { transcripts: true });
+  const t = await openSession(guest, { harness: "claude-code", title: "review", cwd: "/home/user/app", resume: session });
+  const sh = await openSession(guest, { harness: "shell", title: "sh", cwd: "/home/user" });
+  keptByHand(core, t);
+  await recordSessions(guest);
+  core.restart();
+
+  assert.deepEqual(placed(await relaunchSessions(guest, unlocked)), [["review", "relaunched", "t3"], ["sh", "present", sh]]);
+  assert.deepEqual(core.terminals.map((x) => x.address), [sh, "t3"], "the shell left in Claude's place is gone");
+  assert.deepEqual(program(core.terminals[1]!).slice(0, 3), ["claude", "--resume", session]);
+  assert.deepEqual(placed(await relaunchSessions(guest, unlocked)), [["review", "present", "t3"], ["sh", "present", sh]]);
+  assert.equal(runs(core).length, 3, "Claude was resumed once");
 });
 
 test("a relaunch seeds Claude's state once for every Claude session it starts", async () => {
