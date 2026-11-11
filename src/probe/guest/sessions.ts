@@ -9,7 +9,10 @@
  *
  * A shell is kept, so a wake's core brings it back in place, at its address and with its labels, and the relaunch
  * finds it there. An agent is not: Core would bring it back as a bare shell. Its terminal ends with it, and the
- * relaunch, the only thing that starts agents, resumes it in a new terminal.
+ * relaunch, the only thing that starts agents, resumes it in a new terminal. A person may keep an agent's terminal, as
+ * herdr-app does to show it in a pane, and Core then gives it a shell in place of the agent it loses, at a core restart
+ * or a death by signal, under the agent's labels. That shell is no session: a send resumes the agent in a new terminal,
+ * as a wake does, and the wake removes the shell.
  */
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
@@ -87,6 +90,9 @@ function agentLabels(agent: Launcher, harness: SessionHarness, title: string, ar
  */
 const launchArgv = (agent: Launcher, args: readonly string[]) =>
   ["env", "-u", "CLAUDE_CODE_SESSION_ID", "-u", "CLAUDECODE", "bash", "-lc", 'exec "$0" "$@"', agent.kind, ...args];
+
+/** Whether `argv` is a launch of `agent`. Core keeps it as the terminal's argv until it gives the terminal a shell in the agent's place. */
+const launches = (argv: readonly string[], agent: Launcher) => launchArgv(agent, []).every((arg, i) => argv[i] === arg);
 
 /**
  * Returns the new session's terminal. Rolls the terminal back if the harness exits as it starts.
@@ -197,11 +203,11 @@ async function promptedLaunch(guest: Guest, agent: Launcher, harness: SessionHar
   return address;
 }
 
-/** The live terminal named `name`, or null. */
+/** The live terminal named `name` that still runs what Nexus started in it, or null. */
 async function liveNamed(guest: Guest, name: string): Promise<string | null> {
   try {
     const t = await core(guest, "terminal.get", { terminal: name });
-    return t.state === "live" ? t.address : null;
+    return t.state === "live" && liveTerminal(t) !== null ? t.address : null;
   } catch (err) {
     if (err instanceof CoreError && err.kind === "not_found") return null;
     throw err;
@@ -375,8 +381,9 @@ async function liveTerminalAt(guest: Guest, address: string, gone = () => new Er
     if (err instanceof CoreError && (err.kind === "not_found" || err.kind === "no_core")) throw gone();
     throw err;
   });
-  if (t.state !== "live") throw gone();
-  return liveTerminal(t);
+  const live = t.state === "live" ? liveTerminal(t) : null;
+  if (live === null) throw gone();
+  return live;
 }
 
 /** Forgets a failed session in no terminal, by its ID, so no wake tries it again. False when the file holds no such session. */
@@ -532,19 +539,22 @@ async function relaunch(guest: Guest, file: SessionsFile, records: readonly Sess
     }
   }
   await recordOutcomes(guest, file, outcomes);
-  await removeFinished(guest);
+  await removeLeftovers(guest);
   return outcomes;
 }
 
 /**
- * Removes the finished terminals Nexus opened, such as the agents a wake's core brought back as finished, which a
- * relaunch resumed in new ones, so they do not crowd herdr-app's list. One that cannot be removed is only clutter, so
- * it is left for the next wake.
+ * Removes what is left of the agents Nexus opened, which a relaunch resumed in new terminals: each finished terminal,
+ * as a wake's core brings an agent back, and each shell Core gave a kept one in the agent's place, so that the shell,
+ * under the agent's labels and at the address the agent was recorded at, is not a second session the person or a wake
+ * could take for it. A person's pane on that shell ends with it. One that cannot be removed is left for the next wake.
  */
-async function removeFinished(guest: Guest): Promise<void> {
+async function removeLeftovers(guest: Guest): Promise<void> {
   const all = await core(guest, "terminal.list", { all: true }).catch(() => ({ terminals: [] }));
   for (const t of all.terminals) {
-    if (t.state === "finished" && t.labels[harnessLabel] !== undefined) await core(guest, "terminal.rm", { terminal: t.address }).catch(() => undefined);
+    if (t.labels[harnessLabel] === undefined || t.address.includes("/")) continue;
+    if (t.state === "finished") await core(guest, "terminal.rm", { terminal: t.address }).catch(() => undefined);
+    else if (liveTerminal(t) === null) await remove(guest, t.address).catch(() => undefined);
   }
 }
 
@@ -603,15 +613,19 @@ function harnessOf(argv: readonly string[]): SessionHarness {
 const statusWords: Readonly<Record<string, TerminalStatus>> = { working: "working", idle: "idle", done: "idle", error: "idle", blocked: "blocked" };
 
 /**
- * A terminal Nexus started an agent in is that agent's from its start, by its label, while its foreground is still
- * the launch's env and login shell, since it ends with the agent. Any other terminal runs what its foreground does,
- * such as a Claude a person started in a shell.
+ * A terminal Nexus started an agent in is that agent's, by its label, while it runs Nexus's launch of it, from the
+ * launch's env and login shell on, since the launch ends with the agent. Any other terminal runs what its foreground
+ * does, such as a Claude a person started in a shell. One labelled as an agent's that runs a shell is null: what is left
+ * of the agent once Core gave its kept terminal a shell in its place (spikes/herdr-core, restart-kept), which is no
+ * session, and must never be typed into as the agent.
  */
-function liveTerminal(t: Terminal): LiveTerminal {
+function liveTerminal(t: Terminal): LiveTerminal | null {
   const labelled = sessionHarnessSchema.safeParse(t.labels[harnessLabel]).data;
-  const started = labelled !== undefined && launchers[labelled] !== null;
-  const argv = started ? t.argv : t.foreground?.argv ?? [];
-  const harness = started ? labelled : harnessOf(argv);
+  const started = labelled === undefined ? null : launchers[labelled];
+  const launched = started !== null && launches(t.argv, started) ? labelled : undefined;
+  const argv = launched === undefined ? t.foreground?.argv ?? [] : t.argv;
+  const harness = launched ?? harnessOf(argv);
+  if (started !== null && harness === "shell") return null;
   const agent = launchers[harness];
   const args = agent === null ? { session: null } : startedWith(argv, agent);
   const sessionLabelled = agent?.sessionLabel === undefined ? undefined : t.labels[agent.sessionLabel];
@@ -629,7 +643,7 @@ function liveTerminal(t: Terminal): LiveTerminal {
 
 /** Each live terminal on this machine. A machine the person added to the pylon's core has terminals of its own, which are not the pylon's. */
 async function liveTerminals(guest: Guest, timeoutMs = callTimeoutMs): Promise<LiveTerminal[]> {
-  return (await core(guest, "terminal.list", {}, timeoutMs)).terminals.filter((t) => !t.address.includes("/")).map(liveTerminal);
+  return (await core(guest, "terminal.list", {}, timeoutMs)).terminals.flatMap((t) => t.address.includes("/") ? [] : liveTerminal(t) ?? []);
 }
 
 /**

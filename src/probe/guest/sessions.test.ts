@@ -250,6 +250,16 @@ test("a launch sent again once a wake's relaunch runs its session, in a terminal
   }
 });
 
+test("a launch sent again never takes the shell Core gave in its kept Claude's place, which keeps the launch's name, for that Claude", async () => {
+  const core = fakeCore();
+  const guest = pylon(core, { transcripts: false });
+  const t = await openSession(guest, prompted);
+  keptByHand(core, t);
+  core.restart();
+  await assert.rejects(openSession(guest, prompted), /name_taken|already named/);
+  assert.deepEqual(core.terminals.map((x) => [x.address, x.argv, x.sent]), [[t, ["/bin/bash"], []]]);
+});
+
 test("a launch whose receipt never comes stalls and leaves its terminal for the person, unless Claude is working on it", async () => {
   const idle = fakeCore({ start: (t) => { t.screen = "Choose the text style\n"; } });
   await assert.rejects(openSession(pylon(idle, { transcripts: false, submitted: false }), prompted),
