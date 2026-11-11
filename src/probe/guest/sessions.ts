@@ -7,12 +7,12 @@
  * harness. Terminals opened by hand, such as from herdr-app, are reported and recorded like any other. A terminal another
  * one started, such as a shepherdr reviewer, belongs to it: it is reported, but never recorded or relaunched.
  *
- * A shell is kept, so a wake's core brings it back in place, at its address and with its labels, and the relaunch
- * finds it there. An agent is not: Core would bring it back as a bare shell. Its terminal ends with it, and the
- * relaunch, the only thing that starts agents, resumes it in a new terminal. A person may keep an agent's terminal, as
- * herdr-app does to show it in a pane, and Core then gives it a shell in place of the agent it loses, at a core restart
- * or a death by signal, under the agent's labels. That shell is no session: a send resumes the agent in a new terminal,
- * as a wake does, and the wake removes the shell.
+ * Every terminal Nexus starts is kept, so a wake's core brings it back in place, at its address and with its labels.
+ * A shell comes back as itself, and the relaunch finds it there. An agent comes back as a bare shell under the agent's
+ * labels, as it does after a death by a signal Core did not send. That shell is no session, and nothing is typed into
+ * it as the agent. The relaunch, or a send to the session, resumes the agent in it, typing the agent's launch into it
+ * as one `exec` line, so every viewer of the terminal keeps the session (resumeInPlace). A shell that is not plainly
+ * that, idle at the session's cwd, is left: the agent resumes in a new terminal, and the wake removes the shell.
  */
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
@@ -21,6 +21,7 @@ import type { Guest } from "../../backends/backend.ts";
 import type { TerminalStatus, PausedSession, SessionFact, SessionIdentity } from "../../protocol/observations.ts";
 import type { CommandResult, InterruptClaudeOutcome } from "../../protocol/commands.ts";
 import { nonEmpty, parseJson } from "../../parse.ts";
+import { shellQuote } from "../../shell.ts";
 import { claudeCode, launchers, type Launcher } from "./launchers.ts";
 import { agentKinds, claudeSessionId, sessionHarnessSchema, type SessionHarness } from "../../protocol/agent-kinds.ts";
 import { callTimeoutMs, coreStartMs, coreViewer, ensureCore } from "../../guest-contract.ts";
@@ -64,7 +65,9 @@ function standing(file: SessionsFile | null, live: readonly LiveTerminal[]): { f
 interface SessionsFile { version: 2; recordedAt: string; sessions: readonly SessionRecord[]; failed: readonly FailedRecord[] }
 
 export type RelaunchOutcome =
-  | { record: SessionRecord; result: "present" | "relaunched"; terminal: string }
+  | { record: SessionRecord; result: "present" | "resumed-in-place"; terminal: string }
+  /** `notInPlace` says why an agent did not resume in place at its recorded address, and is null for a shell. */
+  | { record: SessionRecord; result: "relaunched"; terminal: string; notInPlace: string | null }
   | { record: SessionRecord; result: "failed"; terminal: string | null; message: string }
   /** A second record of a Claude Code session another record brings back. Its terminal, if live, is closed. */
   | { record: SessionRecord; result: "dropped"; terminal: string | null };
@@ -91,8 +94,15 @@ function agentLabels(agent: Launcher, harness: SessionHarness, title: string, ar
 const launchArgv = (agent: Launcher, args: readonly string[]) =>
   ["env", "-u", "CLAUDE_CODE_SESSION_ID", "-u", "CLAUDECODE", "bash", "-lc", 'exec "$0" "$@"', agent.kind, ...args];
 
-/** Whether `argv` is a launch of `agent`. Core keeps it as the terminal's argv until it gives the terminal a shell in the agent's place. */
-const launches = (argv: readonly string[], agent: Launcher) => launchArgv(agent, []).every((arg, i) => argv[i] === arg);
+/**
+ * Whether `argv` is a launch of `agent`, or its login shell, which the launch's env execs. A launch's argv stays the
+ * terminal's until Core gives the terminal a shell in the agent's place. A launch typed into that shell is the
+ * terminal's foreground only, from its env, through its login shell, to the agent.
+ */
+function launches(argv: readonly string[], agent: Launcher): boolean {
+  const launch = launchArgv(agent, []);
+  return [launch, launch.slice(launch.indexOf("bash"))].some((prefix) => prefix.every((arg, i) => argv[i] === arg));
+}
 
 /**
  * Returns the new session's terminal. Rolls the terminal back if the harness exits as it starts.
@@ -112,9 +122,79 @@ export async function openSession(guest: Guest, session: { harness: SessionHarne
   const running = agent.oneTerminal && session.resume !== undefined ? await startedAlready(guest, agent, session.resume) : null;
   if (running !== null) return running;
   const { args } = await launchArgs(guest, agent, session);
-  const { address } = await core(guest, "terminal.run", { argv: launchArgv(agent, args), cwd: session.cwd, labels: agentLabels(agent, session.harness, session.title, args), no_parent: true });
+  const { address } = await core(guest, "terminal.run", { argv: launchArgv(agent, args), cwd: session.cwd, labels: agentLabels(agent, session.harness, session.title, args), no_parent: true, keep: true });
   await awaitReady(guest, agent, session.harness, address);
   return address;
+}
+
+/**
+ * A shell Core gives a kept terminal in place of a program it lost, as the terminal's argv and its foreground: the
+ * user's shell by its path, such as /bin/bash in a pylon and /usr/bin/bash on Arch.
+ */
+const restoredShell = /^\/(?:[^/]+\/)*(?:bash|dash|sh|zsh)$/;
+
+/** What resuming a session in place needs to know of it. */
+type InPlace = Pick<SessionRecord, "harness" | "cwd" | "harnessSessionId">;
+
+/**
+ * Why `t` is not the shell Core gave in place of the agent that ran `session`, idle and ready to take the agent's
+ * launch, or null when it is: live and kept, running the lone shell Core restores and nothing else, at the session's
+ * cwd, and labelled with the session's harness and its session.
+ */
+function notInPlace(t: Terminal, session: InPlace): string | null {
+  const agent = launchers[session.harness];
+  const sessionLabel = agent?.sessionLabel;
+  if (sessionLabel === undefined) return `${agentKinds[session.harness].label} has no session label to check a terminal by`;
+  if (session.harnessSessionId === null) return "the session's ID is not known";
+  const shell = t.argv.length === 1 && restoredShell.test(t.argv[0]!) ? t.argv[0] : null;
+  const foreground = t.foreground?.argv ?? [];
+  if (t.state !== "live") return `${t.address} has finished`;
+  if (!t.keep) return `${t.address} is not kept`;
+  if (shell === null) return `${t.address} runs ${JSON.stringify(t.argv)}, not the shell Core gives in an agent's place`;
+  if (foreground.length === 0) return `${t.address}'s shell has no foreground yet`;
+  if (foreground.length !== 1 || foreground[0] !== shell) return `${t.address}'s shell is running ${JSON.stringify(foreground)}`;
+  if (t.foreground?.cwd !== session.cwd) return `${t.address}'s shell is in ${t.foreground?.cwd}, not the session's ${session.cwd}`;
+  if (t.labels[harnessLabel] !== session.harness) return `${t.address} is labelled ${JSON.stringify(t.labels[harnessLabel] ?? null)}, not ${session.harness}`;
+  if (t.labels[sessionLabel] !== session.harnessSessionId) return `${t.address} is labelled with session ${JSON.stringify(t.labels[sessionLabel] ?? null)}, not ${session.harnessSessionId}`;
+  return null;
+}
+
+/**
+ * Resumes the agent of `session` at `address`, in the shell Core gave there in the agent's place, so the session keeps
+ * its terminal and every viewer of it, such as a herdr-app pane, the dashboard's Terminal tab or `nexus attach`. It
+ * types one line into the shell, `exec` and the launch a new terminal would run, then waits for the agent as a launch
+ * does. It reads the terminal again just before it types, and types nothing into one that is not that shell, or that
+ * it cannot read, saying why. Core has no call that starts a program in a terminal that has one (spikes/herdr-core).
+ */
+async function resumeInPlace(guest: Guest, address: string, session: InPlace & Start): Promise<{ terminal: string } | { refused: string }> {
+  const agent = launchers[session.harness];
+  const read = () => core(guest, "terminal.get", { terminal: address }).then((t) => notInPlace(t, session),
+    (err: unknown) => err instanceof CoreError && err.kind === "not_found" ? `${address} is gone` : `${address} could not be read: ${(err as Error).message}`);
+  const before = await read();
+  if (agent === null || before !== null) return { refused: before ?? "a shell is no agent" };
+  const { args } = await launchArgs(guest, agent, { ...session, resume: session.harnessSessionId! });
+  const refused = await read();
+  if (refused !== null) return { refused };
+  const line = `exec ${launchArgv(agent, args).map(shellQuote).join(" ")}`;
+  for (const deadline = Date.now() + claudeReadyMs; ;) {
+    try {
+      await core(guest, "terminal.send", { terminal: address, text: line }, sendTimeoutMs);
+      break;
+    } catch (err) {
+      // Core refuses a shell it is still giving the terminal, or whose output has not settled, as `unavailable`, and types nothing.
+      if (!(err instanceof CoreError && err.kind === "unavailable") || Date.now() >= deadline) throw err;
+      await delay(claudeReadyPollMs);
+    }
+  }
+  // Core answers once the line is typed, before the shell runs it, and its wait does not wait on a shell that is not
+  // working, so the terminal is the agent's only once its foreground leaves the shell for the launch.
+  for (const deadline = Date.now() + agentStartTimeoutMs; ; await delay(claudeReadyPollMs)) {
+    const t = await core(guest, "terminal.get", { terminal: address });
+    if (t.state !== "live" || liveTerminal(t) !== null) break;
+    if (Date.now() >= deadline) throw new Error(`the shell at ${address} did not run the ${agentKinds[session.harness].label} launch typed into it within ${agentStartTimeoutMs / 1000} seconds. The terminal showed:\n${await screen(guest, address)}`);
+  }
+  await awaitReady(guest, agent, session.harness, address);
+  return { terminal: address };
 }
 
 /** How a start runs. `seeded` says the caller ran the agent's seed already, as a relaunch does once for all its starts. */
@@ -193,7 +273,7 @@ async function promptedLaunch(guest: Guest, agent: Launcher, harness: SessionHar
   if (hasHistory) throw new Error(`${label} session ${id} already has a transcript, so its first prompt went in before this launch, which started nothing. Attach to check before starting another session`);
   let address: string;
   try {
-    address = (await core(guest, "terminal.run", { argv: launchArgv(agent, [...args, session.prompt]), cwd: session.cwd, name, labels: agentLabels(agent, harness, session.title, args), no_parent: true })).address;
+    address = (await core(guest, "terminal.run", { argv: launchArgv(agent, [...args, session.prompt]), cwd: session.cwd, name, labels: agentLabels(agent, harness, session.title, args), no_parent: true, keep: true })).address;
   } catch (err) {
     const claimed = await liveNamed(guest, name).catch(() => null);
     if (claimed === null) throw err;
@@ -274,8 +354,9 @@ const sendTimeoutMs = 75_000;
 
 /**
  * Pastes `message.text` into the Claude Code session `message.session` as a prompt and submits it, as `hc send` does.
- * A session in no live terminal is resumed first, under `message.model` if given. The text goes in exactly as written,
- * so a leading `!` runs it as a shell command and a leading `/` as a slash command. Core waits for a person's
+ * A session in no live terminal is resumed first, under `message.model` if given: in place, in the shell Core gave in
+ * its Claude's place, when there is one to resume it in (resumeInPlace), and otherwise in a new terminal. The text
+ * goes in exactly as written, so a leading `!` runs it as a shell command and a leading `/` as a slash command. Core waits for a person's
  * unfinished draft in an attached terminal before it pastes. Claude wraps a long paste in `<pasted_content>` tags,
  * which the conversation readers unwrap only from PR #651 (feat/activity-pasted-content) on, which this change needs.
  *
@@ -291,7 +372,7 @@ export async function sendToClaude(guest: Guest, message: { session: string; tex
   await ensureCoreRuns(guest);
   const found = await claudeTerminal(guest, message.session);
   const resumed = found === null;
-  const terminal = found?.terminal ?? await openSession(guest, await resumeOf(guest, message.session, message.model));
+  const terminal = found?.terminal ?? await resumeClaude(guest, await resumeOf(guest, message.session, message.model));
   const closed = () => new Error(`Claude's terminal ${terminal} closed before it could take the message, so nothing was sent`);
   const deadline = Date.now() + readyWithinMs;
   let live = await liveTerminalAt(guest, terminal, closed);
@@ -329,6 +410,21 @@ async function resumeOf(guest: Guest, session: string, model: string | undefined
   const r = [...file?.sessions ?? [], ...file?.failed.map((f) => f.record) ?? []].find((r) => r.harness === "claude-code" && r.harnessSessionId === session);
   const kept = model ?? r?.model;
   return { harness: "claude-code" as const, title: r?.title ?? agentKinds["claude-code"].label, cwd: r?.cwd ?? checkoutDir, resume: session, ...(kept === undefined ? {} : { model: kept }) };
+}
+
+/**
+ * Resumes a Claude session in no live terminal, in place in the first shell Core gave in its Claude's place that takes
+ * it, waiting up to 15 seconds for Core to give one, and otherwise in a new terminal.
+ */
+async function resumeClaude(guest: Guest, session: Awaited<ReturnType<typeof resumeOf>>): Promise<string> {
+  const terminals = await restored(guest, (t) => t.labels[harnessLabel] === "claude-code" && t.labels[claudeCode.sessionLabel!] === session.resume, claudeReadyMs);
+  const inPlace = { ...session, harnessSessionId: session.resume };
+  for (const t of terminals) {
+    if (t.address.includes("/") || notInPlace(t, inPlace) !== null) continue;
+    const resumed = await resumeInPlace(guest, t.address, inPlace);
+    if ("terminal" in resumed) return resumed.terminal;
+  }
+  return openSession(guest, session);
 }
 
 /**
@@ -453,10 +549,11 @@ function relaunchedFrom(file: SessionsFile): RecordedSession[] {
 }
 
 /**
- * On wake: start the core, then bring back each recorded session that is not already live. Running it again
- * converges: each live terminal answers for at most one record, so neither a kept shell the core brought back nor an
- * earlier relaunch is opened twice. One failure does not stop the rest, and the sessions file is rewritten with each
- * session's terminal and with the failures, so a later record keeps them. A core that does not start fails every
+ * On wake: start the core, then bring back each recorded session that is not already live, an agent in place at its
+ * recorded address when Core gave a shell there in its place (resumeInPlace), and otherwise in a new terminal. Running
+ * it again converges: each live terminal answers for at most one record, so neither a kept shell the core brought back
+ * nor an earlier relaunch is opened twice. One failure does not stop the rest, and the sessions file is rewritten with
+ * each session's terminal and with the failures, so a later record keeps them. A core that does not start fails every
  * session, for its reason.
  *
  * A session of a one-terminal harness, such as Claude Code, comes back in one terminal only: the first record of it
@@ -479,6 +576,7 @@ async function relaunch(guest: Guest, file: SessionsFile, records: readonly Sess
   let unclaimed: LiveTerminal[];
   try {
     await ensureCoreRuns(guest);
+    await restored(guest, () => true, coreStartMs);
     unclaimed = (await liveTerminals(guest)).filter((p) => !p.child);
   } catch (err) {
     const outcomes = records.map((record): RelaunchOutcome => ({ record, result: "failed", terminal: null, message: (err as Error).message }));
@@ -531,8 +629,10 @@ async function relaunch(guest: Guest, file: SessionsFile, records: readonly Sess
       } else {
         const unseeded = seeds.get(launchers[r.harness]?.seed);
         if (unseeded) throw unseeded;
-        const terminal = await openSession(guest, { harness: r.harness, title: r.title, cwd: r.cwd, seeded: true, ...(r.model === undefined ? {} : { model: r.model }), ...(resume === undefined ? {} : { resume }) });
-        outcomes.push({ record: r, result: "relaunched", terminal });
+        const start = { harness: r.harness, title: r.title, cwd: r.cwd, seeded: true, ...(r.model === undefined ? {} : { model: r.model }), ...(resume === undefined ? {} : { resume }) };
+        const inPlace = launchers[r.harness] === null ? null : await resumeInPlace(guest, r.terminal, { ...start, harnessSessionId: r.harnessSessionId });
+        if (inPlace !== null && "terminal" in inPlace) outcomes.push({ record: r, result: "resumed-in-place", terminal: inPlace.terminal });
+        else outcomes.push({ record: r, result: "relaunched", terminal: await openSession(guest, start), notInPlace: inPlace?.refused ?? null });
       }
     } catch (err) {
       outcomes.push({ record: r, result: "failed", terminal: err instanceof LaunchStalled ? err.terminal : null, message: (err as Error).message });
@@ -541,6 +641,19 @@ async function relaunch(guest: Guest, file: SessionsFile, records: readonly Sess
   await recordOutcomes(guest, file, outcomes);
   await removeLeftovers(guest);
   return outcomes;
+}
+
+/**
+ * The live terminals once the core gave each kept one `waitsFor` accepts whose program it lost a shell, or after
+ * `withinMs`. Until then Core lists the terminal with no foreground: for a moment after a core start, or after a death
+ * by a signal for 2 seconds, and longer for each death soon after another, 13 seconds by the fourth, with no process
+ * and the lost program's argv, then with its shell and no foreground yet for half a second.
+ */
+async function restored(guest: Guest, waitsFor: (t: Terminal) => boolean, withinMs: number): Promise<readonly Terminal[]> {
+  for (const deadline = Date.now() + withinMs; ; await delay(100)) {
+    const { terminals } = await core(guest, "terminal.list", {});
+    if (!terminals.some((t) => t.keep && t.foreground === null && waitsFor(t)) || Date.now() >= deadline) return terminals;
+  }
 }
 
 /**
@@ -562,7 +675,7 @@ async function removeLeftovers(guest: Guest): Promise<void> {
 async function recordOutcomes(guest: Guest, file: SessionsFile, outcomes: readonly RelaunchOutcome[]): Promise<void> {
   await writeSessionsFile(guest, {
     ...file,
-    sessions: outcomes.flatMap((o) => o.result === "present" || o.result === "relaunched" ? [{ ...o.record, terminal: o.terminal }] : []),
+    sessions: outcomes.flatMap((o) => o.result === "present" || o.result === "resumed-in-place" || o.result === "relaunched" ? [{ ...o.record, terminal: o.terminal }] : []),
     failed: outcomes.flatMap((o): FailedRecord[] => o.result !== "failed" ? []
       : [{ record: { ...o.record, terminal: o.terminal ?? o.record.terminal }, inTerminal: o.terminal !== null, message: o.message }]),
   });
@@ -613,17 +726,21 @@ function harnessOf(argv: readonly string[]): SessionHarness {
 const statusWords: Readonly<Record<string, TerminalStatus>> = { working: "working", idle: "idle", done: "idle", error: "idle", blocked: "blocked" };
 
 /**
- * A terminal Nexus started an agent in is that agent's, by its label, while it runs Nexus's launch of it, from the
- * launch's env and login shell on, since the launch ends with the agent. Any other terminal runs what its foreground
- * does, such as a Claude a person started in a shell. One labelled as an agent's that runs a shell is null: what is left
- * of the agent once Core gave its kept terminal a shell in its place (spikes/herdr-core, restart-kept), which is no
- * session, and must never be typed into as the agent.
+ * A terminal Nexus started an agent in is that agent's, by its label, while its argv or its foreground is Nexus's
+ * launch of it, from the launch's env and login shell on, since the launch ends with the agent. Its foreground is the
+ * launch when the launch was typed into a shell (resumeInPlace). Any other terminal runs what its foreground does, such
+ * as a Claude a person started in a shell. One labelled as an agent's that runs a shell is null: what is left of the
+ * agent once Core gave its kept terminal a shell in its place (spikes/herdr-core, restart-kept), which is no session,
+ * and is never typed into as the agent. So is one with no process, whose agent Core lost and has not yet given a
+ * shell in its place, though Core lists it with the agent's launch as its argv until then.
  */
 function liveTerminal(t: Terminal): LiveTerminal | null {
   const labelled = sessionHarnessSchema.safeParse(t.labels[harnessLabel]).data;
   const started = labelled === undefined ? null : launchers[labelled];
-  const launched = started !== null && launches(t.argv, started) ? labelled : undefined;
-  const argv = launched === undefined ? t.foreground?.argv ?? [] : t.argv;
+  if (started !== null && t.pid === null) return null;
+  const launch = started === null ? undefined : [t.argv, t.foreground?.argv ?? []].find((argv) => launches(argv, started));
+  const launched = launch === undefined ? undefined : labelled;
+  const argv = launch ?? t.foreground?.argv ?? [];
   const harness = launched ?? harnessOf(argv);
   if (started !== null && harness === "shell") return null;
   const agent = launchers[harness];

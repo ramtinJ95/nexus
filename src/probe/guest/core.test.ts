@@ -8,7 +8,7 @@ import { coreHome, tempDir, unixSockets } from "../../test-support/kit.ts";
 import { core, coreCall, CoreError, noCore, screenChars } from "./core.ts";
 import { coreError, coreOk, fakeCore, fakeGuest } from "../../backends/fake-guest.ts";
 
-const shell = { address: "t1", name: null, state: "live", labels: {}, argv: ["bash"], cwd: "/home/user", parent: null, foreground: null, status: null };
+const shell = { address: "t1", name: null, state: "live", labels: {}, argv: ["bash"], cwd: "/home/user", parent: null, keep: false, pid: 7, foreground: null, status: null };
 
 test("a call with no core running starts none and rejects as no_core, which a read can take as none", async () => {
   const off = fakeCore({ running: false });
@@ -55,6 +55,7 @@ test("in the guest, the call checks for a core before Core can start one, tells 
   assert.deepEqual(terminals[0]!.foreground, { argv: ["claude", "--resume", "id-1", prompt.slice(0, 256)], cwd: "/w", name: "claude" });
   assert.equal(terminals[0]!.argv[3], prompt.slice(0, 256));
   assert.deepEqual(terminals[0]!.status, { state: "idle", app: "claude-code" });
+  assert.deepEqual([terminals[0]!.keep, terminals[0]!.pid], [false, 7], "whether it is kept and its process, which tell a shell Core gave from a session");
   const output = guest.execs.at(-1)!;
   assert.equal(output[2], coreCall);
   const { text } = await core(guest, "terminal.read", { terminal: "t1" });
