@@ -30,6 +30,23 @@ test("reviewers are warned about template dependency freshness on initial and la
   }
 });
 
+test("both reviewer seats and a landing quote receive the complete long PR description", () => {
+  for (const length of [11_946, 65_536]) {
+    const tail = "\n| heavy cavalry | win |\n\nNot checked live: combat under real multiplayer traffic.";
+    const body = "Matchup evidence:\n".padEnd(length - tail.length, "x") + tail;
+    const long = { ...detail, body };
+    const review = testReview();
+    const messages = [
+      ...["gpt-6-astra", "claude-opus-5-5"].map((model) => reviewerRequest(review, long, "rv-1:a", model)),
+      quoteRequest(review, { ...long, branch: "cache" } as never, "rv-1:q"),
+    ];
+    for (const message of messages) {
+      const supplied = message.split("<description>\n")[1]!.split("\n</description>")[0];
+      assert.equal(supplied, body, "evidence and the live-check statement at the tail must not be cut off");
+    }
+  }
+});
+
 test("every review prompt keeps its text", (t) => {
   const prompts: Record<string, string> = {
     "reviewer request": reviewerRequest(testReview(), detail, "rv-1:a", "gpt-6-astra"),
