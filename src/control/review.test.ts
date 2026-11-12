@@ -5730,7 +5730,7 @@ test("each pull request a second model caught on 2026-11-04 gets a second review
   assert.equal(secondReviewRule({ always: false, lines: null, reserved: true }, missed[2]!.files, true), "the change has holds for the person on its paths: reserved-path:auth", "#445 changed the review loop, which holds as the policy's own code");
 });
 
-test("both reviewers get the builder's brief, cut as the description is, so a change that leaves out what it asked for can be found", async (t) => {
+test("both reviewers get the builder's brief, cut at 8,000 characters, so a change that leaves out what it asked for can be found", async (t) => {
   const f = fixture(t, { secondReview: { always: true }, secrets: claudeToken });
   const loop = f.loop();
   await loop.start(f.builder, { land: null });

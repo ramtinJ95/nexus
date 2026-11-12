@@ -22,6 +22,17 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_* \
  && ln -s /usr/bin/fdfind /usr/local/bin/fd
 
+# Playwright's Debian 12 Chromium runtime (nativeDeps.ts), for every project's browser tests and captures.
+# Projects install the browser with their own Playwright version; a shared Chromium binary would mismatch it.
+# Download hosts remain project grants, including storage.googleapis.com for Chrome for Testing downloads.
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 libcairo2 libcups2 libdbus-1-3 \
+      libdrm2 libgbm1 libglib2.0-0 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 \
+      libxcomposite1 libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2 \
+      fonts-liberation fonts-noto-color-emoji \
+ && rm -rf /var/lib/apt/lists/*
+
 RUN useradd --create-home --uid 1000 --shell /bin/bash user \
  && echo 'user ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/user \
  && chmod 0440 /etc/sudoers.d/user \
