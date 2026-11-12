@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer, request } from "node:http";
-import { connect } from "node:net";
+import { connect, createServer as createNetServer } from "node:net";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createDockerBackend } from "./docker-backend.ts";
@@ -341,8 +341,17 @@ test("a pause whose session record fails keeps the sessions its checkpoint's pau
   const paused = Buffer.from(JSON.stringify([{ id: "t1", terminal: "t1", harness: "shell", harnessSessionId: null, title: "sh" }])).toString("base64url");
   const labels = { "nexus.pylon": pylon, "nexus.image": "img-test00000000", "nexus.booted-from": "ckpt-a-1", "nexus.checkpoint": "ckpt-a-1", "nexus.sessions": paused };
   const docker = await fakeDocker(t, { ps: { stdout: "c1\n" }, "container inspect c1": running("c1", labels) });
-  // First on the PATH the container's commands run with: a core runs, as pgrep finds it, but its API fails every call.
-  await writeFile(join(docker.root, "..", "pgrep"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  // A core runs, as its socket listens where its core.lock says, but its API, first on the PATH, fails every call.
+  const state = join(docker.root, "state");
+  const socket = join(state, "core.sock");
+  await mkdir(join(state, "herdr-core", process.env.HC_SESSION || "default"), { recursive: true });
+  await writeFile(join(state, "herdr-core", process.env.HC_SESSION || "default", "core.lock"), socket);
+  const core = createNetServer();
+  await new Promise<void>((resolve) => core.listen(socket, resolve));
+  t.after(() => core.close());
+  const xdg = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = state;
+  t.after(() => { if (xdg === undefined) delete process.env.XDG_STATE_HOME; else process.env.XDG_STATE_HOME = xdg; });
   await writeFile(join(docker.root, "..", "herdr-core"), "#!/bin/sh\necho 'herdr-core: broken on purpose' >&2\nexit 1\n", { mode: 0o755 });
   await createDockerBackend({ images }).ensurePaused(pylon, "ckpt-a-2", AbortSignal.timeout(60_000));
   const calls = await docker.calls();
