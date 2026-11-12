@@ -97,9 +97,12 @@ export const commitMissing = 66;
 export function templateCheckout({ url, checkout }: CloneRepo, dir = checkoutDir): string {
   const [commit, git] = [q(checkout.commit), `git -C ${q(dir)}`];
   return [
+    `templateCommit=$(${git} rev-parse HEAD)`,
     `${git} remote set-url origin ${q(url)} && ${git} fetch --quiet origin`,
     `{ ${git} cat-file -e ${commit}^{commit} 2>/dev/null || fetched=$(${git} fetch --quiet origin ${commit} 2>&1) || { echo "$fetched"; case $fetched in *"not our ref"*|*"unadvertised object"*) echo ${q(`${checkout.commit} is not on ${url}`)}; exit ${commitMissing};; esac; exit 1; }; }`,
     `${git} checkout --quiet -B ${q(checkout.branch)} ${commit} && ${recordBase(dir, "HEAD")}`,
+    `checkoutCommit=$(${git} rev-parse HEAD)`,
+    `if test "$templateCommit" != "$checkoutCommit" && ! test -e ${q(`${dir}/.nexus/resume`)}; then echo "setup: template checkout $templateCommit -> $checkoutCommit; no .nexus/resume: dependencies may be stale. Refresh dependencies for this commit before running tests."; fi`,
   ].join(" && ");
 }
 

@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import assert from "node:assert/strict";
 import type { ThreadId } from "../ids.ts";
 import type { Finding, Review, Round, Verdict } from "./review-model.ts";
 import { testReview } from "../test-support/registry-kit.ts";
@@ -13,6 +14,21 @@ const detail = { head: h1, base: "main", body: "Adds a cache.\n\nNot checked liv
 const at = (round: Partial<Round>, over: Partial<Review> = {}) => testReview({ rounds: [{ head: h1, verdict: null, check: null, answers: null, ...round }], ...over });
 const twoRounds = (previous: Partial<Round>, head: string, over: Partial<Review> = {}) =>
   testReview({ rounds: [{ head: h1, base: "main", verdict: null, check: null, answers: null, ...previous }, { head, verdict: null, check: null, answers: null }], ...over });
+
+test("reviewers are warned about template dependency freshness on initial and later checkouts", () => {
+  const previous: Round = { head: h1, base: "main", verdict: verdict([f1]), check: null, answers: [{ id: "F1", action: "fixed", reason: "Done." }] };
+  const review = twoRounds(previous, h2);
+  for (const message of [
+    reviewerRequest(review, detail, "rv-1:a", "gpt-6-astra"),
+    reviewerRequest(review, detail, "rv-1:a", "claude-opus-5-5"),
+    ...(["first", "second"] as const).map((seat) => nextRound(review, previous, "rv-1:b", "main", seat)),
+  ]) {
+    assert.match(message, /dependencies match this commit's lockfiles/);
+    assert.match(message, /\.nexus\/resume/);
+    assert.match(message, /10 seconds/);
+    assert.match(message, /report the tests as blocked/);
+  }
+});
 
 test("every review prompt keeps its text", (t) => {
   const prompts: Record<string, string> = {
