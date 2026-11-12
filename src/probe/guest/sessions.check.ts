@@ -9,9 +9,9 @@
  * the pylon's core twice and deletes its state once, which ends every terminal in it, so never run it in a pylon
  * someone uses.
  *
- * Two wakes. RESTORE stops the core and keeps its state, as a checkpoint carries it. The core then brings the kept
- * shell back at its address with its labels, and the agents, which are not kept, do not come back live. The relaunch
- * must find the shell in place and resume each agent in a new terminal. FRESH also deletes the core's state, as on the
+ * Two wakes. RESTORE stops the core and keeps its state, as a checkpoint carries it. The core then brings every
+ * terminal, all kept, back at its address with its labels, the shell as itself and each agent as a shell in its
+ * place. The relaunch must find the shell in place and resume each agent in place, in that shell. FRESH also deletes the core's state, as on the
  * first wake of a disk from before Core, so the relaunch must reopen every session, the shell included, from the
  * sessions file alone. In both, each agent's terminal must then run its agent with the flag that resumes its session.
  *
@@ -294,12 +294,8 @@ assert.ok(byTerminal.get(opened.pi)?.harnessSessionId, "pi's terminal names its 
 assert.ok(byTerminal.get(opened.unpromptedClaude)?.harnessSessionId, "an unprompted Claude Code's terminal names its session ID too");
 assert.equal(byTerminal.get(opened.unpromptedPi)?.harness, "pi", "an unprompted pi is its terminal's foreground");
 assert.ok(byTerminal.get(opened.unpromptedPi)?.harnessSessionId, "an unprompted pi's terminal names its session file too");
-// What RESTORE turns on: the core gives a kept terminal a shell when its program is lost, so only the shell is kept,
-// and an agent's terminal ends with it rather than coming back as a shell the next record would take for a session.
-for (const [title, terminal] of Object.entries(opened)) {
-  const { keep } = await terminalJson(terminal);
-  assert.equal(keep, title === "shell", `${title}'s terminal ${terminal} is ${title === "shell" ? "" : "not "}kept`);
-}
+// What RESTORE turns on: the core gives a kept terminal a shell when its program is lost, which the relaunch resumes an agent in.
+for (const [title, terminal] of Object.entries(opened)) assert.equal((await terminalJson(terminal)).keep, true, `${title}'s terminal ${terminal} is kept`);
 
 // A session is only worth resuming once it has a conversation, and Claude Code cannot resume an ID with
 // no transcript. The placeholder key makes the reply fail, but the prompt is still written down.
@@ -322,27 +318,19 @@ dropAppearedSessionFiles("RESTORE", recorded);
 const restored = await relaunchSessions(guest, unlocked);
 stepRelaunch("RESTORE_RELAUNCH_1", restored);
 assert.ok(others(restored).every((o) => o.result !== "failed"), "every recorded session comes back");
-// The core keeps the shell, so it is back in its own terminal, and only the relaunch started agents, each in a new one.
+// The core kept every terminal, so each session is back at its address: the shell as itself, each agent resumed in place.
 for (const o of restored) {
-  const shell = o.record.harness === "shell";
-  const want = shell ? "present" : "relaunched";
-  if (o.result !== want || (o.terminal === o.record.terminal) !== shell) {
-    findings.push(`RESTORE: ${o.record.title} is ${o.result} in ${o.terminal ?? "no terminal"}, not ${want} ${shell ? `in its kept terminal ${o.record.terminal}` : "in a new terminal"}`);
-  }
+  const want = o.record.harness === "shell" ? "present" : "resumed-in-place";
+  if (o.result !== want || o.terminal !== o.record.terminal) findings.push(`RESTORE: ${o.record.title} is ${o.result} in ${o.terminal ?? "no terminal"}, not ${want} in ${o.record.terminal}`);
 }
-// An agent's terminal from before the stop is neither live, which the next record would take for a session, nor left
-// finished, which the relaunch removes so it does not crowd herdr-app's list.
 const afterRelaunch = (await core(guest, "terminal.list", { all: true })).terminals;
 step("RESTORE_TERMINALS", afterRelaunch.map(({ address, state, labels }) => ({ address, state, labels })));
-for (const r of recorded) {
-  const left = r.harness === "shell" ? undefined : afterRelaunch.find((t) => t.address === r.terminal);
-  if (left !== undefined) findings.push(`RESTORE: ${r.title}'s terminal ${r.terminal} from before the stop is still there, ${left.state}`);
-}
+if (afterRelaunch.length !== recorded.length) findings.push(`RESTORE: the core holds ${afterRelaunch.length} terminals, not the ${recorded.length} recorded`);
 const brokenByRestore = await expectRuns("RESTORE", restored);
 const restoredAgain = await relaunchSessions(guest, unlocked);
 stepRelaunch("RESTORE_RELAUNCH_2", restoredAgain);
 assert.ok(others(restoredAgain).every((o) => o.result === "present"), "a second relaunch opens nothing");
-const restoredTerminals = restoredAgain.flatMap((o) => o.result === "present" || o.result === "relaunched" ? [o.terminal] : []);
+const restoredTerminals = restoredAgain.flatMap((o) => o.result === "present" ? [o.terminal] : []);
 const afterRestore = await settledFacts(restoredTerminals);
 step("RESTORE_FACTS", afterRestore);
 assertResumed("RESTORE", recorded, afterRestore);
@@ -398,7 +386,7 @@ const freshAgain = await relaunchSessions(guest, unlocked);
 stepRelaunch("FRESH_RELAUNCH_2", freshAgain);
 assert.ok(others(freshAgain).every((o) => o.result === "present"), "a second relaunch after a fresh one opens nothing");
 
-for (const o of freshAgain) if (o.result === "present" || o.result === "relaunched") await closeSession(guest, o.terminal);
+for (const o of freshAgain) if (o.result === "present") await closeSession(guest, o.terminal);
 assert.equal(await closeSession(guest, "tzzzzzz"), "not-open", "closing a terminal the core never had closes nothing");
 const closed = await sessionFacts(guest);
 step("FACTS_AFTER_CLOSE", closed);

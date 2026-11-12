@@ -103,6 +103,8 @@ export interface FakeTerminal {
    * while Core has none yet. While any is left, its program has reported nothing and a send is refused as still starting.
    */
   starting: FakeTerminal["foreground"][];
+  /** The argv of the program a kept terminal lost, which Core lists it with, and no foreground, until its next read shows the shell it gives in its place. */
+  lost: readonly string[] | null;
   /** Each text sent to it, in order. */
   sent: string[];
   keys: (readonly string[])[];
@@ -118,9 +120,12 @@ export interface FakeCore {
   add(t: Partial<FakeTerminal>): FakeTerminal;
   /**
    * A core stop and start: each kept terminal comes back live as a shell, at its address and with its labels, and the
-   * rest finish. Core gives the shell as the terminal's argv too, as a pylon's wake showed: `["/bin/bash"]`.
+   * rest finish. Core gives the shell as the terminal's argv too, as a pylon's wake showed: `["/bin/bash"]`. Until its
+   * next read, a kept terminal is still lost: listed with its program's argv and no foreground, refusing a send.
    */
   restart(): void;
+  /** A death by a signal Core did not send, such as a SIGKILL: a kept terminal comes back as a shell, as at a restart, and any other finishes. */
+  lose(t: FakeTerminal): void;
   /**
    * A core killed outright: its holder keeps every program running, a call gets the guard's core-lost exit, and the
    * next core, as an ensureCore starts, takes them back live at their addresses.
@@ -142,6 +147,36 @@ export function launchedProgram(argv: readonly string[]): readonly string[] {
   return argv[0] === "env" && at !== -1 ? argv.slice(at + 1) : argv;
 }
 
+/** An agent reports idle once it runs, and anything else nothing. */
+const agentStatus = (program: string): FakeTerminal["status"] =>
+  program === "claude" || program === "pi" ? { state: "idle", app: program === "claude" ? "claude-code" : "pi" } : null;
+
+/** The words of a line as a POSIX shell splits them, for lines of words that are bare or single-quoted, with `\` outside quotes. */
+export function shellWords(line: string): string[] {
+  const words: string[] = [];
+  let word: string | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]!;
+    if (c === " ") {
+      if (word !== null) words.push(word);
+      word = null;
+    } else if (c === "'") {
+      const end = line.indexOf("'", i + 1);
+      if (end === -1) throw new Error(`unclosed quote in ${line}`);
+      word = (word ?? "") + line.slice(i + 1, end);
+      i = end;
+    } else if (c === "\\") {
+      word = (word ?? "") + line[++i];
+    } else if (/["$`]/.test(c)) {
+      throw new Error(`the fake core reads no ${c} in ${line}`);
+    } else {
+      word = (word ?? "") + c;
+    }
+  }
+  if (word !== null) words.push(word);
+  return words;
+}
+
 /**
  * A core that keeps its terminals as Core does: addresses t1, t2, ... never reused, names unique among live terminals,
  * kills that finish and removes that need a finished terminal. A run's program is in its foreground at once, and an
@@ -160,21 +195,38 @@ export function fakeCore(options: {
     const argv = t.argv ?? ["bash", "-l"];
     const program = launchedProgram(argv);
     return {
-      address: `t${next++}`, name: null, state: "live", labels: {}, cwd: checkoutDir, parent: null, keep: false, exitCode: null, screen: "", starting: [], sent: [], keys: [],
+      address: `t${next++}`, name: null, state: "live", labels: {}, cwd: checkoutDir, parent: null, keep: false, exitCode: null, screen: "", starting: [], lost: null, sent: [], keys: [],
       foreground: { argv: program, cwd: t.cwd ?? checkoutDir, name: program[0]!.split("/").at(-1)! }, status: null, ...t, argv,
     };
   };
   // A name finds a live terminal first, as Core's names are unique among those.
   const find = (ref: unknown) => terminals.find((t) => t.address === ref) ?? terminals.find((t) => t.name === ref && t.state === "live") ?? terminals.findLast((t) => t.name === ref);
-  const view = ({ address, name, state, labels, argv, cwd, parent, foreground, status, exitCode, starting }: FakeTerminal) =>
-    ({ address, name, state, labels, argv, cwd, parent, foreground: starting.length > 0 ? starting[0] : foreground, status: starting.length > 0 ? null : status, exit_code: exitCode });
-  /** A read of `t`, which moves a start on by one step. */
+  const view = ({ address, name, state, labels, argv, cwd, parent, keep, foreground, status, exitCode, starting, lost }: FakeTerminal) => lost !== null
+    ? { address, name, state, labels, argv: lost, cwd, parent, keep, pid: null, foreground: null, status: null, exit_code: exitCode }
+    : { address, name, state, labels, argv, cwd, parent, keep, pid: state === "live" ? 4242 : null, foreground: starting.length > 0 ? starting[0] : foreground, status: starting.length > 0 ? null : status, exit_code: exitCode };
+  /** A read of `t`, which moves a start or a restore on by one step. */
   const read = (t: FakeTerminal) => {
     const seen = view(t);
-    t.starting.shift();
+    if (t.lost !== null) t.lost = null;
+    else t.starting.shift();
     return seen;
   };
   let lost = false;
+  /**
+   * A line typed into a shell Core gave a kept terminal: one that execs a program, such as a launch, makes it the
+   * foreground, after a read that still shows the shell, which has yet to run the line.
+   */
+  const typed = (t: FakeTerminal, line: string) => {
+    const [command, ...argv] = shellWords(line);
+    if (command !== "exec" || argv.length === 0) return;
+    const program = launchedProgram(argv);
+    const login = argv.indexOf("bash");
+    const shell = t.foreground!;
+    t.foreground = { argv: program, cwd: shell.cwd, name: program[0]!.split("/").at(-1)! };
+    t.status = agentStatus(program[0]!);
+    t.starting = [shell, { argv, cwd: t.cwd, name: argv[0]! }, ...login === -1 ? [] : [{ argv: argv.slice(login), cwd: t.cwd, name: "bash" }]];
+  };
+  const runsShell = (t: FakeTerminal) => t.argv.length === 1 && t.starting[0]?.argv.join() === t.argv[0];
   const finish = (t: FakeTerminal, exitCode: number | null) => Object.assign(t, { state: "finished", foreground: null, status: null, exitCode });
   const waited = (t: FakeTerminal, ended: boolean, reason: string, status: string | null) =>
     coreOk({ children: [], ended, exit_code: t.exitCode, reason, signal: null, status, terminal: t.address, turn: 0 });
@@ -187,11 +239,11 @@ export function fakeCore(options: {
       return added;
     },
     restart() {
-      for (const t of terminals) {
-        if (t.state !== "live") continue;
-        if (t.keep) Object.assign(t, { argv: ["/bin/bash"], foreground: { argv: ["/bin/bash"], cwd: t.cwd, name: "bash" }, status: null, starting: [] });
-        else finish(t, null);
-      }
+      for (const t of terminals) if (t.state === "live") fake.lose(t);
+    },
+    lose(t) {
+      if (t.keep) Object.assign(t, { lost: t.argv, argv: ["/bin/bash"], foreground: { argv: ["/bin/bash"], cwd: t.cwd, name: "bash" }, status: null, starting: [] });
+      else finish(t, null);
     },
     crash() {
       fake.running = false;
@@ -219,13 +271,14 @@ export function fakeCore(options: {
         case "terminal.run": {
           if (params.name != null && terminals.some((x) => x.state === "live" && x.name === params.name)) return coreError("name_taken", `a live terminal is already named ${JSON.stringify(params.name)}`);
           const run = fake.add({ argv: params.argv as string[], cwd: params.cwd as string, name: (params.name as string | undefined) ?? null, labels: { ...params.labels as Record<string, string> }, keep: params.keep === true });
-          const program = run.foreground!.argv[0]!;
-          if (program === "claude" || program === "pi") run.status = { state: "idle", app: program === "claude" ? "claude-code" : "pi" };
+          run.status = agentStatus(run.foreground!.argv[0]!);
           options.start?.(run);
           return coreOk(view(run));
         }
         case "terminal.wait":
           if (t!.state === "finished") return waited(t!, true, "exit", null);
+          // As Core's, a wait on a shell that is not working, which has yet to run a line typed into it, ends at once.
+          if (runsShell(t!)) return waited(t!, true, "status", null);
           if (t!.starting.length > 0) {
             t!.starting = [];
             return waited(t!, true, "status", t!.status?.state ?? null);
@@ -239,7 +292,9 @@ export function fakeCore(options: {
             t!.starting.shift();
             return stillStarting(t!.address);
           }
+          if (t!.lost !== null) return coreError("unavailable", `${t!.address} is lost, waiting for its new shell`, "retry after the restarted event");
           t!.sent.push(params.text as string);
+          if (t!.argv.length === 1 && t!.foreground?.argv.join() === t!.argv[0]) typed(t!, params.text as string);
           return coreOk({ started: null, status: t!.status?.state ?? null, turn: 0, wait: null });
         case "terminal.keep":
           if (t!.state !== "live") return coreError("invalid_params", "only live terminals can be kept");
