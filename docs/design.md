@@ -476,6 +476,10 @@ A review that ends `landed` leaves its builder and its reviewer nothing to do, s
 
 Merging needs the control plane's GitHub token (`github.tokenFile`) to have write access to the repository's contents and pull requests. A read-only token, enough for the PR watch, makes a landing hold with GitHub's answer, and granting the wider token is the person's decision, as [deployment](../deploy/README.md) says.
 
+### Fixes that change only a pull request's description
+
+Each reviewer round records the digest of the description it received. A builder that answers a reviewer finding `fixed` at the same head can move straight to a new reviewer round once its answering turn ends if the description changed. Both reviewers get the current description with that round's request and judge whether the edit really fixes the finding; the edit is not itself an approval. The normal round cap still applies. This avoids demanding an empty commit for evidence or screenshots added only to the description. A description edit cannot clear a failed check, failed live check or merge conflict: those still require an updated head. Unchanged descriptions and older rounds with no recorded digest retain the normal push grace and reminder. The digest is optional state in the existing review record, not a registry migration.
+
 ## Nudging a builder that stopped short
 
 A review starts only once a builder's pull request is open, so a builder that ends its turn before it pushes, or before it opens the pull request, stops the work until someone reads it. On 2026-10-25 one stopped at a draft and no one noticed. In a project with `--auto-review`, the control plane now nudges such a builder through the inbox, and after two nudges hands it to the person (`src/control/nudge.ts`).
