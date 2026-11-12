@@ -98,7 +98,8 @@ function outcomeLine(o: RelaunchOutcome): string {
   const session = `${JSON.stringify(o.record.title)} (${o.record.harness})`;
   switch (o.result) {
     case "present": return `sessions: ${session} was already running in ${o.terminal}`;
-    case "relaunched": return `sessions: relaunched ${session} in ${o.terminal}`;
+    case "resumed-in-place": return `sessions: resumed ${session} in place in ${o.terminal}`;
+    case "relaunched": return `sessions: relaunched ${session} in ${o.terminal}${o.notInPlace === null ? "" : `, not in place at ${o.record.terminal}, because ${o.notInPlace}`}`;
     case "failed": return `sessions: ${session} did not come back${o.terminal === null ? "" : `, and its terminal ${o.terminal} stays open`}: ${o.message}`;
     case "dropped": return `sessions: dropped ${session}, a second record of ${agentKinds[o.record.harness].label} session ${o.record.harnessSessionId}${o.terminal === null ? "" : `, and closed its terminal ${o.terminal}`}`;
   }
