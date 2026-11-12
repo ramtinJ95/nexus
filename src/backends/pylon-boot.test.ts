@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { coreHome, tempDir, unixSockets } from "../test-support/kit.ts";
@@ -42,6 +42,41 @@ test("a template boot's checkout of a commit a force-push took off its remote fa
   assert.equal(setupRemoved("pylon-th-check" as PylonId, true, "Setup exited 128", "", 128).code, "backend", "a fetch that failed is retried");
   assert.equal(await checkout(newHead), 0);
   assert.equal(await git(template, "rev-parse", "HEAD"), newHead);
+});
+
+test("a template checkout warns when setup's packages may be stale and the repository has no resume hook", async (t) => {
+  const dir = await tempDir("nexus-template-deps-", t);
+  for (const resume of [false, true]) {
+    const remote = join(dir, `remote-${resume}`);
+    const template = join(dir, `template-${resume}`);
+    await run("git", ["init", "--quiet", "--initial-branch=main", remote]);
+    await writeFile(join(remote, "package-lock.json"), "old lockfile\n");
+    if (resume) {
+      await mkdir(join(remote, ".nexus"));
+      await writeFile(join(remote, ".nexus/resume"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    }
+    await git(remote, "add", ".");
+    await git(remote, "commit", "--quiet", "-m", "template setup inputs");
+    const old = await git(remote, "rev-parse", "HEAD");
+    await run("git", ["clone", "--quiet", remote, template]);
+    await mkdir(join(template, "node_modules"));
+    await writeFile(join(template, "node_modules/installed-lock"), "old lockfile\n");
+    await writeFile(join(remote, "package-lock.json"), "new lockfile\n");
+    await git(remote, "commit", "--quiet", "-am", "add dependencies");
+    const head = await git(remote, "rev-parse", "HEAD");
+    const command = templateCheckout({ kind: "clone", url: remote, checkout: { branch: "feature", commit: head } }, template);
+    const { stdout } = await run("sh", ["-c", command]);
+    if (resume) assert.doesNotMatch(stdout, /dependencies may be stale/);
+    else {
+      assert.match(stdout, /dependencies may be stale/);
+      assert.ok(stdout.includes(old) && stdout.includes(head), "the warning names the template's checkout and the new one");
+      assert.match(stdout, /no .nexus\/resume/);
+    }
+    assert.equal(await readFile(join(template, "package-lock.json"), "utf8"), "new lockfile\n");
+    assert.equal(await readFile(join(template, "node_modules/installed-lock"), "utf8"), "old lockfile\n", "checkout must not pretend to install anything");
+    const same = await run("sh", ["-c", command]);
+    assert.doesNotMatch(same.stdout, /dependencies may be stale/, "an unchanged checkout needs no warning");
+  }
 });
 
 test("a boot pulls the dotfiles repository it names, and keeps the image's baked layer without one or when the pull fails", async (t) => {
