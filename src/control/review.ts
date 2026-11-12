@@ -58,6 +58,8 @@ const replyGraceMs = 60_000;
 /** How long an agent may take to answer, or the builder to push what it says it fixed, before the loop asks the person. */
 const answerMs = 3 * 60 * 60_000;
 const pushGraceMs = 10 * 60_000;
+/** How long GitHub may show a turn's description edit before the push that turn made, so the edit alone is not yet taken for the fix. */
+const descriptionGraceMs = 2 * 60_000;
 /** How long GitHub may take to push the update of a branch it accepted before the loop asks for it again. */
 const updateGraceMs = 60_000;
 const maxNudges = 2;
@@ -659,11 +661,9 @@ export function reviewLoop(deps: ReviewDeps) {
         // A push can land on GitHub a little after the turn that made it ends.
         if (state.over === null) return wait(r, phase, "builder", state, null);
         // A description fix needs no commit, but still needs the reviewer's judgment. It cannot clear a failed gate.
-        const descriptionChanged = round.describedFrom !== undefined && round.describedFrom !== descriptionDigest(snapshot.detail.body);
-        if (gate !== null || !descriptionChanged) {
-          if (now() - state.over < pushGraceMs) return r;
-          if (gate === null || gate.kind === "conflict") return wait(r, phase, "builder", state, `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
-        }
+        const descriptionOnly = gate === null && round.describedFrom !== undefined && round.describedFrom !== descriptionDigest(snapshot.detail.body);
+        if (now() - state.over < (descriptionOnly ? descriptionGraceMs : pushGraceMs)) return r;
+        if (!descriptionOnly && (gate === null || gate.kind === "conflict")) return wait(r, phase, "builder", state, `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
       }
       // The reviewer cannot change a gate's result, so a failed gate at an unmoved head is the person's.
       if (gate !== null && snapshot.detail.head === round.head) {
@@ -677,7 +677,7 @@ export function reviewLoop(deps: ReviewDeps) {
         const carried = await carryApproval(withAnswers, snapshot.detail.head, snapshot.detail.base);
         if (carried !== null) return carried;
       }
-      if (n >= r.maxRounds) return ranOut(withAnswers, `The builder pushed fixes after round ${n}, the last this review allows, so they are unreviewed.`);
+      if (n >= r.maxRounds) return ranOut(withAnswers, `The builder ${snapshot.detail.head === round.head ? "changed the description" : "pushed fixes"} after round ${n}, the last this review allows, so they are unreviewed.`);
       return await toReviewers(withAnswers, snapshot.detail.head, snapshot.detail.base);
     },
     async quoting(r, phase) {

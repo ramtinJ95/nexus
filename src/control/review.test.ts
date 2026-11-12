@@ -1573,6 +1573,9 @@ test("a description-only fixed answer starts a fresh review at the same head wit
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body } };
   f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added the CI screenshots to the description. No code change." }]));
   await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing", "a push the turn made may still be on its way");
+  f.tick(60_000);
+  await loop.poll();
   assert.equal(f.review().phase.kind, "reviewing", "no ten-minute wait for a commit the fix does not need");
   assert.deepEqual(f.review().rounds.map((r) => r.head), [head1, head1]);
   assert.ok(f.sent.at(-1)!.message.text.includes(body), "the reviewer must see GitHub's current description, not its old copy");
@@ -1580,6 +1583,46 @@ test("a description-only fixed answer starts a fresh review at the same head wit
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
   assert.equal(f.review().phase.kind, "approved");
+});
+
+test("a description edited beside a push that GitHub shows late gets its round at the pushed head", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { findings: [serious] }));
+  await loop.poll();
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Adds a TTL. F1 fixed." } };
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
+  await loop.poll();
+  f.tick(30_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing", "the edited description alone does not start a round at the old head");
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.deepEqual(f.review().rounds.map((r) => r.head), [head1, head2]);
+});
+
+test("a round recorded before description digests keeps the push grace when the description changes", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { findings: [serious] }));
+  await loop.poll();
+  const { describedFrom: _, ...legacy } = f.review().rounds[0]!;
+  saveOlder(f, { ...f.review(), rounds: [legacy] });
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Edited." } };
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Edited the description." }]));
+  await loop.poll();
+  f.tick(5 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  assert.equal(f.review().rounds.length, 1);
+  f.tick(5 * 60_000);
+  await loop.poll();
+  assert.match(f.sent.at(-1)!.message.text, /head is still 1{40}\. Push the fixes\./);
 });
 
 test("a description-only fix still waits for the builder's answering turn to end", async (t) => {
