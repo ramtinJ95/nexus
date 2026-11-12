@@ -2473,7 +2473,7 @@ test("a failed Claude worker's dashboard agrees with its registry event and API 
   const message = "Claude launch did not complete: executable missing";
   claudeWorkerAt(s.registry, id, "failed", { message });
   const detail = JSON.parse((await s.call("GET", `/v1/threads/${id}`)).text);
-  assert.deepEqual(detail.claudeWorker, { state: "failed", model: "custom-model", message });
+  assert.deepEqual(detail.claudeWorker, { state: "failed", model: "custom-model", session: "launch", message });
   assert.equal(detail.attention, "failed");
   assert.deepEqual(detail.sessions, []);
   const page = textOf((await s.call("GET", `/threads/${id}`)).text);
