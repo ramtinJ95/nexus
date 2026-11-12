@@ -204,13 +204,23 @@ for (const keeps of [true, false]) {
   });
 }
 
-test("a pylon whose earlier wakes left the worker in several terminals comes back with one, in the first", async () => {
+test("a wake whose core kept nothing logs why it resumed the worker in a new terminal rather than in place", async () => {
+  const p = pylon(false);
+  const first = await launched(p);
+  await recordBeforePause(p.guest, quiet);
+  p.pause();
+  const { lines, log } = logged();
+  await relaunchAfterWake(pylonId, p.guest, log);
+  const [running] = p.running(worker);
+  assert.deepEqual(lines, [`sessions: relaunched "Fix the login page" (claude-code) in ${running}, not in place at ${first}, because ${first} is gone`]);
+});
+
+test("a pylon whose earlier wakes left the worker in several terminals comes back with one, in place in the first", async () => {
   const p = pylon();
   const first = await launched(p);
-  const others = [];
   // A launch finds a live terminal that runs the session, so only an earlier pylon's wakes could leave these.
   const { argv, cwd, labels } = p.core.terminals[0]!;
-  for (const title of ["Claude Code", "Claude Code"]) others.push(p.core.add({ argv, cwd, labels: { ...labels, "nexus.title": title }, status: { state: "idle" } }).address);
+  for (const title of ["Claude Code", "Claude Code"]) p.core.add({ argv, cwd, labels: { ...labels, "nexus.title": title }, status: { state: "idle" } });
   await recordBeforePause(p.guest, quiet);
   p.pause();
   const { lines, log } = logged();
@@ -219,12 +229,11 @@ test("a pylon whose earlier wakes left the worker in several terminals comes bac
   assert.equal(p.running(worker).length, 1);
   assert.deepEqual(p.titles(), ["Fix the login page"], "the other records are dropped");
   assert.deepEqual(lines, [
-    `sessions: relaunched "Fix the login page" (claude-code) in ${running}`,
+    `sessions: resumed "Fix the login page" (claude-code) in place in ${running}`,
     `sessions: dropped "Claude Code" (claude-code), a second record of Claude Code session ${worker}`,
     `sessions: dropped "Claude Code" (claude-code), a second record of Claude Code session ${worker}`,
   ]);
-  assert.notEqual(running, first);
-  assert.ok(!others.includes(running!));
+  assert.equal(running, first);
   const file = JSON.parse(p.guest.written.findLast((f) => f.path === sessionsFile)!.content);
   assert.deepEqual(file.sessions.map((r: SessionRecord) => r.terminal), [running], "the next pause records one");
   assert.deepEqual(file.failed, []);
