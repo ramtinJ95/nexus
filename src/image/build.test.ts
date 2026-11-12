@@ -37,6 +37,19 @@ const pins: BuildPins = {
 const manifest: ImageRecipe["files"][number] = { path: agentSetupManifest, mode: 0o644, content: await readFile(join(pylonRecipeDir, agentSetupManifest), "utf8") };
 const modelPolicy: ImageRecipe["files"][number] = { path: "claude-managed-settings.json", mode: 0o644, content: await readFile(join(pylonRecipeDir, "claude-managed-settings.json"), "utf8") };
 
+test("the image supplies Playwright Chromium's Debian 12 runtime and checks it at smoke boot", async () => {
+  const recipe = await loadImageRecipe();
+  const dockerfile = recipe.files.find((f) => f.path === "Dockerfile")!.content;
+  // Playwright's nativeDeps.ts, debian12-x64.chromium; keep browsers version-matched to each project's Playwright.
+  const packages = ["libasound2", "libatk-bridge2.0-0", "libatk1.0-0", "libatspi2.0-0", "libcairo2", "libcups2", "libdbus-1-3", "libdrm2", "libgbm1", "libglib2.0-0", "libnspr4", "libnss3", "libpango-1.0-0", "libx11-6", "libxcb1", "libxcomposite1", "libxdamage1", "libxext6", "libxfixes3", "libxkbcommon0", "libxrandr2", "fonts-liberation", "fonts-noto-color-emoji"];
+  const installs = dockerfile.replace(/\\\n/g, " ").split("\n").filter((line) => line.startsWith("RUN ") && line.includes("apt-get install")).join(" ").split(/\s+/);
+  for (const name of packages) assert.ok(installs.includes(name), `the image installs ${name}`);
+  const check = smokeChecks(recipe).find((c) => c.name === "Chromium runtime");
+  assert.ok(check, "a real image build must check the runtime, not only its recipe");
+  assert.match(check.argv.join(" "), /libnss3\.so/);
+  assert.equal(smokeFailure(check, 1, "missing library"), "exited 1");
+});
+
 async function recipeDir(t: { after(fn: () => Promise<void>): void }, files: Record<string, string>): Promise<string> {
   const dir = await tempDir("nexus-recipe-", t);
   for (const [path, content] of Object.entries(files)) {
