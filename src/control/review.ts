@@ -58,6 +58,8 @@ const replyGraceMs = 60_000;
 /** How long an agent may take to answer, or the builder to push what it says it fixed, before the loop asks the person. */
 const answerMs = 3 * 60 * 60_000;
 const pushGraceMs = 10 * 60_000;
+/** How long GitHub may show a turn's description edit before the push that turn made, so the edit alone is not yet taken for the fix. */
+const descriptionGraceMs = 2 * 60_000;
 /** How long GitHub may take to push the update of a branch it accepted before the loop asks for it again. */
 const updateGraceMs = 60_000;
 const maxNudges = 2;
@@ -316,9 +318,10 @@ export function reviewLoop(deps: ReviewDeps) {
    */
   const toReviewers = async (r: Review, head: string, base: string): Promise<Review> => {
     const previous = r.rounds.at(-1)!;
-    const slot = reviewRound(await joinSecond(r), head, base);
+    const { detail } = await read(r);
+    const slot = withRound(reviewRound(await joinSecond(r), head, base), { describedFrom: descriptionDigest(detail.body) });
     return seatsFor(slot).filter((seat) => talking(slot, partyAt[seat]))
-      .reduce((next, seat) => send(next, partyAt[seat], (token) => nextRound(slot, previous, token, base, seat)), { ...slot, phase: { kind: "reviewing" } } as Review);
+      .reduce((next, seat) => send(next, partyAt[seat], (token) => nextRound(slot, previous, token, base, seat, detail.body)), { ...slot, phase: { kind: "reviewing" } } as Review);
   };
   /** A second reviewer the round's start may need: the project's rule's first at the round's head, or the review's again. */
   const joinSecond = async (r: Review): Promise<Review> => {
@@ -657,8 +660,10 @@ export function reviewLoop(deps: ReviewDeps) {
       if (fixed && snapshot.detail.head === round.head) {
         // A push can land on GitHub a little after the turn that made it ends.
         if (state.over === null) return wait(r, phase, "builder", state, null);
-        if (now() - state.over < pushGraceMs) return r;
-        if (gate === null || gate.kind === "conflict") return wait(r, phase, "builder", state, `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
+        // A description fix needs no commit, but still needs the reviewer's judgment. It cannot clear a failed gate.
+        const descriptionOnly = gate === null && round.describedFrom !== undefined && round.describedFrom !== descriptionDigest(snapshot.detail.body);
+        if (now() - state.over < (descriptionOnly ? descriptionGraceMs : pushGraceMs)) return r;
+        if (!descriptionOnly && (gate === null || gate.kind === "conflict")) return wait(r, phase, "builder", state, `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
       }
       // The reviewer cannot change a gate's result, so a failed gate at an unmoved head is the person's.
       if (gate !== null && snapshot.detail.head === round.head) {
@@ -672,7 +677,7 @@ export function reviewLoop(deps: ReviewDeps) {
         const carried = await carryApproval(withAnswers, snapshot.detail.head, snapshot.detail.base);
         if (carried !== null) return carried;
       }
-      if (n >= r.maxRounds) return ranOut(withAnswers, `The builder pushed fixes after round ${n}, the last this review allows, so they are unreviewed.`);
+      if (n >= r.maxRounds) return ranOut(withAnswers, `The builder ${snapshot.detail.head === round.head ? "changed the description" : "pushed fixes"} after round ${n}, the last this review allows, so they are unreviewed.`);
       return await toReviewers(withAnswers, snapshot.detail.head, snapshot.detail.base);
     },
     async quoting(r, phase) {
@@ -1080,7 +1085,7 @@ export function reviewLoop(deps: ReviewDeps) {
     const started: Review = {
       id, expect, sent: 0, builder: builder.id, reviewer: newThreadId(), reviewerStarted: false, pr, models, reviewerKind: kind.claude ? "claude" : "harness",
       maxRounds: rounds, earlierRounds, land: request.land, auto: request.auto, brief, ...second,
-      rounds: [{ head: snapshot.detail.head, base: snapshot.detail.base, ...verdictsFor(seatsFor(second)), check: null, answers: null }], merged: null, waiver: null, phase: { kind: "reviewing" }, outbox: null,
+      rounds: [{ head: snapshot.detail.head, base: snapshot.detail.base, describedFrom: descriptionDigest(snapshot.detail.body), ...verdictsFor(seatsFor(second)), check: null, answers: null }], merged: null, waiver: null, phase: { kind: "reviewing" }, outbox: null,
       since: at, nudges: 0, startedAt: at, asked,
     };
     // A Claude reviewer's first request is its first prompt, which still takes the first message's number.

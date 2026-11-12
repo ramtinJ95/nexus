@@ -1562,6 +1562,101 @@ test("a check that fails after an approval with P3 notes asks the builder to ans
   assert.equal(f.review().rounds.at(-1)!.head, head2);
 });
 
+test("a description-only fixed answer starts a fresh review at the same head with the new description", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { findings: [{ id: "F1", priority: "P2", summary: "Description lacks screenshots" }] }));
+  await loop.poll();
+  const body = `${f.snapshot.detail.body}\n\nScreenshots: https://example.com/new-capture.png`;
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body } };
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added the CI screenshots to the description. No code change." }]));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing", "a push the turn made may still be on its way");
+  f.tick(60_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing", "no ten-minute wait for a commit the fix does not need");
+  assert.deepEqual(f.review().rounds.map((r) => r.head), [head1, head1]);
+  assert.ok(f.sent.at(-1)!.message.text.includes(body), "the reviewer must see GitHub's current description, not its old copy");
+  assert.match(f.sent.at(-1)!.message.text, /F1: fixed/);
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "approved");
+});
+
+test("a description edited beside a push that GitHub shows late gets its round at the pushed head", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { findings: [serious] }));
+  await loop.poll();
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Adds a TTL. F1 fixed." } };
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
+  await loop.poll();
+  f.tick(30_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing", "the edited description alone does not start a round at the old head");
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing");
+  assert.deepEqual(f.review().rounds.map((r) => r.head), [head1, head2]);
+});
+
+test("a round recorded before description digests keeps the push grace when the description changes", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { findings: [serious] }));
+  await loop.poll();
+  const { describedFrom: _, ...legacy } = f.review().rounds[0]!;
+  saveOlder(f, { ...f.review(), rounds: [legacy] });
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Edited." } };
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Edited the description." }]));
+  await loop.poll();
+  f.tick(5 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  assert.equal(f.review().rounds.length, 1);
+  f.tick(5 * 60_000);
+  await loop.poll();
+  assert.match(f.sent.at(-1)!.message.text, /head is still 1{40}\. Push the fixes\./);
+});
+
+test("a description-only fix still waits for the builder's answering turn to end", async (t) => {
+  const f = fixture(t);
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), { findings: [{ id: "F1", priority: "P2", summary: "Description lacks screenshots" }] }));
+  await loop.poll();
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Screenshots added." } };
+  const text = answers(f.review(), [{ id: "F1", action: "fixed", reason: "Description updated." }]);
+  f.replies.set(f.builder, [text]);
+  f.tick(1_000);
+  claudeRead(f, [{ kind: "reply", at: f.now, text }], ["session.turn-started"]);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  assert.equal(f.review().rounds.length, 1);
+});
+
+test("a changed description cannot replace the new commit a failed check requires", async (t) => {
+  const f = fixture(t);
+  f.check = { kind: "done", passed: false, output: "1 test failed" };
+  const loop = await approved(f, null);
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Changed only the description." } };
+  f.reply(f.builder, answers(f.review(), [{ id: "CHECK", action: "fixed", reason: "Added evidence." }]));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing");
+  f.tick(10 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "needs-person");
+  assert.equal(f.review().rounds.length, 1);
+  assert.deepEqual(f.merges, []);
+});
+
 test("commits pushed with answers that fixed nothing still get another round", async (t) => {
   const f = fixture(t);
   f.check = { kind: "done", passed: false, output: "flaky" };

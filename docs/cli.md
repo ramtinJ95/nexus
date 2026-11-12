@@ -818,12 +818,14 @@ type LandRequest =
  * base under the change moved. With `held`, in a review whose rounds ran out, it carries whatever verdict it was held
  * with, and its hold, and runs nothing at the new head. `quotedFrom` is the digest of the description the reviewer
  * last quoted from when a landing asked it again, so a landing asks again only once the description changed since.
+ * `describedFrom` is the digest supplied to this round's reviewers, so a description-only fix can return to them
+ * without waiting for a new commit. Older rounds without it keep waiting for a push.
  * `heldAt` holds those `head` alone decides (policy.ts's `headHolds`) against the PR's `base`, whose files they read,
  * recorded once its checks pass, so the person's Land and the landing read the same ones. A landing reads them again
  * when the PR's base changed since. A round that passed its checks before Nexus recorded them gets them on the
  * loop's next pass while it waits at approval, and from its landing otherwise.
  */
-interface Round { head: string; base?: string; verdict: Verdict | null; secondVerdict?: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string; held?: true }; quotedFrom?: string; heldAt?: HeldAt }
+interface Round { head: string; base?: string; verdict: Verdict | null; secondVerdict?: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string; held?: true }; quotedFrom?: string; describedFrom?: string; heldAt?: HeldAt }
 /**
  * `absent` when `head` has no `.nexus/verify`, so the landing reads the PR's statement of what it could not check live
  * instead. `ran` when the script gave its verdict in verify pylon `thread`.
