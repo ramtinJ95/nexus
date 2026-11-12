@@ -3372,6 +3372,31 @@ test("a landing checked on a base that moved since brings the branch up to date 
   assert.equal(f.review().phase.kind, "deploying");
 });
 
+test("a disjoint base change that breaks the updated head fails its new check and never merges on the old green result", async (t) => {
+  const f = fixture(t, { repo: "ramtinJ95/first-game" });
+  const change = [{ path: "src/state.ts", previous: null, patch: "@@ -1 +1 @@\n-export type State = {};\n+export type State = { army: number };" }];
+  f.changes.set(head1, change);
+  f.changes.set(head2, change);
+  f.behind.add(head1);
+  f.updateAnswer = () => {
+    // main added another file constructing State without army: no text conflict, but the combination fails.
+    f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+    f.check = { kind: "done", passed: false, output: "src/new-state.ts: Property 'army' is missing in type '{}' but required in type 'State'." };
+    return true;
+  };
+  const loop = await approved(f, "nLAPTOP");
+  await loop.poll();
+  assert.deepEqual(f.merges, [], "a green branch-only check must not authorize the broken combination");
+  assert.deepEqual(f.updates, [head1]);
+  assert.deepEqual(f.checkHeads, [head1, head2]);
+  assert.equal(f.review().rounds[0]!.check!.passed, true, "the branch alone passed");
+  assert.equal(f.review().rounds.at(-1)!.check!.passed, false, "the updated combination failed");
+  assert.equal(f.review().rounds.at(-1)!.carried?.from, head1, "carrying approval must not carry the old check");
+  assert.equal(f.review().phase.kind, "fixing");
+  assert.match(f.sent.at(-1)!.message.text, /CHECK \(P0\)/);
+  assert.match(f.sent.at(-1)!.message.text, /Property 'army' is missing/);
+});
+
 test("an update GitHub accepted but has not pushed yet is asked for once a minute, and nothing merges meanwhile", async (t) => {
   const f = fixture(t);
   f.behind.add(head1);

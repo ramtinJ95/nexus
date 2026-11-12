@@ -31,7 +31,7 @@ process.stdin.setEncoding("utf8").on("data", (chunk) => { text += chunk; }).on("
   try { reply = JSON.parse(lines[at]); } catch { process.stdout.write(text); return; }
   const cut = (args) => Array.isArray(args) ? args.map((arg) => typeof arg === "string" ? arg.slice(0, ${argChars}) : arg) : args;
   const slim = (t) => ({
-    address: t.address, name: t.name, state: t.state, labels: t.labels, argv: cut(t.argv), cwd: t.cwd, parent: t.parent,
+    address: t.address, name: t.name, state: t.state, labels: t.labels, argv: cut(t.argv), cwd: t.cwd, parent: t.parent, keep: t.keep, pid: t.pid,
     foreground: t.foreground && { argv: cut(t.foreground.argv), cwd: t.foreground.cwd, name: t.foreground.name },
     status: t.status && { state: t.status.state, app: t.status.app }, exit_code: t.exit_code,
   });
@@ -67,6 +67,10 @@ const terminalSchema = z.object({
   cwd: z.string(),
   /** The terminal that started it, which it belongs to, such as a shepherdr reviewer's Claude. */
   parent: z.string().nullish().transform((parent) => parent ?? null),
+  /** Core gives it a shell in place of a program it loses, at a core restart or a death by a signal it did not send. */
+  keep: z.boolean().nullish().transform((keep) => keep === true),
+  /** Its program's process, which a live terminal lacks only while Core gives it a shell in place of a program it lost. */
+  pid: z.number().nullish().transform((pid) => pid ?? null),
   /** What its program runs now: the process group that holds its terminal. */
   foreground: z.object({ argv: z.array(z.string()), cwd: z.string(), name: z.string() }).nullish().transform((f) => f ?? null),
   /** The program's own word for what it does, from its OSC 7501 reports, or null if it never said or has exited. */
