@@ -422,6 +422,12 @@ export function smokeChecks(recipe: ImageRecipe & { pins: BuildPins }): readonly
     },
     ...versionChecks(recipe),
     {
+      // Load the shared libraries in the real guest; merely finding package names in the recipe proves nothing.
+      name: "Chromium runtime",
+      argv: userSmoke(`python3 -c 'import ctypes; [ctypes.CDLL(lib) for lib in ["libasound.so.2", "libatk-1.0.so.0", "libatk-bridge-2.0.so.0", "libatspi.so.0", "libcairo.so.2", "libcups.so.2", "libdbus-1.so.3", "libdrm.so.2", "libgbm.so.1", "libglib-2.0.so.0", "libnspr4.so", "libnss3.so", "libpango-1.0.so.0", "libX11.so.6", "libxcb.so.1", "libXcomposite.so.1", "libXdamage.so.1", "libXext.so.6", "libXfixes.so.3", "libxkbcommon.so.0", "libXrandr.so.2"]]; print("Chromium runtime ready")'`),
+      expect: "Chromium runtime ready\n",
+    },
+    {
       name: "guest tools",
       argv: userSmoke("command -v ssh sshd sandboxssh rg fd; grep -c '^Include /etc/ssh/ssh_config.d/\\*.conf' /etc/ssh/ssh_config"),
       expect: "/usr/bin/ssh\n/usr/sbin/sshd\n/usr/bin/sandboxssh\n/usr/bin/rg\n/usr/local/bin/fd\n1\n",
