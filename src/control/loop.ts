@@ -29,7 +29,7 @@ import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { pylonLive } from "./live.ts";
 import { gitIdentityOf } from "./project.ts";
-import { freeHeldRoom } from "./placement.ts";
+import { freeHeldRoom, wakeShort } from "./placement.ts";
 import { claudeLaunch } from "./claude-launch.ts";
 import type { Registry } from "./registry.ts";
 import type { PortRange, StoredPylon, Thread } from "./thread-store.ts";
@@ -231,6 +231,7 @@ export function startLoop(options: LoopOptions): Loop {
         // A thread retention purged during the tick keeps the phase the tick began with.
         desired: () => { const now = registry.threads.thread(found.thread); return now === undefined ? pylon.desired : desiredPhase(now, registry.now()); },
         sealedBoot: () => registry.threads.sealedBoot(pylonId),
+        noRoom: (observation) => wakeShort(registry, stored, observation),
         uncountedFailed: (failure) => {
           registry.usage.failUsageRead(thread.id, failure);
           void wake(node);

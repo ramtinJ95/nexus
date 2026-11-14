@@ -53,7 +53,7 @@ const del: PlanStep = { kind: "submit", job: { kind: "delete", pylonId } };
 const gaveUpDeleting = (code: JobErrorCode) => `gave up deleting after 5 failed attempts, the last with ${code}: the probe's ${code} message. It is tried again every 10 min`;
 const fetch = (artifact: ArtifactId, from: NodeName): PlanStep => ({ kind: "submit", job: { kind: "fetch-artifact", artifact, from, sha256: `sha-${artifact}` } });
 const done: PlanStep = { kind: "done" };
-const wait = (reason: "node-offline" | "in-flight" | "backoff" | "transitioning" | "held-secret"): PlanStep => ({ kind: "wait", reason });
+const wait = (reason: "node-offline" | "in-flight" | "backoff" | "transitioning" | "held-secret" | "no-room"): PlanStep => ({ kind: "wait", reason });
 
 const jobInFlight = (state: "running" | "succeeded"): JobStatus => state === "running"
   ? { jobId: "j1" as JobId, subject: pylonId, kind: "spawn", state, startedAt: "2027-01-01T00:00:00Z" }
@@ -78,6 +78,8 @@ interface Row {
   retrying?: boolean;
   /** The planner's verdict when it gave up. */
   failed?: string;
+  /** Why the node has no memory to boot the pylon. */
+  noRoom?: string;
   /** The secrets the boot asks for, and the secrets the node holds. */
   secrets?: { asked: readonly string[]; holds: readonly string[] };
 }
@@ -107,6 +109,10 @@ const rows: Record<string, Row> = {
   "a delete the planner gave up on goes again after 10 min": { desired: "deleted", observed: phase("booting"), inFlight: null, attempts: [5, 600_000, "deadline", "delete"], failed: gaveUpDeleting("deadline"), online: true, present: imageOnly, expect: del },
   "a delete that keeps failing after the verdict keeps it, so it notifies once": { desired: "deleted", observed: phase("booting"), inFlight: null, attempts: [7, 600_000, "backend", "delete"], failed: gaveUpDeleting("deadline"), online: true, present: imageOnly, expect: del },
   "a deleted pylon that is gone needs nothing, whatever its deletes failed": { desired: "deleted", observed: "absent", inFlight: null, attempts: [5, 1_000_000, "backend", "delete"], online: true, present: [], expect: done },
+  "a wake its node has no memory for waits, with no attempt counted": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, noRoom: "rj-firebat has 30 of 31.2 GiB of memory committed, and the pylon needs 4 GiB", expect: wait("no-room") },
+  "a first boot its node has no memory for waits": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, noRoom: "rj-firebat has 30 of 31.2 GiB of memory committed, and the pylon needs 4 GiB", expect: wait("no-room") },
+  "a pause goes on though the node has no memory to spare": { desired: "paused", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, noRoom: "short", expect: pause },
+  "a delete goes on though the node has no memory to spare": { desired: "deleted", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, noRoom: "short", expect: del },
   "delete does not wait for a transition": { desired: "deleted", observed: phase("stopping"), inFlight: null, attempts: none, online: true, present: imageOnly, expect: del },
   "a failed wake for reading waits rather than failing, whatever its code": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [1, 600_000, "setup-failed"], online: true, present: imageOnly, expect: wait("backoff") },
   "a wake for reading that failed past the attempt budget still waits": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [5, 600_000, "backend"], online: true, present: imageOnly, expect: wait("backoff") },
@@ -195,6 +201,7 @@ function input(row: Row): PlanInput {
     attempts: { count, last: attempt },
     retrying: row.retrying ?? false,
     failed: row.failed ?? null,
+    noRoom: row.noRoom ?? null,
     holders: (id) => row.holders?.[id] ?? [],
     artifactSha256: (id) => `sha-${id}`,
   };

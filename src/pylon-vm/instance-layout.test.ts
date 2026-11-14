@@ -6,7 +6,7 @@ import { directory, instanceFiles, isTombstone, scratchDirectory, stagingDirecto
 test("every state and instance file keeps the name it had on disk", () => {
 	const root = "/state";
 	const { kind, ...files } = stateFiles(root);
-	assert.deepEqual(files, { scratch: "/state/tmp", hostBridge: "/state/host-bridge.sock", events: "/state/events.sqlite" });
+	assert.deepEqual(files, { scratch: "/state/tmp", hostBridge: "/state/host-bridge.sock", events: "/state/events.sqlite", keptLogs: "/state/kept-logs" });
 	assert.equal(kind("instances"), "/state/instances");
 	assert.equal(kind("templates"), "/state/templates");
 	assert.equal(directory(root, "instances", "p1"), "/state/instances/p1");
@@ -22,6 +22,7 @@ test("every state and instance file keeps the name it had on disk", () => {
 		disk: "/state/instances/p1/disk.qcow2",
 		nextDisk: "/state/instances/p1/disk.next.qcow2",
 		log: "/state/instances/p1/controller.log",
+		serial: "/state/instances/p1/serial.log",
 		pid: "/state/instances/p1/controller.pid",
 		socket: "/state/instances/p1/control.sock",
 		launchLock: "/state/instances/p1/launch.lock",

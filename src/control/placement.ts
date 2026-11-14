@@ -36,12 +36,14 @@ export function placeAuto(registry: WeighingRegistry, need: Need): Placement {
 
 /**
  * On `near` while it can run the pylon, as the review loop starts a builder's reviewer and checks beside it. Otherwise on
- * the node with the most room left, and on `near` all the same when no node has room, so a review never waits for one,
- * unless `ifRoom`, as for a check that can wait for the reviewer's verdict instead.
+ * the node with the most room left. When no node can run it, a start is refused for room while any node is short of
+ * memory only, so it waits for room, and goes to `near` all the same when every node refused it for another reason,
+ * unless `ifRoom`.
  */
 export function placeNear(registry: WeighingRegistry, need: Need, near: NodeName, ifRoom = false): Placement {
   const { best, weighed, roomFrees } = weighNodes(registry, need);
-  if (best === null && ifRoom) throw refuse(roomFrees, `no node has room for this pylon: ${refusals(weighed)}`);
+  // A node short of memory is never overcommitted for a review, which waits for room as a check does.
+  if (best === null && (ifRoom || roomFrees)) throw refuse(roomFrees, `no node has room for this pylon: ${refusals(weighed)}`);
   if (best === null || weighed.some((w) => w.node === near && "left" in w)) return { how: "named", node: near };
   return { how: "auto", node: best, weighed };
 }
@@ -60,6 +62,51 @@ export function weighNodes(registry: WeighingRegistry, need: Need, except?: Node
 
 export const refusals = (weighed: readonly Weighed[]) => weighed.flatMap((w) => "refused" in w ? [`${w.node} ${w.refused}`] : []).join("; ");
 
+/**
+ * Why `name` has no memory for a pylon that holds `need` once it boots, as `auto` weighs it, or null, and whether the room
+ * can free there. A start that names the node, or goes to its project's pinned default, is held to it too, so no way in
+ * commits more memory than a node has.
+ */
+export function memoryShort(registry: WeighingRegistry, name: NodeName, need: Need): { why: string; frees: boolean } | null {
+  const node = registry.nodes.nodes().find((n) => n.name === name);
+  const o = node?.state === "online" ? node.observation : null;
+  if (o == null) return null;
+  const never = tooSmall(o.capacity, need);
+  if (never !== null) return { why: never, frees: false };
+  // Apart from the image, secrets and disk weigh asks for first, which a named start may still lack.
+  const { left, pending } = roomLeft(registry, name, o, o.capacity, need.resources);
+  const held = heldRoom(registry, name, registry.now());
+  pending.memoryGiB -= held;
+  left.memoryGiB += held;
+  const tight = memoryTight(registry, name, o, o.capacity, need, left, pending);
+  return tight === null ? null : { why: tight, frees: true };
+}
+
+/** Why the node could never hold the pylon's memory, however much frees there, or null. */
+const tooSmall = (c: NodeCapacity, need: Need): string | null => need.resources.memoryGiB + memoryHeadroomGiB > c.memoryGiB
+  ? `has ${gib(c.memoryGiB)} GiB of memory, and the pylon needs ${need.resources.memoryGiB} GiB with ${memoryHeadroomGiB} GiB to spare` : null;
+
+/**
+ * Why the node has no memory to boot or wake `p` now, or null. It counts what the node commits, the spawns in flight there
+ * and the starts placed there, and not the other pylons that wait to boot, so
+ * pylons that wait for room never hold each other back. Committed memory never passes the node's: its swap is zram, which
+ * keeps a swapped-out guest's pages in the same memory.
+ */
+export function wakeShort(registry: WeighingRegistry, p: StoredPylon, o: NodeObservation): string | null {
+  const seen = new Map(o.pylons.map((s) => [s.pylonId, s]));
+  const need = uncounted(p, seen.get(p.pylonId)).memoryGiB;
+  if (need === 0) return null;
+  const c = o.capacity;
+  const inFlight = registry.threads.pylonsWithThreadsOn(p.node)
+    .filter(({ pylon }) => pylon.pylonId !== p.pylonId && pylon.submitted?.job.kind === "spawn")
+    .reduce((gib, { pylon }) => gib + uncounted(pylon, seen.get(pylon.pylonId)).memoryGiB, 0);
+  const reserved = registry.placement.reserved(p.node).reduce((gib, r) => gib + r.memoryGiB, 0);
+  // A held builder's room counts until the node reports it freed: this wait is what makes freeHeldRoom release its hold.
+  const committed = c.committedMemoryGiB + inFlight + reserved;
+  if (committed + need <= c.memoryGiB) return null;
+  return `${p.node} has ${gib(committed)} of ${gib(c.memoryGiB)} GiB of memory committed, and the pylon needs ${need} GiB`;
+}
+
 /** `short` marks a node that refused the pylon for its room alone. */
 function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighed | { node: NodeName; refused: string; short: true } {
   const refused = (why: string): Weighed => ({ node: node.name, refused: why });
@@ -77,7 +124,8 @@ function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighe
   if (ssh.length > 0 && !o.grants.gitSsh) return refused(`has no git SSH key to reach ${ssh.join(" and ")}`);
   // Room that frees never gives a pylon more than the node has.
   const disks = c.disks?.find((d) => d.pylons === true);
-  if (need.resources.memoryGiB + memoryHeadroomGiB > c.memoryGiB) return refused(`has ${gib(c.memoryGiB)} GiB of memory, and the pylon needs ${need.resources.memoryGiB} GiB with ${memoryHeadroomGiB} GiB to spare`);
+  const never = tooSmall(c, need);
+  if (never !== null) return refused(never);
   if (disks !== undefined && need.resources.diskGiB + keptFreeGiB(disks.totalGiB) > disks.totalGiB) return refused(`has ${gib(disks.totalGiB)} GiB on the filesystem of its pylons' disks, too little for a ${need.resources.diskGiB} GiB pylon disk and the ${gib(keptFreeGiB(disks.totalGiB))} GiB it keeps free`);
   const { left, pending } = roomLeft(registry, node.name, o, c, need.resources);
   const held = heldRoom(registry, node.name, registry.now());
@@ -86,20 +134,29 @@ function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighe
   // Disk frees only as pylons are deleted, not as they pause, so a node short of it is no wait for room, even short of memory too.
   const disk = diskShort(c, left, need.resources);
   if (disk !== null) return refused(disk);
+  const tight = memoryTight(registry, node.name, o, c, need, left, pending);
+  return tight !== null ? short(tight) : { node: node.name, left };
+}
+
+/**
+ * Why the node is short of memory for the pylon once `left` and `pending` count it, by its commitments or, with a fresh
+ * health read, by its host's free memory, or null. It lowers `left.memoryGiB` to what the free memory leaves.
+ */
+function memoryTight(registry: WeighingRegistry, node: NodeName, o: NodeObservation, c: NodeCapacity, need: Need, left: Room, pending: Room): string | null {
   const committed = `${gib(c.committedMemoryGiB + pending.memoryGiB)} of ${gib(c.memoryGiB)} GiB of memory committed`;
-  if (c.committedMemoryGiB + pending.memoryGiB > c.memoryGiB) return short(`is overcommitted, with ${committed}`);
-  if (left.memoryGiB < 0) return short(`has ${committed}, and the pylon needs ${need.resources.memoryGiB}`);
-  const free = freeMemory(registry, node.name, o, c, registry.now());
+  if (c.committedMemoryGiB + pending.memoryGiB > c.memoryGiB) return `is overcommitted, with ${committed}`;
+  if (left.memoryGiB < 0) return `has ${committed}, and the pylon needs ${need.resources.memoryGiB}`;
+  const free = freeMemory(registry, node, o, c, registry.now());
   // With no fresh reading of its free memory, the node is weighed by its commitments alone.
   if (free !== null) {
     const freeLeft = free.availableGiB - free.untouchedGiB - pending.memoryGiB - need.resources.memoryGiB;
     if (freeLeft < memoryHeadroomGiB) {
       const less = [free.untouchedGiB > 0 && `${gib(free.untouchedGiB)} GiB its pylons have yet to touch`, pending.memoryGiB > 0 && `${gib(pending.memoryGiB)} GiB for pylons about to boot there`].filter((s) => s !== false);
-      return short(`has ${gib(free.availableGiB)} GiB of memory free${less.length > 0 ? `, less ${less.join(" and ")}` : ""}, and the pylon needs ${need.resources.memoryGiB} GiB with ${memoryHeadroomGiB} GiB to spare`);
+      return `has ${gib(free.availableGiB)} GiB of memory free${less.length > 0 ? `, less ${less.join(" and ")}` : ""}, and the pylon needs ${need.resources.memoryGiB} GiB with ${memoryHeadroomGiB} GiB to spare`;
     }
     left.memoryGiB = Math.min(left.memoryGiB, freeLeft);
   }
-  return { node: node.name, left };
+  return null;
 }
 
 /**

@@ -8,7 +8,7 @@ import type { StoredPylon, Thread } from "./thread-store.ts";
 import type { Room } from "./placement-model.ts";
 import { testCapacity, testObservation } from "../test-support/kit.ts";
 import { NoRoom, Refusal } from "./refusal.ts";
-import { freeHeldRoom, placeAuto, placeNear, weighNodes } from "./placement.ts";
+import { freeHeldRoom, placeAuto, placeNear, wakeShort, weighNodes } from "./placement.ts";
 import { observeNode, withImage } from "../test-support/api-kit.ts";
 
 const image = "img-0123456789ab";
@@ -166,13 +166,30 @@ test("a node with no fresh reading of its free memory is weighed by its commitme
   assert.deepEqual(weighNodes(fakeRegistry(unread), need()).weighed.map((w) => "left" in w && w.left.memoryGiB), [8, 8, 8]);
 });
 
-test("a review's start beside its builder goes elsewhere once the builder's host has too little memory free", () => {
+test("a review's start beside its builder goes elsewhere once the builder's host has too little memory free, and waits for room when no node has it", () => {
   const registry = fakeRegistry([{ name: "builder", total: 32, committed: 4, free: 3 }, { name: "other", total: 32, committed: 4, free: 20 }]);
   assert.deepEqual(placeNear(registry, need(), "builder" as NodeName).node, "other");
-  assert.deepEqual(placeNear(fakeRegistry([{ name: "builder", total: 32, committed: 4, free: 3 }]), need(), "builder" as NodeName), { how: "named", node: "builder" },
-    "with no node to take it, it goes beside the builder all the same");
+  assert.throws(() => placeNear(fakeRegistry([{ name: "builder", total: 32, committed: 4, free: 3 }]), need(), "builder" as NodeName), (err: unknown) => err instanceof NoRoom && /^no node has room for this pylon: builder has 3 GiB of memory free/.test(err.message),
+    "with no node to take it, it waits for room rather than overcommit the builder's host");
+  assert.throws(() => placeNear(fakeRegistry([{ name: "builder", total: 32, committed: 30, free: 20 }]), need(), "builder" as NodeName), (err: unknown) => err instanceof NoRoom && /builder has 30 of 32 GiB of memory committed, and the pylon needs 4/.test(err.message),
+    "nor past what the builder's host commits");
   assert.throws(() => placeNear(fakeRegistry([{ name: "builder", total: 32, committed: 4, free: 3 }]), need(), "builder" as NodeName, true), /no node has room for this pylon: builder has 3 GiB of memory free/,
     "a start that asks for room never overcommits the builder's host");
+});
+
+test("a wake counts a held builder's memory until its node reports it freed, so it waits while the released builder pauses", () => {
+  const now = Date.now();
+  const builder = (id: string) => ({ pylon: { pylonId: id, failed: null, boot: { resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } } },
+    thread: { status: "active", agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: 0, awaitedUntil: now + 60_000 } });
+  const registry = {
+    now: () => now,
+    placement: { reserved: () => [] },
+    threads: { pylonsWithThreadsOn: () => [], pylonsWithHeldThreadsOn: () => [builder("pylon-held-1"), builder("pylon-held-2")] },
+  } as unknown as Parameters<typeof wakeShort>[0];
+  const waking = { pylonId: "pylon-wake", node: "small", submitted: null, retrying: false, boot: { resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } } } as unknown as Parameters<typeof wakeShort>[1];
+  const observed = (committedMemoryGiB: number) => ({ pylons: [], capacity: { memoryGiB: 16, committedMemoryGiB } }) as unknown as Parameters<typeof wakeShort>[2];
+  assert.equal(wakeShort(registry, waking, observed(16)), "small has 16 of 16 GiB of memory committed, and the pylon needs 4 GiB", "two held builders still hold their 16 GiB");
+  assert.equal(wakeShort(registry, waking, observed(12)), null, "once the node reports one paused, the wake fits");
 });
 
 test("a move weighs the other nodes by their free memory too", () => {
@@ -180,7 +197,7 @@ test("a move weighs the other nodes by their free memory too", () => {
   assert.equal(weighNodes(registry, need(), "from" as NodeName).best, "to");
 });
 
-test("a start with --node auto fails with the free memory as the reason, and one that names the node starts there all the same", async (t) => {
+test("a start with --node auto, one that names the node and one on its project's pinned default all fail with the node's memory as the reason", async (t) => {
   const s = await withImage(t);
   observeNode(s, "infra-testbench", { total: 31.2, committed: 8 });
   s.registry.nodeMetrics.recordHealthSample("infra-testbench", { at: Date.now(), values: { memAvailable: 2.2 } });
@@ -188,8 +205,14 @@ test("a start with --node auto fails with the free memory as the reason, and one
   assert.equal(refused.status, 409);
   assert.equal(refused.body.error, "no node can run this pylon: infra-testbench has 2.2 GiB of memory free, and the pylon needs 4 GiB with 1 GiB to spare; rj-firebat is offline");
   const named = await s.call("POST", "/v1/threads", { project: "acme", title: "Pinned", node: "infra-testbench" });
-  assert.equal(named.status, 201, JSON.stringify(named.body));
-  assert.deepEqual(named.body.placement, { how: "named", node: "infra-testbench" });
+  assert.deepEqual([named.status, named.body.error], [409, "infra-testbench has 2.2 GiB of memory free, and the pylon needs 4 GiB with 1 GiB to spare"]);
+  observeNode(s, "infra-testbench", { total: 31.2, committed: 29 });
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { defaultNode: "infra-testbench" })).status, 200);
+  const pinned = await s.call("POST", "/v1/threads", { project: "acme", title: "Default" });
+  assert.deepEqual([pinned.status, pinned.body.error], [409, "infra-testbench has 29 of 31.2 GiB of memory committed, and the pylon needs 4"]);
+  const huge = await s.call("POST", "/v1/threads", { project: "acme", title: "Huge", node: "infra-testbench", resources: { memoryGiB: 32 } });
+  assert.deepEqual([huge.status, huge.body.error], [409, "infra-testbench has 31.2 GiB of memory, and the pylon needs 32 GiB with 1 GiB to spare"], "a pylon the node could never hold is refused, not left to wait");
+  assert.equal(s.registry.threads.threads().length, 0, "no refused start made a thread");
 });
 
 test("a pylon that boots after the node's health read holds all its memory until a read names it", async (t) => {

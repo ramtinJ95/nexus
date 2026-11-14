@@ -8,8 +8,8 @@ import type { PylonOverlay } from "./overlay.ts";
 import { liveHashOf, minPylonMemoryGiB, minPylonMemoryReason, type BootInputs, type RepoInit } from "../protocol/spawn.ts";
 import { newThreadId, pylonIdOf, type ImageId, type NodeName, type ProjectId, type TemplateId } from "../ids.ts";
 import { newPylonRecord, type PylonRecord } from "./tick.ts";
-import { Refusal } from "./refusal.ts";
-import { namedDiskShort, placeAuto, placeNear } from "./placement.ts";
+import { NoRoom, Refusal } from "./refusal.ts";
+import { memoryShort, namedDiskShort, placeAuto, placeNear } from "./placement.ts";
 import type { Placement } from "./placement-model.ts";
 import type { Thread } from "./thread-store.ts";
 import { pylonLive } from "./live.ts";
@@ -144,6 +144,9 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     // `auto` passes such a node by, and a review's start beside its builder goes there all the same.
     const short = named || placement.how === "default" ? namedDiskShort(registry, node, resources) : null;
     if (short !== null) throw new Refusal("conflict", `${node} ${short}`);
+    // A start beside a node that no node had room for is placed there only when no node could ever take it.
+    const tight = placement.how !== "auto" ? memoryShort(registry, node, need) : null;
+    if (tight !== null) throw tight.frees ? new NoRoom("conflict", `${node} ${tight.why}`) : new Refusal("conflict", `${node} ${tight.why}`);
     const release = registry.placement.reserve(pylonId, node, resources);
     try {
       // A template's disk is its project's size, and a pylon's disk size is fixed once it exists.

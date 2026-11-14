@@ -20,7 +20,7 @@ async function main(): Promise<void> {
 	const record = await readRecord(dir);
 	// The log is opened for appending, so it holds every controller this instance had, and this line tells them apart.
 	console.error(`controller ${process.pid} started for ${record.name}`);
-	const { pid: pidFile, log, socket } = instanceFiles(dir);
+	const { pid: pidFile, log, serial, socket } = instanceFiles(dir);
 	await publishIdentity(pidFile);
 	// The scratch directory goes first: once controller.pid is gone, a launch may make both again for its own controller,
 	// so this runs once however many paths end the controller.
@@ -30,7 +30,9 @@ async function main(): Promise<void> {
 			await rm(scratchDirectory(stateRootOf(dir), dir), { recursive: true, force: true });
 			await rm(pidFile, { force: true });
 		})());
-	setInterval(() => void rotateLog(log, controllerLogLimit).catch((error: unknown) => console.error(error)), 60_000).unref();
+	setInterval(() => {
+		for (const file of [log, serial]) void rotateLog(file, controllerLogLimit).catch((error: unknown) => console.error(error));
+	}, 60_000).unref();
 	// The launching client writes the boot spec, secrets included, to stdin and closes it.
 	const spec = bootSchema.parse(JSON.parse(await text(process.stdin)));
 	const runtime = new SandboxRuntime(dir, record, spec);

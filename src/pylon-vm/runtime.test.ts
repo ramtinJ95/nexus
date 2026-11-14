@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { fakeVm, type WritePhase } from "./fake-vm.ts";
 import { execute } from "./guest.ts";
 import { networkOptions } from "./network.ts";
-import { loadKvm, readIntent, reportResume, runHooks, SandboxRuntime, setupMarkerOf, setupOnDisk } from "./runtime.ts";
+import { loadKvm, readIntent, reportResume, runHooks, SandboxRuntime, serialConsole, setupMarkerOf, setupOnDisk } from "./runtime.ts";
 import { GuestProcesses } from "./processes.ts";
 
 type Status = Awaited<ReturnType<Parameters<typeof reportResume>[0]["status"]>>;
@@ -124,6 +124,16 @@ test("a boot hook whose launch the guest never answers fails the boot at the sam
 	const fake = fakeVm((path) => (path.endsWith("/worker.py") ? "answering" : undefined));
 	const processes = new GuestProcesses(fake.vm, stopping.signal);
 	await assert.rejects(runHooks(processes, ["true"], 200), /^Error: Boot hook 1 of 1 did not finish within 0\.2 s, so the boot failed/);
+});
+
+test("the serial console keeps the guest's console and QEMU's own lines, and drops every other debug line", () => {
+	const lines: string[] = [];
+	const log = serialConsole((line) => lines.push(line));
+	log("qemu", "stdout: [init] starting sandboxd");
+	log("protocol", "exec_output stream=stdout bytes=12");
+	log("qemu", "qemu-system-x86_64: terminating on signal 15");
+	log("exec", "spawned 42");
+	assert.deepEqual(lines, ["[init] starting sandboxd\n", "qemu-system-x86_64: terminating on signal 15\n"]);
 });
 
 /** A running instance on a fake VM whose file writes to paths `holds` names hold in `phase`. */

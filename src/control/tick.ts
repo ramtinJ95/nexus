@@ -60,6 +60,8 @@ export interface TickContext {
   sealedBoot: () => string | undefined;
   /** An uncounted step failed (PlanStep). */
   uncountedFailed(failure: FailedAttempt): void;
+  /** Why the pylon's node has no memory to boot it now, or null, read against the observation the tick plans on. */
+  noRoom(observation: NodeObservation): string | null;
 }
 
 export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanStep> {
@@ -105,6 +107,7 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
     attempts: pylon.attempts,
     retrying: pylon.retrying,
     failed: pylon.failed,
+    noRoom: observation === null ? null : ctx.noRoom(observation),
     ...(sealedBoot === undefined ? {} : { sealedBoot }),
     holders: ctx.holders,
     artifactSha256: ctx.artifactSha256,

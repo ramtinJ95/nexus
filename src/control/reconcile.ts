@@ -137,6 +137,8 @@ export interface PlanInput {
   retrying: boolean;
   /** The planner's verdict when it gave up on the pylon, until a human retry. */
   failed: string | null;
+  /** Why the node has no memory to boot the pylon now (placement.ts wakeShort), or null. */
+  noRoom: string | null;
   /** The boot, by its `bootedAt`, whose transcripts a settle sealed. */
   sealedBoot?: string;
   /** Online nodes other than `node` that hold the artifact. */
@@ -159,7 +161,7 @@ export const noAttempts: Readonly<Attempts> = Object.freeze({ count: 0, last: nu
  */
 export type PlanStep =
   | { kind: "done" }
-  | { kind: "wait"; reason: "node-offline" | "in-flight" | "backoff" | "transitioning" | "held-secret" }
+  | { kind: "wait"; reason: "node-offline" | "in-flight" | "backoff" | "transitioning" | "held-secret" | "no-room" }
   | { kind: "submit"; job: Job; uncounted?: true }
   | { kind: "fail"; code: JobErrorCode; reason: string; uncounted?: true }; // the registry marks the pylon failed until a human retries
 
@@ -254,6 +256,8 @@ const planRules: readonly Rule[] = [
   // 7d. A probe older than a held secret fails the spawn for good, as in a deploy that upgrades the control plane first,
   // and one that has not been handed it yet, as after a restart, would boot a pylon whose first requests are refused.
   (i) => i.boot.network.secrets.some((s) => heldSecrets.includes(s.name) && !i.nodeSecrets.has(s.name)) ? wait("held-secret") : null,
+  // 7e. A boot or a wake never commits more memory than its node has. It waits, with no attempt counted, until a pause or a delete frees it.
+  (i) => i.noRoom !== null ? wait("no-room") : null,
   (i) => submit({ kind: "spawn", pylonId: i.pylonId, boot: { ...i.boot, source: bootSource(i) }, live: i.live, liveHash: i.liveHash, ...(i.desired === "reading" ? { relaunch: false } : {}) }),
 ];
 
