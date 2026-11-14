@@ -1,4 +1,5 @@
 /** Where a thread start boots its pylon, from which template, and at what size. */
+import { NoRoom } from "./refusal.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -131,7 +132,7 @@ test("without --node a thread still boots on its project's default node, and a n
   assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "x", node: "nowhere" })).status, 400);
 });
 
-test("a start near a node boots there while it has room, on the roomiest node once it has none, and there all the same when no node has room", async (t) => {
+test("a start near a node boots there while it has room, on the roomiest node once it has none, and waits for room when no node has it", async (t) => {
   const s = await withImage(t);
   observeNode(s, "big", { total: 64, committed: 0 });
   observeNode(s, "full", { total: 32, committed: 40 });
@@ -146,8 +147,9 @@ test("a start near a node boots there while it has room, on the roomiest node on
     ],
   });
   observeNode(s, "big", { total: 64, committed: 70 });
-  const stayed = await s.startThread({ request: { project: "acme", title: "Stayed", near: "full" as NodeName }, caller: "nexus-review", role: "reviewer" });
-  assert.deepEqual(stayed.placement, { how: "named", node: "full" }, "no node has room, so it stays where it was asked to be near");
+  await assert.rejects(s.startThread({ request: { project: "acme", title: "Waits", near: "full" as NodeName }, caller: "nexus-review", role: "reviewer" }),
+    (err: unknown) => err instanceof NoRoom && /^no node has room for this pylon: big is overcommitted, with \d+ of 64 GiB of memory committed; full is overcommitted/.test((err as Error).message),
+    "no node has room, so it waits rather than overcommit the node it was asked to be near");
 });
 
 test("the first start of a setup builds its template on the node, the next waits for it, and one after it is ready boots from it at the commit read", async (t) => {

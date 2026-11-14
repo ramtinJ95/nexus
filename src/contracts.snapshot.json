@@ -109,6 +109,8 @@
   ],
   "holdsWhenThePatchNamesTheGuard": [
     "package.json: reserved-path:irreversible",
+    "src/backends/pylon-vm/kept-logs.ts: reserved-path:auth",
+    "src/backends/pylon-vm/kept-logs.ts: reserved-path:egress",
     "src/backends/pylon-vm/pylon-guest.check.ts: reserved-path:auth",
     "src/backends/pylon-vm/pylon-guest.check.ts: reserved-path:egress",
     "src/backends/pylon-vm/pylon-guest.ts: reserved-path:auth",
@@ -217,6 +219,7 @@
   "pylonVmImporters": [
     "src/backends/docker-backend.ts",
     "src/backends/docker-service-guest.ts",
+    "src/backends/pylon-vm/kept-logs.ts",
     "src/backends/pylon-vm/pylon-guest.check.ts",
     "src/backends/pylon-vm/pylon-guest.ts",
     "src/backends/pylon-vm/pylon-vm-backend.ts",
