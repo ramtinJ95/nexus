@@ -8,8 +8,8 @@ import type { PylonOverlay } from "./overlay.ts";
 import { liveHashOf, minPylonMemoryGiB, minPylonMemoryReason, type BootInputs, type RepoInit } from "../protocol/spawn.ts";
 import { newThreadId, pylonIdOf, type ImageId, type NodeName, type ProjectId, type TemplateId } from "../ids.ts";
 import { newPylonRecord, type PylonRecord } from "./tick.ts";
-import { Refusal } from "./refusal.ts";
-import { namedDiskShort, placeAuto, placeNear } from "./placement.ts";
+import { NoRoom, Refusal } from "./refusal.ts";
+import { memoryShort, namedDiskShort, placeAuto, placeNear } from "./placement.ts";
 import type { Placement } from "./placement-model.ts";
 import type { Thread } from "./thread-store.ts";
 import { pylonLive } from "./live.ts";
@@ -144,6 +144,8 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     // `auto` passes such a node by, and a review's start beside its builder goes there all the same.
     const short = named || placement.how === "default" ? namedDiskShort(registry, node, resources) : null;
     if (short !== null) throw new Refusal("conflict", `${node} ${short}`);
+    const tight = named || placement.how === "default" ? memoryShort(registry, node, need) : null;
+    if (tight !== null) throw new NoRoom("conflict", `${node} ${tight}`);
     const release = registry.placement.reserve(pylonId, node, resources);
     try {
       // A template's disk is its project's size, and a pylon's disk size is fixed once it exists.

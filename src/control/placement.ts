@@ -36,12 +36,14 @@ export function placeAuto(registry: WeighingRegistry, need: Need): Placement {
 
 /**
  * On `near` while it can run the pylon, as the review loop starts a builder's reviewer and checks beside it. Otherwise on
- * the node with the most room left, and on `near` all the same when no node has room, so a review never waits for one,
- * unless `ifRoom`, as for a check that can wait for the reviewer's verdict instead.
+ * the node with the most room left. When no node can run it, a start is refused for room while any node is short of
+ * memory only, so it waits for room, and goes to `near` all the same when every node refused it for another reason,
+ * unless `ifRoom`.
  */
 export function placeNear(registry: WeighingRegistry, need: Need, near: NodeName, ifRoom = false): Placement {
   const { best, weighed, roomFrees } = weighNodes(registry, need);
-  if (best === null && ifRoom) throw refuse(roomFrees, `no node has room for this pylon: ${refusals(weighed)}`);
+  // A node short of memory is never overcommitted for a review, which waits for room as a check does.
+  if (best === null && (ifRoom || roomFrees)) throw refuse(roomFrees, `no node has room for this pylon: ${refusals(weighed)}`);
   if (best === null || weighed.some((w) => w.node === near && "left" in w)) return { how: "named", node: near };
   return { how: "auto", node: best, weighed };
 }
@@ -59,6 +61,36 @@ export function weighNodes(registry: WeighingRegistry, need: Need, except?: Node
 }
 
 export const refusals = (weighed: readonly Weighed[]) => weighed.flatMap((w) => "refused" in w ? [`${w.node} ${w.refused}`] : []).join("; ");
+
+/**
+ * Why `name` has no memory for a pylon that holds `need` once it boots, as `auto` weighs it, or null. A start that names
+ * the node, or goes to its project's pinned default, is held to it too, so no way in commits more memory than a node has.
+ */
+export function memoryShort(registry: WeighingRegistry, name: NodeName, need: Need): string | null {
+  const node = registry.nodes.nodes().find((n) => n.name === name);
+  const w = node === undefined ? null : weigh(registry, node, need);
+  return w !== null && "short" in w && "refused" in w ? w.refused : null;
+}
+
+/**
+ * Why the node has no memory to boot or wake `p` now, or null. It counts what the node commits, the spawns in flight there
+ * and the starts placed there, as a hold's room is free (`freeHeldRoom`), and not the other pylons that wait to boot, so
+ * pylons that wait for room never hold each other back. Committed memory never passes the node's: its swap is zram, which
+ * keeps a swapped-out guest's pages in the same memory.
+ */
+export function wakeShort(registry: WeighingRegistry, p: StoredPylon, o: NodeObservation): string | null {
+  const seen = new Map(o.pylons.map((s) => [s.pylonId, s]));
+  const need = uncounted(p, seen.get(p.pylonId)).memoryGiB;
+  if (need === 0) return null;
+  const c = o.capacity;
+  const inFlight = registry.threads.pylonsWithThreadsOn(p.node)
+    .filter(({ pylon }) => pylon.pylonId !== p.pylonId && pylon.submitted?.job.kind === "spawn")
+    .reduce((gib, { pylon }) => gib + uncounted(pylon, seen.get(pylon.pylonId)).memoryGiB, 0);
+  const reserved = registry.placement.reserved(p.node).reduce((gib, r) => gib + r.memoryGiB, 0);
+  const committed = c.committedMemoryGiB + inFlight + reserved - heldRoom(registry, p.node, registry.now());
+  if (committed + need <= c.memoryGiB) return null;
+  return `${p.node} has ${gib(committed)} of ${gib(c.memoryGiB)} GiB of memory committed, and the pylon needs ${need} GiB`;
+}
 
 /** `short` marks a node that refused the pylon for its room alone. */
 function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighed | { node: NodeName; refused: string; short: true } {

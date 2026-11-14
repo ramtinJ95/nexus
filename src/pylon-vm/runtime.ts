@@ -1,6 +1,7 @@
 import { access, readFile, rename } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { posix } from "node:path";
+import { createWriteStream } from "node:fs";
 import { VM, type VMOptions, VmCheckpoint } from "@earendil-works/gondolin";
 import { z } from "zod";
 import { setupExited, type Action, type BootSpec, type SandboxRecord } from "./contracts.ts";
@@ -115,6 +116,15 @@ export async function loadKvm(vm: VM, resources: BootSpec["resources"]): Promise
 	}
 }
 
+/**
+ * Gondolin hands the guest's serial console, QEMU's stdout, only to its protocol debug log, as `qemu` lines that start
+ * `stdout: `, beside QEMU's own stderr lines. Those go to `write`, and the rest of that log, every guest command's
+ * messages, is dropped.
+ */
+export const serialConsole = (write: (line: string) => void): NonNullable<VMOptions["debugLog"]> => (component, message) => {
+	if (component === "qemu") write(`${message.startsWith("stdout: ") ? message.slice("stdout: ".length) : message}\n`);
+};
+
 /** One script that runs each command in a login shell, and stops at the first that fails with its exit code. */
 const chained = (commands: readonly string[]) => commands.map((cmd) => `/bin/sh -lc ${q(cmd)} || exit $?`).join("\n");
 
@@ -189,6 +199,10 @@ export class SandboxRuntime {
 		| "interrupted"
 		| "failed" = "starting";
 	private dir: string;
+	private serialFile: ReturnType<typeof createWriteStream> | undefined;
+	private get serial() {
+		return (this.serialFile ??= createWriteStream(instanceFiles(this.dir).serial, { flags: "a", mode: 0o600 }));
+	}
 	private record: SandboxRecord;
 	private spec: BootSpec;
 	private network: ReturnType<typeof networkOptions> | undefined;
@@ -221,7 +235,10 @@ export class SandboxRuntime {
 				vmm: "qemu",
 				accel: process.platform === "darwin" ? "hvf" : "kvm",
 				...(config.image ? { imagePath: config.image } : {}),
+				debug: ["protocol"],
 			},
+			// The daemon rotates it as it does the controller's log.
+			debugLog: serialConsole((line) => this.serial.write(line)),
 			...network,
 			env: {
 				HOME: "/root",

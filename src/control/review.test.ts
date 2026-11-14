@@ -36,7 +36,7 @@ import { checkCaller, reviewerCaller, senders, verifyCaller } from "./agent-prot
 import { desiredPhase, idlePolicy } from "./reconcile.ts";
 import type { CheckState } from "./gate.ts";
 import type { Start, StartRequest } from "./start-request.ts";
-import { Refusal } from "./refusal.ts";
+import { NoRoom, Refusal } from "./refusal.ts";
 
 /** The lines the API words a review in. */
 const reviewSaidText = (r: Review) => reviewSaid(r).join("\n");
@@ -133,6 +133,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   let refuseStart: (request: StartRequest) => string | null = () => null;
   /** Why a reviewer thread's start fails other than by a refusal, as when the harness is down, by the start's request, or null. */
   let failStart: (request: StartRequest) => string | null = () => null;
+  /** Why no node has room for a reviewer thread's start now, by the start's request, or null. */
+  let noRoomStart: (request: StartRequest) => string | null = () => null;
   const briefs = new Map<ThreadId, string>();
   const deployers = new Set(["nLAPTOP"]);
   const woken: ThreadId[] = [];
@@ -204,6 +206,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     async startThread(start) {
       const refused = refuseStart(start.request);
       if (refused !== null) throw new Refusal("conflict", refused);
+      const short = noRoomStart(start.request);
+      if (short !== null) throw new NoRoom("conflict", short);
       const failed = failStart(start.request);
       if (failed !== null) throw new Error(failed);
       started.push(start);
@@ -242,6 +246,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     set onStart(hook: () => Promise<void>) { onStart = hook; },
     set refuseStart(why: (request: StartRequest) => string | null) { refuseStart = why; },
     set failStart(why: (request: StartRequest) => string | null) { failStart = why; },
+    set noRoomStart(why: (request: StartRequest) => string | null) { noRoomStart = why; },
     /** A harness thread's first message. A Claude worker's is its prompt. */
     briefs,
     set mergeAnswer(a: (sha: string) => MergeResult) { mergeAnswer = a; },
@@ -1343,6 +1348,32 @@ test("a reviewer whose start keeps failing is tried each pass for 30 minutes, th
   f.tick(2 * 60_000);
   await loop.poll();
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [`The reviewer thread ${f.review().reviewer} did not start within 30 minutes: the harness is unreachable.`] });
+});
+
+test("a reviewer no node has room for waits for room, and starts once a node has it, never on its builder's full node", async (t) => {
+  const f = fixture(t);
+  f.noRoomStart = () => "no node has room for this pylon: rj-firebat has 30 of 31.2 GiB of memory committed, and the pylon needs 4";
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.tick(29 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "reviewing", "a start refused for room waits for it");
+  assert.deepEqual([f.review().reviewerStarted, f.started.length], [false, 0]);
+  f.noRoomStart = () => null;
+  await loop.poll();
+  assert.deepEqual([f.review().reviewerStarted, f.started.length], [true, 1]);
+});
+
+test("a reviewer no node has room for in 30 minutes waits on the person, with the node's memory as the reason", async (t) => {
+  const f = fixture(t);
+  f.noRoomStart = () => "no node has room for this pylon: rj-firebat has 30 of 31.2 GiB of memory committed, and the pylon needs 4";
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  f.tick(31 * 60_000);
+  await loop.poll();
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [`The reviewer thread ${f.review().reviewer} did not start within 30 minutes: no node has room for this pylon: rj-firebat has 30 of 31.2 GiB of memory committed, and the pylon needs 4.`] });
 });
 
 test("a reviewer thread that a start made before a crash is not started again", async (t) => {

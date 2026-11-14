@@ -58,9 +58,11 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; heldSecrets?:
   };
   let reachable = true;
 
+  /** What other VMs commit of the node's 64 GiB, which a test sets and then announces. */
+  const memory = { committedGiB: 0 };
   const observation = (): NodeObservation => ({
     node, observedAt: new Date().toISOString(), probeBootId: "boot-1",
-    capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: 0, diskFreeGiB: 100, committedDiskGiB: 0 },
+    capacity: { cpus: 16, committedCpus: 0, memoryGiB: 64, committedMemoryGiB: memory.committedGiB, diskFreeGiB: 100, committedDiskGiB: 0 },
     artifacts: options.artifacts ?? [image], jobs: [...jobs.values()].map((j) => j.status), pylons: [...pylons.values()], grants: { secrets: [...handed], gitSsh: false }, previewRoutes: [...routes.values()],
     events: [], heldSecrets: heldSecrets ?? [],
   });
@@ -237,7 +239,7 @@ function fakeNode(options: { autoFinish: boolean; node?: NodeName; heldSecrets?:
   }
 
   return {
-    probe, pylons, submitted, lives, routes, finish, setSessions, breakPylon, stopOnFailedSetup, setServices: (pylonId: PylonId, services: readonly ServiceFact[] | null) => setFacts(pylonId, { services }),
+    memory, probe, pylons, submitted, lives, routes, finish, setSessions, breakPylon, stopOnFailedSetup, setServices: (pylonId: PylonId, services: readonly ServiceFact[] | null) => setFacts(pylonId, { services }),
     setListening: (pylonId: PylonId, listening: readonly ListeningFact[] | null) => setFacts(pylonId, { listening }),
     /** Settles once the loop has taken every event sent so far, which it ingests before it asks for the next. */
     delivered: () => new Promise<void>((resolve) => { delivered.push(resolve); checkDelivered(); }),
@@ -839,6 +841,33 @@ test("a delete that keeps failing gives up with attention, counting only its own
   assert.deepEqual(logged, [`${thread.pylonId}: the planner gave up: ${verdict}`]);
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn", "delete", "delete"]);
   assert.ok(fake.pylons.has(thread.pylonId), "the pylon the delete could not remove is still on its node");
+});
+
+test("a wake its node has no memory for waits with no attempt counted, and boots once the room frees", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: true });
+  const loop = run(t, registry, fake.probe);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  registry.threads.setThreadStatus(thread.id, "archived");
+  await until("the pause is folded in", () => registry.threads.pylon(thread.pylonId)?.pauses === 1);
+
+  // Other VMs hold 62 of the node's 64 GiB, so the pylon's 4 GiB would overcommit it.
+  fake.memory.committedGiB = 62;
+  fake.announce();
+  await fake.delivered();
+  registry.threads.setThreadStatus(thread.id, "active");
+  registry.threads.recordActivity(thread.id, { human: Date.now() });
+  await loop.wake(node);
+  await loop.wake(node);
+  assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn", "pause"], "the wake waits");
+  assert.equal(fake.pylons.get(thread.pylonId)?.phase, "stopped");
+  assert.deepEqual(registry.threads.pylon(thread.pylonId)!.attempts, { count: 0, last: null }, "a wait for room is no failed attempt");
+
+  fake.memory.committedGiB = 60;
+  fake.announce();
+  await until("the pylon wakes once 4 GiB are free", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn", "pause", "spawn"]);
 });
 
 const kinds = (jobs: readonly Job[]) => jobs.map((job) => job.kind === "spawn" ? `spawn ${job.boot.source.kind}` : job.kind);

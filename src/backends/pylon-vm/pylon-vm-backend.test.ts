@@ -1256,17 +1256,23 @@ test("a retry whose controller answers no inspect pauses on what the instance's 
   assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint]), [["stopped", "ckpt-hung-1"]]);
 });
 
-test("a delete of a pylon whose boot never ends stops its controller and removes the instance, without waiting for the boot", async (t) => {
-  const { backend, instances } = await backendWith(noGrace);
+test("a delete of a pylon whose boot never ends stops its controller and removes the instance, without waiting for the boot, and keeps its logs", async (t) => {
+  const { backend, instances, stateRoot } = await backendWith(noGrace);
   const id = "pylon-neverbooted" as PylonId;
   const dir = await leftInstance(instances, id, "starting");
   const controller = await stuckController(t, dir, id, "silent", "unbound");
   assert.equal(await backend.state(id), "booting", "a live controller with no control socket is still booting");
+  await writeFile(join(dir, "serial.log"), "[init] starting sandboxd\n");
   await backend.ensureDeleted(id, AbortSignal.timeout(60_000));
   await controller.exited;
   assert.deepEqual(await groupMembers(controller.pid), [], "neither controller nor QEMU stand-in can still run");
   assert.equal(existsSync(dir), false);
   assert.deepEqual(await backend.list(), [], "nothing of the pylon is held");
+  const [kept, ...more] = await readdir(join(stateRoot, "kept-logs"));
+  assert.ok(kept?.startsWith(`${id}-`) && more.length === 0, "the stuck boot's logs outlive its instance");
+  assert.match(await readFile(join(stateRoot, "kept-logs", kept!, "controller.log"), "utf8"), /controller \d+ started for pylon-neverbooted[\s\S]*delete: stopping the controller, which is unavailable/);
+  assert.equal(await readFile(join(stateRoot, "kept-logs", kept!, "serial.log"), "utf8"), "[init] starting sandboxd\n");
+  assert.equal(await readFile(join(stateRoot, "kept-logs", kept!, "why.txt"), "utf8"), "deleted while its controller was unavailable\n");
 });
 
 test("a delete of a pylon whose controller answers no inspect stops it, though it last recorded running, and removes the instance", async (t) => {

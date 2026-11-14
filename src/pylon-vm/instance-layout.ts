@@ -11,6 +11,8 @@ export const stateFiles = (root: string) => ({
 	hostBridge: join(root, "host-bridge.sock"),
 	/** Nexus's adapter keeps its event journal here. */
 	events: join(root, "events.sqlite"),
+	/** The logs Nexus's adapter keeps of an instance whose boot never finished, after the instance is removed. */
+	keptLogs: join(root, "kept-logs"),
 });
 
 export const directory = (root: string, kind: Kind, name: string): string => join(root, kind, name);
@@ -34,6 +36,8 @@ export const instanceFiles = (dir: string) => ({
 	disk: join(dir, "disk.qcow2"),
 	nextDisk: join(dir, "disk.next.qcow2"),
 	log: join(dir, "controller.log"),
+	/** The guest's serial console, which the controller rotates as it does its log. */
+	serial: join(dir, "serial.log"),
 	pid: join(dir, "controller.pid"),
 	socket: join(dir, "control.sock"),
 	launchLock: join(dir, "launch.lock"),

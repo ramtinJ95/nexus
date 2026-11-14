@@ -31,6 +31,7 @@ import { imageLabel, settled, setupExitCode, type BootSpec, type Inspection, typ
 import { bridgePylonHeader } from "../../pylon-vm/host-bridge.ts";
 import { directory, instanceFiles, stateFiles } from "../../pylon-vm/instance-layout.ts";
 import { listenHostBridge, type HostBridge } from "../../host-bridge.ts";
+import { keepLogs } from "./kept-logs.ts";
 import { controllerLog, controllerLogTail, pylonGuest, type Sandbox, type ShellFlights, type StatusCache } from "./pylon-guest.ts";
 import { readJson, saveJson } from "../../node-base/json-file.ts";
 import { diskBytes } from "../../node-base/disk-bytes.ts";
@@ -206,6 +207,13 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     return sandbox({ action: "inspect", name }, signal);
   }
 
+  /** A failure to keep them never stops the delete or the removal that asked for it. */
+  const keepBootLogs = (pylonId: PylonId, why: string) => {
+    const files = instanceFiles(instanceDir(pylonId));
+    return keepLogs(stateFiles(stateRoot).keptLogs, pylonId, [files.log, files.serial], why, Date.now())
+      .then((dir) => console.log(`kept the logs of ${pylonId} in ${dir}`), (error: unknown) => console.error(`could not keep the logs of ${pylonId}:`, error));
+  };
+
   const settledInstance = (pylonId: PylonId, signal: AbortSignal) => settled(() => inspect(pylonId), ["starting", "unavailable", "stopping"], signal);
 
   async function readSidecar(pylonId: PylonId): Promise<Sidecar> {
@@ -312,6 +320,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     const log = await controllerLogTail(instanceDir(pylonId));
     if (!checkoutFailed && !freshFailed) return new JobFailure("setup-failed", `${pylonId}: ${startupError}`, log);
     const name = instanceName(pylonId);
+    await keepBootLogs(pylonId, `removed after its setup failed: ${startupError}`);
     await sandbox({ action: "destroy", kind: "instances", name, confirm: name });
     return setupRemoved(pylonId, checkoutFailed, startupError, log, setupExitCode(status.startupFailures?.find((f) => f.kind === "setup")?.message ?? ""));
   }
@@ -537,15 +546,19 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       // A controller that is starting, stopping or unavailable may never settle, as one whose boot hook never ends does,
       // and destroy refuses a live controller that does not answer. The retry's stop is bounded, so the delete never waits on it.
       // One that answers no inspect would not answer destroy either, whatever it last recorded.
-      const state = await inspect(pylonId, AbortSignal.any([signal, AbortSignal.timeout(1500)])).then((i) => i?.status.state ?? null, () => {
+      const instance = await inspect(pylonId, AbortSignal.any([signal, AbortSignal.timeout(1500)])).catch(() => {
         signal.throwIfAborted();
-        return "not answering";
+        return "not answering" as const;
       });
+      const state = instance === "not answering" ? instance : instance?.status.state ?? null;
       if (state !== null && ["starting", "unavailable", "stopping", "not answering"].includes(state)) {
         await controllerLog(instanceDir(pylonId))(`delete: stopping the controller, which is ${state}`);
         await sandbox({ action: "retry-stop", name }, signal);
       }
       signal.throwIfAborted();
+      // A boot that never finished, or failed, is explained only by its logs, which destroy removes with the instance.
+      const healthy = state === null || state === "stopped" || (instance !== "not answering" && state === "running" && instance?.status.startupError === undefined);
+      if (!healthy) await keepBootLogs(pylonId, `deleted while its controller was ${state}`);
       // Also when absent, because destroy sweeps what an interrupted create or destroy left aside.
       await sandbox({ action: "destroy", kind: "instances", name, confirm: name });
       statuses.delete(pylonId);

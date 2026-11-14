@@ -25,7 +25,7 @@ import type { SecretGrant } from "../protocol/secret-grants.ts";
 import { agentKinds } from "../protocol/agent-kinds.ts";
 import { defaultClaudeModel } from "../protocol/models.ts";
 import type { ChangedFile, GitHub, PrSnapshot, PullRequest } from "./github.ts";
-import { Refusal } from "./refusal.ts";
+import { NoRoom, Refusal } from "./refusal.ts";
 import type { Inbox } from "./inbox.ts";
 import { logOnce, type Log } from "./log-once.ts";
 import { caseOf, remedyOf, waivable, waivedName, type Hold } from "./holds.ts";
@@ -1125,7 +1125,8 @@ export function reviewLoop(deps: ReviewDeps) {
       try {
         await startReviewer(builder, `Review of #${r.pr.number}: ${r.pr.title}`, r.pr.branch, r.models.reviewer, r.reviewerKind === "claude", r.asked, r.reviewer);
       } catch (err) {
-        if (err instanceof Refusal) return toPerson(r, "thread", `The reviewer thread ${r.reviewer} did not start: ${err.message}.`);
+        // A start refused for room waits for it, as one that failed otherwise does.
+        if (err instanceof Refusal && !(err instanceof NoRoom)) return toPerson(r, "thread", `The reviewer thread ${r.reviewer} did not start: ${err.message}.`);
         if (now() - r.since < secondStartMs) throw err;
         return toPerson(r, "thread", `The reviewer thread ${r.reviewer} did not start within ${secondStartMs / 60_000} minutes: ${(err as Error).message}.`);
       }
