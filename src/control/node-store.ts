@@ -1,6 +1,11 @@
 import { jsonOrNull, type Db, type Holding, type Row } from "./db.ts";
-import type { NodeName, TailnetNodeId } from "../ids.ts";
-import type { NodeCapacity, NodeObservation } from "../protocol/observations.ts";
+import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { NodeCapacity, NodeObservation, PylonObservation } from "../protocol/observations.ts";
+
+/** A phase a pylon passes through on its way to another, and when the node's observations first showed it there. */
+export type Transitional = Extract<PylonObservation, { phase: "booting" | "stopping" | "deleting" }>["phase"];
+export interface Transition { phase: Transitional; since: number }
+const transitional = (p: PylonObservation): p is Extract<PylonObservation, { phase: Transitional }> => p.phase === "booting" || p.phase === "stopping" || p.phase === "deleting";
 
 export interface NodeRecord {
   name: NodeName;
@@ -34,6 +39,11 @@ export const holding = { tables: { nodes: {}, join_tokens: {}, joined_nodes: {} 
 export function nodeStore(db: Db) {
   db.hold(holding);
   const { transaction, sql } = db;
+  /** The node's pylons its latest observation shows booting, stopping or deleting, and since when. */
+  function transitions(name: NodeName): ReadonlyMap<PylonId, Transition> {
+    const row = sql("SELECT transitions FROM nodes WHERE name = ?").get(name);
+    return new Map(row === undefined ? [] : Object.entries(JSON.parse(row.transitions as string) as Record<PylonId, Transition>) as [PylonId, Transition][]);
+  }
   function node(name: NodeName): NodeRecord | undefined {
     const row = sql("SELECT * FROM nodes WHERE name = ?").get(name);
     return row && nodeRow(row);
@@ -48,8 +58,19 @@ export function nodeStore(db: Db) {
     upsertNode,
     nodes: () => (sql("SELECT * FROM nodes ORDER BY name").all() as Row[]).map(nodeRow),
     node,
-    /** For ingest, in its transaction. */
-    saveObservation(observation: NodeObservation) { sql("UPDATE nodes SET observation = ? WHERE name = ?").run(JSON.stringify(observation), observation.node); },
+    /**
+     * For ingest, in its transaction, at `at` by the control plane's clock, which the age of a transition is read against.
+     * A pylon still in the transitional phase it was in keeps the time it entered it.
+     */
+    saveObservation(observation: NodeObservation, at: number) {
+      const before = transitions(observation.node);
+      const after = Object.fromEntries(observation.pylons.filter(transitional).map((p): [PylonId, Transition] => {
+        const was = before.get(p.pylonId);
+        return [p.pylonId, was?.phase === p.phase ? was : { phase: p.phase, since: at }];
+      }));
+      sql("UPDATE nodes SET observation = ?, transitions = ? WHERE name = ?").run(JSON.stringify(observation), JSON.stringify(after), observation.node);
+    },
+    transitions,
     saveNodeState(name: NodeName, state: NodeRecord["state"], capacity: NodeObservation["capacity"]) { sql("UPDATE nodes SET state = ?, capacity = ? WHERE name = ?").run(state, JSON.stringify(capacity), name); },
     /** Each node's tailnet node ID, without reading its observation. */
     nodeIds: (): Map<NodeName, TailnetNodeId> => new Map(sql("SELECT name, tailnet_node_id FROM nodes").all().map((r) => [r.name as NodeName, r.tailnet_node_id as TailnetNodeId])),

@@ -319,4 +319,7 @@ export const migrations: readonly string[] = [
   // A session's terminal is the address of its Herdr Core terminal, so the column named for Herdr's panes is renamed.
   // SQLite renames it in the table's check too, and every row keeps its value.
   `ALTER TABLE sessions RENAME COLUMN herdr_pane TO terminal;`,
+  // When the node's observations first showed each of its pylons booting, stopping or deleting, as JSON by pylon ID, so
+  // one stuck there is told however often the control plane restarted. A node observed before counts from its next save.
+  `ALTER TABLE nodes ADD COLUMN transitions TEXT NOT NULL DEFAULT '{}';`,
 ];

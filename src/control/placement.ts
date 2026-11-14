@@ -21,6 +21,7 @@ type PlacementRegistry = Pick<Registry, "now"> & {
   placement: Pick<Registry["placement"], "reserved">;
   threads: Pick<Registry["threads"], "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "pylonsWithHeldThreadsOn">;
 };
+type TallyRegistry = PlacementRegistry & { nodes: Pick<Registry["nodes"], "transitions">; threads: Pick<Registry["threads"], "deletesAskedOn"> };
 type WeighingRegistry = PlacementRegistry & { nodeMetrics: Pick<Registry["nodeMetrics"], "latestHealthSample"> };
 
 type Need = Pick<BootInputs, "image" | "resources" | "network" | "repo" | "dotfiles">;
@@ -249,13 +250,31 @@ export interface Tally { pylons: number; cpus: number; memoryGiB: number }
  * its thread archived or deleted, holds only its disk and boots only once the thread is unarchived. An orphaned VM is
  * one the registry has not placed on the node, whose CPUs and memory the control plane does not know.
  */
-export interface NodePylons { up: Tally; paused: Tally; archived: Tally; crashed: Tally; orphaned: readonly PylonId[] }
+export interface NodePylons { up: Tally; paused: Tally; archived: Tally; crashed: Tally; orphaned: readonly PylonId[]; stuck: readonly StuckPylon[] }
 
-export function nodePylons(registry: PlacementRegistry, node: NodeRecord): NodePylons | null {
+/**
+ * Longer than a fresh boot's setup may run, 20 minutes, with its boot hooks and the deadline the controller gives each, and
+ * than a delete that backs off over 5 failed tries, so a pylon in one phase this long will not leave it on its own.
+ */
+export const stuckAfterMs = 30 * 60_000;
+/**
+ * A pylon in no tally because it has been booting, stopping or deleting at least `stuckAfterMs`, with what it holds.
+ * `doing` is the phase the node shows it in, since `since`, or `deleting` when the node shows none. A delete counts from
+ * `deleteAskedAt`, the thread's delete or its archived disk's, as pylon-vm shows a pylon it deletes in the phase it was in.
+ */
+export interface StuckPylon {
+  pylonId: PylonId; thread: string; doing: "booting" | "stopping" | "deleting"; since: string; deleteAskedAt: string | null; cpus: number; memoryGiB: number;
+}
+
+export function nodePylons(registry: TallyRegistry, node: NodeRecord): NodePylons | null {
   if (node.observation === null) return null;
   const zero = (): Tally => ({ pylons: 0, cpus: 0, memoryGiB: 0 });
   const tallies = { up: zero(), paused: zero(), archived: zero(), crashed: zero() };
   const orphaned: PylonId[] = [];
+  const stuck: StuckPylon[] = [];
+  const now = registry.now();
+  const transitions = registry.nodes.transitions(node.name);
+  const deletes = registry.threads.deletesAskedOn(node.name);
   const placed = new Map(registry.threads.pylonsWithStatusOn(node.name).map((p) => [p.pylon.pylonId, p]));
   for (const seen of node.observation.pylons) {
     const found = placed.get(seen.pylonId);
@@ -264,17 +283,28 @@ export function nodePylons(registry: PlacementRegistry, node: NodeRecord): NodeP
       continue;
     }
     const { pylon: p, status } = found;
+    const deleteAt = deletes.get(seen.pylonId);
+    const moving = transitions.get(seen.pylonId);
+    if ([deleteAt, moving?.since].some((at) => at !== undefined && now - at >= stuckAfterMs)) {
+      const holds = isUp(seen) ? p.boot.resources : { cpus: 0, memoryGiB: 0 };
+      const iso = (at: number) => new Date(at).toISOString();
+      stuck.push({
+        pylonId: p.pylonId, thread: p.thread, doing: moving?.phase ?? "deleting", since: iso(moving?.since ?? deleteAt!),
+        deleteAskedAt: deleteAt === undefined ? null : iso(deleteAt), cpus: holds.cpus, memoryGiB: holds.memoryGiB,
+      });
+      continue;
+    }
     const tally = tallies[!isUp(seen) && !isOpenStatus(status) ? "archived"
       : crashed(seen) ? "crashed" : isUp(seen) ? "up" : "paused"];
     tally.pylons += 1;
     tally.cpus += p.boot.resources.cpus;
     tally.memoryGiB += p.boot.resources.memoryGiB;
   }
-  return { ...tallies, orphaned };
+  return { ...tallies, orphaned, stuck };
 }
 
 /** The node as `GET /v1/nodes` and `nexus doctor` read it: its record without the observation, and what its pylons hold. */
-export function nodeSummary(registry: PlacementRegistry, record: NodeRecord) {
+export function nodeSummary(registry: TallyRegistry, record: NodeRecord) {
   const { observation, ...n } = record;
   return { ...n, observedAt: observation?.observedAt ?? null, overcommitted: overcommitted(n.capacity), pylons: nodePylons(registry, record) };
 }

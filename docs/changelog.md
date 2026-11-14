@@ -2,6 +2,10 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), except in the commands [Version skew](cli.md#version-skew) names, so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.88.0
+
+Adds `stuck` to `NodeSummary.pylons`, which `GET /v1/nodes` and `nodes --json` answer: each pylon that has been booting, stopping or deleting for 30 minutes, with its thread, what it does, since when and the CPUs and memory it holds, and which no tally counts. Plain `nodes` prints them first on the node's pylons line, plain `node` ends with a `stuck:` line for each, and `doctor`'s `pylons` check warns about them. A CLI of this version prints none from an older server.
+
 ## 0.87.0
 
 Adds `session` to a Claude worker thread's `ThreadDetail.claudeWorker`, which `GET /v1/threads/<thread>` and `show --json` answer: the Claude Code session ID the worker runs, which the worker's entry in `sessions` has as its `harnessSessionId`, or null before its launch. A client can then tell the worker's session from another Claude Code session in the pylon. A control plane older than 0.87.0 answers no `session`.

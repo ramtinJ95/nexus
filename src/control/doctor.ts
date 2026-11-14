@@ -98,15 +98,21 @@ function disk(n: NodeSummary): Verdict {
   return ok(`${disks.length} ${disks.length === 1 ? "filesystem" : "filesystems"}, none under 10% or 20 GiB free`);
 }
 
-function pylons(n: NodeSummary): Verdict {
+function pylons(n: NodeSummary, f: DoctorFacts): Verdict {
   const p = n.pylons;
+  const stuck = p?.stuck ?? [];
   const problems = [
+    ...stuck.length === 0 ? [] : [`${stuck.length} stuck: ${stuck.map((s) => [
+      `${s.pylonId} of ${s.thread} ${s.doing} for ${span(f.now - Date.parse(s.since))}`,
+      ...s.deleteAskedAt === null || s.doing === "deleting" ? [] : [`its delete asked ${span(f.now - Date.parse(s.deleteAskedAt))} ago`],
+      ...s.memoryGiB > 0 ? [`holding ${s.cpus} CPUs and ${s.memoryGiB} GiB`] : [],
+    ].join(", ")).join("; ")}. A boot or a delete that stays stuck needs its node: controller.log in the pylon's instance directory says what it waits on`],
     ...p === null || p.crashed.pylons === 0 ? [] : [`${p.crashed.pylons} crashed ${p.crashed.pylons === 1 ? "pylon" : "pylons"}, whose threads nexus show explains`],
     ...p === null || p.orphaned.length === 0 ? [] : [`${p.orphaned.length} orphaned (${p.orphaned.join(", ")}), which the registry does not know and nothing deletes`],
     ...n.overcommitted ? ["overcommitted, its running pylons holding more CPUs or memory than it has, so pause or archive threads on it"] : [],
   ];
   if (problems.length > 0) return warn(problems.join("; "));
-  return ok(p === null ? "no pylons observed yet" : `${p.up.pylons} up, ${p.paused.pylons} paused, none crashed or orphaned`);
+  return ok(p === null ? "no pylons observed yet" : `${p.up.pylons} up, ${p.paused.pylons} paused, none stuck, crashed or orphaned`);
 }
 
 function backup(f: DoctorFacts): Verdict {

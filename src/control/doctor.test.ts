@@ -26,7 +26,7 @@ function nodeOf(name: NodeName, over: Partial<NodeSummary> = {}): NodeSummary {
   return {
     name, tailnetHost: `${name}.example.ts.net`, tailnetNodeId: `n${name}` as TailnetNodeId, state: "online",
     capacity: testCapacity({ disks: [pylonsDisk, controlDisk] }), observedAt: iso(now - 30_000), overcommitted: false,
-    pylons: { up: { pylons: 2, cpus: 4, memoryGiB: 8 }, paused: none, archived: none, crashed: none, orphaned: [] }, ...over,
+    pylons: { up: { pylons: 2, cpus: 4, memoryGiB: 8 }, paused: none, archived: none, crashed: none, orphaned: [], stuck: [] }, ...over,
   };
 }
 const report = (n: NodeName, role: ReleaseReport["role"], over: Partial<ReleaseReport> = {}): ReleaseReport =>
@@ -111,7 +111,14 @@ test("a node's filesystems are ok with room, warn when one is low, and fail when
 
 test("a node's pylons are ok when none crashed or is orphaned, and warn for each crashed or orphaned pylon and an overcommitted node", () => {
   const pylons = nodeOf(peer).pylons!;
-  expect(healthy(), peer, "pylons", "ok", /2 up, 0 paused, none crashed or orphaned/);
+  expect(healthy(), peer, "pylons", "ok", /2 up, 0 paused, none stuck, crashed or orphaned/);
+  const stuck = [
+    { pylonId: "pylon-th-boot" as PylonId, thread: "th-boot", doing: "booting" as const, since: iso(now - 3 * hour), deleteAskedAt: null, cpus: 2, memoryGiB: 4 },
+    { pylonId: "pylon-th-gone" as PylonId, thread: "th-gone", doing: "deleting" as const, since: iso(now - 17 * hour), deleteAskedAt: iso(now - 17 * hour), cpus: 0, memoryGiB: 0 },
+    { pylonId: "pylon-th-hung" as PylonId, thread: "th-hung", doing: "booting" as const, since: iso(now - 23 * hour), deleteAskedAt: iso(now - 16 * hour), cpus: 2, memoryGiB: 4 },
+  ];
+  expect(healthy({ nodes: [nodeOf(peer, { pylons: { ...pylons, stuck } })] }), peer, "pylons", "warn",
+    /^3 stuck: pylon-th-boot of th-boot booting for 3 h, holding 2 CPUs and 4 GiB; pylon-th-gone of th-gone deleting for 17 h; pylon-th-hung of th-hung booting for 23 h, its delete asked 16 h ago, holding 2 CPUs and 4 GiB\. A boot or a delete that stays stuck needs its node/);
   expect(healthy({ nodes: [nodeOf(peer, { pylons: { ...pylons, crashed: { pylons: 2, cpus: 0, memoryGiB: 0 } } })] }), peer, "pylons", "warn", /2 crashed pylons/);
   expect(healthy({ nodes: [nodeOf(peer, { pylons: { ...pylons, orphaned: ["pylon-gone" as PylonId] } })] }), peer, "pylons", "warn", /1 orphaned \(pylon-gone\)/);
   expect(healthy({ nodes: [nodeOf(peer, { overcommitted: true })] }), peer, "pylons", "warn", /overcommitted/);

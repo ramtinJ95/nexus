@@ -438,10 +438,14 @@ test("a pylon holds its CPUs and memory while its VM is up, from launch on, and 
   await writeFile(join(launching, "status.json"), JSON.stringify({ name: "pylon-launching", state: "starting", resources: { cpus: 2, memoryGiB: 4 } }));
   await mkdir(join(launching, "launch.lock"));
   await writeFile(join(launching, "launch.lock", "owner"), JSON.stringify(await identityOf(process.pid)));
+  // As a controller leaves it whose boot hook passed its deadline: the VM closed and the controller gone.
+  const failed = await leftInstance(instances, "pylon-bootfailed", "failed", 8);
+  await writeFile(join(failed, "status.json"), JSON.stringify({ name: "pylon-bootfailed", state: "failed", resources: { cpus: 2, memoryGiB: 4 } }));
   assert.deepEqual(Object.fromEntries((await backend.list()).map((p) => [p.pylonId, [p.vm, p.holds]])), {
     "pylon-up": ["running", { cpus: 2, memoryGiB: 4, diskGiB: 16 }],
     "pylon-paused": ["stopped", { cpus: 0, memoryGiB: 0, diskGiB: 30 }],
     "pylon-launching": ["booting", { cpus: 2, memoryGiB: 4, diskGiB: 8 }],
+    "pylon-bootfailed": ["broken", { cpus: 0, memoryGiB: 0, diskGiB: 8 }],
   });
 });
 
