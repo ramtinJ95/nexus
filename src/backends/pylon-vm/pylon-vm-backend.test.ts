@@ -1265,6 +1265,17 @@ test("a delete of a pylon whose boot never ends stops its controller and removes
   assert.deepEqual(await backend.list(), [], "nothing of the pylon is held");
 });
 
+test("a delete of a pylon whose controller answers no inspect stops it, though it last recorded running, and removes the instance", async (t) => {
+  const { backend, instances } = await backendWith(noWait);
+  const id = "pylon-hungdelete" as PylonId;
+  const dir = await leftInstance(instances, id, "running");
+  const controller = await stuckController(t, dir, id, "silent", "hang");
+  await backend.ensureDeleted(id, AbortSignal.timeout(60_000));
+  await controller.exited;
+  assert.deepEqual(await groupMembers(controller.pid), []);
+  assert.equal(existsSync(dir), false);
+});
+
 test("a delete of a pylon whose controller is stuck stopping ends its process group and removes the instance", async (t) => {
   const { backend, instances } = await backendWith(noWait);
   const id = "pylon-stuckstop" as PylonId;

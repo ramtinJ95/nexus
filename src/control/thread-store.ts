@@ -354,8 +354,10 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     if (t === undefined) return;
     const old = sql("SELECT * FROM thread_attention WHERE thread = ?").get(id);
     const p = pylon(t.pylonId);
-    // An archived thread's pylon stays paused, so its failure waits for no one until an unarchive.
-    const failed = t.status !== "archived" && (p?.failed != null || workerFailed(id));
+    // An archived thread's pylon stays paused, so its failure waits for no one until an unarchive. A disk delete that
+    // gave up still holds the disk, and the person is the only one who can free it.
+    const deleteFailed = p?.failed != null && p.attempts.last?.job === "delete";
+    const failed = deleteFailed || t.status !== "archived" && (p?.failed != null || workerFailed(id));
     const attention = attentionOf({
       failed, parked: old?.parked === 1, lastReplyAt: t.lastReplyAt, seenAt: t.seenAt, working: t.working, waiting: t.sessionWaiting === true, needs: needs(id), limited: t.usageLimit !== undefined,
     });

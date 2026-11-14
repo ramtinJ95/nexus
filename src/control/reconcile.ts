@@ -135,6 +135,8 @@ export interface PlanInput {
   attempts: Attempts;
   /** A human retried the pylon after the planner gave up, and no job has succeeded nor the planner finished or given up since. */
   retrying: boolean;
+  /** The planner's verdict when it gave up on the pylon, until a human retry. */
+  failed: string | null;
   /** The boot, by its `bootedAt`, whose transcripts a settle sealed. */
   sealedBoot?: string;
   /** Online nodes other than `node` that hold the artifact. */
@@ -165,6 +167,8 @@ export const maxAttempts = 5;
 /** The job error codes the planner never retries, so a pylon whose last job failed with one fails on its next tick. */
 export const finalCodes = (Object.keys(retryable) as JobErrorCode[]).filter((code) => !retryable[code]);
 const backoffScheduleMs = [5_000, 15_000, 45_000, 120_000, 120_000] as const;
+/** How long a delete the planner gave up on waits before it goes again. */
+export const deleteRetryMs = 10 * 60_000;
 /** The consecutive failed deletes that end `attempts`. tick.ts counts a delete's first failure from one, whatever failed before it. */
 export const deleteAttempts = (attempts: Attempts): Attempts => attempts.last?.job === "delete" ? attempts : noAttempts;
 /** Wait after the `attempt`th consecutive failure, counting from 1. */
@@ -196,8 +200,12 @@ const planRules: readonly Rule[] = [
     if (i.desired !== "deleted") return null;
     if (i.observed === "absent" && !i.previewsRouted) return done;
     const { count, last } = deleteAttempts(i.attempts);
-    if (last !== null && count >= maxAttempts) return fail(last.code, `gave up deleting after ${count} failed attempts, the last with ${last.code}: ${last.message}`);
-    if (last !== null && now < last.at + backoffMs(count)) return wait("backoff");
+    if (last === null) return submit({ kind: "delete", pylonId: i.pylonId });
+    // The verdict is given once, so its event notifies once. Only a delete frees the pylon's room, and a deleted thread
+    // has no retry, so a delete that gave up still goes again, slowly.
+    const verdict = `gave up deleting after ${maxAttempts} failed attempts, the last with ${last.code}: ${last.message}. It is tried again every ${deleteRetryMs / 60_000} min`;
+    if (count === maxAttempts && i.failed !== verdict || count > maxAttempts && i.failed === null) return fail(last.code, verdict);
+    if (now < last.at + (count >= maxAttempts ? deleteRetryMs : backoffMs(count))) return wait("backoff");
     return submit({ kind: "delete", pylonId: i.pylonId });
   },
   // A wake for reading retries no failure. Its own go to the usage hold, which gives up on the read (PlanStep).

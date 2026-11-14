@@ -104,6 +104,7 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
     inFlight,
     attempts: pylon.attempts,
     retrying: pylon.retrying,
+    failed: pylon.failed,
     ...(sealedBoot === undefined ? {} : { sealedBoot }),
     holders: ctx.holders,
     artifactSha256: ctx.artifactSha256,
@@ -113,8 +114,7 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
     ctx.uncountedFailed({ at: Date.now(), code: step.code, message: step.reason });
     return { kind: "wait", reason: "backoff" };
   }
-  // A deleted thread's pylon still reaches the planner after it gave up (failedStep), so only a new verdict is saved.
-  if (step.kind === "fail" && (pylon.failed !== step.reason || pylon.retrying)) {
+  if (step.kind === "fail") {
     pylon.failed = step.reason;
     pylon.retrying = false;
     ctx.save(pylon);

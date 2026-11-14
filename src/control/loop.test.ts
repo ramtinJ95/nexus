@@ -833,7 +833,7 @@ test("a delete that keeps failing gives up with attention, counting only its own
   registry.threads.savePylon({ ...pylon(), attempts: { count: 4, last: { at: 0, ...deadline, job: "delete" } } });
   await until("the fifth delete runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!, deadline);
-  const verdict = "gave up deleting after 5 failed attempts, the last with deadline: delete passed its deadline";
+  const verdict = "gave up deleting after 5 failed attempts, the last with deadline: delete passed its deadline. It is tried again every 10 min";
   await until("the planner gives up", () => pylon().failed === verdict);
   assert.equal(registry.threads.attention(thread.id), "failed");
   assert.deepEqual(logged, [`${thread.pylonId}: the planner gave up: ${verdict}`]);

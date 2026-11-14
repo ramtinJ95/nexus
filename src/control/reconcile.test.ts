@@ -50,6 +50,7 @@ const asking = (names: readonly string[]): Omit<BootInputs, "source"> => ({ ...b
 const spawnAsking = (names: readonly string[], source: PylonSource): PlanStep => ({ kind: "submit", job: { kind: "spawn", pylonId, boot: { ...asking(names), source }, live, liveHash } });
 const pause: PlanStep = { kind: "submit", job: { kind: "pause", pylonId, checkpoint: nextCheckpoint } };
 const del: PlanStep = { kind: "submit", job: { kind: "delete", pylonId } };
+const gaveUpDeleting = (code: JobErrorCode) => `gave up deleting after 5 failed attempts, the last with ${code}: the probe's ${code} message. It is tried again every 10 min`;
 const fetch = (artifact: ArtifactId, from: NodeName): PlanStep => ({ kind: "submit", job: { kind: "fetch-artifact", artifact, from, sha256: `sha-${artifact}` } });
 const done: PlanStep = { kind: "done" };
 const wait = (reason: "node-offline" | "in-flight" | "backoff" | "transitioning" | "held-secret"): PlanStep => ({ kind: "wait", reason });
@@ -75,6 +76,8 @@ interface Row {
   previewsRouted?: boolean;
   /** A human retried the pylon. */
   retrying?: boolean;
+  /** The planner's verdict when it gave up. */
+  failed?: string;
   /** The secrets the boot asks for, and the secrets the node holds. */
   secrets?: { asked: readonly string[]; holds: readonly string[] };
 }
@@ -97,8 +100,12 @@ const rows: Record<string, Row> = {
   "delete ignores the failures of the boots before it": { desired: "deleted", observed: running(liveHash), inFlight: null, attempts: [5, 1_000, "deadline", "spawn"], online: true, present: imageOnly, expect: del },
   "delete waits out the backoff of its own failure": { desired: "deleted", observed: phase("booting"), inFlight: null, attempts: [2, 14_000, "deadline", "delete"], online: true, present: imageOnly, expect: wait("backoff") },
   "delete goes again once its backoff is over": { desired: "deleted", observed: phase("booting"), inFlight: null, attempts: [2, 15_000, "deadline", "delete"], online: true, present: imageOnly, expect: del },
-  "delete gives up after five failed deletes in a row": { desired: "deleted", observed: phase("booting"), inFlight: null, attempts: [5, 1_000_000, "deadline", "delete"], online: true, present: imageOnly, expect: { kind: "fail", code: "deadline", reason: "gave up deleting after 5 failed attempts, the last with deadline: the probe's deadline message" } },
-  "a pylon removed by hand whose previews a failing delete never unpublished gives up too": { desired: "deleted", observed: "absent", previewsRouted: true, inFlight: null, attempts: [5, 1_000_000, "backend", "delete"], online: true, present: [], expect: { kind: "fail", code: "backend", reason: "gave up deleting after 5 failed attempts, the last with backend: the probe's backend message" } },
+  "delete gives up after five failed deletes in a row": { desired: "deleted", observed: phase("booting"), inFlight: null, attempts: [5, 1_000, "deadline", "delete"], online: true, present: imageOnly, expect: { kind: "fail", code: "deadline", reason: gaveUpDeleting("deadline") } },
+  "a delete that gave up after a boot's verdict gives its own": { desired: "deleted", observed: phase("booting"), inFlight: null, attempts: [5, 1_000, "deadline", "delete"], failed: "gave up after 5 failed attempts, the last with deadline: spawn passed its deadline", online: true, present: imageOnly, expect: { kind: "fail", code: "deadline", reason: gaveUpDeleting("deadline") } },
+  "a pylon removed by hand whose previews a failing delete never unpublished gives up too": { desired: "deleted", observed: "absent", previewsRouted: true, inFlight: null, attempts: [5, 1_000, "backend", "delete"], online: true, present: [], expect: { kind: "fail", code: "backend", reason: gaveUpDeleting("backend") } },
+  "a delete the planner gave up on goes again only after 10 min": { desired: "deleted", observed: phase("booting"), inFlight: null, attempts: [5, 599_000, "deadline", "delete"], failed: gaveUpDeleting("deadline"), online: true, present: imageOnly, expect: wait("backoff") },
+  "a delete the planner gave up on goes again after 10 min": { desired: "deleted", observed: phase("booting"), inFlight: null, attempts: [5, 600_000, "deadline", "delete"], failed: gaveUpDeleting("deadline"), online: true, present: imageOnly, expect: del },
+  "a delete that keeps failing after the verdict keeps it, so it notifies once": { desired: "deleted", observed: phase("booting"), inFlight: null, attempts: [7, 600_000, "backend", "delete"], failed: gaveUpDeleting("deadline"), online: true, present: imageOnly, expect: del },
   "a deleted pylon that is gone needs nothing, whatever its deletes failed": { desired: "deleted", observed: "absent", inFlight: null, attempts: [5, 1_000_000, "backend", "delete"], online: true, present: [], expect: done },
   "delete does not wait for a transition": { desired: "deleted", observed: phase("stopping"), inFlight: null, attempts: none, online: true, present: imageOnly, expect: del },
   "a failed wake for reading waits rather than failing, whatever its code": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [1, 600_000, "setup-failed"], online: true, present: imageOnly, expect: wait("backoff") },
@@ -187,6 +194,7 @@ function input(row: Row): PlanInput {
     inFlight: row.inFlight === null ? null : jobInFlight(row.inFlight),
     attempts: { count, last: attempt },
     retrying: row.retrying ?? false,
+    failed: row.failed ?? null,
     holders: (id) => row.holders?.[id] ?? [],
     artifactSha256: (id) => `sha-${id}`,
   };
