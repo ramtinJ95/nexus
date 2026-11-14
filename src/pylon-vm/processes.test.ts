@@ -79,6 +79,40 @@ function guest(files: Map<string, string>, onRead: (name: string) => void = () =
 }
 const exited = (exitCode: number) => JSON.stringify({ exitCode, truncated: false });
 
+test("a status that rereads done after its supervisor exited is not cut short by another status consuming the end", async () => {
+	const files = new Map([["pid", "1576"], ["output", "fetched\n"]]);
+	let exitedAt: "running" | "exited" | "reread" = "running";
+	let rereading: () => void = () => {};
+	const reread = new Promise<void>((started) => { rereading = started; });
+	let release: () => void = () => {};
+	const released = new Promise<void>((go) => { release = go; });
+	const vm = guest(files);
+	vm.fs.readFile = (async (path: string) => {
+		const name = path.slice(path.lastIndexOf("/") + 1);
+		// The reread after the supervisor was found gone waits until the other status has had its chance.
+		if (name === "done" && exitedAt === "exited") { exitedAt = "reread"; rereading(); await released; }
+		const content = files.get(name);
+		if (content === undefined) throw fileNotFound(path);
+		return Buffer.from(content);
+	}) as unknown as VM["fs"]["readFile"];
+	vm.fs.deleteFile = (async () => { files.clear(); }) as unknown as VM["fs"]["deleteFile"];
+	vm.exec = (async (argv: string[]) => {
+		if (argv[0] === "python3") return { exitCode: 0, stdout: "1577\n", stderr: "" };
+		// It wrote done and exited between the wait's last read and this check.
+		if (argv[0] === "grep") { files.set("done", exited(0)); exitedAt = "exited"; return { exitCode: 1, stdout: "", stderr: "" }; }
+		return { exitCode: 0, stdout: "", stderr: "" };
+	}) as unknown as VM["exec"];
+	const processes = new GuestProcesses(vm, new AbortController().signal);
+	const pid = await processes.launch("git fetch --quiet origin main", "/home/user/workspace");
+	const first = processes.status(pid, 0);
+	await reread;
+	const second = processes.status(pid, 0);
+	await delay(50);
+	release();
+	assert.deepEqual(await outcome(first), "answered", "the reread saw done, which no other status consumed under it");
+	assert.equal((await second).exitCode, 0);
+});
+
 test("a command whose supervisor died before it wrote done, as on a full disk, ends as failed and names the disk, and one whose supervisor runs is still running", async () => {
 	const files = new Map([["pid", "1576"], ["output", ""]]);
 	const vm = guest(files);

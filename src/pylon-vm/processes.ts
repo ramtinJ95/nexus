@@ -222,13 +222,14 @@ export class GuestProcesses {
 		}
 		// Only the supervisor writes done, so one that died, as on a full disk, leaves its command running for good.
 		if (done === null && !command.final && !(await this.supervised(command))) {
-			// Another status may have consumed the end meanwhile, and removed the directory with it.
-			await command.cursor.catch(() => {});
-			if (this.commands.get(pid) !== command) throw new Error(expired);
-			if (!command.final) {
-				done = await this.read(`${command.path}/done`);
-				if (done === null) throw new SupervisorDied(await this.diskFree());
-			}
+			// On the cursor, so no other status consumes the end, and removes the directory with it, while this one reads.
+			const recheck = command.cursor.catch(() => {}).then(async () => {
+				if (this.commands.get(pid) !== command) throw new Error(expired);
+				return command.final ? null : this.read(`${command.path}/done`);
+			});
+			command.cursor = recheck;
+			done = await recheck;
+			if (done === null && !command.final) throw new SupervisorDied(await this.diskFree());
 		}
 		const consume = command.cursor
 			.catch(() => {})
