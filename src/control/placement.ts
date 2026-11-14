@@ -63,14 +63,23 @@ export function weighNodes(registry: WeighingRegistry, need: Need, except?: Node
 export const refusals = (weighed: readonly Weighed[]) => weighed.flatMap((w) => "refused" in w ? [`${w.node} ${w.refused}`] : []).join("; ");
 
 /**
- * Why `name` has no memory for a pylon that holds `need` once it boots, as `auto` weighs it, or null. A start that names
- * the node, or goes to its project's pinned default, is held to it too, so no way in commits more memory than a node has.
+ * Why `name` has no memory for a pylon that holds `need` once it boots, as `auto` weighs it, or null, and whether the room
+ * can free there. A start that names the node, or goes to its project's pinned default, is held to it too, so no way in
+ * commits more memory than a node has.
  */
-export function memoryShort(registry: WeighingRegistry, name: NodeName, need: Need): string | null {
+export function memoryShort(registry: WeighingRegistry, name: NodeName, need: Need): { why: string; frees: boolean } | null {
   const node = registry.nodes.nodes().find((n) => n.name === name);
-  const w = node === undefined ? null : weigh(registry, node, need);
-  return w !== null && "short" in w && "refused" in w ? w.refused : null;
+  const o = node?.state === "online" ? node.observation : null;
+  if (o == null) return null;
+  const never = tooSmall(o.capacity, need);
+  if (never !== null) return { why: never, frees: false };
+  const w = weigh(registry, node!, need);
+  return "short" in w ? { why: w.refused, frees: true } : null;
 }
+
+/** Why the node could never hold the pylon's memory, however much frees there, or null. */
+const tooSmall = (c: NodeCapacity, need: Need): string | null => need.resources.memoryGiB + memoryHeadroomGiB > c.memoryGiB
+  ? `has ${gib(c.memoryGiB)} GiB of memory, and the pylon needs ${need.resources.memoryGiB} GiB with ${memoryHeadroomGiB} GiB to spare` : null;
 
 /**
  * Why the node has no memory to boot or wake `p` now, or null. It counts what the node commits, the spawns in flight there
@@ -109,7 +118,8 @@ function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighe
   if (ssh.length > 0 && !o.grants.gitSsh) return refused(`has no git SSH key to reach ${ssh.join(" and ")}`);
   // Room that frees never gives a pylon more than the node has.
   const disks = c.disks?.find((d) => d.pylons === true);
-  if (need.resources.memoryGiB + memoryHeadroomGiB > c.memoryGiB) return refused(`has ${gib(c.memoryGiB)} GiB of memory, and the pylon needs ${need.resources.memoryGiB} GiB with ${memoryHeadroomGiB} GiB to spare`);
+  const never = tooSmall(c, need);
+  if (never !== null) return refused(never);
   if (disks !== undefined && need.resources.diskGiB + keptFreeGiB(disks.totalGiB) > disks.totalGiB) return refused(`has ${gib(disks.totalGiB)} GiB on the filesystem of its pylons' disks, too little for a ${need.resources.diskGiB} GiB pylon disk and the ${gib(keptFreeGiB(disks.totalGiB))} GiB it keeps free`);
   const { left, pending } = roomLeft(registry, node.name, o, c, need.resources);
   const held = heldRoom(registry, node.name, registry.now());

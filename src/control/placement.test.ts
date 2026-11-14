@@ -195,6 +195,9 @@ test("a start with --node auto, one that names the node and one on its project's
   assert.equal((await s.call("PATCH", "/v1/projects/acme", { defaultNode: "infra-testbench" })).status, 200);
   const pinned = await s.call("POST", "/v1/threads", { project: "acme", title: "Default" });
   assert.deepEqual([pinned.status, pinned.body.error], [409, "infra-testbench has 29 of 31.2 GiB of memory committed, and the pylon needs 4"]);
+  const huge = await s.call("POST", "/v1/threads", { project: "acme", title: "Huge", node: "infra-testbench", resources: { memoryGiB: 32 } });
+  assert.deepEqual([huge.status, huge.body.error], [409, "infra-testbench has 31.2 GiB of memory, and the pylon needs 32 GiB with 1 GiB to spare"], "a pylon the node could never hold is refused, not left to wait");
+  assert.equal(s.registry.threads.threads().length, 0, "no refused start made a thread");
 });
 
 test("a pylon that boots after the node's health read holds all its memory until a read names it", async (t) => {

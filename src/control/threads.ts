@@ -145,7 +145,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     const short = named || placement.how === "default" ? namedDiskShort(registry, node, resources) : null;
     if (short !== null) throw new Refusal("conflict", `${node} ${short}`);
     const tight = named || placement.how === "default" ? memoryShort(registry, node, need) : null;
-    if (tight !== null) throw new NoRoom("conflict", `${node} ${tight}`);
+    if (tight !== null) throw tight.frees ? new NoRoom("conflict", `${node} ${tight.why}`) : new Refusal("conflict", `${node} ${tight.why}`);
     const release = registry.placement.reserve(pylonId, node, resources);
     try {
       // A template's disk is its project's size, and a pylon's disk size is fixed once it exists.

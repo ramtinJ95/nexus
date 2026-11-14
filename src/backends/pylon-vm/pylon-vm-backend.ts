@@ -31,7 +31,7 @@ import { imageLabel, settled, setupExitCode, type BootSpec, type Inspection, typ
 import { bridgePylonHeader } from "../../pylon-vm/host-bridge.ts";
 import { directory, instanceFiles, stateFiles } from "../../pylon-vm/instance-layout.ts";
 import { listenHostBridge, type HostBridge } from "../../host-bridge.ts";
-import { keepLogs } from "./kept-logs.ts";
+import { keepLogs, pruneKeptLogs } from "./kept-logs.ts";
 import { controllerLog, controllerLogTail, pylonGuest, type Sandbox, type ShellFlights, type StatusCache } from "./pylon-guest.ts";
 import { readJson, saveJson } from "../../node-base/json-file.ts";
 import { diskBytes } from "../../node-base/disk-bytes.ts";
@@ -177,7 +177,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         if (names.length > 0) console.log(`removed ${names.length} scratch directories no controller owns: ${names.join(", ")}`);
       },
       (error: unknown) => console.error("scratch sweep failed:", error),
-    ));
+    ).then(() => pruneKeptLogs(stateFiles(stateRoot).keptLogs, Date.now()).catch((error: unknown) => console.error("kept logs prune failed:", error))));
     return run(stateRoot, action, signal, options.retryStop);
   };
   const store = artifactDirectory(options.artifacts, tarCodec);

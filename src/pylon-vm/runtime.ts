@@ -201,7 +201,12 @@ export class SandboxRuntime {
 	private dir: string;
 	private serialFile: ReturnType<typeof createWriteStream> | undefined;
 	private get serial() {
-		return (this.serialFile ??= createWriteStream(instanceFiles(this.dir).serial, { flags: "a", mode: 0o600 }));
+		if (this.serialFile === undefined) {
+			this.serialFile = createWriteStream(instanceFiles(this.dir).serial, { flags: "a", mode: 0o600 });
+			// A full disk or an unwritable log costs the console's lines, never the VM.
+			this.serialFile.once("error", (error) => console.error(`serial.log is not written: ${error.message}`));
+		}
+		return this.serialFile;
 	}
 	private record: SandboxRecord;
 	private spec: BootSpec;
