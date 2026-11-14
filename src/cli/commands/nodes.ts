@@ -12,13 +12,23 @@ function capacityText(c: Partial<NodeCapacity>, overcommitted: boolean): string 
   return `${n(c.committedCpus)}/${n(c.cpus)} CPUs, ${n(c.committedMemoryGiB, counted)}/${n(c.memoryGiB)} GiB memory committed${overcommitted ? ", overcommitted" : ""}, ${n(c.committedDiskGiB)} GiB disk committed, ${n(c.diskFreeGiB)} GiB disk free${(c.disks ?? []).filter(lowDisk).map((d) => `, disk low at ${d.paths.join(", ")}`).join("")}`;
 }
 
+/** Such as `pylon-x booting since 17h ago (2026-11-13 20:04), its delete asked 16h ago (2026-11-14 02:31), holding 2 CPUs and 4 GiB`. */
+const stuckText = (s: NodePylons["stuck"][number]) => [
+  `${s.pylonId} ${s.doing} since ${when(Date.parse(s.since))}`,
+  ...s.deleteAskedAt === null || s.doing === "deleting" ? [] : [`its delete asked ${when(Date.parse(s.deleteAskedAt))}`],
+  ...s.memoryGiB > 0 ? [`holding ${s.cpus} CPUs and ${gib(s.memoryGiB)} GiB`] : [],
+].join(", ");
+
 /**
- * Such as `5 up holding 20 CPUs and 40 GiB, 1 paused needing 8 GiB to wake, 3 archived, 1 crashed needing 8 GiB to retry,
- * 1 orphaned (pylon-x)`. Empty for a node with no pylons, or never observed.
+ * Such as `1 stuck (pylon-y deleting since 17h ago (02:31), holding 2 CPUs and 4 GiB), 5 up holding 20 CPUs and 40 GiB,
+ * 1 paused needing 8 GiB to wake, 3 archived, 1 crashed needing 8 GiB to retry, 1 orphaned (pylon-x)`. Empty for a node
+ * with no pylons, or never observed. A server older than stuck pylons sends none.
  */
 function pylonsText(p: NodePylons | null): string {
   if (p === null) return "";
+  const stuck = p.stuck ?? [];
   return [
+    ...stuck.length === 0 ? [] : [`${stuck.length} stuck (${stuck.map(stuckText).join("; ")})`],
     ...p.up.pylons === 0 ? [] : [`${p.up.pylons} up holding ${p.up.cpus} CPUs and ${gib(p.up.memoryGiB)} GiB`],
     ...p.paused.pylons === 0 ? [] : [`${p.paused.pylons} paused needing ${gib(p.paused.memoryGiB)} GiB to wake`],
     ...p.archived.pylons === 0 ? [] : [`${p.archived.pylons} archived`],
@@ -46,8 +56,9 @@ const node: Command = {
   help: ["  nexus node [show] <name>                     a node's load, memory, disk, temperatures and pylon processes, read now; deployers only"],
   args: [1, 1],
   async run(api, [name]) {
-    const health = await request(api, nodeRoutes.health, { node: name! });
-    return { json: health, text: healthText(health) };
+    const [health, nodes] = await Promise.all([request(api, nodeRoutes.health, { node: name! }), request(api, nodeRoutes.list, {})]);
+    const stuck = nodes.find((n) => n.name === name)?.pylons?.stuck ?? [];
+    return { json: health, text: [healthText(health), ...stuck.map((s) => `stuck: ${stuckText(s)}`)].join("\n") };
   },
 };
 

@@ -1,4 +1,5 @@
 import { test, type TestContext } from "node:test";
+import { envelope } from "../reconcile.ts";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
@@ -2407,7 +2408,9 @@ test("a job in flight shows on the thread page as its transition", async (t) => 
   const s = await seeded(t);
   const fix = await s.start("acme", "Fix checkout");
   s.observe(fix);
-  s.registry.threads.apply({ record: "job", status: { jobId: "job-1" as JobId, subject: fix.pylonId, kind: "pause", state: "running", startedAt: new Date().toISOString() } });
+  const pause = envelope({ kind: "pause", pylonId: fix.pylonId, checkpoint: "ckpt-fix-1" }, s.registry.threads.pylon(fix.pylonId)!.node, Date.now());
+  s.registry.threads.savePylon({ ...s.registry.threads.pylon(fix.pylonId)!, submitted: pause });
+  s.registry.threads.apply({ record: "job", status: { jobId: pause.jobId, subject: fix.pylonId, kind: "pause", state: "running", startedAt: new Date().toISOString() } });
   const page = (await s.call("GET", `/threads/${fix.id}`)).text;
   assert.match(textOf(sectionOf(page, "pylon-h")), /Observed pausing/);
   assert.deepEqual(sidebarOf(page).rows, ["pausing Fix checkout now"]);

@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import type { Thread } from "../control/thread-store.ts";
 import type { PylonId } from "../ids.ts";
 import type { NodeHealth } from "../protocol/client.ts";
-import { stoppedPylon, testCapacity, testObservation } from "../test-support/kit.ts";
+import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../test-support/kit.ts";
 import { node, image, setup, timeless } from "../test-support/cli-kit.ts";
 import { localTime } from "./kit.ts";
 
@@ -27,6 +27,31 @@ test("nodes marks an overcommitted node and says what its pylons hold", async (t
   assert.match(text, /^Node +State +Observed +Capacity$/m);
   assert.match(text, /^rj-firebat +online +\d+s ago \(.+\) {2}2\/8 CPUs, 40\/22\.8 GiB memory committed, overcommitted, 30 GiB disk committed, 100 GiB disk free$/m);
   assert.match(text, /^ {2}pylons: 1 up holding 2 CPUs and 4 GiB, 1 paused needing 4 GiB to wake, 1 archived, 1 crashed needing 4 GiB to retry, 1 orphaned \(pylon-x\)$/m);
+});
+
+test("nodes and node name a pylon stuck booting and one whose delete waits on a stuck boot, and count neither as up", async (t) => {
+  const since = Date.now() - 3 * 3_600_000;
+  t.mock.timers.enable({ apis: ["Date"], now: since });
+  const s = await setup(t);
+  const [booting, gone, up] = await Promise.all(["booting", "gone", "up"].map((title) => s.json(["start", "--project", "acme", "--title", title]))) as Thread[];
+  await s.nexus(["delete", gone!.id]);
+  const capacity = testCapacity({ cpus: 16, committedCpus: 6, memoryGiB: 31.2, committedMemoryGiB: 12 });
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity });
+  const observed = (ms: number) => s.registry.threads.ingested(testObservation(node, {
+    observedAt: new Date(ms).toISOString(), capacity, artifacts: [image.id],
+    pylons: [{ pylonId: booting!.pylonId, phase: "booting" }, { pylonId: gone!.pylonId, phase: "booting" }, { pylonId: up!.pylonId, phase: "booting" }],
+  }), []);
+  observed(since);
+  s.registry.threads.ingested(testObservation(node, { capacity, artifacts: [image.id], pylons: [{ pylonId: booting!.pylonId, phase: "booting" }, { pylonId: gone!.pylonId, phase: "booting" }, runningPylon(up!.pylonId)] }), []);
+  t.mock.timers.tick(3 * 3_600_000);
+  observed(Date.now());
+  const ago = `3h ago \\(${localTime(since).replace(/[()]/g, "\\$&")}\\)`;
+  const asked = ago;
+  assert.match((await s.nexus(["nodes"])).stdout, new RegExp(`^ {2}pylons: 2 stuck \\(${booting!.pylonId} booting since ${ago}, holding 2 CPUs and 4 GiB; ${gone!.pylonId} booting since ${ago}, its delete asked ${asked}, holding 2 CPUs and 4 GiB\\), 1 up holding 2 CPUs and 4 GiB$`, "m"));
+  const { stuck } = (await s.json(["nodes"]))[0].pylons;
+  assert.deepEqual(stuck.map((p: { pylonId: string; doing: string; since: string }) => [p.pylonId, p.doing, p.since]), [[booting!.pylonId, "booting", new Date(since).toISOString()], [gone!.pylonId, "booting", new Date(since).toISOString()]]);
+  s.nodeHealth(async () => ({ node, readAt: new Date().toISOString(), cpus: 16, load: null, memory: null, disk: { path: "/var/lib/nexus", totalGiB: 457.1, freeGiB: 180.33 }, temperatures: null, pylons: null }));
+  assert.match((await s.nexus(["node", node])).stdout, new RegExp(`\\nstuck: ${booting!.pylonId} booting since ${ago}, holding 2 CPUs and 4 GiB\\nstuck: ${gone!.pylonId} booting since ${ago}, its delete asked ${asked}, holding 2 CPUs and 4 GiB\\n$`));
 });
 
 test("nodes prints what an older probe does not count as unknown, never as 0, with --json or without", async (t) => {

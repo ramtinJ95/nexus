@@ -1956,12 +1956,47 @@ test("a node's tallies and room count each of its pylons by what it holds, and a
   const record = registry.nodes.node(node)!;
   assert.deepEqual(nodePylons(registry, record), {
     up: { pylons: 1, cpus: 2, memoryGiB: 4 }, paused: { pylons: 2, cpus: 4, memoryGiB: 8 }, archived: { pylons: 2, cpus: 4, memoryGiB: 8 },
-    crashed: { pylons: 1, cpus: 2, memoryGiB: 4 }, orphaned: ["pylon-gone", elsewhere],
+    crashed: { pylons: 1, cpus: 2, memoryGiB: 4 }, orphaned: ["pylon-gone", elsewhere], stuck: [],
   });
   assert.deepEqual(roomLeft(registry, node, record.observation!, capacity, { cpus: 1, memoryGiB: 1, diskGiB: 1 }), {
     pending: { cpus: 7, memoryGiB: 13, diskGiB: 11 },
     left: { cpus: 8, memoryGiB: 42, diskGiB: 388 },
   }, "a stopped pylon about to wake or be read holds its CPUs and memory again, an unreported one all it asked for, and a start placed here what it reserved");
+});
+
+test("a pylon booting, stopping or deleting 30 minutes is stuck, in no tally, from when its node first showed it so or its delete was asked for, across a reopen", async () => {
+  const { nodePylons } = await import("./placement.ts");
+  const path = tempDb();
+  const start = Date.parse("2027-01-01T00:00:00Z");
+  const clock = { now: start };
+  let registry = seed(openRegistry(path, () => clock.now));
+  const [booting, deleted, archived, healthy] = ["th-booting", "th-deleted", "th-disk", "th-healthy"].map((id) => addPylon(registry, id));
+  for (const id of ["th-booting", "th-deleted", "th-healthy"]) registry.threads.recordActivity(id as ThreadId, { human: start });
+  registry.threads.setThreadStatus("th-deleted" as ThreadId, "deleted");
+  registry.threads.setThreadStatus("th-disk" as ThreadId, "archived");
+  registry.threads.requestDiskDelete(archived!, "th-disk" as ThreadId);
+  const observe = (at: number, healthyPhase: "booting" | "running") => registry.threads.ingested(testObservation(node, {
+    observedAt: new Date(at).toISOString(), capacity,
+    pylons: [{ pylonId: booting!, phase: "booting" }, runningPylon(deleted!), stoppedPylon(archived!, { sessions: null }),
+      healthyPhase === "booting" ? { pylonId: healthy!, phase: "booting" } : runningPylon(healthy!)],
+  }), []);
+  observe(start, "booting");
+  observe(start + 20 * 60_000, "running");
+  clock.now = start + 29 * 60_000;
+  observe(clock.now, "booting");
+  assert.deepEqual(nodePylons(registry, registry.nodes.node(node)!)?.stuck, [], "29 minutes is not stuck");
+  registry.close();
+  registry = openRegistry(path, () => clock.now);
+  clock.now = start + 30 * 60_000;
+  observe(clock.now, "booting");
+  const tallies = nodePylons(registry, registry.nodes.node(node)!)!;
+  assert.deepEqual(tallies.stuck, [
+    { pylonId: booting, thread: "th-booting", doing: "booting", since: "2027-01-01T00:00:00.000Z", deleteAskedAt: null, cpus: 2, memoryGiB: 4 },
+    { pylonId: deleted, thread: "th-deleted", doing: "deleting", since: "2027-01-01T00:00:00.000Z", deleteAskedAt: "2027-01-01T00:00:00.000Z", cpus: 2, memoryGiB: 4 },
+    { pylonId: archived, thread: "th-disk", doing: "deleting", since: "2027-01-01T00:00:00.000Z", deleteAskedAt: "2027-01-01T00:00:00.000Z", cpus: 0, memoryGiB: 0 },
+  ], "a boot that ran again after it ran counts from its new start");
+  assert.deepEqual([tallies.up, tallies.archived], [{ pylons: 1, cpus: 2, memoryGiB: 4 }, { pylons: 0, cpus: 0, memoryGiB: 0 }]);
+  registry.close();
 });
 
 test("a usage limit reads each Claude thread's newest 16 entries, in threads() as in thread()", (t) => {

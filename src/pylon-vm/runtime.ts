@@ -56,14 +56,50 @@ export async function reportResume(
 	return true;
 }
 
-async function runToEnd(processes: GuestProcesses, pid: string): Promise<number | undefined> {
-	let result = await processes.status(pid, 60000);
-	while (result.running) {
+/**
+ * How long past its guest deadline the controller waits for a command's end. The guest's worker kills the command at
+ * the deadline and writes its end, so only a worker that never writes it, or a guest that stops answering, outlasts it.
+ */
+export const commandEndGraceMs = 30_000;
+/** The guest kills a boot hook after this. */
+const hookSeconds = 120;
+/** And setup after this. */
+const setupSeconds = 1200;
+
+/**
+ * Launches the command, logs its output to its end and returns its exit code. `what` fails after `limitMs` from before its
+ * launch whether or not the guest answers, which fails the boot, so its controller closes the VM and frees its room.
+ */
+async function runToEnd(processes: Pick<GuestProcesses, "status">, launch: () => Promise<string>, limitMs: number, what: string): Promise<number | undefined> {
+	const follow = (async () => {
+		const pid = await launch();
+		let result = await processes.status(pid, 60000);
+		while (result.running) {
+			console.log(result.output);
+			result = await processes.status(pid, 60000);
+		}
 		console.log(result.output);
-		result = await processes.status(pid, 60000);
+		return result.exitCode;
+	})();
+	// The boot's failure aborts the guest actions, which ends the follow once the race is lost.
+	follow.catch(() => {});
+	let timer: NodeJS.Timeout | undefined;
+	const expired = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new Error(`${what} did not finish within ${limitMs / 1000} s, so the boot failed. Its output so far is above`)), limitMs);
+	});
+	try {
+		return await Promise.race([follow, expired]);
+	} finally {
+		clearTimeout(timer);
 	}
-	console.log(result.output);
-	return result.exitCode;
+}
+
+/** Each boot hook in order, as root from /. One that exits non-zero is logged and does not fail the boot. */
+export async function runHooks(processes: GuestProcesses, hooks: readonly string[], limitMs = hookSeconds * 1000 + commandEndGraceMs): Promise<void> {
+	for (const [i, hook] of hooks.entries()) {
+		const exitCode = await runToEnd(processes, () => processes.launch(hook, "/", true, hookSeconds), limitMs, `Boot hook ${i + 1} of ${hooks.length}`);
+		if (exitCode !== 0) console.error(`Boot hook exited ${exitCode}`);
+	}
 }
 
 /**
@@ -240,10 +276,7 @@ export class SandboxRuntime {
 			},
 			...this.spec.files,
 		], this.stopping.signal);
-		for (const hook of this.spec.hooks) {
-			const exitCode = await runToEnd(this.processes, await this.processes.launch(hook, "/", true, 120));
-			if (exitCode !== 0) console.error(`Boot hook exited ${exitCode}`);
-		}
+		await runHooks(this.processes, this.spec.hooks);
 		const marker = resume ? ((await readGuestFile(vm, setupMarker, this.stopping.signal))?.toString("utf8") ?? null) : null;
 		const done = setupOnDisk(marker, this.record);
 		this.setupRecorded = done !== null;
@@ -251,7 +284,8 @@ export class SandboxRuntime {
 		if (done === null) {
 			const setup = config.setup;
 			if (setup.length) {
-				const exitCode = await runToEnd(this.processes, await this.processes.launch(chained(setup), config.workspace, true, 1200));
+				const processes = this.processes;
+				const exitCode = await runToEnd(processes, () => processes.launch(chained(setup), config.workspace, true, setupSeconds), setupSeconds * 1000 + commandEndGraceMs, "Setup");
 				if (exitCode !== 0) {
 					this.failures.push({ kind: "setup", message: setupExited(exitCode) });
 					if (prepare) throw new Error(this.setupError);

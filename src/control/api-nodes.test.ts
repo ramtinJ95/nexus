@@ -16,7 +16,7 @@ test("nodes are listed with their state and capacity, without the observation", 
   const none = { pylons: 0, cpus: 0, memoryGiB: 0 };
   s.registry.threads.apply({ record: "node", node, state: "online", capacity });
   s.registry.threads.ingested(testObservation(node, { observedAt: "2027-01-01T00:01:00Z" }), []);
-  assert.deepEqual((await s.call("GET", "/v1/nodes")).body, [{ ...offline, state: "online", capacity, observedAt: "2027-01-01T00:01:00Z", pylons: { up: none, paused: none, archived: none, crashed: none, orphaned: [] } }]);
+  assert.deepEqual((await s.call("GET", "/v1/nodes")).body, [{ ...offline, state: "online", capacity, observedAt: "2027-01-01T00:01:00Z", pylons: { up: none, paused: none, archived: none, crashed: none, orphaned: [], stuck: [] } }]);
 });
 
 test("nodes report whether they are overcommitted, and their observed pylons as up, paused, archived, crashed and orphaned", async (t) => {
@@ -38,7 +38,7 @@ test("nodes report whether they are overcommitted, and their observed pylons as 
   assert.equal(of("a").overcommitted, true);
   assert.deepEqual(of("a").pylons, {
     up: { pylons: 2, cpus: 6, memoryGiB: 12 }, paused: { pylons: 1, cpus: 2, memoryGiB: 4 }, archived: { pylons: 2, cpus: 4, memoryGiB: 8 },
-    crashed: { pylons: 1, cpus: 2, memoryGiB: 4 }, orphaned: ["pylon-gone"],
+    crashed: { pylons: 1, cpus: 2, memoryGiB: 4 }, orphaned: ["pylon-gone"], stuck: [],
   }, "a VM whose service failed still holds its CPUs and memory, one whose controller exited holds only its disk, and with its thread archived it waits for an unarchive, not a retry");
   assert.deepEqual([of(node).overcommitted, of(node).pylons], [false, null], "a node never observed has no pylons to report");
 });

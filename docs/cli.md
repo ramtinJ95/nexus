@@ -681,7 +681,7 @@ Plain `show` prints it after the pylon and size lines, such as `placement: rj-fi
 
 Committed CPUs and memory count every VM on the node whose controller is alive: running and booting pylons, check and reviewer threads, and orphaned VMs that the registry has not placed there. `NodeSummary.overcommitted` is true when the probe's committed memory exceeds the node's memory, and false for a node never observed or whose probe predates the count. `NodeSummary.pylons` sorts the pylons in the node's latest observation by what they hold, and is null for a node never observed:
 
-<!-- types: src/control/placement.ts Tally NodePylons -->
+<!-- types: src/control/placement.ts Tally NodePylons StuckPylon -->
 ```ts
 // src/control/placement.ts
 interface Tally { pylons: number; cpus: number; memoryGiB: number }
@@ -693,10 +693,20 @@ interface Tally { pylons: number; cpus: number; memoryGiB: number }
  * its thread archived or deleted, holds only its disk and boots only once the thread is unarchived. An orphaned VM is
  * one the registry has not placed on the node, whose CPUs and memory the control plane does not know.
  */
-interface NodePylons { up: Tally; paused: Tally; archived: Tally; crashed: Tally; orphaned: readonly PylonId[] }
+interface NodePylons { up: Tally; paused: Tally; archived: Tally; crashed: Tally; orphaned: readonly PylonId[]; stuck: readonly StuckPylon[] }
+/**
+ * A pylon in no tally because it has been booting, stopping or deleting at least `stuckAfterMs`, with what it holds.
+ * `doing` is the phase the node shows it in, since `since`, or `deleting` when the node shows none. A delete counts from
+ * `deleteAskedAt`, the thread's delete or its archived disk's, as pylon-vm shows a pylon it deletes in the phase it was in.
+ */
+interface StuckPylon {
+  pylonId: PylonId; thread: string; doing: "booting" | "stopping" | "deleting"; since: string; deleteAskedAt: string | null; cpus: number; memoryGiB: number;
+}
 ```
 
 A tally's CPUs and memory are what each pylon's boot asked for. Plain `nodes` prints the classes that have pylons on a line under the node, such as `  pylons: 5 up holding 20 CPUs and 40 GiB, 1 paused needing 8 GiB to wake, 3 archived, 1 crashed needing 8 GiB to retry, 1 orphaned (pylon-x)`.
+
+A pylon that has been booting, stopping or deleting for 30 minutes (`stuckAfterMs`) is in `stuck` and in no tally, with the CPUs and memory it holds while its VM is up. A boot, a stop or the probe's delete counts from the first observation that showed the pylon in that phase, which the registry keeps across restarts, and a delete also from when it was asked for: the thread's delete, or the delete of an archived thread's disk. A fresh boot's setup may run 20 minutes, so a pylon booting longer is not plainly up. pylon-vm shows a pylon it deletes in the phase it was in, so a delete held up by a hung boot is `booting` with its `deleteAskedAt`. Plain `nodes` prints them first, such as `  pylons: 1 stuck (pylon-th-038ccadf3f3c booting since 23h ago (2026-11-13 20:04), its delete asked 16h ago (2026-11-14 02:31), holding 2 CPUs and 4 GiB), 5 up holding 20 CPUs and 40 GiB`, plain `node` ends with a `stuck:` line for each, and `doctor`'s `pylons` check warns, naming each with its thread. A server older than 0.88.0 sends no `stuck`, and the CLI prints none.
 
 ### A thread's size
 

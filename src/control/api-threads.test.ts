@@ -14,6 +14,8 @@ import { processStream } from "../process-stream.ts";
 import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../test-support/kit.ts";
 import { addThread, observeNode, seedRegistry } from "../test-support/registry-kit.ts";
 import type { JobId, NodeName, TailnetNodeId } from "../ids.ts";
+import { envelope } from "./reconcile.ts";
+import type { Job } from "../protocol/jobs.ts";
 import { bootHooks } from "../backends/pylon-boot.ts";
 import { node, laptop, project, image, dotfiles, withThread, withImage, withQueue, localCheckout } from "../test-support/api-kit.ts";
 
@@ -78,6 +80,7 @@ test("thread detail derives the actual state from the node's last observation", 
   const running = runningPylon(thread.pylonId, { liveHash: pylon.liveHash, bootedFrom: { image: image.id, checkpoint: null } });
   s.registry.threads.ingested(testObservation(node, { observedAt: "2027-01-01T00:01:00Z", pylons: [running] }), []);
   const pause = { jobId: "job-1" as JobId, subject: thread.pylonId, kind: "pause" as const };
+  s.registry.threads.savePylon({ ...pylon, submitted: sent({ kind: "pause", pylonId: thread.pylonId, checkpoint: "ckpt-x-1" }, pause.jobId) });
   s.registry.threads.apply({ record: "job", status: { ...pause, state: "running", startedAt: "2027-01-01T00:00:59Z" } });
   s.registry.threads.apply({ record: "sessions", pylonId: thread.pylonId, sessions: [{ id: "p1", state: "running", terminal: "p1", harness: "pi", harnessSessionId: null, status: "idle", title: "plan", message: null }] });
   s.registry.threads.apply({ record: "output", pylonId: thread.pylonId, kind: "branch", ref: "nexus/fix" });
@@ -97,6 +100,27 @@ test("thread detail derives the actual state from the node's last observation", 
   assert.equal((await detail()).pylon.actualState, "unknown");
 });
 
+/** The envelope the tick saves before it sends `job`, under `jobId`. */
+const sent = (job: Job, jobId: JobId) => ({ ...envelope(job, node, Date.now()), jobId });
+
+test("a delete the probe forgot, whose row still says running, shows the pylon as its node reports it, not as deleting", async (t) => {
+  const s = await withThread(t);
+  const { thread } = s;
+  const detail = async () => (await s.call("GET", `/v1/threads/${thread.id}`)).body as ThreadDetail;
+  const row = async () => ((await s.call("GET", "/v1/threads?deleted=true")).body as ThreadRow[]).find((r) => r.id === thread.id)!;
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  await s.call("DELETE", `/v1/threads/${thread.id}`);
+  const del = { jobId: "job-lost" as JobId, subject: thread.pylonId, kind: "delete" as const };
+  s.registry.threads.savePylon({ ...s.registry.threads.pylon(thread.pylonId)!, submitted: sent({ kind: "delete", pylonId: thread.pylonId }, del.jobId) });
+  s.registry.threads.apply({ record: "job", status: { ...del, state: "running", startedAt: "2027-01-01T00:00:00Z" } });
+  s.registry.threads.ingested(testObservation(node, { observedAt: "2027-01-01T00:00:06Z" }), []);
+  assert.equal((await detail()).pylon.actualState, "deleting");
+  // A probe restart lost the job, so the tick dropped the envelope and the row was never told how it ended.
+  s.registry.threads.savePylon({ ...s.registry.threads.pylon(thread.pylonId)!, submitted: null });
+  assert.equal((await detail()).pylon.actualState, "absent");
+  assert.equal((await row()).pylon.actualState, "absent", "the list says what the detail says");
+});
+
 test("a failed pylon shows failed with its reason until its thread is deleted, and then shows the delete", async (t) => {
   const s = await withThread(t);
   const { thread } = s;
@@ -110,6 +134,7 @@ test("a failed pylon shows failed with its reason until its thread is deleted, a
 
   await s.call("DELETE", `/v1/threads/${thread.id}`);
   const del = { jobId: "job-del" as JobId, subject: thread.pylonId, kind: "delete" as const };
+  s.registry.threads.savePylon({ ...s.registry.threads.pylon(thread.pylonId)!, submitted: sent({ kind: "delete", pylonId: thread.pylonId }, del.jobId) });
   s.registry.threads.apply({ record: "job", status: { ...del, state: "running", startedAt: "2027-01-01T00:00:00Z" } });
   assert.equal((await detail()).pylon.actualState, "deleting");
   s.registry.threads.apply({ record: "job", status: { ...del, state: "succeeded", finishedAt: "2027-01-01T00:00:05Z" } });
@@ -159,6 +184,7 @@ test("each row of the list says what its thread's detail says, over threads on t
   s.registry.threads.setThreadStatus(archived.id, "archived");
   s.registry.threads.setThreadStatus(deleted.id, "deleted");
   s.registry.threads.recordReply(running.id, Date.now());
+  s.registry.threads.savePylon({ ...s.registry.threads.pylon(pausing.pylonId)!, submitted: sent({ kind: "pause", pylonId: pausing.pylonId, checkpoint: "ckpt-x-1" }, "job-1" as JobId) });
   s.registry.threads.apply({ record: "job", status: { jobId: "job-1" as JobId, subject: pausing.pylonId, kind: "pause", state: "running", startedAt: "2027-01-01T00:00:00Z" } });
   observeNode(s.registry, { node, pylons: [runningPylon(running.pylonId), runningPylon(pausing.pylonId)] });
   observeNode(s.registry, { node: bench, pylons: [stoppedPylon(archived.pylonId)] });

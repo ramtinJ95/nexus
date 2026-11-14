@@ -49,7 +49,8 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
     const pylon = registry.threads.pylon(t.pylonId)!;
     const node = registry.nodes.node(pylon.node)!;
     const observed = observedPylon({ nodes: { node: () => node } }, pylon) ?? "absent";
-    return { pylon, node, observed, actualState: actualState(observed, registry.threads.job(pylon.pylonId) ?? null, node.state === "online", gaveUp(t, pylon.failed)) };
+    const job = registry.threads.job(pylon.pylonId);
+    return { pylon, node, observed, actualState: actualState(observed, job?.jobId === pylon.submitted?.jobId ? job ?? null : null, node.state === "online", gaveUp(t, pylon.failed)) };
   }
 
   function pylonOf({ pylon, node, observed, actualState }: ReturnType<typeof pylonState>, project: Project): ThreadDetail["pylon"] {

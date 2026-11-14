@@ -554,6 +554,10 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     requestDiskDelete(pylonId: PylonId, thread: ThreadId) {
       sql("INSERT OR IGNORE INTO disk_cleanups (pylon, thread, requested_at) VALUES (?, ?, ?)").run(pylonId, thread, clock());
     },
+    /** When the delete of each pylon on `node` the planner deletes was asked for: its thread's delete, or its archived disk's. */
+    deletesAskedOn: (node: NodeName): ReadonlyMap<PylonId, number> => new Map(sql(`SELECT p.id, coalesce(d.requested_at, t.deleted_at) AS at FROM pylons p
+      JOIN threads t ON t.id = p.thread LEFT JOIN disk_cleanups d ON d.pylon = p.id WHERE p.node = ? AND (t.status = 'deleted' OR t.status = 'archived' AND d.pylon IS NOT NULL)`)
+      .all(node).flatMap((r) => r.at === null ? [] : [[r.id as PylonId, r.at as number]])),
     diskDeleteRequestedAt: (pylonId: PylonId): number | undefined => sql("SELECT requested_at FROM disk_cleanups WHERE pylon = ?").get(pylonId)?.requested_at as number | undefined,
     /**
      * Once the node no longer has the pylon, the disk took the Claude transcript and whatever failed on it. The thread's
@@ -934,8 +938,10 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
 
     /** What a list row shows of each pylon and its thread, in one query that leaves the boot and live specs unread. */
     listedPylons(pylons: readonly PylonId[]): Map<PylonId, ListedPylon> {
+      // A job's row stays as the probe last reported it, which is running for one the probe forgot, as in a restart. The
+      // pylon's job is in flight only while it is the one the record says it submitted.
       return new Map(sql(`SELECT p.id, p.node, p.failed, j.status AS job, a.attention FROM pylons p
-        LEFT JOIN jobs j ON j.subject = p.id LEFT JOIN thread_attention a ON a.thread = p.thread WHERE p.id IN (SELECT value FROM json_each(?))`)
+        LEFT JOIN jobs j ON j.subject = p.id AND j.job_id = json_extract(p.submitted, '$.jobId') LEFT JOIN thread_attention a ON a.thread = p.thread WHERE p.id IN (SELECT value FROM json_each(?))`)
         .all(JSON.stringify(pylons)).map((r) => [r.id as PylonId, {
           node: r.node as NodeName, failed: r.failed as string | null, job: jsonOrNull<JobStatus>(r.job), attention: (r.attention ?? null) as Attention,
         }]));
@@ -949,7 +955,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     ingested(observation: NodeObservation | null, writes: readonly RegistryWrite[]) {
       if (observation === null && writes.length === 0) return;
       transaction(() => {
-        if (observation !== null) nodes.saveObservation(observation);
+        if (observation !== null) nodes.saveObservation(observation, clock());
         for (const write of writes) apply(write);
       });
     },

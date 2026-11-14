@@ -8,7 +8,8 @@ import { join } from "node:path";
 import { fakeVm, type WritePhase } from "./fake-vm.ts";
 import { execute } from "./guest.ts";
 import { networkOptions } from "./network.ts";
-import { loadKvm, readIntent, reportResume, SandboxRuntime, setupMarkerOf, setupOnDisk } from "./runtime.ts";
+import { loadKvm, readIntent, reportResume, runHooks, SandboxRuntime, setupMarkerOf, setupOnDisk } from "./runtime.ts";
+import { GuestProcesses } from "./processes.ts";
 
 type Status = Awaited<ReturnType<Parameters<typeof reportResume>[0]["status"]>>;
 
@@ -106,6 +107,23 @@ test("only a boot that asks for nested virtualization runs the image's KVM step,
 	assert.equal(bootSchema.parse({ ...spec, resources: { cpus: 2, memoryGiB: 4, nestedVirtualization: true } }).resources.nestedVirtualization, true);
 	assert.equal(bootSchema.parse({ ...spec, resources: { cpus: 2, memoryGiB: 4 } }).resources.nestedVirtualization, undefined);
 	assert.throws(() => bootSchema.parse({ ...spec, resources: { cpus: 2, memoryGiB: 4, nestedVirtualization: false } }), "a pylon asks by setting it, so there is one way not to");
+});
+
+test("a boot hook whose end the guest never reports fails the boot at its deadline, with the hook named", async (t) => {
+	const stopping = new AbortController();
+	t.after(() => stopping.abort());
+	const fake = fakeVm();
+	const processes = new GuestProcesses(fake.vm, stopping.signal);
+	await assert.rejects(runHooks(processes, ["echo 'herdr-core: running'"], 200), /^Error: Boot hook 1 of 1 did not finish within 0\.2 s, so the boot failed/);
+	assert.ok(fake.commands.some((cmd) => cmd.includes("herdr-core: running")), "the hook was launched in the guest");
+});
+
+test("a boot hook whose launch the guest never answers fails the boot at the same deadline", async (t) => {
+	const stopping = new AbortController();
+	t.after(() => stopping.abort());
+	const fake = fakeVm((path) => (path.endsWith("/worker.py") ? "answering" : undefined));
+	const processes = new GuestProcesses(fake.vm, stopping.signal);
+	await assert.rejects(runHooks(processes, ["true"], 200), /^Error: Boot hook 1 of 1 did not finish within 0\.2 s, so the boot failed/);
 });
 
 /** A running instance on a fake VM whose file writes to paths `holds` names hold in `phase`. */
