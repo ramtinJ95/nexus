@@ -1664,6 +1664,18 @@ test("the migration that records settles leaves every archive before it unsettle
   assert.deepEqual(upgraded.threads.thread(threadId)!.settleFailure, { reason: "its pylon failed: boom", at: 4_000, count: 1 });
 });
 
+test("an archived thread's failed pylon waits for no one, but a disk delete the planner gave up on raises its attention", (t) => {
+  const registry = seeded(t, tempDb());
+  registry.threads.setThreadStatus(threadId, "archived");
+  const failure = (job: "spawn" | "delete", count = 5) => ({ count, last: { at: 1, code: "deadline" as const, message: `${job} passed its deadline`, job } });
+  registry.threads.savePylon({ ...pylon, failed: "gave up after 5 failed attempts", attempts: failure("spawn") });
+  assert.equal(registry.threads.attention(threadId), null);
+  registry.threads.savePylon({ ...pylon, failed: "gave up after 5 failed attempts", attempts: failure("delete", 4) });
+  assert.equal(registry.threads.attention(threadId), null, "a boot's verdict stays quiet while its disk's delete has tries left");
+  registry.threads.savePylon({ ...pylon, failed: "gave up deleting after 5 failed attempts", attempts: failure("delete") });
+  assert.equal(registry.threads.attention(threadId), "failed");
+});
+
 test("judgments begin at the newest event, so failures from before are never judged, and a rewound registry keeps that watermark", (t) => {
   const path = tempDb();
   const registry = seed(openRegistry(path));
