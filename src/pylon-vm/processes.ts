@@ -24,7 +24,7 @@ const worker = [
 	` open(path+'/output','wb').write(str(e).encode()[:${execOutputMaxBytes}]); open(path+'/done.tmp','w').write(json.dumps({'exitCode':127,'truncated':False})); os.rename(path+'/done.tmp',path+'/done'); sys.exit(0)`,
 	"open(path+'/pid.tmp','w').write(str(p.pid)); os.rename(path+'/pid.tmp',path+'/pid')",
 	"os.set_blocking(p.stdout.fileno(),False)",
-	"size=0; truncated=False; started=time.monotonic(); expired=False; killed=None",
+	"size=0; truncated=False; full=False; started=time.monotonic(); expired=False; killed=None",
 	"with open(path+'/output','wb',buffering=0) as out:",
 	" while True:",
 	"  select.select([p.stdout],[],[],0.05)",
@@ -32,8 +32,13 @@ const worker = [
 	"  except BlockingIOError: data=b''",
 	"  if not data: time.sleep(0.05)",
 	"  if data:",
-	`   room=max(0,${execOutputMaxBytes}-size); out.write(data[:room]); size+=min(room,len(data)); truncated=truncated or len(data)>room`,
-	"   if truncated and not os.path.exists(path+'/truncated'): open(path+'/truncated','w').close()",
+	`   room=0 if full else max(0,${execOutputMaxBytes}-size)`,
+	"   try: out.write(data[:room])",
+	"   except OSError: full=True; room=0",
+	"   size+=min(room,len(data)); truncated=truncated or len(data)>room",
+	"   try:",
+	"    if truncated and not os.path.exists(path+'/truncated'): open(path+'/truncated','w').close()",
+	"   except OSError: pass",
 	"  if killed is None and os.path.exists(path+'/kill'):",
 	"   killed=time.monotonic()",
 	"   try: os.killpg(p.pid,signal.SIGTERM)",
@@ -66,12 +71,14 @@ const worker = [
 	"   except ChildProcessError: break",
 	"  time.sleep(0.01)",
 	"p.wait()",
-	"with open(path+'/output','ab',buffering=0) as out:",
-	" for attempt in range(4):",
-	"  try: data=os.read(p.stdout.fileno(),65536)",
-	"  except BlockingIOError: break",
-	"  if not data: break",
-	`  room=max(0,${execOutputMaxBytes}-size); out.write(data[:room]); size+=min(room,len(data)); truncated=truncated or len(data)>room`,
+	"try:",
+	" with open(path+'/output','ab',buffering=0) as out:",
+	"  for attempt in range(4):",
+	"   try: data=os.read(p.stdout.fileno(),65536)",
+	"   except BlockingIOError: break",
+	"   if not data: break",
+	`   room=0 if full else max(0,${execOutputMaxBytes}-size); out.write(data[:room]); size+=min(room,len(data)); truncated=truncated or len(data)>room`,
+	"except OSError: truncated=True",
 	"p.stdout.close()",
 	"code=124 if expired else (p.returncode if p.returncode>=0 else 128-p.returncode)",
 	"open(path+'/done.tmp','w').write(json.dumps({'exitCode':code,'truncated':truncated}))",
@@ -81,15 +88,24 @@ const worker = [
  * argv: the command's directory, then the worker's. It makes the directory and leaves the worker running on its own,
  * without the launch's guest command mark, so a kill of a launch that got no answer leaves the command it started.
  */
-const launcher = "import os,subprocess,sys; os.mkdir(sys.argv[1],0o700); os.environ.pop('NEXUS_GUEST_COMMAND',None); subprocess.Popen(['python3']+sys.argv[2:],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)";
+const launcher = "import os,subprocess,sys; os.mkdir(sys.argv[1],0o700); os.environ.pop('NEXUS_GUEST_COMMAND',None); print(subprocess.Popen(['python3']+sys.argv[2:],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True).pid)";
 
 type Command = {
 	path: string;
+	/** The guest PID of the command's supervisor, the worker, as its launcher printed it. */
+	supervisor?: number;
 	offset: number;
 	decoder: StringDecoder;
 	final?: { exitCode: number; truncated: boolean };
 	cursor: Promise<unknown>;
 };
+
+/** A command whose supervisor exited before it wrote how the command ended, as one does when the guest's disk is full. */
+export class SupervisorDied extends Error {
+	constructor(disk: string) {
+		super(`The guest's command supervisor exited before it recorded how the command ended, so the command is taken as failed: ${disk}. A full disk ends it so`);
+	}
+}
 
 // Only the short launcher is a guest command. Long waits never hold Gondolin's
 // foreground exec/file-RPC lock. Handles belong to this controller lifetime.
@@ -150,8 +166,10 @@ export class GuestProcesses {
 			await new Promise((accept) => setTimeout(accept, 50));
 		}
 		z.number().int().positive().parse(Number(pid.toString("utf8")));
+		const supervisor = Number(started.stdout.trim());
 		this.commands.set(handle, {
 			path,
+			...(Number.isInteger(supervisor) && supervisor > 0 ? { supervisor } : {}),
 			offset: 0,
 			decoder: new StringDecoder("utf8"),
 			cursor: Promise.resolve(),
@@ -202,6 +220,11 @@ export class GuestProcesses {
 			if (done !== null || command.final || Date.now() >= deadline) break;
 			await new Promise((accept) => setTimeout(accept, 100));
 		}
+		// Only the supervisor writes done, so one that died, as on a full disk, leaves its command running for good.
+		if (done === null && !command.final && !(await this.supervised(command))) {
+			done = await this.read(`${command.path}/done`);
+			if (done === null) throw new SupervisorDied(await this.diskFree());
+		}
 		const consume = command.cursor
 			.catch(() => {})
 			.then(async () => {
@@ -234,6 +257,23 @@ export class GuestProcesses {
 		// The output is consumed and its directory gone, so a failed prune must not lose the result. The next launch prunes again.
 		if (!result.running) await this.pruneCompleted().catch((error: unknown) => console.error(error));
 		return result;
+	}
+	/** Whether the command's supervisor still runs: its PID is alive with the command's directory on its command line. */
+	private async supervised(command: Command): Promise<boolean> {
+		if (command.supervisor === undefined) return true;
+		const alive = await direct(this.vm, ["grep", "-qF", command.path, `/proc/${command.supervisor}/cmdline`], 5000);
+		return alive.exitCode === 0;
+	}
+	/** The guest root filesystem's free space, as `df` reports it, or why it could not be read. */
+	private async diskFree(): Promise<string> {
+		try {
+			const df = await direct(this.vm, ["df", "-Pk", "/"], 5000);
+			const [, size, , avail] = df.stdout.trim().split("\n").at(-1)?.split(/\s+/) ?? [];
+			const gib = (k: string | undefined) => (Number(k) / 2 ** 20).toFixed(1);
+			return size === undefined || Number.isNaN(Number(size)) ? `its disk's free space is unknown` : `its disk has ${gib(avail)} of ${gib(size)} GiB free`;
+		} catch (error) {
+			return `its disk's free space could not be read: ${error instanceof Error ? error.message : String(error)}`;
+		}
 	}
 	async kill(pid: string): Promise<unknown> {
 		const command = this.commands.get(pid);
