@@ -44,9 +44,9 @@ test("a template boot's checkout of a commit a force-push took off its remote fa
   assert.equal(await git(template, "rev-parse", "HEAD"), newHead);
 });
 
-test("a fresh clone and a template checkout fetch the pylon's branch and commit, never a large branch beside it, nor does a later fetch", async (t) => {
+test("a fresh clone and a template checkout fetch the pylon's branch and commit, never a large branch beside it, and a branch gone from the remote leaves its commit", async (t) => {
   const dir = await tempDir("nexus-pylon-boot-", t);
-  const [remote, work, template, fresh] = ["remote.git", "work", "template", "fresh"].map((name) => join(dir, name)) as [string, string, string, string];
+  const [remote, work, template, fresh, orphan] = ["remote.git", "work", "template", "fresh", "orphan"].map((name) => join(dir, name)) as [string, string, string, string, string];
   await run("git", ["init", "--quiet", "--bare", "--initial-branch=main", remote]);
   await run("git", ["clone", "--quiet", remote, work]);
   await git(work, "commit", "--quiet", "--allow-empty", "-m", "base");
@@ -63,17 +63,20 @@ test("a fresh clone and a template checkout fetch the pylon's branch and commit,
   await git(work, "push", "--quiet", "origin", "HEAD:pr-assets");
   const assets = await git(work, "rev-parse", "HEAD:assets.bin");
   const holds = (repo: string, object: string) => sh(`git -C ${repo} cat-file -e ${object}`).then((code) => code === 0);
+  const url = `file://${remote}`;
 
-  assert.equal(await sh(repoInitCommand({ kind: "clone", url: `file://${remote}`, checkout: { branch: "main", commit: head } }, fresh)), 0);
-  assert.equal(await sh(templateCheckout({ kind: "clone", url: remote, checkout: { branch: "main", commit: head } }, template)), 0);
+  assert.equal(await sh(repoInitCommand({ kind: "clone", url, checkout: { branch: "main", commit: "origin/main" } }, fresh)), 0);
+  assert.equal(await sh(templateCheckout({ kind: "clone", url, checkout: { branch: "main", commit: head } }, template)), 0);
   for (const repo of [fresh, template]) {
     assert.equal(await git(repo, "rev-parse", "HEAD"), head);
     assert.equal(await holds(repo, assets), false, `${repo} fetched the large branch`);
-    await git(repo, "fetch", "--quiet", "origin");
-    assert.equal(await holds(repo, assets), false, `a later fetch in ${repo} took the large branch`);
+    await git(repo, "push", "--quiet", "origin", "HEAD:refs/heads/nexus/fix");
+    assert.equal(await git(repo, "rev-parse", "origin/nexus/fix"), head, "a push records its remote-tracking branch, which the pylon's outputs read");
     await git(repo, "fetch", "--quiet", "origin", "pr-assets");
     assert.equal(await holds(repo, assets), true, "a branch asked for by name is fetched");
   }
+  assert.equal(await sh(repoInitCommand({ kind: "clone", url, checkout: { branch: "deleted", commit: head } }, orphan)), 0, "a branch the remote lost leaves its commit to fetch");
+  assert.equal(await git(orphan, "rev-parse", "HEAD"), head);
 });
 
 test("a template checkout warns when setup's packages may be stale and the repository has no resume hook", async (t) => {

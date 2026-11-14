@@ -83,9 +83,9 @@ export function repoInitCommand(repo: RepoInit, dir = checkoutDir): string {
   switch (repo.kind) {
     case "clone": {
       const [git, commit] = [`git -C ${q(dir)}`, q(repo.checkout.commit)];
-      return `git clone --quiet --no-checkout --single-branch --branch ${q(repo.checkout.branch)} ${q(repo.url)} ${q(dir)}`
+      return `git init --quiet ${q(dir)} && ${git} remote add origin ${q(repo.url)} && ${fetchBranch(git, repo.checkout.branch)}`
         + ` && { ${git} cat-file -e ${commit}^{commit} 2>/dev/null || ${git} fetch --quiet origin ${commit}; }`
-        + ` && ${git} checkout -B ${q(repo.checkout.branch)} ${commit} && ${recordBase(dir, "HEAD")}`;
+        + ` && ${git} checkout --quiet -B ${q(repo.checkout.branch)} ${commit} && ${recordBase(dir, "HEAD")}`;
     }
     case "empty": return `git init --quiet --initial-branch=${q(repo.branch)} ${q(dir)} && ${recordBase(dir, `"$(git -C ${q(dir)} hash-object -t tree -w /dev/null)"`)}`;
   }
@@ -93,11 +93,12 @@ export function repoInitCommand(repo: RepoInit, dir = checkoutDir): string {
 
 /**
  * A pylon's checkout fetches its own branch, and its commit when no fetched branch has it, never every branch: on
- * 2026-11-13 a repository's media branch of several GiB filled a fresh pylon's 10 GiB disk during its fetch. A clone
- * with --single-branch fetches the same way, and a later `git fetch` in the pylon keeps to it. Another branch takes a
- * `git fetch origin <branch>` of its own.
+ * 2026-11-13 a repository's media branch of several GiB filled a fresh pylon's 10 GiB disk during its fetch. The remote
+ * keeps git's own fetch refspec, so a push records its remote-tracking branch and `git fetch origin <branch>` brings any
+ * other. A branch the remote no longer has leaves only the commit to fetch.
  */
-const onlyBranch = (branch: string) => `+refs/heads/${branch}:refs/remotes/origin/${branch}`;
+const fetchBranch = (git: string, branch: string) =>
+  `{ ${git} fetch --quiet origin ${q(branch)} || echo ${q(`setup: no fetch of ${branch} from origin, so only its commit is fetched`)}; }`;
 
 /** What a template boot's checkout exits with when the remote it fetched does not have its commit, which no retry changes. */
 export const commitMissing = 66;
@@ -111,7 +112,7 @@ export function templateCheckout({ url, checkout }: CloneRepo, dir = checkoutDir
   const [commit, git] = [q(checkout.commit), `git -C ${q(dir)}`];
   return [
     `templateCommit=$(${git} rev-parse HEAD)`,
-    `${git} remote set-url origin ${q(url)} && ${git} config remote.origin.fetch ${q(onlyBranch(checkout.branch))} && { ${git} fetch --quiet origin || echo ${q(`setup: no fetch of ${checkout.branch} from origin, so only its commit is fetched`)}; }`,
+    `${git} remote set-url origin ${q(url)} && ${fetchBranch(git, checkout.branch)}`,
     `{ ${git} cat-file -e ${commit}^{commit} 2>/dev/null || fetched=$(${git} fetch --quiet origin ${commit} 2>&1) || { echo "$fetched"; case $fetched in *"not our ref"*|*"unadvertised object"*) echo ${q(`${checkout.commit} is not on ${url}`)}; exit ${commitMissing};; esac; exit 1; }; }`,
     `${git} checkout --quiet -B ${q(checkout.branch)} ${commit} && ${recordBase(dir, "HEAD")}`,
     `checkoutCommit=$(${git} rev-parse HEAD)`,

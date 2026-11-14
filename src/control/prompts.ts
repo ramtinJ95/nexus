@@ -40,13 +40,15 @@ const findingLine = (f: Finding) => `${f.id} (${f.priority})${f.where ? ` ${f.wh
 
 const dependencyCheck = `Before running tests after each checkout, verify installed dependencies match this commit's lockfiles. A template can contain packages from an older commit: .nexus/setup does not rerun on a template boot. The repository's .nexus/resume is its refresh hook after a template checkout and on wake; boot waits only 10 seconds for it, so it may still be running or may have failed. Read the repository's refresh instructions, wait for any ongoing install, run the documented dependency refresh when needed, and check it succeeded before testing. Do not rerun once-only setup blindly. If no refresh is documented, inspect the package manager and lockfiles and install the locked dependencies. If grants or tooling prevent this, report the tests as blocked by the environment, not as a code regression or a passed validation. Ask the person to add a lockfile-aware .nexus/resume or lockfiles to the project's templateInputs where appropriate.`;
 
+// A reviewer fetches the base and the head by name, never every branch, so a repository's other branches, as a media
+// branch of several GiB, never fill its pylon's disk.
 /** The first request to a reviewer on `model`, which is the same for either reviewer, so neither hears of the other. */
 export function reviewerRequest(r: Pick<Review, "pr" | "models" | "brief">, detail: Pick<PrSnapshot["detail"], "head" | "base" | "body">, token: string, model: string): string {
   return `${senders.review.prefix}
 You are the independent reviewer of pull request #${r.pr.number}, "${r.pr.title}" (${r.pr.url}). An agent on ${r.models.builder} wrote it; you run on ${model}. Review only. Do not push, change the branch, or comment on GitHub. Your findings go to the builder, who answers each, and you review its new commits in later rounds.
 
 Fetch and check out the head, then review the change against its base:
-  git fetch origin && git checkout --detach ${detail.head}
+  git fetch origin ${detail.base} ${detail.head} && git checkout --detach ${detail.head}
   git diff origin/${detail.base}...${detail.head}
 
 ${dependencyCheck}
@@ -143,9 +145,9 @@ export function nextRound(r: Review, previous: Round, token: string, base: strin
   // A rebase rewrites the commits, so a diff from the old head would show the base's own changes as the builder's, and
   // after a retarget it would leave out what the new base adds to the merge.
   const rewritten = retargeted || previous.conflict !== undefined || previous.answers === null;
-  const review = head === previous.head ? retargeted ? `Review the head against the new base:\n  git fetch origin && git checkout --detach ${head}\n  git diff origin/${base}...${head}` : `It pushed nothing, so the head is still ${head}.`
-    : rewritten ? `Review the new head against the base, and compare its commits with the ones you reviewed:\n  git fetch origin && git checkout --detach ${head}\n  git diff origin/${base}...${head}\n  git range-diff origin/${base} ${previous.head} ${head}`
-    : `Review the new commits:\n  git fetch origin && git checkout --detach ${head}\n  git diff ${previous.head}..${head}`;
+  const review = head === previous.head ? retargeted ? `Review the head against the new base:\n  git fetch origin ${base} ${head} && git checkout --detach ${head}\n  git diff origin/${base}...${head}` : `It pushed nothing, so the head is still ${head}.`
+    : rewritten ? `Review the new head against the base, and compare its commits with the ones you reviewed:\n  git fetch origin ${base} ${head} && git checkout --detach ${head}\n  git diff origin/${base}...${head}\n  git range-diff origin/${base} ${previous.head} ${head}`
+    : `Review the new commits:\n  git fetch origin ${base} ${head} && git checkout --detach ${head}\n  git diff ${previous.head}..${head}`;
   return `${senders.review.prefix}
 Round ${n} of at most ${r.maxRounds}. ${answered}${alsoRetargeted}
 
