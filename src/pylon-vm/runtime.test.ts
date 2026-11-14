@@ -124,6 +124,8 @@ test("a boot hook whose launch the guest never answers fails the boot at the sam
 	const fake = fakeVm((path) => (path.endsWith("/worker.py") ? "answering" : undefined));
 	const processes = new GuestProcesses(fake.vm, stopping.signal);
 	await assert.rejects(runHooks(processes, ["true"], 200), /^Error: Boot hook 1 of 1 did not finish within 0\.2 s, so the boot failed/);
+});
+
 test("the serial console keeps the guest's console and QEMU's own lines, and drops every other debug line", () => {
 	const lines: string[] = [];
 	const log = serialConsole((line) => lines.push(line));
