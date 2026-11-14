@@ -1667,9 +1667,11 @@ test("the migration that records settles leaves every archive before it unsettle
 test("an archived thread's failed pylon waits for no one, but a disk delete the planner gave up on raises its attention", (t) => {
   const registry = seeded(t, tempDb());
   registry.threads.setThreadStatus(threadId, "archived");
-  const failure = (job: "spawn" | "delete") => ({ count: 5, last: { at: 1, code: "deadline" as const, message: `${job} passed its deadline`, job } });
+  const failure = (job: "spawn" | "delete", count = 5) => ({ count, last: { at: 1, code: "deadline" as const, message: `${job} passed its deadline`, job } });
   registry.threads.savePylon({ ...pylon, failed: "gave up after 5 failed attempts", attempts: failure("spawn") });
   assert.equal(registry.threads.attention(threadId), null);
+  registry.threads.savePylon({ ...pylon, failed: "gave up after 5 failed attempts", attempts: failure("delete", 4) });
+  assert.equal(registry.threads.attention(threadId), null, "a boot's verdict stays quiet while its disk's delete has tries left");
   registry.threads.savePylon({ ...pylon, failed: "gave up deleting after 5 failed attempts", attempts: failure("delete") });
   assert.equal(registry.threads.attention(threadId), "failed");
 });
