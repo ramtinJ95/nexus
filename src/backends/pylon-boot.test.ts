@@ -5,7 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { coreHome, tempDir, unixSockets } from "../test-support/kit.ts";
-import { bootHooks, commitMissing, setupRemoved, templateCheckout } from "./pylon-boot.ts";
+import { bootHooks, commitMissing, repoInitCommand, setupRemoved, templateCheckout } from "./pylon-boot.ts";
 import { bakedDotfilesDir, home } from "../../images/pylon/nexus-contract.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
 import type { PylonId } from "../ids.ts";
@@ -42,6 +42,41 @@ test("a template boot's checkout of a commit a force-push took off its remote fa
   assert.equal(setupRemoved("pylon-th-check" as PylonId, true, "Setup exited 128", "", 128).code, "backend", "a fetch that failed is retried");
   assert.equal(await checkout(newHead), 0);
   assert.equal(await git(template, "rev-parse", "HEAD"), newHead);
+});
+
+test("a fresh clone and a template checkout fetch the pylon's branch and commit, never a large branch beside it, and a branch gone from the remote leaves its commit", async (t) => {
+  const dir = await tempDir("nexus-pylon-boot-", t);
+  const [remote, work, template, fresh, orphan] = ["remote.git", "work", "template", "fresh", "orphan"].map((name) => join(dir, name)) as [string, string, string, string, string];
+  await run("git", ["init", "--quiet", "--bare", "--initial-branch=main", remote]);
+  await run("git", ["clone", "--quiet", remote, work]);
+  await git(work, "commit", "--quiet", "--allow-empty", "-m", "base");
+  await git(work, "push", "--quiet", "origin", "HEAD:main");
+  await run("git", ["clone", "--quiet", remote, template]);
+  await git(work, "commit", "--quiet", "--allow-empty", "-m", "head");
+  await git(work, "push", "--quiet", "origin", "HEAD:main");
+  const head = await git(work, "rev-parse", "HEAD");
+  // As the media branch that filled the disk: 32 MiB of random bytes that compress to nothing.
+  await git(work, "checkout", "--quiet", "--orphan", "pr-assets");
+  await run("sh", ["-c", `head -c 33554432 /dev/urandom > ${join(work, "assets.bin")}`]);
+  await git(work, "add", "assets.bin");
+  await git(work, "commit", "--quiet", "-m", "assets");
+  await git(work, "push", "--quiet", "origin", "HEAD:pr-assets");
+  const assets = await git(work, "rev-parse", "HEAD:assets.bin");
+  const holds = (repo: string, object: string) => sh(`git -C ${repo} cat-file -e ${object}`).then((code) => code === 0);
+  const url = `file://${remote}`;
+
+  assert.equal(await sh(repoInitCommand({ kind: "clone", url, checkout: { branch: "main", commit: "origin/main" } }, fresh)), 0);
+  assert.equal(await sh(templateCheckout({ kind: "clone", url, checkout: { branch: "main", commit: head } }, template)), 0);
+  for (const repo of [fresh, template]) {
+    assert.equal(await git(repo, "rev-parse", "HEAD"), head);
+    assert.equal(await holds(repo, assets), false, `${repo} fetched the large branch`);
+    await git(repo, "push", "--quiet", "origin", "HEAD:refs/heads/nexus/fix");
+    assert.equal(await git(repo, "rev-parse", "origin/nexus/fix"), head, "a push records its remote-tracking branch, which the pylon's outputs read");
+    await git(repo, "fetch", "--quiet", "origin", "pr-assets");
+    assert.equal(await holds(repo, assets), true, "a branch asked for by name is fetched");
+  }
+  assert.equal(await sh(repoInitCommand({ kind: "clone", url, checkout: { branch: "deleted", commit: head } }, orphan)), 0, "a branch the remote lost leaves its commit to fetch");
+  assert.equal(await git(orphan, "rev-parse", "HEAD"), head);
 });
 
 test("a template checkout warns when setup's packages may be stale and the repository has no resume hook", async (t) => {

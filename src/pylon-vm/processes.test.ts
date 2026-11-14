@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
 import type { VM } from "@earendil-works/gondolin";
 import { fakeVm, fileNotFound } from "./fake-vm.ts";
-import { GuestProcesses } from "./processes.ts";
+import { GuestProcesses, SupervisorDied } from "./processes.ts";
 
 /** The work's error, or "answered". The deadline only ends a hang: a loaded suite can take seconds over what takes milliseconds alone. */
 const outcome = (work: Promise<unknown>) =>
@@ -78,6 +78,58 @@ function guest(files: Map<string, string>, onRead: (name: string) => void = () =
 	return Object.assign(vm, { counts });
 }
 const exited = (exitCode: number) => JSON.stringify({ exitCode, truncated: false });
+
+test("a status that rereads done after its supervisor exited is not cut short by another status consuming the end", async () => {
+	const files = new Map([["pid", "1576"], ["output", "fetched\n"]]);
+	let exitedAt: "running" | "exited" | "reread" = "running";
+	let rereading: () => void = () => {};
+	const reread = new Promise<void>((started) => { rereading = started; });
+	let release: () => void = () => {};
+	const released = new Promise<void>((go) => { release = go; });
+	const vm = guest(files);
+	vm.fs.readFile = (async (path: string) => {
+		const name = path.slice(path.lastIndexOf("/") + 1);
+		// The reread after the supervisor was found gone waits until the other status has had its chance.
+		if (name === "done" && exitedAt === "exited") { exitedAt = "reread"; rereading(); await released; }
+		const content = files.get(name);
+		if (content === undefined) throw fileNotFound(path);
+		return Buffer.from(content);
+	}) as unknown as VM["fs"]["readFile"];
+	vm.fs.deleteFile = (async () => { files.clear(); }) as unknown as VM["fs"]["deleteFile"];
+	vm.exec = (async (argv: string[]) => {
+		if (argv[0] === "python3") return { exitCode: 0, stdout: "1577\n", stderr: "" };
+		// It wrote done and exited between the wait's last read and this check.
+		if (argv[0] === "grep") { files.set("done", exited(0)); exitedAt = "exited"; return { exitCode: 1, stdout: "", stderr: "" }; }
+		return { exitCode: 0, stdout: "", stderr: "" };
+	}) as unknown as VM["exec"];
+	const processes = new GuestProcesses(vm, new AbortController().signal);
+	const pid = await processes.launch("git fetch --quiet origin main", "/home/user/workspace");
+	const first = processes.status(pid, 0);
+	await reread;
+	const second = processes.status(pid, 0);
+	await delay(50);
+	release();
+	assert.deepEqual(await outcome(first), "answered", "the reread saw done, which no other status consumed under it");
+	assert.equal((await second).exitCode, 0);
+});
+
+test("a command whose supervisor died before it wrote done, as on a full disk, ends as failed and names the disk, and one whose supervisor runs is still running", async () => {
+	const files = new Map([["pid", "1576"], ["output", ""]]);
+	const vm = guest(files);
+	let supervisorRuns = true;
+	vm.exec = (async (argv: string[]) => {
+		if (argv[0] === "python3") return { exitCode: 0, stdout: "1577\n", stderr: "" };
+		if (argv[0] === "grep") return { exitCode: supervisorRuns && argv.at(-1) === "/proc/1577/cmdline" ? 0 : 1, stdout: "", stderr: "" };
+		if (argv[0] === "df") return { exitCode: 0, stdout: "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/vda 10255636 10255636 0 100% /\n", stderr: "" };
+		return { exitCode: 0, stdout: "", stderr: "" };
+	}) as unknown as VM["exec"];
+	const processes = new GuestProcesses(vm, new AbortController().signal);
+	const pid = await processes.launch("git fetch --quiet origin", "/home/user/workspace");
+	assert.equal((await processes.status(pid, 0)).running, true, "a supervisor that runs is waited on");
+	supervisorRuns = false;
+	await assert.rejects(processes.status(pid, 0), (err: unknown) => err instanceof SupervisorDied
+		&& err.message === "The guest's command supervisor exited before it recorded how the command ended, so the command is taken as failed: its disk has 0.0 of 9.8 GiB free. A full disk ends it so");
+});
 
 test("a launch and a status of the finished command run one guest command, the launcher, and the worker is written once for two launches", async () => {
 	const files = new Map([["pid", "42"], ["output", "hello\n"], ["done", exited(0)]]);
