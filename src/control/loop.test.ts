@@ -11,7 +11,7 @@ import { upgradeAttempts } from "./record-upgrade.ts";
 import type { PortRange, Thread } from "./thread-store.ts";
 import { addThread, seedRegistry, claudeWorkerAt } from "../test-support/registry-kit.ts";
 import { usageBackfill } from "./usage-backfill.ts";
-import { archivedDiskMs, envelope, ingest as realIngest } from "./reconcile.ts";
+import { archivedDiskMs, desiredPhase, envelope, ingest as realIngest } from "./reconcile.ts";
 import type { CheckpointId, ImageId, JobId, LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { Job, JobEnvelope, JobErrorCode, JobStatus, SubmitReply } from "../protocol/jobs.ts";
 import type {
@@ -868,6 +868,8 @@ test("a wake its node has no memory for waits with no attempt counted, and boots
   fake.announce();
   await until("the pylon wakes once 4 GiB are free", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn", "pause", "spawn"]);
+});
+
 test("a pylon whose boot outlasts the idle time is not paused as it comes up, so its worker gets its first prompt", async (t) => {
   const { registry, shift } = shiftedRegistry();
   const thread = seed(registry);
@@ -1182,7 +1184,8 @@ test("a retry of a pylon left broken by a fresh setup, as an older backend left 
 
 test("an idle pylon whose fresh setup failed fails with the reason and attention, and a retry removes it so its wake runs setup again", async (t) => {
   const registry = openRegistry(tempDb());
-  const thread = seed(registry);
+  const thread = seed(registry, { lastHumanActivityAt: 0, lastAgentActivityAt: 0 });
+  assert.equal(desiredPhase(registry.threads.thread(thread.id)!, registry.now()), "paused", "the thread is idle");
   const fake = fakeNode({ autoFinish: false });
   // A boot whose setup failed after its spawn job passed its deadline, so the planner sees only the broken pylon.
   fake.breakPylon(thread.pylonId, "Setup exited 128. Read controller logs", "setup");
