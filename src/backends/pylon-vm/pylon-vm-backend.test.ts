@@ -99,7 +99,7 @@ function bootOf(pylonId: string, changes: Partial<BootInputs> = {}): BootInputs 
 }
 
 /** What a pi-sandbox-format instance looks like on disk after its controller died or stopped. */
-async function leftInstance(instances: string, pylonId: string, state: "stopped" | "running" | "starting" | "failed", diskGiB = 8, retrySetup = false) {
+async function leftInstance(instances: string, pylonId: string, state: "stopped" | "running" | "starting" | "stopping" | "failed", diskGiB = 8, retrySetup = false) {
   const dir = join(instances, pylonId);
   await mkdir(dir, { mode: 0o700 });
   const config = { version: 1, diskGiB, image: assets, workspace: "/home/user/workspace", setup: [], retrySetup, resume: [], services: {} };
@@ -1154,7 +1154,7 @@ function expiresOnceSeen(file: string): AbortSignal {
  * A detached controller and a child in its group. Neither cooperates with SIGTERM or shutdown, and a hung one answers no
  * inspect either. With `exec`, it answers an exec of Core's terminal.list and any other exec with those, and write-files.
  */
-async function stuckController(t: TestContext, dir: string, id: PylonId, stop: "silent" | "error", inspect: "answer" | "hang" = "answer", exec?: { list: unknown; other: unknown }) {
+async function stuckController(t: TestContext, dir: string, id: PylonId, stop: "silent" | "error", inspect: "answer" | "hang" | "unbound" = "answer", exec?: { list: unknown; other: unknown }) {
   const child = spawn(process.execPath, ["--input-type=module", "-e", `
     import { spawn } from "node:child_process";
     import { once } from "node:events";
@@ -1191,8 +1191,10 @@ async function stuckController(t: TestContext, dir: string, id: PylonId, stop: "
         res.end(JSON.stringify({ ok: false, error: "unexpected " + action.action }));
       }
     });
-    server.listen(join(dir, "control.sock"));
-    await once(server, "listening");
+    if (${JSON.stringify(inspect)} !== "unbound") {
+      server.listen(join(dir, "control.sock"));
+      await once(server, "listening");
+    }
     console.log("ready");
   `], { detached: true, stdio: ["ignore", "pipe", "pipe"] });
   const exited = once(child, "exit");
@@ -1248,6 +1250,30 @@ test("a retry whose controller answers no inspect pauses on what the instance's 
   assert.deepEqual(await groupMembers(controller.pid), []);
   assert.equal(existsSync(join(dir, "retry-stop.json")), false);
   assert.deepEqual((await backend.list()).map((p) => [p.vm, p.checkpoint]), [["stopped", "ckpt-hung-1"]]);
+});
+
+test("a delete of a pylon whose boot never ends stops its controller and removes the instance, without waiting for the boot", async (t) => {
+  const { backend, instances } = await backendWith(noGrace);
+  const id = "pylon-neverbooted" as PylonId;
+  const dir = await leftInstance(instances, id, "starting");
+  const controller = await stuckController(t, dir, id, "silent", "unbound");
+  assert.equal(await backend.state(id), "booting", "a live controller with no control socket is still booting");
+  await backend.ensureDeleted(id, AbortSignal.timeout(60_000));
+  await controller.exited;
+  assert.deepEqual(await groupMembers(controller.pid), [], "neither controller nor QEMU stand-in can still run");
+  assert.equal(existsSync(dir), false);
+  assert.deepEqual(await backend.list(), [], "nothing of the pylon is held");
+});
+
+test("a delete of a pylon whose controller is stuck stopping ends its process group and removes the instance", async (t) => {
+  const { backend, instances } = await backendWith(noWait);
+  const id = "pylon-stuckstop" as PylonId;
+  const dir = await leftInstance(instances, id, "stopping");
+  const controller = await stuckController(t, dir, id, "silent", "hang");
+  await backend.ensureDeleted(id, AbortSignal.timeout(60_000));
+  await controller.exited;
+  assert.deepEqual(await groupMembers(controller.pid), []);
+  assert.equal(existsSync(dir), false);
 });
 
 test("a retry refuses to pause a controller that answers no inspect when its recorded setup failed on a disk with a checkpoint", async (t) => {

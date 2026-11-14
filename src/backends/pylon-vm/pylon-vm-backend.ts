@@ -533,7 +533,17 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
 
     async ensureDeleted(pylonId, signal) {
       const name = instanceName(pylonId);
-      await settledInstance(pylonId, signal);
+      await sandbox({ action: "finish-retry-stop", name }, signal);
+      // A controller that is starting, stopping or unavailable may never settle, as one whose boot hook never ends does,
+      // and destroy refuses a live controller that does not answer. The retry's stop is bounded, so the delete never waits on it.
+      const instance = await inspect(pylonId, AbortSignal.any([signal, AbortSignal.timeout(1500)])).catch(() => {
+        signal.throwIfAborted();
+        return existsSync(instanceDir(pylonId)) ? sandbox({ action: "recorded", name }) : null;
+      });
+      if (instance !== null && ["starting", "unavailable", "stopping"].includes(instance.status.state)) {
+        await controllerLog(instanceDir(pylonId))(`delete: stopping the controller, which is ${instance.status.state}`);
+        await sandbox({ action: "retry-stop", name }, signal);
+      }
       signal.throwIfAborted();
       // Also when absent, because destroy sweeps what an interrupted create or destroy left aside.
       await sandbox({ action: "destroy", kind: "instances", name, confirm: name });

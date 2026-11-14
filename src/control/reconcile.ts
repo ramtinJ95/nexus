@@ -143,8 +143,11 @@ export interface PlanInput {
   artifactSha256(artifact: ArtifactId): string;
 }
 
-/** `message` is the job's message and the end of its log, bounded by failureMessage. */
-export interface FailedAttempt { at: number; code: JobErrorCode; message: string }
+/**
+ * `message` is the job's message and the end of its log, bounded by failureMessage. `job` is the kind of job that failed,
+ * absent in a record from before it was kept.
+ */
+export interface FailedAttempt { at: number; code: JobErrorCode; message: string; job?: Job["kind"] }
 export interface Attempts { count: number; last: FailedAttempt | null }
 export const noAttempts: Readonly<Attempts> = Object.freeze({ count: 0, last: null });
 
@@ -162,6 +165,8 @@ export const maxAttempts = 5;
 /** The job error codes the planner never retries, so a pylon whose last job failed with one fails on its next tick. */
 export const finalCodes = (Object.keys(retryable) as JobErrorCode[]).filter((code) => !retryable[code]);
 const backoffScheduleMs = [5_000, 15_000, 45_000, 120_000, 120_000] as const;
+/** The consecutive failed deletes that end `attempts`. tick.ts counts a delete's first failure from one, whatever failed before it. */
+export const deleteAttempts = (attempts: Attempts): Attempts => attempts.last?.job === "delete" ? attempts : noAttempts;
 /** Wait after the `attempt`th consecutive failure, counting from 1. */
 export function backoffMs(attempt: number): number {
   if (!Number.isInteger(attempt) || attempt < 1) throw new RangeError(`attempt must be a positive integer, got ${attempt}`);
@@ -185,8 +190,16 @@ const planRules: readonly Rule[] = [
   // 1. Nothing moves to another node on its own, because the disk lives there.
   (i) => i.nodeOnline ? null : wait("node-offline"),
   (i) => i.inFlight?.state === "running" ? wait("in-flight") : null,
-  // 3. Delete ignores the attempt budget. A pylon removed by hand is absent but may still have previews published.
-  (i) => i.desired !== "deleted" ? null : i.observed === "absent" && !i.previewsRouted ? done : submit({ kind: "delete", pylonId: i.pylonId }),
+  // 3. Delete counts only its own failures, so a pylon whose boots used up the budget, or failed for good, is deleted all
+  // the same. A pylon removed by hand is absent but may still have previews published, which only a delete removes.
+  (i, now) => {
+    if (i.desired !== "deleted") return null;
+    if (i.observed === "absent" && !i.previewsRouted) return done;
+    const { count, last } = deleteAttempts(i.attempts);
+    if (last !== null && count >= maxAttempts) return fail(last.code, `gave up deleting after ${count} failed attempts, the last with ${last.code}: ${last.message}`);
+    if (last !== null && now < last.at + backoffMs(count)) return wait("backoff");
+    return submit({ kind: "delete", pylonId: i.pylonId });
+  },
   // A wake for reading retries no failure. Its own go to the usage hold, which gives up on the read (PlanStep).
   ({ desired, attempts: { last } }) => desired === "reading" && last !== null ? wait("backoff") : null,
   ({ attempts: { last } }) => last !== null && !retryable[last.code] ? fail(last.code, `last job failed with ${last.code}, which is not retryable: ${last.message}`) : null,

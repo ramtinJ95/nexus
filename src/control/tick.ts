@@ -113,7 +113,8 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
     ctx.uncountedFailed({ at: Date.now(), code: step.code, message: step.reason });
     return { kind: "wait", reason: "backoff" };
   }
-  if (step.kind === "fail") {
+  // A deleted thread's pylon still reaches the planner after it gave up (failedStep), so only a new verdict is saved.
+  if (step.kind === "fail" && (pylon.failed !== step.reason || pylon.retrying)) {
     pylon.failed = step.reason;
     pylon.retrying = false;
     ctx.save(pylon);
@@ -130,12 +131,12 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
   });
   if (sent === "accepted") return step;
   pylon.submitted = null;
-  if (sent !== "retry") recordFailure(pylon, ctx, { at: Date.now(), code: "invalid", message: failureMessage(sent.invalid, "") }, step.uncounted === true);
+  if (sent !== "retry") recordFailure(pylon, ctx, { at: Date.now(), code: "invalid", message: failureMessage(sent.invalid, ""), job: step.job.kind }, step.uncounted === true);
   ctx.save(pylon);
   return step;
 }
 
-/** Delete still reaches the planner, whose rule 3 ignores failures. */
+/** Delete still reaches the planner, whose rule 3 counts only failed deletes. */
 function failedStep(pylon: PylonRecord): PlanStep | null {
   return pylon.failed !== null && pylon.desired !== "deleted" ? { kind: "fail", code: pylon.attempts.last?.code ?? "backend", reason: pylon.failed } : null;
 }
@@ -191,7 +192,7 @@ async function settle(pylon: PylonRecord, ctx: TickContext, observation: NodeObs
   if (listed === undefined) return "wait";
   pylon.submitted = null;
   if (status.state === "failed") {
-    recordFailure(pylon, ctx, { at: Date.now(), code: status.code, message: failureMessage(status.message, status.logTail) }, env.uncounted === true);
+    recordFailure(pylon, ctx, { at: Date.now(), code: status.code, message: failureMessage(status.message, status.logTail), job: env.job.kind }, env.uncounted === true);
     return null;
   }
   pylon.attempts = noAttempts;
@@ -202,7 +203,7 @@ async function settle(pylon: PylonRecord, ctx: TickContext, observation: NodeObs
 
 function recordFailure(pylon: PylonRecord, ctx: TickContext, failure: FailedAttempt, uncounted: boolean) {
   if (uncounted) ctx.uncountedFailed(failure);
-  else pylon.attempts = { count: pylon.attempts.count + 1, last: failure };
+  else pylon.attempts = { count: failure.job === "delete" && pylon.attempts.last?.job !== "delete" ? 1 : pylon.attempts.count + 1, last: failure };
 }
 
 /** One snapshot from a new observe stream, whose first event is always a snapshot. Null when the probe is unreachable. */

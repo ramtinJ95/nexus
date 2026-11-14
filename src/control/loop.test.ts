@@ -810,6 +810,37 @@ test("a job that fails for good gives up with the probe's message and the end of
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn"], "a setup failure is not retried");
 });
 
+test("a delete that keeps failing gives up with attention, counting only its own failures after the boots that used up the budget", async (t) => {
+  const registry = openRegistry(tempDb());
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: false });
+  const logged: string[] = [];
+  run(t, registry, fake.probe, { log: (line) => logged.push(line) });
+  await until("the spawn runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!);
+  await until("the spawn is folded in", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.threads.pylon(thread.pylonId)?.submitted === null);
+  const pylon = () => registry.threads.pylon(thread.pylonId)!;
+  registry.threads.savePylon({ ...pylon(), failed: "gave up after 5 failed attempts", attempts: { count: 5, last: { at: 0, code: "deadline", message: "spawn passed its deadline", job: "spawn" } } });
+  registry.threads.setThreadStatus(thread.id, "deleted");
+
+  const deadline = { code: "deadline" as const, message: "delete passed its deadline", logTail: "" };
+  await until("the delete runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!, deadline);
+  await until("the failed delete is counted", () => pylon().attempts.last?.job === "delete");
+  assert.equal(pylon().attempts.count, 1, "a delete's first failure counts from one");
+
+  // As four failed deletes leave it, the last long enough ago that its backoff is over.
+  registry.threads.savePylon({ ...pylon(), attempts: { count: 4, last: { at: 0, ...deadline, job: "delete" } } });
+  await until("the fifth delete runs", () => fake.running().length === 1);
+  fake.finish(fake.running()[0]!, deadline);
+  const verdict = "gave up deleting after 5 failed attempts, the last with deadline: delete passed its deadline";
+  await until("the planner gives up", () => pylon().failed === verdict);
+  assert.equal(registry.threads.attention(thread.id), "failed");
+  assert.deepEqual(logged, [`${thread.pylonId}: the planner gave up: ${verdict}`]);
+  assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn", "delete", "delete"]);
+  assert.ok(fake.pylons.has(thread.pylonId), "the pylon the delete could not remove is still on its node");
+});
+
 const kinds = (jobs: readonly Job[]) => jobs.map((job) => job.kind === "spawn" ? `spawn ${job.boot.source.kind}` : job.kind);
 /** As pylon-vm fails a fresh boot's setup: the instance, which holds no work, is removed. */
 const setupFailed = (pylonId: PylonId, run: number) => ({ code: "setup-failed" as const, message: `${pylonId}: Setup exited 128 (run ${run})`, logTail: "fatal: repository not found" });

@@ -58,8 +58,8 @@ const jobInFlight = (state: "running" | "succeeded"): JobStatus => state === "ru
   ? { jobId: "j1" as JobId, subject: pylonId, kind: "spawn", state, startedAt: "2027-01-01T00:00:00Z" }
   : { jobId: "j1" as JobId, subject: pylonId, kind: "spawn", state, finishedAt: "2027-01-01T00:00:00Z" };
 
-/** [count, failed this many ms before now, last code]. */
-type Attempts = readonly [number, number | null, JobErrorCode | null];
+/** [count, failed this many ms before now, last code, and the kind of job that failed when the record keeps it]. */
+type Attempts = readonly [number, number | null, JobErrorCode | null, Job["kind"]?];
 
 interface Row {
   desired: DesiredPhase;
@@ -94,6 +94,12 @@ const rows: Record<string, Row> = {
   "delete of an absent pylon whose previews the node still routes submits delete": { desired: "deleted", observed: "absent", previewsRouted: true, inFlight: null, attempts: none, online: true, present: [], expect: del },
   "delete of a running pylon submits delete": { desired: "deleted", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, expect: del },
   "delete ignores the attempt budget": { desired: "deleted", observed: stopped(lastCheckpoint), inFlight: null, attempts: [5, 1_000, "setup-failed"], online: true, present: imageOnly, expect: del },
+  "delete ignores the failures of the boots before it": { desired: "deleted", observed: running(liveHash), inFlight: null, attempts: [5, 1_000, "deadline", "spawn"], online: true, present: imageOnly, expect: del },
+  "delete waits out the backoff of its own failure": { desired: "deleted", observed: phase("booting"), inFlight: null, attempts: [2, 14_000, "deadline", "delete"], online: true, present: imageOnly, expect: wait("backoff") },
+  "delete goes again once its backoff is over": { desired: "deleted", observed: phase("booting"), inFlight: null, attempts: [2, 15_000, "deadline", "delete"], online: true, present: imageOnly, expect: del },
+  "delete gives up after five failed deletes in a row": { desired: "deleted", observed: phase("booting"), inFlight: null, attempts: [5, 1_000_000, "deadline", "delete"], online: true, present: imageOnly, expect: { kind: "fail", code: "deadline", reason: "gave up deleting after 5 failed attempts, the last with deadline: the probe's deadline message" } },
+  "a pylon removed by hand whose previews a failing delete never unpublished gives up too": { desired: "deleted", observed: "absent", previewsRouted: true, inFlight: null, attempts: [5, 1_000_000, "backend", "delete"], online: true, present: [], expect: { kind: "fail", code: "backend", reason: "gave up deleting after 5 failed attempts, the last with backend: the probe's backend message" } },
+  "a deleted pylon that is gone needs nothing, whatever its deletes failed": { desired: "deleted", observed: "absent", inFlight: null, attempts: [5, 1_000_000, "backend", "delete"], online: true, present: [], expect: done },
   "delete does not wait for a transition": { desired: "deleted", observed: phase("stopping"), inFlight: null, attempts: none, online: true, present: imageOnly, expect: del },
   "a failed wake for reading waits rather than failing, whatever its code": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [1, 600_000, "setup-failed"], online: true, present: imageOnly, expect: wait("backoff") },
   "a wake for reading that failed past the attempt budget still waits": { desired: "reading", observed: stopped(lastCheckpoint), inFlight: null, attempts: [5, 600_000, "backend"], online: true, present: imageOnly, expect: wait("backoff") },
@@ -166,8 +172,8 @@ const rows: Record<string, Row> = {
 };
 
 function input(row: Row): PlanInput {
-  const [count, failedAgo, lastCode] = row.attempts;
-  const attempt = lastCode === null ? null : { at: now - failedAgo!, code: lastCode, message: `the probe's ${lastCode} message` };
+  const [count, failedAgo, lastCode, job] = row.attempts;
+  const attempt = lastCode === null ? null : { at: now - failedAgo!, code: lastCode, message: `the probe's ${lastCode} message`, ...job === undefined ? {} : { job } };
   return {
     pylonId, node, live, liveHash, nextCheckpoint,
     boot: asking(row.secrets?.asked ?? []),
