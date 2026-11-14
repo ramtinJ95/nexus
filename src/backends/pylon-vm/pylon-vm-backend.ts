@@ -210,7 +210,8 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
   /** A failure to keep them never stops the delete or the removal that asked for it. */
   const keepBootLogs = (pylonId: PylonId, why: string) => {
     const files = instanceFiles(instanceDir(pylonId));
-    return keepLogs(stateFiles(stateRoot).keptLogs, pylonId, [files.log, files.serial], why, Date.now())
+    // A rotation just before leaves the boot's lines in the copy, so that is kept too.
+    return keepLogs(stateFiles(stateRoot).keptLogs, pylonId, [`${files.log}.1`, files.log, `${files.serial}.1`, files.serial], why, Date.now())
       .then((dir) => console.log(`kept the logs of ${pylonId} in ${dir}`), (error: unknown) => console.error(`could not keep the logs of ${pylonId}:`, error));
   };
 

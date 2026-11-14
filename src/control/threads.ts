@@ -144,7 +144,8 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     // `auto` passes such a node by, and a review's start beside its builder goes there all the same.
     const short = named || placement.how === "default" ? namedDiskShort(registry, node, resources) : null;
     if (short !== null) throw new Refusal("conflict", `${node} ${short}`);
-    const tight = named || placement.how === "default" ? memoryShort(registry, node, need) : null;
+    // A start beside a node that no node had room for is placed there only when no node could ever take it.
+    const tight = placement.how !== "auto" ? memoryShort(registry, node, need) : null;
     if (tight !== null) throw tight.frees ? new NoRoom("conflict", `${node} ${tight.why}`) : new Refusal("conflict", `${node} ${tight.why}`);
     const release = registry.placement.reserve(pylonId, node, resources);
     try {

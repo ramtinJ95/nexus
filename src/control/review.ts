@@ -421,7 +421,8 @@ export function reviewLoop(deps: ReviewDeps) {
       const startedAt = held && !("room" in started && started.room) ? now() : run.startedAt;
       if ("thread" in started) return { kind: "run", run: { startedAt, thread: started.thread } };
       // Saved rather than thrown once, so the check's deadline counts from when it left the line.
-      if (kind === "check") {
+      // A check refused for room alone waits for it, as the check beside the reviewer and the live check do.
+      if (kind === "check" && !started.room) {
         if (held) return { kind: "run", run: { startedAt, thread: null } };
         throw new Error(started.refused);
       }
