@@ -8,7 +8,7 @@ import type { StoredPylon, Thread } from "./thread-store.ts";
 import type { Room } from "./placement-model.ts";
 import { testCapacity, testObservation } from "../test-support/kit.ts";
 import { NoRoom, Refusal } from "./refusal.ts";
-import { freeHeldRoom, placeAuto, placeNear, weighNodes } from "./placement.ts";
+import { freeHeldRoom, placeAuto, placeNear, wakeShort, weighNodes } from "./placement.ts";
 import { observeNode, withImage } from "../test-support/api-kit.ts";
 
 const image = "img-0123456789ab";
@@ -175,6 +175,21 @@ test("a review's start beside its builder goes elsewhere once the builder's host
     "nor past what the builder's host commits");
   assert.throws(() => placeNear(fakeRegistry([{ name: "builder", total: 32, committed: 4, free: 3 }]), need(), "builder" as NodeName, true), /no node has room for this pylon: builder has 3 GiB of memory free/,
     "a start that asks for room never overcommits the builder's host");
+});
+
+test("a wake counts a held builder's memory until its node reports it freed, so it waits while the released builder pauses", () => {
+  const now = Date.now();
+  const builder = (id: string) => ({ pylon: { pylonId: id, failed: null, boot: { resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } } },
+    thread: { status: "active", agentTurnRunning: false, lastAgentActivityAt: 0, lastHumanActivityAt: 0, awaitedUntil: now + 60_000 } });
+  const registry = {
+    now: () => now,
+    placement: { reserved: () => [] },
+    threads: { pylonsWithThreadsOn: () => [], pylonsWithHeldThreadsOn: () => [builder("pylon-held-1"), builder("pylon-held-2")] },
+  } as unknown as Parameters<typeof wakeShort>[0];
+  const waking = { pylonId: "pylon-wake", node: "small", submitted: null, retrying: false, boot: { resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } } } as unknown as Parameters<typeof wakeShort>[1];
+  const observed = (committedMemoryGiB: number) => ({ pylons: [], capacity: { memoryGiB: 16, committedMemoryGiB } }) as unknown as Parameters<typeof wakeShort>[2];
+  assert.equal(wakeShort(registry, waking, observed(16)), "small has 16 of 16 GiB of memory committed, and the pylon needs 4 GiB", "two held builders still hold their 16 GiB");
+  assert.equal(wakeShort(registry, waking, observed(12)), null, "once the node reports one paused, the wake fits");
 });
 
 test("a move weighs the other nodes by their free memory too", () => {

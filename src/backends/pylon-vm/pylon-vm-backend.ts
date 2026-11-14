@@ -74,6 +74,9 @@ export interface PylonVmBackendOptions {
   retrySessions?: () => AbortSignal;
 }
 
+/** How often a backend in use prunes the kept boot logs past their age. */
+const keptLogsPruneMs = 60 * 60_000;
+
 /** Each controller's limit, so a stuck one cannot hold the update past the control plane's 10 s wait for the probe. */
 const secretUpdateMs = 5_000;
 
@@ -170,6 +173,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     throw new Error(`state root ${stateRoot} is too long: a pylon's control socket would be ${Buffer.byteLength(longest)} bytes, and a Unix socket path must stay under ${socketPathLimit}`);
   }
   let swept: Promise<void> | undefined;
+  let prunedAt = -Infinity;
   const sandbox: Sandbox = async (action, signal) => {
     // Before the first action, so no launch waits on a launch lock the sweep holds. A failed sweep stops no action.
     await (swept ??= sweepScratch(stateRoot).then(
@@ -177,7 +181,12 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
         if (names.length > 0) console.log(`removed ${names.length} scratch directories no controller owns: ${names.join(", ")}`);
       },
       (error: unknown) => console.error("scratch sweep failed:", error),
-    ).then(() => pruneKeptLogs(stateFiles(stateRoot).keptLogs, Date.now()).catch((error: unknown) => console.error("kept logs prune failed:", error))));
+    ));
+    // On the backend's first action and then at most hourly, so a probe that runs for weeks still drops expired logs.
+    if (Date.now() - prunedAt >= keptLogsPruneMs) {
+      prunedAt = Date.now();
+      void pruneKeptLogs(stateFiles(stateRoot).keptLogs, prunedAt).catch((error: unknown) => console.error("kept logs prune failed:", error));
+    }
     return run(stateRoot, action, signal, options.retryStop);
   };
   const store = artifactDirectory(options.artifacts, tarCodec);

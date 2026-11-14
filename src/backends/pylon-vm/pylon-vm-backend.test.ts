@@ -1286,6 +1286,21 @@ test("a delete of a pylon whose controller answers no inspect stops it, though i
   assert.equal(existsSync(dir), false);
 });
 
+test("a backend in use prunes kept boot logs past their 14 days hourly, with no new keep and no restart", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
+  const { backend, stateRoot } = await backendWith();
+  await backend.list();
+  const stale = join(stateRoot, "kept-logs", "pylon-old-2026-11-01");
+  await mkdir(stale, { recursive: true });
+  const old = new Date(Date.now() - 15 * 24 * 60 * 60_000);
+  await utimes(stale, old, old);
+  await backend.list();
+  assert.equal(existsSync(stale), true, "within the hour nothing prunes again");
+  t.mock.timers.tick(60 * 60_000);
+  await backend.list();
+  await until("the expired keep is dropped", () => !existsSync(stale));
+});
+
 test("a delete of a pylon whose controller is stuck stopping ends its process group and removes the instance", async (t) => {
   const { backend, instances } = await backendWith(noWait);
   const id = "pylon-stuckstop" as PylonId;

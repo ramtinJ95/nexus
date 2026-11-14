@@ -88,7 +88,7 @@ const tooSmall = (c: NodeCapacity, need: Need): string | null => need.resources.
 
 /**
  * Why the node has no memory to boot or wake `p` now, or null. It counts what the node commits, the spawns in flight there
- * and the starts placed there, as a hold's room is free (`freeHeldRoom`), and not the other pylons that wait to boot, so
+ * and the starts placed there, and not the other pylons that wait to boot, so
  * pylons that wait for room never hold each other back. Committed memory never passes the node's: its swap is zram, which
  * keeps a swapped-out guest's pages in the same memory.
  */
@@ -101,7 +101,8 @@ export function wakeShort(registry: WeighingRegistry, p: StoredPylon, o: NodeObs
     .filter(({ pylon }) => pylon.pylonId !== p.pylonId && pylon.submitted?.job.kind === "spawn")
     .reduce((gib, { pylon }) => gib + uncounted(pylon, seen.get(pylon.pylonId)).memoryGiB, 0);
   const reserved = registry.placement.reserved(p.node).reduce((gib, r) => gib + r.memoryGiB, 0);
-  const committed = c.committedMemoryGiB + inFlight + reserved - heldRoom(registry, p.node, registry.now());
+  // A held builder's room counts until the node reports it freed: this wait is what makes freeHeldRoom release its hold.
+  const committed = c.committedMemoryGiB + inFlight + reserved;
   if (committed + need <= c.memoryGiB) return null;
   return `${p.node} has ${gib(committed)} of ${gib(c.memoryGiB)} GiB of memory committed, and the pylon needs ${need} GiB`;
 }
