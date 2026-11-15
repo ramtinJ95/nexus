@@ -123,6 +123,55 @@ test("a pull request a builder's Claude opened without pushing its branch from t
   assert.deepEqual(links(late), [], "one that merged before the watch saw it is not linked");
 });
 
+test("a pull request linked from a transcript follows a close and a reopen, is not another repository's branch's, and holds a queued thread until it merges", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const session = "c0ffee00-0000-4000-8000-000000000000";
+  const opens = (id: ThreadId) => f.registry.threads.appendClaudeRead(id, {
+    session, from: transcriptStart, entries: [{ kind: "pull-request", at: 1, number: 1, url: "https://github.com/acme/repo/pull/1", repository: "acme/repo" }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 1,
+  });
+  const stateOf = (id: ThreadId) => (f.registry.prWatches.prWatch(id)?.links ?? []).map((l) => l.pr.state);
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, branch: "api-made" } };
+  // A thread of a project on another repository pushed a branch of the same name, which says nothing about this one.
+  const other = { id: "other" as ProjectId, repoUrl: "https://github.com/acme/other.git", defaultBranch: "main", defaultNode: f.node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null };
+  f.registry.projects.createProject(other);
+  const foreign = testThread({ id: "th-foreign" as ThreadId, title: "test", project: other.id, conversationId: "1", startedBy: "test", createdAt: 1, lastHumanActivityAt: 1 });
+  f.registry.threads.createThread(foreign, testPylon(foreign, { node: f.node, liveHash: "hash", boot: { repo: { kind: "clone", url: other.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: other.repoUrl, ref: "main" } } }), {});
+  f.registry.threads.apply({ record: "output", pylonId: foreign.pylonId, kind: "branch", ref: "origin/api-made" });
+  const builder = f.add("th-builder", true, null);
+  opens(builder);
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(builder), ["open"]);
+
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "closed" } };
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(builder), ["closed"]);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "open" } };
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(builder), ["open"], "a reopened pull request is open again, as one found by its branch is");
+
+  // A predecessor the comment cap stopped, whose transcript names a pull request the watch never linked.
+  const queued = (id: string, after: ThreadId[]) => f.registry.queue.saveQueued({
+    id: id as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after,
+    request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
+  });
+  const capped = f.add("th-capped", true, null);
+  opens(capped);
+  f.registry.prWatches.savePrWatch(capped, { links: [], commentWakes: commentCap, pending: null, error: null });
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(capped), [], "a stopped watch that no queued thread waits on reads nothing");
+  queued("th-q1", [capped]);
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(capped), ["open"], "the open pull request a queued thread waits on is known, so the thread does not start before it merges");
+
+  const landed = f.add("th-landed", true, null);
+  opens(landed);
+  f.registry.prWatches.savePrWatch(landed, { links: [], commentWakes: commentCap, pending: null, error: null });
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
+  queued("th-q2", [landed]);
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(landed), ["merged"], "and one that merged before the watch saw it is recorded, so the thread queued after it starts");
+});
+
 test("batches failures, reviews, inline and issue comments, and conflict; then reports recovery once", async (t) => {
   const f = fixture(); t.after(() => f.registry.close());
   f.snapshot.comments.push({ id: "old", text: "old review" });
