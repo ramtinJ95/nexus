@@ -28,7 +28,7 @@ export interface PrWatchState {
 
 export const holding = { tables: { pr_watches: { record: "thread", purge: "thread = $thread" } } } as const satisfies Holding;
 
-export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: ThreadId, payload: Record<string, unknown>) => unknown) {
+export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: ThreadId, payload: Record<string, unknown>) => unknown, updateAttention: (thread: ThreadId) => void) {
   const { transaction, sql } = db;
   const watches = db.hold(holding).records<PrWatchState>("pr_watches");
   return {
@@ -54,7 +54,8 @@ export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: Thre
     },
     /**
      * Replaces the thread's PR watch, and tells the event log of new feedback, of each PR linked since the last save, and
-     * of an error that starts or clears.
+     * of an error that starts or clears. The thread's attention is recomputed, as a PR that opens or closes changes the
+     * reviews it is owed.
      */
     savePrWatch(thread: ThreadId, state: PrWatchState) {
       transaction(() => {
@@ -68,6 +69,7 @@ export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: Thre
         if ((previous?.error ?? null) === null && state.error !== null) appendEvent("pull-request.error", thread, { error: state.error });
         if ((previous?.error ?? null) !== null && state.error === null) appendEvent("pull-request.error-cleared", thread, {});
         watches.save(thread, state);
+        updateAttention(thread);
       });
     },
   };

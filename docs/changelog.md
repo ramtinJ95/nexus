@@ -2,6 +2,10 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), except in the commands [Version skew](cli.md#version-skew) names, so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.89.0
+
+Adds `unreviewed-prs` to `ControlCheckName`, which `GET /v1/doctor`, `GET /v1/checks` and `doctor --json` answer: it warns about each open pull request in a project with auto-review that no review will start for, because its builder is archived or no reviewer on another model can run for it. Such a pull request also makes its thread's attention `decision`. The review loop now starts a builder's next pull request's review once the review before it settled, and keeps a landed builder open while another of its pull requests is open, as [Reviews that wait their turn](cli.md#reviews-that-wait-their-turn) describes. A CLI of this version prints the check only from a server that runs it.
+
 ## 0.88.0
 
 Adds `stuck` to `NodeSummary.pylons`, which `GET /v1/nodes` and `nodes --json` answer: each pylon that has been booting, stopping or deleting for 30 minutes, with its thread, what it does, since when and the CPUs and memory it holds, and which no tally counts. Plain `nodes` prints them first on the node's pylons line, plain `node` ends with a `stuck:` line for each, and `doctor`'s `pylons` check warns about them. A CLI of this version prints none from an older server.

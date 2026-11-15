@@ -5,6 +5,7 @@
 import type { ThreadId } from "../ids.ts";
 import { roleOf, type Role } from "./agent-protocol.ts";
 import type { Attention, Need } from "./attention.ts";
+import { owedReviews, type Owed } from "./owed-review.ts";
 import { prLocation, watchedPrs, type PrLocation } from "./pr-watch-model.ts";
 import { archivedDiskMs, isOpenStatus, settleStuck } from "./reconcile.ts";
 import type { Registry } from "./registry.ts";
@@ -20,6 +21,12 @@ export function threadRole(registry: Pick<Registry, "reviews" | "planning">, t: 
 
 /** A reviewer, check or verify thread serves a builder's review, and merges no pull request of its own. */
 export const servesReview = (role: Role) => role === "reviewer" || role === "check" || role === "verify";
+
+/** The reviews thread `t` is owed (owed-review.ts), as the registry says now. */
+export const owedOf = (registry: Pick<Registry, "reviews" | "planning" | "prWatches" | "projects" | "threads">, t: Thread): Owed[] => owedReviews({
+  status: t.status, serves: servesReview(threadRole(registry, t)), claude: registry.threads.agent(t).kind === "claude",
+  project: registry.projects.project(t.project), prs: watchedPrs(registry.prWatches.prWatch(t.id)), review: registry.reviews.review(t.id), reviewed: registry.reviews.prReviewed,
+});
 
 export const prLocationOf = (registry: Pick<Registry, "reviews" | "prWatches">, id: ThreadId): PrLocation => prLocation(registry.reviews.review(id), watchedPrs(registry.prWatches.prWatch(id)));
 /**
@@ -42,7 +49,10 @@ export type PersonNeed = Need | { kind: "disk"; since: number } | { kind: "threa
  * session's own state says waits.
  */
 export function personNeeds(registry: Pick<Registry, "threads">, t: Thread, now: number): PersonNeed[] {
-  if (t.status === "archived") return settleStuck(t, now) ? [{ kind: "disk", since: t.archivedAt! + archivedDiskMs }] : [];
+  if (t.status === "archived") {
+    const disk: PersonNeed[] = settleStuck(t, now) ? [{ kind: "disk", since: t.archivedAt! + archivedDiskMs }] : [];
+    return [...disk, ...registry.threads.needs(t.id).filter((n) => n.kind === "unreviewed")];
+  }
   if (!isOpenStatus(t.status)) return [];
   const attention = registry.threads.attention(t.id);
   const stuck = attention === "failed" || attention === "parked" || attention === "limited" ? attention : attention !== "decision" && t.sessionWaiting === true ? "waiting" : null;

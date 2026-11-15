@@ -44,7 +44,7 @@ function fixture(t: import("node:test").TestContext) {
   const registry = testRegistry(t);
   const resources = { cpus: 2, memoryGiB: 4, diskGiB: 10 };
   const project = (id: string, autoReview: AutoReview | null) =>
-    ({ id: id as ProjectId, repoUrl: `https://github.com/${repo}.git`, defaultBranch: "main", defaultNode: node, resources, allowedHosts: [], secrets: [], logins: [], preSetup: null, autoReview });
+    ({ id: id as ProjectId, repoUrl: `https://github.com/${repo}.git`, defaultBranch: "main", defaultNode: node, resources, allowedHosts: [], secrets: [{ name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"] }], logins: [], preSetup: null, autoReview });
   registry.nodes.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
   registry.projects.createProject(project("reviewed", { mode: "review", enabledBy: "nLAPTOP" }));
   registry.projects.createProject(project("plain", null));

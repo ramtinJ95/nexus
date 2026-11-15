@@ -5,14 +5,15 @@ export { needsPerson, type Attention } from "../contract/attention.ts";
 
 /**
  * A thing of a thread's that waits on the person: its review, held for them or stopped at an approval only they land,
- * a question no one has answered, a builder that stopped short of a pull request after its nudges, or a Claude worker
- * whose turns kept dying. `since` is when it began to wait, so far as the records say.
+ * a question no one has answered, a builder that stopped short of a pull request after its nudges, a Claude worker
+ * whose turns kept dying, or an open pull request in a project that reviews on its own that no review will start for. `since` is when it began to wait, so far as the records say.
  */
 export type Need =
   | { kind: "review"; review: string; since: number }
   | { kind: "question"; question: ThreadQuestion; since: number }
   | { kind: "nudge"; since: number }
-  | { kind: "resume"; why: string; since: number };
+  | { kind: "resume"; why: string; since: number }
+  | { kind: "unreviewed"; pr: number; url: string; why: string; since: number };
 
 /** What a thread's attention is read from. `waiting` is a dialog its session waits on, and `limited` its Claude session stopped on its usage limit. */
 export interface AttentionFacts {

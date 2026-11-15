@@ -19,7 +19,7 @@ import type { TokenAnswer } from "./github.ts";
 import type { TailscaleStatus } from "../tailscale.ts";
 
 export interface DoctorSources {
-  registry: Pick<Registry, "nodes" | "now" | "threads" | "placement" | "releases" | "images">;
+  registry: Pick<Registry, "nodes" | "now" | "threads" | "placement" | "releases" | "images" | "prWatches">;
   self: TailnetNodeId;
   backupStatus(): Promise<BackupStatusRead>;
   login(): Promise<LoginState>;
@@ -61,6 +61,8 @@ export async function runDoctor(s: DoctorSources): Promise<DoctorReport> {
       const p = s.registry.threads.pylon(t.pylonId);
       return p !== undefined && observedPylon(s.registry, p) !== "absent";
     }),
+    unreviewed: s.registry.prWatches.withOpenPr().flatMap((thread) => s.registry.threads.needs(thread).flatMap((n) =>
+      n.kind === "unreviewed" ? [{ thread, title: s.registry.threads.thread(thread)?.title ?? thread, pr: n.pr, why: n.why }] : [])),
     image: {
       current,
       holders: current === null ? [] : records.filter((r) => r.observation?.artifacts.includes(current) === true).map((r) => r.name),

@@ -20,6 +20,11 @@ import { checkBeside, liveNote, phaseNote, reviewSaid, roundNote } from "./wordi
 import { cannotLand, changeOf, ended, findingsOf, humanLabel, landable, personPhase, roundsSpent, type HoldCause, type Review, type Verdict, type Waiver } from "./review-model.ts";
 import { reviewerFor, reviewLoop, secondReviewerFor, type ReviewDeps } from "./review.ts";
 import { upgradeReview } from "./record-upgrade.ts";
+import { prWatchMs } from "./pr-watch-model.ts";
+import { personNeeds } from "./work-model.ts";
+import { threadStage } from "./pipeline.ts";
+import { runDoctor } from "./doctor-run.ts";
+import { parseTailscaleStatus } from "../tailscale.ts";
 import { reviewView } from "./review-view.ts";
 import { defaultSecondReview } from "../contract/projects.ts";
 import { agentReader, heard } from "./agent-conversation.ts";
@@ -5911,4 +5916,143 @@ test("a second reviewer is archived once both approve and the review waits on th
   f.reply(again.thread, secondVerdict(f.review(), {}));
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "approved" });
+});
+
+/** Pull request #8 of the builder's, which GitHub shows at `head2` and the PR watch has linked beside #7, as read with `over`. */
+function secondPr(f: ReturnType<typeof fixture>, over: Partial<PrSnapshot["pr"]> = {}) {
+  const pr = testPr({ repo: f.pr.repo, number: 8, title: "Trim the cache", ...over });
+  f.others.set(8, { pr: { ...pr }, detail: { head: head2, branch: "trim", base: "main", body: "Trims the cache.\n\nNot checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] });
+  watchRead(f, 8, over);
+  return pr;
+}
+/** The PR watch's read of pull request `number`, which keeps what it read before but `over`. */
+function watchRead(f: ReturnType<typeof fixture>, number: number, over: Partial<PrSnapshot["pr"]>) {
+  const watch = f.registry.prWatches.prWatch(f.builder)!;
+  const known = watch.links.find((l) => l.pr.number === number);
+  const links = known === undefined ? [...watch.links, { pr: testPr({ repo: f.pr.repo, number, title: "Trim the cache", ...over }), seen: [], failed: false }]
+    : watch.links.map((l) => l.pr.number === number ? { ...l, pr: { ...l.pr, ...over } } : l);
+  f.registry.prWatches.savePrWatch(f.builder, { ...watch, links });
+}
+const github8 = (f: ReturnType<typeof fixture>, over: Partial<PrSnapshot["pr"]>, head = head2) => {
+  const s = f.others.get(8)!;
+  f.others.set(8, { ...s, pr: { ...s.pr, ...over }, detail: { ...s.detail, head } });
+};
+const doctorOf = (f: ReturnType<typeof fixture>) => runDoctor({
+  registry: f.registry, self, clock: () => f.now, startedAt: f.now,
+  backupStatus: async () => "missing", login: async () => ({ provider: "openai", modelId: "gpt-6-astra", credential: null, offered: [], refresh: { ok: true } }),
+  certificate: async () => ({ kind: "none" }), githubToken: async () => ({ kind: "none" }),
+  tailnet: async () => parseTailscaleStatus(JSON.stringify({ Self: null, Peer: {} })),
+}).then((r) => r.checks.find((c) => c.node === null && c.name === "unreviewed-prs")!);
+
+test("a builder's second pull request, opened while its first is under review, is reviewed once the first lands, after the builder rebases it, and the builder stays open meanwhile", async (t) => {
+  const f = fixture(t, { repo: "acme/shop", autoReview: { mode: "land", enabledBy: "nLAPTOP" } });
+  const loop = f.loop();
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
+  await loop.poll();
+  const first = f.review();
+  const second = secondPr(f);
+  await loop.auto(f.registry.threads.thread(f.builder)!, second);
+  await loop.poll();
+  assert.equal(f.review().id, first.id, "the review of #7 runs on, and #8 waits behind it");
+  assert.equal(f.registry.threads.attention(f.builder) === "decision", false, "a pull request that waits on a running review needs no one");
+
+  // #7 merging moves the base, which #8 now conflicts with.
+  github8(f, { conflict: true });
+  f.reply(first.reviewer, verdict(first, {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
+  assert.equal(f.review().id, first.id, "no review of #8 starts while GitHub says it conflicts");
+  assert.deepEqual(f.statuses(), ["active", "archived"], "the builder stays open with #8 open, and #7's reviewer is archived");
+  watchRead(f, 7, { state: "merged" });
+  watchRead(f, 8, { conflict: true });
+  assert.deepEqual(threadStage(f.registry, f.builder, f.now).phase, { kind: "reviewing", why: "PR #8 waits for its review: it conflicts with its base, so its review starts once the builder rebases it" });
+
+  github8(f, { conflict: false }, "3".repeat(40));
+  watchRead(f, 8, { conflict: false });
+  await loop.poll();
+  assert.equal(f.review().id, first.id, "a start GitHub refused is tried again a PR watch interval later");
+  f.tick(prWatchMs);
+  await loop.poll();
+  const next = f.review();
+  assert.equal(next.pr.number, 8, "the rebased #8 gets its review on its own");
+  assert.deepEqual([next.auto, next.land, next.rounds[0]!.head], [true, { requestedBy: "nLAPTOP", fromProject: true }, "3".repeat(40)]);
+  await loop.poll();
+  f.reply(next.reviewer, verdict(next, {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
+  assert.deepEqual(f.statuses(), ["archived", "archived"], "with nothing left open, the builder is archived once #8 lands");
+});
+
+test("a builder in a turn as its review lands, which opens another pull request in that turn, stays open once the turn ends", async (t) => {
+  const f = fixture(t, { repo: "acme/shop", autoReview: { mode: "land", enabledBy: "nLAPTOP" } });
+  const loop = f.loop();
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
+  await loop.poll();
+  f.registry.threads.recordActivity(f.builder, { agent: f.now, agentTurnRunning: true });
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "landed");
+  secondPr(f);
+  f.tick(60_000);
+  f.registry.threads.recordActivity(f.builder, { agent: f.now, agentTurnRunning: false });
+  f.tick(1_000);
+  claudeRead(f, [{ kind: "reply", at: f.now, text: "Opened #8." }], []);
+  await loop.poll();
+  assert.equal(f.registry.threads.thread(f.builder)!.status, "active", "its open #8 keeps it");
+  assert.equal(f.review().pr.number, 8, "and #8 gets its review");
+});
+
+test("an open pull request on an archived builder, as one archived before this change, is named in its attention, the inbox, items and doctor, and is reviewed once the builder is unarchived", async (t) => {
+  const f = fixture(t, { repo: "acme/shop", autoReview: { mode: "land", enabledBy: "nLAPTOP" } });
+  const loop = f.loop();
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.statuses(), ["archived", "archived"], "with only #7 open, its landing archives the builder");
+  // As the loop before this change left a builder: archived with its next pull request open and unreviewed.
+  secondPr(f);
+  const why = "its thread is archived, so no review of it starts. Unarchive the thread, and its review starts on its own";
+  assert.equal(f.registry.threads.attention(f.builder), "decision");
+  const thread = f.registry.threads.thread(f.builder)!;
+  assert.deepEqual(personNeeds(f.registry, thread, f.now).map((n) => n.kind === "unreviewed" ? [n.pr, n.why] : n.kind), [[8, why]], "the inbox shows it");
+  assert.deepEqual(threadStage(f.registry, f.builder, f.now).phase, { kind: "held", why: `PR #8 has no review, as ${why}` }, "nexus items shows it");
+  const doctor = await doctorOf(f);
+  assert.deepEqual([doctor.status, doctor.text], ["warn", `pull request #8 of ${f.builder} (th-builder) is open, and ${why}`]);
+  await loop.poll();
+  assert.equal(f.review().pr.number, 7, "nothing reviews it while its builder is archived");
+
+  f.registry.threads.setThreadStatus(f.builder, "active");
+  assert.equal(f.registry.threads.attention(f.builder), null);
+  await loop.poll();
+  assert.equal(f.review().pr.number, 8, "unarchived, it gets its review on its own");
+  assert.equal((await doctorOf(f)).status, "ok");
+});
+
+test("a harness builder's pull request that no reviewer on another model can review raises its attention with why", async (t) => {
+  const f = fixture(t, { claudeBuilder: false, autoReview: { mode: "land", enabledBy: "nLAPTOP" } });
+  const loop = f.loop();
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
+  assert.equal(f.registry.reviews.review(f.builder), null);
+  assert.equal(f.registry.threads.attention(f.builder), "decision");
+  assert.deepEqual(f.registry.threads.needs(f.builder).map((n) => n.kind === "unreviewed" ? [n.pr, n.why] : n.kind),
+    [[7, "no review of it can start: its builder runs in the harness, and its project grants no Claude token for a reviewer on another model. Grant CLAUDE_CODE_OAUTH_TOKEN for api.anthropic.com to the project (`nexus project edit`)"]]);
+});
+
+test("a second pull request waits behind its builder's approved review, which only the person lands, and starts once they land it", async (t) => {
+  const f = fixture(t, { repo: "acme/shop", autoReview: { mode: "review", enabledBy: "nLAPTOP" } });
+  const loop = f.loop();
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "approved");
+  secondPr(f);
+  await loop.poll();
+  assert.deepEqual([f.review().pr.number, f.review().phase.kind], [7, "approved"], "the approval is not replaced");
+  assert.match(threadStage(f.registry, f.builder, f.now).phase.why, /approved/);
+  loop.land(f.builder, "nLAPTOP");
+  await loop.poll();
+  assert.equal(f.review().pr.number, 8);
+  assert.deepEqual(f.registry.threads.thread(f.builder)!.status, "active");
 });

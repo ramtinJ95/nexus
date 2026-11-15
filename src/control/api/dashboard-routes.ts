@@ -100,7 +100,11 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
       health: { states: registry.health.healthStates(), changes: registry.health.healthChanges() },
       threads, threadsIn: (project) => byProject.get(project) ?? [], queuedIn, pipeline, items,
       closedIn: (project) => closed.get(project as ProjectId) ?? { archived: 0, deleted: 0 },
-      needs: needsOf({ registry, now, threads, items, queuedIn }, detail),
+      // An archive of any age whose pull request is open may have one no review will start for.
+      needs: needsOf({ registry, now, threads: [...threads, ...registry.prWatches.withOpenPr().filter((id) => !threads.some((t) => t.id === id)).flatMap((id) => {
+        const t = registry.threads.thread(id);
+        return t?.status === "archived" ? [t] : [];
+      })], items, queuedIn }, detail),
       reviews: () => reviews ??= registry.reviews.reviews(),
       row: (t) => rows.get(t.id) ?? rows.set(t.id, kit.row(t)).get(t.id)!,
       find: (t) => findText(t, (prs ??= registry.prWatches.prNumbers()).get(t.id)),
