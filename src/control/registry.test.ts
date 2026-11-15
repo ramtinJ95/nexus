@@ -998,6 +998,9 @@ test("a dialog that opens during a turn keeps the turn's lease, so the idle rule
   assert.equal(read().sessionActiveUntil, now + sessionActivityTtlMs);
   registry.threads.ingested(testObservation(node, { observedAt: "2027-01-01T00:00:00Z", capacity, pylons: [stoppedPylon(pylonId, { sessions: null })] }), []);
   assert.equal(read().sessionActiveUntil, undefined, "a stopped pylon runs no turn, as for a working session");
+  registry.threads.ingested(testObservation(node, { observedAt: "2027-01-01T00:00:00Z", capacity, pylons: [runningPylon(pylonId, { bootedAt: new Date(now).toISOString() })] }), []);
+  assert.equal(read().sessionWaiting, true);
+  assert.equal(read().sessionActiveUntil, undefined, "nor does the lease come back when the pylon boots again within the clocks' allowance");
 });
 
 test("a repeated parked report changes nothing, and a later process's report clears a stale one", (t) => {
@@ -1514,6 +1517,12 @@ test("a read that ends on a usage limit ends the turn that ran into it, though C
   append({ kind: "turn", at: 61, durationMs: 10 });
   assert.equal(registry.threads.thread(threadId)!.sessionTurnRunning, true, "a turn that started after the stop keeps running");
   assert.equal(attention(), "working");
+
+  registry.threads.reportSession(node, { sequence: ++sequence, pylon: pylonId, time: 1000 + sequence, event: { kind: "session.waiting", session: "s1", at: 70 } });
+  assert.notEqual(registry.threads.thread(threadId)!.sessionActiveUntil, undefined);
+  append({ kind: "prompt", at: 60, text: "on", from: "person" }, { kind: "notice", at: 80, tone: "error", text: "You've hit your session limit", usageLimit: { resetsAt: 9000 } });
+  assert.equal(registry.threads.thread(threadId)!.sessionActiveUntil, undefined, "a dialog under the turn the limit stopped keeps no lease");
+  assert.equal(registry.threads.thread(threadId)!.sessionWaiting, true);
 });
 
 /** A Claude worker on session s1 whose transcript reads and pylon reports of waiting asks the test makes, as the reader would. */

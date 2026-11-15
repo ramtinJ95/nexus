@@ -462,7 +462,8 @@ when its tracker saw the turn begin, or the retry that resumed a parked run. A w
 time of its `session.turn-started`, or of the heartbeat that resumed it from
 waiting; later heartbeats keep it. Turns running before the migration have no
 start, and none is invented.
-After expiry or an ended/waiting turn, normal agent and human idle rules apply.
+After expiry, an ended turn or a wait that follows one, normal agent and human idle rules apply; a dialog
+that opened during a turn keeps the turn's lease first, until a stop of its pylon or a usage limit ends that turn.
 Expiry itself records no new activity. Session turn ends use the existing strictly
 increasing `lastReplyAt` identity. Attention keeps its precedence: failed pylon or
 worker launch, decision, died, parked, limited, unread reply, working, waiting, then null. Seen still changes

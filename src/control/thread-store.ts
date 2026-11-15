@@ -199,6 +199,9 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     endTurn(thread, session, at) {
       sql("DELETE FROM session_activity WHERE thread = ? AND session = ? AND state = 'session.turn-started' AND EXISTS (SELECT 1 FROM session_order o WHERE o.thread = ? AND o.session = ? AND o.at <= ?)")
         .run(thread, session, thread, session, at);
+      // A dialog that waited under the ended turn keeps waiting, without the turn's lease.
+      sql("UPDATE session_activity SET started_at = NULL WHERE thread = ? AND session = ? AND state = 'session.waiting' AND EXISTS (SELECT 1 FROM session_order o WHERE o.thread = ? AND o.session = ? AND o.at <= ?)")
+        .run(thread, session, thread, session, at);
     },
   });
   /**
@@ -1011,6 +1014,8 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
           if (thread === undefined) continue;
           pylonStopped(thread);
           if (sql("DELETE FROM session_activity WHERE thread = ? AND state = 'session.turn-started' RETURNING thread").all(thread).length > 0) updateAttention(thread);
+          // A dialog that waited under such a turn keeps waiting, without the turn's lease, also once the pylon runs again.
+          sql("UPDATE session_activity SET started_at = NULL WHERE thread = ? AND state = 'session.waiting' AND started_at IS NOT NULL").run(thread);
         }
       });
     },
