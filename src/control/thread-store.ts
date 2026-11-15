@@ -18,7 +18,7 @@ import type { SessionHarness } from "../protocol/agent-kinds.ts";
 import { defaultClaudeModel } from "../protocol/models.ts";
 import type { ThreadSetup } from "./templates.ts";
 import type { PylonRecord } from "./tick.ts";
-import { claudeWorkerStore, type ClaudeStop, type ClaudeWorker } from "./claude-worker.ts";
+import { claudeWorkerStore, clockSkewMs, type ClaudeStop, type ClaudeWorker } from "./claude-worker.ts";
 import type { NodeStore } from "./node-store.ts";
 import type { Placement } from "./placement-model.ts";
 import { upgradeAttempts, upgradeSubmitted } from "./record-upgrade.ts";
@@ -194,7 +194,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
   const { node } = nodes;
   let participants: readonly ThreadParticipant[] = [];
   const reconcile = (thread: ThreadId) => { for (const p of participants) p.reconcile?.(thread); };
-  const { addWorker, claudeStops: stopsCut, workerFailed, launching, turnStarted, turnBeat, turnEnded, sessionEnded, rewindTranscript, ...claude } = claudeWorkerStore(db, {
+  const { addWorker, claudeStops: stopsCut, workerFailed, launching, turnStarted, turnBeat, turnEnded, sessionEnded, pylonStopped, rewindTranscript, ...claude } = claudeWorkerStore(db, {
     reconcile, updateAttention, appendEvent,
     endTurn(thread, session, at) {
       sql("DELETE FROM session_activity WHERE thread = ? AND session = ? AND state = 'session.turn-started' AND EXISTS (SELECT 1 FROM session_order o WHERE o.thread = ? AND o.session = ? AND o.at <= ?)")
@@ -293,7 +293,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       const on = r.node as NodeName;
       if (!observed.has(on)) observed.set(on, node(on)?.observation ?? null);
       const facts = observed.get(on)?.pylons.find((p) => p.pylonId === r.id);
-      if (facts?.phase === "running") cuts.set(r.thread as ThreadId, Date.parse(facts.bootedAt) - 60_000);
+      if (facts?.phase === "running") cuts.set(r.thread as ThreadId, Date.parse(facts.bootedAt) - clockSkewMs);
       else if (facts?.phase === "stopped") cuts.set(r.thread as ThreadId, Infinity);
     }
     return cuts;
@@ -990,6 +990,13 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       transaction(() => {
         if (observation !== null) nodes.saveObservation(observation, clock());
         for (const write of writes) apply(write);
+        // A stopped pylon runs no turn, and its sessions ended without the hook that says so.
+        for (const p of observation?.pylons ?? []) {
+          const thread = p.phase === "stopped" ? threadOfPylon(p.pylonId) : undefined;
+          if (thread === undefined) continue;
+          pylonStopped(thread);
+          if (sql("DELETE FROM session_activity WHERE thread = ? AND state = 'session.turn-started' RETURNING thread").all(thread).length > 0) updateAttention(thread);
+        }
       });
     },
     apply,

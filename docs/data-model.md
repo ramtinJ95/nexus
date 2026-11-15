@@ -517,22 +517,26 @@ without one. A turn its pylon stopped under died too: when `turn_ended_at` is ol
 `turn_at` and nothing above ended it, and the pylon's node observes it stopped, or
 running on a boot more than a minute after `turn_at`, `Thread.turnDied` has the later
 of `turn_at` and `turn_beat_at` as its time and the reason `its pylon stopped during the turn, which ended its Claude
-session`. The migration that added the two columns sets `turn_beat_at` from the
+session`. An observation of the pylon stopped also writes that time to `died_at` and drops the thread's turn rows from
+`session_activity`, so a boot within that minute keeps the death and the turn from before it does not run. The migration that added the two columns sets `turn_beat_at` from the
 session's latest report and leaves `turn_ended_at` null only for a turn whose session's
 latest report is a turn start or a heartbeat. A Claude launch the probe answers records
-its turn start in `turn_session` and `turn_at` when the worker has no turn yet, so a
-pause before the turn's hook reaches Nexus still cuts a turn Nexus knows of. `resume`
+its turn start in `turn_session` and `turn_at` when the worker has no turn yet, a minute
+before the launch was sent, so the turn's own hooks replace it and a pause before they
+reach Nexus still cuts a turn Nexus knows of. `resume`
 holds the JSON record of Nexus resuming the worker (`src/control/resume.ts`): `{ "state":
-"waiting", "turn", "count", "since", "due" }` for a resume that has waited since `since`
-and goes at `due`, `sending` with `since` for one saved before it was first sent,
+"waiting", "turn", "count", "from", "due" }` for a resume that goes at `due`, `sending`
+with `since` for one saved before it was first sent,
 `resumed` with `at` for one that went, `answered` with `at` for a death the person wrote
 to the thread after, which gets no resume, and `{ "state": "person", "turn", "count",
 "why" }` for a death Nexus does not resume, which makes the attention `died` while
 `turnDied.at` is still `turn`. A record that an older release stored as `{ "state":
 "left-alone" }` reads as no record. `turn` is the `turnDied.at` of the death it answers
 and `count` the resumes in a row. A `waiting`, `sending`, `resumed` or `answered` record
-holds a pylon that was up when it began, as `Thread.awaitedUntil`, from `since` or `at`
-until 10 minutes past `due`, `since` or `at`. [Resuming a turn that died](design.md#resuming-a-turn-that-died) has the rule.
+carries `from`, when Nexus began to wait on that death, and holds a pylon that was up
+then, as `Thread.awaitedUntil`, until 10 minutes past `due`, `since` or `at`. `since` and
+`at` start again while the thread's node is offline, and `from` stays. A record an older
+release saved has no `from`, and is held from its `turn`. [Resuming a turn that died](design.md#resuming-a-turn-that-died) has the rule.
 
 Claude worker `model` is the requested model ID, persisted atomically with new
 threads (default `claude-opus-5-5`). A nullable-column migration leaves old workers

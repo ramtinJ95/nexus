@@ -53,32 +53,37 @@ export interface ClaudeStop {
 
 /**
  * Nexus resuming a Claude worker whose turn died (resume.ts). `turn` is the `turnDied.at` of the turn it answers, and
- * `count` the resumes in a row that turn makes. A resume `waiting` since `since` goes at `due`, one `sending` is saved
- * before it is first sent at `since`, and one `resumed` went at `at`. A death the person wrote to the thread after is
- * `answered`, as Nexus found at `at`, and gets no resume. A death Nexus does not resume waits on the person, which makes
+ * `count` the resumes in a row that turn makes. `from` is when Nexus began to wait on that death, which its pylon's hold
+ * counts from. A resume `waiting` goes at `due`, one `sending` is saved before it is first sent at `since`, and one
+ * `resumed` went at `at`. A death the person wrote to the thread after is `answered`, as Nexus found at `at`, and gets
+ * no resume. `since` and `at` start again while the thread's node is offline. A death Nexus does not resume waits on the person, which makes
  * the attention `died` while that death stands, and `why` says why in a line: the last resume in a row was used, the
  * death is over an hour old, a resume or the person's message started no turn, or the session took no resume.
  */
 export type ClaudeResume =
-  | { state: "waiting"; turn: number; count: number; since: number; due: number }
-  | { state: "sending"; turn: number; count: number; since: number }
-  | { state: "resumed" | "answered"; turn: number; count: number; at: number }
+  | { state: "waiting"; turn: number; count: number; from: number; due: number }
+  | { state: "sending"; turn: number; count: number; from: number; since: number }
+  | { state: "resumed" | "answered"; turn: number; count: number; from: number; at: number }
   | { state: "person"; turn: number; count: number; why: string };
 
 /** A resume types a prompt, whose turn starts at once whatever the model does, so a resume that starts none in this long has a fault of its own. */
 export const resumeStartMs = 10 * 60_000;
+/** How far the clocks of a pylon, its host and the control plane may disagree, as a boot and a launch are stamped by the last two and turns by the first. */
+export const clockSkewMs = 60_000;
 
 /**
  * When the resume began to wait, and until when its pylon stays up for it: through its wait and the time its resume, or
  * the person's message, has to start a turn. A pylon paused while it waits would lose the background jobs the resumed
- * turn goes on with. Null for a record that waits on nothing.
+ * turn goes on with. Null for a record that waits on nothing. A record an older release saved has no `from`, and its
+ * death is when the wait began.
  */
 export function resumeHold(r: ClaudeResume): { from: number; until: number } | null {
+  if (r.state === "person") return null;
+  const from = r.from ?? r.turn;
   switch (r.state) {
-    case "waiting": return { from: r.since, until: r.due + resumeStartMs };
-    case "sending": return { from: r.since, until: r.since + resumeStartMs };
-    case "resumed": case "answered": return { from: r.at, until: r.at + resumeStartMs };
-    case "person": return null;
+    case "waiting": return { from, until: r.due + resumeStartMs };
+    case "sending": return { from, until: r.since + resumeStartMs };
+    case "resumed": case "answered": return { from, until: r.at + resumeStartMs };
   }
 }
 
@@ -173,13 +178,14 @@ export function claudeWorkerStore(db: Db, on: ClaudeWorkerThread) {
       // A turn that ends with a background task running reports a heartbeat for its end, so its session may end after a
       // turn whose end only the transcript shows, as a turn's duration or an interrupt.
       const finished = turnAt !== null && (entries.get(id) ?? []).some((e) => e.at !== null && e.at >= turnAt && (e.kind === "turn" || (e.kind === "notice" && e.text === "Interrupted")));
-      const ended = typeof w.died_at === "number" && turnAt !== null && w.died_at >= turnAt && !finished ? w.died_at : null;
-      if (ended !== null && (current === null || ended >= current.at)) stops.set(id, { turnDied: { at: ended, cause: "session-ended", reason: "its Claude session ended during the turn" } });
+      const open = turnAt !== null && !finished && ((w.turn_ended_at as number | null) ?? -Infinity) < turnAt;
+      const cut = open && turnAt < (cuts.get(id) ?? -Infinity);
+      const reason = cut ? "its pylon stopped during the turn, which ended its Claude session" : "its Claude session ended during the turn";
+      const ended = typeof w.died_at === "number" && open && w.died_at >= turnAt! ? w.died_at : null;
+      if (ended !== null && (current === null || ended >= current.at)) stops.set(id, { turnDied: { at: ended, cause: "session-ended", reason } });
       else if (current !== null) stops.set(id, { turnDied: { at: current.at, cause: "model-error", reason: current.text } });
-      else if (turnAt !== null && turnAt < (cuts.get(id) ?? -Infinity) && !finished && ((w.turn_ended_at as number | null) ?? -Infinity) < turnAt) {
-        // Stamped with the turn's last report, so a long turn a pause cut is as fresh as it was.
-        stops.set(id, { turnDied: { at: Math.max(turnAt, (w.turn_beat_at as number | null) ?? turnAt), cause: "session-ended", reason: "its pylon stopped during the turn, which ended its Claude session" } });
-      }
+      // Stamped with the turn's last report, so a long turn a pause cut is as fresh as it was.
+      else if (cut) stops.set(id, { turnDied: { at: Math.max(turnAt!, (w.turn_beat_at as number | null) ?? turnAt!), cause: "session-ended", reason } });
     }
     return stops;
   }
@@ -207,6 +213,14 @@ export function claudeWorkerStore(db: Db, on: ClaudeWorkerThread) {
     /** A turn of `session` ended at `at`, by the pylon's clock, which ends the latest turn if it is one of that session. */
     turnEnded(thread: ThreadId, session: string, at: number) {
       sql("UPDATE claude_workers SET turn_ended_at = ? WHERE thread = ? AND turn_session = ? AND turn_at <= ?").run(at, thread, session, at);
+    },
+    /**
+     * The thread's pylon was seen stopped, which ended every session in it, so a latest turn with no reported end died at
+     * its last report. Kept, as a boot soon after may not be far enough past the turn's start to show the cut.
+     */
+    pylonStopped(thread: ThreadId) {
+      sql(`UPDATE claude_workers SET died_at = coalesce(turn_beat_at, turn_at) WHERE thread = ? AND turn_at IS NOT NULL
+        AND coalesce(turn_ended_at, -1) < turn_at AND coalesce(died_at, -1) < turn_at`).run(thread);
     },
     /** `session` ended at `at`, by the pylon's clock, during a turn of its, which dies with it if it is the latest turn. */
     sessionEnded(thread: ThreadId, session: string, at: number) {

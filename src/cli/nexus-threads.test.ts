@@ -273,7 +273,7 @@ test("show and threads say a Claude worker's turn died, when Nexus resumes it, a
   report(1, "session.turn-started", 1_000);
   report(2, "session.ended", 4_000);
   assert.ok(timeless((await s.nexus(["show", thread.id])).stdout).includes(`\nturn died: its Claude session ended during the turn, ${localTime(4_000)}\n`));
-  s.registry.threads.saveClaudeResume(thread.id, { state: "waiting", turn: 4_000, count: 1, since: 4_000, due: 64_000 });
+  s.registry.threads.saveClaudeResume(thread.id, { state: "waiting", turn: 4_000, count: 1, from: 4_000, due: 64_000 });
   assert.ok(timeless((await s.nexus(["show", thread.id])).stdout).includes(`\nturn died: its Claude session ended during the turn, ${localTime(4_000)}; Nexus resumes it ${localTime(64_000)}, 1 in a row\n`));
   const why = "Its turn died (its Claude session ended during the turn). It died 4 times in a row, so Nexus stopped resuming it.";
   s.registry.threads.saveClaudeResume(thread.id, { state: "person", turn: 4_000, count: 3, why });

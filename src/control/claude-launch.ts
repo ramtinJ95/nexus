@@ -17,7 +17,7 @@ import type { ProbeClient } from "../protocol/client.ts";
 import { defaultClaudeModel } from "../protocol/models.ts";
 import { listsRunning } from "./locator.ts";
 import type { Registry } from "./registry.ts";
-import type { ClaudeWorker } from "./claude-worker.ts";
+import { clockSkewMs, type ClaudeWorker } from "./claude-worker.ts";
 import type { Thread } from "./thread-store.ts";
 
 type ClaudeLaunchRegistry = Pick<Registry, "threads">;
@@ -68,9 +68,11 @@ export function claudeLaunch(options: { registry: ClaudeLaunchRegistry; log: (me
     // A launch a shutdown cut off has not failed.
     const unfinished = (to: "stalled" | "failed", why: string) =>
       !shutdown.aborted && registry.threads.moveClaudeWorker(thread.id, { to, message: `Claude launch did not complete; attach to check before starting another session: ${why}` });
+    // A minute before it is sent, so the turn's own hook, stamped by the pylon's clock, comes after it and replaces it.
+    const sent = Date.now() - clockSkewMs;
     try {
       const { stalled } = await launchClaude(link, pylonId, { kind: "open-session", harness: "claude-code", title: thread.title.slice(0, 80), resume: session, prompt: worker.prompt, model: worker.model ?? defaultClaudeModel });
-      if (stalled === undefined) registry.threads.moveClaudeWorker(thread.id, { to: "started", at: Date.now() });
+      if (stalled === undefined) registry.threads.moveClaudeWorker(thread.id, { to: "started", at: sent });
       else unfinished("stalled", stalled);
     } catch (err) {
       if (unfinished("failed", (err as Error).message)) log(`${pylonId}: the Claude launch failed: ${(err as Error).message}`);

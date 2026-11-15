@@ -1315,7 +1315,7 @@ test("a builder whose resume waits ten minutes keeps its pylon up past the agent
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   const since = Date.now() - 9 * 60_000;
   registry.threads.recordActivity(thread.id, { agentTurnRunning: false, agent: since });
-  registry.threads.saveClaudeResume(thread.id, { state: "waiting", turn: since, count: 2, since, due: since + 10 * 60_000 });
+  registry.threads.saveClaudeResume(thread.id, { state: "waiting", turn: since, count: 2, from: since, due: since + 10 * 60_000 });
   for (let pass = 0; pass < 20; pass++) {
     await settled(fake, loop);
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -1323,7 +1323,7 @@ test("a builder whose resume waits ten minutes keeps its pylon up past the agent
   assert.equal(fake.pylons.get(thread.pylonId)?.phase, "running", "nine minutes into its ten-minute wait, past the five idle ones");
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh"]);
   const over = Date.now() - 21 * 60_000;
-  registry.threads.saveClaudeResume(thread.id, { state: "waiting", turn: over, count: 2, since: over, due: over + 10 * 60_000 });
+  registry.threads.saveClaudeResume(thread.id, { state: "waiting", turn: over, count: 2, from: over, due: over + 10 * 60_000 });
   await until("the pylon pauses once the hold is over", () => fake.pylons.get(thread.pylonId)?.phase === "stopped");
 });
 

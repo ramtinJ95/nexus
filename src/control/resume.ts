@@ -71,7 +71,7 @@ export function deadTurnResumer(options: {
     const save = (next: ClaudeResume | null) => registry.threads.saveClaudeResume(t.id, next);
     if (!covered(t)) return record === null ? undefined : save(null);
     const died = t.turnDied;
-    const answered = (r: { turn: number; count: number }): ClaudeResume => ({ state: "answered", turn: r.turn, count: r.count, at: clock() });
+    const answered = (r: { turn: number; count: number; from?: number }): ClaudeResume => ({ state: "answered", turn: r.turn, count: r.count, from: r.from ?? clock(), at: clock() });
     if (record?.state === "sending") {
       // It may never have gone out, so it goes only to a thread that still waits on that death and that the person did not answer.
       if (await personWroteTo(t, record.turn)) return save(answered(record));
@@ -79,7 +79,7 @@ export function deadTurnResumer(options: {
       if (fresh === undefined) return;
       if (stillDead(fresh, record.turn)) return deliver(fresh, record);
       // Only a turn that started since ends a death, so the resume went out before a crash lost its answer.
-      if (covered(fresh) && fresh.turnDied?.at !== record.turn) save({ state: "resumed", turn: record.turn, count: record.count, at: clock() });
+      if (covered(fresh) && fresh.turnDied?.at !== record.turn) save({ state: "resumed", turn: record.turn, count: record.count, from: record.from, at: clock() });
       return;
     }
     if (died === undefined) {
@@ -104,7 +104,7 @@ export function deadTurnResumer(options: {
       // The await above may have let a turn start or an archive in.
       const fresh = registry.threads.thread(t.id);
       if (fresh === undefined || !stillDead(fresh, record.turn)) return;
-      const sending: ClaudeResume = { state: "sending", turn: record.turn, count: record.count, since: clock() };
+      const sending: ClaudeResume = { state: "sending", turn: record.turn, count: record.count, from: record.from, since: clock() };
       save(sending);
       return deliver(fresh, sending);
     }
@@ -113,21 +113,21 @@ export function deadTurnResumer(options: {
     if (clock() - died.at > freshMs) return toPerson(`It died more than ${freshMs / 60_000} minutes before Nexus saw it, so Nexus did not resume it.`);
     if (await personWroteTo(t, died.at)) return save(answered({ turn: died.at, count }));
     if (count >= resumeWaitsMs.length) return toPerson(`It died ${count + 1} times in a row, so Nexus stopped resuming it.`);
-    save({ state: "waiting", turn: died.at, count: count + 1, since: clock(), due: clock() + resumeWaitsMs[count]! });
+    save({ state: "waiting", turn: died.at, count: count + 1, from: clock(), due: clock() + resumeWaitsMs[count]! });
   }
 
   /**
    * A send the inbox could not take yet stays saved, so the next pass sends it again under the same request ID, until
    * it has tried for as long as a resume may take to start a turn.
    */
-  async function deliver(t: Thread, { turn, count, since }: Extract<ClaudeResume, { state: "sending" }>) {
+  async function deliver(t: Thread, { turn, count, from, since }: Extract<ClaudeResume, { state: "sending" }>) {
     const requestId = requestIds.resume(t.id, turn);
     if (await inbox(t, { id: requestId, text, sender: "resume" }) !== "delivered") {
-      if (offline(t)) registry.threads.saveClaudeResume(t.id, { state: "sending", turn, count, since: clock() });
+      if (offline(t)) registry.threads.saveClaudeResume(t.id, { state: "sending", turn, count, from, since: clock() });
       else if (clock() - since >= resumeStartMs) registry.threads.saveClaudeResume(t.id, { state: "person", turn, count, why: `Its turn died (${t.turnDied?.reason ?? "its Claude session ended"}). Nexus could not type its resume into the session for ${resumeStartMs / 60_000} minutes.` });
       return;
     }
-    registry.threads.saveClaudeResume(t.id, { state: "resumed", turn, count, at: clock() });
+    registry.threads.saveClaudeResume(t.id, { state: "resumed", turn, count, from, at: clock() });
     registry.threads.appendEvent("thread.resumed", t.id, { turn, count, reason: t.turnDied?.reason ?? null, requestId });
   }
 
