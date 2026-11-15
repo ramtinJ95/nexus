@@ -45,6 +45,8 @@ export function prWatcher(options: {
   }
   let started = 0;
   let finished = 0;
+  /** The pull requests a transcript names that merged before the watch linked them, which it reads no more. */
+  const mergedUnlinked = new Set<string>();
   async function tick(only: ReadonlySet<ThreadId> | null) {
     if (github === null) return;
     const pass = only === null ? ++started : null;
@@ -101,11 +103,32 @@ export function prWatcher(options: {
       registry.prWatches.savePrWatch(id, saved);
     };
     const watched = registry.threads.storedThreads({ status: openStatuses });
+    /**
+     * The open pull requests a builder's Claude opened, as its transcript records, that no branch of its checkout led
+     * to: one pushed through GitHub's API, or from another clone, leaves the checkout no branch it pushed. A reviewer,
+     * a check or a planning thread opens none of its own. One whose branch another watched thread pushed is that
+     * thread's, and one from a fork is not the project's, which the search by branch tells as it does for a pushed one.
+     */
+    async function opened(t: StoredThread, builder: boolean, repo: string, linked: ReadonlySet<number>): Promise<number[]> {
+      if (!builder || registry.threads.agent(t).kind !== "claude") return [];
+      const numbers: number[] = [];
+      for (const number of registry.threads.claudePullRequests(t.id)) {
+        const key = `${repo}#${number}`;
+        if (linked.has(number) || mergedUnlinked.has(key)) continue;
+        const { pr, detail } = await poll(repo, number);
+        if (pr.state === "merged") mergedUnlinked.add(key);
+        if (pr.state !== "open") continue;
+        if (watched.some((other) => other.id !== t.id && pushedBranches(registry, other.id).includes(detail.branch))) continue;
+        if ((await find(repo, detail.branch, "open")).includes(number)) numbers.push(number);
+      }
+      return numbers;
+    }
     const waitedOn = [...awaited].filter((id) => !watched.some((t) => t.id === id)).flatMap((id) => registry.threads.thread(id) ?? []);
     for (const t of [...watched, ...waitedOn]) {
       if (only !== null && !only.has(t.id)) continue;
       // A reviewer checks out the builder's branch, so its outputs would link it to the PR it reviews.
-      if (threadRole(registry, t) === "reviewer") continue;
+      const role = threadRole(registry, t);
+      if (role === "reviewer") continue;
       // Before the state is read, so the watch's own save keeps what it records.
       const settled = !awaited.has(t.id) || await settle(t).then(() => true, () => false);
       // Never include transport errors: a fetch implementation may put authorization headers in them.
@@ -118,7 +141,9 @@ export function prWatcher(options: {
         const repo = githubRepo(registry.projects.project(t.project)?.repoUrl ?? null);
         if (repo === null) continue;
         const found = await Promise.all(pushedBranches(registry, t.id).map((branch) => find(repo, branch, "open")));
-        for (const number of found.flat()) {
+        const pushed = found.flat();
+        const named = await opened(t, role === "builder", repo, new Set([...pushed, ...state.links.filter((l) => l.pr.repo === repo).map((l) => l.pr.number)]));
+        for (const number of [...pushed, ...named]) {
           const link = state.links.find((l) => l.pr.repo === repo && l.pr.number === number);
           if (link === undefined) {
             state.links.push({ pr: unread(repo, number), seen: [], failed: false });

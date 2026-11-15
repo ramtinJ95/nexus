@@ -289,6 +289,16 @@ export function claudeWorkerStore(db: Db, on: ClaudeWorkerThread) {
       return sql("SELECT entry FROM claude_entries WHERE thread = ? AND seq >= ? ORDER BY seq").all(thread, from).map((r) => storedEntry(json<ClaudeEntry>(r.entry), repo));
     },
     /**
+     * The numbers of the project's pull requests the worker's transcript records it opened, among the entries kept. The
+     * pylon writes the transcript, as it reports the branches it pushed.
+     */
+    claudePullRequests(thread: ThreadId): number[] {
+      const repo = githubRepo(sql("SELECT json_extract(p.record, '$.repoUrl') AS url FROM threads t JOIN projects p ON p.id = t.project WHERE t.id = ?").get(thread)?.url as string | null ?? null);
+      const opened = sql("SELECT entry FROM claude_entries WHERE thread = ? AND json_extract(entry, '$.kind') = 'pull-request' ORDER BY seq").all(thread)
+        .flatMap((r) => { const entry = storedEntry(json<ClaudeEntry>(r.entry), repo); return entry.kind === "pull-request" ? [entry.number] : []; });
+      return [...new Set(opened)];
+    },
+    /**
      * Appends what a read found and keeps the newest maxEntries. A read of another session than the stored one, or of
      * a file that was replaced, replaces the stored entries. A read that did not start where the stored reader stands, such
      * as one applied twice, changes nothing and answers false.
