@@ -234,7 +234,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 | `createdAt` | `number` | When the thread started |
 | `agentTurnRunning` | `boolean` | A turn of the Nexus agent runs |
 | `sessionTurnRunning` | optional `true` | A turn of a session in the pylon runs, as its hooks report, such as the Claude worker's. A Claude worker thread works while this is present |
-| `sessionActiveUntil` | optional `number` | When that turn's working lease runs out without another report. Present with `sessionTurnRunning` |
+| `sessionActiveUntil` | optional `number` | When that turn's working lease runs out without another report. Present with `sessionTurnRunning`, and with `sessionWaiting` while a dialog that opened during a turn keeps the turn's lease, for 30 minutes from when it opened |
 | `awaitedUntil` | optional `number` | Until when a review keeps the builder's pylon up while its reviewer reads a round and until the findings are delivered, so they find it awake. Present only while that hold lasts: for a builder up when the round started, until the reviewer's model fails in that round, for 30 minutes after the request reached the reviewer at most, and until placement releases it for room its node needs. A Claude worker whose turn died holds its pylon up the same way while Nexus resumes it, as [Turns that died](#turns-that-died) describes |
 | `sessionWaiting` | optional `true` | A session in the pylon waits for input, such as a permission prompt |
 | `sessionWaitingMessage` | optional `string` | What the latest waiting session's report said, such as "A background command was still running after 2 hours" |
@@ -1330,7 +1330,9 @@ pause rules. This bounds killed sessions and lost Stop reports; a silent single
 operation longer than the lease also expires. Session state is capped at 16 rows
 per thread, with oldest activity evicted, and ended/expired working rows are deleted.
 Waiting state has no TTL and records no activity: an unanswered question remains
-waiting until a later session event, archive or deletion. Heartbeats renew
+waiting until a later session event, archive or deletion. A dialog that opened
+during a turn keeps that turn's lease for 30 minutes from when it opened, so its
+pylon is not paused under a turn that Claude Code resumes itself. Heartbeats renew
 working sessions or resume waiting sessions when stamped later than the waiting
 event; they never create sessions or revive ended ones. Hooks capture
 the event's time before writing it to the outbox; control rejects older per-session reports.
