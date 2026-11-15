@@ -27,6 +27,14 @@ TimeoutStopSec=30
 # The listen address exists only once tailscaled is up, so an early start fails and is retried.
 Restart=on-failure
 RestartSec=5
+# A share of the node that its other work cannot take. Under contention the control plane gets ten times the CPU
+# weight of any other service, the probe with its pylons' VMs among them. 1 GiB of its memory is never reclaimed or
+# swapped out: it peaked at 780 MiB on 2026-11-15. The kernel's OOM killer picks a pylon's VM before it.
+# This guards against the node's other work only. It does nothing when the control plane's own main thread is
+# busy, as on 2026-11-15, when the node was 90 % idle.
+CPUWeight=1000
+MemoryMin=1G
+OOMScoreAdjust=-500
 UMask=0077
 NoNewPrivileges=yes
 ProtectSystem=strict
