@@ -967,17 +967,20 @@ test("every source of a thread's decision has a card on its page with the action
   assert.equal(needsCount((await s.call("GET", "/")).text), String(sources.length - 1));
 });
 
-test("a Claude worker Nexus stopped resuming has a card on its page and in Needs you that says why and writes to it", async (t) => {
+test("a Claude worker whose turn died and that Nexus does not resume has a card on its page and in Needs you that says why and writes to it", async (t) => {
   const s = await seeded(t, landingOptions());
   const th = JSON.parse((await s.call("POST", "/v1/threads", { project: "acme", title: "Kept dying", claude: "fix it" })).text) as Thread;
   claudeWorkerAt(s.registry, th.id, "started", { session: "s1" });
-  const why = "Its turn died 4 times in a row (last: API Error: Request timed out.), so Nexus stopped resuming it.";
-  s.registry.threads.saveClaudeResume(th.id, { state: "person", turn: Date.now(), count: 3, why });
+  const died = Date.now();
+  s.registry.threads.reportSession(node, { sequence: 1, pylon: th.pylonId, time: died, event: { kind: "session.turn-started", session: "s1", at: died - 3_000 } });
+  s.registry.threads.reportSession(node, { sequence: 2, pylon: th.pylonId, time: died, event: { kind: "session.ended", session: "s1", at: died } });
+  const why = "Its turn died (its Claude session ended during the turn). It died 4 times in a row, so Nexus stopped resuming it.";
+  s.registry.threads.saveClaudeResume(th.id, { state: "person", turn: died, count: 3, why });
   const page = (await s.call("GET", `/threads/${th.id}`)).text;
-  assert.equal(chipOf(page), "needs your decision");
+  assert.equal(chipOf(page), "its turn died");
   const dock = dockOf(page);
   assert.deepEqual(actionsOf(dock), [`/threads/${th.id}#write`]);
-  assert.ok(textOf(dock).startsWith(`Stopped resuming its turns ${why} Write to it to resume it`), textOf(dock));
+  assert.ok(textOf(dock).startsWith(`Its turn died ${why} Write to it to resume it`), textOf(dock));
   const inbox = (await s.call("GET", "/")).text;
   const card = needsOf(inbox).cards.filter((c) => c.thread === th.id);
   assert.equal(card.length, 1);

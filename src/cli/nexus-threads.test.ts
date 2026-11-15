@@ -264,7 +264,7 @@ test("threads, show and conversation say a Claude worker stopped on its usage li
   assert.ok((await s.nexus(["conversation", thread.id])).stdout.endsWith(`(Claude stopped on its usage limit until ${until}. Send it "continue" after the reset to resume)\n`));
 });
 
-test("show says a Claude worker's turn died, when Nexus resumes it, and why Nexus stopped resuming it", async (t) => {
+test("show and threads say a Claude worker's turn died, when Nexus resumes it, and why Nexus does not resume it", async (t) => {
   const s = await setup(t);
   const thread: Thread = await s.json(["start", "--project", "acme", "--claude", "count the lines"]);
   claudeWorkerAt(s.registry, thread.id, "started", { session: "s1" });
@@ -273,13 +273,15 @@ test("show says a Claude worker's turn died, when Nexus resumes it, and why Nexu
   report(1, "session.turn-started", 1_000);
   report(2, "session.ended", 4_000);
   assert.ok(timeless((await s.nexus(["show", thread.id])).stdout).includes(`\nturn died: its Claude session ended during the turn, ${localTime(4_000)}\n`));
-  s.registry.threads.saveClaudeResume(thread.id, { state: "waiting", turn: 4_000, count: 1, due: 64_000 });
+  s.registry.threads.saveClaudeResume(thread.id, { state: "waiting", turn: 4_000, count: 1, from: 4_000, due: 64_000 });
   assert.ok(timeless((await s.nexus(["show", thread.id])).stdout).includes(`\nturn died: its Claude session ended during the turn, ${localTime(4_000)}; Nexus resumes it ${localTime(64_000)}, 1 in a row\n`));
-  const why = "Its turn died 4 times in a row (last: its Claude session ended during the turn), so Nexus stopped resuming it.";
+  const why = "Its turn died (its Claude session ended during the turn). It died 4 times in a row, so Nexus stopped resuming it.";
   s.registry.threads.saveClaudeResume(thread.id, { state: "person", turn: 4_000, count: 3, why });
   const shown = (await s.nexus(["show", thread.id])).stdout;
-  assert.ok(shown.includes("attention: decision"), shown);
-  assert.ok(shown.includes(`resume: stopped. ${why} Write to it to resume it`), shown);
+  assert.ok(shown.includes("attention: died"), shown);
+  assert.ok(shown.includes(`turn died, and Nexus does not resume it: ${why} Write to it to resume it`), shown);
+  const listed = (await s.nexus(["threads"])).stdout;
+  assert.match(listed, new RegExp(`${thread.id}\\s+\\S+\\s+died\\s`), listed);
 });
 
 test("conversation prints a Claude worker's transcript, and send types into its session, waiting for a paused pylon under one request ID", async (t) => {

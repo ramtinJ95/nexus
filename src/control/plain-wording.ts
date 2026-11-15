@@ -7,7 +7,7 @@ import type { ServiceFact } from "../protocol/observations.ts";
 
 /** How each attention reads on a thread's row, its page's head and a notice. */
 export const attentionLabels: Record<NonNullable<Attention>, string> = {
-  failed: "failed", decision: "needs your decision", parked: "parked", limited: "stopped on its usage limit",
+  failed: "failed", decision: "needs your decision", died: "its turn died", parked: "parked", limited: "stopped on its usage limit",
   reply: "new reply", working: "agent working", waiting: "waiting for input",
 };
 /** A thread with no attention whose pylon runs: the agent is up and ready for a message. */

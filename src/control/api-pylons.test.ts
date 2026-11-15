@@ -8,7 +8,7 @@ import type { ThreadDetail } from "./wire.ts";
 import { ingest } from "./reconcile.ts";
 import { processStream } from "../process-stream.ts";
 import { repoInitCommand } from "../backends/pylon-boot.ts";
-import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation } from "../test-support/kit.ts";
+import { defaultBootedAt, runningPylon, stoppedPylon, tempDir, testCapacity, testObservation } from "../test-support/kit.ts";
 import type { TailnetNodeId } from "../ids.ts";
 import type { PausedSession, ServiceFact } from "../protocol/observations.ts";
 import { node, laptop, withThread, observeRunning, git, localCheckout, pngBytes } from "../test-support/api-kit.ts";
@@ -97,7 +97,7 @@ test("linking a port of a pylon that is not running, or of an archived or delete
 test("a command for a pylon its node lists running on the boot a settle sealed is refused with 409 and never reaches the probe, until another boot runs", async (t) => {
   const s = await withThread(t);
   observeRunning(s, {});
-  s.registry.threads.sealBoot(s.thread.pylonId, "2027-01-01T00:00:00Z");
+  s.registry.threads.sealBoot(s.thread.pylonId, defaultBootedAt);
   s.commands.length = 0;
   const sealed = await s.call("POST", `/v1/threads/${s.thread.id}/previews`, { port: 3000 });
   assert.equal(sealed.status, 409);

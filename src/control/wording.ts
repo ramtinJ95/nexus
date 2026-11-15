@@ -197,7 +197,7 @@ const needRows: { [K in NeedKind]: NeedRow<K> } = {
   judgment: { label: "Judgment", why: asked },
   question: { label: "Needs your decision", why: asked },
   nudge: { label: "Stopped short of a pull request", why: () => stoppedShort },
-  resume: { label: "Stopped resuming its turns", why: (n) => n.why },
+  resume: { label: "Its turn died", why: (n) => n.why },
   unreviewed: {
     label: "Pull request with no review",
     why: (n) => `#${n.pr} is open, and ${n.why}`,

@@ -72,7 +72,7 @@ The probe reads only running pylons, at most once a minute per boot across snaps
 
 The registry stores each thread's nullable `seenAt` and `lastReplyAt` as Unix milliseconds, added by migration. A turn ending records `lastReplyAt`; streaming and parked tasks do not. A turn ending is no reply while the thread's Claude worker's own session still has a turn, or waits on a dialog, so another session in the pylon that finishes, such as a pi session beside the builder, never makes the thread's attention `reply` while the builder works. Any other session's turn end is a reply, so a new session Claude starts in the worker's terminal after `/clear`, or one a person runs by hand after a failed launch, still replies. Old rows start with null timestamps. If recovery finds a previously running turn ended, its reply is dated at recovery.
 
-The registry derives `attention` in order: failed pylon or Claude worker, unless the thread is archived, `decision` (the thread's review ended for the person, as [review records](#review-records) say, or one of its questions is open, as [question records](#question-records) say, or the builder stopped short of a pull request after two nudges, as [nudge records](#nudge-records) say, or Nexus stopped resuming a Claude worker whose turns died, as its `claude_workers.resume` says), parked tasks, `limited` (the Claude worker's session stopped on its usage limit, as [Claude worker conversations](#claude-worker-conversations) say), unread reply (`lastReplyAt > seenAt`, with null seen treated as unread), running harness or session turn, waiting session, then null. Parked tasks are tracked for every conversation at harness recovery, independently of client watches, and the harness reports each change to the registry's parked flag. Deleting a thread clears its flag, because the delete aborts its run, and opening the registry clears it for threads deleted before that. The registry recomputes attention whenever one of its inputs changes, stores it, and appends `attention.changed` when it differs, and opening the registry recomputes every thread's. Both the thread list and detail report the stored value and both timestamps, so they match the thread's latest `attention.changed` event.
+The registry derives `attention` in order: failed pylon or Claude worker, unless the thread is archived, `decision` (the thread's review ended for the person, as [review records](#review-records) say, or one of its questions is open, as [question records](#question-records) say, or the builder stopped short of a pull request after two nudges, as [nudge records](#nudge-records) say), `died` (the Claude worker's latest turn died and Nexus does not resume it, as its `claude_workers.resume` says), parked tasks, `limited` (the Claude worker's session stopped on its usage limit, as [Claude worker conversations](#claude-worker-conversations) say), unread reply (`lastReplyAt > seenAt`, with null seen treated as unread), running harness or session turn, waiting session, then null. Parked tasks are tracked for every conversation at harness recovery, independently of client watches, and the harness reports each change to the registry's parked flag. Deleting a thread clears its flag, because the delete aborts its run, and opening the registry clears it for threads deleted before that. The registry recomputes attention whenever one of its inputs changes, stores it, and appends `attention.changed` when it differs, and opening the registry recomputes every thread's. Both the thread list and detail report the stored value and both timestamps, so they match the thread's latest `attention.changed` event.
 
 Each recorded reply timestamp is strictly greater than the preceding reply and seen marker, nudged forward by a millisecond if needed, so reply identities and unread ordering survive same-millisecond events and clock corrections.
 
@@ -86,7 +86,7 @@ The desired phase is `running`, `reading`, `paused`, or `deleted`. It follows th
 
 | Thread state | Desired phase |
 |---|---|
-| `active` or `idle` | `running` while a harness or reported session turn runs, or the agent was active in the last 5 minutes, or a human in the last 20, or a review awaits the agent (`Thread.awaitedUntil`). Otherwise `paused` |
+| `active` or `idle` | `running` while a harness or reported session turn runs, or the agent was active in the last 5 minutes, or a human in the last 20, or a review or a resume of a turn that died awaits the agent (`Thread.awaitedUntil`). Otherwise `paused` |
 | `archived` | `deleted` once the thread has been archived `archivedDiskMs` (24 hours), its usage is settled (`Thread.usageSettledAt`) and the newest verified backup began after that (`Thread.backedUpAt`), as `diskKept` in `src/control/reconcile.ts` says. Before then `reading` while the usage backfill or the archive's settle reads its pylon (`Thread.readingUsage`), and `paused` otherwise, at once. [Retention](#retention) deletes the thread after 7 days with no activity, so its pylon goes then, whatever its usage |
 | `deleted` | `deleted`, until [retention](#retention) purges the thread, once its pylon is gone |
 
@@ -385,7 +385,9 @@ wait holds up Claude, whose hook only writes the file.
 
 From probe to control, the production probe journals the newest 20 session
 reports of each pylon, and the newest 100 of the node, the most a snapshot
-carries, in `events.sqlite` under its state root. A pylon that reports in a loop
+carries, in `events.sqlite` under its state root. A session's newest heartbeat
+replaces its older ones, so a turn that runs through a long gap in the link does
+not push its session's other reports out. A pylon that reports in a loop
 then evicts only its own older reports; another pylon's go only once the node's
 100 newest are all newer. It answers the hook only after
 the journal commits. Every snapshot carries that journal, so it replays the
@@ -417,7 +419,10 @@ expire on upgrade rather than receiving an invented fresh lease.
 A start gives a session a 30-minute working lease. A `session.heartbeat` renews
 an existing working lease, or resumes an existing waiting session with a fresh
 lease when stamped later than its waiting event. It cannot create a session or
-revive an ended or expired turn.
+revive an ended turn. It revives an expired turn's row only while the session's
+`session_order` still has that turn open, its latest report a turn start or a
+heartbeat, as after a gap in the node's link longer than the lease. The revived row
+starts at the heartbeat's receipt.
 PostToolUse hooks share a per-session five-minute throttle; no network call runs
 in the hook process. Each real tool completion can renew the lease, so a turn can
 run for hours without human activity. A killed, silent or fake one-shot turn start
@@ -456,7 +461,7 @@ start, and none is invented.
 After expiry or an ended/waiting turn, normal agent and human idle rules apply.
 Expiry itself records no new activity. Session turn ends use the existing strictly
 increasing `lastReplyAt` identity. Attention keeps its precedence: failed pylon or
-worker launch, decision, parked, limited, unread reply, working, waiting, then null. Seen still changes
+worker launch, decision, died, parked, limited, unread reply, working, waiting, then null. Seen still changes
 only `seenAt`. These rules also apply to Claude sessions opened by hand when they
 use the image's hooks. A Claude started inside another Claude session, or under a
 HOME other than the pylon user's, reports nothing.
@@ -505,14 +510,33 @@ pylon's stamp of a `session.ended` of the `turn_session` whose previous report i
 no older than `turn_at`, the turn died, which `Thread.turnDied` says, as it does for a
 turn whose newest entry that is not bookkeeping is an error notice without
 `usageLimit` and no older than the turn's start. A turn or `Interrupted` entry no older
-than the turn's start says the turn ended, so the session ending after it is no death. `resume` holds the JSON record of
-Nexus resuming the worker (`src/control/resume.ts`): `{ "state": "waiting", "turn",
-"count", "due" }` for a resume that goes at `due`, `sending` with `since` for one saved before it
-was first sent, `resumed` with `at` for one that went, `{ "state": "person", "turn", "count",
-"why" }` once Nexus stopped, which makes the attention `decision`, and `{ "state":
-"left-alone" }`, kept for good, once the person wrote to the thread after its first
-reply. `turn` is the `turnDied.at` of the death it answers and `count` the resumes in a
-row. [Resuming a turn that died](design.md#resuming-a-turn-that-died) has the rule.
+than the turn's start says the turn ended, so the session ending after it is no death.
+`turn_ended_at` holds the pylon's stamp of the latest `session.turn-ended` of the
+`turn_session`, and `turn_beat_at` that of its latest heartbeat, or the turn's start
+without one. A turn its pylon stopped under died too: when `turn_ended_at` is older than
+`turn_at` and nothing above ended it, and the pylon's node observes it stopped, or
+running on a boot more than a minute after `turn_at`, `Thread.turnDied` has the later
+of `turn_at` and `turn_beat_at` as its time and the reason `its pylon stopped during the turn, which ended its Claude
+session`. An observation of the pylon stopped also writes that time to `died_at` and drops the thread's turn rows from
+`session_activity`, so a boot within that minute keeps the death and the turn from before it does not run. The migration that added the two columns sets `turn_beat_at` from the
+session's latest report and leaves `turn_ended_at` null only for a turn whose session's
+latest report is a turn start or a heartbeat. A Claude launch the probe answers records
+its turn start in `turn_session` and `turn_at` when the worker has no turn yet, a minute
+before the launch was sent, so the turn's own hooks replace it and a pause before they
+reach Nexus still cuts a turn Nexus knows of. `resume`
+holds the JSON record of Nexus resuming the worker (`src/control/resume.ts`): `{ "state":
+"waiting", "turn", "count", "from", "due" }` for a resume that goes at `due`, `sending`
+with `since` for one saved before it was first sent,
+`resumed` with `at` for one that went, `answered` with `at` for a death the person wrote
+to the thread after, which gets no resume, and `{ "state": "person", "turn", "count",
+"why" }` for a death Nexus does not resume, which makes the attention `died` while
+`turnDied.at` is still `turn`. A record that an older release stored as `{ "state":
+"left-alone" }` reads as no record. `turn` is the `turnDied.at` of the death it answers
+and `count` the resumes in a row. A `waiting`, `sending`, `resumed` or `answered` record
+carries `from`, when Nexus began to wait on that death, and holds a pylon that was up
+then, as `Thread.awaitedUntil`, until 10 minutes past `due`, `since` or `at`. `since` and
+`at` start again while the thread's node is offline, and `from` stays. A record an older
+release saved has no `from`, and is held from its `turn`. [Resuming a turn that died](design.md#resuming-a-turn-that-died) has the rule.
 
 Claude worker `model` is the requested model ID, persisted atomically with new
 threads (default `claude-opus-5-5`). A nullable-column migration leaves old workers

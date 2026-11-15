@@ -133,7 +133,7 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `image list` | `GET /v1/images` | `ImagesView` |
 | `images` | The same as `image list` | `ImagesView` |
 | `image current` | `GET /v1/images/current` | `{ current: ImageEntry \| null, previous: ImageEntry \| null }` |
-| `threads [--project P] [--all] [--open] [--active] [--needs-me] [--limit N]` | `GET /v1/threads?deleted=false[&project=P]`, or `GET /v1/threads[?project=P]` with `--all`, or `GET /v1/threads?deleted=false&status=open[&project=P]` with `--open`, and `GET /v1/queued?status=queued[&project=P]`, or `GET /v1/queued[?project=P]` with `--all`, for the queued threads its text lists after the others | `ThreadRow[]`: each `Thread` with `desired` and `pylon: { node, actualState, failed }`, as in `ThreadDetail`. A thread whose harness or session turn runs carries `workingSince`, the earliest known start of those turns in Unix milliseconds, unless no start is known. Deleted threads are left out unless `--all` is given, and `--open` lists only active and idle threads. `--active` lists only active threads, and `--needs-me` only those whose `attention` waits on the person: `failed`, `decision`, `parked`, `limited`, `reply` or `waiting`. Either leaves the queued threads out of the text too. `--limit N` keeps the first N rows, the threads before the queued ones. Queued threads are never in it. The text heads its columns: the thread, its status, its attention, whether it works or stopped on its usage limit, the pylon's state, the project, when it last replied, and the title. The queued threads follow under a header of their own |
+| `threads [--project P] [--all] [--open] [--active] [--needs-me] [--limit N]` | `GET /v1/threads?deleted=false[&project=P]`, or `GET /v1/threads[?project=P]` with `--all`, or `GET /v1/threads?deleted=false&status=open[&project=P]` with `--open`, and `GET /v1/queued?status=queued[&project=P]`, or `GET /v1/queued[?project=P]` with `--all`, for the queued threads its text lists after the others | `ThreadRow[]`: each `Thread` with `desired` and `pylon: { node, actualState, failed }`, as in `ThreadDetail`. A thread whose harness or session turn runs carries `workingSince`, the earliest known start of those turns in Unix milliseconds, unless no start is known. Deleted threads are left out unless `--all` is given, and `--open` lists only active and idle threads. `--active` lists only active threads, and `--needs-me` only those whose `attention` waits on the person: `failed`, `decision`, `died`, `parked`, `limited`, `reply` or `waiting`. Either leaves the queued threads out of the text too. `--limit N` keeps the first N rows, the threads before the queued ones. Queued threads are never in it. The text heads its columns: the thread, its status, its attention, whether it works or stopped on its usage limit, the pylon's state, the project, when it last replied, and the title. The queued threads follow under a header of their own |
 | `threads --queued [--project P] [--all] [--limit N]` | `GET /v1/queued?status=queued[&project=P]`, or `GET /v1/queued[?project=P]` with `--all` | `QueuedThread[]`, the threads that have not started. Cancelled and deleted ones are left out unless `--all` is given |
 | `show <thread>` | `GET /v1/threads/<thread>`, then `GET /v1/queued/<thread>` when that answers 409 with code `queued` | `ThreadDetail`. Its `said` holds the sentences the text prints of the thread's state and review. Its `desired` is what the planner wants of the pylon now: `running`, `paused` or `deleted`. Its `attach` is `hc`, the command that opens Herdr Core's picker of the pylon's terminals from a shell in the pylon. Without `--json`, it prints `attach: nexus attach <thread>`, the command that attaches from this Mac, unless the thread is archived or deleted, and `disk: kept past its 24 hours, as ...` with why for an archived thread whose disk is kept. For a thread that has not started, `QueuedThread` |
 | `thread show <thread>` | The same as `show <thread>` | The same as `show` |
@@ -234,7 +234,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 | `agentTurnRunning` | `boolean` | A turn of the Nexus agent runs |
 | `sessionTurnRunning` | optional `true` | A turn of a session in the pylon runs, as its hooks report, such as the Claude worker's. A Claude worker thread works while this is present |
 | `sessionActiveUntil` | optional `number` | When that turn's working lease runs out without another report. Present with `sessionTurnRunning` |
-| `awaitedUntil` | optional `number` | Until when a review keeps the builder's pylon up while its reviewer reads a round and until the findings are delivered, so they find it awake. Present only while that hold lasts: for a builder up when the round started, until the reviewer's model fails in that round, for 30 minutes after the request reached the reviewer at most, and until placement releases it for room its node needs |
+| `awaitedUntil` | optional `number` | Until when a review keeps the builder's pylon up while its reviewer reads a round and until the findings are delivered, so they find it awake. Present only while that hold lasts: for a builder up when the round started, until the reviewer's model fails in that round, for 30 minutes after the request reached the reviewer at most, and until placement releases it for room its node needs. A Claude worker whose turn died holds its pylon up the same way while Nexus resumes it, as [Turns that died](#turns-that-died) describes |
 | `sessionWaiting` | optional `true` | A session in the pylon waits for input, such as a permission prompt |
 | `sessionWaitingMessage` | optional `string` | What the latest waiting session's report said, such as "A background command was still running after 2 hours" |
 | `working` | `boolean` | A turn of the Nexus agent or of a session in the pylon runs: `agentTurnRunning` or `sessionTurnRunning`. `threads` prints `working` for it, and `show` `agent working` |
@@ -243,7 +243,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 | `seenAt`, `lastReplyAt` | `number \| null` | The shared seen marker and the latest reply, as the next section describes |
 | `placement` | optional `Placement` | Which node the pylon boots on and why, as [Placement](#placement) describes. Left out for a thread started before 0.20.0 |
 | `usageLimit` | optional `{ stoppedAt: number, resetsAt: number \| null }` | The Claude worker's session stopped on its usage limit at `stoppedAt`, and nothing has run since. `resetsAt` is when the limit resets, null when Claude Code did not say. [Usage-limit stops](#usage-limit-stops) describes it |
-| `turnDied` | optional `{ at: number, cause: "session-ended" \| "model-error", reason: string }` | The Claude worker's latest turn died at `at`, by the pylon's clock: its session ended during the turn, or the turn ended on a model error that was not its usage limit, and nothing has run since. `reason` says which, with the error's text for a model error. [Turns that died](#turns-that-died) describes it |
+| `turnDied` | optional `{ at: number, cause: "session-ended" \| "model-error", reason: string }` | The Claude worker's latest turn died at `at`, by the pylon's clock: its session ended during the turn, as it does when its pylon stops under the turn, or the turn ended on a model error that was not its usage limit, and nothing has run since. `reason` says which, with the error's text for a model error. [Turns that died](#turns-that-died) describes it |
 | `setup` | optional `ThreadSetup` | Whether the pylon boots from a template or fresh, and why, as [Templates at thread start](#templates-at-thread-start) describes. Left out for a thread started before 0.23.0 |
 | `standingRulesRevision` | optional `number` | Since 0.63.0, the revision of its project's standing rules that its first message carried, as [Standing rules](#standing-rules) describes. Left out until a message carries them, and for a thread that gets none, such as a reviewer, a check thread or a thread started before the rules were set |
 | `readingUsage` | optional `true` | The usage backfill, or the settle of its archive, reads this archived thread's pylon now, so its `desired` is `reading`, as [Usage backfill](#usage-backfill) describes |
@@ -265,13 +265,14 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 `attention` is the first matching condition, in this order:
 
 1. `"failed"`: the pylon or Claude worker launch failed.
-2. `"decision"`: the thread's review ended for the person, whose reasons `review.phase.reasons` lists, or one of its `questions` has no answer yet, or, in a project with auto-review, the builder ended three turns in a row without a pull request, two of them after a Nexus nudge, as [the design](design.md#nudging-a-builder-that-stopped-short) describes, or a Claude worker's turn died again after Nexus resumed it three times in a row, as [Turns that died](#turns-that-died) describes, or, in a project with auto-review, one of its open pull requests has no review and none will start on its own, because the thread is archived or no reviewer on another model can run for it, as [Reviews that wait their turn](#reviews-that-wait-their-turn) describes.
-3. `"parked"`: tasks hit the restart limit and need `retry`, whether any client watches the thread or not.
-4. `"limited"`: the Claude worker's session stopped on its usage limit, so `usageLimit` is present. Seen does not clear it; the next turn does.
-5. `"reply"`: `lastReplyAt` is non-null and later than `seenAt`, or `seenAt` is null.
-6. `"working"`: a harness or reported session turn is running.
-7. `"waiting"`: a session is waiting for input.
-8. `null`.
+2. `"decision"`: the thread's review ended for the person, whose reasons `review.phase.reasons` lists, or one of its `questions` has no answer yet, or, in a project with auto-review, the builder ended three turns in a row without a pull request, two of them after a Nexus nudge, as [the design](design.md#nudging-a-builder-that-stopped-short) describes, or, in a project with auto-review, one of its open pull requests has no review and none will start on its own, because the thread is archived or no reviewer on another model can run for it, as [Reviews that wait their turn](#reviews-that-wait-their-turn) describes.
+3. `"died"`: the Claude worker's latest turn died and Nexus does not resume it, so `resume.state` is `person` for that death, as [Turns that died](#turns-that-died) describes. A turn that starts since ends it.
+4. `"parked"`: tasks hit the restart limit and need `retry`, whether any client watches the thread or not.
+5. `"limited"`: the Claude worker's session stopped on its usage limit, so `usageLimit` is present. Seen does not clear it; the next turn does.
+6. `"reply"`: `lastReplyAt` is non-null and later than `seenAt`, or `seenAt` is null.
+7. `"working"`: a harness or reported session turn is running.
+8. `"waiting"`: a session is waiting for input.
+9. `null`.
 
 It is the value the thread's latest `attention.changed` event carries. An unread reply outranks working, so a client cancelling a pending reply notification on a follow-up must also check `working`. Reading `threads` or `show` does not mark anything seen; clients call `seen` when they show the conversation. `GET /v1/threads?deleted=false` leaves deleted threads out, as `threads` reads the list; without it the list has them, which `threads --all` prints. `GET /v1/threads?status=open` lists only active and idle threads, as the dashboard reads the list for its notifications and `threads --open` reads it, and answers 400 to any other `status`. The list builds only the rows it answers, so a list of the open threads costs what they cost, however many threads are archived or deleted.
 
@@ -457,14 +458,14 @@ The stream follows these rules:
 
 `watch --until-idle`, and `start --watch` or `send --watch` after their request, print the same stream and end once the run replies, so a script can send a message and block until the agent is done. `--interval` sets the poll as for `watch`.
 
-A run has ended once nothing works or is queued and the thread's `lastReplyAt` is later than it was when the wait began: before the send for `send`, at the start for `start`, and at the watch's first print for `watch`. A watch that begins while the thread is idle waits for the next run. The control plane records a reply at the end of every run, so a run that ended on an error, an abort, a Claude usage-limit stop or a Claude turn that died ends it too. The stream can lag that end, as a pi stream that missed the run's commits does, or a Claude stream that says the turn ended before the control plane read what it wrote. So the watch then reads `GET /v1/threads/<thread>/conversation` and prints what it had not printed, for a Claude worker up to three times until a read began after the reply was recorded. Then it reads `GET /v1/threads/<thread>` again for what the end means, and reads through any run that ended meanwhile. A run working again keeps the wait. So does a Claude turn that died, as [Turns that died](#turns-that-died) describes, while Nexus resumes it, until the resumed turn ends. Nexus's resumer records its resume on its next pass, every 15 seconds, and resumes only a builder's turn, so a death it has no record for keeps the wait for 30 seconds. Each poll then reads the resume again, without another turn. The text prints `-- Its turn died: <reason>. Waiting for Nexus to resume it` when the wait begins to hold for it. The endings other than a run's end need only `GET /v1/threads/<thread>`, so they end the watch before its stream opens. Each ending prints one last text line, and nothing more with `--json`:
+A run has ended once nothing works or is queued and the thread's `lastReplyAt` is later than it was when the wait began: before the send for `send`, at the start for `start`, and at the watch's first print for `watch`. A watch that begins while the thread is idle waits for the next run. The control plane records a reply at the end of every run, so a run that ended on an error, an abort, a Claude usage-limit stop or a Claude turn that died ends it too. The stream can lag that end, as a pi stream that missed the run's commits does, or a Claude stream that says the turn ended before the control plane read what it wrote. So the watch then reads `GET /v1/threads/<thread>/conversation` and prints what it had not printed, for a Claude worker up to three times until a read began after the reply was recorded. Then it reads `GET /v1/threads/<thread>` again for what the end means, and reads through any run that ended meanwhile. A run working again keeps the wait. So does a Claude turn that died, as [Turns that died](#turns-that-died) describes, while Nexus resumes it, until the resumed turn ends, and while a message the person wrote since the death may still start a turn. Nexus's resumer records its resume on its next pass, every 15 seconds, and resumes only a builder's turn, so a death it has no record for keeps the wait for 30 seconds. Each poll then reads the resume again, without another turn. The text prints `-- Its turn died: <reason>. Waiting for Nexus to resume it` when the wait begins to hold for it. The endings other than a run's end need only `GET /v1/threads/<thread>`, so they end the watch before its stream opens. Each ending prints one last text line, and nothing more with `--json`:
 
 | Exit | Ending |
 |---|---|
 | 0 | The run replied |
 | 10 | Tasks that hit the restart limit park the run, which `nexus retry` clears |
-| 11 | The pylon or the Claude worker's launch failed, so `attention` is `failed`, or the thread was archived or deleted before the run replied, or a Claude turn died and Nexus leaves it to the person who wrote to it, or records no resume for it within 30 seconds |
-| 12 | The run waits on the person: a question asked since the wait began has no answer, which ends it at once, or a Claude worker waits at a prompt in its terminal, or the run ended with `attention` at `decision`, which an open question from before the wait also gives, or a Claude turn stopped on its usage limit, or died and Nexus gave its resume to the person |
+| 11 | The pylon or the Claude worker's launch failed, so `attention` is `failed`, or the thread was archived or deleted before the run replied, or a Claude turn died and Nexus records no resume for it within 30 seconds |
+| 12 | The run waits on the person: a question asked since the wait began has no answer, which ends it at once, or a Claude worker waits at a prompt in its terminal, or the run ended with `attention` at `decision`, which an open question from before the wait also gives, or a Claude turn stopped on its usage limit, or died and Nexus does not resume it, which prints `Its turn died, and Nexus does not resume it: <why>` |
 
 Then `nexus conversation <thread> --last` prints only the reply. A failure of the CLI itself, such as an unknown thread, still exits with the codes of [Failures](#failures).
 
@@ -1495,7 +1496,7 @@ and `requestId`, which `events --kind usage-limit.continued` follows.
 ## Turns that died
 
 ```sh
-nexus show <thread>                      # a turn died: line, and a resume: line once Nexus stopped
+nexus show <thread>                      # a turn died: line, with why once Nexus does not resume it
 nexus events --kind thread.resumed       # each resume Nexus typed
 ```
 
@@ -1505,32 +1506,60 @@ session's `session.ended` event says when no `session.turn-ended` came after its
 turn that ends with a background task still running reports a heartbeat for its end,
 or when the turn ends on a model error that is not its usage
 limit, an error notice that is the newest entry that is not bookkeeping, as for
-[usage-limit stops](#usage-limit-stops). Until a turn of a session starts after
-it, the thread has `turnDied` and `show` prints `turn died: <reason>, <time>`, with
-what Nexus does next. Its attention stays what it was, often none, since a session
-that ends records no reply.
+[usage-limit stops](#usage-limit-stops). A turn also dies when its pylon stops under
+it. A pause or a reboot ends the session without the hook that reports its end, so the
+latest turn died when it started, no turn end was reported, and the pylon is stopped or
+runs on a boot more than a minute after the turn started. Its reason is `its pylon
+stopped during the turn, which ended its Claude session`, and its time is the turn's
+last heartbeat, or its start without one. A turn whose session last reported more than
+a minute before the pylon's current boot, or any turn of a stopped pylon, does not
+count as working. Until a turn of a session starts after the death, the thread
+has `turnDied` and `show` prints `turn died: <reason>, <time>`, with what Nexus does
+next. A model error records a reply and a session that ends records none, so while
+Nexus resumes the turn the attention is what that leaves.
 
 The control plane resumes such a turn of a builder on its own: a Claude worker thread
 the person started, active or idle, that is not a reviewer, a check or a planning
 thread, and whose review, if it has one, is not `needs-person`, which is the person's.
 A builder whose review has not finished gets no resume for a model error: the review
-loop sends its request again, or its next message, which resumes it too. Only a death
-in the last hour is resumed, so a control plane that starts leaves older ones as they
-were. Each turn that died gets one
-message, `[Nexus resume — automated, not a message from the person] Your turn stopped
-before it finished: its Claude session ended, or its model's API failed. Continue
-where you stopped.`, typed into the session as the person's message would be, which
-starts Claude again in a session that ended and wakes a paused pylon. It goes 1, 10
-and 30 minutes after each death in a row, under the request ID
+loop sends its request again, or its next message, which resumes it too. Each turn that
+died gets one message, `[Nexus resume — automated, not a message from the person] Your
+turn stopped before it finished: its Claude session ended, or its model's API failed.
+Continue where you stopped.`, typed into the session as the person's message would be,
+which starts Claude again in a session that ended and wakes a paused pylon. It goes 1,
+10 and 30 minutes after each death in a row, under the request ID
 `resume:<thread>:<turnDied.at>`, and appends a `thread.resumed` event with `turn`,
-`count`, `reason` and `requestId`. A turn that ends without dying ends the count. The
-fourth death in a row, a resume that starts no turn within 10 minutes, or one the
-session takes for 10 minutes, as while it waits at a dialog, stops it:
-`resume.state` becomes `person`, `resume.why` says why in a line, `show` prints
-`resume: stopped. <why> Write to it to resume it`, and the attention is `decision`
-until a turn of it starts. An archive clears the record, so an unarchived thread whose
-last turn died starts its count over and is resumed a minute later. The person writing to the thread after its first reply makes
-it theirs, and Nexus never resumes it again, as with [the nudge](design.md#nudging-a-builder-that-stopped-short).
+`count`, `reason` and `requestId`. A turn that ends without dying ends the count. While
+the resume waits, the pylon stays up from when the wait began until 10 minutes after
+the resume is due, as for a review's hold in `awaitedUntil`, so the 5 idle minutes do
+not pause it and end its background jobs. Placement may still take that room, as for
+any hold.
+
+A message the person writes to the thread after the death answers it, through
+`nexus send`, the dashboard or the session's terminal. `resume.state` becomes
+`answered`, Nexus sends no resume for that death, and `show` ends its `turn died:` line with `; you wrote to it
+since, so Nexus waits for the turn your message starts`. A
+message written before the death answers nothing, so a conductor who steers builders
+with `nexus send` keeps their resumes.
+
+Every death Nexus does not resume waits on the person. `resume.state` becomes `person`,
+`resume.why` starts `Its turn died (<reason>).` and says why in a line, `show` prints
+`turn died, and Nexus does not resume it: <why> Write to it to resume it`, and the
+attention is `died` until a turn of it starts. Nexus does not resume a death in these
+cases:
+
+- It is the fourth death in a row.
+- It died more than 60 minutes before Nexus saw it, by the pylon's clock against the
+  control plane's, as when a control plane starts after it.
+- A resume started no turn within 10 minutes.
+- The person's message started no turn within 10 minutes.
+- Nexus could not type the resume into the session for 10 minutes, as while it waits
+  at a dialog.
+
+Each of those 10 minutes starts over while the thread's node is offline, since a turn
+may have started that the node could not report yet. An archive clears the record, so
+an unarchived thread whose last turn died starts its count over and is resumed a minute
+later. A record that an older release stored as `left-alone` reads as no record.
 
 ## Token usage
 
