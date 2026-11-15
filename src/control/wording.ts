@@ -193,7 +193,11 @@ interface NeedRow<K extends NeedKind> {
 const asked = ({ question: q }: NeedOf<"question">) => firstLine(q.kind === "ask" ? q.ask.questions[0]!.question : q.kind === "proposal" ? q.proposal.title : q.text);
 const button = (action: Action, label: string, confirm?: string): NeedAction => ({ kind: "button", action, label, ...confirm === undefined ? {} : { confirm } });
 
-const needRows: { [K in NeedKind]: NeedRow<K> } = {
+/** A thread stopped where only the person moves it has no card of its own on its page, so its row must give the inbox one. */
+type StoppedKind = Extract<ThreadNeed, { kind: "thread" }>["attention"];
+const heldSaid = (d: Pick<ThreadDetail, "said">) => d.said.held ?? "The planner holds its pylon's boot";
+
+const needRows: { [K in NeedKind]: K extends StoppedKind ? Required<NeedRow<K>> : NeedRow<K> } = {
   "held-review": { label: "Review needs you", why: () => "" },
   "approved-review": { label: "Approved, yours to land", why: () => "" },
   holds: { label: "Holds to waive", why: asked },
@@ -222,7 +226,11 @@ const needRows: { [K in NeedKind]: NeedRow<K> } = {
     why: (n, now) => `It ${limitText(n.d.thread, now)}`,
     fix: (n, now) => ({ body: `It ${limitText(n.d.thread, now)}. Nexus has it continue once the limit resets, or archive it to stop it.`, action: button("archive", "Archive") }),
   },
-  "boot-held": { label: "Pylon held", why: (n) => firstLine(n.d.said.held ?? "The planner holds its pylon's boot") },
+  "boot-held": {
+    label: "Pylon held",
+    why: (n) => firstLine(heldSaid(n.d)),
+    fix: (n) => ({ body: `${heldSaid(n.d)}. Nexus boots it once that ends, or archive it to stop it waiting.`, action: button("archive", "Archive") }),
+  },
   parked: { label: "Stuck on the restart limit", why: (n) => parkedText(n.d.agent?.parkedTasks ?? 0), fix: (n) => ({ body: `${parkedText(n.d.agent?.parkedTasks ?? 0)}.`, action: button("retry", "Retry") }) },
   failed: {
     label: "Failed",
