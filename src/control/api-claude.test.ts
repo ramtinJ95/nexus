@@ -122,7 +122,10 @@ test("a Claude worker thread's message is typed into its session exactly, in eit
   assert.match(tab.body.error, /tab/);
   assert.equal((await send({ text: " \n ", requestId: "msg:6" })).status, 400);
   assert.equal((await send({ text: "x" })).status, 400);
-  assert.deepEqual(s.commands, [], "a message Claude cannot take as typed never reaches the probe");
+  const long = await send({ text: "l".repeat(16_385), requestId: "msg:7" });
+  assert.equal(long.status, 400);
+  assert.match(long.body.error, /a message to Claude is at most 16384 characters, and this one is 16385/);
+  assert.deepEqual(s.commands, [], "a message Claude cannot take as typed, or longer than a person's message may be, never reaches the probe");
 });
 
 test("a Claude worker's message is typed once per request ID, a send that typed nothing can be sent again, and one that may have typed some cannot", async (t) => {

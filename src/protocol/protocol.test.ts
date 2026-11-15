@@ -165,7 +165,7 @@ test("a probe refuses a command that fails any check of its fields", () => {
     { kind: "close-session" }, { kind: "close-session", terminal: "t1", session: null }, { kind: "close-session", terminal: "t1", session: { harness: "codex", harnessSessionId: null, title: null } },
     { kind: "close-session", terminal: "t1", session: { harness: "pi", title: null } }, { kind: "close-session", terminal: "t1", session: { harness: "pi", harnessSessionId: null } },
     { kind: "drop-failed-session" }, { kind: "drop-failed-session", id: "" },
-    { ...send, session: "a/b" }, { ...send, session: "s".repeat(201) }, { ...send, session: 1 }, { ...send, text: "" }, { ...send, text: "t".repeat(16_385) }, { ...send, text: "a\tb" }, { ...send, text: "a\u001b[31mb" },
+    { ...send, session: "a/b" }, { ...send, session: "s".repeat(201) }, { ...send, session: 1 }, { ...send, text: "" }, { ...send, text: "t".repeat(500_001) }, { ...send, text: "a\tb" }, { ...send, text: "a\u001b[31mb" },
     { ...send, model: "m".repeat(201) }, { ...send, model: "" }, { ...send, requestId: "" }, { kind: "send-claude-outcome" },
     { kind: "interrupt-claude" }, { kind: "interrupt-claude", session: "a/b" }, { kind: "interrupt-claude", session: "s".repeat(201) },
     { kind: "service", op: "start" }, { kind: "service", op: "logs", name: "" }, { kind: "service", op: "logs", lines: 0 }, { kind: "service", op: "logs", lines: 1.5 },

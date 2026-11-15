@@ -87,6 +87,17 @@ test("a round carries every answer whole, and quotes the description while it fi
   assert.match(most, /The current pull request description is 65536 characters, too long to quote here\..*gh pr view \d+ --json body --jq \.body/);
 });
 
+test("a round counts a tab as the two spaces it is typed as, so a description of tabs is named on GitHub sooner, and an answer's tabs are one space", async () => {
+  const { maxMessageChars } = await import("../protocol/commands.ts");
+  const { typeable } = await import("./inbox.ts");
+  const one = { head: h1, base: "main", verdict: verdict([f1]), check: null, answers: [] };
+  const answers = Array.from({ length: 100 }, (_, i) => ({ id: `F${i + 1}`, action: "rejected" as const, reason: "\t".repeat(4_000) }));
+  const round = nextRound(twoRounds({}, h2), { ...one, answers }, "rv-1:c", "main", "first", "\t".repeat(65_536));
+  assert.ok(typeable(round).length <= maxMessageChars, `${typeable(round).length} characters typed`);
+  assert.match(round, /The current pull request description is 65536 characters, too long to quote here/);
+  assert.ok(round.includes(`F1: rejected. ${" ".repeat(4_000)}`));
+});
+
 test("a quote request quotes GitHub's longest description whole, within what a message carries", async () => {
   const { maxMessageChars } = await import("../protocol/commands.ts");
   const body = "b".repeat(65_536);
