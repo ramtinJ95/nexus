@@ -22,7 +22,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { checkCaller, mint, reviewerCaller, tokenBlocks, verifyCaller } from "./agent-protocol.ts";
 import { scopedFlight } from "../single-flight.ts";
 import type { SecretGrant } from "../protocol/secret-grants.ts";
-import { grantsClaude } from "./owed-review.ts";
+import { grantsClaude, type Owed } from "./owed-review.ts";
 import { defaultClaudeModel } from "../protocol/models.ts";
 import type { ChangedFile, GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { NoRoom, Refusal } from "./refusal.ts";
@@ -1039,21 +1039,31 @@ export function reviewLoop(deps: ReviewDeps) {
       return;
     }
     for (const id of threads) {
-      let key = `${id} owed`;
+      let owed: Owed[];
       try {
         const t = registry.threads.thread(id);
-        const owed = t === undefined ? [] : owedOf(registry, t);
-        const due = owed.find((o) => o.kind === "due") ?? owed.find((o) => o.kind === "waiting" && o.asks === true);
-        if (due === undefined) continue;
-        key = `${due.pr.repo}:${due.pr.number} owed`;
+        owed = t === undefined ? [] : owedOf(registry, t);
+      } catch (err) {
+        retried.failed(`${id} owed`, `${id}: its owed reviews were not read and will be tried again (${(err as Error).name})`);
+        continue;
+      }
+      // The due one first, then each that waits on GitHub alone, since one the watch no longer reads may have closed,
+      // and the next behind it merged cleanly. The first that starts is the builder's one review.
+      const candidates = [...owed.filter((o) => o.kind === "due"), ...owed.filter((o) => o.kind === "waiting" && o.asks === true)];
+      for (const { pr } of candidates) {
+        const key = `${pr.repo}:${pr.number} owed`;
         if (now() - (owedTries.get(key) ?? -Infinity) < prWatchMs) continue;
         owedTries.set(key, now());
-        const setting = registry.projects.project(t!.project)!.autoReview!;
-        await begin(t!, due.pr, { land: landsOnItsOwn(setting) ? { requestedBy: setting.enabledBy, fromProject: true } : null, auto: true, mergeable: true });
-        owedTries.delete(key);
-        retried.ok(key);
-      } catch (err) {
-        retried.failed(key, `${id}: its owed review did not start and will be tried again (${err instanceof Refusal ? err.message : (err as Error).name})`);
+        try {
+          const t = registry.threads.thread(id)!;
+          const setting = registry.projects.project(t.project)!.autoReview!;
+          await begin(t, pr, { land: landsOnItsOwn(setting) ? { requestedBy: setting.enabledBy, fromProject: true } : null, auto: true, mergeable: true });
+          owedTries.delete(key);
+          retried.ok(key);
+          break;
+        } catch (err) {
+          retried.failed(key, `${id}: its owed review of pull request #${pr.number} did not start and will be tried again (${err instanceof Refusal ? err.message : (err as Error).name})`);
+        }
       }
     }
   }
