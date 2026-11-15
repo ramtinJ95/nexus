@@ -227,17 +227,17 @@ const residentIn = (values: HealthSample["values"]) => new Map(Object.entries(va
  * node, orphaned VMs, which the registry has not placed there, are yet to take what the probe commits beyond the placed
  * up pylons, less what the read found their processes hold. One the
  * observation does not count yet is left out, since `roomLeft` counts all it asked for. Null without a read in the
- * last `freshReadMs`, or from a host that reports no memory. `placed` is the node's pylons, or at least each one
- * the observation or the health read names.
+ * last `freshReadMs`, or from a host that reports no memory. `among` is the node's pylons, or at least each one
+ * the observation or the health read names, and without it the node's pylons are read once the health read counts.
  */
-function freeMemory(registry: WeighingRegistry, node: NodeName, o: NodeObservation, c: NodeCapacity, now: number,
-  placed: readonly StoredPylon[] = registry.threads.pylonsWithStatusOn(node).map(({ pylon }) => pylon)): { availableGiB: number; untouchedGiB: number } | null {
+function freeMemory(registry: WeighingRegistry, node: NodeName, o: NodeObservation, c: NodeCapacity, now: number, among?: readonly StoredPylon[]): { availableGiB: number; untouchedGiB: number } | null {
   const read = registry.nodeMetrics.latestHealthSample(node);
   const availableGiB = read?.values.memAvailable;
   if (read == null || now - read.at > freshReadMs || availableGiB === undefined) return null;
   const resident = residentIn(read.values);
   const namesProcesses = c.disks?.some((d) => d.pylons === true) === true;
   const seen = new Map(o.pylons.map((p) => [p.pylonId, p]));
+  const placed = among ?? registry.threads.pylonsWithStatusOn(node).map(({ pylon }) => pylon);
   let placedUpGiB = 0;
   let untouchedGiB = 0;
   for (const pylon of placed) {
