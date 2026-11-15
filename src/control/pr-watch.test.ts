@@ -148,6 +148,12 @@ test("a pull request linked from a transcript follows a close and a reopen, is n
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "open" } };
   await f.watcher.poll();
   assert.deepEqual(stateOf(builder), ["open"], "a reopened pull request is open again, as one found by its branch is");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "closed" } };
+  await f.watcher.poll();
+  f.registry.threads.appendClaudeRead(builder, { session: "c0ffee00-0000-4000-8000-000000000001", from: transcriptStart, entries: [{ kind: "reply", at: 2, text: "Done." }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 2 });
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "open" } };
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(builder), ["open"], "and so is one reopened after another session's transcript replaced the one that named it");
 
   // A predecessor the comment cap stopped, whose transcript names a pull request the watch never linked.
   const queued = (id: string, after: ThreadId[]) => f.registry.queue.saveQueued({
@@ -162,6 +168,22 @@ test("a pull request linked from a transcript follows a close and a reopen, is n
   queued("th-q1", [capped]);
   await f.watcher.poll();
   assert.deepEqual(stateOf(capped), ["open"], "the open pull request a queued thread waits on is known, so the thread does not start before it merges");
+
+  // A read in the same millisecond as the one before it still moves the reader on, so its pull request is seen.
+  const later = f.add("th-later", true, null);
+  f.registry.threads.appendClaudeRead(later, { session, from: transcriptStart, entries: [{ kind: "reply", at: 1, text: "On it." }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 1 });
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(later), []);
+  f.registry.threads.appendClaudeRead(later, { session, from: { ...transcriptStart, offset: 1 }, entries: [{ kind: "pull-request", at: 1, number: 1, url: "https://github.com/acme/repo/pull/1", repository: "acme/repo" }], cursor: { ...transcriptStart, offset: 2 }, reset: false, readAt: 1 });
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(later), ["open"]);
+  // So does a read, in that millisecond too, of a file of the same size that replaced the one read before.
+  const replaced = f.add("th-replaced", true, null);
+  f.registry.threads.appendClaudeRead(replaced, { session, from: transcriptStart, entries: [{ kind: "reply", at: 1, text: "On it." }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 1 });
+  await f.watcher.poll();
+  f.registry.threads.appendClaudeRead(replaced, { session, from: { ...transcriptStart, offset: 1 }, entries: [{ kind: "pull-request", at: 1, number: 1, url: "https://github.com/acme/repo/pull/1", repository: "acme/repo" }], cursor: { ...transcriptStart, offset: 1, before: "another file's bytes" }, reset: true, readAt: 1 });
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(replaced), ["open"]);
 
   const landed = f.add("th-landed", true, null);
   opens(landed);

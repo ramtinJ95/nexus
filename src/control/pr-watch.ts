@@ -47,15 +47,21 @@ export function prWatcher(options: {
   let finished = 0;
   /** The pull requests a transcript names that merged before the watch linked them, which only a queued thread's wait reads again. */
   const mergedUnlinked = new Set<string>();
-  /** The pull requests each Claude worker's transcript names, as of its last read, so a pass scans only a transcript read since. */
-  const named = new Map<ThreadId, { readAt: number; numbers: readonly number[] }>();
+  /**
+   * The pull requests each Claude worker's transcript names, as of where its reader is, so a pass scans only a
+   * transcript read further since. Every read that adds entries moves the reader on in its session's file, starts
+   * another session's, or starts again in a file that replaced it, whose bytes before the reader differ, whatever
+   * the read's time.
+   */
+  const named = new Map<ThreadId, { at: string; numbers: readonly number[] }>();
   function transcriptPrs(id: ThreadId): readonly number[] {
-    const readAt = registry.threads.claudeTranscript(id)?.readAt;
-    if (readAt === undefined) return [];
+    const read = registry.threads.claudeTranscript(id);
+    if (read === undefined) return [];
+    const at = `${read.session}:${read.cursor.offset}:${read.cursor.skipping}:${read.cursor.before}:${read.dropped}`;
     const kept = named.get(id);
-    if (kept?.readAt === readAt) return kept.numbers;
+    if (kept?.at === at) return kept.numbers;
     const numbers = registry.threads.claudePullRequests(id);
-    named.set(id, { readAt, numbers });
+    named.set(id, { at, numbers });
     return numbers;
   }
   async function tick(only: ReadonlySet<ThreadId> | null) {
@@ -122,12 +128,14 @@ export function prWatcher(options: {
      * a check or a planning thread opens none of its own. One whose branch another watched thread of the repository
      * pushed is that thread's, and one from a fork is not the project's, which the search by branch tells as it does
      * for a pushed one. `skip` has the numbers the caller needs no word on, and `merged` asks for the merged ones
-     * too, as a queued thread's wait does.
+     * too, as a queued thread's wait does. A link last seen closed is asked about too, since a transcript keeps only
+     * its newest entries and another session's replaces them, and the pull request may be reopened after either.
      */
     async function opened(t: StoredThread, builder: boolean, repo: string, skip: ReadonlySet<number>, merged = false): Promise<number[]> {
       if (!builder || registry.threads.agent(t).kind !== "claude") return [];
       const numbers: number[] = [];
-      for (const number of transcriptPrs(t.id)) {
+      const closed = (registry.prWatches.prWatch(t.id)?.links ?? []).filter((l) => l.pr.repo === repo && l.pr.state === "closed").map((l) => l.pr.number);
+      for (const number of new Set([...transcriptPrs(t.id), ...closed])) {
         const key = `${repo}#${number}`;
         if (skip.has(number) || (!merged && mergedUnlinked.has(key))) continue;
         const { pr, detail } = await poll(repo, number);
