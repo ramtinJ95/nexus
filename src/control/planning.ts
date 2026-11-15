@@ -110,7 +110,11 @@ export function planning(options: { registry: PlanningRegistry; pipeline: Pick<P
       if (!isOpenStatus(t?.status) || t.working || t.lastReplyAt === null || t.lastReplyAt <= read) continue;
       const through = t.lastReplyAt;
       try {
-        for (const block of planBlocks(await replies(t), registry.planning.planning(thread)!.token)) {
+        const said = await replies(t);
+        // An archive during the read withdrew the proposals that were open, so none is asked for a thread put away since.
+        // Its replies stay unread, and an unarchive asks them.
+        if (!isOpenStatus(registry.threads.thread(thread)?.status)) continue;
+        for (const block of planBlocks(said, registry.planning.planning(thread)!.token)) {
           const at = now();
           for (const p of block) registry.questions.askQuestion(proposalQuestion(t, p, block, at));
         }

@@ -157,6 +157,56 @@ test("cards asked in one millisecond list block by block in the order the blocks
   assert.deepEqual(f.registry.questions.questions(thread.id).map((q) => q.text.match(/Plan \d [AB]/)![0]), ["Plan 1 A", "Plan 1 B", "Plan 3 A", "Plan 3 B", "Plan 8 A", "Plan 8 B"]);
 });
 
+test("archiving a planning thread withdraws its open proposals, which then take no answer and add no item, and keeps its answered ones", async (t) => {
+  const f = await fixture(t);
+  const thread = await f.planner();
+  f.reply(thread, block(f.registry.planning.planning(thread.id)!.token, [a, { key: "c", title: "C", brief: "Build C." }]));
+  await f.plans.poll();
+  const [qa, qc] = f.registry.questions.questions(thread.id);
+  const answer = (id: string, option: string) => f.registry.questions.answerQuestion(f.registry.questions.question(id) as ProposalQuestion, { option, by: laptop, at: 1 }, f.plans.answered);
+  const accepted = answer(qa!.id, "accept");
+  assert.equal(f.registry.threads.attention(thread.id), "decision");
+
+  const archivedAt = Date.now();
+  f.registry.threads.setThreadStatus(thread.id, "archived");
+  const withdrawn = f.registry.questions.question(qc!.id)!;
+  assert.equal(withdrawn.answer, null);
+  assert.equal(withdrawn.withdrawn?.by, "archive");
+  assert.ok(withdrawn.withdrawn.at >= archivedAt);
+  assert.deepEqual(f.registry.questions.question(qa!.id), accepted, "the answered proposal is as it was");
+  assert.notEqual(f.registry.threads.attention(thread.id), "decision", "nothing of the archived thread waits on the person");
+  assert.deepEqual(answer(qc!.id, "accept"), withdrawn, "a withdrawn proposal takes no answer");
+  assert.deepEqual(f.registry.pipeline.items().map((i) => i.id), [proposalItem(qa!.id)], "and adds no item");
+
+  f.registry.threads.setThreadStatus(thread.id, "active");
+  await f.plans.poll();
+  assert.deepEqual(f.registry.questions.question(qc!.id), withdrawn, "an unarchive does not ask it again");
+});
+
+test("an archive while a pass reads the thread's replies asks nothing for the archived thread, and an unarchive asks them", async (t) => {
+  const f = await fixture(t);
+  const thread = await f.planner();
+  const said = block(f.registry.planning.planning(thread.id)!.token, [a]);
+  f.reply(thread, said);
+  let read!: () => void;
+  const reading = new Promise<void>((resolve) => { read = resolve; });
+  let asked!: () => void;
+  const wanted = new Promise<void>((resolve) => { asked = resolve; });
+  const plans = planning({ registry: f.registry, pipeline: f.items, async replies() { asked(); await reading; return [said]; } });
+  const pass = plans.poll();
+  await wanted;
+  f.registry.threads.setThreadStatus(thread.id, "archived");
+  read();
+  await pass;
+  assert.deepEqual(f.registry.questions.questions(thread.id), []);
+  assert.notEqual(f.registry.threads.attention(thread.id), "decision");
+
+  f.registry.threads.setThreadStatus(thread.id, "active");
+  await plans.poll();
+  assert.deepEqual(f.registry.questions.questions(thread.id).map((q) => [q.kind, q.answer, q.withdrawn]), [["proposal", null, undefined]], "the reply the archive cut the read of is read once the thread is open again");
+  await plans.close();
+});
+
 test("an accepted proposal adds the item named from its question once, and one after a rejected proposal cannot be accepted", async (t) => {
   const f = await fixture(t);
   const thread = await f.planner();
