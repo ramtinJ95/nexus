@@ -2016,3 +2016,19 @@ test("a usage limit reads each Claude thread's newest 16 entries, in threads() a
   const listed = registry.threads.threads();
   for (const id of ["th-15-after", "th-16-after"]) assert.deepEqual(listed.find((l) => l.id === id), registry.threads.thread(id as ThreadId), id);
 });
+
+test("a node's observation is parsed once for the readers that share it, which cannot change it, and a save its transaction rolled back is never served", (t) => {
+  const registry = seedRegistry(testRegistry(t));
+  const node = registry.nodes.nodes()[0]!.name;
+  const before = testObservation(node, { observedAt: "2027-01-01T00:00:00Z" });
+  registry.threads.ingested(before, []);
+  const read = registry.nodes.node(node)!.observation!;
+  assert.equal(registry.nodes.node(node)!.observation, read, "a second read shares the first one's parse");
+  assert.throws(() => { (read as { observedAt: string }).observedAt = "changed"; }, TypeError);
+  const later = testObservation(node, { observedAt: "2027-01-01T00:01:00Z" });
+  const broken = { record: "sessions", pylonId: "pylon-th-000000000000", sessions: [{ id: "t1", harness: "pi", harnessSessionId: null, title: null, state: "paused", terminal: null, status: null, message: null }] } as const;
+  assert.throws(() => registry.threads.ingested(later, [broken as never]));
+  assert.equal(registry.nodes.node(node)!.observation!.observedAt, "2027-01-01T00:00:00Z", "the rolled-back save is not served");
+  registry.threads.ingested(later, []);
+  assert.equal(registry.nodes.node(node)!.observation!.observedAt, "2027-01-01T00:01:00Z");
+});

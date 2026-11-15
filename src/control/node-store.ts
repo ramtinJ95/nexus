@@ -21,14 +21,39 @@ export interface NodeRecord {
 /** A node that joined with a token rather than being named in control.json. `deployKey` is the digest of its deployer's token. */
 export interface JoinedNode extends Pick<NodeRecord, "name" | "tailnetHost" | "tailnetNodeId"> { deployKey: string; joinedAt: number }
 
-function nodeRow(r: Row): NodeRecord {
+/** Freezes `value` and everything in it, so a parse that readers share cannot be changed under them. */
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const inner of Object.values(value)) deepFreeze(inner);
+  }
+  return value;
+}
+
+/**
+ * Each node's observation as last parsed, by the stored text it was parsed from. A node's observation lists every
+ * pylon it holds, so it runs to hundreds of kilobytes, and the loop, the locator and each thread read ask for it many
+ * times between the saves that change it. Keyed by the text, so a save rolled back with its transaction is never
+ * served.
+ */
+const parsed = new WeakMap<Db, Map<string, { text: string; observation: NodeObservation }>>();
+
+function nodeRow(db: Db, r: Row): NodeRecord {
+  const text = r.observation as string | null;
+  let observation: NodeObservation | null = null;
+  if (text !== null) {
+    const cache = parsed.get(db) ?? parsed.set(db, new Map()).get(db)!;
+    const kept = cache.get(r.name as string);
+    observation = kept?.text === text ? kept.observation : deepFreeze(JSON.parse(text) as NodeObservation);
+    cache.set(r.name as string, { text, observation });
+  }
   return {
     name: r.name as NodeName,
     tailnetHost: r.tailnet_host as string,
     tailnetNodeId: r.tailnet_node_id as TailnetNodeId,
     state: r.state as NodeRecord["state"],
     capacity: jsonOrNull(r.capacity),
-    observation: jsonOrNull(r.observation),
+    observation,
   };
 }
 
@@ -46,7 +71,7 @@ export function nodeStore(db: Db) {
   }
   function node(name: NodeName): NodeRecord | undefined {
     const row = sql("SELECT * FROM nodes WHERE name = ?").get(name);
-    return row && nodeRow(row);
+    return row && nodeRow(db, row);
   }
 
   function upsertNode(node: Pick<NodeRecord, "name" | "tailnetHost" | "tailnetNodeId">) {
@@ -56,7 +81,7 @@ export function nodeStore(db: Db) {
   return {
     /** Nodes come from the config file or a join. Their state and capacity come from observations. */
     upsertNode,
-    nodes: () => (sql("SELECT * FROM nodes ORDER BY name").all() as Row[]).map(nodeRow),
+    nodes: () => (sql("SELECT * FROM nodes ORDER BY name").all() as Row[]).map((r) => nodeRow(db, r)),
     node,
     /**
      * For ingest, in its transaction, at `at` by the control plane's clock, which the age of a transition is read against.

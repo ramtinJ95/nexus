@@ -1277,6 +1277,25 @@ test("a pass over several running pylons reads its node's record at most once", 
   assert.ok(reads <= 1, `the pass read ${node}'s record ${reads} times`);
 });
 
+test("a pass over paused pylons that stay paused never weighs its node's room, which reads every pylon on it", async (t) => {
+  // rj-firebat on 2026-11-15: each pass asked every stopped pylon whether its node had room, and each answer read every
+  // pylon on the node, so a pass grew with the square of the pylons it lists and the control plane's main thread saturated.
+  const registry = openRegistry(tempDb());
+  seed(registry, { lastAgentActivityAt: 0, lastHumanActivityAt: 0 });
+  for (let i = 0; i < 4; i++) addThread(registry, { node, boot: { image }, thread: { lastAgentActivityAt: 0, lastHumanActivityAt: 0 } });
+  const paused = registry.threads.storedThreads({ status: ["active", "idle"] });
+  const fake = fakeNode({ autoFinish: true });
+  for (const th of paused) fake.pylons.set(th.pylonId, stoppedPylon(th.pylonId, { checkpoint: `ckpt-${th.id}-1` as CheckpointId, sessions: null }));
+  let weighed = 0;
+  const counted: Registry = { ...registry, threads: { ...registry.threads, pylonsWithThreadsOn: (name) => { weighed++; return registry.threads.pylonsWithThreadsOn(name); } } };
+  const loop = run(t, counted, fake.probe, { intervalMs: 60_000 });
+  await settled(fake, loop);
+  weighed = 0;
+  await loop.wake(node);
+  assert.deepEqual(fake.submitted, [], "every pylon stays paused");
+  assert.equal(weighed, 0, `the pass weighed ${node}'s room ${weighed} times`);
+});
+
 test("a tick that waits on nothing reads its thread once", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);

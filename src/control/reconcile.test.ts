@@ -202,7 +202,7 @@ function input(row: Row): PlanInput {
     attempts: { count, last: attempt },
     retrying: row.retrying ?? false,
     failed: row.failed ?? null,
-    noRoom: row.noRoom ?? null,
+    noRoom: () => row.noRoom ?? null,
     holders: (id) => row.holders?.[id] ?? [],
     artifactSha256: (id) => `sha-${id}`,
   };
@@ -210,7 +210,11 @@ function input(row: Row): PlanInput {
 
 for (const [name, row] of Object.entries(rows)) {
   test(`planPylon: ${name}`, () => {
-    assert.deepEqual(planPylon(input(row), now), row.expect);
+    let asked = 0;
+    const step = planPylon({ ...input(row), noRoom: () => { asked++; return row.noRoom ?? null; } }, now);
+    assert.deepEqual(step, row.expect);
+    const boots = step.kind === "submit" && step.job.kind === "spawn" || step.kind === "wait" && step.reason === "no-room";
+    assert.equal(asked, boots ? 1 : 0, "only a step that boots asks for the node's room");
   });
 }
 
