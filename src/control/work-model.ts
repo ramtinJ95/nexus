@@ -35,7 +35,7 @@ export function noChangeOf(registry: Pick<Registry, "reviews" | "prWatches" | "n
  * A thing of a thread's that waits on the person: one of an open thread's own needs, the open thread itself stopped
  * where only the person moves it, or an archive whose disk is kept for usage that will not be read without them.
  */
-export type PersonNeed = Need | { kind: "disk"; since: number } | { kind: "thread"; attention: Exclude<Attention, "reply" | "working" | "decision" | null>; since: number };
+export type PersonNeed = Need | { kind: "disk"; since: number } | { kind: "thread"; attention: Exclude<Attention, "reply" | "working" | "decision" | "died" | null>; since: number };
 
 /**
  * A new reply does not wait on the person, so it has no need, but it outranks a dialog in the terminal, which the
@@ -45,7 +45,7 @@ export function personNeeds(registry: Pick<Registry, "threads">, t: Thread, now:
   if (t.status === "archived") return settleStuck(t, now) ? [{ kind: "disk", since: t.archivedAt! + archivedDiskMs }] : [];
   if (!isOpenStatus(t.status)) return [];
   const attention = registry.threads.attention(t.id);
-  const stuck = attention === "failed" || attention === "parked" || attention === "limited" ? attention : attention !== "decision" && t.sessionWaiting === true ? "waiting" : null;
+  const stuck = attention === "failed" || attention === "parked" || attention === "limited" ? attention : attention !== "decision" && attention !== "died" && t.sessionWaiting === true ? "waiting" : null;
   const own: PersonNeed[] = [...registry.threads.needs(t.id)];
   if (stuck !== null) own.push({ kind: "thread", attention: stuck, since: t.usageLimit?.stoppedAt ?? Math.max(t.createdAt, t.lastAgentActivityAt) });
   return own;

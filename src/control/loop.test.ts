@@ -1305,6 +1305,28 @@ test("a pylon pauses once its agent turn ends and nobody has used it for a while
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn", "pause"]);
 });
 
+test("a builder whose resume waits ten minutes keeps its pylon up past the agent idle time, and pauses once the wait and its start are over", async (t) => {
+  const registry = openRegistry(tempDb());
+  const longAgo = Date.now() - 60 * 60_000;
+  const thread = seed(registry, { agentTurnRunning: true, lastAgentActivityAt: longAgo, lastHumanActivityAt: longAgo }, "fix it");
+  claudeWorkerAt(registry, thread.id, "started", { session: "s1" });
+  const fake = fakeNode({ autoFinish: true });
+  const loop = run(t, registry, fake.probe);
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  const since = Date.now() - 9 * 60_000;
+  registry.threads.recordActivity(thread.id, { agentTurnRunning: false, agent: since });
+  registry.threads.saveClaudeResume(thread.id, { state: "waiting", turn: since, count: 2, from: since, due: since + 10 * 60_000 });
+  for (let pass = 0; pass < 20; pass++) {
+    await settled(fake, loop);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.equal(fake.pylons.get(thread.pylonId)?.phase, "running", "nine minutes into its ten-minute wait, past the five idle ones");
+  assert.deepEqual(kinds(fake.submitted), ["spawn fresh"]);
+  const over = Date.now() - 21 * 60_000;
+  registry.threads.saveClaudeResume(thread.id, { state: "waiting", turn: over, count: 2, from: over, due: over + 10 * 60_000 });
+  await until("the pylon pauses once the hold is over", () => fake.pylons.get(thread.pylonId)?.phase === "stopped");
+});
+
 /**
  * A thread nobody has used for an hour, whose node the control plane last saw with the pylon as `before`, and which
  * comes back from a reboot with it as `after`.
