@@ -40,7 +40,7 @@ import { holdOptions, landOption } from "../contract/reviews.ts";
 import { askingHolds, isOpen, type HeldQuestion, type HoldsQuestion, type Unanswered } from "./questions.ts";
 import {
   answered, approves, behindOf, blocks, cancellable, cannotLand, changedPaths, changeOf, checkOutput, checkThread, descriptionDigest, ended, type EndedKind, findingsOf, gateAhead, gateFailure, gateRun, heldForGate, humanLabel,
-  inLanding, landable, landingVerb, liveOutput, maxRounds, personPhase, pushedHead, reviewerApproved, reviewersFindings, roundsSpent, sameBehind, secondReads, seatsFor, settled, seatsOf, verdictAt, verdictsFor,
+  inLanding, landable, landingVerb, liveOutput, maxRounds, personPhase, pushedHead, reviewerApproved, reviewersFindings, roundsSpent, sameBehind, secondReads, seatsFor, settled, seatsOf, verdictAt, verdictsFor, waitsOnPerson,
   type Behind, type GateRun, type HoldCause, type Refused, type ModelFailure, type Phase, type PhaseKind, type Review, type Round, type Seat, type SecondReviewer, type Talk, type Waiver,
 } from "./review-model.ts";
 import { landsOnItsOwn, type Project } from "./project.ts";
@@ -1139,6 +1139,22 @@ export function reviewLoop(deps: ReviewDeps) {
     if (existing !== null && !ended(existing)) throw new Refusal("conflict", `review ${existing.id} of ${builder} is ${existing.phase.kind}${cancellable(existing) ? `. Cancel it with nexus review --cancel ${builder} to start another` : ""}`);
   }
   /**
+   * A builder has one review, so a review of another of its pull requests takes the place of the one it has. One that
+   * waits on the person for a pull request still open would be lost with what it approved, since nothing lands a
+   * review that is no longer its builder's, so the person says so first.
+   */
+  function refuseIfReplaces(builder: ThreadId, pr: Pick<PullRequest, "repo" | "number">): void {
+    const current = registry.reviews.review(builder);
+    if (current === null || !waitsOnPerson(current) || current.merged !== null || (current.pr.repo === pr.repo && current.pr.number === pr.number)) return;
+    const open = (registry.prWatches.prWatch(builder)?.links ?? []).some((l) => l.pr.state === "open" && l.pr.repo === current.pr.repo && l.pr.number === current.pr.number);
+    if (!open) return;
+    const how = current.phase.kind === "approved" ? "is approved and lands once you land it" : "is held for you";
+    // Only what the review takes is offered: a Land where it would land, a cancel where it can be cancelled.
+    const ways = [...landable(current) ? [`land it first with nexus land ${builder}`] : [], ...cancellable(current) ? [`end it with nexus review --cancel ${builder}`] : [], "start this one with --replace to give it up"];
+    const advice = `${ways.slice(0, -1).join(", ")}, or ${ways.at(-1)}`;
+    throw new Refusal("conflict", `review ${current.id} of pull request #${current.pr.number} ${how}, and a review of #${pr.number} would take its place as ${builder}'s one review, so #${current.pr.number}'s ${landable(current) ? "approval" : "review"} would be given up. ${advice[0]!.toUpperCase()}${advice.slice(1)}`);
+  }
+  /**
    * One review of a PR at a time, so the rounds its reviews spend stay within the one budget each later review reads.
    * Another builder's review that ended may still take a new head back to its rounds, unless it settled.
    */
@@ -1155,7 +1171,7 @@ export function reviewLoop(deps: ReviewDeps) {
    * Records a review of `pr`, a PR of the builder's, with its first request. The loop's next pass starts its reviewer
    * threads, whose starts read the remote and may take longer than the person's request waits.
    */
-  async function begin(builder: Thread, { repo, number }: Pick<PullRequest, "repo" | "number">, request: { rounds?: number | undefined; land: Review["land"]; auto: boolean; mergeable?: true }): Promise<Review> {
+  async function begin(builder: Thread, { repo, number }: Pick<PullRequest, "repo" | "number">, request: { rounds?: number | undefined; land: Review["land"]; auto: boolean; mergeable?: true; replace?: boolean | undefined }): Promise<Review> {
     refuseIfReviewed(builder.id, repo, number);
     // A later review of a PR spends what the earlier ones left, unless the person grants rounds.
     const earlierRounds = registry.reviews.roundsSpentOn(repo, number);
@@ -1194,6 +1210,8 @@ export function reviewLoop(deps: ReviewDeps) {
     // also gives way to any review of the PR since, and to the builder's review that has not settled, which it would replace.
     refuseIfReviewed(builder.id, repo, number);
     refuseIfRunning(builder.id);
+    // And again for the person's start, since another start may have left a review waiting on them while this one read GitHub.
+    if (!request.auto && request.replace !== true) refuseIfReplaces(builder.id, { repo, number });
     if (request.auto) {
       if (registry.reviews.prReviewed(repo, number)) throw new Refusal("conflict", `pull request #${number} got a review while this start read GitHub`);
       const current = registry.reviews.review(builder.id);
@@ -1281,7 +1299,7 @@ export function reviewLoop(deps: ReviewDeps) {
       await passes.settled();
     },
 
-    async start(builderId: ThreadId, request: { pr?: number | undefined; rounds?: number | undefined; land: string | null }): Promise<Review> {
+    async start(builderId: ThreadId, request: { pr?: number | undefined; rounds?: number | undefined; land: string | null; replace?: boolean | undefined }): Promise<Review> {
       const builder = registry.threads.thread(builderId);
       if (builder === undefined) throw new Refusal("missing", `no thread ${builderId}`);
       if (builder.status !== "active") throw new Refusal("conflict", `thread ${builder.id} is ${builder.status}`);
@@ -1290,7 +1308,8 @@ export function reviewLoop(deps: ReviewDeps) {
       const open = (registry.prWatches.prWatch(builder.id)?.links ?? []).filter((l) => l.pr.state === "open" && (request.pr === undefined || l.pr.number === request.pr));
       if (open.length === 0) throw new Refusal("conflict", `thread ${builder.id} has no open pull request${request.pr === undefined ? "" : ` #${request.pr}`} that the PR watch linked`);
       if (open.length > 1) throw new Refusal("conflict", `thread ${builder.id} has ${open.length} open pull requests, so name one: ${open.map((l) => `#${l.pr.number}`).join(", ")}`);
-      return await begin(builder, open[0]!.pr, { rounds: request.rounds, land: request.land === null ? null : { requestedBy: request.land }, auto: false });
+      if (request.replace !== true) refuseIfReplaces(builder.id, open[0]!.pr);
+      return await begin(builder, open[0]!.pr, { rounds: request.rounds, land: request.land === null ? null : { requestedBy: request.land }, auto: false, replace: request.replace });
     },
 
     /**

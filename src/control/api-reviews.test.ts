@@ -29,12 +29,15 @@ test("a review needs the GitHub token's loop, and landing, at its start or later
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/review`, {})).status, 403, "the control node never starts a review either, since a thread never drives another");
   s.callAs(phone);
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/review`, {})).status, 201, "a review that stops at approval needs no deploy right");
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/review`, { pr: 8, replace: true })).status, 201, "the person's word to replace a review that waits on them");
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/review`, { replace: "yes" })).status, 400);
   assert.deepEqual(asked, [
-    ["start", s.thread.id, { pr: 7, rounds: 5, land: null }],
-    ["start", s.thread.id, { pr: undefined, rounds: undefined, land: laptop }],
+    ["start", s.thread.id, { pr: 7, rounds: 5, land: null, replace: false }],
+    ["start", s.thread.id, { pr: undefined, rounds: undefined, land: laptop, replace: false }],
     ["land", s.thread.id, laptop, undefined],
     ["land", s.thread.id, laptop, "a".repeat(40)],
-    ["start", s.thread.id, { pr: undefined, rounds: undefined, land: null }],
+    ["start", s.thread.id, { pr: undefined, rounds: undefined, land: null, replace: false }],
+    ["start", s.thread.id, { pr: 8, rounds: undefined, land: null, replace: true }],
   ]);
 });
 
