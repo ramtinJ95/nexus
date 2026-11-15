@@ -107,7 +107,7 @@ export async function tick(pylon: PylonRecord, ctx: TickContext): Promise<PlanSt
     attempts: pylon.attempts,
     retrying: pylon.retrying,
     failed: pylon.failed,
-    noRoom: observation === null ? null : ctx.noRoom(observation),
+    noRoom: () => observation === null ? null : ctx.noRoom(observation),
     ...(sealedBoot === undefined ? {} : { sealedBoot }),
     holders: ctx.holders,
     artifactSha256: ctx.artifactSha256,
