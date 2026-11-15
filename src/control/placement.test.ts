@@ -60,6 +60,8 @@ function fakeRegistry(nodes: FakeNode[]) {
         pylon: { pylonId: `pylon-${p.id}` as PylonId, boot: { resources: { cpus: 2, memoryGiB: p.memoryGiB, diskGiB: 10 } } } as StoredPylon, status: "active" as const,
       })),
       pylonsWithThreadsOn,
+      // Every fake pylon's thread is open, so each is among those that are up or may come up.
+      pylonsWithThreadsAmong: pylonsWithThreadsOn,
       pylonsWithHeldThreadsOn: (name: NodeName) => pylonsWithThreadsOn(name).filter(({ thread }) => thread.awaitedUntil !== undefined),
     },
     placement: {
