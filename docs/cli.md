@@ -847,12 +847,15 @@ type LandRequest =
  * last quoted from when a landing asked it again, so a landing asks again only once the description changed since.
  * `describedFrom` is the digest supplied to this round's reviewers, so a description-only fix can return to them
  * without waiting for a new commit. Older rounds without it keep waiting for a push.
+ * `unstated` is `asked` from when the loop asks the builder, once a round, to add to the description what could not
+ * be checked live, at a head with no `.nexus/verify` whose reviewer quoted no such passage, and `answered` once the
+ * builder answered or the review ended, so the person who adds it can land.
  * `heldAt` holds those `head` alone decides (policy.ts's `headHolds`) against the PR's `base`, whose files they read,
  * recorded once its checks pass, so the person's Land and the landing read the same ones. A landing reads them again
  * when the PR's base changed since. A round that passed its checks before Nexus recorded them gets them on the
  * loop's next pass while it waits at approval, and from its landing otherwise.
  */
-interface Round { head: string; base?: string; verdict: Verdict | null; secondVerdict?: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string; held?: true }; quotedFrom?: string; describedFrom?: string; heldAt?: HeldAt }
+interface Round { head: string; base?: string; verdict: Verdict | null; secondVerdict?: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string; held?: true }; quotedFrom?: string; describedFrom?: string; unstated?: "asked" | "answered"; heldAt?: HeldAt }
 /**
  * `absent` when `head` has no `.nexus/verify`, so the landing reads the PR's statement of what it could not check live
  * instead. `ran` when the script gave its verdict in verify pylon `thread`.
@@ -1780,7 +1783,7 @@ The control plane stores none of an item's progress. It reads `PipelineItem.phas
 | Its review ended for the person | `held` | `its review ended for the person: <the first reason>` |
 | Its review merges, deploys or rolls back, or is approved and lands | `landing` | `PR #<n> is merging`, `deploying`, `rolling back` or `approved`, `PR #<n> is merging, waiting while <reason>` for a landing that waits its turn, and `PR #<n> is merging, waiting for the pull request's GitHub checks to pass since <HH:MM> UTC` for one that waits for checks still running |
 | Its review is approved and stops at approval | `held` | `PR #<n> is approved, and lands once the person runs nexus land <thread>` |
-| Its review reviews, waits on the builder's fixes, waits on the reviewer's quote of what could not be checked live or runs the checks | `reviewing`, or `landing` for a quote, and for checks run once it was asked to land | `PR #<n>, round <k>: reviewing`, with what its check does beside the reviewer as `show` says it, `fixing`, `quoting` (since 0.59.0) or `checking`, or, since 0.38.0, the live check's line of `show`, such as `live check running .nexus/verify at <commit> in verify pylon <thread>` |
+| Its review reviews, waits on the builder's fixes, waits on the reviewer's quote of what could not be checked live or runs the checks | `reviewing`, or `landing` for a quote and for checks run once it was asked to land | `PR #<n>, round <k>: reviewing`, with what its check does beside the reviewer as `show` says it, `fixing`, `quoting` (since 0.59.0) or `checking`, or, since 0.38.0, the live check's line of `show`, such as `live check running .nexus/verify at <commit> in verify pylon <thread>` |
 | A linked pull request merged and none is open | `landed` | `PR #<n> merged` |
 | Its thread is archived or deleted | `archived` | `its thread is archived` |
 | Its thread's attention is `failed` or `decision` | `held` | `its thread failed`, `its thread needs the person's decision` |

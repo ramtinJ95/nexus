@@ -65,7 +65,9 @@ test("every review prompt keeps its text", (t) => {
     "next round after answers and a retarget": nextRound(twoRounds({}, h2), { head: h1, base: "main", verdict: verdict([f1]), check: null, answers: [{ id: "F1", action: "rejected", reason: "Fine as is." }] }, "rv-1:c", "next", "first"),
     "next round at an unmoved head": nextRound(twoRounds({}, h1), { head: h1, base: "main", verdict: verdict([f1]), check: null, answers: [{ id: "F1", action: "rejected", reason: "Fine as is." }] }, "rv-1:c", "main", "first"),
     "next round after a conflict": nextRound(twoRounds({}, h2), { head: h1, base: "main", verdict: verdict([]), check: null, answers: [], conflict: { base: "main" } }, "rv-1:c", "main", "first"),
-    "quote request": quoteRequest(at({ verdict: verdict([]) }), { ...detail, branch: "cache" } as never, "rv-1:d"),
+    "builder findings of a missing statement": builderFindings(at({ verdict: verdict([f2]), check: { passed: true, output: "" }, live: { kind: "absent" }, unstated: "asked" }), "rv-1:b"),
+    "quote request": quoteRequest(at({ verdict: verdict([]) }, { land: { requestedBy: "nLAPTOP" } }), { ...detail, branch: "cache" } as never, "rv-1:d"),
+    "quote request with no landing asked for": quoteRequest(at({ verdict: verdict([]) }), { ...detail, branch: "cache" } as never, "rv-1:d"),
   };
   for (const phase of ["reviewing", "fixing", "quoting"] as const) {
     prompts[`reminder while ${phase}`] = reminder(phase, null, "rv-1:e");

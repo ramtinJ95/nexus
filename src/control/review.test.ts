@@ -18,7 +18,7 @@ import { reservedNames } from "../contract/reserved.ts";
 import { carryWaiver, headHolds, holdsAt, landPress, secondReviewRule } from "./policy.ts";
 import { landing } from "./dashboard/cards.ts";
 import { checkBeside, liveNote, phaseNote, reviewSaid, roundNote } from "./wording.ts";
-import { cannotLand, changeOf, ended, findingsOf, humanLabel, landable, personPhase, roundsSpent, type HoldCause, type Review, type Verdict, type Waiver } from "./review-model.ts";
+import { cannotLand, changeOf, ended, findingsOf, humanLabel, landable, personPhase, roundsSpent, trackStep, type HoldCause, type Review, type Verdict, type Waiver } from "./review-model.ts";
 import { githubChecksMs, reviewerFor, reviewLoop, secondReviewerFor, type ReviewDeps } from "./review.ts";
 import { upgradeReview } from "./record-upgrade.ts";
 import { commentCap, prWatchMs } from "./pr-watch-model.ts";
@@ -345,6 +345,9 @@ const saveOlder = (f: { registry: Registry }, record: unknown) => f.registry.rev
 const verdict = (r: Review, fields: Record<string, unknown>) => `Done.\n\`\`\`nexus-review\n${JSON.stringify({ token: r.expect, verdict: "approve", findings: [], reserved: [], notCheckedLive: "the cache under real traffic", ...fields })}\n\`\`\``;
 const answers = (r: Review, list: unknown[]) => `Fixed.\n\`\`\`nexus-review-answers\n${JSON.stringify({ token: r.expect, answers: list })}\n\`\`\``;
 const serious = { id: "F1", priority: "P1", where: "src/cache.ts:1", summary: "The cache never expires", detail: "Add a TTL." };
+/** The builder's answer that leaves the statement of what could not be checked live to the person, and the hold that makes. */
+const declined = (r: Review) => answers(r, [{ id: "STATEMENT", action: "rejected", reason: "The person knows the fleet" }]);
+const undeclared = `No live check ran at ${head1}, and the builder did not add to the pull request's description what could not be checked live: The person knows the fleet`;
 
 test("a Claude builder's PR gets a harness reviewer, and findings, fixes and new commits go round until it approves", async (t) => {
   const f = fixture(t);
@@ -2011,7 +2014,10 @@ test("a head with a .nexus/verify lands once its live check passes in a verify p
   assert.deepEqual(g.merges, [], "a head without .nexus/verify still needs the statement");
   assert.deepEqual(g.liveThreads, []);
   assert.deepEqual(g.review().rounds.at(-1)!.live, { kind: "absent" });
-  assert.deepEqual(shown(g.review().phase), { kind: "needs-person", reasons: ["No live check ran, and the pull request does not say what could not be checked live."] });
+  assert.equal(g.review().phase.kind, "fixing", "which its builder is asked for first");
+  g.reply(g.builder, declined(g.review()));
+  await gLoop.poll();
+  assert.deepEqual(shown(g.review().phase), { kind: "needs-person", reasons: [undeclared] });
 });
 
 test("a landing stored before live checks, whose head has a .nexus/verify, is held until a landing runs its live check", async (t) => {
@@ -4647,8 +4653,10 @@ test("a description that says what could not be checked live only after the appr
   const reviewer = f.review().reviewer;
   f.reply(reviewer, verdict(f.review(), { notCheckedLive: null }));
   await loop.poll();
+  f.reply(f.builder, declined(f.review()));
+  await loop.poll();
   const auth = "Always needs the person: changes to login or auth, as it changes src/control/api/server.ts.";
-  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["No live check ran, and the pull request does not say what could not be checked live.", auth] });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [undeclared] });
 
   f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Adds a cache.\n\n## Not checked live\n\nThe cache under real traffic on the fleet." } };
   const sent = f.sent.length;
@@ -4674,6 +4682,8 @@ test("a press whose description still does not say what could not be checked liv
   await loop.poll();
   f.reply(f.review().reviewer, verdict(f.review(), { notCheckedLive: null }));
   await loop.poll();
+  f.reply(f.builder, declined(f.review()));
+  await loop.poll();
   assert.equal(f.review().phase.kind, "needs-person");
   loop.land(f.builder, "nLAPTOP", head1);
   await loop.poll();
@@ -4682,6 +4692,74 @@ test("a press whose description still does not say what could not be checked liv
   await loop.poll();
   assert.deepEqual(f.merges, []);
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["No live check ran, and the pull request does not say what could not be checked live."] });
+});
+
+test("a head no live check ran at, whose description does not say what could not be checked live, goes back to its builder first, and lands through the reviewer's quote of the statement it adds", async (t) => {
+  const f = fixture(t, { repo: "acme/app" });
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Adds a cache." } };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: "nLAPTOP" });
+  await loop.poll();
+  const reviewer = f.review().reviewer;
+  f.reply(reviewer, verdict(f.review(), { notCheckedLive: null }));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing", "the builder can still add it, so the person is not asked yet");
+  assert.equal(f.review().rounds[0]!.unstated, "asked");
+  assert.equal(f.sent.at(-1)!.to, f.builder);
+  assert.match(f.sent.at(-1)!.message.text, /STATEMENT \(P0\)/);
+  assert.match(f.sent.at(-1)!.message.text, /Add a section headed "Not checked live" to the description on GitHub/);
+  assert.deepEqual(f.merges, []);
+
+  const fixed = () => answers(f.review(), [{ id: "STATEMENT", action: "fixed", reason: "Added the section." }]);
+  f.reply(f.builder, fixed());
+  await loop.poll();
+  f.tick(11 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing", "an answer alone adds nothing to the description");
+  assert.match(f.sent.at(-1)!.message.text, /the pull request's description is as the reviewer read it/);
+
+  const body = "Adds a cache.\n\n## Not checked live\n\nThe cache under real traffic on the fleet.";
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body } };
+  f.reply(f.builder, fixed());
+  await loop.poll();
+  f.tick(3 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "quoting", "the statement reaches the landing only through the reviewer");
+  assert.equal(trackStep(f.review()), "landing");
+  assert.equal(f.sent.at(-1)!.to, reviewer);
+  assert.ok(f.sent.at(-1)!.message.text.includes(body), "which reads the description as it is now");
+  assert.deepEqual(f.merges, []);
+  f.reply(reviewer, `Quoted.\n\`\`\`nexus-quote\n${JSON.stringify({ token: f.review().expect, notCheckedLive: "The cache under real traffic on the fleet." })}\n\`\`\``);
+  await loop.poll();
+  assert.equal(f.review().rounds.length, 1, "neither the request nor the quote is a new round");
+  assert.equal(f.review().rounds[0]!.unstated, "answered");
+  assert.deepEqual(f.merges, [head1]);
+});
+
+test("a review that stops at approval asks its builder for the statement of what could not be checked live once, whatever the reviewer then quotes", async (t) => {
+  const f = fixture(t, { repo: "acme/app" });
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Adds a cache." } };
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const reviewer = f.review().reviewer;
+  f.reply(reviewer, verdict(f.review(), { notCheckedLive: null }));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "fixing", "an approval the person could not land is not shown as theirs to land yet");
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, body: "Adds a cache.\n\n## Not checked live\n\nNothing." } };
+  f.reply(f.builder, answers(f.review(), [{ id: "STATEMENT", action: "fixed", reason: "Added the section." }]));
+  await loop.poll();
+  f.tick(3 * 60_000);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "quoting");
+  assert.doesNotMatch(f.sent.at(-1)!.message.text, /Nexus is landing/, "no landing was asked for");
+  assert.equal(trackStep(f.review()), "review", "so its quote is no step of one");
+  const asked = f.sent.filter((m) => m.to === f.builder).length;
+  f.reply(reviewer, `Quoted.\n\`\`\`nexus-quote\n${JSON.stringify({ token: f.review().expect, notCheckedLive: null })}\n\`\`\``);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "approved", "a statement that does not hold up is the person's to see, as before");
+  assert.equal(f.sent.filter((m) => m.to === f.builder).length, asked, "and the builder is not asked again in the round");
+  assert.equal(f.review().rounds.length, 1);
 });
 
 test("for every hold, and for an approval, the land route takes a press exactly when the dashboard offers Land", async (t) => {
@@ -5160,6 +5238,8 @@ test("a reviewer asked to quote is reminded of the nexus-quote block, and a pull
   await loop.start(f.builder, { land: "nLAPTOP" });
   await loop.poll();
   f.reply(f.review().reviewer, verdict(f.review(), { notCheckedLive: null }));
+  await loop.poll();
+  f.reply(f.builder, declined(f.review()));
   await loop.poll();
   loop.land(f.builder, "nLAPTOP", head1);
   await loop.poll();

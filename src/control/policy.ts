@@ -147,6 +147,8 @@ const quoteOf = (round: Round) => {
 
 /** Whether the round has a quote that a landing should ask the reviewer for again, as the description changed since the reviewer last quoted from it. */
 export const staleQuote = (round: Round, body: string) => quoteOf(round) !== null && round.quotedFrom !== descriptionDigest(body);
+/** Whether the round ran no live check and has no quote of what could not be checked live, which holds its landing. */
+export const unstated = (round: Round) => round.live?.kind === "absent" && quoteOf(round) === null;
 
 /**
  * What the person's Land press does now, the one rule the land route and the dashboard both follow. It is `stuck` on

@@ -64,12 +64,15 @@ export const answered = (f: Pick<Finding, "id">, answers: readonly Answer[]) => 
  * last quoted from when a landing asked it again, so a landing asks again only once the description changed since.
  * `describedFrom` is the digest supplied to this round's reviewers, so a description-only fix can return to them
  * without waiting for a new commit. Older rounds without it keep waiting for a push.
+ * `unstated` is `asked` from when the loop asks the builder, once a round, to add to the description what could not
+ * be checked live, at a head with no `.nexus/verify` whose reviewer quoted no such passage, and `answered` once the
+ * builder answered or the review ended, so the person who adds it can land.
  * `heldAt` holds those `head` alone decides (policy.ts's `headHolds`) against the PR's `base`, whose files they read,
  * recorded once its checks pass, so the person's Land and the landing read the same ones. A landing reads them again
  * when the PR's base changed since. A round that passed its checks before Nexus recorded them gets them on the
  * loop's next pass while it waits at approval, and from its landing otherwise.
  */
-export interface Round { head: string; base?: string; verdict: Verdict | null; secondVerdict?: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string; held?: true }; quotedFrom?: string; describedFrom?: string; heldAt?: HeldAt }
+export interface Round { head: string; base?: string; verdict: Verdict | null; secondVerdict?: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string; held?: true }; quotedFrom?: string; describedFrom?: string; unstated?: "asked" | "answered"; heldAt?: HeldAt }
 /** The holds a round's head alone decides, read from the PR's files against `base`. */
 export interface HeldAt { base: string; holds: Hold[] }
 /** The digest of a pull request's description, which a round's `quotedFrom` records. */
@@ -328,7 +331,8 @@ const phases = {
   // A review's checks run as the first steps of its landing once it was asked to land.
   checking: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, track: (_, r) => r.land === null ? "review" : "landing", landingStep: asked("checking") },
   verifying: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, track: (_, r) => r.land === null ? "review" : "landing", landingStep: asked("verifying") },
-  quoting: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, track: "landing", landingStep: reached("checking") },
+  // A quote is asked for by a Land press, and for a builder's statement in a review that may not have been asked to land.
+  quoting: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, track: (_, r) => r.land === null ? "review" : "landing", landingStep: asked("checking") },
   approved: { ended: true, settled: false, waitsOnPerson: true, cancellable: false, track: (_, r) => r.land === null ? "review" : "landing" },
   merging: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, landing: (phase) => phase.authorized === null ? null : "merges", track: "landing", landingStep: reached("merging") },
   deploying: { ended: false, settled: false, waitsOnPerson: false, cancellable: false, landing: () => "deploys", track: "landing", landingStep: reached("deploying") },
@@ -386,7 +390,7 @@ export const personPhase = (cause: HoldCause, ...items: readonly (Hold | string)
  * A gate that stopped an approval: the P0 `finding` the builder answers, what `failed`, the `verdict` its findings
  * message gives, the hold's `code` and its text once the builder `pushedNothing` for it, and the gate's `output`.
  */
-interface GateFailure { kind: "check" | "live" | "conflict"; finding: Finding; failed: string; verdict: string; code: HoldCode; pushedNothing: string; output: string | null }
+interface GateFailure { kind: "check" | "live" | "conflict" | "statement"; finding: Finding; failed: string; verdict: string; code: HoldCode; pushedNothing: string; output: string | null }
 const gates = {
   check: (head: string, output: string): GateFailure => ({
     kind: "check", finding: { id: "CHECK", priority: "P0", where: ".nexus/check", summary: `.nexus/check failed at ${head}`, detail: output }, failed: ".nexus/check failed",
@@ -403,15 +407,24 @@ const gates = {
     }, failed: `The branch conflicted with ${base}`,
     verdict: `the reviewer approved, but the branch conflicts with ${base}, so it cannot merge`, code: "loop", pushedNothing: `The branch conflicts with ${base}, and the builder did not rebase it`, output: null,
   }),
+  statement: (head: string): GateFailure => ({
+    kind: "statement", finding: {
+      id: "STATEMENT", priority: "P0", where: "the pull request's description", summary: `No live check ran at ${head}, and the description does not say what could not be checked live`,
+      detail: `The repository has no .nexus/verify at ${head}, so no live check ran, and the landing then needs the pull request's description to say what could not be checked live. The reviewer found no such passage in it. Add a section headed "Not checked live" to the description on GitHub. Name in it each part of this change that only a run on the real system would show works and that nothing here ran, or say that there is none and why. Claim nothing as checked live that was not run. Edit the description alone and push nothing: the reviewer then reads the section at this commit. If you cannot say, reject STATEMENT with the reason, and the person takes over.`,
+    }, failed: "No live check ran, and the description did not say what could not be checked live",
+    verdict: "the reviewer approved and the repository's checks passed, but no live check ran and the description does not say what could not be checked live", code: "not-checked-live",
+    pushedNothing: `No live check ran at ${head}, and the builder did not add to the pull request's description what could not be checked live`, output: null,
+  }),
 };
 /**
  * The gate that failed at `round`, or null. A round fails at most one: a failed check counts only once the reviewer
- * approves, the live check runs only after the check passes, and a conflict is recorded only when a merge after both
- * is refused.
+ * approves, the live check runs only after the check passes, the statement is asked for only where no live check
+ * ran, and a conflict is recorded only when a merge after them is refused.
  */
 export const gateFailure = (round: Round): GateFailure | null => round.check?.passed === false && reviewerApproved(round) ? gates.check(round.head, round.check.output)
   : round.live?.kind === "ran" && !round.live.passed ? gates.live(round.head, round.live.output)
-  : round.conflict !== undefined ? gates.conflict(round.head, round.conflict.base) : null;
+  : round.conflict !== undefined ? gates.conflict(round.head, round.conflict.base)
+  : round.unstated === "asked" ? gates.statement(round.head) : null;
 /** A second reviewer's finding as the builder answers it. No finding's own ID has a dot, so it never meets one of the first reviewer's. */
 export const secondId = (id: string) => `2.${id}`;
 export const secondFindings = (round: Round): Finding[] => (round.secondVerdict?.findings ?? []).map((f) => ({ ...f, id: secondId(f.id) }));
