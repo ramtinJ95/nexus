@@ -458,7 +458,7 @@ test("a registry from before session titles keeps its sessions, untitled until t
   assert.equal(registry.threads.sessions(pylonId)[0]!.title, "review");
 });
 
-test("a node's spawning pylons are those whose submitted job is a spawn, on that node", (t) => {
+test("a node's spawning pylons are those whose submitted job is a spawn, on that node, and a job is submitted there while any pylon has one", (t) => {
   const registry = seed(testRegistry(t, tempDb()));
   const envelope = { jobId: "j1" as JobId, node, issuedAt: "2027-01-01T00:00:00.000Z", notAfter: "2027-01-01T00:00:30.000Z" };
   assert.deepEqual(registry.threads.pylonsSpawningOn(node), [], "a pylon with nothing submitted is not spawning");
@@ -467,8 +467,17 @@ test("a node's spawning pylons are those whose submitted job is a spawn, on that
   const deleting = addPylon(registry, "th-2");
   registry.threads.savePylon({ ...registry.threads.pylon(deleting)!, submitted: { ...envelope, jobId: "j2" as JobId, job: { kind: "delete", pylonId: deleting } } });
   addPylon(registry, "th-3");
-  assert.deepEqual(registry.threads.pylonsSpawningOn(node), [spawning]);
-  assert.deepEqual(registry.threads.pylonsSpawningOn("elsewhere" as NodeName), []);
+  const peer = "infra-testbench" as NodeName;
+  registry.nodes.upsertNode({ name: peer, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
+  const elsewhere = addPylon(registry, "th-4", peer);
+  const boots = registry.threads.pylon(elsewhere)!;
+  const spawningElsewhere: StoredPylon = { ...boots, submitted: { ...envelope, jobId: "j3" as JobId, node: peer, job: { kind: "spawn", pylonId: elsewhere, boot: { ...boots.boot, source: boots.firstBoot }, live: boots.live, liveHash: boots.liveHash } } };
+  registry.threads.savePylon(spawningElsewhere);
+  assert.equal(registry.threads.jobSubmittedOn(node), true);
+  assert.deepEqual(registry.threads.pylonsSpawningOn(node), [spawning], "neither the delete nor the other node's spawn");
+  assert.deepEqual(registry.threads.pylonsSpawningOn(peer), [spawningElsewhere]);
+  registry.threads.savePylon({ ...spawningElsewhere, submitted: null });
+  assert.equal(registry.threads.jobSubmittedOn(peer), false, "a node with nothing submitted");
 });
 
 test("a registry from before repository kinds reads every stored repo, booted or submitted, as a clone", (t) => {

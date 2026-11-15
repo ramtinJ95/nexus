@@ -1321,6 +1321,27 @@ test("a pass over a pylon that waits for room reads its node's spawns alone, and
   assert.equal(weighed, 0, `the pass read every pylon on ${node} ${weighed} times`);
 });
 
+test("a pass gives the event loop a turn between its pylons, so a request is served between ticks", async (t) => {
+  // rj-firebat on 2026-11-15: a pass ran for 2 to 6 s in one turn, so /v1/health and the deployer's 10 s calls timed out.
+  const registry = openRegistry(tempDb());
+  seed(registry, { lastAgentActivityAt: 0, lastHumanActivityAt: 0 });
+  for (let i = 0; i < 4; i++) addThread(registry, { node, boot: { image }, thread: { lastAgentActivityAt: 0, lastHumanActivityAt: 0 } });
+  const paused = registry.threads.storedThreads({ status: ["active", "idle"] });
+  const fake = fakeNode({ autoFinish: true });
+  for (const th of paused) fake.pylons.set(th.pylonId, stoppedPylon(th.pylonId, { checkpoint: `ckpt-${th.id}-1` as CheckpointId, sessions: null }));
+  const loop = run(t, registry, fake.probe, { intervalMs: 60_000 });
+  await settled(fake, loop);
+
+  let turns = 0;
+  let passing = true;
+  const turn = () => { if (passing) { turns++; setImmediate(turn); } };
+  setImmediate(turn);
+  await loop.wake(node);
+  passing = false;
+  assert.deepEqual(fake.submitted, [], "every pylon stays paused");
+  assert.ok(turns >= paused.length - 1, `the event loop got ${turns} turns during a pass over ${paused.length} pylons`);
+});
+
 test("a tick that waits on nothing reads its thread once", async (t) => {
   const registry = openRegistry(tempDb());
   const thread = seed(registry);

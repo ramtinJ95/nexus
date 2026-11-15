@@ -86,18 +86,32 @@ export function usageBackfill(options: {
    * Keeps room on the node for the largest project's pylon once this one is up, so a person's next start always fits.
    * Only a stopped or running pylon is woken, since the planner fails a broken one it is asked to run.
    */
-  function blocked(p: StoredPylon): string | null {
-    const node = registry.nodes.node(p.node);
-    const o = node?.state === "online" ? node.observation : null;
-    if (o == null) return `${p.node} is offline`;
-    if (o.jobs.some((j) => j.state === "running") || registry.threads.pylonsOn(p.node).some((other) => other.submitted !== null)) return `${p.node} is busy with a job`;
-    const observed = o.pylons.find((seen) => seen.pylonId === p.pylonId);
+  function blocked(p: StoredPylon, rooms = new Map<NodeName, NodeRoom>()): string | null {
+    let room = rooms.get(p.node);
+    if (room === undefined) rooms.set(p.node, room = roomOn(p.node));
+    if (room === null) return `${p.node} is offline`;
+    if (room.busy) return `${p.node} is busy with a job`;
+    const observed = room.o.pylons.find((seen) => seen.pylonId === p.pylonId);
     if (observed !== undefined && observed.phase !== "stopped" && observed.phase !== "running") return `its pylon is ${observed.phase}`;
     const largest = Math.max(0, ...registry.projects.projects().map((project) => project.resources.memoryGiB));
-    const { left } = roomLeft(registry, p.node, o, o.capacity, uncounted(p, observed));
-    if (left.memoryGiB < largest) return `${p.node} would have ${gib(left.memoryGiB)} GiB of memory left with it up, less than the ${largest} GiB of the largest project's pylon`;
+    const leftGiB = room.leftGiB - uncounted(p, observed).memoryGiB;
+    if (leftGiB < largest) return `${p.node} would have ${gib(leftGiB)} GiB of memory left with it up, less than the ${largest} GiB of the largest project's pylon`;
     return null;
   }
+
+  /**
+   * What decides a wake on the node for every pylon alike: its observation, whether a job runs there, and the memory it
+   * has left before the pylon. The memory takes a read of every pylon on the node, so a step that weighs several
+   * archives passes one map and reads each node once. Null for a node that is offline.
+   */
+  function roomOn(name: NodeName) {
+    const node = registry.nodes.node(name);
+    const o = node?.state === "online" ? node.observation : null;
+    if (o == null) return null;
+    const busy = o.jobs.some((j) => j.state === "running") || registry.threads.jobSubmittedOn(name);
+    return { o, busy, leftGiB: busy ? 0 : roomLeft(registry, name, o, o.capacity, { cpus: 0, memoryGiB: 0, diskGiB: 0 }).left.memoryGiB };
+  }
+  type NodeRoom = ReturnType<typeof roomOn>;
 
   function next(now: number) {
     for (const row of registry.usage.usageBackfillThreads()) {
@@ -167,6 +181,7 @@ export function usageBackfill(options: {
       for (const t of archives) if (t.pylonId !== up.pylonId) registry.usage.waitSettle(t.id, `${up.pylonId} on ${up.node} is up for reading, and one pylon is woken at a time`);
       return "up";
     }
+    const rooms = new Map<NodeName, NodeRoom>();
     for (const t of archives) {
       const p = registry.threads.pylon(t.pylonId);
       if (p === undefined) continue;
@@ -195,7 +210,7 @@ export function usageBackfill(options: {
         registry.usage.waitSettle(t.id, o.phase === "running" ? "its pylon has not paused since its archive yet" : `its pylon is ${o.phase}`);
         continue;
       }
-      const waiting = blocked(p);
+      const waiting = blocked(p, rooms);
       registry.usage.waitSettle(t.id, waiting);
       if (waiting !== null) continue;
       if (p.attempts.last !== null) registry.threads.clearPylonAttempts(p.pylonId);

@@ -870,6 +870,8 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     pylonsWithStatusOn: (node: NodeName): { pylon: StoredPylon; status: ThreadStatus }[] =>
       sql("SELECT p.*, t.status AS thread_status FROM pylons p JOIN threads t ON t.id = p.thread WHERE p.node = ? ORDER BY p.id").all(node)
         .map((r) => ({ pylon: pylonRow(r), status: r.thread_status as ThreadStatus })),
+    /** Whether a job is submitted for any pylon on the node, read without the pylons themselves. */
+    jobSubmittedOn: (node: NodeName): boolean => sql("SELECT 1 FROM pylons WHERE node = ? AND submitted IS NOT NULL LIMIT 1").get(node) !== undefined,
     /** The node's pylons whose submitted job is a spawn, reading only those, however many pylons the node ever had. */
     pylonsSpawningOn: (node: NodeName): StoredPylon[] =>
       sql("SELECT * FROM pylons WHERE node = ? AND json_extract(submitted, '$.job.kind') = 'spawn' ORDER BY id").all(node).map(pylonRow),

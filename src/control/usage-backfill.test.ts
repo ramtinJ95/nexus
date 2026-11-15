@@ -630,6 +630,22 @@ test("a pylon stuck up for reading holds the settles back only for the pause's t
   assert.ok(logs.some((m) => m.includes(`${stuck.pylonId} has been up for reading`)), "the pylon it stopped waiting for is logged");
 });
 
+test("a step that weighs several archives that wait for room reads their node's pylons once, not once for each archive", async (t) => {
+  // One read of a node's room takes every pylon the node ever had, 100 ms on rj-firebat on 2026-11-15, and a step runs every 2 s.
+  const registry = opened(t);
+  const full = ["a", "b", "c"].map((title) => addThread(registry, n2, title, "archived", false));
+  observe(registry, n2, full.map((x) => [x.pylonId, "stopped"] as const), {}, { total: 64, committed: 60 });
+  let reads = 0;
+  const counted: Registry = { ...registry, threads: { ...registry.threads, pylonsWithThreadsOn: (name) => { reads++; return registry.threads.pylonsWithThreadsOn(name); } } };
+  const job = usageBackfill({ registry: counted, counter: fakeCounter(registry), wake: () => {}, intervalMs: 60_000, log: () => {} });
+  t.after(() => job.close());
+  await job.poll();
+  reads = 0;
+  await job.poll();
+  for (const x of full) assert.match(registry.threads.thread(x.id)!.settleWaiting!, /^infra-testbench would have .* GiB of memory left with it up/);
+  assert.equal(reads, 1, `the step read every pylon on infra-testbench ${reads} times for ${full.length} archives`);
+});
+
 test("an archive whose settle waits says why: its node is offline, or has no room for its pylon", async (t) => {
   const registry = opened(t);
   const offline = addThread(registry, n1, "offline", "archived", false);
