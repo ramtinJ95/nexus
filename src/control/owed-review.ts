@@ -30,9 +30,9 @@ export interface OwedFacts {
 }
 
 /**
- * `due` starts on the review loop's next pass. `waiting` starts on its own once what `why` names ends, and `asks` when
- * only GitHub's word that it merges cleanly is missing, which the loop asks GitHub for itself, since the PR watch may
- * have stopped reading it. `unmoved` never starts until the person acts, for `why`.
+ * `due` starts on the review loop's next pass. `waiting` starts on its own once what `why` names ends. `asks` is one
+ * no running review holds back, which the loop asks GitHub about itself, in line after the due one, since the PR watch
+ * may have stopped reading it, and one ahead of it in line may have closed or been rebased meanwhile. `unmoved` never starts until the person acts, for `why`.
  */
 export type Owed = { kind: "due"; pr: WatchedPr } | { kind: "waiting"; pr: WatchedPr; why: string; asks?: true } | { kind: "unmoved"; pr: WatchedPr; why: string };
 
@@ -58,5 +58,5 @@ export function owedReviews(f: OwedFacts): Owed[] {
   return prs.map((pr): Owed => pr === first ? { kind: "due", pr }
     : pr.conflict === true ? { kind: "waiting", pr, why: "it conflicts with its base, so its review starts once the builder rebases it", asks: true }
     : pr.conflict === null ? { kind: "waiting", pr, why: "its review starts once GitHub says whether it conflicts with its base", asks: true }
-    : { kind: "waiting", pr, why: `its review starts after #${first!.number}'s` });
+    : { kind: "waiting", pr, why: `its review starts after #${first!.number}'s`, asks: true });
 }

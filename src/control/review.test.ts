@@ -6212,3 +6212,20 @@ test("behind a stopped PR watch, a queued pull request that closed does not hold
   assert.equal(f.registry.prWatches.prWatch(f.builder)!.links.find((l) => l.pr.number === 8)!.pr.state, "open", "the stopped watch still shows #8 open");
   assert.equal(f.review().pr.number, 9, "#9 gets its review though #8 is first in line");
 });
+
+test("behind a stopped PR watch, a queued pull request that closed does not hold back a clean one after it", async (t) => {
+  const f = fixture(t, { repo: "acme/shop", autoReview: { mode: "land", enabledBy: "nLAPTOP" } });
+  const loop = f.loop();
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
+  await loop.poll();
+  secondPr(f);
+  const nine = testPr({ repo: f.pr.repo, number: 9, title: "Name the constant" });
+  f.others.set(9, { pr: { ...nine }, detail: { head: "9".repeat(40), branch: "name", base: "main", body: "Names it.\n\nNot checked live: the cache under real traffic.", mergeCommit: null }, failures: [], comments: [] });
+  watchRead(f, 9, {});
+  f.registry.prWatches.savePrWatch(f.builder, { ...f.registry.prWatches.prWatch(f.builder)!, commentWakes: commentCap });
+  github8(f, { state: "closed" });
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.registry.prWatches.prWatch(f.builder)!.links.find((l) => l.pr.number === 8)!.pr.state, "open", "the stopped watch still shows #8 open and clean");
+  assert.equal(f.review().pr.number, 9, "#9 gets its review though #8 is first in line");
+});

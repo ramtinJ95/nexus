@@ -1047,8 +1047,8 @@ export function reviewLoop(deps: ReviewDeps) {
         retried.failed(`${id} owed`, `${id}: its owed reviews were not read and will be tried again (${(err as Error).name})`);
         continue;
       }
-      // The due one first, then each that waits on GitHub alone, since one the watch no longer reads may have closed,
-      // and the next behind it merged cleanly. The first that starts is the builder's one review.
+      // The due one first, then each other one no running review holds back, since one the watch no longer reads may
+      // have closed, and another behind it merge cleanly. The first that starts is the builder's one review.
       const candidates = [...owed.filter((o) => o.kind === "due"), ...owed.filter((o) => o.kind === "waiting" && o.asks === true)];
       for (const { pr } of candidates) {
         const key = `${pr.repo}:${pr.number} owed`;
