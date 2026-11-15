@@ -30,10 +30,11 @@ export interface OwedFacts {
 }
 
 /**
- * `due` starts on the review loop's next pass. `waiting` starts on its own once what `why` names ends. `unmoved` never
- * starts until the person acts, for `why`.
+ * `due` starts on the review loop's next pass. `waiting` starts on its own once what `why` names ends, and `asks` when
+ * only GitHub's word that it merges cleanly is missing, which the loop asks GitHub for itself, since the PR watch may
+ * have stopped reading it. `unmoved` never starts until the person acts, for `why`.
  */
-export type Owed = { kind: "due"; pr: WatchedPr } | { kind: "waiting" | "unmoved"; pr: WatchedPr; why: string };
+export type Owed = { kind: "due"; pr: WatchedPr } | { kind: "waiting"; pr: WatchedPr; why: string; asks?: true } | { kind: "unmoved"; pr: WatchedPr; why: string };
 
 /**
  * Each owed review, oldest pull request first. One at a time per builder, behind a review that has not settled, since a
@@ -46,7 +47,7 @@ export function owedReviews(f: OwedFacts): Owed[] {
   const prs = f.prs.filter((pr) => wasRead(pr) && pr.state === "open" && !f.reviewed(pr.repo, pr.number)).toSorted((a, b) => a.number - b.number);
   if (prs.length === 0) return [];
   const unmoved = (why: string): Owed[] => prs.map((pr) => ({ kind: "unmoved", pr, why }));
-  if (f.status !== "active") return unmoved(`its thread is ${f.status}, so no review of it starts. Unarchive the thread, and its review starts on its own`);
+  if (f.status !== "active") return unmoved(`its thread is ${f.status}, so no review of it starts${f.status === "archived" ? ". Unarchive the thread, and its review starts on its own" : " until it is active"}`);
   if (!f.claude && !grantsClaude(f.project.secrets)) return unmoved("no review of it can start: its builder runs in the harness, and its project grants no Claude token for a reviewer on another model. Grant CLAUDE_CODE_OAUTH_TOKEN for api.anthropic.com to the project (`nexus project edit`)");
   const r = f.review;
   if (r !== null && !settled(r)) {
@@ -55,6 +56,7 @@ export function owedReviews(f: OwedFacts): Owed[] {
   }
   const first = prs.find((pr) => pr.conflict === false);
   return prs.map((pr): Owed => pr === first ? { kind: "due", pr }
-    : { kind: "waiting", pr, why: pr.conflict === true ? "it conflicts with its base, so its review starts once the builder rebases it"
-      : pr.conflict === null ? "its review starts once GitHub says whether it conflicts with its base" : `its review starts after #${first!.number}'s` });
+    : pr.conflict === true ? { kind: "waiting", pr, why: "it conflicts with its base, so its review starts once the builder rebases it", asks: true }
+    : pr.conflict === null ? { kind: "waiting", pr, why: "its review starts once GitHub says whether it conflicts with its base", asks: true }
+    : { kind: "waiting", pr, why: `its review starts after #${first!.number}'s` });
 }

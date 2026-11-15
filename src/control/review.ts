@@ -1024,9 +1024,10 @@ export function reviewLoop(deps: ReviewDeps) {
   /** When the loop last tried each owed review's start, by PR, so one that waits reads GitHub as often as the PR watch. */
   const owedTries = new Map<string, number>();
   /**
-   * Starts each builder's owed review that is due (owed-review.ts), as its project's setting asks. A start refused for
-   * a conflict GitHub reports, or has not judged yet, is tried again a PR watch interval later, by when the watch has
-   * told the builder of the conflict.
+   * Starts each builder's owed review that is due (owed-review.ts), as its project's setting asks, or else asks GitHub
+   * whether one that waits only on a clean merge now has it, since the PR watch may no longer read it. A start refused
+   * for a conflict GitHub reports, or has not judged yet, is tried again a PR watch interval later, by when the watch
+   * has told the builder of the conflict.
    */
   async function startOwed() {
     let threads: ThreadId[];
@@ -1041,7 +1042,8 @@ export function reviewLoop(deps: ReviewDeps) {
       let key = `${id} owed`;
       try {
         const t = registry.threads.thread(id);
-        const due = t === undefined ? undefined : owedOf(registry, t).find((o) => o.kind === "due");
+        const owed = t === undefined ? [] : owedOf(registry, t);
+        const due = owed.find((o) => o.kind === "due") ?? owed.find((o) => o.kind === "waiting" && o.asks === true);
         if (due === undefined) continue;
         key = `${due.pr.repo}:${due.pr.number} owed`;
         if (now() - (owedTries.get(key) ?? -Infinity) < prWatchMs) continue;

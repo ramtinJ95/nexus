@@ -20,7 +20,7 @@ import { checkBeside, liveNote, phaseNote, reviewSaid, roundNote } from "./wordi
 import { cannotLand, changeOf, ended, findingsOf, humanLabel, landable, personPhase, roundsSpent, type HoldCause, type Review, type Verdict, type Waiver } from "./review-model.ts";
 import { reviewerFor, reviewLoop, secondReviewerFor, type ReviewDeps } from "./review.ts";
 import { upgradeReview } from "./record-upgrade.ts";
-import { prWatchMs } from "./pr-watch-model.ts";
+import { commentCap, prWatchMs } from "./pr-watch-model.ts";
 import { personNeeds } from "./work-model.ts";
 import { threadStage } from "./pipeline.ts";
 import { runDoctor } from "./doctor-run.ts";
@@ -6063,12 +6063,14 @@ test("an owed review's start gives way to a review of its pull request the perso
   await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
   await loop.poll();
   secondPr(f, { conflict: true });
-  github8(f, { conflict: false });
+  github8(f, { conflict: true });
   f.reply(f.review().reviewer, verdict(f.review(), {}));
   await loop.poll();
-  assert.equal(f.review().pr.number, 7, "#8 waits while the PR watch last read it conflicting");
+  assert.equal(f.review().pr.number, 7, "#8 waits while GitHub says it conflicts");
   watchRead(f, 7, { state: "merged" });
   watchRead(f, 8, { conflict: false });
+  github8(f, { conflict: false });
+  f.tick(prWatchMs);
   const hold = f.holdPolls();
   const pass = loop.poll();
   await hold.entered;
@@ -6169,4 +6171,22 @@ test("a landing whose read of the builder's other pull request fails is stepped 
   await loop.poll();
   assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
   assert.equal(f.registry.threads.thread(f.builder)!.status, "archived", "#8 is closed, so nothing keeps the builder");
+});
+
+test("a queued pull request the PR watch last read conflicting, and reads no more past its comment cap, is reviewed once GitHub says it merges cleanly", async (t) => {
+  const f = fixture(t, { repo: "acme/shop", autoReview: { mode: "land", enabledBy: "nLAPTOP" } });
+  const loop = f.loop();
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
+  await loop.poll();
+  secondPr(f, { conflict: true });
+  f.registry.prWatches.savePrWatch(f.builder, { ...f.registry.prWatches.prWatch(f.builder)!, commentWakes: commentCap });
+  github8(f, { conflict: true });
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().pr.number, 7, "#8 conflicts, so its review waits");
+  github8(f, { conflict: false }, "3".repeat(40));
+  f.tick(prWatchMs);
+  await loop.poll();
+  assert.equal(f.registry.prWatches.prWatch(f.builder)!.links.find((l) => l.pr.number === 8)!.pr.conflict, true, "the stopped watch still shows #8 conflicting");
+  assert.deepEqual([f.review().pr.number, f.review().rounds[0]!.head], [8, "3".repeat(40)], "the loop asked GitHub itself, and #8 gets its review");
 });
