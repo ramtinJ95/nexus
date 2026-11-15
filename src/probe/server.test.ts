@@ -859,7 +859,7 @@ test("malformed commands get 400 and reach no guest", async (t) => {
   assert.equal(await post({ kind: "close-session", terminal: "t1", session: { harness: "pi", title: null } }), 400);
   assert.equal(await post({ kind: "reboot" }), 400);
   const send = { kind: "send-claude", session: "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90", text: "hi" };
-  for (const bad of [{ session: undefined }, { session: "../etc" }, { session: "a".repeat(201) }, { text: "" }, { text: "x".repeat(16_385) }, { text: "a\tb" }, { text: "a\rb" }, { model: "" }, { model: "m".repeat(201) }, { requestId: "" }, { requestId: 1 }]) {
+  for (const bad of [{ session: undefined }, { session: "../etc" }, { session: "a".repeat(201) }, { text: "" }, { text: "x".repeat(500_001) }, { text: "a\tb" }, { text: "a\rb" }, { model: "" }, { model: "m".repeat(201) }, { requestId: "" }, { requestId: 1 }]) {
     assert.equal(await post({ ...send, ...bad }), 400, JSON.stringify(bad));
   }
   assert.equal(await post({ kind: "send-claude-outcome" }), 400);
