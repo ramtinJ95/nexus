@@ -68,6 +68,7 @@ function projectText(p: Project): string {
   const { cpus, memoryGiB, diskGiB } = p.resources;
   return [
     `${p.id}: ${p.repoUrl ?? "scratch"}`,
+    ...p.removed === undefined ? [] : [`Removed by ${p.removed.by} at ${new Date(p.removed.at).toISOString()}. History is kept; no new work can start.`],
     `node ${p.defaultNode}, branch ${p.defaultBranch}, ${cpus} CPUs, ${memoryGiB} GiB memory, ${diskGiB} GiB disk`,
     `hosts: ${listText(p.allowedHosts)}. logins: ${listText(p.logins)}. secrets: ${listText(p.secrets.map((grant) => grant.name))}`,
     ...p.gitIdentity == null ? [] : [`git identity: ${p.gitIdentity.name} <${p.gitIdentity.email}>`],
@@ -81,11 +82,12 @@ function projectText(p: Project): string {
 
 export const projectsCommands: Readonly<Record<string, Command>> = {
   projects: {
-    help: ["  nexus projects"],
+    help: ["  nexus projects [--all]                      projects available for work; --all includes removed projects"],
     args: [0, 0],
-    async run(api) {
-      const projects = await request(api, projectRoutes.list, {});
-      return { json: projects, text: projects.length === 0 ? "No projects." : table(["Project", "Node", "Branch", "Review", "Pipeline", "Repository"], projects.map((p) => [p.id, p.defaultNode, p.defaultBranch, autoReviewText(p), pipelineText(p), p.repoUrl ?? "scratch"])) };
+    options: { all: { type: "boolean" } },
+    async run(api, _, v) {
+      const projects = await request(api, projectRoutes.list, { query: v.all ? { removed: true } : {} });
+      return { json: projects, text: projects.length === 0 ? "No projects." : table(["Project", "Node", "Branch", "Review", "Pipeline", "Repository"], projects.map((p) => [p.id + (p.removed === undefined ? "" : " (removed)"), p.defaultNode, p.defaultBranch, autoReviewText(p), pipelineText(p), p.repoUrl ?? "scratch"])) };
     },
   },
   "project show": {
@@ -95,9 +97,17 @@ export const projectsCommands: Readonly<Record<string, Command>> = {
     args: [1, 1], project: true,
     async run(api, [id]) {
       // From the list, so the command needs no route newer than `projects`.
-      const p = (await request(api, projectRoutes.list, {})).find((project) => project.id === id);
+      const p = (await request(api, projectRoutes.list, { query: { removed: true } })).find((project) => project.id === id);
       if (p === undefined) throw new CliError("not-found", `no project ${id}`);
       return { json: p, text: projectText(p) };
+    },
+  },
+  "project remove": {
+    help: ["  nexus project remove <id>                  remove an inactive project from the list, keeping its history and repository"],
+    args: [1, 1], project: true,
+    async run(api, [id]) {
+      const p = await request(api, projectRoutes.remove, { project: id! });
+      return { json: p, text: `Removed project ${p.id}. Thread history and usage are kept; its GitHub repository is unchanged.` };
     },
   },
   "project edit": {

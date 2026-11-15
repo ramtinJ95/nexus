@@ -606,6 +606,7 @@ test("the route table holds the routes it always has, and each path matches one 
     return `${entry[0]} ${entry[1].source} ${policy.role}${said}${policy.startsTurn ? ", startsTurn" : ""}`;
   });
   assert.deepEqual(described.sort(), [
+    "DELETE ^\\/v1\\/projects\\/([^/]+)$ person: remove a project",
     "DELETE ^\\/v1\\/threads\\/([^/]+)$ person: delete a thread",
     "DELETE ^\\/v1\\/threads\\/([^/]+)\\/previews\\/([^/]+)$ person: unpublish a preview",
     "DELETE ^\\/v1\\/threads\\/([^/]+)\\/sessions\\/([^/]+)$ person: close a session in a thread's pylon",

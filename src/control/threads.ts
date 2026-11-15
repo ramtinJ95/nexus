@@ -41,6 +41,7 @@ export function checkStart(registry: ThreadsRegistry, start: Pick<Start, "reques
   if (claudePrompt !== undefined && claudePrompt.length > maxPromptChars) throw new Refusal("invalid", `Claude prompt${claudePrompt.startsWith(claudeSkill) ? ` including ${claudeSkill}` : ""} exceeds ${maxPromptChars} characters`);
   const project = registry.projects.project(request.project as ProjectId);
   if (project === undefined) throw new Refusal("missing", `no project ${request.project}`);
+  if (project.removed !== undefined) throw new Refusal("conflict", `project ${project.id} is removed; its history is read-only`);
   const { memoryGiB } = resourcesOf(request.resources, project);
   if (memoryGiB < minPylonMemoryGiB) throw new Refusal("invalid", `the pylon would get ${memoryGiB} GiB, but ${minPylonMemoryReason}`);
   const rules = standingRulesFor(project, start);
@@ -159,6 +160,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     const tight = placement.how !== "auto" ? memoryShort(registry, node, need) : null;
     if (tight !== null) throw tight.frees ? new NoRoom("conflict", `${node} ${tight.why}`) : new Refusal("conflict", `${node} ${tight.why}`);
     const release = registry.placement.reserve(pylonId, node, resources);
+    const releaseProject = registry.projects.reserveStart(project.id);
     try {
       // A template's disk is its project's size, and a pylon's disk size is fixed once it exists.
       const disk: SetupRead | null = resources.diskGiB === project.resources.diskGiB ? null
@@ -193,6 +195,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     } finally {
       // Once the pylon's row exists, placement counts it from there.
       release();
+      releaseProject();
     }
   };
 }

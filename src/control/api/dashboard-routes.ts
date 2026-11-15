@@ -202,7 +202,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
       const query = r.query.get("q")?.trim() ?? "";
       const closed = (of: string) => kind === "quiet" ? { shown: [], total: 0 } : registry.threads.newestThreads(
         { project: of as ProjectId, status: ["archived", "deleted"], ...query === "" ? {} : { match: (t) => found(c.find(t), query) } }, { size: foldCap, index: page - 1 });
-      const fold: FoldView = { project: project?.id ?? null, projects: project === null ? registry.projects.projects() : [project], offline: offline(), cancelled, closed };
+      const fold: FoldView = { project: project?.id ?? null, projects: project === null ? registry.projects.projects({ removed: kind === "closed" }) : [project], offline: offline(), cancelled, closed };
       return ok(foldPage(c, kind, fold, page, query));
     }]),
     ["GET", /^\/threads\/([^/]+)$/, anyAllowed, async (m, r) => {

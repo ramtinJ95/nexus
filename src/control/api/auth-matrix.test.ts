@@ -55,6 +55,7 @@ const requests: readonly (readonly [string, string, unknown?])[] = [
   ["POST", `/v1/threads/${t0}/abort`, {}], ["POST", `/v1/threads/${t0}/retry`, {}], ["POST", `/v1/threads/${t0}/pylon/retry`, {}],
   ["GET", `/v1/threads/${t0}/conversation`],
   ["PATCH", "/v1/projects/nosuch", { bogus: 1 }], ["GET", "/v1/projects"], ["POST", "/v1/projects", { bogus: 1 }],
+  ["DELETE", "/v1/projects/nosuch", {}],
   ["GET", "/v1/items"], ["POST", "/v1/items", { bogus: 1 }], ["GET", "/v1/items/it-nosuch"], ["POST", "/v1/items/it-nosuch/cancel", {}], ["POST", "/v1/items/it-nosuch/approve", {}],
   ["GET", "/v1/nodes"], ["GET", "/v1/nodes/nosuch/health"], ["GET", "/v1/nodes/nosuch/metrics?from=0"], ["GET", "/v1/nodes/rj-firebat/metrics"],
   ["GET", "/v1/images"], ["POST", "/v1/images", { bogus: 1 }], ["GET", "/v1/images/current"],

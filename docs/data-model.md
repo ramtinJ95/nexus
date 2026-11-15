@@ -418,7 +418,10 @@ expire on upgrade rather than receiving an invented fresh lease.
 
 A start gives a session a 30-minute working lease. A `session.heartbeat` renews
 an existing working lease, or resumes an existing waiting session with a fresh
-lease when stamped later than its waiting event. It cannot create a session or
+lease when stamped later than its waiting event. A `session.waiting` report for a session whose turn runs keeps that turn's
+lease, 30 minutes from the report, as a dialog Claude Code answers itself leaves the
+turn working with no report; one for a session with no running turn, as after a
+turn's end, gives none. It cannot create a session or
 revive an ended turn. It revives an expired turn's row only while the session's
 `session_order` still has that turn open, its latest report a turn start or a
 heartbeat, as after a gap in the node's link longer than the lease. The revived row
@@ -448,7 +451,8 @@ message is kept with it as `Thread.sessionWaitingMessage`, and the dashboard sho
 it as the thread's state.
 
 `Thread.sessionTurnRunning` and `sessionWaiting` are optional current facts;
-`sessionActiveUntil` lets the pure planner enforce expiry even on an older read.
+`sessionActiveUntil`, present while a turn runs or a dialog that opened during one
+keeps its lease, lets the pure planner enforce expiry even on an older read.
 `Thread.working` is true while the harness turn or a live session turn runs, so a
 Claude worker's turn counts as a harness turn does wherever a thread reads as working.
 `Thread.workingSince` is the earliest known start, in Unix milliseconds, of the
@@ -458,7 +462,8 @@ when its tracker saw the turn begin, or the retry that resumed a parked run. A w
 time of its `session.turn-started`, or of the heartbeat that resumed it from
 waiting; later heartbeats keep it. Turns running before the migration have no
 start, and none is invented.
-After expiry or an ended/waiting turn, normal agent and human idle rules apply.
+After expiry, an ended turn or a wait that follows one, normal agent and human idle rules apply; a dialog
+that opened during a turn keeps the turn's lease first, until a stop of its pylon or a usage limit ends that turn.
 Expiry itself records no new activity. Session turn ends use the existing strictly
 increasing `lastReplyAt` identity. Attention keeps its precedence: failed pylon or
 worker launch, decision, died, parked, limited, boot-held, unread reply, working, waiting, then null. Seen still changes

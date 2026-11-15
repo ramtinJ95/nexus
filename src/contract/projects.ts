@@ -21,10 +21,18 @@ const itemsQuery: QueryCodec<ItemsQuery> = {
   decode: (params) => ({ ...params.has("project") ? { project: params.get("project")! } : {}, ...params.get("cancelled") === "false" ? { cancelled: false } : {} }),
 };
 
+/** Include removed projects for history; ordinary pickers list only projects that can start work. */
+export interface ProjectsQuery { removed?: true }
+const projectsQuery: QueryCodec<ProjectsQuery> = {
+  encode: ({ removed }) => queryOf([["removed", removed ? "true" : undefined]]),
+  decode: (params) => params.get("removed") === "true" ? { removed: true } : {},
+};
+
 export const projectRoutes = {
-  list: route<Project[]>()("GET", "/v1/projects"),
+  list: route<Project[]>()("GET", "/v1/projects", projectsQuery),
   add: route<Project, z.input<typeof projectAddSchema>>()("POST", "/v1/projects"),
   edit: route<Project, z.input<typeof projectEditSchema>>()("PATCH", "/v1/projects/{project}"),
+  remove: route<Project>()("DELETE", "/v1/projects/{project}"),
 } as const;
 
 export const itemRoutes = {
