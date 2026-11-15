@@ -146,8 +146,11 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     const { node } = placement;
     // An older probe refuses a first prompt past the command line's room, and its worker would stay failed, so the start
     // is refused at once, naming the node to upgrade.
-    if (claudePrompt !== undefined && claudePrompt.length > inlinePromptChars && registry.nodes.node(node)?.observation?.longPrompts !== true) {
-      throw new Refusal("conflict", `${node}'s probe cannot start a Claude session with a first prompt of ${claudePrompt.length} characters, over the ${inlinePromptChars} its command line takes, so it needs this release of Nexus on its probe`, "probe-too-old");
+    const observed = registry.nodes.node(node)?.observation;
+    if (claudePrompt !== undefined && claudePrompt.length > inlinePromptChars && observed?.longPrompts !== true) {
+      throw observed == null
+        ? new Refusal("conflict", `${node}'s probe has not reported yet, so whether it can start a Claude session with a first prompt of ${claudePrompt.length} characters is unknown`)
+        : new Refusal("conflict", `${node}'s probe cannot start a Claude session with a first prompt of ${claudePrompt.length} characters, over the ${inlinePromptChars} its command line takes, so it needs this release of Nexus on its probe`, "probe-too-old");
     }
     // `auto` passes such a node by, and a review's start beside its builder goes there all the same.
     const short = named || placement.how === "default" ? namedDiskShort(registry, node, resources) : null;

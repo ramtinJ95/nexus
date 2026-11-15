@@ -18,6 +18,8 @@
  * A reply that lacks the block gets a reminder, at most twice in a row, before the loop asks the person. A turn that
  * ended because the agent's model failed gets the same request again, after a wait that grows with each failure in a row.
  */
+import { maxPromptChars, promptFile, promptPointer } from "../protocol/commands.ts";
+import { claudeLaunchesDir } from "../../images/pylon/nexus-contract.ts";
 import { createHash, randomBytes } from "node:crypto";
 import { checkCaller, mint, reviewerCaller, tokenBlocks, verifyCaller } from "./agent-protocol.ts";
 import { scopedFlight } from "../single-flight.ts";
@@ -290,7 +292,16 @@ export function reviewLoop(deps: ReviewDeps) {
   /** The last message to `party` again, under the review's next request ID, so it keeps its token. */
   const resend = (r: Review, party: Party): Review => {
     const c = conversation(r, party);
-    return { ...c.with({ ...c.talk, outbox: { id: `${r.id}:${r.sent + 1}`, text: c.talk.asked, attempted: null } }), sent: r.sent + 1 };
+    return { ...c.with({ ...c.talk, outbox: { id: `${r.id}:${r.sent + 1}`, text: sendable(c), attempted: null } }), sent: r.sent + 1 };
+  };
+  /**
+   * The last message to the party as a message can carry it. A first request too long for one went to the worker in a
+   * file (probe/guest/sessions.ts), so sending it again names that file.
+   */
+  const sendable = (c: Conversation): string => {
+    if (c.talk.asked.length <= maxPromptChars) return c.talk.asked;
+    const worker = registry.threads.claudeWorker(c.thread);
+    return worker?.session == null || worker.prompt !== c.talk.asked ? c.talk.asked : promptPointer(promptFile(`${claudeLaunchesDir}/${worker.session}`), c.talk.asked.length);
   };
   const say = (r: Review, party: Party, expect: string, nudges: number, text: (token: string) => string): Review => {
     const c = conversation(r, party);

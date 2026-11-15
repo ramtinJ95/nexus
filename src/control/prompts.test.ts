@@ -73,3 +73,13 @@ test("every review prompt keeps its text", (t) => {
   }
   t.assert.snapshot(prompts);
 });
+
+test("a round whose description would take the message past what a message carries names the description on GitHub instead", async () => {
+  const { maxPromptChars } = await import("../protocol/commands.ts");
+  const previous = { head: h1, base: "main", verdict: verdict([f1]), check: null, answers: [{ id: "F1", action: "fixed" as const, reason: "Done." }] };
+  const short = nextRound(twoRounds({}, h2), previous, "rv-1:c", "main", "first", "Adds a cache.");
+  assert.match(short, /<description>\nAdds a cache.\n<\/description>/);
+  const long = nextRound(twoRounds({}, h2), previous, "rv-1:c", "main", "first", "d".repeat(30_000));
+  assert.ok(long.length <= maxPromptChars, `${long.length} characters`);
+  assert.match(long, /The current pull request description is 30000 characters, too long to quote here\..*gh pr view \d+ --json body --jq \.body/);
+});
