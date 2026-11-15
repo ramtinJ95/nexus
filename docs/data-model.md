@@ -529,7 +529,8 @@ holds the JSON record of Nexus resuming the worker (`src/control/resume.ts`): `{
 with `since` for one saved before it was first sent,
 `resumed` with `at` for one that went, `answered` with `at` for a death the person wrote
 to the thread after, which gets no resume, and `{ "state": "person", "turn", "count",
-"why" }` for a death Nexus does not resume, which makes the attention `died` while
+"why" }` for a death Nexus does not resume, which makes the attention `died`, or leaves
+it `decision` beside a review that waits on the person, while
 `turnDied.at` is still `turn`. A record that an older release stored as `{ "state":
 "left-alone" }` reads as no record. `turn` is the `turnDied.at` of the death it answers
 and `count` the resumes in a row. A `waiting`, `sending`, `resumed` or `answered` record

@@ -5,6 +5,7 @@ import { personPhase, type Phase } from "./review-model.ts";
 import { agentInbox } from "./inbox.ts";
 import { agentReader } from "./agent-conversation.ts";
 import { deadTurnResumer, resumeWaitsMs } from "./resume.ts";
+import { resumeStartMs } from "./claude-worker.ts";
 import { claudeLaunch } from "./claude-launch.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
@@ -393,6 +394,33 @@ test("a builder whose review is not finished gets no resume for a model error, n
   f.tick(resumeWaitsMs[0]!);
   await f.resumer.poll();
   assert.deepEqual(f.typed.map((c) => c.requestId!.split(":")[1]).sort(), phases.filter(([, , , resumed]) => resumed).map(([name]) => name).sort());
+});
+
+test("a death in a builder whose review waits on the person is told to them with why, beside the review, until a turn of it starts", async (t) => {
+  const f = fixture(t);
+  const id = f.add("th-1");
+  f.registry.reviews.saveReview(testReview({ id: "rv-1", builder: id, reviewer: "th-reviewer" as ThreadId, phase: personPhase("agent", "The builder gave no answer Nexus could read within 3 hours in round 1.") }));
+  await f.resumer.poll();
+  assert.equal(f.registry.threads.claudeResume(id), null, "a builder that did not die has no record");
+  f.report(id, "session.turn-started");
+  await f.resumer.poll();
+  assert.equal(f.registry.threads.claudeResume(id), null, "nor has one whose turn runs");
+  f.tick(3_000);
+  f.report(id, "session.ended");
+  const died = f.registry.threads.thread(id)!.turnDied!;
+  await f.resumer.poll();
+  const record = { state: "person", turn: died.at, count: 0, why: `Its turn died (${died.reason}). Its review waits on you, so Nexus did not resume it.` };
+  assert.deepEqual(f.registry.threads.claudeResume(id), record);
+  assert.equal(f.registry.threads.attention(id), "decision", "the review still comes first");
+  f.tick(resumeWaitsMs[0]! + resumeStartMs);
+  await f.resumer.poll();
+  assert.equal(f.typed.length, 0, "and no resume goes out");
+  assert.deepEqual(f.registry.threads.claudeResume(id), record);
+
+  f.tick(1_000);
+  f.report(id, "session.turn-started");
+  await f.resumer.poll();
+  assert.equal(f.registry.threads.claudeResume(id), null, "the turn the person's message started ends the death");
 });
 
 test("a session that ends after a turn the transcript shows ended, with a background task still running, did not die", async (t) => {

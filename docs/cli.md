@@ -1554,9 +1554,12 @@ with `nexus send` keeps their resumes.
 Every death Nexus does not resume waits on the person. `resume.state` becomes `person`,
 `resume.why` starts `Its turn died (<reason>).` and says why in a line, `show` prints
 `turn died, and Nexus does not resume it: <why> Write to it to resume it`, and the
-attention is `died` until a turn of it starts. Nexus does not resume a death in these
+attention is `died` until a turn of it starts, or stays `decision` when something
+else of the thread's waits on the person too. Nexus does not resume a death in these
 cases:
 
+- The builder's review waits on the person, who decides what the builder does next. The
+  death shows beside the review, on the thread's page and in Needs you.
 - It is the fourth death in a row.
 - It died more than 60 minutes before Nexus saw it, by the pylon's clock against the
   control plane's, as when a control plane starts after it.
