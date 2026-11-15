@@ -182,6 +182,7 @@ ${phase.kind === "quoting" ? html`<p class="land-note">The reviewer quotes, from
   : phase.kind === "checking" ? html`<p class="land-note">.nexus/check runs at ${short(r.rounds.at(-1)!.head)}, unless it passed there already.</p>`
   : phase.kind === "verifying" ? html`<p class="land-note">${phase.thread === null && phase.refused !== undefined ? html`No node can take the verify pylon yet: ${phase.refused}` : html`.nexus/verify runs at ${short(r.rounds.at(-1)!.head)} in a verify pylon${phase.thread !== null && html`, <a href="/threads/${phase.thread}">${phase.thread}</a>`}.`}</p>`
   : phase.kind === "merging" && phase.waiting !== undefined ? html`<p class="land-note">Waiting while ${phase.waiting}, since landings deploy one at a time, then merging ${short(r.rounds.at(-1)!.head)}.</p>`
+  : phase.kind === "merging" && phase.checks !== undefined ? html`<p class="land-note">Waiting for the pull request's GitHub checks to pass, then merging ${short(r.rounds.at(-1)!.head)}. Failed checks, or checks still running an hour after the wait began, come to you.</p>`
   : phase.kind === "merging" ? html`<p class="land-note">Checking the merge policy again with what GitHub says now, then merging ${short(r.rounds.at(-1)!.head)}.</p>`
   : phase.kind === "deploying" ? html`<p class="land-note">Deploying the merge commit ${short(phase.commit)} until every service reports it healthy.</p>`
   : phase.kind === "rolling-back" ? html`<p class="error">${phase.why} Rolling back to ${short(phase.previous)}.</p>`
