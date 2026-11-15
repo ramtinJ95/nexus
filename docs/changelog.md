@@ -2,6 +2,10 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), except in the commands [Version skew](cli.md#version-skew) names, so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.93.0
+
+Adds `replace` to `POST /v1/threads/<thread>/review` and `--replace` to `nexus review`. Without it, a start that would take the place of the thread's review of another open pull request, one approved or held for the person, is now refused with 409 and what to do, as [`review`](cli.md#reviews-that-wait-their-turn) describes. Before, the start went through and the waiting review could no longer land. A control plane older than 0.93.0 refuses a body with `replace`, and replaces without it.
+
 ## 0.92.0
 
 Adds the CLI's timeout setting: `--timeout SECONDS`, `NEXUS_TIMEOUT` or `"timeout"` in the config file, whole seconds from 1 to 3600, 30 when unset as before. It is how long the CLI lets a connection stay silent, as [Where it connects](cli.md#where-it-connects) describes. A control plane that took the connection and then sent nothing, in the TLS handshake too, is now named as busy or stuck, with the setting that waits longer. Before, a silence in the handshake was reported as the SOCKS proxy's. The API contract is unchanged, and a 0.91.0 control plane serves this CLI.

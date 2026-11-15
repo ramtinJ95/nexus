@@ -8,6 +8,8 @@ export const reviewSchema = z.strictObject({
   rounds: z.int().min(1).max(maxRounds).optional(),
   /** Land the PR under the merge policy once the review approves it and its checks pass. */
   land: z.boolean().default(false),
+  /** Start it even when it takes the place of the builder's review of another open pull request that waits on the person. */
+  replace: z.boolean().default(false),
 });
 
 const holdsSchema = z.array(z.string().min(1).max(4_000)).min(1).max(20);

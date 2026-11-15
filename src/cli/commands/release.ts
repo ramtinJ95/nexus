@@ -123,20 +123,21 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
   },
   review: {
     help: [
-      "  nexus review <thread> [--pr N] [--rounds N] [--land]",
-      "    a reviewer on another model for the thread's open PR, round after round until it approves; --land merges and deploys under the merge policy",
+      "  nexus review <thread> [--pr N] [--rounds N] [--land] [--replace]",
+      "    a reviewer on another model for the thread's open PR, round after round until it approves; --land merges and deploys under the merge policy;",
+      "    --replace starts it though it takes the place of the thread's review of another open PR that waits on you",
       "  nexus review --cancel <thread>               end the thread's running review and archive its reviewer, unless it began merging or deploying",
     ],
-    args: [1, 1], thread: true, options: { pr: { type: "string" }, rounds: { type: "string" }, land: { type: "boolean" }, cancel: { type: "boolean" } },
+    args: [1, 1], thread: true, options: { pr: { type: "string" }, rounds: { type: "string" }, land: { type: "boolean" }, replace: { type: "boolean" }, cancel: { type: "boolean" } },
     async run(api, [id], v) {
       if (v.cancel === true) {
-        if (v.pr !== undefined || v.rounds !== undefined || v.land !== undefined) throw new UsageError("--cancel takes no --pr, --rounds or --land");
+        if (v.pr !== undefined || v.rounds !== undefined || v.land !== undefined || v.replace !== undefined) throw new UsageError("--cancel takes no --pr, --rounds, --land or --replace");
         const r = await request(api, reviewRoutes.cancel, { thread: id! });
         return { json: r, text: `Cancelled ${r.said.join("\n")}` };
       }
       const pr = str(v, "pr");
       const rounds = str(v, "rounds");
-      const body = { ...pr === undefined ? {} : { pr: int(pr, "--pr", 0) }, ...rounds === undefined ? {} : { rounds: int(rounds, "--rounds", 0) }, ...v.land === true ? { land: true } : {} };
+      const body = { ...pr === undefined ? {} : { pr: int(pr, "--pr", 0) }, ...rounds === undefined ? {} : { rounds: int(rounds, "--rounds", 0) }, ...v.land === true ? { land: true } : {}, ...v.replace === true ? { replace: true } : {} };
       const r = await request(api, reviewRoutes.start, { thread: id!, body });
       return { json: r, text: `Started ${r.said.join("\n")}` };
     },

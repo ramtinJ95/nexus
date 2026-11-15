@@ -1343,6 +1343,48 @@ test("the rounds of a PR's reviews count for it alone, whichever review of the b
   await assert.rejects(loop.start(f.builder, { pr: 7, land: null }), /pull request #7 has had 5 rounds over its reviews/);
 });
 
+test("a review of a builder's next pull request does not silently take the place of one that waits on the person for a pull request still open", async (t) => {
+  const f = fixture(t);
+  const other = testPr({ repo: "ramtinJ95/nexus", number: 8, title: "Add the queue" });
+  f.others.set(8, { ...f.snapshot, pr: { ...other } });
+  const watch = (first: "open" | "closed") => f.registry.prWatches.savePrWatch(f.builder, { links: [{ pr: { ...f.pr, state: first }, seen: [], failed: false }, { pr: other, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  const loop = await approved(f, null);
+  const first = f.review();
+  assert.deepEqual(first.phase, { kind: "approved" });
+  // The builder opens a second pull request while the first's approved review waits for the person's Land.
+  watch("open");
+  await assert.rejects(loop.start(f.builder, { pr: 8, land: null }), (err: unknown) => err instanceof Refusal && err.kind === "conflict"
+    && err.message === `review ${first.id} of pull request #7 is approved and lands once you land it, and a review of #8 would take its place, so #7 could no longer land from ${f.builder}. Land it first with nexus land ${f.builder}, or start this one with --replace to give it up`);
+  assert.equal(f.review().id, first.id, "the approved review is still the builder's");
+  // One held for the person can also be ended, and the refusal says so.
+  f.registry.reviews.saveReview({ ...first, phase: personPhase("policy", "The pull request's GitHub checks are failed.") });
+  await assert.rejects(loop.start(f.builder, { pr: 8, land: null }), (err: unknown) => err instanceof Refusal
+    && err.message.startsWith(`review ${first.id} of pull request #7 is held for you, and a review of #8 would take its place`)
+    && err.message.endsWith(`Land it first with nexus land ${f.builder}, end it with nexus review --cancel ${f.builder}, or start this one with --replace to give it up`));
+  // A first pull request that closed has nothing left to land, so its review gives way.
+  watch("closed");
+  const next = await loop.start(f.builder, { pr: 8, land: null });
+  assert.equal(next.pr.number, 8);
+});
+
+test("a review of a builder's next pull request replaces one that waits on the person when the person says so, and the same pull request's review starts again as before", async (t) => {
+  const f = fixture(t);
+  const other = testPr({ repo: "ramtinJ95/nexus", number: 8, title: "Add the queue" });
+  f.others.set(8, { ...f.snapshot, pr: { ...other } });
+  const loop = await approved(f, null);
+  const first = f.review();
+  f.registry.prWatches.savePrWatch(f.builder, { links: [{ pr: f.pr, seen: [], failed: false }, { pr: other, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  const again = await loop.start(f.builder, { pr: 7, land: null });
+  assert.equal(again.pr.number, 7, "nothing of another pull request's is lost by it");
+  loop.cancel(f.builder, "nLAPTOP");
+  f.registry.reviews.saveReview({ ...first, startedAt: f.review().startedAt + 1 });
+  assert.equal(f.review().id, first.id);
+  await assert.rejects(loop.start(f.builder, { pr: 8, land: null }), /would take its place/);
+  const replaced = await loop.start(f.builder, { pr: 8, land: null, replace: true });
+  assert.equal(replaced.pr.number, 8);
+  assert.equal(f.review().id, replaced.id);
+});
+
 test("a PR runs one review at a time, whichever of its builders starts it, so its rounds stay within one budget", async (t) => {
   const f = fixture(t);
   const other = f.add("th-other", true);
