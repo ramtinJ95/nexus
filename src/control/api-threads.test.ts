@@ -72,7 +72,7 @@ test("thread detail derives the actual state from the node's last observation", 
     desired: "running",
     pylon: { grantsOutdated: false, id: thread.pylonId, node, actualState: "unknown", failed: null, observedAt: null, retryRefused: null, resources: project.resources },
     sessions: [], previews: [], ports: [], outputs: [], prWatch: { enabled: false, stopped: false, error: null }, pullRequests: [], reviewView: null, keptPastDay: null, questions: [], judgments: [], planning: false, attach: "hc", agent: { parkedTasks: 0 },
-    said: { guest: null, disk: null, usage: null, paused: "paused, resumes on wake", prWatch: "PR watch: off (no control-plane GitHub token configured)", review: null },
+    said: { held: null, guest: null, disk: null, usage: null, paused: "paused, resumes on wake", prWatch: "PR watch: off (no control-plane GitHub token configured)", review: null },
   });
 
   s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
@@ -421,9 +421,9 @@ test("the API reports the attention the event stream last reported, and a delete
 
 test("attention takes the first matching state in every combination", () => {
   for (const failed of [false, true]) for (const parked of [false, true]) for (const decision of [false, true]) for (const limited of [false, true]) {
-    for (const reply of [null, 10]) for (const seen of [null, 9, 10, 11]) for (const working of [false, true]) {
-      const expected = failed ? "failed" : decision ? "decision" : parked ? "parked" : limited ? "limited" : reply !== null && (seen === null || reply > seen) ? "reply" : working ? "working" : null;
-      assert.equal(attentionOf({ failed, parked, lastReplyAt: reply, seenAt: seen, working, waiting: false, needs: decision ? [{ kind: "nudge", since: 0 }] : [], limited }), expected);
+    for (const reply of [null, 10]) for (const seen of [null, 9, 10, 11]) for (const working of [false, true]) for (const bootHeld of [false, true]) {
+      const expected = failed ? "failed" : decision ? "decision" : parked ? "parked" : limited ? "limited" : bootHeld ? "boot-held" : reply !== null && (seen === null || reply > seen) ? "reply" : working ? "working" : null;
+      assert.equal(attentionOf({ failed, parked, lastReplyAt: reply, seenAt: seen, working, waiting: false, needs: decision ? [{ kind: "nudge", since: 0 }] : [], limited, bootHeld }), expected);
     }
   }
 });

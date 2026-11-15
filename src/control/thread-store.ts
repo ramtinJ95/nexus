@@ -2,7 +2,7 @@
  * The thread core. It makes the Claude worker's store (claude-worker.ts) and serves it. The features with per-thread
  * state of their own take part through a ThreadParticipant each, which the registry registers.
  */
-import { attentionOf, type Attention, type Need } from "./attention.ts";
+import { attentionOf, holdShownAfterMs, type Attention, type BootHold, type Need } from "./attention.ts";
 import { previewFailed } from "./plain-wording.ts";
 import { eventCursor, sessionActivityTtlMs, maxActiveSessions, type EventFilter, type EventKind, type NexusEvent } from "./events.ts";
 import type { StartKey } from "./start-request.ts";
@@ -372,6 +372,29 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
   }
 
   const threadStatus = (id: ThreadId) => sql("SELECT status FROM threads WHERE id = ?").get(id)?.status as ThreadStatus | undefined;
+
+  /**
+   * Each pylon whose boot or wake the planner held on its last pass over it, why, and since when. Kept in memory, since
+   * the first pass after a restart says it again, so a hold's `since` starts over with the process.
+   */
+  const bootHolds = new Map<PylonId, { why: string; since: number; shown: boolean }>();
+  const lasting = (hold: { since: number }) => clock() - hold.since >= holdShownAfterMs;
+  /** Records what the pass's tick of a pylon said of its boot, and tells its thread's attention once a hold lasts and once one ends. */
+  function holdBoot(pylonId: PylonId, thread: ThreadId, why: string | null): void {
+    const old = bootHolds.get(pylonId);
+    if (why === null) {
+      if (old === undefined) return;
+      bootHolds.delete(pylonId);
+      if (old.shown) updateAttention(thread);
+      return;
+    }
+    const hold = { why, since: old?.since ?? clock(), shown: old?.shown ?? false };
+    bootHolds.set(pylonId, hold);
+    if (hold.shown || !lasting(hold)) return;
+    hold.shown = true;
+    updateAttention(thread);
+  }
+
   function updateAttention(id: ThreadId): void {
     const t = thread(id);
     if (t === undefined) return;
@@ -383,6 +406,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     const failed = deleteFailed || t.status !== "archived" && (p?.failed != null || workerFailed(id));
     const attention = attentionOf({
       failed, parked: old?.parked === 1, lastReplyAt: t.lastReplyAt, seenAt: t.seenAt, working: t.working, waiting: t.sessionWaiting === true, needs: needs(id), limited: t.usageLimit !== undefined,
+      bootHeld: bootHolds.get(t.pylonId)?.shown === true,
     });
     if ((old?.attention ?? null) === attention) return;
     sql("INSERT INTO thread_attention (thread, attention) VALUES (?, ?) ON CONFLICT(thread) DO UPDATE SET attention = excluded.attention").run(id, attention);
@@ -395,8 +419,10 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       if (status === "archived") sql("INSERT INTO thread_archives (thread, archived_at) VALUES (?, ?) ON CONFLICT(thread) DO NOTHING").run(id, clock());
       else sql("DELETE FROM thread_archives WHERE thread = ?").run(id);
       if (!isOpenStatus(status)) {
-        // The thread's pylon pauses, so no turn of it runs and no dialog waits.
+        // The thread's pylon pauses, so no turn of it runs and no dialog waits, and a pass may never tick it again to end a hold.
         sql("DELETE FROM session_activity WHERE thread = ?").run(id);
+        const held = sql("SELECT id FROM pylons WHERE thread = ?").get(id)?.id as PylonId | undefined;
+        if (held !== undefined) bootHolds.delete(held);
         for (const p of participants) p.closed?.(id);
       }
       if (status === "deleted") {
@@ -563,6 +589,12 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     /** Keeps the newest 10,000 events, so a cursor from before them expires. */
     retainEvents() { sql("DELETE FROM events WHERE id <= (SELECT max(id) FROM events) - 10000").run(); },
     attention: (id: ThreadId): Attention => (sql("SELECT attention FROM thread_attention WHERE thread = ?").get(id)?.attention ?? null) as Attention,
+    holdBoot,
+    /** The planner's hold on the pylon's boot or wake, as the last pass over it left it. */
+    bootHold(pylonId: PylonId): BootHold | undefined {
+      const hold = bootHolds.get(pylonId);
+      return hold && { why: hold.why, since: hold.since, lasting: hold.shown };
+    },
     recordParked(id: ThreadId, parked: boolean) {
       // The harness reports each flip, but a process's first report for a thread may repeat what an earlier process stored.
       if (sql("SELECT parked FROM thread_attention WHERE thread = ?").get(id)?.parked === (parked ? 1 : 0)) return;

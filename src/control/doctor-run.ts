@@ -11,6 +11,8 @@ import type { BackupStatusRead } from "./backup-status.ts";
 import { doctorReport, type CertificateFact } from "./doctor.ts";
 import { checkKey, statuses, type Check, type DoctorReport, type HealthChange } from "./doctor-model.ts";
 import { observedPylon } from "./observed.ts";
+import { bootSecrets } from "./project.ts";
+import { chatgptTokenGrant } from "../protocol/secret-grants.ts";
 import { nodeSummary } from "./placement.ts";
 import { releaseView } from "./releases.ts";
 import type { Registry } from "./registry.ts";
@@ -19,7 +21,7 @@ import type { TokenAnswer } from "./github.ts";
 import type { TailscaleStatus } from "../tailscale.ts";
 
 export interface DoctorSources {
-  registry: Pick<Registry, "nodes" | "now" | "threads" | "placement" | "releases" | "images" | "prWatches">;
+  registry: Pick<Registry, "nodes" | "now" | "threads" | "placement" | "releases" | "images" | "prWatches" | "projects">;
   self: TailnetNodeId;
   backupStatus(): Promise<BackupStatusRead>;
   login(): Promise<LoginState>;
@@ -56,6 +58,7 @@ export async function runDoctor(s: DoctorSources): Promise<DoctorReport> {
     release: releaseView(s.registry, s.self, now),
     controlNode: s.registry.nodes.nodeByTailnetId(s.self)?.name ?? null,
     backup, login, certificate, github, tailnet,
+    tokenProjects: s.registry.projects.projects().filter((p) => bootSecrets(p).some((grant) => grant.name === chatgptTokenGrant.name)).map((p) => p.id),
     // A pylon its node does not list has no disk to keep, as one whose disk was deleted before disks waited for their usage.
     keptArchives: s.registry.threads.keptArchives().filter((t) => {
       const p = s.registry.threads.pylon(t.pylonId);

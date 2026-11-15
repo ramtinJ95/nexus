@@ -18,7 +18,7 @@ import { claudeWorkerAt } from "../test-support/registry-kit.ts";
 import type { ProjectId } from "../ids.ts";
 import type { InterruptClaudeOutcome } from "../protocol/commands.ts";
 import { transcriptStart, type ClaudeEntry } from "../control/claude-transcript.ts";
-import { tempDir, testCapacity, testObservation } from "../test-support/kit.ts";
+import { stoppedPylon, tempDir, testCapacity, testObservation } from "../test-support/kit.ts";
 import { CliError } from "./transport.ts";
 import type { Api } from "./kit.ts";
 import { threadsCommands } from "./commands/threads.ts";
@@ -225,6 +225,20 @@ test("wake says it recorded the person's activity and what that does to the pylo
   assert.equal((await s.nexus(["wake", thread.id])).stdout, `Recorded your activity on ${thread.id}, but its pylon failed, and activity does not retry it. \`nexus retry-pylon ${thread.id}\` does.\n`);
   await s.json(["archive", thread.id]);
   assert.equal((await s.nexus(["wake", thread.id])).stdout, `Recorded your activity on ${thread.id}, but it is archived, so its pylon stays paused. \`nexus unarchive ${thread.id}\` wakes it.\n`);
+});
+
+test("wake says why its pylon does not wake when the planner holds the wake, reading the thread until the pass says so", async (t) => {
+  const s = await setup(t);
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "held"]);
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
+  s.registry.threads.ingested(testObservation(node, { pylons: [stoppedPylon(thread.pylonId)] }), []);
+  assert.equal((await s.nexus(["wake", thread.id])).stdout, `Recorded your activity on ${thread.id}, so Nexus wakes its pylon, which is paused.\n`, "a wake no pass says anything of within its reads");
+  // The pass the activity sets off holds the wake a moment after the activity is recorded.
+  const before = s.registry.threads.thread(thread.id)!.lastHumanActivityAt;
+  const waking = s.nexus(["wake", thread.id]);
+  await until("the activity is recorded", () => s.registry.threads.thread(thread.id)!.lastHumanActivityAt > before);
+  s.registry.threads.holdBoot(thread.pylonId, thread.id, "rj-firebat has 62 of 64 GiB of memory committed, and the pylon needs 4 GiB");
+  assert.equal((await waking).stdout, `Recorded your activity on ${thread.id}, but its pylon does not wake yet. The planner holds its pylon's boot, as rj-firebat has 62 of 64 GiB of memory committed, and the pylon needs 4 GiB.\n`);
 });
 
 test("show --json names the session a started Claude worker runs, so a client can tell it from other Claude sessions", async (t) => {

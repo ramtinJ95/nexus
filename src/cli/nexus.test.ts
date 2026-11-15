@@ -36,7 +36,7 @@ async function closingApi(t: TestContext, close: "idle" | "request") {
   const answer = withHealth((req, res) => {
     // Without Node's keep-alive hint, which would tell the client when the server closes a connection.
     const reply = (status: number, body: unknown) => res.writeHead(status, { "content-type": "application/json", connection: "keep-alive" }).end(JSON.stringify(body));
-    if (!req.url!.includes("/files")) return reply(200, { thread: { status: "active" } });
+    if (!req.url!.includes("/files")) return reply(200, { thread: { status: "active" }, pylon: {}, said: {} });
     if (++reads === 1) return reply(409, { error: "pylon pylon-x is not running yet", code: "not-running", retryable: true });
     reply(200, { path: "", entries: [], truncated: false });
   });
@@ -474,8 +474,25 @@ test("a reused connection takes each request's own idle timeout, and a silence o
   assert.equal(sockets.size, 1, "the three requests shared one connection");
 });
 
+test("whenRunning says why the planner holds the pylon while it waits, and gives up at once on a hold that has lasted", async () => {
+  const refusal = new CliError("conflict", "pylon-x is stopped, not running", 409, "not-running", true);
+  const said = { held: "The planner holds its pylon's boot, as rj-firebat has 62 of 64 GiB of memory committed, and the pylon needs 4 GiB" };
+  const shown = (lasting: boolean): Api => async () => ({ thread: { status: "active" }, pylon: { held: { why: "", since: 0, lasting } }, said });
+  let tries = 0;
+  await assert.rejects(whenRunning(shown(true), process, "th-0123456789ab", () => { tries++; throw refusal; }, "nothing was sent"),
+    (err) => err instanceof CliError && err.kind === "failed" && err.message === `the pylon of th-0123456789ab does not run, so nothing was sent. ${said.held}`);
+  assert.equal(tries, 1, "a hold that has lasted is not waited on");
+
+  // A hold that began a moment ago may end with the next handover or pause, so the wait goes on and says what it waits for.
+  const noted: string[] = [];
+  const io = { ...process, stderr: { write: (text: string) => { noted.push(text); return true; }, isTTY: true } } as unknown as typeof process;
+  tries = 0;
+  assert.equal(await whenRunning(shown(false), io, "th-0123456789ab", () => tries++ === 0 ? Promise.reject(refusal) : Promise.resolve("sent"), "nothing was sent"), "sent");
+  assert.deepEqual(noted, [`Waiting up to 120 s for the pylon of th-0123456789ab to run: pylon-x is stopped, not running. ${said.held}\n`]);
+});
+
 test("whenRunning tries a retryable refusal again and fails at once on any other", async () => {
-  const api: Api = async () => ({ thread: { status: "active" } });
+  const api: Api = async () => ({ thread: { status: "active" }, pylon: {}, said: {} });
   for (const refusal of [
     new CliError("conflict", "pylon-x is stopped, not running", 409, "not-running", true),
     new CliError("conflict", "control plane is draining for deployment", 409, "draining", true),

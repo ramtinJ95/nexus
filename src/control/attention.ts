@@ -16,15 +16,30 @@ export type Need =
   | { kind: "resume"; why: string; since: number }
   | { kind: "unreviewed"; pr: number; url: string; why: string; since: number };
 
-/** What a thread's attention is read from. `waiting` is a dialog its session waits on, and `limited` its Claude session stopped on its usage limit. */
+/**
+ * How long the planner holds a pylon's boot before its thread's attention says so. The token a probe is handed after it
+ * starts and the room a pause in flight frees both end a hold sooner, and neither is worth a notice.
+ */
+export const holdShownAfterMs = 60_000;
+
+/**
+ * A boot or wake the planner holds: `why` goes on after "as ", `since` is when it first held it, and `lasting` says it
+ * has held long enough to be the thread's attention, so a wait on it is not worth going on with.
+ */
+export interface BootHold { why: string; since: number; lasting: boolean }
+
+/**
+ * What a thread's attention is read from. `waiting` is a dialog its session waits on, `limited` its Claude session
+ * stopped on its usage limit, and `bootHeld` a boot or wake of its pylon the planner has held for holdShownAfterMs.
+ */
 export interface AttentionFacts {
-  failed: boolean; parked: boolean; lastReplyAt: number | null; seenAt: number | null; working: boolean; waiting: boolean; needs: readonly Need[]; limited: boolean;
+  failed: boolean; parked: boolean; lastReplyAt: number | null; seenAt: number | null; working: boolean; waiting: boolean; needs: readonly Need[]; limited: boolean; bootHeld: boolean;
 }
 
 /**
  * The first that holds: `decision` is anything else that waits on the person, as its needs say, and `died` a turn that
  * died and that Nexus does not resume. `died` and `limited` outrank `reply` because the turn end that recorded the
- * reply is the stop itself.
+ * reply is the stop itself, and `boot-held` because nothing the person writes back reaches a pylon that does not boot.
  */
 export function attentionOf(f: AttentionFacts): Attention {
   if (f.failed) return "failed";
@@ -32,6 +47,7 @@ export function attentionOf(f: AttentionFacts): Attention {
   if (f.needs.length > 0) return "died";
   if (f.parked) return "parked";
   if (f.limited) return "limited";
+  if (f.bootHeld) return "boot-held";
   if (f.lastReplyAt !== null && (f.seenAt === null || f.lastReplyAt > f.seenAt)) return "reply";
   return f.working ? "working" : f.waiting ? "waiting" : null;
 }
