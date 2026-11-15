@@ -15,6 +15,27 @@ import type { ProjectId } from "../ids.ts";
 import { deadPort } from "../test-support/kit.ts";
 import { cli, node, laptop, phone, project, setup } from "../test-support/cli-kit.ts";
 
+test("project remove keeps history, lists it only with --all, and reports refusals", async (t) => {
+  const s = await setup(t);
+  const started = await s.json(["start", "--project", "acme", "--title", "Keep history"]);
+  assert.equal((await s.nexus(["project", "remove", "acme"])).code, 5);
+  await s.nexus(["archive", started.id]);
+  const removed = await s.nexus(["project", "remove", "acme"]);
+  assert.deepEqual([removed.code, removed.stdout, removed.stderr], [0, "Removed project acme. Thread history and usage are kept; its GitHub repository is unchanged.\n", ""]);
+  assert.deepEqual(await s.json(["projects"]), []);
+  const all = await s.json(["projects", "--all"]);
+  assert.equal(all.length, 1);
+  assert.equal(all[0].removed.by, laptop);
+  assert.match((await s.nexus(["projects", "--all"])).stdout, /acme \(removed\)/);
+  assert.match((await s.nexus(["project", "show", "acme"])).stdout, /Removed by .*History is kept/);
+  assert.deepEqual(await s.json(["project", "show", "acme"]), all[0]);
+  assert.deepEqual(await s.json(["project", "remove", "acme"]), all[0]);
+  assert.equal((await s.json(["show", started.id])).thread.status, "archived");
+  assert.equal((await s.nexus(["project", "remove", "missing"])).code, 4);
+  assert.equal((await s.nexus(["project", "remove"])).code, 64);
+  assert.equal((await s.nexus(["start", "--project", "acme", "--title", "No"])).code, 5);
+});
+
 test("project add sizes a project at 2 CPUs, 4 GiB of memory and 10 GiB of disk, and each size flag overrides its own field", async (t) => {
   const s = await setup(t);
   const repo = "https://github.com/octocat/Hello-World.git";

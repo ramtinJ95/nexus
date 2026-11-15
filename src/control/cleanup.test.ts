@@ -58,6 +58,13 @@ const asked = (registry: Registry) => registry.questions.nodeQuestions(testNode)
 const keysOf = (registry: Registry) => asked(registry).map((q) => q.cleanup.items.map((i) => i.kind === "release" ? i.name.slice(0, 1) : i.id));
 const answer = (registry: Registry, option: "Delete" | "Keep") => registry.questions.answerQuestion(asked(registry).at(-1)!, { option, by: "nLAPTOP" as TailnetNodeId, at: now });
 
+test("a removed project's old templates still reach normal cleanup", async (t) => {
+  const { registry, pass } = setUp(t);
+  registry.projects.editProject("acme" as ProjectId, (p) => ({ ...p, removed: { at: now, by: "nLAPTOP" } }));
+  await pass.poll();
+  assert.ok(asked(registry)[0]!.cleanup.items.some((i) => i.kind === "template" && i.id === oldTemplate.id));
+});
+
 test("one question per node, asked again only once a new candidate joins, with each item's space and the total", async (t) => {
   const { registry, pass, observe, later } = setUp(t);
   pass.releases(testNode, inventory());

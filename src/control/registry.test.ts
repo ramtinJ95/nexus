@@ -46,6 +46,21 @@ function seed(registry: Registry, claudePrompt?: string) {
 }
 const seeded = (t: TestContext, path: string, clock?: () => number, claudePrompt?: string) => seed(testRegistry(t, path, clock), claudePrompt);
 
+test("removed projects stay removed across a registry restart, with their archived threads intact", (t) => {
+  const path = tempDb();
+  const first = seed(openRegistry(path));
+  first.threads.setThreadStatus(threadId, "archived");
+  const removed = first.projects.editProject(project.id, (p) => ({ ...p, removed: { at: 1000, by: "nLAPTOP" }, autoReview: null, pipeline: null }));
+  const archived = first.threads.thread(threadId);
+  first.close();
+  const second = testRegistry(t, path);
+  assert.deepEqual(second.projects.projects(), []);
+  assert.deepEqual(second.projects.projects({ removed: true }), [removed]);
+  assert.deepEqual(second.projects.project(project.id), removed);
+  assert.deepEqual(second.threads.thread(threadId), archived);
+  assert.equal(second.threads.pylon(pylonId)?.thread, threadId);
+});
+
 test("records survive closing and reopening the file", async (t) => {
   const path = tempDb();
   const first = seed(openRegistry(path));

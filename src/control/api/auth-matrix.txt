@@ -85,6 +85,7 @@ deployer POST /v1/projects -> 400 ✖ Unrecognized key: "bogus"
   → at id
 ✖ Invalid input: expected string, received undefined
   → at repoUrl
+deployer DELETE /v1/projects/nosuch -> 404 no project nosuch
 deployer GET /v1/items -> 200
 deployer POST /v1/items -> 400 ✖ Unrecognized key: "bogus"
 ✖ Invalid input: expected string, received undefined
@@ -228,6 +229,7 @@ person POST /v1/projects -> 400 ✖ Unrecognized key: "bogus"
   → at id
 ✖ Invalid input: expected string, received undefined
   → at repoUrl
+person DELETE /v1/projects/nosuch -> 404 no project nosuch
 person GET /v1/items -> 200
 person POST /v1/items -> 400 ✖ Unrecognized key: "bogus"
 ✖ Invalid input: expected string, received undefined
@@ -383,6 +385,7 @@ control-node POST /v1/projects -> 400 ✖ Unrecognized key: "bogus"
   → at id
 ✖ Invalid input: expected string, received undefined
   → at repoUrl
+control-node DELETE /v1/projects/nosuch -> 403 caller may not remove a project: only a person may, never the control plane, infrastructure nodes or pylons
 control-node GET /v1/items -> 200
 control-node POST /v1/items -> 403 caller may not add an item: only a person may, never the control plane, infrastructure nodes or pylons
 control-node GET /v1/items/it-nosuch -> 404 no item it-nosuch
@@ -522,6 +525,7 @@ control-node-without-key POST /v1/projects -> 400 ✖ Unrecognized key: "bogus"
   → at id
 ✖ Invalid input: expected string, received undefined
   → at repoUrl
+control-node-without-key DELETE /v1/projects/nosuch -> 403 caller may not remove a project: only a person may, never the control plane, infrastructure nodes or pylons
 control-node-without-key GET /v1/items -> 200
 control-node-without-key POST /v1/items -> 403 caller may not add an item: only a person may, never the control plane, infrastructure nodes or pylons
 control-node-without-key GET /v1/items/it-nosuch -> 404 no item it-nosuch
@@ -669,6 +673,7 @@ reporter GET /v1/threads/th-000000000000/conversation -> 403 caller is not a tai
 reporter PATCH /v1/projects/nosuch -> 403 caller is not a tailnet node this control plane allows
 reporter GET /v1/projects -> 403 caller is not a tailnet node this control plane allows
 reporter POST /v1/projects -> 403 caller is not a tailnet node this control plane allows
+reporter DELETE /v1/projects/nosuch -> 403 caller is not a tailnet node this control plane allows
 reporter GET /v1/items -> 403 caller is not a tailnet node this control plane allows
 reporter POST /v1/items -> 403 caller is not a tailnet node this control plane allows
 reporter GET /v1/items/it-nosuch -> 403 caller is not a tailnet node this control plane allows
@@ -790,6 +795,7 @@ reporter-wrong-key GET /v1/threads/th-000000000000/conversation -> 403 caller is
 reporter-wrong-key PATCH /v1/projects/nosuch -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /v1/projects -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key POST /v1/projects -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key DELETE /v1/projects/nosuch -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /v1/items -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key POST /v1/items -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /v1/items/it-nosuch -> 403 caller is not a tailnet node this control plane allows
@@ -911,6 +917,7 @@ node-without-key GET /v1/threads/th-000000000000/conversation -> 403 caller is n
 node-without-key PATCH /v1/projects/nosuch -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /v1/projects -> 403 caller is not a tailnet node this control plane allows
 node-without-key POST /v1/projects -> 403 caller is not a tailnet node this control plane allows
+node-without-key DELETE /v1/projects/nosuch -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /v1/items -> 403 caller is not a tailnet node this control plane allows
 node-without-key POST /v1/items -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /v1/items/it-nosuch -> 403 caller is not a tailnet node this control plane allows
@@ -1032,6 +1039,7 @@ stranger GET /v1/threads/th-000000000000/conversation -> 403 caller is not a tai
 stranger PATCH /v1/projects/nosuch -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET /v1/projects -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger POST /v1/projects -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger DELETE /v1/projects/nosuch -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET /v1/items -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger POST /v1/items -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET /v1/items/it-nosuch -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
@@ -1147,6 +1155,7 @@ unnamed GET /v1/threads/th-000000000000/conversation -> 403 caller is not a tail
 unnamed PATCH /v1/projects/nosuch -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /v1/projects -> 403 caller is not a tailnet node this control plane allows
 unnamed POST /v1/projects -> 403 caller is not a tailnet node this control plane allows
+unnamed DELETE /v1/projects/nosuch -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /v1/items -> 403 caller is not a tailnet node this control plane allows
 unnamed POST /v1/items -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /v1/items/it-nosuch -> 403 caller is not a tailnet node this control plane allows

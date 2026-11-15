@@ -20,7 +20,7 @@ export const sections: readonly { title: string; names: readonly string[] }[] = 
   { title: "Threads", names: ["threads", "show", "thread show", "ports", "preview", "unpreview", "files", "cat", "changes", "diff", "conversation", "session open", "session close", "attach", "exec"] },
   { title: "Work", names: ["start", "start-queued", "send", "answer", "watch", "seen", "abort", "retry", "retry-pylon", "wake", "archive", "unarchive", "delete"] },
   { title: "Pipeline", names: ["items", "item add", "item show", "item approve", "item cancel"] },
-  { title: "Projects", names: ["projects", "project show", "project edit", "project add"] },
+  { title: "Projects", names: ["projects", "project show", "project edit", "project add", "project remove"] },
   { title: "Review and release", names: ["review", "land", "deploy", "release"] },
   { title: "Images", names: ["image build", "image rollout", "image rollback", "image list", "images", "image current"] },
   { title: "Nodes, events and usage", names: ["nodes", "node", "node show", "events", "usage", "usage backfill"] },

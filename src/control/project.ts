@@ -6,6 +6,8 @@ import { anthropicApiHost } from "../protocol/agent-kinds.ts";
 import type { GitIdentity, PylonResources } from "../protocol/spawn.ts";
 
 export interface Project {
+  /** Removed from project pickers, not erased: archived history and its project identity remain readable. */
+  removed?: { at: number; by: string };
   gitIdentity?: GitIdentity | null | undefined;
   id: ProjectId;
   /**

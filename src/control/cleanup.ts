@@ -27,7 +27,7 @@ export function cleanupPass({ registry, probes, log, now = Date.now }: {
     const record = registry.nodes.node(node);
     return {
       held: record?.state === "online" ? record.observation?.artifacts ?? null : null,
-      templates: registry.projects.projects().flatMap((p) => registry.images.templates(p.id)).filter((t) => (t.state === "ready" ? t.builtOn : t.on) === node),
+      templates: registry.projects.projects({ removed: true }).flatMap((p) => registry.images.templates(p.id)).filter((t) => (t.state === "ready" ? t.builtOn : t.on) === node),
       current: registry.images.currentImage(),
       previous: registry.images.previousImage(),
       operated: registry.images.imageOperation()?.image ?? null,
