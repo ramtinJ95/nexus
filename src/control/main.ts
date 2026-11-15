@@ -256,7 +256,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   services.start({ everyMs: passMs, ...judgmentPass({ registry, harness, probes: probeMap, wake }) });
   const cleanup = services.start({ everyMs: cleanupEveryMs, ...cleanupPass({ registry, probes: probeMap, log }) });
   const startedAt = Date.now();
-  const loopDelay = loopWatch();
+  const loopDelay = services.start(loopWatch());
   const doctor = () => runDoctor({
     registry, self: config.self.tailnetNodeId, startedAt, loop: loopDelay.late,
     backupStatus: () => readBackupStatus(backupStatusFile),

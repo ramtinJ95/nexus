@@ -85,6 +85,10 @@ test("the event loop's check says how late the control plane ran in its slowest 
   // The evening of 2026-11-14, hours before the control plane stopped answering.
   expect(loop(1_500, 1_600, 0.3), null, "event-loop", "warn", /ran what was due 1\.5 s late at the 99th percentile, 1\.6 s at worst, and was at work 30 % of the time\. Every request and every probe's event waits that long, since its own work holds its one thread\. journalctl -u nexus-control/);
   expect(loop(500, 500, 0.1), null, "event-loop", "warn", /500 ms late/);
+  // A machine suspended for nearly the whole minute: late, and at work none of it.
+  expect(loop(59_180, 59_180, 0), null, "event-loop", "fail", /59\.2 s late at the 99th percentile, 59\.2 s at worst, and was at work 0 % of the time\. It was at work too little of that time for its own work to have held it, so the process was stopped or its machine suspended for that long\. Nothing is wrong with it if that was meant/);
+  expect(loop(600, 600, 0.19), null, "event-loop", "warn", /process was stopped/);
+  expect(loop(600, 600, 0.2), null, "event-loop", "warn", /its own work holds its one thread/);
   // And the night that followed.
   expect(loop(2_000, 5_800, 1), null, "event-loop", "fail", /2\.0 s late at the 99th percentile, 5\.8 s at worst, and was at work 100 % of the time\. Every request/);
 });
