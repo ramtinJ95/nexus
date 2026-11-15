@@ -18,7 +18,7 @@ import type { SessionHarness } from "../protocol/agent-kinds.ts";
 import { defaultClaudeModel } from "../protocol/models.ts";
 import type { ThreadSetup } from "./templates.ts";
 import type { PylonRecord } from "./tick.ts";
-import { claudeWorkerStore, clockSkewMs, type ClaudeStop, type ClaudeWorker } from "./claude-worker.ts";
+import { claudeWorkerStore, type ClaudeStop, type ClaudeWorker } from "./claude-worker.ts";
 import type { NodeStore } from "./node-store.ts";
 import type { Placement } from "./placement-model.ts";
 import { upgradeAttempts, upgradeSubmitted } from "./record-upgrade.ts";
@@ -194,7 +194,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
   const { node } = nodes;
   let participants: readonly ThreadParticipant[] = [];
   const reconcile = (thread: ThreadId) => { for (const p of participants) p.reconcile?.(thread); };
-  const { addWorker, claudeStops: stopsCut, workerFailed, launching, turnStarted, turnBeat, turnEnded, sessionEnded, pylonStopped, rewindTranscript, ...claude } = claudeWorkerStore(db, {
+  const { addWorker, claudeStops, workerFailed, launching, turnStarted, sessionEnded, rewindTranscript, ...claude } = claudeWorkerStore(db, {
     reconcile, updateAttention, appendEvent,
     endTurn(thread, session, at) {
       sql("DELETE FROM session_activity WHERE thread = ? AND session = ? AND state = 'session.turn-started' AND EXISTS (SELECT 1 FROM session_order o WHERE o.thread = ? AND o.session = ? AND o.at <= ?)")
@@ -281,42 +281,19 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     return (sql("SELECT thread FROM pylons WHERE id = ?").get(pylonId) as Row | undefined)?.thread as ThreadId | undefined;
   }
 
-  /**
-   * When each of `threads`' pylons last stopped running what ran on it, by its node's last observation: a minute before
-   * its boot while it runs, as the boot is stamped by its host's clock and its turns by the pylon's, and Infinity while
-   * it is stopped. A pylon booting, stopping, broken or not observed says nothing.
-   */
-  function turnCuts(threads: readonly ThreadId[]): Map<ThreadId, number> {
-    const cuts = new Map<ThreadId, number>();
-    const observed = new Map<NodeName, NodeObservation | null>();
-    for (const r of sql("SELECT id, thread, node FROM pylons WHERE thread IN (SELECT value FROM json_each(?))").all(JSON.stringify(threads))) {
-      const on = r.node as NodeName;
-      if (!observed.has(on)) observed.set(on, node(on)?.observation ?? null);
-      const facts = observed.get(on)?.pylons.find((p) => p.pylonId === r.id);
-      if (facts?.phase === "running") cuts.set(r.thread as ThreadId, Date.parse(facts.bootedAt) - clockSkewMs);
-      else if (facts?.phase === "stopped") cuts.set(r.thread as ThreadId, Infinity);
-    }
-    return cuts;
-  }
-  const claudeStops = (ids: readonly ThreadId[], cuts = turnCuts(ids)) => stopsCut(ids, cuts);
-
   /** The threads of `rows` with what their sessions and the participants say, read in a few queries however many rows there are. */
   function withSessions(rows: readonly Row[]): Thread[] {
     if (rows.length === 0) return [];
     const ids = JSON.stringify(rows.map((r) => r.id));
-    const cuts = turnCuts(rows.map((r) => r.id as ThreadId));
-    // A turn its pylon stopped under no longer runs, though no report of its end came.
-    const live = new Map(sql(`SELECT a.thread, max(a.updated_at) AS at, min(a.started_at) AS since, max(o.at) AS heard FROM session_activity a
-      LEFT JOIN session_order o ON o.thread = a.thread AND o.session = a.session
-      WHERE a.thread IN (SELECT value FROM json_each(?)) AND a.state = 'session.turn-started' AND a.updated_at > ? GROUP BY a.thread`)
-      .all(ids, clock() - sessionActivityTtlMs).flatMap((r) => ((r.heard as number | null) ?? -Infinity) < (cuts.get(r.thread as ThreadId) ?? -Infinity) ? [] : [[r.thread as ThreadId, r] as const]));
+    const live = new Map(sql(`SELECT thread, max(updated_at) AS at, min(started_at) AS since FROM session_activity
+      WHERE thread IN (SELECT value FROM json_each(?)) AND state = 'session.turn-started' AND updated_at > ? GROUP BY thread`)
+      .all(ids, clock() - sessionActivityTtlMs).map((r) => [r.thread as ThreadId, r]));
     const waiting = new Map(sql(`SELECT thread, message FROM (SELECT thread, message, row_number() OVER (PARTITION BY thread ORDER BY updated_at DESC, rowid DESC) AS n
       FROM session_activity WHERE thread IN (SELECT value FROM json_each(?)) AND state = 'session.waiting') WHERE n = 1`).all(ids).map((r) => [r.thread as ThreadId, r]));
     const archived = new Map(sql("SELECT * FROM thread_archives WHERE thread IN (SELECT value FROM json_each(?))").all(ids).map((r) => [r.thread as ThreadId, r]));
     const backedUp = backedUpAt();
-    const stops = claudeStops(rows.map((r) => r.id as ThreadId).filter((id) => !live.has(id)), cuts);
-    const held = rows.map((r) => r.id as ThreadId);
-    const holds = [...participants.flatMap((p) => [...p.awaited?.(held) ?? []]), ...claude.resumeHolds(held)];
+    const stops = claudeStops(rows.map((r) => r.id as ThreadId).filter((id) => !live.has(id)));
+    const holds = participants.flatMap((p) => [...p.awaited?.(rows.map((r) => r.id as ThreadId)) ?? []]);
     const now = clock();
     const threads = rows.map((row): Thread => {
       const thread = threadRow(row);
@@ -521,14 +498,10 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     return kept;
   }
 
-  /**
-   * What waits on the person for the thread. A review that asks about its holds has its question's need, which shows the
-   * review too. A death Nexus left to the person waits only while it stands: a turn that started since ended it.
-   */
+  /** What waits on the person for the thread. A review that asks about its holds has its question's need, which shows the review too. */
   function needs(thread: ThreadId): Need[] {
     const resume = claude.claudeResume(thread);
-    const died = resume?.state === "person" && claudeStops([thread]).get(thread)?.turnDied?.at === resume.turn;
-    const all = [...participants.flatMap((p) => p.needs?.(thread) ?? []), ...died ? [{ kind: "resume" as const, why: resume.why, since: resume.turn }] : []];
+    const all = [...participants.flatMap((p) => p.needs?.(thread) ?? []), ...resume?.state === "person" ? [{ kind: "resume" as const, why: resume.why, since: resume.turn }] : []];
     return all.filter((n) => n.kind !== "review" || !all.some((q) => q.kind === "question" && q.question.kind === "holds" && q.question.holds.review === n.review));
   }
 
@@ -662,12 +635,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
           if (at === previous.at && (event.kind === "session.turn-started" || event.kind === "session.heartbeat") && previous.kind !== "session.turn-started" && previous.kind !== "session.heartbeat") return;
         } else if (floor !== undefined && at <= floor) return;
         const current = sql("SELECT state, started_at FROM session_activity WHERE thread = ? AND session = ?").get(thread, session);
-        // A heartbeat of a turn the order still has running revives the turn's row, which a gap in the node's link longer
-        // than sessionActivityTtlMs pruned, so a turn that ran through the gap does not read as idle when its reports come.
-        const open = previous?.kind === "session.turn-started" || previous?.kind === "session.heartbeat";
-        if (event.kind === "session.heartbeat" && current?.state !== "session.turn-started" && current?.state !== "session.waiting" && !open) return;
-        if (event.kind === "session.heartbeat") turnBeat(thread, session, at);
-        if (event.kind === "session.turn-ended") turnEnded(thread, session, at);
+        if (event.kind === "session.heartbeat" && current?.state !== "session.turn-started" && current?.state !== "session.waiting") return;
         if (event.kind === "session.turn-started") {
           turnStarted(thread, session, at, event.session !== undefined);
           // A prompt submitted in any of the pylon's Claudes is the person's, at the time the hook stamped it but never
@@ -882,8 +850,7 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     pylonsWithHeldThreadsOn(node: NodeName): { pylon: StoredPylon; thread: Thread }[] {
       const open = sql("SELECT t.* FROM threads t CROSS JOIN pylons p ON p.thread = t.id WHERE t.status IN ('active', 'idle') AND p.node = ?").all(node);
       const now = clock();
-      const ids = open.map((r) => r.id as ThreadId);
-      const held = new Set([...participants.flatMap((p) => [...p.awaited?.(ids) ?? []]), ...claude.resumeHolds(ids)].flatMap(([id, hold]) => hold.until > now ? [id] : []));
+      const held = new Set(participants.flatMap((p) => [...p.awaited?.(open.map((r) => r.id as ThreadId)) ?? []].flatMap(([id, hold]) => hold.until > now ? [id] : [])));
       return withSessions(open.filter((r) => held.has(r.id as ThreadId))).flatMap((thread) => thread.awaitedUntil === undefined ? [] : [{ pylon: pylon(thread.pylonId)!, thread }]);
     },
     pylonIdsToTick,
@@ -990,13 +957,6 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       transaction(() => {
         if (observation !== null) nodes.saveObservation(observation, clock());
         for (const write of writes) apply(write);
-        // A stopped pylon runs no turn, and its sessions ended without the hook that says so.
-        for (const p of observation?.pylons ?? []) {
-          const thread = p.phase === "stopped" ? threadOfPylon(p.pylonId) : undefined;
-          if (thread === undefined) continue;
-          pylonStopped(thread);
-          if (sql("DELETE FROM session_activity WHERE thread = ? AND state = 'session.turn-started' RETURNING thread").all(thread).length > 0) updateAttention(thread);
-        }
       });
     },
     apply,

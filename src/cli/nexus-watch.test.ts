@@ -588,7 +588,7 @@ async function claudeDeath(t: TestContext, s: Awaited<ReturnType<typeof setup>>,
 test("watch --until-idle waits on a Claude turn that died before Nexus records its resume, and exits 0 on the resumed turn's reply", async (t) => {
   const s = await setup(t);
   const { printed, code } = await claudeDeath(t, s, () => {}, async (c) => {
-    s.registry.threads.saveClaudeResume(c.thread.id, { state: "waiting", turn: Date.parse(at(3)), count: 1, from: 0, due: 0 });
+    s.registry.threads.saveClaudeResume(c.thread.id, { state: "waiting", turn: Date.parse(at(3)), count: 1, due: 0 });
     c.report("session.turn-started", Date.parse(at(5)));
     await appendFile(c.transcript, jsonl({ ...claudeRecords.reply, timestamp: at(6), message: { model: "claude-opus-5-5", content: [{ type: "text", text: "Done." }] } }));
     c.report("session.turn-ended", Date.parse(at(7)));
@@ -599,23 +599,20 @@ test("watch --until-idle waits on a Claude turn that died before Nexus records i
 
 test("watch --until-idle exits 12 when Nexus gives the resume it waits on to the person, with no turn since", async (t) => {
   const s = await setup(t);
-  const resuming = (thread: string) => s.registry.threads.saveClaudeResume(thread as never, { state: "waiting", turn: Date.parse(at(3)), count: 1, from: 0, due: 0 });
+  const resuming = (thread: string) => s.registry.threads.saveClaudeResume(thread as never, { state: "waiting", turn: Date.parse(at(3)), count: 1, due: 0 });
   const { printed, code } = await claudeDeath(t, s, resuming, async (c) => {
     s.registry.threads.saveClaudeResume(c.thread.id, { state: "person", turn: Date.parse(at(3)), count: 3, why: "it died three times in a row" });
   });
   assert.equal(code, 12, printed.join("\n"));
-  assert.equal(printed.at(-1), "-- Its turn died, and Nexus does not resume it: it died three times in a row");
+  assert.equal(printed.at(-1), "-- Its turn died, and Nexus stopped resuming it: it died three times in a row");
 });
 
-test("watch --until-idle waits while the person's message answers the dead turn, and exits 12 once Nexus says it started no turn", async (t) => {
+test("watch --until-idle exits 11 when Nexus leaves the dead turn it waits on to the person", async (t) => {
   const s = await setup(t);
-  const resuming = (thread: string) => s.registry.threads.saveClaudeResume(thread as never, { state: "waiting", turn: Date.parse(at(3)), count: 1, from: 0, due: 0 });
-  const { printed, code } = await claudeDeath(t, s, resuming, async (c) => {
-    s.registry.threads.saveClaudeResume(c.thread.id, { state: "answered", turn: Date.parse(at(3)), count: 0, from: 0, at: 0 });
-    s.registry.threads.saveClaudeResume(c.thread.id, { state: "person", turn: Date.parse(at(3)), count: 0, why: "You wrote to it since, and no turn started within 10 minutes." });
+  const { printed, code } = await claudeDeath(t, s, () => {}, async (c) => {
+    s.registry.threads.saveClaudeResume(c.thread.id, { state: "left-alone" });
   });
-  assert.equal(code, 12, printed.join("\n"));
-  assert.equal(printed.at(-1), "-- Its turn died, and Nexus does not resume it: You wrote to it since, and no turn started within 10 minutes.");
+  assert.equal(code, 11, printed.join("\n"));
 });
 
 test("watch --until-idle exits 12 when a Claude turn died and Nexus gave its resume to the person", async (t) => {
@@ -626,7 +623,7 @@ test("watch --until-idle exits 12 when a Claude turn died and Nexus gave its res
 
 test("watch --until-idle waits through a Claude turn that died while Nexus resumes it, and exits 0 on the resumed turn's reply", async (t) => {
   const s = await setup(t);
-  const resuming = (thread: string) => s.registry.threads.saveClaudeResume(thread as never, { state: "waiting", turn: Date.parse(at(3)), count: 1, from: 0, due: 0 });
+  const resuming = (thread: string) => s.registry.threads.saveClaudeResume(thread as never, { state: "waiting", turn: Date.parse(at(3)), count: 1, due: 0 });
   const resumed = async (c: Awaited<ReturnType<typeof claudeWatched>>) => {
     c.report("session.turn-started", Date.parse(at(5)));
     await appendFile(c.transcript, jsonl({ ...claudeRecords.reply, timestamp: at(6), message: { model: "claude-opus-5-5", content: [{ type: "text", text: "Done." }] } }));

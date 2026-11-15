@@ -216,14 +216,11 @@ export async function setup(t: TestContext, setupOptions: { queue?: boolean; htt
   };
 }
 
-/**
- * Reports the node online with the thread's pylon running these services and listening on these ports, and its guest
- * not answering if given. The pylon booted before at(0), as a pylon boots before its turns.
- */
+/** Reports the node online with the thread's pylon running these services and listening on these ports, and its guest not answering if given. */
 export function observeRunning(s: Awaited<ReturnType<typeof setup>>, thread: Thread, services: ServiceFact[], ports: number[], notAnswering?: { since: string; timeouts: number }) {
   s.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
   s.registry.threads.ingested(testObservation(node, {
-    pylons: [runningPylon(thread.pylonId, { liveHash: s.registry.threads.pylon(thread.pylonId)!.liveHash, bootedAt: "2026-10-26T00:00:00Z", bootedFrom: { image: image.id, checkpoint: null }, services, listening: ports.map((port) => ({ port })), ...notAnswering === undefined ? {} : { notAnswering } })],
+    pylons: [runningPylon(thread.pylonId, { liveHash: s.registry.threads.pylon(thread.pylonId)!.liveHash, bootedFrom: { image: image.id, checkpoint: null }, services, listening: ports.map((port) => ({ port })), ...notAnswering === undefined ? {} : { notAnswering } })],
   }), []);
 }
 

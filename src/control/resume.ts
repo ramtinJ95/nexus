@@ -3,31 +3,28 @@
  * a model error after Claude Code's own retries. Nothing else moves such a thread: no reply was recorded or the reply
  * was the error, and the pylon idles until it pauses. Each turn that died gets one fixed message, after a wait that
  * grows with each death in a row, under a request ID of the thread and the turn's death, which the inbox never delivers
- * twice. After the last resume in a row a turn that dies too goes to the person through the `died` attention, so a
- * provider outage ends there rather than looping. A turn that does not die ends the count. The person's message after
- * a death answers that death, so Nexus sends no resume for it, and one that starts no turn goes to the person too. A
- * message the person wrote before the death answers nothing, so a conductor who steers a builder keeps its resumes.
- * Every death Nexus does not resume goes to the person with why, so none reads as a reply.
+ * twice. After the last resume in a row a turn that dies too goes to the person through the `decision` attention, so
+ * a provider outage ends there rather than looping. A turn that does not die ends the count, and the person writing to
+ * the thread leaves it alone for good.
  *
  * Reviewers, checks and planning threads are left out, and so is a builder whose review the loop handed to the person.
  * Until its review finishes, the loop sends a builder whose turn ended on a model error its request again, or its next
  * message, which resumes it as well, so such a builder gets no resume for one. A planning thread runs in the harness,
  * where no session ends. Only a death in the last hour is resumed, so a control plane that starts, or starts this,
- * leaves the turns that died long before to the person. The ten minutes a resume has to start a turn count from its
- * node's last return, so a link to the node that was down does not use them up.
+ * leaves the turns that died long before to the person.
  */
 import { senders } from "./agent-protocol.ts";
 import { singleFlight } from "../single-flight.ts";
 import type { Inbox } from "./inbox.ts";
 import type { Registry } from "./registry.ts";
-import { resumeStartMs, type ClaudeResume } from "./claude-worker.ts";
+import type { ClaudeResume } from "./claude-worker.ts";
 import type { Thread } from "./thread-store.ts";
 import { requestIds, type ThreadId } from "../ids.ts";
 import type { PhaseKind } from "./review-model.ts";
 import { threadRole } from "./work-model.ts";
 import { isOpenStatus, openStatuses } from "./reconcile.ts";
 
-type ResumeRegistry = Pick<Registry, "threads" | "reviews" | "planning" | "nodes">;
+type ResumeRegistry = Pick<Registry, "threads" | "reviews" | "planning">;
 
 const text = `${senders.resume.prefix} Your turn stopped before it finished: its Claude session ended, or its model's API failed. Continue where you stopped.`;
 
@@ -38,14 +35,16 @@ const text = `${senders.resume.prefix} Your turn stopped before it finished: its
  * outage or something the work itself does, which is the person's.
  */
 export const resumeWaitsMs = [1, 10, 30].map((minutes) => minutes * 60_000);
+/** A resume types a prompt, whose turn starts at once whatever the model does, so a resume that starts none has a fault of its own. */
+const startMs = 10 * 60_000;
 /** By the pylon's clock against the control plane's, which an hour leaves room for. */
 const freshMs = 60 * 60_000;
 const finished: ReadonlySet<PhaseKind> = new Set(["landed", "merged", "closed", "cancelled"]);
 
 export function deadTurnResumer(options: {
   registry: ResumeRegistry; inbox: Inbox;
-  /** Whether the person wrote to the thread after `since`, by the pylon's clock, as a turn's death is stamped. */
-  personWroteTo(t: Thread, since: number): Promise<boolean>;
+  /** The person talking to a thread after its first reply makes it theirs, so it is left alone. */
+  personWroteTo(t: Thread): Promise<boolean>;
   clock?: () => number; log?: (message: string) => void;
 }) {
   const { registry, inbox, personWroteTo, clock = Date.now, log = (message: string) => console.error(message) } = options;
@@ -60,26 +59,23 @@ export function deadTurnResumer(options: {
 
   /** Whether `t` still waits on the death `turn` and no turn of it runs. */
   const stillDead = (t: Thread, turn: number) => covered(t) && !t.working && t.turnDied?.at === turn;
-  /** Whether the thread's node is offline, so no message reaches it and no report of a turn comes from it. */
-  const offline = (t: Thread) => {
-    const pylon = registry.threads.pylon(t.pylonId);
-    return pylon !== undefined && registry.nodes.node(pylon.node)?.state !== "online";
-  };
 
   async function judge(t: Thread) {
     const record = registry.threads.claudeResume(t.id);
+    if (record?.state === "left-alone") return;
     const save = (next: ClaudeResume | null) => registry.threads.saveClaudeResume(t.id, next);
     if (!covered(t)) return record === null ? undefined : save(null);
+    // The turn the person's message starts may outlast the transcript's hold on that message, so look while it runs.
+    if (t.working && t.lastHumanActivityAt > (t.lastReplyAt ?? 0) && await personWroteTo(t)) return save({ state: "left-alone" });
     const died = t.turnDied;
-    const answered = (r: { turn: number; count: number; from?: number }): ClaudeResume => ({ state: "answered", turn: r.turn, count: r.count, from: r.from ?? clock(), at: clock() });
     if (record?.state === "sending") {
-      // It may never have gone out, so it goes only to a thread that still waits on that death and that the person did not answer.
-      if (await personWroteTo(t, record.turn)) return save(answered(record));
+      // It may never have gone out, so it goes only to a thread that still waits on that death and is not the person's.
+      if (await personWroteTo(t)) return save({ state: "left-alone" });
       const fresh = registry.threads.thread(t.id);
       if (fresh === undefined) return;
       if (stillDead(fresh, record.turn)) return deliver(fresh, record);
       // Only a turn that started since ends a death, so the resume went out before a crash lost its answer.
-      if (covered(fresh) && fresh.turnDied?.at !== record.turn) save({ state: "resumed", turn: record.turn, count: record.count, from: record.from, at: clock() });
+      if (covered(fresh) && fresh.turnDied?.at !== record.turn) save({ state: "resumed", turn: record.turn, count: record.count, at: clock() });
       return;
     }
     if (died === undefined) {
@@ -91,43 +87,36 @@ export function deadTurnResumer(options: {
     }
     if (t.working) return;
     if (record !== null && record.turn >= died.at) {
-      if (record.state === "resumed" || record.state === "answered") {
-        // A turn its node has not been able to report yet may have started, so the wait counts from the node's return.
-        if (offline(t)) return save({ ...record, at: clock() });
-        if (clock() - record.at < resumeStartMs) return;
-        return save({ state: "person", turn: record.turn, count: record.count, why: record.state === "resumed"
-          ? `Its turn died (${died.reason}). Nexus resumed it, and no turn started within ${resumeStartMs / 60_000} minutes.`
-          : `Its turn died (${died.reason}). You wrote to it since, and no turn started within ${resumeStartMs / 60_000} minutes.` });
+      if (record.state === "resumed" && clock() - record.at >= startMs) {
+        return save({ state: "person", turn: record.turn, count: record.count, why: `Nexus resumed it after its turn died, and no turn started within ${startMs / 60_000} minutes.` });
       }
       if (record.state !== "waiting" || clock() < record.due) return;
-      if (await personWroteTo(t, record.turn)) return save(answered(record));
+      if (await personWroteTo(t)) return save({ state: "left-alone" });
       // The await above may have let a turn start or an archive in.
       const fresh = registry.threads.thread(t.id);
       if (fresh === undefined || !stillDead(fresh, record.turn)) return;
-      const sending: ClaudeResume = { state: "sending", turn: record.turn, count: record.count, from: record.from, since: clock() };
+      const sending: ClaudeResume = { state: "sending", turn: record.turn, count: record.count, since: clock() };
       save(sending);
       return deliver(fresh, sending);
     }
-    const count = record?.count ?? 0;
-    const toPerson = (why: string) => save({ state: "person", turn: died.at, count, why: `Its turn died (${died.reason}). ${why}` });
-    if (clock() - died.at > freshMs) return toPerson(`It died more than ${freshMs / 60_000} minutes before Nexus saw it, so Nexus did not resume it.`);
-    if (await personWroteTo(t, died.at)) return save(answered({ turn: died.at, count }));
-    if (count >= resumeWaitsMs.length) return toPerson(`It died ${count + 1} times in a row, so Nexus stopped resuming it.`);
-    save({ state: "waiting", turn: died.at, count: count + 1, from: clock(), due: clock() + resumeWaitsMs[count]! });
+    if (clock() - died.at > freshMs) return;
+    if (await personWroteTo(t)) return save({ state: "left-alone" });
+    const count = (record?.count ?? 0) + 1;
+    if (count > resumeWaitsMs.length) return save({ state: "person", turn: died.at, count: count - 1, why: `Its turn died ${count} times in a row (last: ${died.reason}), so Nexus stopped resuming it.` });
+    save({ state: "waiting", turn: died.at, count, due: clock() + resumeWaitsMs[count - 1]! });
   }
 
   /**
    * A send the inbox could not take yet stays saved, so the next pass sends it again under the same request ID, until
    * it has tried for as long as a resume may take to start a turn.
    */
-  async function deliver(t: Thread, { turn, count, from, since }: Extract<ClaudeResume, { state: "sending" }>) {
+  async function deliver(t: Thread, { turn, count, since }: Extract<ClaudeResume, { state: "sending" }>) {
     const requestId = requestIds.resume(t.id, turn);
     if (await inbox(t, { id: requestId, text, sender: "resume" }) !== "delivered") {
-      if (offline(t)) registry.threads.saveClaudeResume(t.id, { state: "sending", turn, count, from, since: clock() });
-      else if (clock() - since >= resumeStartMs) registry.threads.saveClaudeResume(t.id, { state: "person", turn, count, why: `Its turn died (${t.turnDied?.reason ?? "its Claude session ended"}). Nexus could not type its resume into the session for ${resumeStartMs / 60_000} minutes.` });
+      if (clock() - since >= startMs) registry.threads.saveClaudeResume(t.id, { state: "person", turn, count, why: `Its turn died, and Nexus could not type its resume into the session for ${startMs / 60_000} minutes.` });
       return;
     }
-    registry.threads.saveClaudeResume(t.id, { state: "resumed", turn, count, from, at: clock() });
+    registry.threads.saveClaudeResume(t.id, { state: "resumed", turn, count, at: clock() });
     registry.threads.appendEvent("thread.resumed", t.id, { turn, count, reason: t.turnDied?.reason ?? null, requestId });
   }
 

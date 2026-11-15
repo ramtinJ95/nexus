@@ -1,31 +1,25 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { testPylon, testReview, testThread, claudeWorkerAt, storedTranscripts } from "../test-support/registry-kit.ts";
+import { testPylon, testRegistry, testReview, testThread, claudeWorkerAt, storedTranscripts } from "../test-support/registry-kit.ts";
 import { personPhase, type Phase } from "./review-model.ts";
 import { agentInbox } from "./inbox.ts";
 import { agentReader } from "./agent-conversation.ts";
 import { deadTurnResumer, resumeWaitsMs } from "./resume.ts";
-import { claudeLaunch } from "./claude-launch.ts";
-import { openRegistry, type Registry } from "./registry.ts";
-import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
-import { join } from "node:path";
-import { randomUUID } from "node:crypto";
 import { checkCaller, reviewerCaller, senders } from "./agent-protocol.ts";
 import { transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
 import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { PylonEvent } from "../protocol/observations.ts";
-import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation } from "../test-support/kit.ts";
+import { runningPylon, testCapacity, testObservation } from "../test-support/kit.ts";
 
 const node = "node" as NodeName;
 const session = "c0ffee00-0000-4000-8000-000000000000";
 const minute = 60_000;
 
 /** Claude worker threads behind the real inbox and a probe that types, or blocks, and a clock the test moves. */
-function fixture(t: import("node:test").TestContext, path = ":memory:") {
+function fixture(t: import("node:test").TestContext) {
   let now = 1_800_000_000_000;
-  let registry = openRegistry(path, () => now);
-  t.after(() => registry.close());
+  const registry = testRegistry(t, ":memory:", () => now);
   const project = { id: "nexus" as ProjectId, repoUrl: "https://github.com/acme/repo.git", defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null };
   registry.nodes.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
   registry.projects.createProject(project);
@@ -34,19 +28,16 @@ function fixture(t: import("node:test").TestContext, path = ":memory:") {
   let outcome: "sent" | "blocked" = "sent";
   const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command as Extract<PylonCommand, { kind: "send-claude" }>); return { kind: "send-claude", outcome, terminal: "t1", resumed: true }; } };
   const harness = { async send() { throw new Error("a Claude worker's message never reaches the harness"); } };
-  const resumerOf = (r: Registry) => deadTurnResumer({
-    registry: r, inbox: agentInbox({ log: assert.fail, registry: r, harness, probes: new Map([[node, probe]]), wake() {} }),
-    personWroteTo: agentReader(r, { async watch() { throw new Error("no harness thread here"); } }, storedTranscripts).personWrote, clock: () => now, log() {},
-  });
-  let resumer = resumerOf(registry);
+  const inbox = agentInbox({ log: assert.fail, registry, harness, probes: new Map([[node, probe]]), wake() {} });
+  const resumer = deadTurnResumer({ registry, inbox, personWroteTo: agentReader(registry, { async watch() { throw new Error("no harness thread here"); } }, storedTranscripts).personWrote, clock: () => now, log() {} });
   let sequence = 0;
   const seq = new Map<ThreadId, number>();
   const pylons: PylonId[] = [];
 
-  function add(id: string, startedBy = "nLAPTOP", worker: "started" | "pending" = "started"): ThreadId {
+  function add(id: string, startedBy = "nLAPTOP"): ThreadId {
     const thread = testThread({ id: id as ThreadId, title: id, project: project.id, conversationId: null, startedBy, createdAt: 1, lastHumanActivityAt: 1 });
     registry.threads.createThread(thread, testPylon(thread, { node, liveHash: "hash", boot: { repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: project.repoUrl, ref: "main" } } }), { claude: { prompt: "/poteto-mode fix it" } });
-    if (worker === "started") claudeWorkerAt(registry, thread.id, "started", { session });
+    claudeWorkerAt(registry, thread.id, "started", { session });
     pylons.push(thread.pylonId);
     registry.threads.ingested(testObservation(node, { pylons: pylons.map((p) => runningPylon(p, { liveHash: "hash" as LiveHash })) }), []);
     seq.set(thread.id, 0);
@@ -73,16 +64,7 @@ function fixture(t: import("node:test").TestContext, path = ":memory:") {
     report(id, "session.turn-ended");
   }
   return {
-    get registry() { return registry; },
-    get resumer() { return resumer; },
-    typed, add, report, turn, transcript,
-    /** Closes the registry file, rewinds it to schema `version`, and opens it again, as a control plane upgraded from that version does. */
-    upgradeFrom(version: number) {
-      registry.close();
-      rewindTo(path, version);
-      registry = openRegistry(path, () => now);
-      resumer = resumerOf(registry);
-    },
+    registry, resumer, typed, add, report, turn, transcript,
     tick(ms: number) { now += ms; },
     get now() { return now; },
     set outcome(o: "sent" | "blocked") { outcome = o; },
@@ -168,16 +150,12 @@ test("each death in a row waits longer, and the death after the last resume goes
   assert.equal(f.typed.length, resumeWaitsMs.length, "a provider outage does not loop");
   const record = f.registry.threads.claudeResume(id);
   assert.equal(record?.state, "person");
-  assert.equal(record.state === "person" ? record.why : null, "Its turn died (API Error: Request timed out.). It died 4 times in a row, so Nexus stopped resuming it.");
-  assert.equal(f.registry.threads.attention(id), "died");
-  f.report(id, "session.turn-started");
-  assert.notEqual(f.registry.threads.attention(id), "died", "a turn that started since ends the death");
-  f.tick(3_000);
-  f.transcript(id, [{ kind: "reply", at: f.now, text: "Done." }]);
-  f.report(id, "session.turn-ended");
+  assert.equal(record.state === "person" ? record.why : null, "Its turn died 4 times in a row (last: API Error: Request timed out.), so Nexus stopped resuming it.");
+  assert.equal(f.registry.threads.attention(id), "decision");
+  f.turn(id, "ok");
   await f.resumer.poll();
   assert.equal(f.registry.threads.claudeResume(id), null, "a turn that ends without dying ends the hold");
-  assert.equal(f.registry.threads.attention(id), "reply");
+  assert.notEqual(f.registry.threads.attention(id), "decision");
 });
 
 test("a turn that ends without dying ends the deaths in a row", async (t) => {
@@ -211,8 +189,8 @@ test("a resume that starts no turn goes to the person", async (t) => {
   f.tick(10 * minute);
   await f.resumer.poll();
   const record = f.registry.threads.claudeResume(id);
-  assert.equal(record?.state === "person" ? record.why : null, "Its turn died (its Claude session ended during the turn). Nexus resumed it, and no turn started within 10 minutes.");
-  assert.equal(f.registry.threads.attention(id), "died");
+  assert.equal(record?.state === "person" ? record.why : null, "Nexus resumed it after its turn died, and no turn started within 10 minutes.");
+  assert.equal(f.registry.threads.attention(id), "decision");
 });
 
 test("a resume the session could not take yet is sent again under the same request ID", async (t) => {
@@ -241,60 +219,23 @@ test("a resume delivered just before a crash, whose record says sending, is not 
   f.tick(resumeWaitsMs[0]!);
   await f.resumer.poll();
   const turn = f.registry.threads.thread(id)!.turnDied!.at;
-  f.registry.threads.saveClaudeResume(id, { state: "sending", turn, count: 1, from: f.now, since: f.now });
+  f.registry.threads.saveClaudeResume(id, { state: "sending", turn, count: 1, since: f.now });
   await f.resumer.poll();
   assert.equal(f.typed.length, 1, "the inbox answers the request ID it already typed");
   assert.equal(f.registry.threads.claudeResume(id)?.state, "resumed");
 });
 
-test("a builder the person wrote to before its turn died is resumed, as a conductor's steering answers no later death", async (t) => {
-  // th-1362c77311b2, th-77f2eaaf7e39 and th-7efcaa555e4a on 2026-11-15: each had a `nexus send` from the conductor, so
-  // their deaths in a DNS outage were left alone, read as a reply, and their pylons paused mid-work.
-  const f = fixture(t);
-  const id = f.add("th-1362c77311b2");
-  f.tick(1_000);
-  f.transcript(id, [{ kind: "prompt", at: f.now, text: "main moved, rebase onto it", from: "person" }]);
-  f.registry.threads.recordActivity(id, { human: f.now });
-  f.turn(id, "ok");
-  f.tick(1_000);
-  f.turn(id, "model-error");
-  await f.resumer.poll();
-  f.tick(resumeWaitsMs[0]!);
-  await f.resumer.poll();
-  assert.equal(f.typed.length, 1);
-  assert.ok(f.typed[0]!.text.startsWith(senders.resume.prefix));
-  assert.equal(f.registry.threads.claudeResume(id)?.state, "resumed");
-});
-
-test("a death the person wrote to the thread after is theirs, and one whose message starts no turn is told as died", async (t) => {
+test("the person writing to the thread after its first reply leaves it alone", async (t) => {
   const f = fixture(t);
   const id = f.add("th-1");
-  f.turn(id, "session-ended");
-  f.tick(1_000);
   f.transcript(id, [{ kind: "prompt", at: f.now, text: "also check the docs", from: "person" }]);
-  await f.resumer.poll();
-  f.tick(resumeWaitsMs[0]!);
-  await f.resumer.poll();
-  assert.deepEqual(f.typed, [], "the person's message answers the death");
-  assert.equal(f.registry.threads.claudeResume(id)?.state, "answered");
-  f.tick(10 * minute);
-  await f.resumer.poll();
-  const record = f.registry.threads.claudeResume(id);
-  assert.equal(record?.state === "person" ? record.why : null, "Its turn died (its Claude session ended during the turn). You wrote to it since, and no turn started within 10 minutes.");
-  assert.equal(f.registry.threads.attention(id), "died");
-  assert.deepEqual(f.typed, []);
-});
-
-test("a thread an older release left alone for good is resumed at its next death", async (t) => {
-  const f = fixture(t);
-  const id = f.add("th-1");
-  f.registry.threads.saveClaudeResume(id, { state: "left-alone" } as never);
-  assert.equal(f.registry.threads.claudeResume(id), null);
   f.turn(id, "session-ended");
   await f.resumer.poll();
   f.tick(resumeWaitsMs[0]!);
   await f.resumer.poll();
-  assert.equal(f.typed.length, 1);
+  assert.deepEqual(f.typed, []);
+  assert.deepEqual(f.registry.threads.claudeResume(id), { state: "left-alone" });
+  assert.notEqual(f.registry.threads.attention(id), "decision");
 });
 
 test("a reviewer, a check thread, an archived thread and a running turn get no resume", async (t) => {
@@ -333,7 +274,7 @@ test("a turn end the transcript has not been read past yet keeps the deaths in a
   f.transcript(id, [{ kind: "notice", at: f.now - 1_000, tone: "error", text: "API Error: Request timed out." }]);
   await f.resumer.poll();
   const record = f.registry.threads.claudeResume(id);
-  assert.deepEqual(record, { state: "waiting", turn: f.now - 1_000, count: 2, from: f.now, due: f.now + resumeWaitsMs[1]! });
+  assert.deepEqual(record, { state: "waiting", turn: f.now - 1_000, count: 2, due: f.now + resumeWaitsMs[1]! });
 });
 
 test("a resume delivered just before a crash, whose turn then died, counts toward the deaths in a row", async (t) => {
@@ -344,7 +285,7 @@ test("a resume delivered just before a crash, whose turn then died, counts towar
   f.tick(resumeWaitsMs[0]!);
   await f.resumer.poll();
   const first = f.registry.threads.thread(id)!.turnDied!.at;
-  f.registry.threads.saveClaudeResume(id, { state: "sending", turn: first, count: 1, from: f.now, since: f.now });
+  f.registry.threads.saveClaudeResume(id, { state: "sending", turn: first, count: 1, since: f.now });
   f.tick(1_000);
   f.turn(id, "session-ended");
   await f.resumer.poll();
@@ -357,7 +298,7 @@ test("a resume delivered just before a crash, whose turn then died, counts towar
   assert.equal(f.typed.length, 2);
 });
 
-test("a turn the person's message started is resumed when it dies", async (t) => {
+test("a person's message seen while the turn it started runs keeps the thread theirs after the transcript drops it", async (t) => {
   const f = fixture(t);
   const id = f.add("th-1");
   f.tick(1_000);
@@ -365,13 +306,15 @@ test("a turn the person's message started is resumed when it dies", async (t) =>
   f.registry.threads.recordActivity(id, { human: f.now });
   f.report(id, "session.turn-started");
   await f.resumer.poll();
-  assert.equal(f.registry.threads.claudeResume(id), null);
+  assert.deepEqual(f.registry.threads.claudeResume(id), { state: "left-alone" });
+  f.transcript(id, [{ kind: "reply", at: f.now, text: "Checked." }], true);
   f.tick(3_000);
   f.report(id, "session.ended");
-  await f.resumer.poll();
-  f.tick(resumeWaitsMs[0]!);
-  await f.resumer.poll();
-  assert.equal(f.typed.length, 1);
+  for (const wait of resumeWaitsMs) {
+    f.tick(wait);
+    await f.resumer.poll();
+  }
+  assert.equal(f.typed.length, 0);
 });
 
 test("a builder whose review is not finished gets no resume for a model error, nor for any death once the review is the person's", async (t) => {
@@ -414,7 +357,7 @@ test("a session that ends after a turn the transcript shows ended, with a backgr
   assert.equal(f.typed.length, 0);
 });
 
-test("a death more than an hour old, as one from before this control plane watched, is not resumed and is told as died", async (t) => {
+test("a death more than an hour old, as one from before this control plane watched, is left alone", async (t) => {
   const f = fixture(t);
   const id = f.add("th-1");
   f.turn(id, "model-error");
@@ -425,9 +368,8 @@ test("a death more than an hour old, as one from before this control plane watch
   }
   await f.resumer.poll();
   assert.equal(f.typed.length, 0);
-  const record = f.registry.threads.claudeResume(id);
-  assert.equal(record?.state === "person" ? record.why : null, "Its turn died (API Error: Request timed out.). It died more than 60 minutes before Nexus saw it, so Nexus did not resume it.");
-  assert.equal(f.registry.threads.attention(id), "died");
+  assert.equal(f.registry.threads.claudeResume(id), null);
+  assert.notEqual(f.registry.threads.attention(id), "decision");
 });
 
 test("a resume the session never takes goes to the person once it has tried for ten minutes", async (t) => {
@@ -444,197 +386,10 @@ test("a resume the session never takes goes to the person once it has tried for 
   f.tick(1);
   await f.resumer.poll();
   const record = f.registry.threads.claudeResume(id);
-  assert.equal(record?.state === "person" ? record.why : null, "Its turn died (its Claude session ended during the turn). Nexus could not type its resume into the session for 10 minutes.");
-  assert.equal(f.registry.threads.attention(id), "died");
+  assert.equal(record?.state === "person" ? record.why : null, "Its turn died, and Nexus could not type its resume into the session for 10 minutes.");
+  assert.equal(f.registry.threads.attention(id), "decision");
   const tries = f.typed.length;
   f.tick(minute);
   await f.resumer.poll();
   assert.equal(f.typed.length, tries, "it stops trying");
-});
-
-test("a first prompt a pause cut before its turn's hook reached Nexus is resumed after the wake, and its late hook keeps the death", async (t) => {
-  // th-050a77cdcaa3 on 2026-11-14: paused 15 s after its worker took its first prompt, before any hook reported the
-  // turn. The prompt's turn never ran again, and nothing said so.
-  const f = fixture(t);
-  const id = f.add("th-050a77cdcaa3");
-  const pylon = f.registry.threads.thread(id)!.pylonId;
-  const launched = f.now;
-  f.registry.threads.moveClaudeWorker(id, { to: "started", at: launched });
-  assert.equal(f.registry.threads.thread(id)!.turnDied, undefined, "a launched turn that runs did not die");
-  f.tick(15_000);
-  f.registry.threads.ingested(testObservation(node, { pylons: [stoppedPylon(pylon, { sessions: null })] }), []);
-  assert.deepEqual(f.registry.threads.thread(id)!.turnDied, { at: launched, cause: "session-ended", reason: "its pylon stopped during the turn, which ended its Claude session" });
-  await f.resumer.poll();
-  f.tick(resumeWaitsMs[0]!);
-  await f.resumer.poll();
-  assert.equal(f.typed.length, 0, "the paused pylon takes no message yet");
-  assert.equal(f.registry.threads.claudeResume(id)?.state, "sending");
-  f.registry.threads.ingested(testObservation(node, { pylons: [runningPylon(pylon, { liveHash: "hash" as LiveHash, bootedAt: new Date(f.now).toISOString() })] }), []);
-  f.registry.threads.reportSession(node, { sequence: 1_000, pylon, time: f.now, event: { kind: "session.turn-started", session, at: launched } });
-  assert.equal(f.registry.threads.thread(id)!.working, false, "a turn from before the wake does not run");
-  assert.equal(f.registry.threads.thread(id)!.turnDied?.at, launched);
-  await f.resumer.poll();
-  assert.equal(f.typed.length, 1);
-  assert.ok(f.typed[0]!.text.startsWith(senders.resume.prefix));
-  f.tick(1_000);
-  f.registry.threads.reportSession(node, { sequence: 1_001, pylon, time: f.now, event: { kind: "session.turn-started", session, at: f.now } });
-  assert.equal(f.registry.threads.thread(id)!.turnDied, undefined, "the resumed turn ends the death");
-});
-
-test("a pylon paused after its turn ended, or one that runs on through the turn, cuts no turn", async (t) => {
-  const f = fixture(t);
-  const id = f.add("th-1");
-  const pylon = f.registry.threads.thread(id)!.pylonId;
-  f.turn(id, "ok");
-  f.tick(6 * minute);
-  f.registry.threads.ingested(testObservation(node, { pylons: [stoppedPylon(pylon, { sessions: null })] }), []);
-  assert.equal(f.registry.threads.thread(id)!.turnDied, undefined);
-  f.registry.threads.ingested(testObservation(node, { pylons: [runningPylon(pylon, { liveHash: "hash" as LiveHash, bootedAt: new Date(f.now).toISOString() })] }), []);
-  f.tick(1_000);
-  f.report(id, "session.turn-started");
-  f.tick(1_000);
-  f.registry.threads.ingested(testObservation(node, { pylons: [runningPylon(pylon, { liveHash: "hash" as LiveHash, bootedAt: new Date(f.now - 2_000).toISOString() })] }), []);
-  assert.equal(f.registry.threads.thread(id)!.turnDied, undefined);
-  assert.equal(f.registry.threads.thread(id)!.working, true);
-});
-
-test("a batch of reports a link gap held back keeps a turn that ran through the gap working, and resumes the deaths in it", async (t) => {
-  // 2026-11-15 on infra-testbench: the network was down from 00:23 to 00:36, and the control plane recorded the turns
-  // that ended in between at 00:37, all at once.
-  const f = fixture(t);
-  const long = f.add("th-long");
-  const died = f.add("th-1362c77311b2");
-  const steered = f.add("th-77f2eaaf7e39");
-  f.transcript(steered, [{ kind: "prompt", at: f.now, text: "main moved, rebase onto it", from: "person" }]);
-  const pylon = (id: ThreadId) => f.registry.threads.thread(id)!.pylonId;
-  let sequence = 5_000;
-  const late = (id: ThreadId, kind: PylonEvent["kind"], at: number) => f.registry.threads.reportSession(node, { sequence: ++sequence, pylon: pylon(id), time: f.now, event: { kind, session, at } });
-  const start = f.now;
-  for (const id of [long, died, steered]) late(id, "session.turn-started", start);
-  f.tick(60 * minute);
-  assert.equal(f.registry.threads.thread(long)!.working, false, "an hour without a report reads as idle");
-  for (let at = start + 5 * minute; at < f.now; at += 5 * minute) late(long, "session.heartbeat", at);
-  for (const id of [died, steered]) {
-    f.transcript(id, [{ kind: "notice", at: start + 14 * minute, tone: "error", text: "API Error: 502 Bad Gateway: host dns lookup failed for api.anthropic.com (EAI_AGAIN)" }]);
-    late(id, "session.turn-ended", start + 14 * minute);
-  }
-  assert.equal(f.registry.threads.thread(long)!.working, true, "its late heartbeats say it ran through the gap");
-  await f.resumer.poll();
-  f.tick(resumeWaitsMs[0]!);
-  await f.resumer.poll();
-  assert.deepEqual(f.typed.map((c) => c.requestId!.split(":")[1]).sort(), [died, steered].sort());
-});
-
-test("a resume's ten minutes to be typed, and then to start a turn, count only while its node is online", async (t) => {
-  const f = fixture(t);
-  const id = f.add("th-1");
-  f.turn(id, "session-ended");
-  await f.resumer.poll();
-  f.tick(resumeWaitsMs[0]!);
-  f.registry.threads.apply({ record: "node", node, state: "offline", capacity: testCapacity() });
-  await f.resumer.poll();
-  for (let i = 0; i < 4; i++) {
-    f.tick(5 * minute);
-    await f.resumer.poll();
-  }
-  assert.equal(f.registry.threads.claudeResume(id)?.state, "sending", "twenty minutes offline use none of the ten");
-  f.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
-  await f.resumer.poll();
-  assert.equal(f.typed.length, 1);
-  assert.equal(f.registry.threads.claudeResume(id)?.state, "resumed");
-  f.registry.threads.apply({ record: "node", node, state: "offline", capacity: testCapacity() });
-  f.tick(20 * minute);
-  await f.resumer.poll();
-  assert.equal(f.registry.threads.claudeResume(id)?.state, "resumed", "a turn the offline node could not report yet may have started");
-  f.registry.threads.apply({ record: "node", node, state: "online", capacity: testCapacity() });
-  f.tick(10 * minute);
-  await f.resumer.poll();
-  assert.equal(f.registry.threads.claudeResume(id)?.state, "person");
-});
-
-test("a launch's turn whose hooks come late, stamped before the control plane heard the launch answer, ends, and a pause after it cuts nothing", async (t) => {
-  const f = fixture(t);
-  const id = f.add("th-1", "nLAPTOP", "pending");
-  const pylon = f.registry.threads.thread(id)!.pylonId;
-  let hookAt = 0;
-  const probe = {
-    async command(): Promise<CommandResult> {
-      hookAt = Date.now();
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      return { kind: "open-session", terminal: "t1" };
-    },
-  };
-  const launches = claudeLaunch({ registry: f.registry, log: assert.fail, retryMs: 1_000, shutdown: new AbortController().signal });
-  assert.equal(launches.step(f.registry.threads.thread(id)!, pylon, f.registry.nodes.node(node)!.observation, { probe, snapshot: async () => true, wake() {} }), "skip");
-  await launches.settled();
-  assert.equal(f.registry.threads.claudeWorker(id)?.state, "started");
-  const launched = f.registry.threads.claudeWorker(id)!.session!;
-  f.registry.threads.reportSession(node, { sequence: 2_000, pylon, time: hookAt, event: { kind: "session.turn-started", session: launched, at: hookAt } });
-  f.registry.threads.reportSession(node, { sequence: 2_001, pylon, time: hookAt, event: { kind: "session.turn-ended", session: launched, at: hookAt + 10 } });
-  f.registry.threads.ingested(testObservation(node, { pylons: [stoppedPylon(pylon, { sessions: null })] }), []);
-  assert.equal(f.registry.threads.thread(id)!.turnDied, undefined);
-});
-
-test("a death seen while the pylon was stopped stands through a boot soon after, and the turn from before does not run", async (t) => {
-  const f = fixture(t);
-  const id = f.add("th-1");
-  const pylon = f.registry.threads.thread(id)!.pylonId;
-  const started = f.now;
-  f.report(id, "session.turn-started");
-  f.tick(15_000);
-  f.registry.threads.ingested(testObservation(node, { pylons: [stoppedPylon(pylon, { sessions: null })] }), []);
-  f.tick(15_000);
-  f.registry.threads.ingested(testObservation(node, { pylons: [runningPylon(pylon, { liveHash: "hash" as LiveHash, bootedAt: new Date(f.now).toISOString() })] }), []);
-  const thread = f.registry.threads.thread(id)!;
-  assert.equal(thread.working, false);
-  assert.equal(thread.turnDied?.at, started);
-  await f.resumer.poll();
-  f.tick(resumeWaitsMs[0]!);
-  await f.resumer.poll();
-  assert.equal(f.typed.length, 1);
-});
-
-test("a resume keeps its pylon's hold while its node is offline, and so does a waiting record an older release saved", async (t) => {
-  const f = fixture(t);
-  const id = f.add("th-1");
-  f.turn(id, "session-ended");
-  await f.resumer.poll();
-  f.tick(resumeWaitsMs[0]!);
-  await f.resumer.poll();
-  assert.equal(f.registry.threads.claudeResume(id)?.state, "resumed");
-  f.registry.threads.apply({ record: "node", node, state: "offline", capacity: testCapacity() });
-  for (let i = 0; i < 6; i++) {
-    f.tick(minute);
-    await f.resumer.poll();
-  }
-  assert.ok((f.registry.threads.thread(id)!.awaitedUntil ?? 0) > f.now, "six minutes offline keep the hold");
-  const old = f.add("th-2");
-  f.turn(old, "session-ended");
-  const died = f.registry.threads.thread(old)!.turnDied!.at;
-  f.registry.threads.saveClaudeResume(old, { state: "waiting", turn: died, count: 2, due: f.now + resumeWaitsMs[1]! } as never);
-  f.tick(6 * minute);
-  assert.ok((f.registry.threads.thread(old)!.awaitedUntil ?? 0) > f.now, "an older waiting record is held from its death");
-});
-
-const dbDir = await tempDir("nexus-resume-");
-
-test("an upgrade keeps a death a session's end recorded mid-turn, so it is resumed, and so a resume that waited on it goes out", async (t) => {
-  const f = fixture(t, join(dbDir, `${randomUUID()}.db`));
-  const unrecorded = f.add("th-unrecorded");
-  const waiting = f.add("th-waiting");
-  f.turn(unrecorded, "session-ended");
-  f.turn(waiting, "session-ended");
-  const died = (id: ThreadId) => f.registry.threads.thread(id)!.turnDied?.at;
-  const waitedOn = died(waiting)!;
-  await f.resumer.poll();
-  assert.equal(f.registry.threads.claudeResume(waiting)?.state, "waiting");
-  f.registry.threads.saveClaudeResume(unrecorded, null);
-  const before = { unrecorded: died(unrecorded), waiting: waitedOn };
-  f.upgradeFrom(versionBefore(/ADD COLUMN turn_ended_at\b/));
-  assert.deepEqual({ unrecorded: died(unrecorded), waiting: died(waiting) }, before, "the upgrade keeps both deaths");
-  f.tick(resumeWaitsMs[0]!);
-  await f.resumer.poll();
-  f.tick(resumeWaitsMs[0]!);
-  await f.resumer.poll();
-  assert.deepEqual(f.typed.map((c) => c.requestId!.split(":")[1]).sort(), [unrecorded, waiting].sort());
 });

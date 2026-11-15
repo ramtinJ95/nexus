@@ -98,11 +98,10 @@ export function testCapacity(over: Partial<NodeCapacity> = {}): NodeCapacity {
 type RunningPylon = Extract<PylonObservation, { phase: "running" }>;
 type StoppedPylon = Extract<PylonObservation, { phase: "stopped" }>;
 
-/** A pylon running img-000000000000 since before any turn a test stamps, with nothing read from it yet. */
-export const defaultBootedAt = "1970-01-01T00:00:00Z";
+/** A pylon running img-000000000000 since 2027-01-01, with nothing read from it yet. */
 export function runningPylon(pylonId: PylonId, over: Partial<Omit<RunningPylon, "pylonId" | "phase">> = {}): RunningPylon {
   return {
-    pylonId, phase: "running", liveHash: null, bootedAt: defaultBootedAt, bootedFrom: { image: "img-000000000000" as ImageId, checkpoint: null },
+    pylonId, phase: "running", liveHash: null, bootedAt: "2027-01-01T00:00:00Z", bootedFrom: { image: "img-000000000000" as ImageId, checkpoint: null },
     services: [], listening: [], previews: [], sessions: [], git: null, declaredOutputs: [], attachedClients: 0, ...over,
   };
 }

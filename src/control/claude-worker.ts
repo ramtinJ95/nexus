@@ -33,7 +33,7 @@ const canMove = (from: ClaudeWorkerState, to: ClaudeWorkerState) => (claudeMoves
 const startable = (Object.keys(claudeMoves) as ClaudeWorkerState[]).filter((s) => canMove(s, "started"));
 
 /** A move of the worker. Starting names the session its launch opens. A stall or failure says why, which its thread.failed event says too. */
-export type ClaudeMove = { to: "starting"; session: string } | { to: "started"; at?: number } | { to: "stalled" | "failed"; message: string };
+export type ClaudeMove = { to: "starting"; session: string } | { to: "started" } | { to: "stalled" | "failed"; message: string };
 
 /** A Claude worker thread's worker. `session` is the Claude Code session its launch opened, null until the launch names one. */
 export type ClaudeWorker = { prompt: string; model: string | null; session: string | null } & (
@@ -53,39 +53,18 @@ export interface ClaudeStop {
 
 /**
  * Nexus resuming a Claude worker whose turn died (resume.ts). `turn` is the `turnDied.at` of the turn it answers, and
- * `count` the resumes in a row that turn makes. `from` is when Nexus began to wait on that death, which its pylon's hold
- * counts from. A resume `waiting` goes at `due`, one `sending` is saved before it is first sent at `since`, and one
- * `resumed` went at `at`. A death the person wrote to the thread after is `answered`, as Nexus found at `at`, and gets
- * no resume. `since` and `at` start again while the thread's node is offline. A death Nexus does not resume waits on the person, which makes
- * the attention `died` while that death stands, and `why` says why in a line: the last resume in a row was used, the
- * death is over an hour old, a resume or the person's message started no turn, or the session took no resume.
+ * `count` the resumes in a row that turn makes. A resume `waiting` goes at `due`, one `sending` is saved before it is
+ * first sent at `since`, and one `resumed` went at `at`. After the last resume in a row a turn that died too waits on
+ * the person, which makes the attention a decision, and `why` says why in a line. So does a resume that started no
+ * turn, or one the session took no message for. The person writing to the thread makes it theirs, which is kept, as
+ * the transcript may drop the message.
  */
 export type ClaudeResume =
-  | { state: "waiting"; turn: number; count: number; from: number; due: number }
-  | { state: "sending"; turn: number; count: number; from: number; since: number }
-  | { state: "resumed" | "answered"; turn: number; count: number; from: number; at: number }
-  | { state: "person"; turn: number; count: number; why: string };
-
-/** A resume types a prompt, whose turn starts at once whatever the model does, so a resume that starts none in this long has a fault of its own. */
-export const resumeStartMs = 10 * 60_000;
-/** How far the clocks of a pylon, its host and the control plane may disagree, as a boot and a launch are stamped by the last two and turns by the first. */
-export const clockSkewMs = 60_000;
-
-/**
- * When the resume began to wait, and until when its pylon stays up for it: through its wait and the time its resume, or
- * the person's message, has to start a turn. A pylon paused while it waits would lose the background jobs the resumed
- * turn goes on with. Null for a record that waits on nothing. A record an older release saved has no `from`, and its
- * death is when the wait began.
- */
-export function resumeHold(r: ClaudeResume): { from: number; until: number } | null {
-  if (r.state === "person") return null;
-  const from = r.from ?? r.turn;
-  switch (r.state) {
-    case "waiting": return { from, until: r.due + resumeStartMs };
-    case "sending": return { from, until: r.since + resumeStartMs };
-    case "resumed": case "answered": return { from, until: r.at + resumeStartMs };
-  }
-}
+  | { state: "waiting"; turn: number; count: number; due: number }
+  | { state: "sending"; turn: number; count: number; since: number }
+  | { state: "resumed"; turn: number; count: number; at: number }
+  | { state: "person"; turn: number; count: number; why: string }
+  | { state: "left-alone" };
 
 /** Where the reader of a Claude worker's transcript is in its session's file, how many entries it dropped to keep maxEntries, and when it last read. */
 interface ClaudeTranscript { session: string; cursor: TranscriptCursor; dropped: number; readAt: number }
@@ -133,10 +112,8 @@ export function claudeWorkerStore(db: Db, on: ClaudeWorkerThread) {
     return state === "stalled" || state === "failed" ? { ...worker, state, message: row.message as string } : { ...worker, state };
   }
 
-  /** An older release kept a thread the person ever wrote to as left alone for good, which now reads as no record. */
   function claudeResume(thread: ThreadId): ClaudeResume | null {
-    const record = jsonOrNull<ClaudeResume | { state: "left-alone" }>(sql("SELECT resume FROM claude_workers WHERE thread = ?").get(thread)?.resume ?? null);
-    return record?.state === "left-alone" ? null : record;
+    return jsonOrNull<ClaudeResume>(sql("SELECT resume FROM claude_workers WHERE thread = ?").get(thread)?.resume ?? null);
   }
 
   function claudeTranscript(thread: ThreadId): ClaudeTranscript | undefined {
@@ -148,15 +125,12 @@ export function claudeWorkerStore(db: Db, on: ClaudeWorkerThread) {
 
   /**
    * What stopped the latest turn of each of the Claude worker threads among `ids`. Derived from the newest entries
-   * rather than stored, so it holds whichever of the turn's end and the transcript's read comes first. `cuts` holds, by
-   * the pylon's clock, when each thread's pylon last stopped running whatever ran: its boot for a running pylon, and
-   * Infinity for a stopped one. A turn that started before its cut and never ended died with its session, which a pause
-   * or a reboot ends without the hook that reports a session's end.
+   * rather than stored, so it holds whichever of the turn's end and the transcript's read comes first.
    */
-  function claudeStops(ids: readonly ThreadId[], cuts: ReadonlyMap<ThreadId, number>): Map<ThreadId, ClaudeStop> {
+  function claudeStops(ids: readonly ThreadId[]): Map<ThreadId, ClaudeStop> {
     const stops = new Map<ThreadId, ClaudeStop>();
     if (ids.length === 0) return stops;
-    const workers = sql(`SELECT w.thread, w.turn_at, w.died_at, w.turn_ended_at, w.turn_beat_at, t.thread IS NOT NULL AS read FROM claude_workers w LEFT JOIN claude_transcripts t ON t.thread = w.thread AND t.session = w.session
+    const workers = sql(`SELECT w.thread, w.turn_at, w.died_at, t.thread IS NOT NULL AS read FROM claude_workers w LEFT JOIN claude_transcripts t ON t.thread = w.thread AND t.session = w.session
       WHERE w.thread IN (SELECT value FROM json_each(?))`).all(JSON.stringify(ids));
     const entries = new Map<ThreadId, ClaudeEntry[]>();
     // Each thread's newest 16 through the index, as a window over the threads' entries would rank every one it keeps.
@@ -178,14 +152,9 @@ export function claudeWorkerStore(db: Db, on: ClaudeWorkerThread) {
       // A turn that ends with a background task running reports a heartbeat for its end, so its session may end after a
       // turn whose end only the transcript shows, as a turn's duration or an interrupt.
       const finished = turnAt !== null && (entries.get(id) ?? []).some((e) => e.at !== null && e.at >= turnAt && (e.kind === "turn" || (e.kind === "notice" && e.text === "Interrupted")));
-      const open = turnAt !== null && !finished && ((w.turn_ended_at as number | null) ?? -Infinity) < turnAt;
-      const cut = open && turnAt < (cuts.get(id) ?? -Infinity);
-      const reason = cut ? "its pylon stopped during the turn, which ended its Claude session" : "its Claude session ended during the turn";
-      const ended = typeof w.died_at === "number" && open && w.died_at >= turnAt! ? w.died_at : null;
-      if (ended !== null && (current === null || ended >= current.at)) stops.set(id, { turnDied: { at: ended, cause: "session-ended", reason } });
+      const ended = typeof w.died_at === "number" && turnAt !== null && w.died_at >= turnAt && !finished ? w.died_at : null;
+      if (ended !== null && (current === null || ended >= current.at)) stops.set(id, { turnDied: { at: ended, cause: "session-ended", reason: "its Claude session ended during the turn" } });
       else if (current !== null) stops.set(id, { turnDied: { at: current.at, cause: "model-error", reason: current.text } });
-      // Stamped with the turn's last report, so a long turn a pause cut is as fresh as it was.
-      else if (cut) stops.set(id, { turnDied: { at: Math.max(turnAt!, (w.turn_beat_at as number | null) ?? turnAt!), cause: "session-ended", reason } });
     }
     return stops;
   }
@@ -204,23 +173,7 @@ export function claudeWorkerStore(db: Db, on: ClaudeWorkerThread) {
     /** A turn of `session` started at `at`, by the pylon's clock. `named` says the report named the session, as a launch's session is. */
     turnStarted(thread: ThreadId, session: string, at: number, named: boolean) {
       if (named) sql(`UPDATE claude_workers SET state = 'started', message = NULL WHERE thread = ? AND session = ? AND state IN (SELECT value FROM json_each(?))`).run(thread, session, JSON.stringify(startable));
-      sql("UPDATE claude_workers SET turn_session = ?, turn_at = ?, turn_beat_at = ? WHERE thread = ? AND (turn_at IS NULL OR turn_at < ?)").run(session, at, at, thread, at);
-    },
-    /** A heartbeat of `session` at `at`, by the pylon's clock, says the latest turn still ran then. */
-    turnBeat(thread: ThreadId, session: string, at: number) {
-      sql("UPDATE claude_workers SET turn_beat_at = max(coalesce(turn_beat_at, turn_at), ?) WHERE thread = ? AND turn_session = ? AND turn_at <= ?").run(at, thread, session, at);
-    },
-    /** A turn of `session` ended at `at`, by the pylon's clock, which ends the latest turn if it is one of that session. */
-    turnEnded(thread: ThreadId, session: string, at: number) {
-      sql("UPDATE claude_workers SET turn_ended_at = ? WHERE thread = ? AND turn_session = ? AND turn_at <= ?").run(at, thread, session, at);
-    },
-    /**
-     * The thread's pylon was seen stopped, which ended every session in it, so a latest turn with no reported end died at
-     * its last report. Kept, as a boot soon after may not be far enough past the turn's start to show the cut.
-     */
-    pylonStopped(thread: ThreadId) {
-      sql(`UPDATE claude_workers SET died_at = coalesce(turn_beat_at, turn_at) WHERE thread = ? AND turn_at IS NOT NULL
-        AND coalesce(turn_ended_at, -1) < turn_at AND coalesce(died_at, -1) < turn_at`).run(thread);
+      sql("UPDATE claude_workers SET turn_session = ?, turn_at = ? WHERE thread = ? AND (turn_at IS NULL OR turn_at < ?)").run(session, at, thread, at);
     },
     /** `session` ended at `at`, by the pylon's clock, during a turn of its, which dies with it if it is the latest turn. */
     sessionEnded(thread: ThreadId, session: string, at: number) {
@@ -246,9 +199,6 @@ export function claudeWorkerStore(db: Db, on: ClaudeWorkerThread) {
         if (from === undefined || !canMove(from, move.to)) return false;
         sql("UPDATE claude_workers SET state = ?, message = ?, session = coalesce(?, session) WHERE thread = ?")
           .run(move.to, "message" in move ? move.message : null, move.to === "starting" ? move.session : null, thread);
-        // The probe answers a launch once its prompt started a turn, which a pause before the turn's hook reaches Nexus
-        // would otherwise cut unseen.
-        if (move.to === "started" && move.at !== undefined) sql("UPDATE claude_workers SET turn_session = session, turn_at = ?, turn_beat_at = ? WHERE thread = ? AND turn_at IS NULL AND session IS NOT NULL").run(move.at, move.at, thread);
         on.reconcile(thread);
         on.updateAttention(thread);
         if ("message" in move) on.appendEvent("thread.failed", thread, { message: move.message, cause: "claude-worker" });
@@ -262,14 +212,7 @@ export function claudeWorkerStore(db: Db, on: ClaudeWorkerThread) {
         on.updateAttention(thread);
       });
     },
-    /** The threads with a resume record, which a later pass may still change or clear. */
-    /** The holds of the resumes of `threads` that wait (resumeHold). */
-    resumeHolds: (threads: readonly ThreadId[]) => new Map(sql("SELECT thread, resume FROM claude_workers WHERE resume IS NOT NULL AND thread IN (SELECT value FROM json_each(?))").all(JSON.stringify(threads))
-      .flatMap((r) => {
-        const record = jsonOrNull<ClaudeResume | { state: "left-alone" }>(r.resume as string);
-        const hold = record === null || record.state === "left-alone" ? null : resumeHold(record);
-        return hold === null ? [] : [[r.thread as ThreadId, hold] as const];
-      })),
+    /** The threads with a resume record that a later pass may still change or clear, which is every one but left-alone. */
     resumedThreads: (): ThreadId[] => sql("SELECT thread FROM claude_workers WHERE resume IS NOT NULL AND json_extract(resume, '$.state') != 'left-alone' ORDER BY thread").all().map((r) => r.thread as ThreadId),
     /** The snapshot ID of the latest session.turn-started of any session on a Claude worker thread. */
     latestClaudeTurn(thread: ThreadId): string | null {
@@ -306,7 +249,7 @@ export function claudeWorkerStore(db: Db, on: ClaudeWorkerThread) {
             dropped = excluded.dropped, read_at = excluded.read_at`)
           .run(thread, read.session, read.cursor.offset, read.cursor.skipping ? 1 : 0, read.cursor.before, Math.max(0, total - maxEntries), read.readAt);
         // An image without the StopFailure hook reports no end to the turn a usage limit stopped, so the transcript ends it.
-        const stop = claudeStops([thread], new Map()).get(thread)?.usageLimit;
+        const stop = claudeStops([thread]).get(thread)?.usageLimit;
         if (stop !== undefined) on.endTurn(thread, read.session, stop.stoppedAt);
         on.reconcile(thread);
         on.updateAttention(thread);

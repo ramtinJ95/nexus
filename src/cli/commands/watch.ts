@@ -85,7 +85,9 @@ const resumeGraceMs = 30_000;
  */
 function deathEnding(d: ThreadDetail, died: NonNullable<ThreadDetail["thread"]["turnDied"]>, waitedMs: number): Ending | null {
   const resume = d.resume ?? null;
-  if (resume !== null && resume.turn >= died.at) return resume.state === "person" ? { outcome: "waiting", text: `Its turn died, and Nexus does not resume it: ${resume.why}` } : null;
+  if (resume?.state === "person") return { outcome: "waiting", text: `Its turn died, and Nexus stopped resuming it: ${resume.why}` };
+  if (resume?.state === "left-alone") return { outcome: "failed", text: `Its turn died, and Nexus leaves it to you, as you wrote to it: ${died.reason}` };
+  if (resume !== null && resume.turn >= died.at) return null;
   return waitedMs >= resumeGraceMs ? { outcome: "failed", text: `Its turn died, and Nexus did not resume it: ${died.reason}` } : null;
 }
 
