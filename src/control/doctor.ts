@@ -3,7 +3,7 @@
  * holds, gathered by src/control/doctor-run.ts. Each gives ok, warn or fail with one line that says what is wrong and
  * what to do.
  */
-import type { ImageId, NodeName, ThreadId } from "../ids.ts";
+import type { ImageId, NodeName, ProjectId, ThreadId } from "../ids.ts";
 import { diskText, keptFreeGiB, lowDisk } from "../disk-space.ts";
 import { keptPastDay, settleFailuresFail, settleOverdueMs, type ActivityFacts, type ArchiveFacts } from "./reconcile.ts";
 import type { ReleaseReport, ReleaseView } from "../protocol/deploy.ts";
@@ -35,6 +35,8 @@ export interface DoctorFacts {
   backup: BackupStatusRead;
   /** `unreadable` holds the error's code, never its message, which can carry the login's own text. */
   login: LoginState | { unreadable: string };
+  /** The projects whose pylons are granted the token of the harness's ChatGPT sign-in, which the control plane hands every probe. */
+  tokenProjects: readonly ProjectId[];
   certificate: CertificateFact;
   /** What GitHub last said of the control plane's token, `none` when control.json names no github.tokenFile, or why GitHub gave no answer. */
   github: TokenAnswer | { kind: "none" } | { kind: "unread"; error: string };
@@ -161,7 +163,10 @@ function backup(f: DoctorFacts): Verdict {
 function login(f: DoctorFacts): Verdict {
   if ("unreadable" in f.login) return fail(`the harness's login could not be read, with a ${f.login.unreadable} error. Check that nexus-control can read harness.credentials in control.json`);
   const { provider, modelId, credential, offered, refresh } = f.login;
-  const signIn = "Stop the control plane and sign it in with node src/control/login.ts as nexus-control";
+  // The sign-in is the control plane's own, for its reviews and judgments, and its token is what a probe is handed for such a project's pylons.
+  const boots = provider !== "openai" || f.tokenProjects.length === 0 ? ""
+    : `. Pylons of ${f.tokenProjects.join(", ")} reach OpenAI with its token, so none of them boots or wakes on a node whose probe has restarted since, which \`nexus show\` says of each thread it holds`;
+  const signIn = `Stop the control plane and sign it in with node src/control/login.ts as nexus-control${boots}`;
   if (offered === null) return fail(`harness.model names provider ${provider}, which the harness does not have. Fix control.json`);
   if (credential === null || offered.length === 0) return fail(`the harness is not signed in to ${provider}, so every thread fails at its first turn. ${signIn}`);
   if (!refresh.ok) return fail(`the harness's ${provider} login no longer resolves, with pi-ai's ${refresh.code} error. ${signIn}`);

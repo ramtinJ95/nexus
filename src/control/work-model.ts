@@ -55,8 +55,8 @@ export function personNeeds(registry: Pick<Registry, "threads">, t: Thread, now:
   }
   if (!isOpenStatus(t.status)) return [];
   const attention = registry.threads.attention(t.id);
-  const stuck = attention === "failed" || attention === "parked" || attention === "limited" ? attention : attention !== "decision" && attention !== "died" && t.sessionWaiting === true ? "waiting" : null;
+  const stuck = attention === "failed" || attention === "parked" || attention === "limited" || attention === "boot-held" ? attention : attention !== "decision" && attention !== "died" && t.sessionWaiting === true ? "waiting" : null;
   const own: PersonNeed[] = [...registry.threads.needs(t.id)];
-  if (stuck !== null) own.push({ kind: "thread", attention: stuck, since: t.usageLimit?.stoppedAt ?? Math.max(t.createdAt, t.lastAgentActivityAt) });
+  if (stuck !== null) own.push({ kind: "thread", attention: stuck, since: (stuck === "boot-held" ? registry.threads.bootHold(t.pylonId)?.since : t.usageLimit?.stoppedAt) ?? Math.max(t.createdAt, t.lastAgentActivityAt) });
   return own;
 }

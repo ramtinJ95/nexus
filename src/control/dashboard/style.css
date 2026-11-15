@@ -809,7 +809,7 @@ h4.md-h { font-size: 1.07em; }
 /* Needs you: a line for each thing that waits, edged by what it is, opening in place to its card */
 .need-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .need { --kind: var(--accent); min-width: 0; border: 1px solid var(--line); border-left: 3px solid var(--kind); border-radius: 12px; background: var(--card); box-shadow: var(--shadow); font-size: 13px; scroll-margin-top: 12px; }
-.need[data-attention="failed"], .need[data-attention="parked"], .need[data-attention="limited"], .need-held { --kind: var(--bad); }
+.need[data-attention="failed"], .need[data-attention="parked"], .need[data-attention="limited"], .need[data-attention="boot-held"], .need-held { --kind: var(--bad); }
 .need[data-attention="waiting"] { --kind: var(--warn); }
 .need.picked, .need:focus-visible { outline: 2px solid var(--kind); outline-offset: 2px; }
 .need-sum { list-style: none; display: flex; align-items: baseline; gap: 10px; min-width: 0; padding: 9px 12px; border-radius: 9px 12px 12px 9px; cursor: pointer; }

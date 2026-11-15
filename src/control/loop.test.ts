@@ -20,6 +20,7 @@ import type {
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { chatgptTokenGrant } from "../protocol/secret-grants.ts";
+import { holdShownAfterMs } from "./attention.ts";
 import { liveHashOf, type LiveSpec } from "../protocol/spawn.ts";
 import type { ProjectId } from "../ids.ts";
 import type { ReportedEvent } from "../protocol/observations.ts";
@@ -863,11 +864,13 @@ test("a wake its node has no memory for waits with no attempt counted, and boots
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn", "pause"], "the wake waits");
   assert.equal(fake.pylons.get(thread.pylonId)?.phase, "stopped");
   assert.deepEqual(registry.threads.pylon(thread.pylonId)!.attempts, { count: 0, last: null }, "a wait for room is no failed attempt");
+  assert.equal(registry.threads.bootHold(thread.pylonId)?.why, "rj-firebat has 62 of 64 GiB of memory committed, and the pylon needs 4 GiB", "the thread's detail says what the wake waits for");
 
   fake.memory.committedGiB = 60;
   fake.announce();
   await until("the pylon wakes once 4 GiB are free", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn", "pause", "spawn"]);
+  assert.equal(registry.threads.bootHold(thread.pylonId), undefined, "the wake that went out is held no longer");
 });
 
 test("a pylon whose boot outlasts the idle time is not paused as it comes up, so its worker gets its first prompt", async (t) => {
@@ -2307,6 +2310,39 @@ test("a boot asking for a held secret waits for a probe older than it, and boots
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   assert.deepEqual(kinds(fake.submitted), ["spawn fresh"]);
   assert.equal(registry.threads.pylon(thread.pylonId)!.attempts.count, 0);
+});
+
+test("a boot held for a token its probe has not been handed says why, is its thread's attention once it has lasted, and both end with the boot", async (t) => {
+  // 15 Nov: the control plane's sign-in was dead, no probe got the token, and every wake waited with nothing said anywhere.
+  const { registry, shift } = shiftedRegistry();
+  const thread = seed(registry);
+  const stored = registry.threads.pylon(thread.pylonId)!;
+  registry.threads.savePylon({ ...stored, boot: { ...stored.boot, network: { allowedHosts: [], secrets: [chatgptTokenGrant] } } });
+  const fake = fakeNode({ autoFinish: true, heldSecrets: [chatgptTokenGrant.name] });
+  const loop = run(t, registry, fake.probe);
+  await until("the planner holds the boot", () => registry.threads.bootHold(thread.pylonId) !== undefined);
+  const { since, ...held } = registry.threads.bootHold(thread.pylonId)!;
+  assert.deepEqual(held, {
+    why: "the control plane has not handed rj-firebat's probe NEXUS_CHATGPT_TOKEN, which the pylon is granted. That takes a moment after a probe starts, and never happens while the control plane's own sign-in fails, which `nexus doctor` says",
+    lasting: false,
+  });
+  const before = registry.threads.attention(thread.id);
+  assert.notEqual(before, "boot-held", "a hold the next handover ends is no one's to look at");
+
+  shift.ms = holdShownAfterMs - 1_000;
+  await settled(fake, loop);
+  assert.equal(registry.threads.attention(thread.id), before);
+  shift.ms = holdShownAfterMs;
+  await settled(fake, loop);
+  assert.equal(registry.threads.attention(thread.id), "boot-held");
+  assert.deepEqual(registry.threads.bootHold(thread.pylonId), { ...held, since, lasting: true }, "the hold began when the planner first held the boot");
+  assert.deepEqual(fake.submitted, []);
+
+  await fake.probe.putSecret(chatgptTokenGrant.name, "token");
+  await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
+  await until("the hold ends", () => registry.threads.bootHold(thread.pylonId) === undefined);
+  assert.notEqual(registry.threads.attention(thread.id), "boot-held");
+  assert.deepEqual(registry.threads.events("0", { kinds: ["attention.changed"] }).map((e) => e.payload.attention).filter((a) => a === "boot-held"), ["boot-held"], "told once, however many passes held it");
 });
 
 test("a boot asking for the ChatGPT token right after a probe restart boots once the handoff the restart set off arrives", async (t) => {

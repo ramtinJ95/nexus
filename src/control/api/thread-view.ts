@@ -54,11 +54,13 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
   }
 
   function pylonOf({ pylon, node, observed, actualState }: ReturnType<typeof pylonState>, project: Project): ThreadDetail["pylon"] {
+    const held = registry.threads.bootHold(pylon.pylonId);
     return {
       grantsOutdated: networkGrantsKey(pylon.boot.network) !== networkGrantsKey(bootNetwork(project, pylon.boot.dotfiles?.repo)),
       id: pylon.pylonId, node: pylon.node, failed: pylon.failed, observedAt: node.observation?.observedAt ?? null, resources: pylon.boot.resources,
       actualState, retryRefused: retryRefusal(observed),
       ...(observed !== "absent" && observed.phase === "running" && observed.notAnswering ? { notAnswering: observed.notAnswering } : {}),
+      ...(held === undefined ? {} : { held }),
     };
   }
 

@@ -258,9 +258,11 @@ export async function whenRunning<T>(api: Api, io: Io, id: string, send: () => P
     } catch (err) {
       if (!(err instanceof CliError) || !err.retryable) throw err;
       sending = false;
-      const { status } = (await request(api, threadRoutes.show, { thread: id })).thread;
+      const { thread: { status }, pylon, said } = await request(api, threadRoutes.show, { thread: id });
       if (status === "archived" || status === "deleted") throw err;
-      refused = err;
+      // A hold that has lasted ends no sooner for the wait, so the answer is its reason now, not the deadline's in two minutes.
+      if (pylon.held?.lasting && said.held) throw new CliError("failed", `the pylon of ${id} does not run, so ${undone}. ${said.held}`);
+      refused = pylon.held === undefined || !said.held ? err : new CliError(err.kind, `${err.message}. ${said.held}`, err.status, err.code, err.retryable);
       return undefined;
     }
   });

@@ -2,11 +2,19 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), except in the commands [Version skew](cli.md#version-skew) names, so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
-## 0.93.0
+## 0.95.0
 
-Adds the `event-loop` check to `ControlCheckName`, which `GET /v1/checks`, `GET /v1/doctor`, `nexus doctor` and the Health page answer after `release`: how late the control plane ran what was due in the slowest of its last 5 minutes, `warn` from 500 ms at the 99th percentile and `fail` from 2 s, as [the design's doctor](design.md#doctor-and-health-alerts) describes. A control plane older than 0.93.0 reports no such check.
+Adds the `event-loop` check to `ControlCheckName`, which `GET /v1/checks`, `GET /v1/doctor`, `nexus doctor` and the Health page answer after `release`: how late the control plane ran what was due in the slowest of its last 5 minutes, `warn` from 500 ms at the 99th percentile and `fail` from 2 s, as [the design's doctor](design.md#doctor-and-health-alerts) describes. A control plane older than 0.95.0 reports no such check.
 
 Adds `loop` to `GET /v1/health`: `{ overMs, p99Ms, maxMs, busy }`, how late the control plane ran what was due in its last full minute, or since its start before the first minute ends. `overMs` is how long that stretch is, `p99Ms` and `maxMs` how late the loop ran at the 99th percentile and at worst, and `busy` the share of the stretch it was at work, from 0 to 1. The check reads the slowest of the last 5 minutes, and health the latest, so a monitor that polls health sees each minute once. The CLI does not read it.
+
+## 0.94.0
+
+Adds `boot-held` to `Attention`, between `limited` and `reply`, which `GET /v1/threads`, `GET /v1/threads/<thread>`, `threads --json` and `show --json` answer once the planner has held a pylon's boot or wake for a minute: its node's probe has not been handed a secret the control plane holds, such as the token of the harness's ChatGPT sign-in, or its node has no memory for it. It waits on the person, so `threads --needs-me` lists it. Adds `pylon.held`, `{ why, since, lasting }`, to `ThreadDetail` from the first pass that holds the boot until one that does not, and `said.held`, the sentence `show` prints under `held:`. `wake` reads the thread up to seven times, half a second apart, and says a held wake and why. `send` to a Claude worker, and every other command that waits for a paused pylon to run, fails at once with the reason once the hold is `lasting`, and names it in its wait and its timeout before that. The `login` check of `doctor` names the projects whose pylons take their token from the harness's sign-in, since a sign-in that fails stops their boots too.
+
+## 0.93.0
+
+Adds `checks` to a review's `merging` phase: the time in milliseconds since which the landing has waited for the pull request's GitHub checks to pass. A landing that nothing but pending checks holds now stays at `merging` with `authorized` null, and merges when they pass, as [the design's landing](design.md#the-review-loop-and-landing) describes. It ends `needs-person` when a check fails, when another condition fails beside them, or with `The pull request's GitHub checks are still pending, <n> minutes after its landing began to wait for them.` an hour after the wait began, or with `The landing waited <n> minutes for the pull request's GitHub checks, and its last try failed (<error>). Land it again once GitHub answers.` when a try fails after the hour, as while GitHub cannot be read. Before, it ended `needs-person` at once with `The pull request's GitHub checks are pending.` A review's line in `nexus show` and the pipeline ends `, waiting for the pull request's GitHub checks to pass since <HH:MM> UTC` meanwhile. A client older than 0.93.0 shows such a landing as merging.
 
 ## 0.92.0
 

@@ -66,6 +66,8 @@ const maxNudges = 2;
 /** How long the loop waits before it sends a request again after each model failure in a row. The next failure goes to the person. */
 const retryMs = [2, 5, 10, 20].map((minutes) => minutes * 60_000);
 const checkMs = 60 * 60_000;
+/** How long a landing that nothing else holds waits for GitHub checks that are pending to pass, before it asks the person. */
+export const githubChecksMs = 60 * 60_000;
 /** How long a second reviewer's start is tried, once a minute, before the review goes on without it. */
 const secondStartMs = 30 * 60_000;
 const secondRetryMs = 60_000;
@@ -204,6 +206,8 @@ export function reviewLoop(deps: ReviewDeps) {
   const cappedReads = new Map<string, number>();
   /** When the loop last read the holds of each approved review's head that had none recorded. */
   const holdReads = new Map<string, number>();
+  /** When the loop last read the PR of each landing that waits for its GitHub checks. A restart reads it again. */
+  const checkReads = new Map<string, number>();
   /** Whether a PR watch interval passed since the loop last read GitHub for `r` in `reads`. */
   const due = (reads: Map<string, number>, r: Review) => now() - (reads.get(r.id) ?? -Infinity) >= prWatchMs;
   /** The check thread or verify pylon `phase` holds, and the runs it is one of. */
@@ -719,6 +723,24 @@ export function reviewLoop(deps: ReviewDeps) {
       return after;
     },
     async merging(r, phase, builder) {
+      if (phase.checks === undefined) return await merge(r, phase, builder);
+      // GitHub's checks take minutes, so a landing that waits for them asks about them as often as the PR watch does,
+      // whatever the last try came to. A try that fails is made again, as any failed step is, but not past the wait.
+      if (!due(checkReads, r)) return r;
+      checkReads.set(r.id, now());
+      try {
+        return await merge(r, phase, builder);
+      } catch (err) {
+        if (now() - phase.checks < githubChecksMs) throw err;
+        // The try may have failed at any step, a read of the checks or the branch's update after they passed, so the reason names the try.
+        return toPerson(r, "policy", `The landing waited ${Math.round((now() - phase.checks) / 60_000)} minutes for the pull request's GitHub checks, and its last try failed (${(err as Error).name}). Land it again once GitHub answers.`);
+      }
+    },
+    ...landings.steps,
+  };
+
+  /** One try at a landing's merge: the policy checked again with what GitHub says now, then the merge it authorized. */
+  async function merge(r: Review, phase: Extract<Phase, { kind: "merging" }>, builder: Thread): Promise<Review> {
       const head = r.rounds.at(-1)!.head;
       // The policy is checked again with what GitHub says now, before every attempt, so the step that merges does not
       // act on the read of the step that authorized it.
@@ -730,7 +752,9 @@ export function reviewLoop(deps: ReviewDeps) {
       // A landing that has authorized its merge holds the turn, which every other waits for.
       if (phase.authorized !== head) {
         const waiting = landings.ahead(r);
-        if (waiting !== null) return phase.waiting === waiting ? r : { ...r, phase: { ...phase, waiting } };
+        // Its turn comes before its checks: a wait for them ends here, and begins anew if they still run when the turn comes.
+        const { checks: _, ...turn } = phase;
+        if (waiting !== null) return phase.waiting === waiting && phase.checks === undefined ? r : { ...r, phase: { ...turn, waiting } };
       }
       // `left` is what the person's waiver does not get past, once carried to this head if its change is the one they
       // waived, and `why` why it did not carry. A landing that holds goes to the person with every hold, those it
@@ -772,6 +796,17 @@ export function reviewLoop(deps: ReviewDeps) {
         if (remedy === "rebase") return rebase(review, snapshot.detail.base);
         // A quote the description lost since the reviewer gave it is asked for again, once per description.
         if (remedy === "quote" && staleQuote(r.rounds.at(-1)!, snapshot.detail.body)) return { ...review, phase: { kind: "quoting", asked: null } };
+        // Checks still running are no one's to act on: the landing waits for them, and lands when they pass. Failed
+        // ones, any other hold beside them, or an hour of waiting go to the person.
+        if (left.length && snapshot.pr.checks === "pending" && left.every((h) => h.code === "github-checks")) {
+          const since = phase.checks ?? now();
+          if (now() - since < githubChecksMs) {
+            checkReads.set(r.id, now());
+            // Nothing is authorized while it waits, so no other landing waits behind it.
+            return phase.checks === since && phase.authorized === null ? review : { ...review, phase: { kind: "merging", authorized: null, checks: since } };
+          }
+          return toPerson(review, "policy", ...why, ...all.map((h) => h.code === "github-checks" ? { ...h, text: `The pull request's GitHub checks are still pending, ${Math.round((now() - since) / 60_000)} minutes after its landing began to wait for them.` } : h));
+        }
         if (left.length) return toPerson(review, "policy", ...why, ...all);
         // A squash merge lands `head` on the base as it is now, so a base that moved since `head`'s check lands a
         // combination no check ran. GitHub pushes the updated head a little later, and it gets a round of its own,
@@ -796,9 +831,7 @@ export function reviewLoop(deps: ReviewDeps) {
         commit = merged.commit;
       }
       return landings.merged(toLand, commit);
-    },
-    ...landings.steps,
-  };
+  }
 
   const watchedPr = (r: Review) => {
     const watch = registry.prWatches.prWatch(r.builder);

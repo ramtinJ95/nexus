@@ -46,7 +46,7 @@ export type NoticeAttention = Exclude<NonNullable<Attention>, "reply" | "working
 /** The home page's hash that opens the card for what a thread waits on, which home.ts marks by `data-attention`. */
 export const noticeHash = (thread: string, attention: NoticeAttention) => `#needs-you:${thread}:${attention}`;
 export function noticeOf(hash: string): { thread: string; attention: string } | null {
-  const m = /^#needs-you:([\w-]+):(\w+)$/.exec(hash);
+  const m = /^#needs-you:([\w-]+):([\w-]+)$/.exec(hash);
   return m === null ? null : { thread: m[1]!, attention: m[2]! };
 }
 

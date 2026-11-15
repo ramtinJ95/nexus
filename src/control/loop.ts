@@ -245,6 +245,7 @@ export function startLoop(options: LoopOptions): Loop {
       try {
         if (launches.step(thread, pylonId, nodeObservation, { probe: link.probe, snapshot: (waitMs) => snapshot(link, () => true, waitMs), wake: () => void wake(node) }) === "skip") continue;
         const step = await tick(pylon, ctx);
+        registry.threads.holdBoot(pylonId, thread.id, step.kind === "wait" && "why" in step ? step.why : null);
         if (step.kind === "fail" && stored.failed !== step.reason) log(`${pylon.pylonId}: the planner gave up: ${step.reason}`);
         // Done for a deleted thread means its node neither has the pylon nor routes a port to it, so nothing serves the ports.
         if (pylon.desired === "deleted" && step.kind === "done") registry.threads.releasePreviews(pylon.pylonId);
