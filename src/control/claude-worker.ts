@@ -3,7 +3,7 @@
  * death, Nexus resuming a turn that died, its transcript as read so far, what stopped its latest turn, and the
  * messages typed into it. The thread store makes it, and hands it the thread's reconcile, attention and turn.
  */
-import { inlinePromptChars, promptFile, promptPointer } from "../protocol/commands.ts";
+import { inlinePromptChars, messageFile, messagePointer, promptFile, promptPointer } from "../protocol/commands.ts";
 import { claudeLaunchesDir } from "../../images/pylon/nexus-contract.ts";
 import { createHash } from "node:crypto";
 import { claudeTurn } from "../../images/pylon/nexus-contract.ts";
@@ -101,6 +101,9 @@ export interface ClaudeWorkerThread {
  * the same hash of each prompt, so a prompt is Nexus's only when the two match.
  */
 export const textSha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
+/** What the probe types for `text` into `session`: the text, or the pointer to the file a message too long to type goes in. */
+export const typedForm = (session: string, text: string): string =>
+  text.length <= inlinePromptChars ? text : messagePointer(messageFile(`${claudeLaunchesDir}/${session}`, textSha256(text)), text.length);
 
 export function claudeWorkerStore(db: Db, on: ClaudeWorkerThread) {
   const { transaction, sql } = db;

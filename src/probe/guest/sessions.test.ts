@@ -1,6 +1,8 @@
 import { labelClaudeSession, seedClaudeState } from "./launchers.ts";
 import { test } from "node:test";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { inlinePromptChars } from "../../protocol/commands.ts";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1087,4 +1089,16 @@ test("attached terminals are the core's viewers, which pgrep counts, and a count
   assert.equal(await attachedTerminals(counting({ exitCode: 1, output: "0\n" })), 0, "pgrep exits 1 for none");
   await assert.rejects(attachedTerminals(counting({ exitCode: 2, output: "pgrep: bad regex\n" })), /counting attached terminals: pgrep exited 2: pgrep: bad regex/);
   await assert.rejects(attachedTerminals(counting({ exitCode: 0, output: "" })), /pgrep exited 0/);
+});
+
+test("a message too long to type goes whole to a file in its session's launch directory, and Claude is typed a short message that names it", async () => {
+  const long = `${"a long round's answers, \"quoted\" 'and' `ticked` 😀\n".repeat(900)}end`;
+  assert.ok(long.length > inlinePromptChars);
+  const core = fakeCore();
+  const t = claudeRunning(core, "idle");
+  const guest = pylon(core);
+  assert.deepEqual(await sendToClaude(guest, { session, text: long }), { outcome: "sent", terminal: "t1", resumed: false });
+  const path = `${claudeLaunchesDir}/${session}/message-${createHash("sha256").update(long).digest("hex").slice(0, 16)}.md`;
+  assert.deepEqual(guest.written, [{ path, mode: 0o644, owner: "user", content: long }], "the whole message, as given");
+  assert.deepEqual(t.sent, [`This message is ${long.length} characters, too long to type, so it is in ${path}. Read all of it now and act on it as if it were this message.`]);
 });

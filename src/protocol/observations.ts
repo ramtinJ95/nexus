@@ -58,7 +58,8 @@ export interface NodeObservation {
   nestedVirtualization?: true;
   /**
    * True from a probe that starts a Claude session with a first prompt longer than its command line takes, by a file the
-   * session is told to read (probe/guest/sessions.ts). An older probe refuses such a prompt.
+   * session is told to read (probe/guest/sessions.ts), and sends a message too long to type the same way. An older probe
+   * refuses either.
    */
   longPrompts?: true;
   /** The heldSecrets this probe takes from the control plane. */

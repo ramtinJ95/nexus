@@ -14,13 +14,13 @@
  * as one `exec` line, so every viewer of the terminal keeps the session (resumeInPlace). A shell that is not plainly
  * that, idle at the session's cwd, is left: the agent resumes in a new terminal, and the wake removes the shell.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import type { Guest } from "../../backends/backend.ts";
 import type { TerminalStatus, PausedSession, SessionFact, SessionIdentity } from "../../protocol/observations.ts";
 import type { CommandResult, InterruptClaudeOutcome } from "../../protocol/commands.ts";
-import { inlinePromptChars, promptFile, promptPointer } from "../../protocol/commands.ts";
+import { inlinePromptChars, messageFile, messagePointer, promptFile, promptPointer } from "../../protocol/commands.ts";
 import { nonEmpty, parseJson } from "../../parse.ts";
 import { shellQuote } from "../../shell.ts";
 import { claudeCode, launchers, type Launcher } from "./launchers.ts";
@@ -397,9 +397,10 @@ export async function sendToClaude(guest: Guest, message: { session: string; tex
   if (live.status === "unknown") return { outcome: await atDialog(guest, terminal) ? "blocked" : "starting", terminal, resumed };
   if (live.status === "blocked") return { outcome: "blocked", terminal, resumed };
   if (!runsSession(live, claudeCode, message.session)) return { outcome: "moved", terminal, resumed };
+  const text = await typedText(guest, message.session, message.text);
   for (;;) {
     try {
-      const sent = await core(guest, "terminal.send", { terminal, text: message.text }, sendTimeoutMs);
+      const sent = await core(guest, "terminal.send", { terminal, text }, sendTimeoutMs);
       return { outcome: sent.status === "working" ? "queued" : "sent", terminal, resumed };
     } catch (err) {
       // Core refuses before it pastes anything a blocked program, and as `unavailable` one whose output has not
@@ -412,6 +413,17 @@ export async function sendToClaude(guest: Guest, message: { session: string; tex
       await delay(claudeReadyPollMs);
     }
   }
+}
+
+/**
+ * `text` itself while it is short enough to type, or else a short message that names the file it is written to, in the
+ * session's launch directory, so the session gets it whole.
+ */
+async function typedText(guest: Guest, session: string, text: string): Promise<string> {
+  if (text.length <= inlinePromptChars) return text;
+  const path = messageFile(`${claudeLaunchesDir}/${session}`, createHash("sha256").update(text).digest("hex")) as `/${string}`;
+  await guest.writeFiles([{ path, mode: 0o644, owner: "user", content: text }]);
+  return messagePointer(path, text.length);
 }
 
 /**

@@ -13,7 +13,8 @@ import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { runningProbe } from "./locator.ts";
 import type { Registry } from "./registry.ts";
-import { textSha256, type ClaudeSent } from "./claude-worker.ts";
+import { textSha256, typedForm, type ClaudeSent } from "./claude-worker.ts";
+import { inlinePromptChars } from "../protocol/commands.ts";
 import type { Thread } from "./thread-store.ts";
 
 type InboxRegistry = Pick<Registry, "threads" | "nodes">;
@@ -72,7 +73,15 @@ async function typeOnce(registry: InboxRegistry, thread: ThreadId, session: stri
     if (earlier.send === "failed" || earlier.send === "unknown") return { kind: "uncertain" };
     result = earlier.send;
   } else {
-    registry.threads.setClaudeMessage(thread, requestId, { state: "sending" }, { sender, sha256: textSha256(text) });
+    // An older probe refuses a message too long to type, which this one sends by a file, so it is not asked at all.
+    const t = registry.threads.thread(thread);
+    const pylon = t === undefined ? undefined : registry.threads.pylon(t.pylonId);
+    const node = pylon === undefined ? undefined : registry.nodes.node(pylon.node);
+    if (text.length > inlinePromptChars && node?.observation?.longPrompts !== true) {
+      throw new Error(`${node?.name ?? "the thread's node"}'s probe cannot send Claude a message of ${text.length} characters, over the ${inlinePromptChars} it types, so it needs this release of Nexus on its probe`);
+    }
+    // The transcript shows what was typed, which for a long message is the pointer to its file.
+    registry.threads.setClaudeMessage(thread, requestId, { state: "sending" }, { sender, sha256: textSha256(typedForm(session, text)) });
     try {
       result = await ask({ kind: "send-claude", session, text, requestId, ...(model === null ? {} : { model }) }) as Extract<CommandResult, { kind: "send-claude" }>;
     } catch (err) {

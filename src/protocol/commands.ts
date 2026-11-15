@@ -97,8 +97,14 @@ export type CommandResult =
   /** `refused` says why the pylon left a port a service's preview owns, for a person to read. Null once the port is not linked. */
   | { kind: "unlink-port"; refused: string | null };
 
-/** The longest message a Claude session is sent. */
+/** The longest message a person sends a Claude session, or a prompt they start one with. */
 export const maxPromptChars = 16_384;
+/**
+ * The longest message Nexus sends a Claude session. One longer than `inlinePromptChars` goes in a file the session is
+ * told to read (probe/guest/sessions.ts). A message holds no control character but a newline (claudeTextProblem), so
+ * JSON escapes each character to at most 2, and this fits the probe's request body of 1 MiB.
+ */
+export const maxMessageChars = 500_000;
 /**
  * The longest prompt an open session starts with. One longer than `inlinePromptChars` goes to the session in a file it
  * is told to read (probe/guest/sessions.ts), so this bounds only what the control plane stores and sends the probe,
@@ -113,6 +119,14 @@ export const maxOpenPromptChars = 131_072;
 export const inlinePromptChars = 16_384;
 /** Where a first prompt too long for the command line is written, in its launch's directory. */
 export const promptFile = (launchDir: string) => `${launchDir}/prompt.md`;
+/**
+ * Where a message too long to type is written, in its session's launch directory, named for its text's SHA-256 so the
+ * control plane knows the pointer typed in its place.
+ */
+export const messageFile = (launchDir: string, textSha256: string) => `${launchDir}/message-${textSha256.slice(0, 16)}.md`;
+/** The message typed in place of one written to `path`. */
+export const messagePointer = (path: string, length: number) =>
+  `This message is ${length} characters, too long to type, so it is in ${path}. Read all of it now and act on it as if it were this message.`;
 /** The first prompt Claude is started with in place of one written to `path`, which the control plane counts as Nexus's own. */
 export const promptPointer = (path: string, length: number) =>
   `Your first message is ${length} characters, too long for the command line, so it is in ${path}. Read all of it now and act on it as if it were this message.`;
@@ -144,7 +158,7 @@ const pylonCommandSchema = z.discriminatedUnion("kind", [
   z.looseObject({
     kind: z.literal("send-claude"),
     session: claudeSession,
-    text: nonEmpty.max(maxPromptChars).superRefine((t, ctx) => {
+    text: nonEmpty.max(maxMessageChars).superRefine((t, ctx) => {
       const problem = claudeTextProblem(t);
       if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
     }),

@@ -74,12 +74,23 @@ test("every review prompt keeps its text", (t) => {
   t.assert.snapshot(prompts);
 });
 
-test("a round whose description would take the message past what a message carries names the description on GitHub instead", async () => {
-  const { maxPromptChars } = await import("../protocol/commands.ts");
-  const previous = { head: h1, base: "main", verdict: verdict([f1]), check: null, answers: [{ id: "F1", action: "fixed" as const, reason: "Done." }] };
-  const short = nextRound(twoRounds({}, h2), previous, "rv-1:c", "main", "first", "Adds a cache.");
-  assert.match(short, /<description>\nAdds a cache.\n<\/description>/);
-  const long = nextRound(twoRounds({}, h2), previous, "rv-1:c", "main", "first", "d".repeat(30_000));
-  assert.ok(long.length <= maxPromptChars, `${long.length} characters`);
-  assert.match(long, /The current pull request description is 30000 characters, too long to quote here\..*gh pr view \d+ --json body --jq \.body/);
+test("a round carries every answer whole, and quotes the description while it fits beside them, or else names it on GitHub", async () => {
+  const { maxMessageChars } = await import("../protocol/commands.ts");
+  const one = { head: h1, base: "main", verdict: verdict([f1]), check: null, answers: [{ id: "F1", action: "fixed" as const, reason: "Done." }] };
+  const long = nextRound(twoRounds({}, h2), one, "rv-1:c", "main", "first", "d".repeat(30_000));
+  assert.match(long, new RegExp(`<description>\n${"d".repeat(30_000)}\n</description>`), "a long description beside one answer is quoted whole");
+  // The most a reply may answer: 110 findings, each with a reason of 4000 characters, beside GitHub's longest description.
+  const answers = Array.from({ length: 110 }, (_, i) => ({ id: `F${i + 1}`.padEnd(42, "x"), action: "rejected" as const, reason: `${i}`.padEnd(4_000, "r") }));
+  const most = nextRound(twoRounds({}, h2), { ...one, answers }, "rv-1:c", "main", "first", "d".repeat(65_536));
+  assert.ok(most.length <= maxMessageChars, `${most.length} characters`);
+  for (const a of answers) assert.ok(most.includes(`${a.id}: rejected. ${a.reason}`), `${a.id} whole`);
+  assert.match(most, /The current pull request description is 65536 characters, too long to quote here\..*gh pr view \d+ --json body --jq \.body/);
+});
+
+test("a quote request quotes GitHub's longest description whole, within what a message carries", async () => {
+  const { maxMessageChars } = await import("../protocol/commands.ts");
+  const body = "b".repeat(65_536);
+  const asked = quoteRequest(at({ verdict: verdict([]) }), { ...detail, body, branch: "cache" } as never, "rv-1:d");
+  assert.ok(asked.includes(`<description>\n${body}\n</description>`));
+  assert.ok(asked.length <= maxMessageChars);
 });
