@@ -895,9 +895,10 @@ type Phase =
    * merged at it is this review's own merge, and any other merge is someone else's. `waiting` is why a review that
    * deploys has not authorized its merge yet: another landing that deploys is under way, a deploy drains the control
    * plane, or the desired release is not healthy everywhere. `updated` is when the loop asked GitHub to bring the
-   * branch up to date with a base that moved since its head's check, whose new head GitHub pushes later.
+   * branch up to date with a base that moved since its head's check, whose new head GitHub pushes later. `checks` is
+   * since when the landing has waited for the pull request's GitHub checks, the one condition it has not met, to pass.
    */
-  | { kind: "merging"; authorized: string | null; waiting?: string; updated?: number }
+  | { kind: "merging"; authorized: string | null; waiting?: string; updated?: number; checks?: number }
   /** `requested` once the desired release is set. `previous` is the release to roll back to, null if there was none. */
   | { kind: "deploying"; commit: string; previous: string | null; requested: boolean; deadline: number }
   /** The deploy of `commit` failed for `why`, and the fleet goes back to `previous`, the desired release once `requested`. */
@@ -1771,7 +1772,7 @@ The control plane stores none of an item's progress. It reads `PipelineItem.phas
 | Its queued thread waits | `queued` | `waits for <title>: <why>`, or `starts on the queue's next pass` |
 | Its review landed, or saw its PR merged outside it | `landed` | `PR #<n> merged as <commit>`, or `PR #<n> merged outside its review` |
 | Its review ended for the person | `held` | `its review ended for the person: <the first reason>` |
-| Its review merges, deploys or rolls back, or is approved and lands | `landing` | `PR #<n> is merging`, `deploying`, `rolling back` or `approved`, and `PR #<n> is merging, waiting while <reason>` for a landing that waits its turn |
+| Its review merges, deploys or rolls back, or is approved and lands | `landing` | `PR #<n> is merging`, `deploying`, `rolling back` or `approved`, `PR #<n> is merging, waiting while <reason>` for a landing that waits its turn, and `PR #<n> is merging, waiting for the pull request's GitHub checks to pass since <HH:MM> UTC` for one that waits for checks still running |
 | Its review is approved and stops at approval | `held` | `PR #<n> is approved, and lands once the person runs nexus land <thread>` |
 | Its review reviews, waits on the builder's fixes, waits on the reviewer's quote of what could not be checked live or runs the checks | `reviewing`, or `landing` for a quote, and for checks run once it was asked to land | `PR #<n>, round <k>: reviewing`, with what its check does beside the reviewer as `show` says it, `fixing`, `quoting` (since 0.59.0) or `checking`, or, since 0.38.0, the live check's line of `show`, such as `live check running .nexus/verify at <commit> in verify pylon <thread>` |
 | A linked pull request merged and none is open | `landed` | `PR #<n> merged` |

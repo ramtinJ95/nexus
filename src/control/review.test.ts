@@ -19,7 +19,7 @@ import { carryWaiver, headHolds, holdsAt, landPress, secondReviewRule } from "./
 import { landing } from "./dashboard/cards.ts";
 import { checkBeside, liveNote, phaseNote, reviewSaid, roundNote } from "./wording.ts";
 import { cannotLand, changeOf, ended, findingsOf, humanLabel, landable, personPhase, roundsSpent, type HoldCause, type Review, type Verdict, type Waiver } from "./review-model.ts";
-import { reviewerFor, reviewLoop, secondReviewerFor, type ReviewDeps } from "./review.ts";
+import { githubChecksMs, reviewerFor, reviewLoop, secondReviewerFor, type ReviewDeps } from "./review.ts";
 import { upgradeReview } from "./record-upgrade.ts";
 import { commentCap, prWatchMs } from "./pr-watch-model.ts";
 import { personNeeds } from "./work-model.ts";
@@ -4945,17 +4945,64 @@ test("a Land press at a head whose check passed keeps that check and merges", as
   assert.deepEqual(f.merges, [head1]);
 });
 
-test("a landing held for checks that later pass lands on the next press at the same head with no second check", async (t) => {
+test("a landing whose only hold is pending GitHub checks waits for them, asking as often as the PR watch, and merges when they pass", async (t) => {
   const f = fixture(t);
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "pending" } };
-  await approved(f, "nLAPTOP");
-  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The pull request's GitHub checks are pending."] });
-  const loop = f.loop();
+  const loop = await approved(f, "nLAPTOP");
+  const since = f.now;
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, checks: since }, "it waits, and authorizes nothing meanwhile");
+  assert.equal(phaseNote(f.review()), `, waiting for the pull request's GitHub checks to pass since ${new Date(since).toISOString().slice(11, 16)} UTC`);
+  const polls = f.polls;
+  f.tick(prWatchMs - 1);
+  await loop.poll();
+  assert.equal(f.polls, polls, "GitHub is not asked again within a PR watch interval");
+  f.tick(1);
+  await loop.poll();
+  assert.equal(f.polls, polls + 1);
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, checks: since }, "still pending, and the wait counts from its start");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "passing" } };
+  f.tick(prWatchMs);
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1]);
+  assert.equal(f.checkThreads.length, 1, "the check that passed at that head is kept");
+});
+
+test("a landing that waits for GitHub checks goes to the person when one fails", async (t) => {
+  const f = fixture(t);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "pending" } };
+  const loop = await approved(f, "nLAPTOP");
+  assert.equal(f.review().phase.kind, "merging");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "failed" } };
+  f.tick(prWatchMs);
+  await loop.poll();
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The pull request's GitHub checks are failed."] });
+  assert.deepEqual(f.merges, []);
+});
+
+test("a landing that has waited an hour for GitHub checks goes to the person, and lands on their press once the checks pass", async (t) => {
+  const f = fixture(t);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "pending" } };
+  const loop = await approved(f, "nLAPTOP");
+  f.tick(githubChecksMs - 1);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "merging", "not before the hour is over");
+  f.tick(prWatchMs);
+  await loop.poll();
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The pull request's GitHub checks are still pending, 62 minutes after its landing began to wait for them."] });
+  const held = f.review().phase;
+  assert.deepEqual(held.kind === "needs-person" && held.holds.map((h) => h.code), ["github-checks"]);
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "passing" } };
   loop.land(f.builder, "nLAPTOP", head1);
   await loop.poll();
   assert.equal(f.checkThreads.length, 1, "the press kept the check that passed at that head");
   assert.deepEqual(f.merges, [head1]);
+});
+
+test("a landing that pending GitHub checks hold beside something else goes to the person at once", async (t) => {
+  const f = fixture(t);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "pending", conflict: true } };
+  await approved(f, "nLAPTOP");
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The branch conflicts with its base.", "The pull request's GitHub checks are pending."] });
 });
 
 test("a Land press on a round with no check runs it before merging", async (t) => {

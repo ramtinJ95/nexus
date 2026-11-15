@@ -114,7 +114,7 @@ Each hold has a code, `HoldCode` in [the CLI reference](cli.md#reviews-and-landi
 | `unanswered` |  | No | No |  | Every P0 to P2 finding needs the builder's fix or its reason to reject. |
 | `check-failed` |  | No | No |  | Only a .nexus/check that passed at the approved head lands. |
 | `live-failed` |  | No | No |  | A repository with a .nexus/verify lands only once its live check passed at the approved head. |
-| `github-checks` |  | No | No |  | Failing or pending GitHub checks hold every landing until they pass. |
+| `github-checks` |  | No | No |  | Failing or pending GitHub checks hold every landing until they pass. A landing held by pending checks alone waits for them, up to an hour, before it asks the person. |
 | `not-approved-head` |  | No | No |  | Only the commit the reviewer approved lands. |
 | `conflict` |  | No | No | rebase | A branch that conflicts with its base cannot merge. |
 | `pr-not-open` |  | No | No |  | Only an open pull request lands. |

@@ -43,7 +43,7 @@ const holdRows: Record<HoldCode, HoldRow> = {
   unanswered: notWaivable("Every P0 to P2 finding needs the builder's fix or its reason to reject."),
   "check-failed": notWaivable("Only a .nexus/check that passed at the approved head lands."),
   "live-failed": notWaivable("A repository with a .nexus/verify lands only once its live check passed at the approved head."),
-  "github-checks": notWaivable("Failing or pending GitHub checks hold every landing until they pass."),
+  "github-checks": notWaivable("Failing or pending GitHub checks hold every landing until they pass. A landing held by pending checks alone waits for them, up to an hour, before it asks the person."),
   "not-approved-head": notWaivable("Only the commit the reviewer approved lands."),
   conflict: notWaivable("A branch that conflicts with its base cannot merge.", "rebase"),
   "pr-not-open": notWaivable("Only an open pull request lands."),
