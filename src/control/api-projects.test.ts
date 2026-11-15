@@ -5,7 +5,110 @@ import type { Thread } from "./thread-store.ts";
 import { githubTokenGrant } from "../protocol/secret-grants.ts";
 import type { ImageId, ProjectId } from "../ids.ts";
 import type { TailnetNodeId } from "../ids.ts";
-import { project, image, testApi, withThread } from "../test-support/api-kit.ts";
+import { project, image, laptop, testApi, withThread } from "../test-support/api-kit.ts";
+import { testPr } from "../test-support/registry-kit.ts";
+
+test("removing an inactive project hides it, retains history, and refuses new work and identity reuse", async (t) => {
+  const s = await withThread(t);
+  const remove = () => s.call("DELETE", "/v1/projects/acme");
+  assert.equal((await remove()).status, 409, "an active thread blocks removal");
+  s.registry.threads.setThreadStatus(s.thread.id, "idle");
+  assert.equal((await remove()).status, 409, "idle is still open work");
+  await s.call("POST", `/v1/threads/${s.thread.id}/archive`);
+  const before = s.registry.threads.thread(s.thread.id);
+  const pylon = s.registry.threads.pylon(s.thread.pylonId);
+  const removed = await remove();
+  assert.equal(removed.status, 200);
+  assert.equal(removed.body.removed.by, laptop);
+  assert.equal(typeof removed.body.removed.at, "number");
+  assert.equal(removed.body.repoUrl, project.repoUrl, "removal never changes a remote");
+  assert.deepEqual((await s.call("GET", "/v1/projects")).body, []);
+  assert.deepEqual((await s.call("GET", "/v1/projects?removed=true")).body, [removed.body]);
+  assert.doesNotMatch((await s.raw("/")).body.toString(), /id="project-acme"/);
+  assert.doesNotMatch((await s.raw("/threads/new")).body.toString(), /name="project" value="acme"/);
+  assert.ok((await s.raw("/threads/closed")).body.toString().includes(s.thread.id), "closed history still lists removed projects");
+  assert.deepEqual(s.registry.threads.thread(s.thread.id), before);
+  assert.deepEqual(s.registry.threads.pylon(s.thread.pylonId), pylon);
+  assert.equal((await s.call("GET", `/v1/threads/${s.thread.id}`)).status, 200);
+  assert.equal((await s.call("GET", "/v1/threads?project=acme")).body.length, 1);
+  assert.deepEqual(await remove(), removed, "repeating removal keeps its first attribution and time");
+  for (const [method, path, body] of [
+    ["POST", "/v1/threads", { project: "acme", title: "No" }],
+    ["POST", `/v1/threads/${s.thread.id}/unarchive`, {}],
+    ["PATCH", "/v1/projects/acme", { defaultBranch: "other" }],
+    ["POST", "/v1/projects", project],
+  ] as const) assert.equal((await s.call(method, path, body)).status, 409, path);
+  assert.equal((await s.call("DELETE", "/v1/projects/missing")).status, 404);
+});
+
+test("only a person's device can remove a project, and callers cannot forge a removal", async (t) => {
+  const s = await testApi(t);
+  await s.call("POST", "/v1/projects", project);
+  for (const caller of ["nSTRANGER", "nFIREBAT"] as TailnetNodeId[]) {
+    s.callAs(caller);
+    assert.equal((await s.call("DELETE", "/v1/projects/acme")).status, 403);
+    assert.equal(s.registry.projects.project(project.id as ProjectId)?.removed, undefined);
+  }
+  s.callAs(laptop);
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { removed: { by: laptop, at: 1 } })).status, 400);
+  assert.equal((await s.call("POST", "/v1/projects", { ...project, id: "forged", removed: { by: laptop, at: 1 } })).status, 400);
+  assert.equal((await s.call("DELETE", "/v1/projects/acme")).status, 200);
+});
+
+test("queued work and unstarted pipeline items block removal; cancelled history cannot restart", async (t) => {
+  const s = await testApi(t, { pipeline: true });
+  await s.call("POST", "/v1/projects", project);
+  const queued = s.queue!.add({ project: "acme", title: "Later" }, null, [], laptop);
+  assert.equal((await s.call("DELETE", "/v1/projects/acme")).status, 409);
+  await s.call("POST", `/v1/threads/${queued.id}/archive`);
+  await s.call("PATCH", "/v1/projects/acme", { pipeline: { autoStart: false } });
+  const item = await s.call("POST", "/v1/items", { project: "acme", title: "Planned", message: "Do it" });
+  assert.equal(item.status, 201, JSON.stringify(item.body));
+  const blocked = await s.call("DELETE", "/v1/projects/acme");
+  assert.equal(blocked.status, 409);
+  assert.ok(blocked.body.error.includes(item.body.id));
+  await s.call("POST", `/v1/items/${item.body.id}/cancel`);
+  const removed = await s.call("DELETE", "/v1/projects/acme");
+  assert.equal(removed.status, 200);
+  assert.equal(removed.body.pipeline, null);
+  assert.equal(removed.body.autoReview, null);
+  assert.equal((await s.call("POST", `/v1/threads/${queued.id}/unarchive`)).status, 409);
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Queued", after: [queued.id] })).status, 409);
+  assert.equal((await s.call("POST", "/v1/items", { project: "acme", title: "New", message: "No" })).status, 409);
+  assert.equal(s.registry.queue.queuedThread(queued.id)?.status, "archived");
+});
+
+test("an archived thread with an open pull request still blocks project removal", async (t) => {
+  const s = await withThread(t);
+  await s.call("POST", `/v1/threads/${s.thread.id}/archive`);
+  for (const state of ["open", "merged"] as const) {
+    s.registry.prWatches.savePrWatch(s.thread.id, { links: [{ pr: testPr({ state }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+    const result = await s.call("DELETE", "/v1/projects/acme");
+    assert.equal(result.status, state === "open" ? 409 : 200);
+    if (state === "open") assert.match(result.body.error, /open pull requests/);
+  }
+});
+
+test("a start reserves its project before its thread exists, and releases it after success or failure", async (t) => {
+  const s = await withThread(t);
+  await s.call("POST", `/v1/threads/${s.thread.id}/archive`);
+  for (const fails of [false, true]) {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<null>();
+    s.remoteReads(() => { entered.resolve(); return release.promise; });
+    const starting = s.call("POST", "/v1/threads", { project: "acme", title: "Race", ...fails ? { branch: "missing" } : {} });
+    await entered.promise;
+    const blocked = await s.call("DELETE", "/v1/projects/acme");
+    assert.equal(blocked.status, 409);
+    assert.match(blocked.body.error, /thread starting/);
+    release.resolve(null);
+    const result = await starting;
+    assert.equal(result.status, fails ? 400 : 201, JSON.stringify(result.body));
+    assert.equal(s.registry.projects.starting(project.id as ProjectId), false);
+    if (!fails) await s.call("POST", `/v1/threads/${result.body.id}/archive`);
+  }
+  assert.equal((await s.call("DELETE", "/v1/projects/acme")).status, 200);
+});
 
 test("projects are created, listed, and checked", async (t) => {
   const s = await testApi(t);

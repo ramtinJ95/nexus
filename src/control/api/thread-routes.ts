@@ -166,6 +166,8 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
     }),
     on(routes.unarchive, { role: "person", action: "unarchive a thread" }, ({ thread: id }) => {
       const found = lookup(id);
+      const project = "queued" in found ? found.queued.project : found.thread.project;
+      if (registry.projects.project(project)?.removed !== undefined) throw new HttpError(409, `project ${project} is removed; its history is read-only`);
       return ok("queued" in found ? queuedStatus(id, "queued") : unarchive(found.thread));
     }),
     on(routes.activity, { role: "allowed", why: "a page open on the thread only keeps its pylon awake" }, async ({ thread: id }, r) => { recordActivity(thread(id), await r.body()); return noContent; }),

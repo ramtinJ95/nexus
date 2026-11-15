@@ -33,6 +33,7 @@ const before: readonly (readonly [string, RegExp, ApiRoute, readonly string[]])[
   ["GET", /^\/v1\/checks\/changes$/, doctorRoutes.changes, []],
   ["POST", /^\/v1\/checks\/seen$/, doctorRoutes.seen, []],
   ["PATCH", /^\/v1\/projects\/([^/]+)$/, projectRoutes.edit, ["project"]],
+  ["DELETE", /^\/v1\/projects\/([^/]+)$/, projectRoutes.remove, ["project"]],
   ["GET", /^\/v1\/projects$/, projectRoutes.list, []],
   ["POST", /^\/v1\/projects$/, projectRoutes.add, []],
   ["GET", /^\/v1\/items$/, itemRoutes.list, []],
