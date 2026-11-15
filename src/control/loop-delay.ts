@@ -53,6 +53,8 @@ export function loopWatch(options: { minuteMs?: number; kept?: number } = {}) {
   return {
     late: (): LoopLate => minutes.length === 0 ? { slowest: now(), minutes: 0 }
       : { slowest: minutes.reduce((a, b) => b.p99Ms > a.p99Ms ? b : a), minutes: minutes.length },
+    /** The last full minute, or the time since the start before the first ends. */
+    latest: (): LoopDelay => minutes.at(-1) ?? now(),
     close() {
       clearInterval(timer);
       histogram.disable();

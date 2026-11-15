@@ -256,9 +256,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   services.start({ everyMs: passMs, ...judgmentPass({ registry, harness, probes: probeMap, wake }) });
   const cleanup = services.start({ everyMs: cleanupEveryMs, ...cleanupPass({ registry, probes: probeMap, log }) });
   const startedAt = Date.now();
-  const loopLate = loopWatch().late;
+  const loopDelay = loopWatch();
   const doctor = () => runDoctor({
-    registry, self: config.self.tailnetNodeId, startedAt, loop: loopLate,
+    registry, self: config.self.tailnetNodeId, startedAt, loop: loopDelay.late,
     backupStatus: () => readBackupStatus(backupStatusFile),
     login: () => loginState(models, config.harness.model),
     // The API listens on one address, or on every one, where the loopback reaches it too.
@@ -299,6 +299,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     probes: probeMap,
     previewPorts: config.previewPorts,
     health: health.latest,
+    loop: loopDelay.latest,
     log,
   }));
   // After the API, whose delete it shares, so it closes first.

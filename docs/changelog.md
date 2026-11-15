@@ -6,6 +6,8 @@ What each version of the API contract and the Mac `nexus` CLI changed, newest fi
 
 Adds the `event-loop` check to `ControlCheckName`, which `GET /v1/checks`, `GET /v1/doctor`, `nexus doctor` and the Health page answer after `release`: how late the control plane ran what was due in the slowest of its last 5 minutes, `warn` from 500 ms at the 99th percentile and `fail` from 2 s, as [the design's doctor](design.md#doctor-and-health-alerts) describes. A control plane older than 0.93.0 reports no such check.
 
+Adds `loop` to `GET /v1/health`: `{ overMs, p99Ms, maxMs, busy }`, how late the control plane ran what was due in its last full minute, or since its start before the first minute ends. `overMs` is how long that stretch is, `p99Ms` and `maxMs` how late the loop ran at the 99th percentile and at worst, and `busy` the share of the stretch it was at work, from 0 to 1. The check reads the slowest of the last 5 minutes, and health the latest, so a monitor that polls health sees each minute once. The CLI does not read it.
+
 ## 0.92.0
 
 Adds the CLI's timeout setting: `--timeout SECONDS`, `NEXUS_TIMEOUT` or `"timeout"` in the config file, whole seconds from 1 to 3600, 30 when unset as before. It is how long the CLI lets a connection stay silent, as [Where it connects](cli.md#where-it-connects) describes. A control plane that took the connection and then sent nothing, in the TLS handshake too, is now named as busy or stuck, with the setting that waits longer. Before, a silence in the handshake was reported as the SOCKS proxy's. The API contract is unchanged, and a 0.91.0 control plane serves this CLI.

@@ -15,6 +15,7 @@ test("the watch reports the time since its start, then the slowest of the minute
   const watch = loopWatch({ minuteMs: 400, kept: 2 });
   t.after(() => watch.close());
   assert.equal(watch.late().minutes, 0, "before its first minute is over it reports the time since the start");
+  assert.ok(watch.latest().overMs < 400, "and so does its latest minute");
   // Work that holds the thread 150 ms at a time, with a turn of the loop between, so each sample comes that late.
   const until = Date.now() + 1300;
   while (Date.now() < until) {
@@ -28,4 +29,6 @@ test("the watch reports the time since its start, then the slowest of the minute
   assert.ok(slowest.busy >= 0.5, `and was busy ${slowest.busy} of the time`);
   await sleep(1000);
   assert.equal(watch.late().minutes, 2);
+  const latest = watch.latest();
+  assert.ok(latest.p99Ms < slowest.p99Ms && latest.busy < slowest.busy, `the latest minute is the idle one after the work, not the slowest kept: ${JSON.stringify(latest)}`);
 });
