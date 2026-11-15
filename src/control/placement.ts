@@ -23,6 +23,7 @@ type PlacementRegistry = Pick<Registry, "now"> & {
 };
 type TallyRegistry = PlacementRegistry & { nodes: Pick<Registry["nodes"], "transitions">; threads: Pick<Registry["threads"], "deletesAskedOn"> };
 type WeighingRegistry = PlacementRegistry & { nodeMetrics: Pick<Registry["nodeMetrics"], "latestHealthSample"> };
+type WakeRegistry = { placement: Pick<Registry["placement"], "reserved">; threads: Pick<Registry["threads"], "pylonsSpawningOn"> };
 
 type Need = Pick<BootInputs, "image" | "resources" | "network" | "repo" | "dotfiles">;
 
@@ -92,14 +93,15 @@ const tooSmall = (c: NodeCapacity, need: Need): string | null => need.resources.
  * pylons that wait for room never hold each other back. Committed memory never passes the node's: its swap is zram, which
  * keeps a swapped-out guest's pages in the same memory.
  */
-export function wakeShort(registry: WeighingRegistry, p: StoredPylon, o: NodeObservation): string | null {
+export function wakeShort(registry: WakeRegistry, p: StoredPylon, o: NodeObservation): string | null {
   const seen = new Map(o.pylons.map((s) => [s.pylonId, s]));
   const need = uncounted(p, seen.get(p.pylonId)).memoryGiB;
   if (need === 0) return null;
   const c = o.capacity;
-  const inFlight = registry.threads.pylonsWithThreadsOn(p.node)
-    .filter(({ pylon }) => pylon.pylonId !== p.pylonId && pylon.submitted?.job.kind === "spawn")
-    .reduce((gib, { pylon }) => gib + uncounted(pylon, seen.get(pylon.pylonId)).memoryGiB, 0);
+  // Asked on every pass of each pylon that waits for room, so it reads the spawns alone and not every pylon the node ever had.
+  const inFlight = registry.threads.pylonsSpawningOn(p.node)
+    .filter((pylon) => pylon.pylonId !== p.pylonId)
+    .reduce((gib, pylon) => gib + uncounted(pylon, seen.get(pylon.pylonId)).memoryGiB, 0);
   const reserved = registry.placement.reserved(p.node).reduce((gib, r) => gib + r.memoryGiB, 0);
   // A held builder's room counts until the node reports it freed: this wait is what makes freeHeldRoom release its hold.
   const committed = c.committedMemoryGiB + inFlight + reserved;

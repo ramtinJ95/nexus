@@ -458,6 +458,19 @@ test("a registry from before session titles keeps its sessions, untitled until t
   assert.equal(registry.threads.sessions(pylonId)[0]!.title, "review");
 });
 
+test("a node's spawning pylons are those whose submitted job is a spawn, on that node", (t) => {
+  const registry = seed(testRegistry(t, tempDb()));
+  const envelope = { jobId: "j1" as JobId, node, issuedAt: "2027-01-01T00:00:00.000Z", notAfter: "2027-01-01T00:00:30.000Z" };
+  assert.deepEqual(registry.threads.pylonsSpawningOn(node), [], "a pylon with nothing submitted is not spawning");
+  const spawning: Omit<PylonRecord, "desired"> = { ...pylon, submitted: { ...envelope, job: { kind: "spawn", pylonId, boot: { ...pylon.boot, source: pylon.firstBoot }, live: pylon.live, liveHash: pylon.liveHash } } };
+  registry.threads.savePylon(spawning);
+  const deleting = addPylon(registry, "th-2");
+  registry.threads.savePylon({ ...registry.threads.pylon(deleting)!, submitted: { ...envelope, jobId: "j2" as JobId, job: { kind: "delete", pylonId: deleting } } });
+  addPylon(registry, "th-3");
+  assert.deepEqual(registry.threads.pylonsSpawningOn(node), [spawning]);
+  assert.deepEqual(registry.threads.pylonsSpawningOn("elsewhere" as NodeName), []);
+});
+
 test("a registry from before repository kinds reads every stored repo, booted or submitted, as a clone", (t) => {
   const path = tempDb();
   const first = seed(openRegistry(path));
