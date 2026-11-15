@@ -10,7 +10,7 @@ import { usageBackfill } from "./usage-backfill.ts";
 import { archivedDiskMs, desiredPhase, diskKept, envelope } from "./reconcile.ts";
 import type { ImageId, JobId, LiveHash, NodeName, PylonId, ThreadId } from "../ids.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
-import { runningPylon, stoppedPylon, tempDir, testCapacity } from "../test-support/kit.ts";
+import { defaultBootedAt, runningPylon, stoppedPylon, tempDir, testCapacity } from "../test-support/kit.ts";
 import { polled } from "../test-support/service-kit.ts";
 
 const image: ImageId = "img-000000000000";
@@ -583,7 +583,7 @@ test("a thread unarchived while its settle waits to seal its pylon is not sealed
   await settling(registry, b, "reading");
   observe(registry, n2, [[b.pylonId, "running"]]);
   await settling(registry, b, "pausing");
-  assert.deepEqual([counter.sealed, registry.threads.sealedBoot(b.pylonId)], [[b.id], "2027-01-01T00:00:00Z"], "the boot it sealed is recorded");
+  assert.deepEqual([counter.sealed, registry.threads.sealedBoot(b.pylonId)], [[b.id], defaultBootedAt], "the boot it sealed is recorded");
 });
 
 test("a run wakes nothing while a pylon a restart's lost settle woke is still up, and goes on once it paused", async (t) => {

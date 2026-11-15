@@ -197,7 +197,7 @@ const needRows: { [K in NeedKind]: NeedRow<K> } = {
   judgment: { label: "Judgment", why: asked },
   question: { label: "Needs your decision", why: asked },
   nudge: { label: "Stopped short of a pull request", why: () => stoppedShort },
-  resume: { label: "Stopped resuming its turns", why: (n) => n.why },
+  resume: { label: "Its turn died", why: (n) => n.why },
   disk: {
     label: "Disk kept for its usage",
     why: (n, now) => firstLine(keptPastDay(n.d.thread, now) ?? "Its disk is kept for its token usage"),

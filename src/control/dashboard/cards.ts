@@ -272,12 +272,12 @@ ${again && refusal !== null && html`<p class="error">${landRefusals[refusal](c.c
 export const cancelReview = (thread: ThreadId, r: Review, look: string) => cancellable(r)
   && html`<button type="button" class="btn ${look}"${act("cancel-review")} data-thread="${thread}" data-confirm="Cancel review ${r.id} of pull request #${r.pr.number}?${r.phase.kind === "needs-person" && " It stops waiting on you."} Its reviewer thread is archived, and this thread stays as it is.">Cancel review</button>`;
 
-/** For a Claude worker whose turns kept dying after Nexus resumed them, which waits on the person, with why Nexus stopped resuming it. */
+/** For a Claude worker whose turn died and that Nexus does not resume, which waits on the person, with why. */
 export function resumeCard(t: Thread, why: string, place: Place = "page"): Html {
   const id = namer(place, t.id);
   return html`<section class="landing nudge" aria-labelledby="${id("resume-h")}">
 <div class="land-top"><h2 id="${id("resume-h")}">${needLabels.resume}</h2></div>
-<p class="land-note">${why} Write to it to resume it: your message makes the thread yours, and Nexus leaves it alone from then on.</p>
+<p class="land-note">${why} Write to it to resume it.</p>
 <div class="land-act need-act"><a class="btn btn-primary" href="/threads/${t.id}#write" data-write>Write to it</a></div>
 </section>`;
 }
