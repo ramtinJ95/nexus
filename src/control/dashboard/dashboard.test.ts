@@ -1006,6 +1006,12 @@ test("a Claude worker whose turn died and that Nexus does not resume has a card 
   const card = needsOf(inbox).cards.filter((c) => c.thread === th.id);
   assert.equal(card.length, 1);
   assert.deepEqual(actionsOf(card[0]!.html), actionsOf(dock));
+
+  s.registry.reviews.saveReview(approvedReview(th.id, personPhase("policy", { code: "github-checks", text: "The pull request's GitHub checks are pending." }), { land: { requestedBy: laptop } }));
+  const held = (await s.call("GET", `/threads/${th.id}`)).text;
+  assert.equal(s.registry.threads.attention(th.id), "decision");
+  assert.ok(textOf(dockOf(held)).includes(`Its turn died ${why} Write to it to resume it`), "a death beside a review that waits on the person shows on the page too");
+  assert.match(landingOf(held), /Held for you/);
 });
 test("a held review waits from when it was held, not from when its review last messaged an agent, so a question asked before that comes first", async (t) => {
   const s = await seeded(t, landingOptions());

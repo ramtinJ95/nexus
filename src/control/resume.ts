@@ -9,7 +9,8 @@
  * message the person wrote before the death answers nothing, so a conductor who steers a builder keeps its resumes.
  * Every death Nexus does not resume goes to the person with why, so none reads as a reply.
  *
- * Reviewers, checks and planning threads are left out, and so is a builder whose review the loop handed to the person.
+ * Reviewers, checks and planning threads are left out. A builder whose review the loop handed to the person gets no
+ * resume either, as its work waits on them, and its death goes to them with why, beside the review.
  * Until its review finishes, the loop sends a builder whose turn ended on a model error its request again, or its next
  * message, which resumes it as well, so such a builder gets no resume for one. A planning thread runs in the harness,
  * where no session ends. Only a death in the last hour is resumed, so a control plane that starts, or starts this,
@@ -50,11 +51,14 @@ export function deadTurnResumer(options: {
 }) {
   const { registry, inbox, personWroteTo, clock = Date.now, log = (message: string) => console.error(message) } = options;
 
+  /** Whether `t` is a thread whose deaths this answers: an open Claude builder. */
+  const builder = (t: Thread) => isOpenStatus(t.status) && registry.threads.agent(t).kind === "claude" && threadRole(registry, t) === "builder";
+  /** Whether `t`'s review waits on the person, who then decides what its builder does next. */
+  const reviewWaits = (t: Thread) => registry.reviews.review(t.id)?.phase.kind === "needs-person";
+
   function covered(t: Thread): boolean {
-    if (!isOpenStatus(t.status)) return false;
-    if (registry.threads.agent(t).kind !== "claude" || threadRole(registry, t) !== "builder") return false;
+    if (!builder(t) || reviewWaits(t)) return false;
     const phase = registry.reviews.review(t.id)?.phase.kind;
-    if (phase === "needs-person") return false;
     return !(t.turnDied?.cause === "model-error" && phase !== undefined && !finished.has(phase));
   }
 
@@ -67,10 +71,21 @@ export function deadTurnResumer(options: {
   };
 
   async function judge(t: Thread) {
-    const record = registry.threads.claudeResume(t.id);
+    const stored = registry.threads.claudeResume(t.id);
     const save = (next: ClaudeResume | null) => registry.threads.saveClaudeResume(t.id, next);
-    if (!covered(t)) return record === null ? undefined : save(null);
     const died = t.turnDied;
+    if (!covered(t)) {
+      // The death stands beside the review that waits on the person, so a builder that stopped mid-turn does not read as one that waits.
+      if (died !== undefined && !t.working && builder(t) && reviewWaits(t)) {
+        if (stored?.state === "person" && stored.turn >= died.at) return;
+        // A review handed to the person ends the deaths in a row, as it did when it cleared the record.
+        return save({ state: "person", turn: died.at, count: 0, why: `Its turn died (${died.reason}). Its review waits on you, so Nexus did not resume it.`, review: true });
+      }
+      return stored === null ? undefined : save(null);
+    }
+    // The review moved on, so a death left to the person only for it is judged as one no record answers yet.
+    const left = stored?.state === "person" && stored.review === true;
+    const record = left ? null : stored;
     const answered = (r: { turn: number; count: number; from?: number }): ClaudeResume => ({ state: "answered", turn: r.turn, count: r.count, from: r.from ?? clock(), at: clock() });
     if (record?.state === "sending") {
       // It may never have gone out, so it goes only to a thread that still waits on that death and that the person did not answer.
@@ -86,7 +101,7 @@ export function deadTurnResumer(options: {
       // A turn started since the one that died. Once it ended and the transcript was read past its end without a death
       // in it, the deaths in a row are over: a read that lags the end would show no model error yet.
       const readAt = registry.threads.claudeTranscript(t.id)?.readAt ?? -Infinity;
-      if (record !== null && !t.working && t.lastReplyAt !== null && readAt >= t.lastReplyAt) save(null);
+      if (left || (record !== null && !t.working && t.lastReplyAt !== null && readAt >= t.lastReplyAt)) save(null);
       return;
     }
     if (t.working) return;
