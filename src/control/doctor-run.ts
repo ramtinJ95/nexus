@@ -17,6 +17,7 @@ import type { Registry } from "./registry.ts";
 import type { NewHealthChange } from "./health-store.ts";
 import type { TokenAnswer } from "./github.ts";
 import type { TailscaleStatus } from "../tailscale.ts";
+import type { LoopLate } from "./loop-delay.ts";
 
 export interface DoctorSources {
   registry: Pick<Registry, "nodes" | "now" | "threads" | "placement" | "releases" | "images" | "prWatches">;
@@ -28,6 +29,8 @@ export interface DoctorSources {
   githubToken(): Promise<TokenAnswer | { kind: "none" }>;
   /** tailscaled's status on the control plane's machine. */
   tailnet(): Promise<TailscaleStatus>;
+  /** How late the event loop ran lately, as its watch says. */
+  loop(): LoopLate;
   startedAt: number;
   clock?: () => number;
 }
@@ -55,7 +58,7 @@ export async function runDoctor(s: DoctorSources): Promise<DoctorReport> {
     nodes: records.map((record) => nodeSummary(s.registry, record)),
     release: releaseView(s.registry, s.self, now),
     controlNode: s.registry.nodes.nodeByTailnetId(s.self)?.name ?? null,
-    backup, login, certificate, github, tailnet,
+    loop: s.loop(), backup, login, certificate, github, tailnet,
     // A pylon its node does not list has no disk to keep, as one whose disk was deleted before disks waited for their usage.
     keptArchives: s.registry.threads.keptArchives().filter((t) => {
       const p = s.registry.threads.pylon(t.pylonId);
