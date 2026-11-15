@@ -56,6 +56,12 @@ export interface NodeObservation {
    * nest. Only such a node takes a pylon whose boot asks for nested virtualization, such as a verify pylon.
    */
   nestedVirtualization?: true;
+  /**
+   * True from a probe that starts a Claude session with a first prompt longer than its command line takes, by a file the
+   * session is told to read (probe/guest/sessions.ts), and sends a message too long to type the same way. An older probe
+   * refuses either.
+   */
+  longPrompts?: true;
   /** The heldSecrets this probe takes from the control plane. */
   heldSecrets: readonly string[];
 }
@@ -248,6 +254,7 @@ const observationSchema = z.looseObject({
   previewRoutes: z.array(unchecked<PreviewRouteFact>()),
   grants: unchecked<NodeObservation["grants"]>(),
   nestedVirtualization: unchecked<true>(),
+  longPrompts: unchecked<true>(),
   heldSecrets: unchecked<readonly string[]>(),
 }) satisfies z.ZodType<NodeObservation>;
 

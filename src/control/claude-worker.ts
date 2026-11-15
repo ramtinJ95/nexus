@@ -3,6 +3,8 @@
  * death, Nexus resuming a turn that died, its transcript as read so far, what stopped its latest turn, and the
  * messages typed into it. The thread store makes it, and hands it the thread's reconcile, attention and turn.
  */
+import { inlinePromptChars, messageFile, messagePointer, promptFile, promptPointer } from "../protocol/commands.ts";
+import { claudeLaunchesDir } from "../../images/pylon/nexus-contract.ts";
 import { createHash } from "node:crypto";
 import { claudeTurn } from "../../images/pylon/nexus-contract.ts";
 import type { ThreadId } from "../ids.ts";
@@ -120,6 +122,9 @@ export interface ClaudeWorkerThread {
  * the same hash of each prompt, so a prompt is Nexus's only when the two match.
  */
 export const textSha256 = (text: string): string => createHash("sha256").update(text).digest("hex");
+/** What the probe types for `text` into `session`: the text, or the pointer to the file a message too long to type goes in. */
+export const typedForm = (session: string, text: string): string =>
+  text.length <= inlinePromptChars ? text : messagePointer(messageFile(`${claudeLaunchesDir}/${session}`, textSha256(text)), text.length);
 
 export function claudeWorkerStore(db: Db, on: ClaudeWorkerThread) {
   const { transaction, sql } = db;
@@ -332,7 +337,10 @@ export function claudeWorkerStore(db: Db, on: ClaudeWorkerThread) {
     /** Whether Nexus typed the text whose textSha256 this is into the thread's Claude worker, or launched the worker with it. */
     typedByNexus(thread: ThreadId, sha256: string): boolean {
       const worker = claudeWorker(thread);
-      return (worker !== undefined && textSha256(worker.prompt) === sha256) || sql("SELECT 1 FROM claude_senders WHERE thread = ? AND text_sha256 = ?").get(thread, sha256) !== undefined;
+      const typed = (text: string) => textSha256(text) === sha256;
+      // A first prompt too long for the command line is launched as a pointer to the file that holds it.
+      const pointer = worker?.session == null || worker.prompt.length <= inlinePromptChars ? null : promptPointer(promptFile(`${claudeLaunchesDir}/${worker.session}`), worker.prompt.length);
+      return (worker !== undefined && (typed(worker.prompt) || (pointer !== null && typed(pointer)))) || sql("SELECT 1 FROM claude_senders WHERE thread = ? AND text_sha256 = ?").get(thread, sha256) !== undefined;
     },
     /** Who typed each message recorded for the thread's Claude worker, and the hash of its text, null for one recorded before senders were. */
     claudeMessageSenders: (thread: ThreadId) => sql("SELECT coalesce(s.sender, 'unknown') AS sender, s.text_sha256 FROM claude_messages m LEFT JOIN claude_senders s USING (thread, request_id) WHERE m.thread = ?").all(thread)

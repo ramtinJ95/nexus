@@ -97,8 +97,40 @@ export type CommandResult =
   /** `refused` says why the pylon left a port a service's preview owns, for a person to read. Null once the port is not linked. */
   | { kind: "unlink-port"; refused: string | null };
 
-/** The longest prompt an open session starts with, and the longest message a Claude session is sent. */
+/** The longest message a person sends a Claude session, or a prompt they start one with. */
 export const maxPromptChars = 16_384;
+/**
+ * The longest message Nexus sends a Claude session. One longer than `inlinePromptChars` goes in a file the session is
+ * told to read (probe/guest/sessions.ts). The probe's request body takes 1,048,576 characters, counted as UTF-16 code
+ * units, not bytes (node-base/request-body.ts), so a character of 3 or 4 UTF-8 bytes counts as 1 or 2, as it does here.
+ * A message holds no control character but a newline (claudeTextProblem), so JSON escapes each to at most 2, and this fits.
+ */
+export const maxMessageChars = 500_000;
+/**
+ * The longest prompt an open session starts with. One longer than `inlinePromptChars` goes to the session in a file it
+ * is told to read (probe/guest/sessions.ts), so this bounds only what the control plane stores and sends the probe,
+ * whose request body takes 1 MiB: even escaped to 6 bytes a character in JSON, this fits.
+ */
+export const maxOpenPromptChars = 131_072;
+/**
+ * The longest first prompt passed on Claude's command line. It goes there as one argument, inside a Herdr Core request
+ * that the guest runs as one shell-quoted argument, and Linux takes at most 131,072 bytes in one argument
+ * (MAX_ARG_STRLEN). Quoting turns an apostrophe into 5 bytes, so 16,384 characters keep any text under it.
+ */
+export const inlinePromptChars = 16_384;
+/** Where a first prompt too long for the command line is written, in its launch's directory. */
+export const promptFile = (launchDir: string) => `${launchDir}/prompt.md`;
+/**
+ * Where a message too long to type is written, in its session's launch directory, named for its text's SHA-256 so the
+ * control plane knows the pointer typed in its place.
+ */
+export const messageFile = (launchDir: string, textSha256: string) => `${launchDir}/message-${textSha256.slice(0, 16)}.md`;
+/** The message typed in place of one written to `path`. */
+export const messagePointer = (path: string, length: number) =>
+  `This message is ${length} characters, too long to type, so it is in ${path}. Read all of it now and act on it as if it were this message.`;
+/** The first prompt Claude is started with in place of one written to `path`, which the control plane counts as Nexus's own. */
+export const promptPointer = (path: string, length: number) =>
+  `Your first message is ${length} characters, too long for the command line, so it is in ${path}. Read all of it now and act on it as if it were this message.`;
 
 const port = z.int().min(1).max(65535).refine((p) => !reservedPorts.has(p), reservedPortMessage);
 /** Refuses an open-session field that only some kinds of session take, and names them. */
@@ -111,7 +143,7 @@ const openSession = (harness: SessionHarness) => {
   return z.looseObject({
     kind: z.literal("open-session"), title: nonEmpty, harness: z.literal(harness),
     resume: takes.resume ? nonEmpty.exactOptional() : z.never({ error: `a ${harness} session has nothing to resume` }).exactOptional(),
-    prompt: takes.prompt ? nonEmpty.max(maxPromptChars).exactOptional() : onlyFor("prompt"),
+    prompt: takes.prompt ? nonEmpty.max(maxOpenPromptChars).exactOptional() : onlyFor("prompt"),
     model: takes.model ? nonEmpty.max(200).exactOptional() : onlyFor("model"),
   });
 };
@@ -127,7 +159,7 @@ const pylonCommandSchema = z.discriminatedUnion("kind", [
   z.looseObject({
     kind: z.literal("send-claude"),
     session: claudeSession,
-    text: nonEmpty.max(maxPromptChars).superRefine((t, ctx) => {
+    text: nonEmpty.max(maxMessageChars).superRefine((t, ctx) => {
       const problem = claudeTextProblem(t);
       if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
     }),

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { fullCommit } from "../protocol/deploy.ts";
-import { maxPromptChars } from "../protocol/commands.ts";
+import { inlinePromptChars, maxOpenPromptChars, maxPromptChars as maxPersonPromptChars } from "../protocol/commands.ts";
 import type { HarnessHost } from "./harness/host.ts";
 import { chooseTemplate, setupHashOf, type ProjectMirror, type SetupInputs, type ThreadSetup } from "./templates.ts";
 import { bootSecrets, effectiveAllowedHosts, gitIdentityOf, hasRemote, withHttpsHosts, type Project, type RemoteProject } from "./project.ts";
@@ -35,14 +35,17 @@ const claudePromptOf = ({ request, role }: Pick<Start, "request" | "role">) =>
 export function checkStart(registry: ThreadsRegistry, start: Pick<Start, "request" | "role">): Project {
   const { request } = start;
   const claudePrompt = claudePromptOf(start);
-  if (claudePrompt !== undefined && claudePrompt.length > maxPromptChars) throw new Refusal("invalid", `Claude prompt including ${claudeSkill} exceeds ${maxPromptChars} characters`);
+  // A reviewer's first request carries the pull request's description and the builder's brief, which Nexus does not
+  // bound, so it may be as long as an open session takes. The probe hands one past the command line's room in a file.
+  const maxPromptChars = start.role === "reviewer" ? maxOpenPromptChars : maxPersonPromptChars;
+  if (claudePrompt !== undefined && claudePrompt.length > maxPromptChars) throw new Refusal("invalid", `Claude prompt${claudePrompt.startsWith(claudeSkill) ? ` including ${claudeSkill}` : ""} exceeds ${maxPromptChars} characters`);
   const project = registry.projects.project(request.project as ProjectId);
   if (project === undefined) throw new Refusal("missing", `no project ${request.project}`);
   const { memoryGiB } = resourcesOf(request.resources, project);
   if (memoryGiB < minPylonMemoryGiB) throw new Refusal("invalid", `the pylon would get ${memoryGiB} GiB, but ${minPylonMemoryReason}`);
   const rules = standingRulesFor(project, start);
   if (claudePrompt !== undefined && withStandingRules(claudePrompt, rules).length > maxPromptChars) {
-    throw new Refusal("invalid", `Claude prompt including ${claudeSkill} and project ${project.id}'s standing rules exceeds ${maxPromptChars} characters. Shorten the brief, or the rules that nexus project show ${project.id} prints`, "too-long");
+    throw new Refusal("invalid", `Claude prompt${claudePrompt.startsWith(claudeSkill) ? ` including ${claudeSkill}` : ""} and project ${project.id}'s standing rules exceeds ${maxPromptChars} characters. Shorten the brief, or the rules that nexus project show ${project.id} prints`, "too-long");
   }
   if (request.node !== undefined && request.node !== "auto" && registry.nodes.node(request.node as NodeName) === undefined) throw new Refusal("invalid", `no node ${request.node}`);
   if (!hasRemote(project) && request.commit !== undefined) throw new Refusal("invalid", `project ${project.id} is a scratch project, so it has no commit to check out`);
@@ -141,6 +144,14 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
       : request.near !== undefined ? placeNear(registry, need, request.near, request.ifRoom === true)
       : { how: "default", node: project.defaultNode as NodeName };
     const { node } = placement;
+    // An older probe refuses a first prompt past the command line's room, and its worker would stay failed, so the start
+    // is refused at once, naming the node to upgrade.
+    const observed = registry.nodes.node(node)?.observation;
+    if (claudePrompt !== undefined && claudePrompt.length > inlinePromptChars && observed?.longPrompts !== true) {
+      throw observed == null
+        ? new Refusal("conflict", `${node}'s probe has not reported yet, so whether it can start a Claude session with a first prompt of ${claudePrompt.length} characters is unknown`)
+        : new Refusal("conflict", `${node}'s probe cannot start a Claude session with a first prompt of ${claudePrompt.length} characters, over the ${inlinePromptChars} its command line takes, so it needs this release of Nexus on its probe`, "probe-too-old");
+    }
     // `auto` passes such a node by, and a review's start beside its builder goes there all the same.
     const short = named || placement.how === "default" ? namedDiskShort(registry, node, resources) : null;
     if (short !== null) throw new Refusal("conflict", `${node} ${short}`);

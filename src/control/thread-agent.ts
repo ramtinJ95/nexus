@@ -15,6 +15,7 @@ import type { ProbeError } from "../protocol/http.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import type { HarnessHost } from "./harness/host.ts";
 import { claudeTextProblem } from "../protocol/agent-kinds.ts";
+import { maxPromptChars } from "../protocol/commands.ts";
 import { agentReads, harnessView, refreshClaude, type AgentRead } from "./agent-conversation.ts";
 import type { ClaudeConversations } from "./claude-conversation.ts";
 import { viewFrames, type Frames, type Watch } from "./conversation-view.ts";
@@ -122,6 +123,7 @@ export function threadAgents(options: {
         const text = message.text.replace(/\r\n?/g, "\n").trim();
         const problem = claudeTextProblem(text);
         if (problem !== null) throw new Refusal("invalid", `Claude cannot take this message as typed: ${problem}`);
+        if (text.length > maxPromptChars) throw new Refusal("invalid", `a message to Claude is at most ${maxPromptChars} characters, and this one is ${text.length}`);
         const { session, model } = worker(t);
         if (session === null) throw new Refusal("conflict", `the Claude worker of ${t.id} has not started a session yet, so it takes no messages. Send it once it has started`, "not-ready");
         const stored = registry.threads.claudeMessage(t.id, message.requestId);

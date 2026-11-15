@@ -16,7 +16,7 @@ import { readControlPlane } from "../deploy/control-plane.ts";
 import type { ArtifactId, CheckpointId, ImageId, JobId, LiveHash, NodeName, PortableArtifactId, PylonId, TailnetNodeId, TemplateId } from "../ids.ts";
 import { jobDeadlineMs, JobFailure, type Job, type JobEnvelope, type JobStatus } from "../protocol/jobs.ts";
 import { gitPollMs, type DeclaredOutput, type GitFacts, type NodeObservation, type ProbeEvent, type ServiceFact } from "../protocol/observations.ts";
-import type { PylonCommand } from "../protocol/commands.ts";
+import { maxMessageChars, type PylonCommand } from "../protocol/commands.ts";
 import { streamPath, streamProtocol, type ByteStream } from "../protocol/streams.ts";
 import { fetchArtifact } from "../protocol/artifacts.ts";
 import { connectProbe } from "../protocol/client.ts";
@@ -859,11 +859,27 @@ test("malformed commands get 400 and reach no guest", async (t) => {
   assert.equal(await post({ kind: "close-session", terminal: "t1", session: { harness: "pi", title: null } }), 400);
   assert.equal(await post({ kind: "reboot" }), 400);
   const send = { kind: "send-claude", session: "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90", text: "hi" };
-  for (const bad of [{ session: undefined }, { session: "../etc" }, { session: "a".repeat(201) }, { text: "" }, { text: "x".repeat(16_385) }, { text: "a\tb" }, { text: "a\rb" }, { model: "" }, { model: "m".repeat(201) }, { requestId: "" }, { requestId: 1 }]) {
+  for (const bad of [{ session: undefined }, { session: "../etc" }, { session: "a".repeat(201) }, { text: "" }, { text: "x".repeat(500_001) }, { text: "a\tb" }, { text: "a\rb" }, { model: "" }, { model: "m".repeat(201) }, { requestId: "" }, { requestId: 1 }]) {
     assert.equal(await post({ ...send, ...bad }), 400, JSON.stringify(bad));
   }
   assert.equal(await post({ kind: "send-claude-outcome" }), 400);
   assert.deepEqual(guest.execs, []);
+});
+
+test("a Claude message of maxMessageChars passes the request's limit whatever its characters, since the limit counts characters, not bytes", async (t) => {
+  const guest = fakeGuest(() => { throw new Error("the guest is not reached in this test"); });
+  const { client, base } = await setup(t, {}, guest);
+  await running(client);
+  const post = (text: string) => fetch(`${base}/v1/pylons/${pylonId}/commands`, { method: "POST", body: JSON.stringify({ kind: "send-claude", session: "0b5e3a52-5d0f-4c1e-9a43-1f2a6c7d8e90", text }) })
+    .then(async (r) => ({ status: r.status, body: await r.text() }));
+  // 界 is 3 bytes of UTF-8 and an emoji 4, so these bodies are 1.5 and 1 MB; a newline escapes to 2 characters.
+  for (const text of ["界".repeat(maxMessageChars), "😀".repeat(maxMessageChars / 2), `a${"\n".repeat(maxMessageChars - 2)}b`]) {
+    const { status, body } = await post(text);
+    assert.notEqual(status, 400, body.slice(0, 200));
+  }
+  const over = await post("界".repeat(maxMessageChars + 1));
+  assert.equal(over.status, 400);
+  assert.doesNotMatch(over.body, /request body over/, "the schema refuses it, not the body's limit");
 });
 
 test("a message that resumes its Claude session publishes the session's new terminal at once", async (t) => {
