@@ -195,8 +195,8 @@ export function reviewLoop(deps: ReviewDeps) {
 
   /** Each PR as GitHub said it in this pass, which a step reads rather than GitHub again. A landing reads it afresh. */
   let reads = new Map<string, Promise<PrSnapshot>>();
-  const prKey = (r: Pick<Review, "pr">) => `${r.pr.repo}:${r.pr.number}`;
-  const read = (r: Pick<Review, "pr">) => {
+  const prKey = (r: { pr: Pick<Review["pr"], "repo" | "number"> }) => `${r.pr.repo}:${r.pr.number}`;
+  const read = (r: { pr: Pick<Review["pr"], "repo" | "number"> }) => {
     if (!reads.has(prKey(r))) reads.set(prKey(r), github.poll(r.pr.repo, r.pr.number));
     return reads.get(prKey(r))!;
   };
@@ -935,10 +935,16 @@ export function reviewLoop(deps: ReviewDeps) {
   const finished = (...ids: ThreadId[]): Thread[] => ids.map((id) => registry.threads.thread(id))
     .filter((t): t is Thread => t !== undefined && !t.working && isOpenStatus(t.status));
   /**
-   * Whether a builder whose review landed still has work open: another pull request the PR watch shows open, whose
-   * review runs after this one or waits on its builder. Its turn is `finished`'s to judge.
+   * Whether a builder whose review landed still has work open: another pull request the PR watch linked that GitHub says
+   * is open now, whose review runs after this one or waits on its builder, and whose landing archives the builder in
+   * turn. GitHub is asked, since the watch may not have read a merge yet. Its turn is `finished`'s to judge.
    */
-  const keepsWork = (r: Review) => watchedPrs(registry.prWatches.prWatch(r.builder)).some((pr) => pr.state === "open" && !(pr.repo === r.pr.repo && pr.number === r.pr.number));
+  const keepsWork = async (r: Review) => {
+    for (const pr of watchedPrs(registry.prWatches.prWatch(r.builder)).filter((pr) => pr.state === "open" && !(pr.repo === r.pr.repo && pr.number === r.pr.number))) {
+      if ((await read({ pr })).pr.state === "open") return true;
+    }
+    return false;
+  };
 
   /**
    * Whether `r` may still use its reviewer: while it runs, or while it waits at approval or for the person, unmerged, in
@@ -968,15 +974,10 @@ export function reviewLoop(deps: ReviewDeps) {
       deps.wake(t);
     }
     // So has a builder whose turn ran on past its review's landing, once the turn ends, unless the person wrote to it
-    // since the landing, which makes it theirs, or it opened another pull request meanwhile.
+    // since the landing, which makes it theirs, or another of its pull requests is open, whose own landing archives it.
     for (const r of registry.reviews.landedInTurn()) {
       try {
         if (r.phase.kind !== "landed" || r.phase.inTurn === undefined) continue;
-        if (keepsWork(r)) {
-          const { inTurn: _, ...phase } = r.phase;
-          registry.reviews.saveReview({ ...r, phase }, [], r);
-          continue;
-        }
         const builder = registry.threads.thread(r.builder);
         if (builder?.working === true && isOpenStatus(builder.status)) continue;
         const { inTurn, ...phase } = r.phase;
@@ -988,7 +989,11 @@ export function reviewLoop(deps: ReviewDeps) {
         // The read yields, so a turn, an archive or a delete meanwhile decides instead.
         const fresh = registry.threads.thread(r.builder);
         if (fresh?.working === true && isOpenStatus(fresh.status)) continue;
-        const archive = !theirs && fresh !== undefined && isOpenStatus(fresh.status) ? [fresh] : [];
+        // A pull request the builder opened in its turn keeps it for that pull request's own landing. The read yields too.
+        const kept = !theirs && fresh !== undefined && isOpenStatus(fresh.status) && await keepsWork(r);
+        const latest = registry.threads.thread(r.builder);
+        if (latest?.working === true && isOpenStatus(latest.status)) continue;
+        const archive = !theirs && !kept && latest !== undefined && isOpenStatus(latest.status) ? [latest] : [];
         if (registry.reviews.saveReview({ ...r, phase }, archive.map((t) => t.id), r)) for (const t of archive) deps.wake(t);
         retried.ok(`${r.id} builder`);
       } catch (err) {
@@ -1056,7 +1061,8 @@ export function reviewLoop(deps: ReviewDeps) {
           if (next === r) break;
           let archive: Thread[] = [];
           if (next.phase.kind === "landed" && r.phase.kind !== "landed") {
-            const kept = keepsWork(next);
+            // A read that fails keeps the builder, which the next pull request's landing archives.
+            const kept = await keepsWork(next).catch(() => true);
             archive = finished(...kept ? [] : [next.builder], ...reviewersOf(next));
             const builder = registry.threads.thread(next.builder);
             if (!kept && builder?.working === true && isOpenStatus(builder.status)) next = { ...next, phase: { ...next.phase, inTurn: now() } };
@@ -1135,9 +1141,15 @@ export function reviewLoop(deps: ReviewDeps) {
     };
     // A Claude reviewer's first request is its first prompt, which still takes the first message's number.
     const review = kind.claude ? { ...started, sent: 1 } : resend(started, "reviewer");
-    // Again, since another start of the PR may have recorded its review while this one read GitHub.
+    // Again, since another start of the PR may have recorded its review while this one read GitHub. An automatic start
+    // also gives way to any review of the PR since, and to the builder's review that has not settled, which it would replace.
     refuseIfReviewed(builder.id, repo, number);
     refuseIfRunning(builder.id);
+    if (request.auto) {
+      if (registry.reviews.prReviewed(repo, number)) throw new Refusal("conflict", `pull request #${number} got a review while this start read GitHub`);
+      const current = registry.reviews.review(builder.id);
+      if (current !== null && !settled(current)) throw new Refusal("conflict", `review ${current.id} of ${builder.id} is ${current.phase.kind}, so pull request #${number} waits for it`);
+    }
     registry.reviews.saveReview(review);
     void poll();
     return review;

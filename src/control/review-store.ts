@@ -15,10 +15,11 @@ import type { Need } from "./attention.ts";
 /** A purged builder's review goes with it, and the pull requests its reviews read and the rounds they spent stay counted. */
 export const holding = { tables: { reviews: { record: "builder", purge: "builder = $thread" }, reviewed_prs: {}, review_rounds: {} } } as const satisfies Holding;
 
-export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, status: ThreadStatus) => void; appendEvent: (kind: EventKind, thread: ThreadId, payload: Record<string, unknown>) => unknown; updateAttention: (thread: ThreadId) => void; events: (since: string, filter: EventFilter) => NexusEvent[] }) {
+/** `firstReview` hears, in the save's transaction, of the first review ever saved of a pull request. */
+export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, status: ThreadStatus) => void; appendEvent: (kind: EventKind, thread: ThreadId, payload: Record<string, unknown>) => unknown; updateAttention: (thread: ThreadId) => void; events: (since: string, filter: EventFilter) => NexusEvent[]; firstReview?: (repo: string, number: number) => void }) {
   const { transaction, sql } = db;
   const reviews = db.hold(holding).records<Review>("reviews");
-  const { setThreadStatus, appendEvent, updateAttention, events } = core;
+  const { setThreadStatus, appendEvent, updateAttention, events, firstReview = () => {} } = core;
   /** A review whose reviewer never started read nothing, so it spent no round. */
   const spend = (review: Review) => sql("INSERT INTO review_rounds (review, repo, number, rounds) VALUES (?, ?, ?, ?) ON CONFLICT (review) DO UPDATE SET rounds = excluded.rounds")
     .run(review.id, review.pr.repo, review.pr.number, review.reviewerStarted ? roundsSpent(review) : 0);
@@ -100,7 +101,7 @@ export function reviewStore(db: Db, core: { setThreadStatus: (id: ThreadId, stat
         for (const id of archive) setThreadStatus(id, "archived");
         sql("INSERT INTO reviews (builder, reviewer, record) VALUES (?, ?, ?) ON CONFLICT (builder) DO UPDATE SET reviewer = excluded.reviewer, record = excluded.record")
           .run(review.builder, review.reviewer, JSON.stringify(review));
-        sql("INSERT OR IGNORE INTO reviewed_prs (repo, number) VALUES (?, ?)").run(review.pr.repo, review.pr.number);
+        if (sql("INSERT OR IGNORE INTO reviewed_prs (repo, number) VALUES (?, ?)").run(review.pr.repo, review.pr.number).changes > 0) firstReview(review.pr.repo, review.pr.number);
         spend(review);
         const label = (r: Review | null) => r?.phase.kind === "needs-person" ? r.phase.label?.state : undefined;
         if (before?.id !== review.id || before.phase.kind !== review.phase.kind || before.rounds.length !== review.rounds.length || label(before) !== label(review)) {

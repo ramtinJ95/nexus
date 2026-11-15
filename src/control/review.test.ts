@@ -6056,3 +6056,72 @@ test("a second pull request waits behind its builder's approved review, which on
   assert.equal(f.review().pr.number, 8);
   assert.deepEqual(f.registry.threads.thread(f.builder)!.status, "active");
 });
+
+test("an owed review's start gives way to a review of its pull request the person saved while it read GitHub", async (t) => {
+  const f = fixture(t, { repo: "acme/shop", autoReview: { mode: "land", enabledBy: "nLAPTOP" } });
+  const loop = f.loop();
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
+  await loop.poll();
+  secondPr(f, { conflict: true });
+  github8(f, { conflict: false });
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().pr.number, 7, "#8 waits while the PR watch last read it conflicting");
+  watchRead(f, 7, { state: "merged" });
+  watchRead(f, 8, { conflict: false });
+  const hold = f.holdPolls();
+  const pass = loop.poll();
+  await hold.entered;
+  const cancelled: Review = { ...f.review(), id: "rv-person", pr: { ...f.review().pr, number: 8 }, phase: { kind: "cancelled", who: "person", by: "nLAPTOP" } };
+  f.registry.reviews.saveReview(cancelled);
+  hold.release();
+  await pass;
+  assert.equal(f.review().id, "rv-person", "the person's review of #8 stays as they left it");
+});
+
+test("a pull request the PR watch links while the loop reads whether the person wrote to a landed builder keeps the builder open", async (t) => {
+  let link = () => {};
+  const f = fixture(t, { repo: "acme/shop", autoReview: { mode: "land", enabledBy: "nLAPTOP" }, personWrote: () => async () => { link(); return false; } });
+  const loop = f.loop();
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
+  await loop.poll();
+  f.registry.threads.recordActivity(f.builder, { agent: f.now, agentTurnRunning: true });
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "landed");
+  link = () => { secondPr(f); };
+  f.tick(60_000);
+  f.registry.threads.recordActivity(f.builder, { agent: f.now, agentTurnRunning: false });
+  f.tick(1_000);
+  claudeRead(f, [{ kind: "reply", at: f.now, text: "Opened #8." }], []);
+  await loop.poll();
+  assert.equal(f.registry.threads.thread(f.builder)!.status, "active");
+});
+
+test("a builder whose earlier pull request the PR watch has not seen merge is archived as its last one lands", async (t) => {
+  const f = fixture(t, { repo: "acme/shop", autoReview: { mode: "land", enabledBy: "nLAPTOP" } });
+  const loop = f.loop();
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
+  await loop.poll();
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  secondPr(f);
+  await loop.poll();
+  await loop.poll();
+  const second = f.review();
+  assert.equal(second.pr.number, 8);
+  f.reply(second.reviewer, verdict(second, {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "landed");
+  assert.equal(f.registry.prWatches.prWatch(f.builder)!.links.find((l) => l.pr.number === 7)!.pr.state, "open", "the PR watch has not read #7's merge");
+  assert.equal(f.registry.threads.thread(f.builder)!.status, "archived", "GitHub says #7 merged, so nothing keeps the builder");
+});
+
+test("a project edit, and another thread's review of the same pull request, recompute what a thread is owed", (t) => {
+  const f = fixture(t, { claudeBuilder: false });
+  assert.equal(f.registry.threads.attention(f.builder), null, "no auto-review, so nothing is owed");
+  f.registry.projects.editProject(f.registry.threads.thread(f.builder)!.project, (p) => ({ ...p, autoReview: { mode: "land", enabledBy: "nLAPTOP" } }));
+  assert.equal(f.registry.threads.attention(f.builder), "decision", "turning auto-review on owes #7 a review no reviewer can give");
+  const other = f.add("th-other", true);
+  f.registry.reviews.saveReview(testReview({ id: "rv-other", builder: other, pr: { ...testReview().pr, repo: f.pr.repo, number: f.pr.number } }));
+  assert.equal(f.registry.threads.attention(f.builder), null, "#7 got its review from the thread beside it");
+});

@@ -46,6 +46,9 @@ export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: Thre
     /** The threads with a pull request the watch last read open. */
     withOpenPr: (): ThreadId[] => sql(`SELECT DISTINCT w.thread FROM pr_watches w, json_each(w.record, '$.links') l WHERE json_extract(l.value, '$.pr.state') = 'open'`)
       .all().map((r) => r.thread as ThreadId),
+    /** The threads that link pull request `number` of `repo`. */
+    linking: (repo: string, number: number): ThreadId[] => sql(`SELECT DISTINCT w.thread FROM pr_watches w, json_each(w.record, '$.links') l
+      WHERE json_extract(l.value, '$.pr.repo') = ? AND json_extract(l.value, '$.pr.number') = ?`).all(repo, number).map((r) => r.thread as ThreadId),
     /** The number of each pull request linked to each of `threads`, or to every thread, in one read. */
     prNumbers(threads?: readonly ThreadId[]): ReadonlyMap<ThreadId, number[]> {
       const links = "SELECT thread, json_extract(link.value, '$.pr.number') AS number FROM pr_watches, json_each(pr_watches.record, '$.links') AS link";

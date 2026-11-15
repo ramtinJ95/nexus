@@ -37,11 +37,16 @@ export function openRegistry(path: string, clock = Date.now, log = (message: str
   const { holdReleased, ...placement } = placementMemory(clock);
   const { updateAttention, threadRecord, saveStartKey, start, archivedAt, recordSettle, ...threads } = threadStore(kernel, clock, { node: nodes.node, saveObservation, saveNodeState }, holdReleased);
   const { appendEvent, setThreadStatus, threadStatus, events } = threads;
-  const { participant: reviewing, ...reviews } = reviewStore(kernel, { setThreadStatus, appendEvent, updateAttention, events });
+  // A pull request's first review settles what every thread that links it is owed (owed-review.ts).
+  const firstReview = (repo: string, number: number) => { for (const id of prWatches.linking(repo, number)) updateAttention(id); };
+  const { participant: reviewing, ...reviews } = reviewStore(kernel, { setThreadStatus, appendEvent, updateAttention, events, firstReview });
   const { participant: asking, ...questions } = questionStore(kernel, clock, threadStatus, updateAttention);
   const { participant: nudging, ...nudges } = nudgeStore(kernel, updateAttention);
   const { participant: watching, ...prWatches } = prWatchStore(kernel, appendEvent, updateAttention);
-  const projects = projectStore(kernel);
+  // A project's auto-review setting and secrets decide which of its threads' pull requests no review will start for.
+  const projects = projectStore(kernel, (project) => {
+    for (const t of threads.storedThreads()) if (t.project === project) updateAttention(t.id);
+  });
   /** An open pull request no review will start for, whose builder's project reviews on its own (owed-review.ts). */
   const owing = {
     needs(id: ThreadId): Need[] {
