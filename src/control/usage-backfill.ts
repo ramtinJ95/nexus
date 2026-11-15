@@ -94,22 +94,24 @@ export function usageBackfill(options: {
     const observed = room.o.pylons.find((seen) => seen.pylonId === p.pylonId);
     if (observed !== undefined && observed.phase !== "stopped" && observed.phase !== "running") return `its pylon is ${observed.phase}`;
     const largest = Math.max(0, ...registry.projects.projects().map((project) => project.resources.memoryGiB));
-    const leftGiB = room.leftGiB - uncounted(p, observed).memoryGiB;
+    const leftGiB = room.leftGiB() - uncounted(p, observed).memoryGiB;
     if (leftGiB < largest) return `${p.node} would have ${gib(leftGiB)} GiB of memory left with it up, less than the ${largest} GiB of the largest project's pylon`;
     return null;
   }
 
   /**
    * What decides a wake on the node for every pylon alike: its observation, whether a job runs there, and the memory it
-   * has left before the pylon. The memory takes a read of every pylon on the node, so a step that weighs several
-   * archives passes one map and reads each node once. Null for a node that is offline.
+   * has left before the pylon. The memory takes a read of every pylon on the node, so it is read only when a pylon's
+   * wake comes down to it, and a step that weighs several archives passes one map and reads each node once. Null for
+   * a node that is offline.
    */
   function roomOn(name: NodeName) {
     const node = registry.nodes.node(name);
     const o = node?.state === "online" ? node.observation : null;
     if (o == null) return null;
     const busy = o.jobs.some((j) => j.state === "running") || registry.threads.jobSubmittedOn(name);
-    return { o, busy, leftGiB: busy ? 0 : roomLeft(registry, name, o, o.capacity, { cpus: 0, memoryGiB: 0, diskGiB: 0 }).left.memoryGiB };
+    let left: number | undefined;
+    return { o, busy, leftGiB: () => left ??= roomLeft(registry, name, o, o.capacity, { cpus: 0, memoryGiB: 0, diskGiB: 0 }).left.memoryGiB };
   }
   type NodeRoom = ReturnType<typeof roomOn>;
 
