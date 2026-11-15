@@ -13,9 +13,11 @@ Help
   nexus --version
 
 Global flags
-  Every command takes --json, --url URL and --socks HOST:PORT|none, before or after its name. The URL and proxy come
-  from those flags, then NEXUS_URL and NEXUS_SOCKS, then ${configFile(env)}, which \`nexus connect\` writes.
-  Without a proxy the CLI connects directly.
+  Every command takes --json, --url URL, --socks HOST:PORT|none and --timeout SECONDS, before or after its name.
+  The URL, proxy and timeout come from those flags,
+  then NEXUS_URL, NEXUS_SOCKS and NEXUS_TIMEOUT, then ${configFile(env)}, which \`nexus connect\` writes.
+  Without a proxy the CLI connects directly. The timeout is how long the CLI waits on a control plane that sends
+  nothing, 30 seconds unless set.
 `;
 
 /** A command's entry, or each entry of a group such as `image`, whose commands are `image build` and the rest. */

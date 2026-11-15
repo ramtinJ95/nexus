@@ -48,18 +48,44 @@ export interface HostPort { host: string; port: number }
 export interface Endpoint {
   url: URL;
   socks: HostPort | null;
+  /**
+   * How long the CLI lets a connection stay silent: apiIdleMs unless the person set a timeout. A route that waits on
+   * its work keeps its own time when that is longer, and so does a stream or a terminal, which the server pings.
+   */
+  idleMs: number;
 }
+
+/**
+ * No byte for the idle timeout. `hint` is what to do about it, which follows whatever a caller adds to `head`, as
+ * for a change that went out before the silence.
+ */
+class Silence extends CliError {
+  readonly head: string;
+  readonly hint: string;
+  constructor(head: string, hint: string) {
+    super("unreachable", `${head}${hint}`);
+    this.head = head;
+    this.hint = hint;
+  }
+}
+/** The control plane took the connection, so the silence is its own and neither the network's nor a proxy's. */
+const busyHint = ". It took the connection, so it is busy or stuck rather than unreachable. --timeout SECONDS or NEXUS_TIMEOUT waits longer";
+/** A stream's or a terminal's idle timeout, never under the one the server's pings are spaced for. */
+const quietMs = (endpoint: Endpoint) => Math.max(apiIdleMs, endpoint.idleMs);
 
 const statusKinds: Readonly<Record<number, ErrorKind>> = { 400: "invalid", 413: "invalid", 403: "refused", 415: "refused", 404: "not-found", 409: "conflict" };
 
 async function open(endpoint: Endpoint): Promise<Socket> {
   const secure = endpoint.url.protocol === "https:";
   const target: HostPort = { host: endpoint.url.hostname, port: Number(endpoint.url.port || (secure ? 443 : 80)) };
-  const raw = await (endpoint.socks === null ? direct(target) : tunnel(endpoint.socks, target));
-  const socket = secure ? await handshake(raw, target.host) : raw;
+  const raw = await (endpoint.socks === null ? direct(target, endpoint.idleMs) : tunnel(endpoint.socks, target, endpoint.idleMs));
   // Once connected, a silence is the API's, such as a command queued behind a slow one in its pylon, not the proxy's.
-  raw.removeAllListeners("timeout");
-  return withIdleTimeout(socket, `the control plane at ${endpoint.url.host}`);
+  // That holds for the TLS handshake too, which a control plane too busy to run its event loop never answers.
+  const silent = (socket: Socket) => {
+    raw.removeAllListeners("timeout");
+    return withIdleTimeout(socket, `the control plane at ${endpoint.url.host}`, endpoint.idleMs, busyHint);
+  };
+  return silent(secure ? await handshake(silent(raw), target.host) : raw);
 }
 
 /** The raw socket's idle timeout still covers a handshake that hangs. */
@@ -85,10 +111,10 @@ function handshake(raw: Socket, host: string): Promise<Socket> {
  * A request the API answers only once its work is done, such as a session open that waits for its agent, passes a
  * longer `idleMs`. With `as` set to `bytes`, a success answers the body's bytes as a Buffer rather than its JSON.
  */
-export async function call(endpoint: Endpoint, method: string, path: string, body?: unknown, idleMs = apiIdleMs, as?: "bytes"): Promise<unknown> {
+export async function call(endpoint: Endpoint, method: string, path: string, body?: unknown, idleMs = 0, as?: "bytes"): Promise<unknown> {
   // Only a GET shares a connection. An error on a reused one may hide a request that ran, and only a GET may run twice.
   const via = method === "GET" ? pool(endpoint) : await open(endpoint);
-  const { status, bytes } = await exchange(via, endpoint.url.host, method, path, body, idleMs);
+  const { status, bytes } = await exchange(via, endpoint.url.host, method, path, body, Math.max(idleMs, endpoint.idleMs));
   if (as === "bytes" && status >= 200 && status < 300) return bytes;
   return reply(method, path, status, bytes.toString("utf8"));
 }
@@ -133,6 +159,7 @@ export async function follow(endpoint: Endpoint, path: string, onEvent: (data: u
     const failed = (err: Error) => signal.aborted ? resolve() : reject(err instanceof CliError ? err : lost(host, err));
     const req = request({ method: "GET", path, createConnection: () => socket, signal, headers: { host, accept: "text/event-stream" } }, (res) => {
       responseStarted = true;
+      socket.setTimeout(quietMs(endpoint));
       res.setEncoding("utf8");
       const read = async () => {
         if (res.statusCode !== 200) {
@@ -158,7 +185,7 @@ export async function follow(endpoint: Endpoint, path: string, onEvent: (data: u
               data = [];
               // Waiting for the consumer is not an idle network. Async iteration bounds the unread response.
               socket.setTimeout(0);
-              try { await onEvent(event); } finally { if (!signal.aborted && !socket.destroyed) socket.setTimeout(apiIdleMs); }
+              try { await onEvent(event); } finally { if (!signal.aborted && !socket.destroyed) socket.setTimeout(quietMs(endpoint)); }
             }
             if (cursor !== undefined) onCursor?.(cursor);
             cursor = undefined;
@@ -211,7 +238,7 @@ export async function upgrade(endpoint: Endpoint, path: string): Promise<WebSock
       // Until the caller listens, so a message that came with the 101 waits for it. The caller resumes it.
       ws.pause();
       // ws turns the socket's timeout off once the handshake is done.
-      socket.setTimeout(apiIdleMs);
+      socket.setTimeout(quietMs(endpoint));
       socket.on("error", (err) => ws.emit("error", lost(host, err)));
       resolve(ws);
     });
@@ -243,7 +270,7 @@ function exchange(via: Agent | Socket, host: string, method: string, path: strin
       // The server closed the pooled connection as the request went out. A silence is the API's, and is not tried again.
       if (req.reusedSocket && !answered && !retried && !(err instanceof CliError)) resolve(exchange(via, host, method, path, body, idleMs, true));
       // A silence after a change went out leaves the change made or not, which only the API can tell.
-      else if (method !== "GET" && req.writableFinished && err instanceof CliError) reject(new CliError(err.kind, `${err.message} after ${method} ${path} went out, so the request may have gone through. Check with nexus show <thread>, or nexus threads for a start, before you try again`));
+      else if (method !== "GET" && req.writableFinished && err instanceof CliError) reject(new CliError(err.kind, `${err instanceof Silence ? err.head : err.message} after ${method} ${path} went out, so the request may have gone through. Check with nexus show <thread>, or nexus threads for a start, before you try again${err instanceof Silence ? err.hint : ""}`));
       else reject(lost(host, err));
     });
     req.end(payload);
@@ -257,14 +284,14 @@ const codeOf = (err: Error): string | undefined => (err as NodeJS.ErrnoException
 const restartCodes: ReadonlySet<string | undefined> = new Set(["ECONNREFUSED", "ECONNRESET", "EPIPE"]);
 const unresolved: ReadonlySet<string | undefined> = new Set(["ENOTFOUND", "EAI_AGAIN"]);
 
-function withIdleTimeout(socket: Socket, what: string, ms = apiIdleMs): Socket {
-  socket.setTimeout(ms, () => socket.destroy(new CliError("unreachable", `${what} sent nothing for ${socket.timeout! / 1000}s`)));
+function withIdleTimeout(socket: Socket, what: string, ms: number, hint = ""): Socket {
+  socket.setTimeout(ms, () => socket.destroy(new Silence(`${what} sent nothing for ${socket.timeout! / 1000}s`, hint)));
   return socket;
 }
 
-function direct(target: HostPort): Promise<Socket> {
+function direct(target: HostPort, idleMs: number): Promise<Socket> {
   return new Promise((resolve, reject) => {
-    const socket = withIdleTimeout(connect(target.port, target.host), `${target.host}:${target.port}`);
+    const socket = withIdleTimeout(connect(target.port, target.host), `${target.host}:${target.port}`, idleMs);
     socket.once("error", (err) => reject(err instanceof CliError ? err : directFailure(target, err)));
     socket.once("connect", () => resolve(socket));
   });
@@ -290,12 +317,12 @@ const replies: Readonly<Record<number, string>> = {
 const boundLength = (reply: Buffer): number | undefined => ({ 1: 4, 3: 1 + reply[4]!, 4: 16 } as Record<number, number>)[reply[3]!];
 
 /** RFC 1928 without authentication, which ts-home's proxy does not ask for. */
-function tunnel(proxy: HostPort, target: HostPort): Promise<Socket> {
+function tunnel(proxy: HostPort, target: HostPort, idleMs: number): Promise<Socket> {
   const where = `the SOCKS proxy at ${proxy.host}:${proxy.port}`;
   const name = Buffer.from(target.host);
   if (name.length > 255) return Promise.reject(new CliError("invalid", `the host name ${target.host} is too long for SOCKS5`));
   return new Promise((resolve, reject) => {
-    const socket = withIdleTimeout(connect(proxy.port, proxy.host), where);
+    const socket = withIdleTimeout(connect(proxy.port, proxy.host), where, idleMs);
     let received = Buffer.alloc(0);
     let greeted = false;
     const fail = (err: Error) => {

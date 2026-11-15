@@ -8,6 +8,7 @@ import { call, CliError, type Endpoint, type HostPort } from "./transport.ts";
 import { type Io, type Note, type Values, type Versions, str } from "./kit.ts";
 import { version } from "../version.ts";
 import { ports } from "../node-base/node-layout.ts";
+import { apiIdleMs } from "../contract/route.ts";
 
 /**
  * The oldest control plane this CLI reads, raised when the CLI starts relying on something newer. 0.53.0 is the first
@@ -31,7 +32,7 @@ export function configFile(env: Io["env"] = process.env): string {
   return existsSync(file) || !existsSync(before) ? file : before;
 }
 
-const configSchema = z.strictObject({ url: z.string().optional(), socks: z.string().optional() });
+const configSchema = z.strictObject({ url: z.string().optional(), socks: z.string().optional(), timeout: z.number().optional() });
 
 export async function readConfig(file: string): Promise<Config> {
   let value: unknown;
@@ -54,7 +55,7 @@ export async function settings(v: Values, env: Io["env"]): Promise<Endpoint> {
   const config = await readConfig(configFile(env));
   const url = str(v, "url") ?? fromEnv(env, "NEXUS_URL") ?? config.url;
   if (url === undefined) throw new CliError("invalid", "no control plane is set. Run nexus connect <host> with its tailnet name, or give --url or NEXUS_URL");
-  return { url: controlUrl(url), socks: socksOf(v, config, env) };
+  return { url: controlUrl(url), socks: socksOf(v, config, env), idleMs: idleMsOf(v, config, env) };
 }
 
 const versionParts = (v: unknown) => typeof v === "string" ? /^(\d+)\.(\d+)\.(\d+)$/.exec(v)?.slice(1).map(Number) ?? null : null;
@@ -101,6 +102,15 @@ export async function checked(endpoint: Endpoint, anyVersion: boolean, note: Not
 export function socksOf(v: Values, config: Config, env: Io["env"]): HostPort | null {
   const socks = str(v, "socks") ?? fromEnv(env, "NEXUS_SOCKS") ?? config.socks;
   return socks === undefined || socks === "none" ? null : hostPort(socks);
+}
+
+/** The longest the CLI waits on a silent connection, which a control plane that is slow rather than down needs raised. */
+export function idleMsOf(v: Values, config: Config, env: Io["env"]): number {
+  const given = str(v, "timeout") ?? fromEnv(env, "NEXUS_TIMEOUT") ?? config.timeout;
+  if (given === undefined) return apiIdleMs;
+  const seconds = Number(given);
+  if (given === "" || !Number.isInteger(seconds) || seconds < 1 || seconds > 3600) throw new CliError("invalid", `the timeout takes whole seconds from 1 to 3600, got ${given}`);
+  return seconds * 1000;
 }
 
 export function controlUrl(url: string): URL {
