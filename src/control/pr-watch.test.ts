@@ -4,7 +4,8 @@ import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { openRegistry } from "./registry.ts";
-import { testPr, testPylon, testRegistry, testThread, claudeWorkerAt } from "../test-support/registry-kit.ts";
+import { testPr, testPylon, testRegistry, testReview, testThread, claudeWorkerAt } from "../test-support/registry-kit.ts";
+import { transcriptStart } from "./claude-transcript.ts";
 import { desiredPhase, ingest } from "./reconcile.ts";
 import { fakeGuest } from "../backends/fake-guest.ts";
 import { gitFacts } from "../probe/guest/git-facts.ts";
@@ -76,6 +77,121 @@ test("links origin branches, shares reads, and only deliberate messages wake wit
   assert.equal(thread.lastReplyAt, 1000);
   assert.equal(desiredPhase(thread, thread.lastAgentActivityAt), "running");
   assert.equal(desiredPhase(thread, thread.lastAgentActivityAt + 21 * 60_000), "paused");
+});
+
+test("a pull request a builder's Claude opened without pushing its branch from the checkout is linked from its transcript, and no one else's is", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const session = "c0ffee00-0000-4000-8000-000000000000";
+  const opens = (id: ThreadId, url: string, number = 1) => f.registry.threads.appendClaudeRead(id, {
+    session, from: transcriptStart, entries: [{ kind: "pull-request", at: 1, number, url, repository: "acme/repo" }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 1,
+  });
+  const links = (id: ThreadId) => (f.registry.prWatches.prWatch(id)?.links ?? []).map((l) => l.pr.number);
+  // The branch was pushed through GitHub's API, so no checkout has it among the branches it pushed.
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, branch: "api-made" } };
+  const builder = f.add("th-builder", true, null);
+  const elsewhere = f.add("th-elsewhere", true, null);
+  const harness = f.add("th-harness", false, null);
+  opens(builder, "https://github.com/acme/repo/pull/1");
+  opens(elsewhere, "https://github.com/other/repo/pull/1");
+  const started: string[] = [];
+  const watcher = prWatcher({ ...f.options, async linked(thread, pr) { started.push(`${thread.id} #${pr.number}`); } });
+  await watcher.poll();
+  assert.deepEqual([links(builder), links(elsewhere), links(harness)], [[1], [], []]);
+  assert.equal(f.registry.threads.outputs(builder).find((o) => o.kind === "pull-request")?.ref, f.snapshot.pr.url);
+  assert.ok(started.includes("th-builder #1"), "its review starts as for a pull request found by its branch");
+  assert.ok(f.calls.includes("find:acme/repo:api-made"), "the search by the pull request's branch tells that it is the project's own, not a fork's");
+
+  const reviewer = f.add("th-reviewer", true, null);
+  f.registry.reviews.saveReview(testReview({ id: "rv-1", builder, reviewer }));
+  opens(reviewer, "https://github.com/acme/repo/pull/1");
+  const owned = f.add("th-owned", true, null);
+  opens(owned, "https://github.com/acme/repo/pull/1");
+  f.registry.threads.apply({ record: "output", pylonId: f.registry.threads.thread(harness)!.pylonId, kind: "branch", ref: "origin/api-made" });
+  await watcher.poll();
+  assert.deepEqual([links(reviewer), links(owned)], [[], []], "a reviewer links none, and a pull request whose branch another thread pushed is that thread's");
+
+  const fork = f.add("th-fork", true, null);
+  opens(fork, "https://github.com/acme/repo/pull/1");
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, branch: "from-a-fork" } };
+  await prWatcher({ ...f.options, github: { ...f.github, async find() { return []; } } }).poll();
+  assert.deepEqual(links(fork), [], "the project's repository has no such branch");
+
+  const late = f.add("th-late", true, null);
+  opens(late, "https://github.com/acme/repo/pull/1");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
+  await watcher.poll();
+  assert.deepEqual(links(late), [], "one that merged before the watch saw it is not linked");
+});
+
+test("a pull request linked from a transcript follows a close and a reopen, is not another repository's branch's, and holds a queued thread until it merges", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  const session = "c0ffee00-0000-4000-8000-000000000000";
+  const opens = (id: ThreadId) => f.registry.threads.appendClaudeRead(id, {
+    session, from: transcriptStart, entries: [{ kind: "pull-request", at: 1, number: 1, url: "https://github.com/acme/repo/pull/1", repository: "acme/repo" }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 1,
+  });
+  const stateOf = (id: ThreadId) => (f.registry.prWatches.prWatch(id)?.links ?? []).map((l) => l.pr.state);
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, branch: "api-made" } };
+  // A thread of a project on another repository pushed a branch of the same name, which says nothing about this one.
+  const other = { id: "other" as ProjectId, repoUrl: "https://github.com/acme/other.git", defaultBranch: "main", defaultNode: f.node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null };
+  f.registry.projects.createProject(other);
+  const foreign = testThread({ id: "th-foreign" as ThreadId, title: "test", project: other.id, conversationId: "1", startedBy: "test", createdAt: 1, lastHumanActivityAt: 1 });
+  f.registry.threads.createThread(foreign, testPylon(foreign, { node: f.node, liveHash: "hash", boot: { repo: { kind: "clone", url: other.repoUrl, checkout: { branch: "main", commit: "main" } }, dotfiles: { repo: other.repoUrl, ref: "main" } } }), {});
+  f.registry.threads.apply({ record: "output", pylonId: foreign.pylonId, kind: "branch", ref: "origin/api-made" });
+  const builder = f.add("th-builder", true, null);
+  opens(builder);
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(builder), ["open"]);
+
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "closed" } };
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(builder), ["closed"]);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "open" } };
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(builder), ["open"], "a reopened pull request is open again, as one found by its branch is");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "closed" } };
+  await f.watcher.poll();
+  f.registry.threads.appendClaudeRead(builder, { session: "c0ffee00-0000-4000-8000-000000000001", from: transcriptStart, entries: [{ kind: "reply", at: 2, text: "Done." }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 2 });
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "open" } };
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(builder), ["open"], "and so is one reopened after another session's transcript replaced the one that named it");
+
+  // A predecessor the comment cap stopped, whose transcript names a pull request the watch never linked.
+  const queued = (id: string, after: ThreadId[]) => f.registry.queue.saveQueued({
+    id: id as ThreadId, title: "after", project: "project" as ProjectId, startedBy: "test", createdAt: 1, after,
+    request: { project: "project", title: "after", resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } }, message: null, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
+  });
+  const capped = f.add("th-capped", true, null);
+  opens(capped);
+  f.registry.prWatches.savePrWatch(capped, { links: [], commentWakes: commentCap, pending: null, error: null });
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(capped), [], "a stopped watch that no queued thread waits on reads nothing");
+  queued("th-q1", [capped]);
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(capped), ["open"], "the open pull request a queued thread waits on is known, so the thread does not start before it merges");
+
+  // A read in the same millisecond as the one before it still moves the reader on, so its pull request is seen.
+  const later = f.add("th-later", true, null);
+  f.registry.threads.appendClaudeRead(later, { session, from: transcriptStart, entries: [{ kind: "reply", at: 1, text: "On it." }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 1 });
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(later), []);
+  f.registry.threads.appendClaudeRead(later, { session, from: { ...transcriptStart, offset: 1 }, entries: [{ kind: "pull-request", at: 1, number: 1, url: "https://github.com/acme/repo/pull/1", repository: "acme/repo" }], cursor: { ...transcriptStart, offset: 2 }, reset: false, readAt: 1 });
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(later), ["open"]);
+  // So does a read, in that millisecond too, of a file of the same size that replaced the one read before.
+  const replaced = f.add("th-replaced", true, null);
+  f.registry.threads.appendClaudeRead(replaced, { session, from: transcriptStart, entries: [{ kind: "reply", at: 1, text: "On it." }], cursor: { ...transcriptStart, offset: 1 }, reset: false, readAt: 1 });
+  await f.watcher.poll();
+  f.registry.threads.appendClaudeRead(replaced, { session, from: { ...transcriptStart, offset: 1 }, entries: [{ kind: "pull-request", at: 1, number: 1, url: "https://github.com/acme/repo/pull/1", repository: "acme/repo" }], cursor: { ...transcriptStart, offset: 1, before: "another file's bytes" }, reset: true, readAt: 1 });
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(replaced), ["open"]);
+
+  const landed = f.add("th-landed", true, null);
+  opens(landed);
+  f.registry.prWatches.savePrWatch(landed, { links: [], commentWakes: commentCap, pending: null, error: null });
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, state: "merged" } };
+  queued("th-q2", [landed]);
+  await f.watcher.poll();
+  assert.deepEqual(stateOf(landed), ["merged"], "and one that merged before the watch saw it is recorded, so the thread queued after it starts");
 });
 
 test("batches failures, reviews, inline and issue comments, and conflict; then reports recovery once", async (t) => {
