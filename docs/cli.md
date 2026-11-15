@@ -845,12 +845,15 @@ type LandRequest =
  * last quoted from when a landing asked it again, so a landing asks again only once the description changed since.
  * `describedFrom` is the digest supplied to this round's reviewers, so a description-only fix can return to them
  * without waiting for a new commit. Older rounds without it keep waiting for a push.
+ * `unstated` is `asked` from when the loop asks the builder, once a round, to add to the description what could not
+ * be checked live, at a head with no `.nexus/verify` whose reviewer quoted no such passage, and `answered` once the
+ * builder answered or the review ended, so the person who adds it can land.
  * `heldAt` holds those `head` alone decides (policy.ts's `headHolds`) against the PR's `base`, whose files they read,
  * recorded once its checks pass, so the person's Land and the landing read the same ones. A landing reads them again
  * when the PR's base changed since. A round that passed its checks before Nexus recorded them gets them on the
  * loop's next pass while it waits at approval, and from its landing otherwise.
  */
-interface Round { head: string; base?: string; verdict: Verdict | null; secondVerdict?: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string; held?: true }; quotedFrom?: string; describedFrom?: string; heldAt?: HeldAt }
+interface Round { head: string; base?: string; verdict: Verdict | null; secondVerdict?: Verdict | null; check: { passed: boolean; output: string } | null; live?: LiveCheck; answers: Answer[] | null; conflict?: { base: string }; carried?: { from: string; held?: true }; quotedFrom?: string; describedFrom?: string; unstated?: "asked" | "answered"; heldAt?: HeldAt }
 /**
  * `absent` when `head` has no `.nexus/verify`, so the landing reads the PR's statement of what it could not check live
  * instead. `ran` when the script gave its verdict in verify pylon `thread`.

@@ -29,7 +29,7 @@ import { NoRoom, Refusal } from "./refusal.ts";
 import type { Inbox } from "./inbox.ts";
 import { logOnce, type Log } from "./log-once.ts";
 import { caseOf, remedyOf, waivable, waivedName, type Hold } from "./holds.ts";
-import { carryWaiver, headHolds, holdsAt, landPress, secondReviewRule, staleQuote, unwaived } from "./policy.ts";
+import { carryWaiver, headHolds, holdsAt, landPress, secondReviewRule, staleQuote, unstated, unwaived } from "./policy.ts";
 import type { CheckRuns } from "./gate.ts";
 import type { AgentState } from "./agent-conversation.ts";
 import { prWatchMs, reviewedPr, watchedPrs, watchStopped } from "./pr-watch-model.ts";
@@ -218,6 +218,8 @@ export function reviewLoop(deps: ReviewDeps) {
   const end = (r: Review, phase: Extract<Phase, { kind: EndedKind }>): Review => {
     const gate = gateThread(r.phase);
     if (gate !== null) gate.runs.discard(gate.thread);
+    // A review that ends asks its builder nothing more, so the person who adds the statement of what could not be checked live can land it.
+    if (r.rounds.at(-1)?.unstated === "asked") r = withRound(r, { unstated: "answered" });
     return { ...r, phase, outbox: null, ...r.second?.kind === "claude" && { second: { ...r.second, outbox: null } } };
   };
   const toPerson = (r: Review, cause: HoldCause, ...items: (Hold | string)[]): Review => end(r, personPhase(cause, ...items));
@@ -255,7 +257,12 @@ export function reviewLoop(deps: ReviewDeps) {
   /** Past the check at the round's head: the live check runs where the head has a `.nexus/verify` and none ran there yet. */
   const checkPassed = async (r: Review, verifies: boolean): Promise<Review> => {
     if (verifies) return { ...r, phase: { kind: "verifying", startedAt: now(), thread: null } };
-    return await checked(r.rounds.at(-1)!.live === undefined ? withRound(r, { live: { kind: "absent" } }) : r);
+    const next = r.rounds.at(-1)!.live === undefined ? withRound(r, { live: { kind: "absent" } }) : r;
+    const round = next.rounds.at(-1)!;
+    // No live check ran, and the description says nothing of what could not be checked live, which holds every
+    // landing. The builder can still add it, so it is asked once a round, before the person is.
+    if (unstated(round) && round.unstated === undefined) return toBuilder(withRound(await recordHolds(next) ?? next, { unstated: "asked" }));
+    return await checked(next);
   };
   /**
    * The failed check or live check of `next`'s round goes back to the builder as a P0 finding, unless no round is left,
@@ -662,9 +669,16 @@ export function reviewLoop(deps: ReviewDeps) {
         // A push can land on GitHub a little after the turn that made it ends.
         if (state.over === null) return wait(r, phase, "builder", state, null);
         // A description fix needs no commit, but still needs the reviewer's judgment. It cannot clear a failed gate.
-        const descriptionOnly = gate === null && round.describedFrom !== undefined && round.describedFrom !== descriptionDigest(snapshot.detail.body);
+        // The statement of what could not be checked live is a description fix too, read against the description the
+        // reviewer last quoted from. A round that recorded none takes the builder's word that it changed.
+        const read = gate?.kind === "statement" ? round.quotedFrom ?? round.describedFrom : round.describedFrom;
+        const descriptionOnly = gate?.kind === "statement" ? read !== descriptionDigest(snapshot.detail.body)
+          : gate === null && read !== undefined && read !== descriptionDigest(snapshot.detail.body);
         if (now() - state.over < (descriptionOnly ? descriptionGraceMs : pushGraceMs)) return r;
+        if (!descriptionOnly && gate?.kind === "statement") return wait(r, phase, "builder", state, "You answered that you fixed STATEMENT, but the pull request's description is as the reviewer read it. Edit the description on GitHub.");
         if (!descriptionOnly && (gate === null || gate.kind === "conflict")) return wait(r, phase, "builder", state, `You answered that you fixed findings, but the pull request's head is still ${round.head}. Push the fixes.`);
+        // The reviewer quotes the statement from the new description at the same head, with no new round.
+        if (gate?.kind === "statement") return { ...withRound(withAnswers, { unstated: "answered" }), phase: { kind: "quoting", asked: null }, nudges: 0 };
       }
       // The reviewer cannot change a gate's result, so a failed gate at an unmoved head is the person's.
       if (gate !== null && snapshot.detail.head === round.head) {

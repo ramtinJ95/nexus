@@ -2,6 +2,10 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), except in the commands [Version skew](cli.md#version-skew) names, so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.97.0
+
+Adds `unstated` to a review's `Round`, `asked` or `answered`, and the finding `STATEMENT` (P0) among those a round's builder answers. A review whose head has no `.nexus/verify`, and whose reviewer quoted nothing from the description of what could not be checked live, now goes to `fixing` once its check passes, where the builder is asked to add that section to the description, and to `quoting` once it did, as [the design's review loop](design.md#the-review-loop-and-landing) describes. Before, such a review stopped at `approved`, or its landing ended `needs-person` with `No live check ran, and the pull request does not say what could not be checked live.`, and the builder was told nothing. A builder that rejects the finding ends the review `needs-person` with `No live check ran at <head>, and the builder did not add to the pull request's description what could not be checked live: <its reason>`.
+
 ## 0.95.0
 
 Adds the `event-loop` check to `ControlCheckName`, which `GET /v1/checks`, `GET /v1/doctor`, `nexus doctor` and the Health page answer after `release`: how late the control plane ran what was due in the slowest of its last 5 minutes, `warn` from 500 ms at the 99th percentile and `fail` from 2 s, as [the design's doctor](design.md#doctor-and-health-alerts) describes. A control plane older than 0.95.0 reports no such check.
