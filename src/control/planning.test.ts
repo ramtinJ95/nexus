@@ -183,6 +183,30 @@ test("archiving a planning thread withdraws its open proposals, which then take 
   assert.deepEqual(f.registry.questions.question(qc!.id), withdrawn, "an unarchive does not ask it again");
 });
 
+test("an archive while a pass reads the thread's replies asks nothing for the archived thread, and an unarchive asks them", async (t) => {
+  const f = await fixture(t);
+  const thread = await f.planner();
+  const said = block(f.registry.planning.planning(thread.id)!.token, [a]);
+  f.reply(thread, said);
+  let read!: () => void;
+  const reading = new Promise<void>((resolve) => { read = resolve; });
+  let asked!: () => void;
+  const wanted = new Promise<void>((resolve) => { asked = resolve; });
+  const plans = planning({ registry: f.registry, pipeline: f.items, async replies() { asked(); await reading; return [said]; } });
+  const pass = plans.poll();
+  await wanted;
+  f.registry.threads.setThreadStatus(thread.id, "archived");
+  read();
+  await pass;
+  assert.deepEqual(f.registry.questions.questions(thread.id), []);
+  assert.notEqual(f.registry.threads.attention(thread.id), "decision");
+
+  f.registry.threads.setThreadStatus(thread.id, "active");
+  await plans.poll();
+  assert.deepEqual(f.registry.questions.questions(thread.id).map((q) => [q.kind, q.answer, q.withdrawn]), [["proposal", null, undefined]], "the reply the archive cut the read of is read once the thread is open again");
+  await plans.close();
+});
+
 test("an accepted proposal adds the item named from its question once, and one after a rejected proposal cannot be accepted", async (t) => {
   const f = await fixture(t);
   const thread = await f.planner();
