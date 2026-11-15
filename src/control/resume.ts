@@ -78,13 +78,14 @@ export function deadTurnResumer(options: {
       // The death stands beside the review that waits on the person, so a builder that stopped mid-turn does not read as one that waits.
       if (died !== undefined && !t.working && builder(t) && reviewWaits(t)) {
         if (stored?.state === "person" && stored.turn >= died.at) return;
-        return save({ state: "person", turn: died.at, count: stored?.count ?? 0, why: `Its turn died (${died.reason}). Its review waits on you, so Nexus did not resume it.`, review: true });
+        // A review handed to the person ends the deaths in a row, as it did when it cleared the record.
+        return save({ state: "person", turn: died.at, count: 0, why: `Its turn died (${died.reason}). Its review waits on you, so Nexus did not resume it.`, review: true });
       }
       return stored === null ? undefined : save(null);
     }
-    // The review moved on, so a death left to the person only for it is judged as one no record answers yet, with its count.
-    const left = stored?.state === "person" && stored.review === true ? stored : null;
-    const record = left === null ? stored : null;
+    // The review moved on, so a death left to the person only for it is judged as one no record answers yet.
+    const left = stored?.state === "person" && stored.review === true;
+    const record = left ? null : stored;
     const answered = (r: { turn: number; count: number; from?: number }): ClaudeResume => ({ state: "answered", turn: r.turn, count: r.count, from: r.from ?? clock(), at: clock() });
     if (record?.state === "sending") {
       // It may never have gone out, so it goes only to a thread that still waits on that death and that the person did not answer.
@@ -100,7 +101,7 @@ export function deadTurnResumer(options: {
       // A turn started since the one that died. Once it ended and the transcript was read past its end without a death
       // in it, the deaths in a row are over: a read that lags the end would show no model error yet.
       const readAt = registry.threads.claudeTranscript(t.id)?.readAt ?? -Infinity;
-      if (left !== null || (record !== null && !t.working && t.lastReplyAt !== null && readAt >= t.lastReplyAt)) save(null);
+      if (left || (record !== null && !t.working && t.lastReplyAt !== null && readAt >= t.lastReplyAt)) save(null);
       return;
     }
     if (t.working) return;
@@ -122,7 +123,7 @@ export function deadTurnResumer(options: {
       save(sending);
       return deliver(fresh, sending);
     }
-    const count = record?.count ?? left?.count ?? 0;
+    const count = record?.count ?? 0;
     const toPerson = (why: string) => save({ state: "person", turn: died.at, count, why: `Its turn died (${died.reason}). ${why}` });
     if (clock() - died.at > freshMs) return toPerson(`It died more than ${freshMs / 60_000} minutes before Nexus saw it, so Nexus did not resume it.`);
     if (await personWroteTo(t, died.at)) return save(answered({ turn: died.at, count }));

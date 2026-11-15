@@ -446,6 +446,14 @@ test("a death left to the person only for a review that waits on them is resumed
   assert.equal(kept?.state === "person" && kept.review, undefined, "a death more than an hour old stays the person's, for that reason now");
   assert.match(kept?.state === "person" ? kept.why : "", /more than 60 minutes before Nexus saw it/);
   assert.equal(f.registry.threads.claudeResume(gone), null, "a turn that started since ends the record");
+  for (let cycle = 0; cycle < 4; cycle++) {
+    f.registry.reviews.saveReview(testReview({ id: "rv-0", builder: fresh, reviewer: "th-reviewer-0" as ThreadId, phase: held }));
+    await f.resumer.poll();
+    assert.deepEqual([f.registry.threads.claudeResume(fresh)?.state, f.registry.threads.claudeResume(fresh)?.count], ["person", 0]);
+    f.registry.reviews.saveReview(testReview({ id: "rv-0", builder: fresh, reviewer: "th-reviewer-0" as ThreadId, phase: { kind: "fixing" } }));
+    await f.resumer.poll();
+    assert.deepEqual([f.registry.threads.claudeResume(fresh)?.state, f.registry.threads.claudeResume(fresh)?.count], ["waiting", 1], "a review that goes to the person and back counts the one death once");
+  }
   f.tick(resumeWaitsMs[0]!);
   await f.resumer.poll();
   assert.deepEqual(f.typed.map((c) => c.requestId!.split(":")[1]), ["th-fresh"]);
