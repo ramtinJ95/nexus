@@ -2084,6 +2084,8 @@ test("Archive asks first only when it loses something, and names the open questi
   assert.equal(await confirmOf(), 'Archive "Fix checkout"? Its agent is in a turn, and its pylon goes to sleep at once.', "an answered question is not lost");
   s.fake.park(fix.id, 2);
   assert.equal(await confirmOf(), 'Archive "Fix checkout"? Its agent is in a turn, and its pylon goes to sleep at once.', "parked tasks beside a turn still running");
+  s.registry.questions.askQuestion({ kind: "proposal", id: "plan:1", thread: fix.id, text: "The planning thread proposes a pipeline item: Cache\n\nBuild it.", options: ["accept", "reject"], reserved: null, answerer: "person", askedAt: Date.now(), proposal: { block: "b", index: 0, key: "cache", title: "Cache", brief: "Build it.", after: [] } });
+  assert.equal(await confirmOf(), 'Archive "Fix checkout"? Its open question "The planning thread proposes a pipeline item: Cache" is withdrawn. Its agent is in a turn, and its pylon goes to sleep at once.', "an archive withdraws a planning thread's open proposal");
 });
 
 test("an unknown thread page is a 404 page", async (t) => {
