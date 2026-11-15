@@ -227,6 +227,9 @@ const planRules: readonly Rule[] = [
   (i) => {
     if (i.desired !== "paused") return null;
     if (i.observed === "absent" || i.observed.phase === "stopped") return done;
+    // A broken pylon fails, idle or not, so a boot that broke is told: a pause would remove a fresh one whose setup failed
+    // and leave its thread with no pylon and nothing said. A human retry still pauses it onto its newest disk.
+    if (i.observed.phase === "broken" && !i.retrying) return brokenFailure(i.observed, retryRefusal(i.observed));
     const refused = retryRefusal(i.observed);
     if (i.observed.phase === "broken" && refused !== null) return brokenFailure(i.observed, refused);
     return submit({ kind: "pause", pylonId: i.pylonId, checkpoint: i.nextCheckpoint });
@@ -457,7 +460,10 @@ function pylonWrites(pylonId: PylonId, previous: PylonObservation | "absent", cu
   for (const [key, p] of isReady) if (!wasReady.has(key)) writes.push({ record: "preview", pylonId, ...p, ready: true });
   for (const [key, p] of wasReady) if (!isReady.has(key)) writes.push({ record: "preview", pylonId, ...p, ready: false });
 
-  const woke = markedForWake(current) && (unlisted || !markedForWake(previous));
+  // A boot that just finished is agent activity, so its idle clocks start once it runs: a fresh setup can outlast the
+  // human idle time, and a pylon that came up idle by them was paused as its worker took its first prompt.
+  const booted = current !== "absent" && current.phase === "running" && (previous === "absent" || previous.phase !== "running" || previous.bootedAt !== current.bootedAt);
+  const woke = booted || markedForWake(current) && (unlisted || !markedForWake(previous));
   const agent = woke || after.sessions?.some((s) => harnessNamed(s.harness)?.activity !== "hooks" && s.state === "running" && s.status === "working") ? now : null;
   const human = after.attachedClients > 0 ? now : null;
   if (agent !== null || human !== null) writes.push({ record: "activity", pylonId, human, agent });
