@@ -9,6 +9,7 @@ import type { Thread } from "./thread-store.ts";
 import type { NodeName, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { AutoReview, SecondReview } from "./project.ts";
 import type { ProjectId } from "../ids.ts";
+import { freeHeldRoom } from "./placement.ts";
 import type { SecretGrant } from "../protocol/secret-grants.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
@@ -35,7 +36,7 @@ import { claudeHook, claudeProjects } from "../../images/pylon/nexus-contract.ts
 import type { ProbeClient } from "../protocol/client.ts";
 import { fakeHarness } from "../test-support/fake-harness.ts";
 import { parseRecord, transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
-import { runningPylon, tempDir, until, watch } from "../test-support/kit.ts";
+import { runningPylon, tempDir, testCapacity, testObservation, until, watch } from "../test-support/kit.ts";
 import { testPr, testPylon, testReview, testThread, claudeWorkerAt, observeNode, storedTranscripts } from "../test-support/registry-kit.ts";
 import { checkCaller, reviewerCaller, senders, verifyCaller } from "./agent-protocol.ts";
 import { desiredPhase, idlePolicy } from "./reconcile.ts";
@@ -386,6 +387,32 @@ test("a Claude builder's PR gets a harness reviewer, and findings, fixes and new
   assert.deepEqual(f.registry.threads.events("0", { kinds: ["review.changed"] }).map((e) => [(e.payload.phase as { kind: string }).kind, e.payload.round]),
     [["reviewing", 1], ["fixing", 1], ["reviewing", 2], ["checking", 2], ["approved", 2]]);
   assert.equal(f.registry.threads.thread(f.builder)!.lastHumanActivityAt, 1, "nothing in the loop is human activity");
+});
+
+test("whether a node needs a held builder's room back is asked without reading every pylon the node ever had", async (t) => {
+  // Placement reads the registry's clock, the real one, so the review began 8 minutes before it, just after the builder's turn.
+  const f = fixture(t);
+  f.tick(Date.now() - idlePolicy.agentIdleMs - 3 * 60_000 - f.now);
+  f.registry.threads.recordActivity(f.builder, { agent: f.now - 60_000 });
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const pylon = f.registry.threads.pylon(f.registry.threads.thread(f.builder)!.pylonId)!;
+  const reads: string[] = [];
+  const counted = { ...f.registry, threads: { ...f.registry.threads,
+    pylonsWithThreadsOn: (name: NodeName) => { reads.push("every pylon with its thread"); return f.registry.threads.pylonsWithThreadsOn(name); },
+    pylonsWithStatusOn: (name: NodeName) => { reads.push("every pylon with its status"); return f.registry.threads.pylonsWithStatusOn(name); },
+    pylonsWithThreadsAmong: (name: NodeName, ids: readonly PylonId[]) => { reads.push(`among ${ids.join(" ")}`); return f.registry.threads.pylonsWithThreadsAmong(name, ids); },
+  } };
+  const observed = (committedMemoryGiB: number) => {
+    const capacity = testCapacity({ memoryGiB: 16, committedMemoryGiB });
+    f.registry.threads.ingested(testObservation(pylon.node, { capacity, pylons: [runningPylon(pylon.pylonId)] }), [{ record: "node", node: pylon.node, state: "online", capacity }]);
+  };
+  observed(pylon.boot.resources.memoryGiB);
+  assert.deepEqual(freeHeldRoom(counted, pylon.node), [], "a node with room keeps the hold");
+  observed(20);
+  assert.deepEqual(freeHeldRoom(counted, pylon.node), [f.builder], "one committed past its memory takes the held builder's room back");
+  assert.deepEqual(reads, [`among ${pylon.pylonId}`, `among ${pylon.pylonId}`], "each time by one read of the pylons that are up or may come up");
 });
 
 test("a builder's pylon stays up while its reviewer reads a round, so its findings need no wake, and never while the review waits on the person", async (t) => {

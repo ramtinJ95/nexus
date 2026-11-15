@@ -5,10 +5,10 @@ import { heldSecrets, type NodeCapacity, type NodeObservation, type PylonObserva
 import { desiredPhase, isOpenStatus, wantsToRun } from "./reconcile.ts";
 import { NoRoom, Refusal } from "./refusal.ts";
 import { gib } from "../util/gib.ts";
-import { backgroundReadMs, seriesOf } from "./node-metrics.ts";
+import { backgroundReadMs, seriesOf, type HealthSample } from "./node-metrics.ts";
 import type { Registry } from "./registry.ts";
 import type { NodeRecord } from "./node-store.ts";
-import type { StoredPylon } from "./thread-store.ts";
+import type { StoredPylon, Thread } from "./thread-store.ts";
 import type { Placement, Room, Weighed } from "./placement-model.ts";
 
 /** A controller that exited or failed to boot the VM leaves it down, holding only its disk. */
@@ -176,18 +176,22 @@ const heldRoom = (registry: PlacementRegistry, node: NodeName, now: number) => h
  * or with less free than the headroom a start keeps, so a held pylon pauses for a start or a wake that took its room.
  * The soonest to end goes first.
  */
-export function freeHeldRoom(registry: WeighingRegistry & { placement: Pick<Registry["placement"], "releaseHold"> }, node: NodeName): ThreadId[] {
+export function freeHeldRoom(registry: WeighingRegistry & { placement: Pick<Registry["placement"], "releaseHold">; threads: Pick<Registry["threads"], "pylonsWithThreadsAmong"> }, node: NodeName): ThreadId[] {
   const record = registry.nodes.nodes().find((n) => n.name === node);
   const o = record?.state === "online" ? record.observation : null;
   if (o == null) return [];
   const now = registry.now();
   const held = heldOnly(registry, node, now).sort((a, b) => a.thread.awaitedUntil! - b.thread.awaitedUntil!);
   if (held.length === 0) return [];
-  const { left, pending } = roomLeft(registry, node, o, o.capacity, { cpus: 0, memoryGiB: 0, diskGiB: 0 });
-  const free = freeMemory(registry, node, o, o.capacity, now);
+  // Every pass asks this while a hold is up, so it reads only the pylons that take or give back room: those the node
+  // or its health read names, and those about to boot. The rest of what the node ever had is stopped and stays so.
+  const named = [...new Set([...o.pylons.map((p) => p.pylonId), ...residentIn(registry.nodeMetrics.latestHealthSample(node)?.values ?? {}).keys()])];
+  const placed = registry.threads.pylonsWithThreadsAmong(node, named);
+  const { left, pending } = roomLeft(registry, node, o, o.capacity, { cpus: 0, memoryGiB: 0, diskGiB: 0 }, placed);
+  const free = freeMemory(registry, node, o, o.capacity, now, placed.map(({ pylon }) => pylon));
   // A pylon still up that is to pause, as one whose hold went on an earlier pass, gives its room back soon.
   const up = new Set(o.pylons.filter(isUp).map((p) => p.pylonId));
-  const pausing = registry.threads.pylonsWithThreadsOn(node).filter(({ pylon, thread }) => up.has(pylon.pylonId) && !wantsToRun(thread, now))
+  const pausing = placed.filter(({ pylon, thread }) => up.has(pylon.pylonId) && !wantsToRun(thread, now))
     .reduce((gib, { pylon }) => gib + pylon.boot.resources.memoryGiB, 0);
   let short = Math.max(-left.memoryGiB, free === null ? 0 : memoryHeadroomGiB - (free.availableGiB - free.untouchedGiB - pending.memoryGiB)) - pausing;
   const released: ThreadId[] = [];
@@ -208,6 +212,12 @@ const memoryHeadroomGiB = 1;
 /** A health read older than this, as when a node's reads keep failing, no longer says what it has free. */
 const freshReadMs = 2 * backgroundReadMs;
 
+/** What each pylon's processes held, by a health read's values. */
+const residentIn = (values: HealthSample["values"]) => new Map(Object.entries(values).flatMap(([key, value]) => {
+  const s = seriesOf(key);
+  return s?.kind === "pylonResident" ? [[s.pylon, value] as const] : [];
+}));
+
 /**
  * The node's MemAvailable in its newest health read, and how much of it the node's up pylons are yet to take: a guest
  * takes its memory from the host only as it touches it, so a pylon whose processes hold less than its size will take
@@ -217,19 +227,17 @@ const freshReadMs = 2 * backgroundReadMs;
  * node, orphaned VMs, which the registry has not placed there, are yet to take what the probe commits beyond the placed
  * up pylons, less what the read found their processes hold. One the
  * observation does not count yet is left out, since `roomLeft` counts all it asked for. Null without a read in the
- * last `freshReadMs`, or from a host that reports no memory.
+ * last `freshReadMs`, or from a host that reports no memory. `placed` is the node's pylons, or at least each one
+ * the observation or the health read names.
  */
-function freeMemory(registry: WeighingRegistry, node: NodeName, o: NodeObservation, c: NodeCapacity, now: number): { availableGiB: number; untouchedGiB: number } | null {
+function freeMemory(registry: WeighingRegistry, node: NodeName, o: NodeObservation, c: NodeCapacity, now: number,
+  placed: readonly StoredPylon[] = registry.threads.pylonsWithStatusOn(node).map(({ pylon }) => pylon)): { availableGiB: number; untouchedGiB: number } | null {
   const read = registry.nodeMetrics.latestHealthSample(node);
   const availableGiB = read?.values.memAvailable;
   if (read == null || now - read.at > freshReadMs || availableGiB === undefined) return null;
-  const resident = new Map(Object.entries(read.values).flatMap(([key, value]) => {
-    const s = seriesOf(key);
-    return s?.kind === "pylonResident" ? [[s.pylon, value] as const] : [];
-  }));
+  const resident = residentIn(read.values);
   const namesProcesses = c.disks?.some((d) => d.pylons === true) === true;
   const seen = new Map(o.pylons.map((p) => [p.pylonId, p]));
-  const placed = registry.threads.pylonsWithStatusOn(node).map(({ pylon }) => pylon);
   let placedUpGiB = 0;
   let untouchedGiB = 0;
   for (const pylon of placed) {
@@ -267,12 +275,14 @@ export function namedDiskShort(registry: PlacementRegistry, name: NodeName, need
 
 /**
  * The room the node has left once a pylon that holds `need` more boots there: what its observation does not count as
- * committed, less what its pylons about to boot or wake and the starts placed there will hold (`pending`).
+ * committed, less what its pylons about to boot or wake and the starts placed there will hold (`pending`). `placed`
+ * is the node's pylons with their threads, or at least each one that is to be up.
  */
-export function roomLeft(registry: PlacementRegistry, node: NodeName, o: NodeObservation, c: NodeCapacity, need: Room): { left: Room; pending: Room } {
+export function roomLeft(registry: PlacementRegistry, node: NodeName, o: NodeObservation, c: NodeCapacity, need: Room,
+  placed: readonly { pylon: StoredPylon; thread: Thread }[] = registry.threads.pylonsWithThreadsOn(node)): { left: Room; pending: Room } {
   const now = registry.now();
   const seen = new Map(o.pylons.map((p) => [p.pylonId, p]));
-  const pending = [...registry.threads.pylonsWithThreadsOn(node)
+  const pending = [...placed
     .filter(({ pylon, thread }) => pylon.failed === null && wantsToRun(thread, now))
     .map(({ pylon }) => uncounted(pylon, seen.get(pylon.pylonId))), ...registry.placement.reserved(node)]
     .reduce((total, r) => ({ cpus: total.cpus + r.cpus, memoryGiB: total.memoryGiB + r.memoryGiB, diskGiB: total.diskGiB + r.diskGiB }), { cpus: 0, memoryGiB: 0, diskGiB: 0 });
