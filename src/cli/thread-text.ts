@@ -45,10 +45,11 @@ function judgmentText(j: ThreadDetail["judgments"][number]): string {
 }
 
 function deathLines(t: ThreadDetail["thread"], resume: ThreadDetail["resume"]): string[] {
-  if (resume?.state === "person") return [`resume: stopped. ${resume.why} Write to it to resume it`];
   if (t.turnDied === undefined) return [];
-  const then = resume == null ? "" : resume.state === "left-alone" ? "; Nexus leaves it to you, as you wrote to it"
-    : resume.state === "waiting" ? `; Nexus resumes it ${when(resume.due)}, ${resume.count} in a row` : `; Nexus resumed it, ${resume.count} in a row`;
+  const of = resume != null && resume.turn >= t.turnDied.at ? resume : null;
+  if (of?.state === "person") return [`turn died, and Nexus does not resume it: ${of.why} Write to it to resume it`];
+  const then = of === null ? "" : of.state === "waiting" ? `; Nexus resumes it ${when(of.due)}, ${of.count} in a row`
+    : of.state === "answered" ? "; you wrote to it since, so Nexus waits for the turn your message starts" : `; Nexus resumed it, ${of.count} in a row`;
   return [`turn died: ${t.turnDied.reason}, ${when(t.turnDied.at)}${then}`];
 }
 

@@ -85,7 +85,7 @@ ${t.status !== "deleted" && termView(t)}
 <div id="judgments" data-live>${judgmentCards(c, d)}</div>
 <div id="questions" data-live>${questionCards(c, d)}</div>
 <div id="nudge" data-live>${nudged && nudgeCard(t)}</div>
-<div id="resume" data-live>${d.resume?.state === "person" && resumeCard(t, d.resume.why)}</div>
+<div id="resume" data-live>${d.resume?.state === "person" && d.attention === "died" && resumeCard(t, d.resume.why)}</div>
 <div id="landing" data-live>${landing(c, d, lands)}</div>
 <div id="run" data-live>${(open || (t.status === "archived" && run.kind === "parked")) && stateBar(t, run, c.now)}</div>
 <div id="composer" data-live>${composer(d, agent.kind, run, model, read?.kind === "claude" ? read.view : null, c.now)}</div>

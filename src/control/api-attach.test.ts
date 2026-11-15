@@ -10,7 +10,7 @@ import type { Thread } from "./thread-store.ts";
 import { processStream } from "../process-stream.ts";
 import { encodeMessage } from "../contract/attach.ts";
 import { terminalSize } from "../guest-terminal.ts";
-import { runningPylon, testObservation, until } from "../test-support/kit.ts";
+import { defaultBootedAt, runningPylon, testObservation, until } from "../test-support/kit.ts";
 import type { TailnetNodeId } from "../ids.ts";
 import type { ByteStream, StreamEnd } from "../protocol/streams.ts";
 import { node, laptop, phone, streamsAs, claudeSession, withThread, observeRunning, attachTo, attachPathOf } from "../test-support/api-kit.ts";
@@ -83,7 +83,7 @@ test("an attach to a pylon running on the boot a settle sealed waits, opening no
   const pipe = fakePipe();
   s.probePipes(async () => pipe.stream);
   observeRunning(s, {});
-  s.registry.threads.sealBoot(s.thread.pylonId, "2027-01-01T00:00:00Z");
+  s.registry.threads.sealBoot(s.thread.pylonId, defaultBootedAt);
   const a = await attachTo(s.port, attachPathOf(s.thread.id, "cols=100&rows=30"));
   assert.ok("ws" in a);
   await sleep(200);

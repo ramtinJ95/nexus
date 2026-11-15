@@ -82,12 +82,25 @@ test("a pylon reporting in a loop keeps only its own share, and leaves other pyl
   try {
     const pylon = (n: number) => `pylon-t${n}` as import("./ids.ts").PylonId;
     const quiet = journal.append(pylon(2), { kind: "session.turn-ended", session: "c2" });
-    for (let i = 0; i < 10 * maxSnapshotEvents; i++) journal.append(pylon(1), { kind: "session.heartbeat", session: "c1" });
+    for (let i = 0; i < 10 * maxSnapshotEvents; i++) journal.append(pylon(1), { kind: "session.turn-ended", session: "c1" });
     assert.deepEqual(replayed().filter((r) => r.pylon === pylon(2)), [quiet]);
     assert.equal(replayed().filter((r) => r.pylon === pylon(1)).length, journalPerPylon);
     for (let n = 3; n < 3 + maxSnapshotEvents; n++) journal.append(pylon(n), { kind: "session.turn-ended", session: `c${n}` });
     assert.equal(replayed().length, maxSnapshotEvents, "the node cap keeps the journal within what a snapshot carries");
     assert.equal(replayed().some((r) => r.pylon === pylon(2)), false, "past the node cap the oldest report goes first");
+  } finally { journal.close(); }
+});
+
+test("a session's newest heartbeat replaces its older ones, so an hour of heartbeats leaves the turn ends of the gap in the journal", async () => {
+  const { eventJournal } = await import("./probe/event-journal.ts");
+  const journal = eventJournal(":memory:");
+  try {
+    const pylon = "pylon-t1" as import("./ids.ts").PylonId;
+    const ended = journal.append(pylon, { kind: "session.turn-ended", session: "c1", at: 1 });
+    const other = journal.append(pylon, { kind: "session.heartbeat", session: "c2", at: 2 });
+    for (let at = 3; at < 3 + 12 * 4; at++) journal.append(pylon, { kind: "session.heartbeat", session: "c1", at });
+    const newest = journal.append(pylon, { kind: "session.heartbeat", session: "c1", at: 100 });
+    assert.deepEqual(journal.recent(), [ended, other, newest]);
   } finally { journal.close(); }
 });
 

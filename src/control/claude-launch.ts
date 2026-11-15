@@ -70,7 +70,7 @@ export function claudeLaunch(options: { registry: ClaudeLaunchRegistry; log: (me
       !shutdown.aborted && registry.threads.moveClaudeWorker(thread.id, { to, message: `Claude launch did not complete; attach to check before starting another session: ${why}` });
     try {
       const { stalled } = await launchClaude(link, pylonId, { kind: "open-session", harness: "claude-code", title: thread.title.slice(0, 80), resume: session, prompt: worker.prompt, model: worker.model ?? defaultClaudeModel });
-      if (stalled === undefined) registry.threads.moveClaudeWorker(thread.id, { to: "started" });
+      if (stalled === undefined) registry.threads.moveClaudeWorker(thread.id, { to: "started", at: Date.now() });
       else unfinished("stalled", stalled);
     } catch (err) {
       if (unfinished("failed", (err as Error).message)) log(`${pylonId}: the Claude launch failed: ${(err as Error).message}`);
