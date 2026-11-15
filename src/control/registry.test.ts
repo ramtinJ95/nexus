@@ -675,6 +675,20 @@ test("a prompt submitted in any of the pylon's Claudes is the person's at its ho
   assert.equal(human(), 9_000, "a late report never moves it back");
 });
 
+test("a worker launched with a pointer to its first prompt's file, as one too long for the command line is, did not count as the person", async (t) => {
+  const { promptFile, promptPointer } = await import("../protocol/commands.ts");
+  const { claudeLaunchesDir } = await import("../../images/pylon/nexus-contract.ts");
+  const brief = "Review the pull request.\n".repeat(1_000);
+  const registry = seeded(t, tempDb(), undefined, brief);
+  claudeWorkerAt(registry, threadId, "started", { session: "s1" });
+  const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+  const pointer = promptPointer(promptFile(`${claudeLaunchesDir}/s1`), registry.threads.claudeWorker(threadId)!.prompt.length);
+  registry.threads.reportSession(node, { sequence: 1, pylon: pylonId, time: Date.now(), event: { kind: "session.turn-started", session: "s1", at: 5_000, promptSha256: sha256(pointer) } });
+  assert.equal(registry.threads.thread(threadId)!.lastHumanActivityAt, thread.lastHumanActivityAt);
+  registry.threads.reportSession(node, { sequence: 2, pylon: pylonId, time: Date.now(), event: { kind: "session.turn-started", session: "s1", at: 6_000, promptSha256: sha256("Try another approach") } });
+  assert.equal(registry.threads.thread(threadId)!.lastHumanActivityAt, 6_000, "the person's own prompt still counts");
+});
+
 test("a long message Nexus typed is still Nexus's when Claude hands its hook the message as a paste", async (t) => {
   const { hookReport } = await import("../../images/pylon/nexus-heartbeat.ts");
   const registry = seeded(t, tempDb(), undefined, "Fix the checkout");

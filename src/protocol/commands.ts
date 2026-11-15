@@ -101,15 +101,21 @@ export type CommandResult =
 export const maxPromptChars = 16_384;
 /**
  * The longest prompt an open session starts with. One longer than `inlinePromptChars` goes to the session in a file it
- * is told to read (probe/guest/sessions.ts), so this bounds only what the control plane stores and sends the probe.
+ * is told to read (probe/guest/sessions.ts), so this bounds only what the control plane stores and sends the probe,
+ * whose request body takes 1 MiB: even escaped to 6 bytes a character in JSON, this fits.
  */
-export const maxOpenPromptChars = 1_048_576;
+export const maxOpenPromptChars = 131_072;
 /**
  * The longest first prompt passed on Claude's command line. It goes there as one argument, inside a Herdr Core request
  * that the guest runs as one shell-quoted argument, and Linux takes at most 131,072 bytes in one argument
  * (MAX_ARG_STRLEN). Quoting turns an apostrophe into 5 bytes, so 16,384 characters keep any text under it.
  */
 export const inlinePromptChars = 16_384;
+/** Where a first prompt too long for the command line is written, in its launch's directory. */
+export const promptFile = (launchDir: string) => `${launchDir}/prompt.md`;
+/** The first prompt Claude is started with in place of one written to `path`, which the control plane counts as Nexus's own. */
+export const promptPointer = (path: string, length: number) =>
+  `Your first message is ${length} characters, too long for the command line, so it is in ${path}. Read all of it now and act on it as if it were this message.`;
 
 const port = z.int().min(1).max(65535).refine((p) => !reservedPorts.has(p), reservedPortMessage);
 /** Refuses an open-session field that only some kinds of session take, and names them. */
