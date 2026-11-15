@@ -6,6 +6,10 @@ What each version of the API contract and the Mac `nexus` CLI changed, newest fi
 
 Adds `unstated` to a review's `Round`, `asked` or `answered`, and the finding `STATEMENT` (P0) among those a round's builder answers. A review whose head has no `.nexus/verify`, and whose reviewer quoted nothing from the description of what could not be checked live, now goes to `fixing` once its check passes, where the builder is asked to add that section to the description, and to `quoting` once it did, as [the design's review loop](design.md#the-review-loop-and-landing) describes. Before, such a review stopped at `approved`, or its landing ended `needs-person` with `No live check ran, and the pull request does not say what could not be checked live.`, and the builder was told nothing. A builder that rejects the finding ends the review `needs-person` with `No live check ran at <head>, and the builder did not add to the pull request's description what could not be checked live: <its reason>`.
 
+## 0.96.0
+
+Adds `replace` to `POST /v1/threads/<thread>/review` and `--replace` to `nexus review`. Without it, a start that would take the place of the thread's review of another open pull request, one approved or held for the person, is now refused with 409 and what to do, as [`review`](cli.md#reviews-that-wait-their-turn) describes. Before, the start went through and the waiting review could no longer land. A control plane older than 0.96.0 refuses a body with `replace`, and replaces without it.
+
 ## 0.95.0
 
 Adds the `event-loop` check to `ControlCheckName`, which `GET /v1/checks`, `GET /v1/doctor`, `nexus doctor` and the Health page answer after `release`: how late the control plane ran what was due in the slowest of its last 5 minutes, `warn` from 500 ms at the 99th percentile and `fail` from 2 s, as [the design's doctor](design.md#doctor-and-health-alerts) describes. A control plane older than 0.95.0 reports no such check.

@@ -235,8 +235,18 @@ test("review --cancel ends the thread's running review through its route, and pr
   assert.equal((await s.nexus(["review", "--cancel", thread.id])).stdout, `Cancelled review rv-1 of PR #7: cancelled, round 1 of 5, reviewer th-reviewer on gpt-6-astra, cancelled by ${laptop}\n`);
   assert.deepEqual((await s.json(["review", thread.id, "--cancel"])).phase, { kind: "cancelled", who: "person", by: laptop });
   assert.deepEqual(asked, [[thread.id, laptop], [thread.id, laptop]]);
-  for (const extra of [["--land"], ["--pr", "7"], ["--rounds", "2"]]) assert.equal((await s.nexus(["review", "--cancel", thread.id, ...extra])).code, 64, `--cancel with ${extra[0]}`);
+  for (const extra of [["--land"], ["--pr", "7"], ["--rounds", "2"], ["--replace"]]) assert.equal((await s.nexus(["review", "--cancel", thread.id, ...extra])).code, 64, `--cancel with ${extra[0]}`);
   assert.equal(asked.length, 2, "a refused flag sends nothing");
+});
+
+test("review --replace sends the person's word to replace the thread's review of another pull request that waits on them", async (t) => {
+  const asked: unknown[] = [];
+  const reviews = { async start(builder: ThreadId, request: unknown) { asked.push(request); return testReview({ builder }); } } as never as ReviewLoop;
+  const s = await setup(t, { reviews });
+  const thread: Thread = await s.json(["start", "--project", "acme", "--title", "Cache"]);
+  assert.equal((await s.nexus(["review", thread.id, "--pr", "8"])).code, 0);
+  assert.equal((await s.nexus(["review", thread.id, "--pr", "8", "--replace"])).code, 0);
+  assert.deepEqual(asked, [{ pr: 8, rounds: undefined, land: null, replace: false }, { pr: 8, rounds: undefined, land: null, replace: true }]);
 });
 
 test("land --waive without a terminal refuses before it reads or sends anything, and land alone sends no waiver", async (t) => {
