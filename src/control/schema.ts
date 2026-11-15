@@ -323,10 +323,11 @@ export const migrations: readonly string[] = [
   // one stuck there is told however often the control plane restarted. A node observed before counts from its next save.
   `ALTER TABLE nodes ADD COLUMN transitions TEXT NOT NULL DEFAULT '{}';`,
   // When a Claude worker's latest turn ended and last reported running, by the pylon's clock, so a turn its pylon stopped
-  // under is one that died. A turn from before ended unless its session's latest report says it ran.
+  // under is one that died. A turn from before ended unless its session's latest report says it ran, or its session's
+  // end during it was recorded as its death.
   `ALTER TABLE claude_workers ADD COLUMN turn_ended_at INTEGER;
    ALTER TABLE claude_workers ADD COLUMN turn_beat_at INTEGER;
    UPDATE claude_workers SET turn_beat_at = coalesce((SELECT o.at FROM session_order o WHERE o.thread = claude_workers.thread AND o.session = claude_workers.turn_session), turn_at),
-     turn_ended_at = CASE WHEN (SELECT o.kind FROM session_order o WHERE o.thread = claude_workers.thread AND o.session = claude_workers.turn_session) IN ('session.turn-started', 'session.heartbeat') THEN NULL ELSE turn_at END
+     turn_ended_at = CASE WHEN (SELECT o.kind FROM session_order o WHERE o.thread = claude_workers.thread AND o.session = claude_workers.turn_session) IN ('session.turn-started', 'session.heartbeat') OR coalesce(died_at, -1) >= turn_at THEN NULL ELSE turn_at END
      WHERE turn_at IS NOT NULL;`,
 ];

@@ -609,7 +609,8 @@ test("watch --until-idle exits 12 when Nexus gives the resume it waits on to the
 
 test("watch --until-idle waits while the person's message answers the dead turn, and exits 12 once Nexus says it started no turn", async (t) => {
   const s = await setup(t);
-  const { printed, code } = await claudeDeath(t, s, () => {}, async (c) => {
+  const resuming = (thread: string) => s.registry.threads.saveClaudeResume(thread as never, { state: "waiting", turn: Date.parse(at(3)), count: 1, from: 0, due: 0 });
+  const { printed, code } = await claudeDeath(t, s, resuming, async (c) => {
     s.registry.threads.saveClaudeResume(c.thread.id, { state: "answered", turn: Date.parse(at(3)), count: 0, from: 0, at: 0 });
     s.registry.threads.saveClaudeResume(c.thread.id, { state: "person", turn: Date.parse(at(3)), count: 0, why: "You wrote to it since, and no turn started within 10 minutes." });
   });

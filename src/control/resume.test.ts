@@ -1,26 +1,31 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { testPylon, testRegistry, testReview, testThread, claudeWorkerAt, storedTranscripts } from "../test-support/registry-kit.ts";
+import { testPylon, testReview, testThread, claudeWorkerAt, storedTranscripts } from "../test-support/registry-kit.ts";
 import { personPhase, type Phase } from "./review-model.ts";
 import { agentInbox } from "./inbox.ts";
 import { agentReader } from "./agent-conversation.ts";
 import { deadTurnResumer, resumeWaitsMs } from "./resume.ts";
 import { claudeLaunch } from "./claude-launch.ts";
+import { openRegistry, type Registry } from "./registry.ts";
+import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { checkCaller, reviewerCaller, senders } from "./agent-protocol.ts";
 import { transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
 import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { PylonEvent } from "../protocol/observations.ts";
-import { runningPylon, stoppedPylon, testCapacity, testObservation } from "../test-support/kit.ts";
+import { runningPylon, stoppedPylon, tempDir, testCapacity, testObservation } from "../test-support/kit.ts";
 
 const node = "node" as NodeName;
 const session = "c0ffee00-0000-4000-8000-000000000000";
 const minute = 60_000;
 
 /** Claude worker threads behind the real inbox and a probe that types, or blocks, and a clock the test moves. */
-function fixture(t: import("node:test").TestContext) {
+function fixture(t: import("node:test").TestContext, path = ":memory:") {
   let now = 1_800_000_000_000;
-  const registry = testRegistry(t, ":memory:", () => now);
+  let registry = openRegistry(path, () => now);
+  t.after(() => registry.close());
   const project = { id: "nexus" as ProjectId, repoUrl: "https://github.com/acme/repo.git", defaultBranch: "main", defaultNode: node, resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: [], secrets: [], logins: [], preSetup: null };
   registry.nodes.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
   registry.projects.createProject(project);
@@ -29,8 +34,11 @@ function fixture(t: import("node:test").TestContext) {
   let outcome: "sent" | "blocked" = "sent";
   const probe = { async command(_: PylonId, command: PylonCommand): Promise<CommandResult> { typed.push(command as Extract<PylonCommand, { kind: "send-claude" }>); return { kind: "send-claude", outcome, terminal: "t1", resumed: true }; } };
   const harness = { async send() { throw new Error("a Claude worker's message never reaches the harness"); } };
-  const inbox = agentInbox({ log: assert.fail, registry, harness, probes: new Map([[node, probe]]), wake() {} });
-  const resumer = deadTurnResumer({ registry, inbox, personWroteTo: agentReader(registry, { async watch() { throw new Error("no harness thread here"); } }, storedTranscripts).personWrote, clock: () => now, log() {} });
+  const resumerOf = (r: Registry) => deadTurnResumer({
+    registry: r, inbox: agentInbox({ log: assert.fail, registry: r, harness, probes: new Map([[node, probe]]), wake() {} }),
+    personWroteTo: agentReader(r, { async watch() { throw new Error("no harness thread here"); } }, storedTranscripts).personWrote, clock: () => now, log() {},
+  });
+  let resumer = resumerOf(registry);
   let sequence = 0;
   const seq = new Map<ThreadId, number>();
   const pylons: PylonId[] = [];
@@ -65,7 +73,16 @@ function fixture(t: import("node:test").TestContext) {
     report(id, "session.turn-ended");
   }
   return {
-    registry, resumer, typed, add, report, turn, transcript,
+    get registry() { return registry; },
+    get resumer() { return resumer; },
+    typed, add, report, turn, transcript,
+    /** Closes the registry file, rewinds it to schema `version`, and opens it again, as a control plane upgraded from that version does. */
+    upgradeFrom(version: number) {
+      registry.close();
+      rewindTo(path, version);
+      registry = openRegistry(path, () => now);
+      resumer = resumerOf(registry);
+    },
     tick(ms: number) { now += ms; },
     get now() { return now; },
     set outcome(o: "sent" | "blocked") { outcome = o; },
@@ -597,4 +614,27 @@ test("a resume keeps its pylon's hold while its node is offline, and so does a w
   f.registry.threads.saveClaudeResume(old, { state: "waiting", turn: died, count: 2, due: f.now + resumeWaitsMs[1]! } as never);
   f.tick(6 * minute);
   assert.ok((f.registry.threads.thread(old)!.awaitedUntil ?? 0) > f.now, "an older waiting record is held from its death");
+});
+
+const dbDir = await tempDir("nexus-resume-");
+
+test("an upgrade keeps a death a session's end recorded mid-turn, so it is resumed, and so a resume that waited on it goes out", async (t) => {
+  const f = fixture(t, join(dbDir, `${randomUUID()}.db`));
+  const unrecorded = f.add("th-unrecorded");
+  const waiting = f.add("th-waiting");
+  f.turn(unrecorded, "session-ended");
+  f.turn(waiting, "session-ended");
+  const died = (id: ThreadId) => f.registry.threads.thread(id)!.turnDied?.at;
+  const waitedOn = died(waiting)!;
+  await f.resumer.poll();
+  assert.equal(f.registry.threads.claudeResume(waiting)?.state, "waiting");
+  f.registry.threads.saveClaudeResume(unrecorded, null);
+  const before = { unrecorded: died(unrecorded), waiting: waitedOn };
+  f.upgradeFrom(versionBefore(/ADD COLUMN turn_ended_at\b/));
+  assert.deepEqual({ unrecorded: died(unrecorded), waiting: died(waiting) }, before, "the upgrade keeps both deaths");
+  f.tick(resumeWaitsMs[0]!);
+  await f.resumer.poll();
+  f.tick(resumeWaitsMs[0]!);
+  await f.resumer.poll();
+  assert.deepEqual(f.typed.map((c) => c.requestId!.split(":")[1]).sort(), [unrecorded, waiting].sort());
 });
