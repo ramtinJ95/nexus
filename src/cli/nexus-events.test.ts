@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createServer as createHttpServer } from "node:http";
 import { follow } from "./transport.ts";
+import { apiIdleMs } from "../contract/route.ts";
 import { cli, withHealth, setup } from "../test-support/cli-kit.ts";
 
 test("events prints one JSON object per line and resumes after a cursor", async (t) => {
@@ -32,7 +33,7 @@ test("the SSE reader waits for its consumer before delivering more data or a cur
   const release = Promise.withResolvers<void>();
   const seen: unknown[] = [];
   const cursors: string[] = [];
-  const reading = follow({ url: new URL(`http://127.0.0.1:${port}`), socks: null }, "/events", async (data) => {
+  const reading = follow({ url: new URL(`http://127.0.0.1:${port}`), socks: null, idleMs: apiIdleMs }, "/events", async (data) => {
     seen.push(data);
     entered.resolve();
     await release.promise;
@@ -117,7 +118,7 @@ test("a dropped SSE connection cannot reconnect around a blocked consumer", asyn
   t.after(() => { release.resolve(); server.closeAllConnections(); server.close(); });
   const port = (server.address() as { port: number }).port;
   let settled = false;
-  const reading = follow({ url: new URL(`http://127.0.0.1:${port}`), socks: null }, "/events", async () => {
+  const reading = follow({ url: new URL(`http://127.0.0.1:${port}`), socks: null, idleMs: apiIdleMs }, "/events", async () => {
     entered.resolve();
     await release.promise;
   }, new AbortController().signal).then(() => { settled = true; }, () => { settled = true; });

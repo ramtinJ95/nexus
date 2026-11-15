@@ -18,6 +18,7 @@ import type { TailnetNodeId } from "../ids.ts";
 import { testCertificate } from "../test-certificate.ts";
 import { deadPort, tempDir } from "../test-support/kit.ts";
 import { call, CliError, follow } from "./transport.ts";
+import { apiIdleMs } from "../contract/route.ts";
 import { whenRunning, type Api } from "./kit.ts";
 import { commandGroups, commands, sections } from "./commands/index.ts";
 import { version } from "../version.ts";
@@ -121,7 +122,7 @@ test("every command whose help takes a <thread> resolves its first argument as o
 
 test("nexus --help and nexus alone name the config file in the HOME the CLI runs with", async (t) => {
   const s = await setup(t);
-  const config = `then NEXUS_URL and NEXUS_SOCKS, then ${join(s.home, ".config", "nexus", "cli.json")}, which`;
+  const config = `then NEXUS_URL, NEXUS_SOCKS and NEXUS_TIMEOUT, then ${join(s.home, ".config", "nexus", "cli.json")}, which`;
   assert.ok((await s.nexus(["--help"])).stdout.includes(config));
   const bare = await s.nexus([]);
   assert.equal(bare.code, 64);
@@ -315,6 +316,39 @@ test("the URL and the proxy come from the flags, then the environment, then the 
   assert.match(bad.stderr, /cli\.json is not a CLI config/);
 });
 
+test("the timeout comes from the flag, then the environment, then the config file, and a silent control plane fails after it", { timeout: 60_000 }, async (t) => {
+  const s = await setup(t);
+  const held = new Set<Socket>();
+  const silent = createServer((socket) => { socket.on("error", () => {}); held.add(socket); });
+  const port = await listening(t, silent);
+  const at = { NEXUS_URL: `http://127.0.0.1:${port}`, NEXUS_SOCKS: "" };
+  const after = (seconds: number) => [2, `nexus: the control plane at 127.0.0.1:${port} sent nothing for ${seconds}s. It took the connection, so it is busy or stuck rather than unreachable. --timeout SECONDS or NEXUS_TIMEOUT waits longer\n`];
+  const config = join(s.home, ".config", "nexus", "cli.json");
+  try {
+    await mkdir(join(s.home, ".config", "nexus"), { recursive: true });
+    await writeFile(config, JSON.stringify({ timeout: 1 }));
+    const fromFile = await s.nexus(["projects"], at);
+    assert.deepEqual([fromFile.code, fromFile.stderr], after(1), "the config file's seconds");
+    await writeFile(config, JSON.stringify({ timeout: 20 }));
+    const fromEnv = await s.nexus(["projects"], { ...at, NEXUS_TIMEOUT: "1" });
+    assert.deepEqual([fromEnv.code, fromEnv.stderr], after(1), "the environment overrides the file");
+    const fromFlag = await s.nexus(["projects", "--timeout", "1"], { ...at, NEXUS_TIMEOUT: "20" });
+    assert.deepEqual([fromFlag.code, fromFlag.stderr], after(1), "a flag overrides the environment");
+
+    for (const given of ["0", "1.5", "soon", "3601"]) {
+      const bad = await s.nexus(["projects", "--timeout", given], at);
+      assert.deepEqual([bad.code, bad.stderr], [64, `nexus: the timeout takes whole seconds from 1 to 3600, got ${given}\n`]);
+    }
+    await writeFile(config, JSON.stringify({ timeout: "20" }));
+    const text = await s.nexus(["projects"], at);
+    assert.equal(text.code, 64);
+    assert.match(text.stderr, /cli\.json is not a CLI config/);
+  } finally {
+    // A server's socket that nothing reads never sees the CLI hang up, and would hold the server's close.
+    for (const socket of held) socket.destroy();
+  }
+});
+
 test("a thread's default title is its brief's first line that is not blank, cut to 80 characters", () => {
   assert.equal(titleOf("\n  \n  Fix the login page  \nthen test it"), "Fix the login page");
   assert.equal(titleOf("a".repeat(80)), "a".repeat(80));
@@ -330,11 +364,11 @@ test("a stream refused with a reply cut off mid-body fails as unreachable rather
     });
   });
   const port = await listening(t, server);
-  await assert.rejects(follow({ url: new URL(`http://127.0.0.1:${port}`), socks: null }, "/v1/threads/th-x/events", () => {}, new AbortController().signal),
+  await assert.rejects(follow({ url: new URL(`http://127.0.0.1:${port}`), socks: null, idleMs: apiIdleMs }, "/v1/threads/th-x/events", () => {}, new AbortController().signal),
     (err) => err instanceof CliError && err.kind === "unreachable");
 });
 
-test("an API that stays silent behind a working proxy is named as the culprit, not the proxy", { timeout: 60_000 }, async (t) => {
+test("an API that stays silent behind a working proxy is named as the culprit, not the proxy, in its TLS handshake too", { timeout: 60_000 }, async (t) => {
   const held = new Set<Socket>();
   const silent = createServer((socket) => {
     socket.on("error", () => {});
@@ -343,8 +377,12 @@ test("an API that stays silent behind a working proxy is named as the culprit, n
   const port = await listening(t, silent);
   const proxy = await socksProxy(t);
   try {
-    await assert.rejects(call({ url: new URL(`http://${apiName}:${port}`), socks: { host: "127.0.0.1", port: proxy.port } }, "DELETE", "/v1/threads/th-x/previews/8003", undefined, 200),
-      (err) => err instanceof CliError && err.kind === "unreachable" && err.message === `the control plane at ${apiName}:${port} sent nothing for 0.2s after DELETE /v1/threads/th-x/previews/8003 went out, so the request may have gone through. Check with nexus show <thread>, or nexus threads for a start, before you try again`);
+    const socks = { host: "127.0.0.1", port: proxy.port };
+    await assert.rejects(call({ url: new URL(`http://${apiName}:${port}`), socks, idleMs: 200 }, "DELETE", "/v1/threads/th-x/previews/8003"),
+      (err) => err instanceof CliError && err.kind === "unreachable" && err.message === `the control plane at ${apiName}:${port} sent nothing for 0.2s after DELETE /v1/threads/th-x/previews/8003 went out, so the request may have gone through. Check with nexus show <thread>, or nexus threads for a start, before you try again. It took the connection, so it is busy or stuck rather than unreachable. --timeout SECONDS or NEXUS_TIMEOUT waits longer`);
+    // A control plane whose event loop is blocked takes the connection and never answers the TLS hello.
+    await assert.rejects(call({ url: new URL(`https://${apiName}:${port}`), socks, idleMs: 200 }, "GET", "/v1/health"),
+      (err) => err instanceof CliError && err.kind === "unreachable" && err.message === `the control plane at ${apiName}:${port} sent nothing for 0.2s. It took the connection, so it is busy or stuck rather than unreachable. --timeout SECONDS or NEXUS_TIMEOUT waits longer`);
   } finally {
     // The proxy keeps its leg to the silent server open after the CLI gives up, which would hold the server's close.
     for (const socket of held) socket.destroy();
@@ -464,12 +502,12 @@ test("a reused connection takes each request's own idle timeout, and a silence o
   });
   const port = await listening(t, server);
   t.after(() => { for (const socket of sockets) socket.destroy(); });
-  const endpoint = { url: new URL(`http://127.0.0.1:${port}`), socks: null };
+  const endpoint = { url: new URL(`http://127.0.0.1:${port}`), socks: null, idleMs: 50 };
   await call(endpoint, "GET", "/fast", undefined, 100);
   await new Promise((resolve) => setTimeout(resolve, 300));
   assert.deepEqual(await call(endpoint, "GET", "/fast", undefined, 60_000), {}, "the first request's 100 ms did not stay on the socket");
   await assert.rejects(call(endpoint, "GET", "/slow", undefined, 200),
-    (err) => err instanceof CliError && err.kind === "unreachable" && err.message === `the control plane at 127.0.0.1:${port} sent nothing for 0.2s`);
+    (err) => err instanceof CliError && err.kind === "unreachable" && err.message === `the control plane at 127.0.0.1:${port} sent nothing for 0.2s. It took the connection, so it is busy or stuck rather than unreachable. --timeout SECONDS or NEXUS_TIMEOUT waits longer`);
   assert.deepEqual(seen, ["/fast", "/fast", "/slow"]);
   assert.equal(sockets.size, 1, "the three requests shared one connection");
 });

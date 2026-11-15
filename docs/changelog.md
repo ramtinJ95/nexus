@@ -2,6 +2,10 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), except in the commands [Version skew](cli.md#version-skew) names, so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.92.0
+
+Adds the CLI's timeout setting: `--timeout SECONDS`, `NEXUS_TIMEOUT` or `"timeout"` in the config file, whole seconds from 1 to 3600, 30 when unset as before. It is how long the CLI lets a connection stay silent, as [Where it connects](cli.md#where-it-connects) describes. A control plane that took the connection and then sent nothing, in the TLS handshake too, is now named as busy or stuck, with the setting that waits longer. Before, a silence in the handshake was reported as the SOCKS proxy's. The API contract is unchanged, and a 0.91.0 control plane serves this CLI.
+
 ## 0.91.0
 
 Adds `nexus project remove <id>` and `DELETE /v1/projects/<id>`. Only a person's device can remove a project. Removal refuses open or starting threads, queued starts, unstarted pipeline items and linked open pull requests. It keeps the project identity, archived and deleted threads, usage and repository, and records `Project.removed`, `{ at: number, by: string }`. New starts, edits and unarchives in that project are refused. `GET /v1/projects` and ordinary project pickers leave removed projects out; `GET /v1/projects?removed=true`, `projects --all` and `project show` include them. A repeat removal returns the first removal. No project ID is reused. A control plane older than 0.91.0 refuses the removal route and ignores the list query.
