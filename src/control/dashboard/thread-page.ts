@@ -131,10 +131,10 @@ const archiveButton = (id: ThreadId, archived: boolean, confirm: string | null =
 
 /**
  * What archiving the thread loses, or null when nothing: the open questions an archive withdraws, a failed pylon's
- * judgment and a Claude worker's asks, and the turn its agent is in, whose pylon goes to sleep at once.
+ * judgment, a planning thread's proposals and a Claude worker's asks, and the turn its agent is in, whose pylon goes to sleep at once.
  */
 function archiveLoses(d: ThreadDetail, run: Run): string | null {
-  const questions = d.questions.filter((q) => (q.kind === "judgment" || q.kind === "ask") && isOpen(q));
+  const questions = d.questions.filter((q) => (q.kind === "judgment" || q.kind === "ask" || q.kind === "proposal") && isOpen(q));
   const named = questions.map((q) => `"${q.text.split("\n")[0]}"`).join(", ");
   const lost = [
     questions.length > 0 && (questions.length === 1 ? `Its open question ${named} is withdrawn.` : `Its ${questions.length} open questions ${named} are withdrawn.`),
