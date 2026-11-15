@@ -4,9 +4,10 @@ import assert from "node:assert/strict";
 import type { ThreadDetail } from "./wire.ts";
 import type { Thread } from "./thread-store.ts";
 import { stoppedPylon, testCapacity, testObservation } from "../test-support/kit.ts";
-import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { ImageId, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { ProjectPlacement } from "../contract/reports.ts";
 import type { NodeHealth } from "../protocol/client.ts";
-import { node, laptop, phone, image, testApi, withThread, observeNode, withImage, deployment, admitStep } from "../test-support/api-kit.ts";
+import { node, laptop, phone, image, project, testApi, withThread, observeNode, withImage, deployment, admitStep } from "../test-support/api-kit.ts";
 
 test("nodes are listed with their state and capacity, without the observation", async (t) => {
   const s = await testApi(t);
@@ -66,4 +67,41 @@ test("only a deployer reads a node's health, which the node's probe answers, and
   assert.equal(reads, 1, "a refused caller reaches no probe");
   const off = await testApi(t);
   assert.equal((await off.call("GET", `/v1/nodes/${node}/health`)).status, 403, "with no deployers configured, nobody reads it");
+});
+
+test("placement preview uses the start's project and dotfiles inputs, protects health, and reserves nothing", async (t) => {
+  const s = await testApi(t, { deployment });
+  assert.equal((await s.call("POST", "/v1/projects", { ...project, repoUrl: "https://example.com/acme.git", defaultNode: "auto" })).status, 201);
+  assert.equal((await s.call("GET", "/v1/placement/acme")).status, 409, "no image yet is explicit, not a guessed decision");
+  assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
+  s.registry.images.setCurrentImage(image.id as ImageId);
+  observeNode(s, "full", { total: 32, committed: 24 });
+  observeNode(s, "no-ssh", { total: 32, committed: 0 }, { grants: { secrets: ["STRIPE_KEY", "NEXUS_CHATGPT_TOKEN"], gitSsh: false } });
+  const at = Date.now();
+  s.registry.nodeMetrics.recordHealthSample("full", { at, values: { memAvailable: 4.5 } });
+  const reply = await s.call("GET", "/v1/placement/acme");
+  assert.equal(reply.status, 200);
+  const report = reply.body as ProjectPlacement;
+  assert.deepEqual(report.resources, project.resources);
+  assert.equal(report.defaultNode, "auto");
+  assert.equal(report.best, null);
+  assert.deepEqual(report.nearest, { node: "full", missingGiB: 0.5 });
+  assert.match(report.nodes.find((n) => n.node === "no-ssh")!.reason!, /dotfiles.git/, "HTTPS project still needs the configured SSH dotfiles grant");
+  assert.equal(report.nodes.find((n) => n.node === "full")!.memory!.sampledAt, at);
+  assert.deepEqual(report.nodes.find((n) => n.node === node), { node, admitted: false, reason: "is offline", memory: null });
+  assert.equal(s.registry.threads.threads().length, 0);
+  assert.deepEqual(s.registry.placement.reserved("full" as NodeName), []);
+  assert.equal((await s.call("GET", "/v1/placement/missing")).status, 404);
+  assert.equal((await s.call("POST", "/v1/placement/acme", {})).status, 405);
+  const start = await s.call("POST", "/v1/threads", { project: "acme", title: "No room", node: "auto" });
+  assert.equal(start.status, 409);
+  for (const n of report.nodes) assert.ok(start.body.error.includes(`${n.node} ${n.reason}`));
+  assert.match(start.body.error, /nearest node: full needs 0.5 GiB more memory$/);
+  s.callAs(phone);
+  assert.equal((await s.call("GET", "/v1/placement/acme")).status, 403);
+  s.callAs("nFIREBAT" as TailnetNodeId);
+  assert.equal((await s.call("GET", "/v1/placement/acme")).status, 403);
+  s.callAs(laptop);
+  assert.equal((await s.call("DELETE", "/v1/projects/acme")).status, 200);
+  assert.equal((await s.call("GET", "/v1/placement/acme")).status, 409);
 });

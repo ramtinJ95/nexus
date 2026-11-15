@@ -28,6 +28,15 @@ const startsWithSkill = new RegExp(`^${claudeSkill}(?:\\s|$)`);
 const claudePromptOf = ({ request, role }: Pick<Start, "request" | "role">) =>
   request.claude === undefined || role === "reviewer" || startsWithSkill.test(request.claude) ? request.claude : `${claudeSkill} ${request.claude}`;
 
+/** The inputs placement weighs, shared by a start and the read-only project preview. */
+export function placementNeed(project: Project, request: Pick<StartRequest, "branch" | "commit" | "resources">, image: BootInputs["image"], dotfiles: PylonOverlay["dotfiles"]) {
+  const branch = request.branch ?? project.defaultBranch;
+  const repo: RepoInit = hasRemote(project)
+    ? { kind: "clone", url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } }
+    : { kind: "empty", branch };
+  return { image, resources: resourcesOf(request.resources, project), network: bootNetwork(project, dotfiles?.repo), repo, dotfiles };
+}
+
 /**
  * What a start refuses before it places anything, which a queued start is checked against when it is queued too. A
  * Claude prompt must fit the pylon's open-session prompt, its project's standing rules included.
@@ -131,15 +140,10 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     if (image === null) throw new Refusal("conflict", "no image is current yet, so a pylon has nothing to boot");
     const branch = request.branch ?? project.defaultBranch;
     // The repository as a fresh boot makes it. setUp pins a template boot's commit, and the pylon's boot freezes either.
-    const freshRepo: RepoInit = hasRemote(project)
-      ? { kind: "clone", url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } }
-      : { kind: "empty", branch };
-    const network = bootNetwork(project, dotfiles?.repo);
-
-    const resources = resourcesOf(request.resources, project);
+    const need = placementNeed(project, request, image, dotfiles);
+    const { repo: freshRepo, network, resources } = need;
     const id = queued ?? start.id ?? newThreadId();
     const pylonId = pylonIdOf(id);
-    const need = { image, resources, network, repo: freshRepo, dotfiles };
     const placement: Placement = named ? { how: "named", node: request.node as NodeName }
       : request.node === "auto" || (request.near === undefined && project.defaultNode === "auto") ? placeAuto(registry, need)
       : request.near !== undefined ? placeNear(registry, need, request.near, request.ifRoom === true)

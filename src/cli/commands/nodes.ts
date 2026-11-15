@@ -2,7 +2,7 @@ import { gib } from "../../util/gib.ts";
 import type { NodeCapacity } from "../../protocol/observations.ts";
 import type { NodeHealth } from "../../protocol/client.ts";
 import { diskText, lowDisk } from "../../disk-space.ts";
-import { type Command, when, request, table } from "../kit.ts";
+import { type Command, when, request, table, str } from "../kit.ts";
 import { nodeRoutes, type NodePylons } from "../../contract/reports.ts";
 
 /** A probe from before pylons were counted reports no CPUs or committed disk, and always 0 GiB of memory committed. */
@@ -67,19 +67,32 @@ export const nodesCommands: Readonly<Record<string, Command>> = {
   // A node may be named show, and `nexus node show` has always read its health.
   "node show": { ...node, args: [0, 1], run: (api, [name = "show"], ...rest) => node.run(api, [name], ...rest) },
   nodes: {
-    help: ["  nexus nodes"],
+    help: ["  nexus nodes [--project <id>]                reservations; with a project, its default pylon's auto-placement check (deployers only)"],
     args: [0, 0],
-    async run(api) {
+    options: { project: { type: "string" } },
+    async run(api, _args, values) {
       const nodes = await request(api, nodeRoutes.list, {});
+      const project = str(values, "project");
+      const placement = project === undefined ? null : await request(api, nodeRoutes.placement, { project });
       return {
-        json: nodes,
+        json: placement === null ? nodes : { nodes, placement },
         text: nodes.length === 0 ? "No nodes." : table(["Node", "State", "Observed", "Capacity"], nodes.map((n) => [
           n.name, n.state, n.observedAt === null ? "never" : when(Date.parse(n.observedAt)),
           n.capacity === null ? "" : capacityText(n.capacity, n.overcommitted),
         ])).split("\n").flatMap((line, i) => {
           const held = i === 0 ? "" : pylonsText(nodes[i - 1]!.pylons);
-          return held === "" ? [line] : [line, `  pylons: ${held}`];
-        }).join("\n"),
+          const admission = i === 0 ? undefined : placement?.nodes.find((a) => a.node === nodes[i - 1]!.name);
+          const memory = admission?.memory;
+          return [line, ...held === "" ? [] : [`  pylons: ${held}`], ...admission === undefined ? [] : [
+            `  auto placement: ${admission.admitted ? "can take" : "cannot take"} ${project}'s ${placement!.resources.memoryGiB} GiB pylon${admission.reason === null ? "" : `: ${admission.reason}`}`,
+            ...memory == null ? [] : [memory.availableGiB === null
+              ? "  memory: no fresh host sample; placement uses reservations only"
+              : `  memory: ${gib(memory.availableGiB)} GiB host free, ${gib(memory.untouchedGiB!)} GiB reserved but untouched, ${gib(memory.pendingGiB)} GiB pending, ${gib(memory.reclaimableGiB)} GiB reclaimable holds, ${memory.headroomGiB} GiB spare; sampled ${when(memory.sampledAt!)}`],
+          ]];
+        }).concat(placement === null ? ["Reservations are not free capacity. Use --project <id> to check placement."] : [
+          `Auto-placement snapshot; not a reservation. Project default: ${placement.defaultNode}.`,
+          ...placement.nearest === null ? [] : [`Nearest node: ${placement.nearest.node} needs ${Math.max(0.1, gib(placement.nearest.missingGiB))} GiB more memory.`],
+        ]).join("\n"),
       };
     },
   },

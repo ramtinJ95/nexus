@@ -3,6 +3,8 @@ import type { z } from "zod";
 import type { NodeHealth } from "../protocol/client.ts";
 import type { NodeSummary } from "../control/wire.ts";
 import type { NodeMetrics } from "../control/node-metrics.ts";
+import type { PlacementReport } from "../control/placement.ts";
+import type { Project } from "../control/project.ts";
 import type { BackfillPlanRow, UsageBackfill, UsageReport } from "./usage.ts";
 import type { DoctorReport, HealthChange, HealthView } from "../control/doctor-model.ts";
 import type { checksSeenSchema } from "./reports-parse.ts";
@@ -28,8 +30,16 @@ const usageQuery: QueryCodec<UsageQuery, URLSearchParams> = {
 /** The backfill's state, and the archived threads a start would read. */
 export interface BackfillView { backfill: UsageBackfill; plan: BackfillPlanRow[] }
 
+/** Auto-placement of this project's default-sized pylon, independent of its pinned default node. */
+export interface ProjectPlacement extends PlacementReport {
+  project: string;
+  defaultNode: string;
+  resources: Project["resources"];
+}
+
 export const nodeRoutes = {
   list: route<NodeSummary[]>()("GET", "/v1/nodes"),
+  placement: route<ProjectPlacement>()("GET", "/v1/placement/{project}"),
   health: route<NodeHealth>()("GET", "/v1/nodes/{node}/health"),
   metrics: route<NodeMetrics>()("GET", "/v1/nodes/{node}/metrics", metricsQuery),
 } as const;

@@ -275,6 +275,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   services.start({ everyMs: backgroundReadMs, ...healthSampling({ registry, probes: probeMap, log }) });
   services.start({ everyMs: 60_000, poll: () => drainNodeMetrics(registry.nodeMetrics.pruneNodeMetrics, Date.now()).catch((err: unknown) => log(`pruning node metrics failed: ${(err as Error).message}`)) });
   const api = services.start(await startApi({
+    dotfiles: config.dotfiles,
     ...(config.https ? { https: { port: ports.dashboard, certificate: () => localApiCertificate(config.https!.hostname, tailscaled) } } : {}),
     prWatchEnabled: token !== null,
     features: { reviews, queue, pipeline, planning, cleanup, images, usageBackfill: backfill, doctor },

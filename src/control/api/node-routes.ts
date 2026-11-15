@@ -1,8 +1,10 @@
 import type { NodeHealth } from "../../protocol/client.ts";
-import type { NodeName } from "../../ids.ts";
+import type { NodeName, ProjectId } from "../../ids.ts";
 import { HttpError } from "../http-error.ts";
 import { foldPylons, seriesLabel, type MetricSeries, type NodeMetrics, type Series } from "../node-metrics.ts";
-import { nodeSummary } from "../placement.ts";
+import { nodeSummary, placementReport } from "../placement.ts";
+import { placementNeed } from "../threads.ts";
+import type { PylonOverlay } from "../overlay.ts";
 import { ok, on, type RouteEntry, type ApiKit } from "./kit.ts";
 import { anyAllowed, type Policy } from "./access.ts";
 import { nodeRoutes as routes } from "../../contract/reports.ts";
@@ -20,7 +22,7 @@ function whole(query: URLSearchParams, name: string): number | null {
   return value;
 }
 
-export function nodeRoutes(kit: ApiKit, nodeHealth: (name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
+export function nodeRoutes(kit: ApiKit, nodeHealth: (name: NodeName) => Promise<NodeHealth>, dotfiles: PylonOverlay["dotfiles"]): readonly RouteEntry[] {
   const { registry } = kit;
 
   /** Read from the registry alone. */
@@ -40,6 +42,16 @@ export function nodeRoutes(kit: ApiKit, nodeHealth: (name: NodeName) => Promise<
 
   return [
     on(routes.list, anyAllowed, () => ok(registry.nodes.nodes().map((record) => nodeSummary(registry, record)))),
+    // Includes the scheduler's host-memory sample, so it has the same access as health, not the public node summary.
+    on(routes.placement, readHealth, ({ project: id }) => {
+      const project = registry.projects.project(id as ProjectId);
+      if (project === undefined) throw new HttpError(404, `no project ${id}`);
+      if (project.removed !== undefined) throw new HttpError(409, `project ${id} is removed`);
+      const image = registry.images.currentImage();
+      if (image === null) throw new HttpError(409, "no image is current yet, so a pylon has nothing to boot");
+      const need = placementNeed(project, {}, image, dotfiles);
+      return ok({ project: id, defaultNode: project.defaultNode, resources: need.resources, ...placementReport(registry, need) });
+    }),
     on(routes.health, readHealth, async ({ node }) => ok(await nodeHealth(node as NodeName))),
     // History holds what a node's health held, so it takes the same right.
     on(routes.metrics, { role: "deployer", action: "read a node's metrics" }, ({ node }, r) => ok(nodeMetrics(node as NodeName, r.query))),

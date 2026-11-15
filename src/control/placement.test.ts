@@ -8,7 +8,7 @@ import type { StoredPylon, Thread } from "./thread-store.ts";
 import type { Room } from "./placement-model.ts";
 import { testCapacity, testObservation } from "../test-support/kit.ts";
 import { NoRoom, Refusal } from "./refusal.ts";
-import { freeHeldRoom, placeAuto, placeNear, wakeShort, weighNodes } from "./placement.ts";
+import { freeHeldRoom, placeAuto, placeNear, placementReport, wakeShort, weighNodes } from "./placement.ts";
 import { observeNode, withImage } from "../test-support/api-kit.ts";
 
 const image = "img-0123456789ab";
@@ -87,7 +87,7 @@ test("auto passes over a node whose host has too little memory free, however lit
 test("a start no node has free memory for fails with each node's reason", () => {
   const registry = fakeRegistry([{ name: "a", total: 32, committed: 0, free: 4.5 }, { name: "b", total: 32, committed: 0, free: 3 }]);
   assert.throws(() => placeAuto(registry, need()), (err: unknown) => err instanceof Refusal && err.kind === "conflict"
-    && err.message === "no node can run this pylon: a has 4.5 GiB of memory free, and the pylon needs 4 GiB with 1 GiB to spare; b has 3 GiB of memory free, and the pylon needs 4 GiB with 1 GiB to spare");
+    && err.message === "no node can run this pylon: a has 4.5 GiB of memory free, and the pylon needs 4 GiB with 1 GiB to spare; b has 3 GiB of memory free, and the pylon needs 4 GiB with 1 GiB to spare; nearest node: a needs 0.5 GiB more memory");
   assert.equal(placeAuto(registry, need(3.5)).node, "a", "1 GiB to spare is enough");
 });
 
@@ -205,13 +205,13 @@ test("a start with --node auto, one that names the node and one on its project's
   s.registry.nodeMetrics.recordHealthSample("infra-testbench", { at: Date.now(), values: { memAvailable: 2.2 } });
   const refused = await s.call("POST", "/v1/threads", { project: "acme", title: "Nowhere", node: "auto" });
   assert.equal(refused.status, 409);
-  assert.equal(refused.body.error, "no node can run this pylon: infra-testbench has 2.2 GiB of memory free, and the pylon needs 4 GiB with 1 GiB to spare; rj-firebat is offline");
+  assert.equal(refused.body.error, "no node can run this pylon: infra-testbench has 2.2 GiB of memory free, and the pylon needs 4 GiB with 1 GiB to spare; rj-firebat is offline; nearest node: infra-testbench needs 2.8 GiB more memory");
   const named = await s.call("POST", "/v1/threads", { project: "acme", title: "Pinned", node: "infra-testbench" });
-  assert.deepEqual([named.status, named.body.error], [409, "infra-testbench has 2.2 GiB of memory free, and the pylon needs 4 GiB with 1 GiB to spare"]);
+  assert.deepEqual([named.status, named.body.error], [409, "infra-testbench has 2.2 GiB of memory free, and the pylon needs 4 GiB with 1 GiB to spare; infra-testbench needs 2.8 GiB more memory"]);
   observeNode(s, "infra-testbench", { total: 31.2, committed: 29 });
   assert.equal((await s.call("PATCH", "/v1/projects/acme", { defaultNode: "infra-testbench" })).status, 200);
   const pinned = await s.call("POST", "/v1/threads", { project: "acme", title: "Default" });
-  assert.deepEqual([pinned.status, pinned.body.error], [409, "infra-testbench has 29 of 31.2 GiB of memory committed, and the pylon needs 4"]);
+  assert.deepEqual([pinned.status, pinned.body.error], [409, "infra-testbench has 29 of 31.2 GiB of memory committed, and the pylon needs 4; infra-testbench needs 2.8 GiB more memory"]);
   const huge = await s.call("POST", "/v1/threads", { project: "acme", title: "Huge", node: "infra-testbench", resources: { memoryGiB: 32 } });
   assert.deepEqual([huge.status, huge.body.error], [409, "infra-testbench has 31.2 GiB of memory, and the pylon needs 32 GiB with 1 GiB to spare"], "a pylon the node could never hold is refused, not left to wait");
   assert.equal(s.registry.threads.threads().length, 0, "no refused start made a thread");
@@ -225,7 +225,7 @@ test("a pylon that boots after the node's health read holds all its memory until
   s.registry.nodeMetrics.recordHealthSample("infra-testbench", { at: Date.now(), values: { memAvailable: 6 } });
   const first = await s.call("POST", "/v1/threads", { project: "acme", title: "First", node: "auto" });
   assert.equal(first.status, 201, JSON.stringify(first.body));
-  const refusal = "no node can run this pylon: infra-testbench has 6 GiB of memory free, less 4 GiB %s, and the pylon needs 4 GiB with 1 GiB to spare; rj-firebat is offline";
+  const refusal = "no node can run this pylon: infra-testbench has 6 GiB of memory free, less 4 GiB %s, and the pylon needs 4 GiB with 1 GiB to spare; rj-firebat is offline; nearest node: infra-testbench needs 3 GiB more memory";
   const second = () => s.call("POST", "/v1/threads", { project: "acme", title: "Second", node: "auto" });
   assert.equal((await second()).body.error, refusal.replace("%s", "for pylons about to boot there"), "before the node reports it, the first pylon is about to boot");
   observeNode(s, "infra-testbench", { total: 32, committed: 4 }, { capacity: capacity(4), pylons: [{ pylonId: (first.body as Thread).pylonId, phase: "booting" }] });
@@ -260,4 +260,66 @@ test("a node whose free memory falls under the headroom releases its held builde
   assert.equal(freeHeldRoom(registry, "a" as NodeName).length, 1, "one held builder's 4 GiB bring back the 1 GiB of headroom");
   assert.deepEqual(freeHeldRoom(fakeRegistry([{ name: "b", total: 31.2, committed: 8, free: 20, pylons: [{ id: "held", memoryGiB: 4, residentGiB: 4, held: true }] }]), "b" as NodeName), [],
     "a node with room keeps its held builders up");
+});
+
+test("the admission report reproduces the two roomy-looking nodes in herdr-stuff #13", () => {
+  const registry = fakeRegistry([
+    { name: "a", total: 31.2, committed: 24, free: 6.3, pylons: [{ id: "a1", memoryGiB: 24, residentGiB: 21.4 }] },
+    { name: "b", total: 22.8, committed: 16, free: 10.8, pylons: [{ id: "b1", memoryGiB: 16, residentGiB: 9.1 }] },
+  ]);
+  const report = placementReport(registry, need());
+  assert.equal(report.best, null);
+  assert.ok(report.nodes.every((n) => !n.admitted));
+  assert.equal(report.nearest?.node, "b");
+  assert.ok(Math.abs(report.nearest!.missingGiB - 1.1) < 1e-10);
+  for (const [i, free, untouched, max] of [[0, 6.3, 2.6, 2.7], [1, 10.8, 6.9, 2.9]]) {
+    const memory = report.nodes[i!]!.memory!;
+    assert.equal(memory.availableGiB, free);
+    assert.ok(Math.abs(memory.untouchedGiB! - untouched!) < 1e-10);
+    assert.ok(Math.abs(memory.maxMemoryGiB - max!) < 1e-10);
+    assert.equal(memory.headroomGiB, 1);
+    assert.equal(memory.sampledAt, registry.now());
+  }
+  assert.throws(() => placeAuto(registry, need()), (err: unknown) => err instanceof NoRoom && /nearest node: b needs 1.1 GiB more memory/.test(err.message));
+});
+
+test("reported memory ceilings agree with admission at the boundary, including pending, held, stale and orphaned memory", () => {
+  const cases: FakeNode[] = [
+    { name: "fresh", total: 32, committed: 12, free: 10, reserved: 4 },
+    { name: "stale", total: 32, committed: 12, free: 1, readAgoMs: 121_000 },
+    { name: "unread", total: 32, committed: 12, free: "unread" },
+    { name: "held", total: 32, committed: 30, free: 3, pylons: [{ id: "held", memoryGiB: 4, residentGiB: 4, held: true }] },
+    { name: "orphan", total: 32, committed: 8, free: 10, pylonVm: true, orphans: [{ id: "lost", residentGiB: 1 }] },
+    { name: "booting", total: 32, committed: 0, free: 10, pylons: [{ id: "new", memoryGiB: 4, residentGiB: 0, observed: false }] },
+    { name: "empty", total: 8, committed: 0 },
+  ];
+  for (const n of cases) {
+    const registry = fakeRegistry([n]);
+    const m = placementReport(registry, need()).nodes[0]!.memory!;
+    assert.ok(m.maxMemoryGiB > 0, n.name);
+    assert.equal(placementReport(registry, need(m.maxMemoryGiB)).nodes[0]!.admitted, true, n.name);
+    assert.equal(placementReport(registry, need(m.maxMemoryGiB + 0.1)).nodes[0]!.admitted, false, n.name);
+    if (n.name === "stale" || n.name === "unread") assert.deepEqual([m.availableGiB, m.untouchedGiB, m.sampledAt], [null, null, null]);
+    if (n.name === "held") assert.deepEqual([m.pendingGiB, m.reclaimableGiB], [0, 4]);
+  }
+});
+
+test("nearest means memory alone could admit it, never an image or disk refusal", () => {
+  const registry = fakeRegistry([{ name: "disk", total: 32, committed: 0, free: 4.9, diskFree: 0 }, { name: "memory", total: 32, committed: 0, free: 4 }]);
+  assert.deepEqual(placementReport(registry, need()).nearest, { node: "memory", missingGiB: 1 });
+  assert.equal(placementReport(registry, { ...need(), image: "img-missing" }).nearest, null);
+  assert.equal(placementReport(registry, need(3)).nearest, null, "a node fits, so there is no shortage to wait for");
+});
+
+test("a report freezes the clock so a health sample cannot expire between decision and explanation", () => {
+  const registry = fakeRegistry([{ name: "a", total: 32, committed: 0, free: 1, readAgoMs: 119_999 }]);
+  const at = registry.now();
+  let reads = 0;
+  registry.now = () => at + reads++ * 2;
+  const report = placementReport(registry, need());
+  assert.equal(reads, 1);
+  assert.equal(report.at, at);
+  assert.equal(report.nodes[0]!.admitted, false);
+  assert.equal(report.nodes[0]!.memory!.availableGiB, 1);
+  assert.deepEqual(report.nearest, { node: "a", missingGiB: 4 });
 });

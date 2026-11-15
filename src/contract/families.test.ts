@@ -22,6 +22,7 @@ const before: readonly (readonly [string, RegExp, ApiRoute, readonly string[]])[
   ["POST", /^\/v1\/images\/rollout$/, imageRoutes.rollout, []],
   ["POST", /^\/v1\/images\/rollback$/, imageRoutes.rollback, []],
   ["GET", /^\/v1\/nodes$/, nodeRoutes.list, []],
+  ["GET", /^\/v1\/placement\/([^/]+)$/, nodeRoutes.placement, ["project"]],
   ["GET", /^\/v1\/nodes\/([^/]+)\/health$/, nodeRoutes.health, ["node"]],
   ["GET", /^\/v1\/nodes\/([^/]+)\/metrics$/, nodeRoutes.metrics, ["node"]],
   ["GET", /^\/v1\/usage$/, usageRoutes.report, []],
@@ -54,7 +55,7 @@ const roots = ["release", "deployer/release", "deployer/report", "deployer/relea
 const segments = ["n-1", "a%2Fb", "", "x:y"];
 const tails = ["", "/health", "/metrics", "/metrics/x", "/cancel", "/approve", "/review", "/review/cancel", "/land", "/answer", "/answer/x"];
 const corpus = [...roots.flatMap((root) => [`/v1/${root}`, `/v1/${root}/`, `/v2/${root}`]),
-  ...["nodes", "projects", "items", "threads", "questions"].flatMap((root) => segments.flatMap((id) => tails.map((tail) => `/v1/${root}/${id}${tail}`)))];
+  ...["nodes", "placement", "projects", "items", "threads", "questions"].flatMap((root) => segments.flatMap((id) => tails.map((tail) => `/v1/${root}/${id}${tail}`)))];
 
 test("each route's path template matches the paths its old RegExp did, with the same parameters captured", () => {
   assert.equal(new Set(before.map(([, , route]) => route)).size, families.reduce((n, family) => n + Object.keys(family).length, 0));

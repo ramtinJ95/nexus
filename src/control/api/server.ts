@@ -78,6 +78,8 @@ import { asset, entry } from "../dashboard/assets.ts";
 import { writeBody } from "./encoding.ts";
 
 export interface ApiOptions {
+  /** The same common layer the thread starter uses, for read-only placement previews. */
+  dotfiles?: import("../overlay.ts").PylonOverlay["dotfiles"];
   https?: { port: number; certificate(): Promise<Certificate>; renewalMs?: number; retryMs?: number };
   prWatchEnabled?: boolean;
   features: Features;
@@ -133,7 +135,7 @@ export function featureRoutes(kit: ApiKit, options: ApiOptions, nodeHealth: (nam
     ...streamRoutes(kit),
     ...projectRoutes(kit, options.features),
     ...usageRoutes(kit, options.features),
-    ...nodeRoutes(kit, nodeHealth),
+    ...nodeRoutes(kit, nodeHealth, options.dotfiles),
     ...threadRoutes(kit, options.features),
     ...pipelineRoutes(kit, options.features),
     ...reviewRoutes(kit, options.features),

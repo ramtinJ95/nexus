@@ -58,6 +58,7 @@ const requests: readonly (readonly [string, string, unknown?])[] = [
   ["DELETE", "/v1/projects/nosuch", {}],
   ["GET", "/v1/items"], ["POST", "/v1/items", { bogus: 1 }], ["GET", "/v1/items/it-nosuch"], ["POST", "/v1/items/it-nosuch/cancel", {}], ["POST", "/v1/items/it-nosuch/approve", {}],
   ["GET", "/v1/nodes"], ["GET", "/v1/nodes/nosuch/health"], ["GET", "/v1/nodes/nosuch/metrics?from=0"], ["GET", "/v1/nodes/rj-firebat/metrics"],
+  ["GET", "/v1/placement/nosuch"], ["POST", "/v1/placement/nosuch", {}],
   ["GET", "/v1/images"], ["POST", "/v1/images", { bogus: 1 }], ["GET", "/v1/images/current"],
   ["POST", "/v1/images/build", {}], ["POST", "/v1/images/rollout", { bogus: 1 }], ["POST", "/v1/images/rollback", {}],
   ["GET", "/v1/doctor"], ["GET", "/v1/checks"], ["GET", "/v1/checks/changes"], ["POST", "/v1/checks/seen", { bogus: 1 }],
