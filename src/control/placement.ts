@@ -27,11 +27,31 @@ type WakeRegistry = { placement: Pick<Registry["placement"], "reserved">; thread
 
 type Need = Pick<BootInputs, "image" | "resources" | "network" | "repo" | "dotfiles">;
 
-const refuse = (roomFrees: boolean, message: string) => roomFrees ? new NoRoom("conflict", message) : new Refusal("conflict", message);
+export interface MemoryAdmission {
+  /** The scheduler's ceiling, before rounding; negative means even a zero-sized start lacks headroom. */
+  maxMemoryGiB: number;
+  availableGiB: number | null;
+  untouchedGiB: number | null;
+  pendingGiB: number;
+  reclaimableGiB: number;
+  headroomGiB: number;
+  sampledAt: number | null;
+}
+export interface MemoryShortfall { node: NodeName; missingGiB: number }
+export interface PlacementReport {
+  at: number;
+  nodes: { node: NodeName; admitted: boolean; reason: string | null; memory: MemoryAdmission | null }[];
+  best: NodeName | null;
+  nearest: MemoryShortfall | null;
+}
+/** Round a positive shortage up, never telling a waiter that zero more will suffice. */
+const shortfallText = (s: MemoryShortfall) => `${s.node} needs ${Math.ceil(s.missingGiB * 10) / 10} GiB more memory`;
+const refuse = (roomFrees: boolean, message: string, nearest: MemoryShortfall | null) => roomFrees
+  ? new NoRoom("conflict", `${message}${nearest === null ? "" : `; nearest node: ${shortfallText(nearest)}`}`) : new Refusal("conflict", message);
 
 export function placeAuto(registry: WeighingRegistry, need: Need): Placement {
-  const { best, weighed, roomFrees } = weighNodes(registry, need);
-  if (best === null) throw refuse(roomFrees, `no node can run this pylon: ${refusals(weighed)}`);
+  const { best, weighed, roomFrees, nearest } = weighNodes(registry, need);
+  if (best === null) throw refuse(roomFrees, `no node can run this pylon: ${refusals(weighed)}`, nearest);
   return { how: "auto", node: best, weighed };
 }
 
@@ -42,9 +62,9 @@ export function placeAuto(registry: WeighingRegistry, need: Need): Placement {
  * unless `ifRoom`.
  */
 export function placeNear(registry: WeighingRegistry, need: Need, near: NodeName, ifRoom = false): Placement {
-  const { best, weighed, roomFrees } = weighNodes(registry, need);
+  const { best, weighed, roomFrees, nearest } = weighNodes(registry, need);
   // A node short of memory is never overcommitted for a review, which waits for room as a check does.
-  if (best === null && (ifRoom || roomFrees)) throw refuse(roomFrees, `no node has room for this pylon: ${refusals(weighed)}`);
+  if (best === null && (ifRoom || roomFrees)) throw refuse(roomFrees, `no node has room for this pylon: ${refusals(weighed)}`, nearest);
   if (best === null || weighed.some((w) => w.node === near && "left" in w)) return { how: "named", node: near };
   return { how: "auto", node: best, weighed };
 }
@@ -53,12 +73,49 @@ export function placeNear(registry: WeighingRegistry, need: Need, near: NodeName
  * Every node but `except` weighed for the pylon, and the one with the most room left once it boots there, if any can run
  * it. `roomFrees` when a node refused it for its memory alone, so a node could take it once its pylons pause.
  */
-export function weighNodes(registry: WeighingRegistry, need: Need, except?: NodeName): { best: NodeName | null; weighed: Weighed[]; roomFrees: boolean } {
+export function weighNodes(registry: WeighingRegistry, need: Need, except?: NodeName): { best: NodeName | null; weighed: Weighed[]; roomFrees: boolean; nearest: MemoryShortfall | null } {
+  const at = registry.now();
+  registry = { ...registry, now: () => at };
   const weighings = registry.nodes.nodes().filter((n) => n.name !== except).map((n) => weigh(registry, n, need));
   const weighed = weighings.map((w): Weighed => "short" in w ? { node: w.node, refused: w.refused } : w);
   const fits = weighed.flatMap((w) => "left" in w ? [w] : [])
     .sort((a, b) => b.left.memoryGiB - a.left.memoryGiB || b.left.cpus - a.left.cpus || b.left.diskGiB - a.left.diskGiB);
-  return { best: fits[0]?.node ?? null, weighed, roomFrees: weighings.some((w) => "short" in w) };
+  const nearest = weighings.flatMap((w) => "short" in w ? [{ node: w.node, missingGiB: w.missingGiB }] : [])
+    .sort((a, b) => a.missingGiB - b.missingGiB)[0] ?? null;
+  return { best: fits[0]?.node ?? null, weighed, roomFrees: nearest !== null, nearest: fits.length === 0 ? nearest : null };
+}
+
+/** An auto-placement preview, not a reservation. It uses the very same weighing as a start. */
+export function placementReport(registry: WeighingRegistry, need: Need): PlacementReport {
+  // A health sample or hold must not expire between the decision and its explanation.
+  const at = registry.now();
+  registry = { ...registry, now: () => at };
+  const { best, nearest, weighed } = weighNodes(registry, need);
+  const records = registry.nodes.nodes();
+  return { at, best, nearest, nodes: weighed.map((w) => ({ node: w.node, admitted: "left" in w,
+    reason: "refused" in w ? w.refused : null,
+    memory: nodeMemoryAdmission(registry, records.find((n) => n.name === w.node)!),
+  })) };
+}
+
+/** The memory ceiling of a new pylon. Image, grants, disk and placement policy still have to fit. */
+function nodeMemoryAdmission(registry: WeighingRegistry, node: NodeRecord): MemoryAdmission | null {
+  const o = node.state === "online" ? node.observation : null;
+  if (o === null) return null;
+  const { pending } = roomLeft(registry, node.name, o, o.capacity, { cpus: 0, memoryGiB: 0, diskGiB: 0 });
+  const reclaimable = heldRoom(registry, node.name, registry.now());
+  const free = freeMemory(registry, node.name, o, o.capacity, registry.now());
+  return memoryBudget(o.capacity, free, pending.memoryGiB, reclaimable);
+}
+
+function memoryBudget(c: NodeCapacity, free: ReturnType<typeof freeMemory>, pendingGiB: number, reclaimableGiB: number): MemoryAdmission {
+  const pending = pendingGiB - reclaimableGiB;
+  return {
+    maxMemoryGiB: Math.min(c.memoryGiB - memoryHeadroomGiB, c.memoryGiB - c.committedMemoryGiB - pending,
+      free === null ? Infinity : free.availableGiB - free.untouchedGiB - pending - memoryHeadroomGiB),
+    availableGiB: free?.availableGiB ?? null, untouchedGiB: free?.untouchedGiB ?? null,
+    pendingGiB, reclaimableGiB, headroomGiB: memoryHeadroomGiB, sampledAt: free?.sampledAt ?? null,
+  };
 }
 
 export const refusals = (weighed: readonly Weighed[]) => weighed.flatMap((w) => "refused" in w ? [`${w.node} ${w.refused}`] : []).join("; ");
@@ -69,6 +126,8 @@ export const refusals = (weighed: readonly Weighed[]) => weighed.flatMap((w) => 
  * commits more memory than a node has.
  */
 export function memoryShort(registry: WeighingRegistry, name: NodeName, need: Need): { why: string; frees: boolean } | null {
+  const at = registry.now();
+  registry = { ...registry, now: () => at };
   const node = registry.nodes.nodes().find((n) => n.name === name);
   const o = node?.state === "online" ? node.observation : null;
   if (o == null) return null;
@@ -80,7 +139,7 @@ export function memoryShort(registry: WeighingRegistry, name: NodeName, need: Ne
   pending.memoryGiB -= held;
   left.memoryGiB += held;
   const tight = memoryTight(registry, name, o, o.capacity, need, left, pending);
-  return tight === null ? null : { why: tight, frees: true };
+  return tight === null ? null : { why: `${tight}; ${shortfallText({ node: name, missingGiB: need.resources.memoryGiB - nodeMemoryAdmission(registry, node!)!.maxMemoryGiB })}`, frees: true };
 }
 
 /** Why the node could never hold the pylon's memory, however much frees there, or null. */
@@ -110,9 +169,10 @@ export function wakeShort(registry: WakeRegistry, p: StoredPylon, o: NodeObserva
 }
 
 /** `short` marks a node that refused the pylon for its room alone. */
-function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighed | { node: NodeName; refused: string; short: true } {
+function weigh(registry: WeighingRegistry, node: NodeRecord, need: Need): Weighed | { node: NodeName; refused: string; short: true; missingGiB: number } {
   const refused = (why: string): Weighed => ({ node: node.name, refused: why });
-  const short = (why: string) => ({ node: node.name, refused: why, short: true as const });
+  const short = (why: string) => ({ node: node.name, refused: why, short: true as const,
+    missingGiB: need.resources.memoryGiB - nodeMemoryAdmission(registry, node)!.maxMemoryGiB });
   const o = node.observation;
   if (node.state !== "online" || o === null) return refused("is offline");
   const { capacity: c } = o;
@@ -151,12 +211,12 @@ function memoryTight(registry: WeighingRegistry, node: NodeName, o: NodeObservat
   const free = freeMemory(registry, node, o, c, registry.now());
   // With no fresh reading of its free memory, the node is weighed by its commitments alone.
   if (free !== null) {
-    const freeLeft = free.availableGiB - free.untouchedGiB - pending.memoryGiB - need.resources.memoryGiB;
-    if (freeLeft < memoryHeadroomGiB) {
+    const budget = memoryBudget(c, free, pending.memoryGiB, 0);
+    if (need.resources.memoryGiB > budget.maxMemoryGiB) {
       const less = [free.untouchedGiB > 0 && `${gib(free.untouchedGiB)} GiB its pylons have yet to touch`, pending.memoryGiB > 0 && `${gib(pending.memoryGiB)} GiB for pylons about to boot there`].filter((s) => s !== false);
       return `has ${gib(free.availableGiB)} GiB of memory free${less.length > 0 ? `, less ${less.join(" and ")}` : ""}, and the pylon needs ${need.resources.memoryGiB} GiB with ${memoryHeadroomGiB} GiB to spare`;
     }
-    left.memoryGiB = Math.min(left.memoryGiB, freeLeft);
+    left.memoryGiB = Math.min(left.memoryGiB, free.availableGiB - free.untouchedGiB - pending.memoryGiB - need.resources.memoryGiB);
   }
   return null;
 }
@@ -230,7 +290,7 @@ const residentIn = (values: HealthSample["values"]) => new Map(Object.entries(va
  * last `freshReadMs`, or from a host that reports no memory. `among` is the node's pylons, or at least each one
  * the observation or the health read names, and without it the node's pylons are read once the health read counts.
  */
-function freeMemory(registry: WeighingRegistry, node: NodeName, o: NodeObservation, c: NodeCapacity, now: number, among?: readonly StoredPylon[]): { availableGiB: number; untouchedGiB: number } | null {
+function freeMemory(registry: WeighingRegistry, node: NodeName, o: NodeObservation, c: NodeCapacity, now: number, among?: readonly StoredPylon[]): { availableGiB: number; untouchedGiB: number; sampledAt: number } | null {
   const read = registry.nodeMetrics.latestHealthSample(node);
   const availableGiB = read?.values.memAvailable;
   if (read == null || now - read.at > freshReadMs || availableGiB === undefined) return null;
@@ -252,7 +312,7 @@ function freeMemory(registry: WeighingRegistry, node: NodeName, o: NodeObservati
   const ids = new Set(placed.map((p) => p.pylonId));
   const orphansHeldGiB = [...resident].reduce((sum, [id, held]) => ids.has(id) ? sum : sum + held, 0);
   if (namesProcesses) untouchedGiB += Math.max(0, c.committedMemoryGiB - placedUpGiB - orphansHeldGiB);
-  return { availableGiB, untouchedGiB };
+  return { availableGiB, untouchedGiB, sampledAt: read.at };
 }
 
 /** A probe from before filesystems were reported is held only to the disk fitting. */

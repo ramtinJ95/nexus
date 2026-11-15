@@ -59,7 +59,7 @@ export const claudeSession = "11111111-2222-4333-8444-555555555501";
 export const fixture = (await readFile(new URL("../fixtures/claude-transcript.jsonl", import.meta.url), "utf8")).split("\n").filter((line) => line !== "").map((line) => `${line}\n`);
 
 /** Every API option but the services the kit builds, which a test asks for by flag or factory. */
-export type TestApiOptions = Omit<Partial<ApiOptions>, "deployment" | "features" | "log"> & Partial<Pick<Features, "reviews" | "cleanup" | "doctor">> & {
+export type TestApiOptions = Omit<Partial<ApiOptions>, "deployment" | "features" | "log" | "dotfiles"> & Partial<Pick<Features, "reviews" | "cleanup" | "doctor">> & {
   /** null leaves deployments off. */
   deployment?: DeploymentOptions | null;
   images?(registry: Registry): ImageRollout;
@@ -142,6 +142,7 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
     // The control plane runs on rj-firebat and deploys nothing unless a test says so.
     ...(deployment === null ? {} : { deployment: deployment ?? { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} } }),
     startThread,
+    dotfiles: dots === null ? undefined : dots ?? dotfiles,
     features: { ...noFeatures, reviews, cleanup, doctor, queue, pipeline, planning: plans, images: images ?? null, usageBackfill: backfill ?? null },
     gate: turnGate(() => isDraining(registry.releases.drain(), registry.now())),
     health: () => null,

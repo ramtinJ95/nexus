@@ -29,6 +29,25 @@ test("nodes marks an overcommitted node and says what its pylons hold", async (t
   assert.match(text, /^ {2}pylons: 1 up holding 2 CPUs and 4 GiB, 1 paused needing 4 GiB to wake, 1 archived, 1 crashed needing 4 GiB to retry, 1 orphaned \(pylon-x\)$/m);
 });
 
+test("nodes --project explains placement from the server, instead of treating commitments as room", async (t) => {
+  const s = await setup(t);
+  const capacity = testCapacity();
+  s.registry.threads.apply({ record: "node", node, state: "online", capacity });
+  s.registry.threads.ingested(testObservation(node, { capacity, artifacts: [image.id] }), []);
+  s.registry.nodeMetrics.recordHealthSample(node, { at: Date.now(), values: { memAvailable: 3 } });
+  const result = await s.nexus(["nodes", "--project", "acme"]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /cannot take acme's 4 GiB pylon/);
+  assert.match(result.stdout, /3 GiB host free, 0 GiB reserved but untouched/);
+  assert.match(result.stdout, /1 GiB spare/);
+  assert.match(result.stdout, /Nearest node: rj-firebat needs 2 GiB more memory/);
+  const json = await s.json(["nodes", "--project", "acme"]);
+  assert.equal(json.placement.nodes[0].admitted, false);
+  assert.equal(json.nodes[0].name, node);
+  assert.match((await s.nexus(["nodes"])).stdout, /Reservations are not free capacity/);
+  assert.equal(Array.isArray(await s.json(["nodes"])), true, "the existing JSON list is unchanged");
+});
+
 test("nodes and node name a pylon stuck booting and one whose delete waits on a stuck boot, and count neither as up", async (t) => {
   const since = Date.now() - 3 * 3_600_000;
   t.mock.timers.enable({ apis: ["Date"], now: since });

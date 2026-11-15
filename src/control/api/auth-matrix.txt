@@ -97,6 +97,8 @@ deployer GET /v1/nodes -> 200
 deployer GET /v1/nodes/nosuch/health -> 404 no node nosuch
 deployer GET /v1/nodes/nosuch/metrics?from=0 -> 404 no node nosuch
 deployer GET /v1/nodes/rj-firebat/metrics -> 400 from must be a whole number of milliseconds since the epoch
+deployer GET /v1/placement/nosuch -> 404 no project nosuch
+deployer POST /v1/placement/nosuch -> 405 POST is not allowed on /v1/placement/nosuch
 deployer GET /v1/images -> 200
 deployer POST /v1/images -> 400 ✖ Unrecognized key: "bogus"
 ✖ must be an image ID
@@ -241,6 +243,8 @@ person GET /v1/nodes -> 200
 person GET /v1/nodes/nosuch/health -> 403 caller may not read a node's health: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nPHONE
 person GET /v1/nodes/nosuch/metrics?from=0 -> 403 caller may not read a node's metrics: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nPHONE
 person GET /v1/nodes/rj-firebat/metrics -> 403 caller may not read a node's metrics: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nPHONE
+person GET /v1/placement/nosuch -> 403 caller may not read a node's health: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nPHONE
+person POST /v1/placement/nosuch -> 405 POST is not allowed on /v1/placement/nosuch
 person GET /v1/images -> 200
 person POST /v1/images -> 400 ✖ Unrecognized key: "bogus"
 ✖ must be an image ID
@@ -395,6 +399,8 @@ control-node GET /v1/nodes -> 200
 control-node GET /v1/nodes/nosuch/health -> 403 caller may not read a node's health: only deployers may, never infrastructure nodes or pylons
 control-node GET /v1/nodes/nosuch/metrics?from=0 -> 403 caller may not read a node's metrics: only deployers may, never infrastructure nodes or pylons
 control-node GET /v1/nodes/rj-firebat/metrics -> 403 caller may not read a node's metrics: only deployers may, never infrastructure nodes or pylons
+control-node GET /v1/placement/nosuch -> 403 caller may not read a node's health: only deployers may, never infrastructure nodes or pylons
+control-node POST /v1/placement/nosuch -> 405 POST is not allowed on /v1/placement/nosuch
 control-node GET /v1/images -> 200
 control-node POST /v1/images -> 400 ✖ Unrecognized key: "bogus"
 ✖ must be an image ID
@@ -535,6 +541,8 @@ control-node-without-key GET /v1/nodes -> 200
 control-node-without-key GET /v1/nodes/nosuch/health -> 403 caller may not read a node's health: only deployers may, never infrastructure nodes or pylons
 control-node-without-key GET /v1/nodes/nosuch/metrics?from=0 -> 403 caller may not read a node's metrics: only deployers may, never infrastructure nodes or pylons
 control-node-without-key GET /v1/nodes/rj-firebat/metrics -> 403 caller may not read a node's metrics: only deployers may, never infrastructure nodes or pylons
+control-node-without-key GET /v1/placement/nosuch -> 403 caller may not read a node's health: only deployers may, never infrastructure nodes or pylons
+control-node-without-key POST /v1/placement/nosuch -> 405 POST is not allowed on /v1/placement/nosuch
 control-node-without-key GET /v1/images -> 200
 control-node-without-key POST /v1/images -> 400 ✖ Unrecognized key: "bogus"
 ✖ must be an image ID
@@ -683,6 +691,8 @@ reporter GET /v1/nodes -> 403 caller is not a tailnet node this control plane al
 reporter GET /v1/nodes/nosuch/health -> 403 caller is not a tailnet node this control plane allows
 reporter GET /v1/nodes/nosuch/metrics?from=0 -> 403 caller is not a tailnet node this control plane allows
 reporter GET /v1/nodes/rj-firebat/metrics -> 403 caller is not a tailnet node this control plane allows
+reporter GET /v1/placement/nosuch -> 403 caller is not a tailnet node this control plane allows
+reporter POST /v1/placement/nosuch -> 403 caller is not a tailnet node this control plane allows
 reporter GET /v1/images -> 403 caller is not a tailnet node this control plane allows
 reporter POST /v1/images -> 403 caller is not a tailnet node this control plane allows
 reporter GET /v1/images/current -> 403 caller is not a tailnet node this control plane allows
@@ -805,6 +815,8 @@ reporter-wrong-key GET /v1/nodes -> 403 caller is not a tailnet node this contro
 reporter-wrong-key GET /v1/nodes/nosuch/health -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /v1/nodes/nosuch/metrics?from=0 -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /v1/nodes/rj-firebat/metrics -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key GET /v1/placement/nosuch -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key POST /v1/placement/nosuch -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /v1/images -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key POST /v1/images -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /v1/images/current -> 403 caller is not a tailnet node this control plane allows
@@ -927,6 +939,8 @@ node-without-key GET /v1/nodes -> 403 caller is not a tailnet node this control 
 node-without-key GET /v1/nodes/nosuch/health -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /v1/nodes/nosuch/metrics?from=0 -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /v1/nodes/rj-firebat/metrics -> 403 caller is not a tailnet node this control plane allows
+node-without-key GET /v1/placement/nosuch -> 403 caller is not a tailnet node this control plane allows
+node-without-key POST /v1/placement/nosuch -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /v1/images -> 403 caller is not a tailnet node this control plane allows
 node-without-key POST /v1/images -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /v1/images/current -> 403 caller is not a tailnet node this control plane allows
@@ -1049,6 +1063,8 @@ stranger GET /v1/nodes -> 403 caller is not a tailnet node this control plane al
 stranger GET /v1/nodes/nosuch/health -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET /v1/nodes/nosuch/metrics?from=0 -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET /v1/nodes/rj-firebat/metrics -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/placement/nosuch -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/placement/nosuch -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET /v1/images -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger POST /v1/images -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET /v1/images/current -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
@@ -1165,6 +1181,8 @@ unnamed GET /v1/nodes -> 403 caller is not a tailnet node this control plane all
 unnamed GET /v1/nodes/nosuch/health -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /v1/nodes/nosuch/metrics?from=0 -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /v1/nodes/rj-firebat/metrics -> 403 caller is not a tailnet node this control plane allows
+unnamed GET /v1/placement/nosuch -> 403 caller is not a tailnet node this control plane allows
+unnamed POST /v1/placement/nosuch -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /v1/images -> 403 caller is not a tailnet node this control plane allows
 unnamed POST /v1/images -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /v1/images/current -> 403 caller is not a tailnet node this control plane allows

@@ -90,7 +90,7 @@ test("--node auto refuses with each node's reason when none can run the pylon, a
   assert.equal(refused.body.error, "no node can run this pylon: full has 30 of 32 GiB of memory committed, and the pylon needs 4; "
     + `no-image does not hold image ${image.id}; no-secret has no secret STRIPE_KEY in its secret file, NEXUS_CHATGPT_TOKEN, which its probe is too old to take from the control plane; `
     + "no-ssh has no git SSH key to reach git@example.com:acme.git and git@github.com:ramtin/dotfiles.git; no-token has no secret NEXUS_CHATGPT_TOKEN, which its probe is too old to take from the control plane; "
-    + "rj-firebat is offline; token-coming has no secret STRIPE_KEY in its secret file");
+    + "rj-firebat is offline; token-coming has no secret STRIPE_KEY in its secret file; nearest node: full needs 2 GiB more memory");
   assert.deepEqual((await s.call("GET", "/v1/threads")).body, []);
   assert.deepEqual(s.calls, [], "no conversation was started for it");
   assert.deepEqual(s.woken, []);
@@ -404,4 +404,23 @@ test("an overlapping start's reservation holds the start's own size", async (t) 
   assert.equal(one.body.placement.node, "a");
   assert.equal(two.body.placement.node, "b");
   assert.deepEqual(two.body.placement.weighed.find((w: { node: string }) => w.node === "a").left.memoryGiB, 0, "a counts the 12 GiB One reserved there, then Two's 4");
+});
+
+test("a queued pipeline item's reason names the nearest shortage for its actual size, not the project default", async (t) => {
+  const s = await testApi(t, { pipeline: true });
+  assert.equal((await s.call("POST", "/v1/projects", { ...project, defaultNode: "auto" })).status, 201);
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { pipeline: { autoStart: true } })).status, 200);
+  assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
+  s.registry.images.setCurrentImage(image.id as ImageId);
+  observeNode(s, "a", { total: 32, committed: 0 });
+  s.registry.nodeMetrics.recordHealthSample("a", { at: Date.now(), values: { memAvailable: 6 } });
+  const added = await s.call("POST", "/v1/items", { project: "acme", title: "Larger than default", message: "Build it", resources: { memoryGiB: 8 } });
+  assert.equal(added.status, 201);
+  const item = (await s.call("GET", `/v1/items/${added.body.id}`)).body;
+  assert.equal(item.phase.kind, "queued");
+  assert.match(item.phase.why, /nearest node: a needs 3 GiB more memory/);
+  const queued = (await s.call("GET", `/v1/queued/${item.thread}`)).body;
+  assert.equal(queued.resources.memoryGiB, 8);
+  assert.match(queued.lastError, /nearest node: a needs 3 GiB more memory/);
+  assert.equal(s.registry.threads.threads().length, 0);
 });
