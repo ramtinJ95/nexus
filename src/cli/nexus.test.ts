@@ -336,8 +336,11 @@ test("the timeout comes from the flag, then the environment, then the config fil
     assert.deepEqual([fromFlag.code, fromFlag.stderr], after(1), "a flag overrides the environment");
 
     for (const given of ["0", "1.5", "soon", "3601"]) {
-      const bad = await s.nexus(["projects", "--timeout", given], at);
-      assert.deepEqual([bad.code, bad.stderr], [64, `nexus: the timeout takes whole seconds from 1 to 3600, got ${given}\n`]);
+      // Before the command's name too, as an alias gives it, and joined to its flag.
+      for (const args of [["projects", "--timeout", given], ["--timeout", given, "projects"], [`--timeout=${given}`, "projects"]]) {
+        const bad = await s.nexus(args, at);
+        assert.deepEqual([bad.code, bad.stderr], [64, `nexus: the timeout takes whole seconds from 1 to 3600, got ${given}\n`]);
+      }
     }
     await writeFile(config, JSON.stringify({ timeout: "20" }));
     const text = await s.nexus(["projects"], at);

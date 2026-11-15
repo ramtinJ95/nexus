@@ -24,16 +24,19 @@ type Invocation =
 
 const isHelp = (word: string) => word === "--help" || word === "-h";
 
+/** The global flags that take a value, so one added to globalOptions is read before a command's name too. */
+const valued = Object.entries(globalOptions).flatMap(([name, option]) => option.type === "string" ? [`--${name}`] : []);
+
 /** Global flags may come before the command, and then go to it as if they followed its name. */
 function invocationOf(argv: readonly string[]): Invocation {
   const leading: string[] = [];
   let at = 0;
   for (; at < argv.length; at++) {
     const word = argv[at]!;
-    if (word === "--url" || word === "--socks") {
+    if (valued.includes(word)) {
       leading.push(word, ...argv.slice(at + 1, at + 2));
       at++;
-    } else if (word === "--json" || word === "--version" || isHelp(word) || /^--(url|socks)=/.test(word)) leading.push(word);
+    } else if (word === "--json" || word === "--version" || isHelp(word) || valued.some((flag) => word.startsWith(`${flag}=`))) leading.push(word);
     else break;
   }
   const words = argv.slice(at);
