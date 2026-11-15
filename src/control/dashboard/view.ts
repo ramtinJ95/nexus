@@ -100,7 +100,7 @@ export const shortcut = (name: keyof typeof shortcuts) => html`<kbd><span class=
 export const unseen = (text: string) => html`<span class="vh">${text}</span>`;
 
 
-export const attentionTone: Record<NonNullable<Attention>, Tone> = { failed: "bad", decision: "decide", died: "stuck", parked: "stuck", limited: "limit", reply: "reply", working: "work", waiting: "idle" };
+export const attentionTone: Record<NonNullable<Attention>, Tone> = { failed: "bad", decision: "decide", died: "stuck", parked: "stuck", limited: "limit", "boot-held": "stuck", reply: "reply", working: "work", waiting: "idle" };
 
 /**
  * What a thread is doing, most urgent first, as its row, the home table and its page's header all say it: the agent

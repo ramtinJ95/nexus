@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import { sessionHarnessSchema } from "../../protocol/agent-kinds.ts";
 import { threadRoutes as routes, type Preview } from "../../contract/threads.ts";
 import { pylonRoutes, type ChangesBase } from "../../contract/pylon.ts";
@@ -47,6 +48,10 @@ async function served(api: Api, io: Io, id: string, port: number, published: Pre
 }
 
 const listed = (names: readonly string[]) => names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+
+/** How often `nexus wake` reads the thread, and how many times, for the pass its activity set off to say what became of the wake. */
+const wakeReadMs = 500;
+const wakeReads = 7;
 
 const actionHelp = ["  nexus abort|retry|retry-pylon|wake <thread>"];
 const action = (done: string, call: (api: Api, thread: string) => Promise<null>): Command => ({
@@ -357,10 +362,19 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
     async run(api, [id], v) {
       await request(api, routes.activity, { thread: id!, body: { kind: "human" } });
       if (v.json === true) return { json: null, text: "" };
-      const { thread: t, pylon, desired } = await request(api, routes.show, { thread: id! });
+      // The pass the activity set off says whether the wake goes out or is held, so a pylon still stopped is read again for it.
+      const shown = () => request(api, routes.show, { thread: id! });
+      const settling = (d: Awaited<ReturnType<typeof shown>>) => d.desired === "running" && d.pylon.failed === null && d.pylon.held === undefined && (d.pylon.actualState === "paused" || d.pylon.actualState === "absent");
+      let d = await shown();
+      for (let reads = 1; reads < wakeReads && settling(d); reads++) {
+        await sleep(wakeReadMs);
+        d = await shown();
+      }
+      const { thread: t, pylon, desired, said } = d;
       const text = desired !== "running"
         ? `Recorded your activity on ${id}, but it is ${t.status}, so its pylon stays ${desired}.${t.status === "archived" ? ` \`nexus unarchive ${id}\` wakes it.` : ""}`
         : pylon.actualState === "failed" || pylon.failed !== null ? `Recorded your activity on ${id}, but its pylon failed, and activity does not retry it. \`nexus retry-pylon ${id}\` does.`
+        : pylon.held !== undefined && said.held ? `Recorded your activity on ${id}, but its pylon does not ${pylon.actualState === "running" ? "relaunch" : "wake"} yet. ${said.held}.`
         : pylon.actualState === "running" ? `Recorded your activity on ${id}, which keeps its running pylon awake.`
         : `Recorded your activity on ${id}, so Nexus wakes its pylon, which is ${pylon.actualState}.`;
       return { json: null, text };

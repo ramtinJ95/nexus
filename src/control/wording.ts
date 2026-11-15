@@ -5,6 +5,7 @@
  */
 import type { ServerDetail, ThreadDetail, ThreadNeed, ThreadSaid } from "./wire.ts";
 import type { Thread } from "./thread-store.ts";
+import type { BootHold } from "./attention.ts";
 import type { Action } from "./dashboard/contract.ts";
 import { usageLimitText } from "../contract/threads.ts";
 import { archivedDiskMs, keptPastDay } from "./reconcile.ts";
@@ -35,6 +36,9 @@ export const plannerGaveUp = (failed: string) => `The planner gave up on its pyl
 /** Why a failed thread failed: the planner gave up on its pylon, or its Claude worker failed. */
 export const failedText = (d: Pick<ThreadDetail, "pylon" | "claudeWorker">) => d.pylon.failed !== null ? plannerGaveUp(d.pylon.failed)
   : `The Claude worker failed${d.claudeWorker?.message === undefined ? "" : `: ${firstLine(d.claudeWorker.message)}`}`;
+
+/** Why the planner holds a pylon's boot or wake, as `nexus show`, `nexus wake`, `nexus send` and the inbox say it. */
+export const bootHeldText = (held: BootHold) => `The planner holds its pylon's boot, as ${held.why}`;
 
 export const keptPast = `kept past its ${duration(archivedDiskMs)}`;
 /** Where an archive's disk is, whose token usage was not read: gone with its pylon, or going once its time is up. */
@@ -146,6 +150,7 @@ export const reviewSaid = (r: Review): string[] => {
 export function threadSaid(d: Omit<ServerDetail, "said">): ThreadSaid {
   const { thread: t, pylon: p } = d;
   return {
+    held: p.held === undefined ? null : bootHeldText(p.held),
     guest: p.notAnswering === undefined ? null : `as its last ${p.notAnswering.timeouts} guest commands got no answer, so messages, files and diffs fail. ${freshVm(t.id)}`,
     disk: d.keptPastDay == null ? null : `${keptPast}, as ${d.keptPastDay}`,
     usage: t.status !== "archived" || t.usageUnread === undefined ? null : `unread, as ${t.usageUnread}, so ${diskGoes(p.actualState === "absent")} without it`,
@@ -168,7 +173,7 @@ export function reviewLine(r: Review): { lead: string; tail: string } {
 }
 
 /** One kind of what waits on the person, as its card in the inbox and the timeline's hold name it. */
-export type NeedKind = "held-review" | "approved-review" | "holds" | "ask" | "proposal" | "judgment" | "question" | "nudge" | "resume" | "unreviewed" | "disk" | "waiting" | "limited" | "parked" | "failed";
+export type NeedKind = "held-review" | "approved-review" | "holds" | "ask" | "proposal" | "judgment" | "question" | "nudge" | "resume" | "unreviewed" | "disk" | "waiting" | "limited" | "boot-held" | "parked" | "failed";
 type NeedOf<K extends NeedKind> = K extends "held-review" | "approved-review" ? Extract<ThreadNeed, { kind: "review" }>
   : K extends "holds" | "ask" | "proposal" | "judgment" | "question" ? Extract<ThreadNeed, { kind: "question" }>
   : K extends "nudge" | "resume" | "unreviewed" | "disk" ? Extract<ThreadNeed, { kind: K }>
@@ -189,7 +194,11 @@ interface NeedRow<K extends NeedKind> {
 const asked = ({ question: q }: NeedOf<"question">) => firstLine(q.kind === "ask" ? q.ask.questions[0]!.question : q.kind === "proposal" ? q.proposal.title : q.text);
 const button = (action: Action, label: string, confirm?: string): NeedAction => ({ kind: "button", action, label, ...confirm === undefined ? {} : { confirm } });
 
-const needRows: { [K in NeedKind]: NeedRow<K> } = {
+/** A thread stopped where only the person moves it has no card of its own on its page, so its row must give the inbox one. */
+type StoppedKind = Extract<ThreadNeed, { kind: "thread" }>["attention"];
+const heldSaid = (d: Pick<ThreadDetail, "said">) => d.said.held ?? "The planner holds its pylon's boot";
+
+const needRows: { [K in NeedKind]: K extends StoppedKind ? Required<NeedRow<K>> : NeedRow<K> } = {
   "held-review": { label: "Review needs you", why: () => "" },
   "approved-review": { label: "Approved, yours to land", why: () => "" },
   holds: { label: "Holds to waive", why: asked },
@@ -217,6 +226,11 @@ const needRows: { [K in NeedKind]: NeedRow<K> } = {
     label: "Usage limit",
     why: (n, now) => `It ${limitText(n.d.thread, now)}`,
     fix: (n, now) => ({ body: `It ${limitText(n.d.thread, now)}. Nexus has it continue once the limit resets, or archive it to stop it.`, action: button("archive", "Archive") }),
+  },
+  "boot-held": {
+    label: "Pylon held",
+    why: (n) => firstLine(heldSaid(n.d)),
+    fix: (n) => ({ body: `${heldSaid(n.d)}. Nexus boots it once that ends, or archive it to stop it waiting.`, action: button("archive", "Archive") }),
   },
   parked: { label: "Stuck on the restart limit", why: (n) => parkedText(n.d.agent?.parkedTasks ?? 0), fix: (n) => ({ body: `${parkedText(n.d.agent?.parkedTasks ?? 0)}.`, action: button("retry", "Retry") }) },
   failed: {

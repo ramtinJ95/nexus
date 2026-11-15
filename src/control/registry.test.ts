@@ -473,6 +473,32 @@ test("a registry from before session titles keeps its sessions, untitled until t
   assert.equal(registry.threads.sessions(pylonId)[0]!.title, "review");
 });
 
+test("a held boot is its thread's attention once it has lasted a minute, told once, and an archive ends it, since no pass may tick its pylon again", (t) => {
+  let now = 10_000_000;
+  const registry = seed(testRegistry(t, tempDb(), () => now));
+  const changes = () => registry.threads.events("0", { kinds: ["attention.changed"] }).map((e) => e.payload.attention);
+  const before = registry.threads.attention(threadId);
+  registry.threads.holdBoot(pylonId, threadId, "the node has no room");
+  now += 59_999;
+  registry.threads.holdBoot(pylonId, threadId, "the node has no room");
+  assert.deepEqual([registry.threads.bootHold(pylonId), registry.threads.attention(threadId)], [{ why: "the node has no room", since: 10_000_000, lasting: false }, before]);
+  now += 1;
+  registry.threads.holdBoot(pylonId, threadId, "the node still has no room");
+  registry.threads.holdBoot(pylonId, threadId, "the node still has no room");
+  assert.deepEqual([registry.threads.bootHold(pylonId), registry.threads.attention(threadId)], [{ why: "the node still has no room", since: 10_000_000, lasting: true }, "boot-held"]);
+  registry.threads.holdBoot(pylonId, threadId, null);
+  assert.deepEqual([registry.threads.bootHold(pylonId), registry.threads.attention(threadId)], [undefined, before]);
+  assert.deepEqual(changes().filter((a) => a === "boot-held"), ["boot-held"]);
+
+  now += 60_000;
+  registry.threads.holdBoot(pylonId, threadId, "the node has no room");
+  now += 60_000;
+  registry.threads.holdBoot(pylonId, threadId, "the node has no room");
+  assert.equal(registry.threads.attention(threadId), "boot-held", "a hold after the last one counts from its own start");
+  registry.threads.setThreadStatus(threadId, "archived");
+  assert.deepEqual([registry.threads.bootHold(pylonId), registry.threads.attention(threadId)], [undefined, null]);
+});
+
 test("a node's spawning pylons are those whose submitted job is a spawn, on that node, and a job is submitted there while any pylon has one", (t) => {
   const registry = seed(testRegistry(t, tempDb()));
   const envelope = { jobId: "j1" as JobId, node, issuedAt: "2027-01-01T00:00:00.000Z", notAfter: "2027-01-01T00:00:30.000Z" };

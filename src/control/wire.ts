@@ -2,7 +2,7 @@
  * The JSON the control plane's API serves that the CLI, the dashboard and the on-node checks read.
  */
 import type { Submission } from "@earendil-works/pi-durable";
-import type { Attention } from "./attention.ts";
+import type { Attention, BootHold } from "./attention.ts";
 import type { PersonNeed } from "./work-model.ts";
 import type { ActualState, DesiredPhase } from "./reconcile.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
@@ -44,6 +44,8 @@ export interface ThreadDetail {
     retryRefused: string | null;
     /** Set while its node reports the running pylon's guest gives no answer to its guest commands. */
     notAnswering?: GuestNotAnswering;
+    /** Set while the planner holds the pylon's boot or wake, as its last pass over it said. */
+    held?: BootHold;
   };
   /** Every Herdr Core terminal in the pylon and every failed session, as its node last reported them, or what its wake brings back while it is paused. */
   sessions: readonly Session[];
@@ -76,6 +78,8 @@ export interface ThreadDetail {
 
 /** The sentences `nexus show` prints of a thread's state, as control/wording.ts words them, null where the state is not. */
 export interface ThreadSaid {
+  /** Why the planner holds the pylon's boot or wake, while `pylon.held` is set. */
+  held: string | null;
   /** What a guest that stopped answering fails and what gives it a fresh VM, which follows when it stopped. */
   guest: string | null;
   disk: string | null;
