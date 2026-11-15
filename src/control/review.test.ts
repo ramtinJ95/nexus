@@ -4998,6 +4998,27 @@ test("a landing that has waited an hour for GitHub checks goes to the person, an
   assert.deepEqual(f.merges, [head1]);
 });
 
+test("a landing that waits for GitHub checks and then for its turn to deploy says which it waits for, and waits for the checks anew after", async (t) => {
+  const f = fixture(t);
+  released(f, previous);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "pending" } };
+  const loop = await approved(f, "nLAPTOP");
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, checks: f.now });
+  f.registry.releases.setDrain({ commit: previous, expiresAt: Date.now() + 60_000 });
+  f.tick(prWatchMs);
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, waiting: "a deploy drains the control plane" }, "its turn comes first, and the wait for checks is over");
+  f.registry.releases.setDrain(null);
+  f.tick(githubChecksMs);
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, checks: f.now }, "the hour counts from when its turn came");
+  assert.match(phaseNote(f.review()), /^, waiting for the pull request's GitHub checks to pass since /);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "passing" } };
+  f.tick(prWatchMs);
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1]);
+});
+
 test("a landing that pending GitHub checks hold beside something else goes to the person at once", async (t) => {
   const f = fixture(t);
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "pending", conflict: true } };

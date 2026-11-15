@@ -736,7 +736,9 @@ export function reviewLoop(deps: ReviewDeps) {
       // A landing that has authorized its merge holds the turn, which every other waits for.
       if (phase.authorized !== head) {
         const waiting = landings.ahead(r);
-        if (waiting !== null) return phase.waiting === waiting ? r : { ...r, phase: { ...phase, waiting } };
+        // Its turn comes before its checks: a wait for them ends here, and begins anew if they still run when the turn comes.
+        const { checks: _, ...turn } = phase;
+        if (waiting !== null) return phase.waiting === waiting && phase.checks === undefined ? r : { ...r, phase: { ...turn, waiting } };
       }
       // `left` is what the person's waiver does not get past, once carried to this head if its change is the one they
       // waived, and `why` why it did not carry. A landing that holds goes to the person with every hold, those it
