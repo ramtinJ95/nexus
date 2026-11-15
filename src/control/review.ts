@@ -732,8 +732,8 @@ export function reviewLoop(deps: ReviewDeps) {
         return await merge(r, phase, builder);
       } catch (err) {
         if (now() - phase.checks < githubChecksMs) throw err;
-        log(`review ${r.id} of ${r.builder}: its pull request's checks could not be read (${(err as Error).name}), and its wait for them is over`);
-        return toPerson(r, "policy", { code: "github-checks", text: `The pull request's GitHub checks could not be read, ${Math.round((now() - phase.checks) / 60_000)} minutes after its landing began to wait for them.` });
+        // The try may have failed at any step, a read of the checks or the branch's update after they passed, so the reason names the try.
+        return toPerson(r, "policy", `The landing waited ${Math.round((now() - phase.checks) / 60_000)} minutes for the pull request's GitHub checks, and its last try failed (${(err as Error).name}). Land it again once GitHub answers.`);
       }
     },
     ...landings.steps,

@@ -5036,7 +5036,7 @@ test("a landing that waits for GitHub checks which GitHub then cannot report ask
   assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, checks: since });
   f.tick(githubChecksMs);
   await loop.poll();
-  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The pull request's GitHub checks could not be read, 62 minutes after its landing began to wait for them."] });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The landing waited 62 minutes for the pull request's GitHub checks, and its last try failed (Error). Land it again once GitHub answers."] });
   assert.deepEqual(f.merges, []);
 });
 
@@ -5054,7 +5054,7 @@ test("a landing that waits for GitHub checks while GitHub refuses the read asks 
   assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, checks: since });
   f.tick(githubChecksMs);
   await loop.poll();
-  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The pull request's GitHub checks could not be read, 62 minutes after its landing began to wait for them."] });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The landing waited 62 minutes for the pull request's GitHub checks, and its last try failed (Error). Land it again once GitHub answers."] });
   f.onPoll = () => {};
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "passing" } };
   loop.land(f.builder, "nLAPTOP", head1);
