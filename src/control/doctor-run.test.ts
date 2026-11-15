@@ -186,7 +186,7 @@ test("the doctor reads each node, the release and the control node from the regi
   const r = await doctor();
   const status = Object.fromEntries(r.checks.map((c) => [`${c.node ?? "control"} ${c.name}`, c.status]));
   assert.deepEqual(status, {
-    "control release": "warn", "control backup": "fail", "control login": "fail", "control github-token": "warn", "control certificate": "ok", "control archived-disks": "ok",
+    "control release": "warn", "control backup": "fail", "control login": "fail", "control github-token": "warn", "control certificate": "ok", "control archived-disks": "ok", "control unreviewed-prs": "ok",
     "rj-firebat online": "ok", "rj-firebat release": "warn", "rj-firebat disk": "fail", "rj-firebat pylons": "ok", "rj-firebat tailnet-key": "fail", "rj-firebat image": "warn",
   }, "no deployer has reported, so both roles are pending, the pylons' filesystem is under its reserve, the token expires in 3 days, the control node's own key, tailscaled's Self, expired, and the node lacks the current image");
   assert.match(r.checks.find((c) => c.node === null && c.name === "release")!.text, /control on rj-firebat .* no deployer report/);

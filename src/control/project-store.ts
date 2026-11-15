@@ -4,7 +4,8 @@ import { upgradeProject, type Project } from "./project.ts";
 
 export const holding = { tables: { projects: {} } } as const satisfies Holding;
 
-export function projectStore(db: Db) {
+/** `onEdit` hears of each project's edit in its transaction, so what reads the project, such as attention, is recomputed. */
+export function projectStore(db: Db, onEdit: (id: ProjectId) => void = () => {}) {
   db.hold(holding);
   const { transaction, sql } = db;
   function project(id: ProjectId): Project | undefined {
@@ -18,6 +19,7 @@ export function projectStore(db: Db) {
         if (stored === undefined) return undefined;
         const edited = edit(stored);
         sql("UPDATE projects SET record = ? WHERE id = ?").run(JSON.stringify(edited), id);
+        onEdit(id);
         return edited;
       });
     },

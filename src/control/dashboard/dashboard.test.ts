@@ -890,6 +890,19 @@ test("each project in the overview shows its auto-review setting, and a deployer
   assert.equal((await s.call("PATCH", "/v1/projects/acme", { autoReview: { mode: "yolo" } })).status, 403, "and the route refuses it whatever the page shows");
 });
 
+test("an archived builder's open pull request that no review will start for has a Needs you card that unarchives it", async (t) => {
+  const s = await seeded(t, landingOptions());
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } })).status, 200);
+  const builder = await s.start("acme", "Trim the cache");
+  s.registry.prWatches.savePrWatch(builder.id, { links: [{ pr: testPr({ repo: "acme/nexus", number: 9, title: "Trim" }), seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  s.registry.threads.setThreadStatus(builder.id, "archived");
+  const inbox = (await s.call("GET", "/")).text;
+  const cards = needsOf(inbox).cards.filter((c) => c.thread === builder.id);
+  assert.equal(cards.length, 1);
+  assert.match(textOf(cards[0]!.html), /Pull request with no review .*Pull request #9 is open, and its thread is archived, so no review of it starts\. Unarchive the thread, and its review starts on its own\./);
+  assert.deepEqual(actionsOf(cards[0]!.html), ["unarchive"]);
+});
+
 test("every source of a thread's decision has a card on its page with the action that resolves it, and Needs you shows that card with the same actions", async (t) => {
   const s = await seeded(t, landingOptions());
   assert.equal((await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } })).status, 200);

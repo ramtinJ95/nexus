@@ -1143,3 +1143,16 @@ test("close waits for a turn end's fresh read, and no pass reads GitHub after it
   await ended;
   assert.deepEqual(f.calls, []);
 });
+
+test("an archived builder's open pull request that no review will start for stops needing the person once it merges outside Nexus", async (t) => {
+  const f = fixture(); t.after(() => f.registry.close());
+  f.registry.projects.editProject("project" as ProjectId, (p) => ({ ...p, autoReview: { mode: "land", enabledBy: "nLAPTOP" } }));
+  await f.watcher.poll();
+  f.registry.threads.setThreadStatus(f.id, "archived");
+  assert.equal(f.registry.threads.attention(f.id), "decision");
+  assert.deepEqual(f.registry.threads.needs(f.id).map((n) => n.kind), ["unreviewed"]);
+  f.snapshot.pr.state = "merged";
+  await f.watcher.poll();
+  assert.deepEqual(f.registry.threads.needs(f.id), [], "the watch reads an archived thread's open pull request, and sees it merged");
+  assert.equal(f.registry.threads.attention(f.id), null);
+});

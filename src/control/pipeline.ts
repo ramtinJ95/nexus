@@ -13,12 +13,12 @@ import { singleFlight } from "../single-flight.ts";
 import { newItemId, requestIds, type ItemId, type ProjectId, type ThreadId } from "../ids.ts";
 import { Refusal } from "./refusal.ts";
 import { queuedView, waitOf, type ThreadQueue } from "./queue.ts";
-import { trackStep, type Review } from "./review-model.ts";
+import { settled, trackStep, type Review } from "./review-model.ts";
 import { checkBeside, heldNote, liveNote, phaseNote } from "./wording.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import { attentionLabels } from "./plain-wording.ts";
-import { personNeeds, prLocationOf, type PersonNeed } from "./work-model.ts";
+import { owedOf, personNeeds, prLocationOf, type PersonNeed } from "./work-model.ts";
 import { checkStart, startKey } from "./threads.ts";
 import type { StartRequest } from "./start-request.ts";
 import type { ItemRecord } from "./pipeline-store.ts";
@@ -110,6 +110,12 @@ const onTrack = (r: Review) => trackStep(r) === "landing" ? "landing" : "reviewi
 function startedPhase(registry: PipelineRegistry, t: Thread, review: Review | null): ItemPhase {
   const { id } = t;
   const pr = review === null ? "" : `PR #${review.pr.number}`;
+  // A review that settled says nothing of the builder's next pull request, which waits for a review of its own.
+  const owed = review === null || settled(review) ? owedOf(registry, t)[0] : undefined;
+  if (owed !== undefined) {
+    const number = `PR #${owed.pr.number}`;
+    return owed.kind === "unmoved" ? phase("held", `${number} has no review, as ${owed.why}`) : phase("reviewing", `${number} waits for its review: ${owed.kind === "due" ? "it starts on the review loop's next pass" : owed.why}`);
+  }
   switch (review?.phase.kind) {
     case "landed": return phase("landed", `${pr} merged as ${review.phase.commit.slice(0, 12)}`);
     case "merged": return phase("landed", `${pr} merged outside its review`);

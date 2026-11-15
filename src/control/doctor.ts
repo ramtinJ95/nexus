@@ -39,6 +39,8 @@ export interface DoctorFacts {
   tailnet: readonly TailnetDevice[] | { unreadable: string };
   /** The archived threads whose disk may be kept for their usage, as the registry's keptArchives lists them, less those whose node has no disk for them. */
   keptArchives: readonly (ActivityFacts & ArchiveFacts & { id: ThreadId; title: string })[];
+  /** Each open pull request no review will start for, in a project that reviews on its own (owed-review.ts), and why. */
+  unreviewed: readonly { thread: ThreadId; title: string; pr: number; why: string }[];
   /** The current image, the nodes whose last observation lists it, online or not, and the fetches the image worker keeps of it. */
   image: { current: ImageId | null; holders: readonly NodeName[]; fetches: readonly ImageFetch[] };
 }
@@ -233,6 +235,11 @@ function archivedDisks(f: DoctorFacts): Verdict {
   return ok(`${read.length === 1 ? "1 archived disk waits" : `${read.length} archived disks wait`} past the 24 hours for the next backup, and then ${read.length === 1 ? "goes" : "go"}`);
 }
 
+function unreviewedPrs(f: DoctorFacts): Verdict {
+  if (f.unreviewed.length === 0) return ok("every open pull request in a project that reviews on its own has its review, or one that starts on its own");
+  return warn(f.unreviewed.map((u) => `pull request #${u.pr} of ${u.thread} (${u.title}) is open, and ${u.why}`).join("; "));
+}
+
 const nodeChecks: Readonly<Record<NodeCheckName, (n: NodeSummary, f: DoctorFacts) => Verdict>> = {
   online,
   release: (n, f) => release(f.release.nodes.find((r) => r.node === n.name && r.role === "probe"), f.release.desired, f.now),
@@ -248,6 +255,7 @@ const controlChecks: Readonly<Record<ControlCheckName, (f: DoctorFacts) => Verdi
   "github-token": githubToken,
   certificate,
   "archived-disks": archivedDisks,
+  "unreviewed-prs": unreviewedPrs,
 };
 
 /** Every check, the control plane's first and then each node's. */

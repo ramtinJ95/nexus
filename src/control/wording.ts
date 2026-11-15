@@ -167,10 +167,10 @@ export function reviewLine(r: Review): { lead: string; tail: string } {
 }
 
 /** One kind of what waits on the person, as its card in the inbox and the timeline's hold name it. */
-export type NeedKind = "held-review" | "approved-review" | "holds" | "ask" | "proposal" | "judgment" | "question" | "nudge" | "resume" | "disk" | "waiting" | "limited" | "parked" | "failed";
+export type NeedKind = "held-review" | "approved-review" | "holds" | "ask" | "proposal" | "judgment" | "question" | "nudge" | "resume" | "unreviewed" | "disk" | "waiting" | "limited" | "parked" | "failed";
 type NeedOf<K extends NeedKind> = K extends "held-review" | "approved-review" ? Extract<ThreadNeed, { kind: "review" }>
   : K extends "holds" | "ask" | "proposal" | "judgment" | "question" ? Extract<ThreadNeed, { kind: "question" }>
-  : K extends "nudge" | "resume" | "disk" ? Extract<ThreadNeed, { kind: K }>
+  : K extends "nudge" | "resume" | "unreviewed" | "disk" ? Extract<ThreadNeed, { kind: K }>
   : Extract<ThreadNeed, { kind: "thread" }>;
 
 /** What gets a stopped thread past the stop: a button its card presses, or its terminal, where a dialog waits. */
@@ -182,7 +182,7 @@ interface NeedRow<K extends NeedKind> {
   label: string;
   /** In a line, which the card the need opens to says in full. Empty where that card says it. */
   why(n: NeedOf<K>, now: number): string;
-  fix?(n: NeedOf<K>, now: number): NeedFix;
+  fix?(n: NeedOf<K>, now: number): NeedFix | null;
 }
 
 const asked = ({ question: q }: NeedOf<"question">) => firstLine(q.kind === "ask" ? q.ask.questions[0]!.question : q.kind === "proposal" ? q.proposal.title : q.text);
@@ -198,6 +198,11 @@ const needRows: { [K in NeedKind]: NeedRow<K> } = {
   question: { label: "Needs your decision", why: asked },
   nudge: { label: "Stopped short of a pull request", why: () => stoppedShort },
   resume: { label: "Its turn died", why: (n) => n.why },
+  unreviewed: {
+    label: "Pull request with no review",
+    why: (n) => `#${n.pr} is open, and ${n.why}`,
+    fix: (n) => n.d.thread.status === "archived" ? { body: `Pull request #${n.pr} is open, and ${n.why}.`, action: button("unarchive", "Unarchive") } : null,
+  },
   disk: {
     label: "Disk kept for its usage",
     why: (n, now) => firstLine(keptPastDay(n.d.thread, now) ?? "Its disk is kept for its token usage"),
