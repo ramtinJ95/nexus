@@ -101,8 +101,9 @@ export type CommandResult =
 export const maxPromptChars = 16_384;
 /**
  * The longest message Nexus sends a Claude session. One longer than `inlinePromptChars` goes in a file the session is
- * told to read (probe/guest/sessions.ts). A message holds no control character but a newline (claudeTextProblem), so
- * JSON escapes each character to at most 2, and this fits the probe's request body of 1 MiB.
+ * told to read (probe/guest/sessions.ts). The probe's request body takes 1,048,576 characters, counted as UTF-16 code
+ * units, not bytes (node-base/request-body.ts), so a character of 3 or 4 UTF-8 bytes counts as 1 or 2, as it does here.
+ * A message holds no control character but a newline (claudeTextProblem), so JSON escapes each to at most 2, and this fits.
  */
 export const maxMessageChars = 500_000;
 /**
