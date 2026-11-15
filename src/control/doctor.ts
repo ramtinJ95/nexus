@@ -71,8 +71,6 @@ export const certificateFailMs = 2 * day;
  */
 export const loopWarnMs = 500;
 export const loopFailMs = 2_000;
-/** The share of a minute at work below which a loop that ran late was paused from outside, not held by its own work. */
-export const loopOwnWork = 0.2;
 /** A credential that expires sooner warns, so the person has two weeks to renew it. */
 export const expiryWarnMs = 14 * day;
 
@@ -96,10 +94,8 @@ function eventLoop(f: DoctorFacts): Verdict {
   const when = minutes === 0 ? `in the ${Math.max(1, Math.round(l.overMs / 1000))} s since it started` : minutes === 1 ? "in its last minute" : `in the slowest of its last ${minutes} minutes`;
   const found = `${when} the control plane ran what was due ${late(l.p99Ms)} late at the 99th percentile, ${late(l.maxMs)} at worst, and was at work ${Math.round(l.busy * 100)} % of the time`;
   if (l.p99Ms < loopWarnMs) return ok(found);
-  // Work that holds the loop 500 ms at a time reaches the 99th percentile only by taking a fifth of the minute or more.
-  const look = l.busy < loopOwnWork
-    ? "It was at work too little of that time for its own work to have held it, so the process was stopped or its machine suspended for that long. Nothing is wrong with it if that was meant, and journalctl -u nexus-control on its machine shows what it logged around it"
-    : "Every request and every probe's event waits that long, since its own work holds its one thread. journalctl -u nexus-control on its machine shows what it logs, and a restart helps only until that work returns";
+  // The share at work is a hint, not a proof: a process stopped in the middle of its work counts the stop as work.
+  const look = "Every request and every probe's event waits that long. A loop at work most of that time is held by its own work, which a restart helps only until it returns. One at work little of it was more likely stopped, or its machine suspended or short of CPU. journalctl -u nexus-control on its machine shows what it logged";
   return (l.p99Ms < loopFailMs ? warn : fail)(`${found}. ${look}`);
 }
 

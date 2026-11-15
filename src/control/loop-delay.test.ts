@@ -67,6 +67,7 @@ test("one pause in a minute moves only the worst figure unless it takes nearly t
   assert.deepEqual(minutes.latest(120_000, active), { overMs: 60_000, p99Ms: 59_180, maxMs: 59_180, busy: 0 });
 });
 
+// The one test on the real clock asserts only what a slow or paused machine cannot undo: that a held loop shows as late.
 test("the watch samples the running loop, and work that holds it shows in its figures", async (t) => {
   const watch = loopWatch({ minuteMs: 300, kept: 2 });
   t.after(() => watch.close());
@@ -80,6 +81,5 @@ test("the watch samples the running loop, and work that holds it shows in its fi
   const { slowest, minutes } = watch.late();
   assert.ok(minutes >= 1 && minutes <= 2, `it keeps 2 minutes at most, and has ${minutes}`);
   assert.ok(slowest.maxMs >= 100 && slowest.maxMs >= slowest.p99Ms, `the held loop ran ${slowest.p99Ms} ms late, ${slowest.maxMs} at worst`);
-  assert.ok(slowest.busy >= 0.5, `and was at work ${slowest.busy} of the time`);
   assert.ok(watch.latest().overMs >= 300);
 });
