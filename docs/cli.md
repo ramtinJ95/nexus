@@ -179,7 +179,7 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `project remove <id>` | `DELETE /v1/projects/<id>` | `Project`, with `removed: { at: number, by: string }`, as [Project removal](#project-removal) describes |
 | `project edit <id> [--node N\|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB] [--allow-host HOST]... [--login claude\|chatgpt]... [--secret NAME:HOST[,HOST]...]... [--clear-hosts] [--clear-logins] [--clear-secrets] [--git-name NAME --git-email EMAIL \| --clear-git-identity] [--template-input PATH]... [--clear-template-inputs] [--auto-review off\|review\|land\|yolo] [--pipeline off\|approve\|start] [--second-reviewer off\|on\|always\|reserved,lines=N] [--rules-file PATH\|-] [--clear-rules]` | `PATCH /v1/projects/<id>`, as [Project editing](#project-editing) describes | `Project`, the project as edited |
 | `project add <id> (<repo-url> \| --scratch) [--node N\|auto] [--branch B] [--cpus n] [--memory GiB] [--disk GiB] [--allow-host HOST]... [--login claude\|chatgpt]... [--secret NAME:HOST[,HOST]...]... [--rules-file PATH\|-] [--auto-review off\|review\|land\|yolo]` | `POST /v1/projects` | `Project`, the project that was added |
-| `nodes` | `GET /v1/nodes` | `NodeSummary[]` |
+| `nodes [--project <id>]` | `GET /v1/nodes`, plus `GET /v1/placement/<project>` with `--project` (deployers only) | `NodeSummary[]`, or `{ nodes: NodeSummary[], placement: ProjectPlacement }` with `--project` |
 | `node <name>` | `GET /v1/nodes/<name>/health` | `NodeHealth` |
 | `node show <name>` | The same as `node <name>` | `NodeHealth` |
 | `doctor` | `GET /v1/doctor` | `DoctorReport`, as [Doctor](#doctor) describes. It exits 1 with its report on stdout when a check failed |
