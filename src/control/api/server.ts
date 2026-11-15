@@ -68,6 +68,7 @@ import { pylonRoutes } from "./pylon-routes.ts";
 import { imageRoutes } from "./image-routes.ts";
 import { doctorRoutes } from "./doctor-routes.ts";
 import type { DoctorReport } from "../doctor-model.ts";
+import type { LoopDelay } from "../loop-delay.ts";
 import { BodyTooLarge, readBody } from "../../node-base/request-body.ts";
 import type { Start } from "../start-request.ts";
 import type { Features } from "../features.ts";
@@ -105,6 +106,8 @@ export interface ApiOptions {
   previewPorts: PortRange;
   /** The health passes' latest, null before the first. */
   health(): DoctorReport | null;
+  /** How late the event loop ran in its last full minute, which `GET /v1/health` reports. */
+  loop(): LoopDelay;
   log: Log;
   /** How long a stream's client may leave what was sent unread before it is dropped. 30 s by default. */
   streamStallMs?: number;
@@ -211,7 +214,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   const httpsState: { status: "disabled" | "waiting" | "ready" | "degraded"; error: string | null; nextAttemptAt: number | null } = {
     status: options.https ? "waiting" : "disabled", error: null, nextAttemptAt: null,
   };
-  const health = () => ({ commit: runningCommit, version, https: { ...httpsState } });
+  const health = () => ({ commit: runningCommit, version, https: { ...httpsState }, loop: options.loop() });
 
   const callerOf = <T>(req: IncomingMessage, who: (address: string, port: number) => Promise<T | null>) => {
     const { remoteAddress, remotePort } = req.socket;

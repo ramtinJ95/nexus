@@ -73,7 +73,7 @@ const claude = claudeConversations({ registry, probes: new Map(), log: (message)
 const api = await startApi({
   registry, host: "127.0.0.1", port: 0, whois: async () => laptop, allowed: new Set([laptop]), hostnames: new Set(["127.0.0.1"]),
   deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} },
-  harness: threads, claude, wake: () => {}, log: (message) => console.error(message), features: noFeatures, gate: turnGate(() => isDraining(registry.releases.drain(), registry.now())), health: () => null,
+  harness: threads, claude, wake: () => {}, log: (message) => console.error(message), features: noFeatures, gate: turnGate(() => isDraining(registry.releases.drain(), registry.now())), health: () => null, loop: () => ({ overMs: 0, p99Ms: 0, maxMs: 0, busy: 0 }),
   startThread: threadStarter({
     registry, harness: threads, wake: () => {}, dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
     mirror: { setupInputs: () => Promise.reject(new Error("the stream check reads no remote")) },
