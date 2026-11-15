@@ -134,8 +134,9 @@ const rows: Record<string, Row> = {
   "paused and absent is done though the node still routes its previews": { desired: "paused", observed: "absent", previewsRouted: true, inFlight: null, attempts: none, online: true, present: [], expect: done },
   "paused and stopped is done": { desired: "paused", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, expect: done },
   "paused and running submits pause": { desired: "paused", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, expect: pause },
-  "paused and broken submits pause": { desired: "paused", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, expect: pause },
-  "paused and broken by a setup that failed on this boot submits pause, which removes the VM": { desired: "paused", observed: brokenSetup, inFlight: null, attempts: none, online: true, present: imageOnly, expect: pause },
+  "paused and broken fails with the reason, so a boot that broke is told": { desired: "paused", observed: broken, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", code: "backend", reason: "pylon is broken: qcow2 header unreadable" } },
+  "paused and broken by a setup that failed on this boot fails, and is not removed unseen": { desired: "paused", observed: brokenSetup, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", code: "backend", reason: "pylon is broken: Setup exited 128. Read controller logs" } },
+  "paused and broken after a human retry submits pause, which removes a VM whose setup failed": { desired: "paused", observed: brokenSetup, inFlight: null, attempts: none, online: true, present: imageOnly, retrying: true, expect: pause },
   "paused and broken with a saved setup fails, since a pause would save the failure": { desired: "paused", observed: brokenSavedSetup, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", code: "backend", reason: "pylon is broken: Setup exited 128. Read controller logs. Its disk holds the failed setup, and every boot of that disk fails the same way, so a retry cannot help. Start again from the project" } },
   "paused and broken for a reason the node did not say fails rather than pausing": { desired: "paused", observed: brokenUnknown, inFlight: null, attempts: none, online: true, present: imageOnly, expect: { kind: "fail", code: "backend", reason: "pylon is broken: qcow2 header unreadable. The node did not say why the pylon broke in a way this control plane understands. Upgrade Nexus on the node and the control plane, or start again from the project" } },
   // 7a
@@ -413,7 +414,7 @@ test("ingest: a new running pylon writes its sessions, derived outputs and activ
     { record: "output", pylonId, kind: "file", ref: "o1" },
     { record: "output", pylonId, kind: "diff", ref: "o2" },
     { record: "preview", pylonId, service: "web", httpsPort: 8443, ready: true },
-    { record: "activity", pylonId, human: now, agent: null },
+    { record: "activity", pylonId, human: now, agent: now },
   ] satisfies RegistryWrite[]);
 });
 
@@ -523,13 +524,14 @@ test("ingest: the first list after a wake replaces the paused sessions with thei
       { ...workingRow, id: "t3", terminal: "t3", status: "idle" },
       { id: "failed-0123456789ab", state: "failed", terminal: null, harness: "pi", harnessSessionId: "/s.jsonl", title: "plan", status: null, message: "pi exited 1" },
     ] },
+    { record: "activity", pylonId, human: null, agent: now },
   ] satisfies RegistryWrite[]);
 });
 
 test("ingest: a pylon that runs again before its sessions are read resumes the paused ones, once", () => {
   const unread = runningWith({ sessions: null });
-  assert.deepEqual(ingest({ type: "pylon", pylon: unread }, node, knows(phase("booting")), now), [{ record: "sessions-resumed", pylonId }]);
-  assert.deepEqual(ingest({ type: "pylon", pylon: unread }, node, knows(stopped(lastCheckpoint, [pausedReview])), now), [{ record: "sessions-resumed", pylonId }], "a wake between two observations");
+  assert.deepEqual(ingest({ type: "pylon", pylon: unread }, node, knows(phase("booting")), now), [{ record: "sessions-resumed", pylonId }, { record: "activity", pylonId, human: null, agent: now }], "a boot that just finished is agent activity");
+  assert.deepEqual(ingest({ type: "pylon", pylon: unread }, node, knows(stopped(lastCheckpoint, [pausedReview])), now), [{ record: "sessions-resumed", pylonId }, { record: "activity", pylonId, human: null, agent: now }], "a wake between two observations");
   assert.deepEqual(ingest({ type: "pylon", pylon: unread }, node, knows(unread), now), [], "a later unread list writes nothing");
   assert.deepEqual(ingest({ type: "pylon", pylon: unread }, node, knows(runningWith({ sessions: [working] })), now, new Set([pylonId])), [{ record: "sessions-resumed", pylonId }], "a restarted control plane resumes them too, since an older one may have left them paused");
 });
@@ -567,7 +569,7 @@ test("ingest: a snapshot writes the node, its jobs, its pylons, and closes known
   assert.deepEqual(ingest({ type: "snapshot", observation }, node, known, now), [
     { record: "node", node, state: "online", capacity: observation.capacity },
     { record: "job", status },
-    { record: "activity", pylonId, human: now, agent: null },
+    { record: "activity", pylonId, human: now, agent: now },
     { record: "sessions", pylonId: gone, sessions: [] },
   ] satisfies RegistryWrite[]);
   assert.throws(() => ingest({ type: "snapshot", observation }, peer, known, now), /names node rj-firebat/);

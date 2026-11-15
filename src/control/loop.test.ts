@@ -11,7 +11,7 @@ import { upgradeAttempts } from "./record-upgrade.ts";
 import type { PortRange, Thread } from "./thread-store.ts";
 import { addThread, seedRegistry, claudeWorkerAt } from "../test-support/registry-kit.ts";
 import { usageBackfill } from "./usage-backfill.ts";
-import { archivedDiskMs, envelope, ingest as realIngest } from "./reconcile.ts";
+import { archivedDiskMs, desiredPhase, envelope, ingest as realIngest } from "./reconcile.ts";
 import type { CheckpointId, ImageId, JobId, LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
 import type { Job, JobEnvelope, JobErrorCode, JobStatus, SubmitReply } from "../protocol/jobs.ts";
 import type {
@@ -870,6 +870,21 @@ test("a wake its node has no memory for waits with no attempt counted, and boots
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn", "pause", "spawn"]);
 });
 
+test("a pylon whose boot outlasts the idle time is not paused as it comes up, so its worker gets its first prompt", async (t) => {
+  const { registry, shift } = shiftedRegistry();
+  const thread = seed(registry);
+  const fake = fakeNode({ autoFinish: false });
+  const loop = run(t, registry, fake.probe, { ingest: realIngest });
+  await until("the spawn runs", () => fake.running().length === 1);
+  // A fresh setup of 25 minutes, past the 20 the start's human activity keeps the thread up.
+  shift.ms = 25 * 60_000;
+  fake.finish(fake.running()[0]!);
+  await until("the boot is folded in", () => fake.pylons.get(thread.pylonId)?.phase === "running" && registry.threads.pylon(thread.pylonId)?.submitted === null);
+  await loop.wake(node);
+  await loop.wake(node);
+  assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn"], "no pause follows the boot");
+});
+
 const kinds = (jobs: readonly Job[]) => jobs.map((job) => job.kind === "spawn" ? `spawn ${job.boot.source.kind}` : job.kind);
 /** As pylon-vm fails a fresh boot's setup: the instance, which holds no work, is removed. */
 const setupFailed = (pylonId: PylonId, run: number) => ({ code: "setup-failed" as const, message: `${pylonId}: Setup exited 128 (run ${run})`, logTail: "fatal: repository not found" });
@@ -1167,19 +1182,23 @@ test("a retry of a pylon left broken by a fresh setup, as an older backend left 
   assert.match(registry.threads.pylon(thread.pylonId)!.failed!, /^last job failed with setup-failed, which is not retryable: .*\(run 2\)/);
 });
 
-test("an idle pylon whose fresh setup failed is removed by its pause, so its wake runs setup again", async (t) => {
+test("an idle pylon whose fresh setup failed fails with the reason and attention, and a retry removes it so its wake runs setup again", async (t) => {
   const registry = openRegistry(tempDb());
-  const thread = seed(registry);
-  registry.threads.setThreadStatus(thread.id, "archived");
+  const thread = seed(registry, { lastHumanActivityAt: 0, lastAgentActivityAt: 0 });
+  assert.equal(desiredPhase(registry.threads.thread(thread.id)!, registry.now()), "paused", "the thread is idle");
   const fake = fakeNode({ autoFinish: false });
-  // A probe that died between the setup failure and the instance's removal, so the planner sees only the broken pylon.
+  // A boot whose setup failed after its spawn job passed its deadline, so the planner sees only the broken pylon.
   fake.breakPylon(thread.pylonId, "Setup exited 128. Read controller logs", "setup");
   run(t, registry, fake.probe, { log: () => {} });
-  await until("the idle broken pylon's pause runs", () => fake.running().length === 1);
+  await until("the planner fails the pylon", () => registry.threads.pylon(thread.pylonId)?.failed !== null);
+  assert.match(registry.threads.pylon(thread.pylonId)!.failed!, /^pylon is broken: Setup exited 128/);
+  assert.equal(registry.threads.attention(thread.id), "failed");
+  assert.deepEqual(fake.submitted, [], "nothing removed it unseen");
+  registry.threads.retryPylon(thread.pylonId);
+  await until("the retry's pause runs", () => fake.running().length === 1);
   fake.finish(fake.running()[0]!);
   await until("the pause is folded in", () => registry.threads.pylon(thread.pylonId)?.pauses === 1);
   assert.equal(fake.pylons.has(thread.pylonId), false, "no checkpoint holds the failed setup");
-  registry.threads.setThreadStatus(thread.id, "active");
   registry.threads.recordActivity(thread.id, { human: Date.now() });
   await until("the wake spawns", () => fake.submitted.length === 2);
   assert.deepEqual(kinds(fake.submitted), ["pause", "spawn fresh"]);
