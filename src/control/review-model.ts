@@ -331,7 +331,8 @@ const phases = {
   // A review's checks run as the first steps of its landing once it was asked to land.
   checking: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, track: (_, r) => r.land === null ? "review" : "landing", landingStep: asked("checking") },
   verifying: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, track: (_, r) => r.land === null ? "review" : "landing", landingStep: asked("verifying") },
-  quoting: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, track: "landing", landingStep: reached("checking") },
+  // A quote is asked for by a Land press, and for a builder's statement in a review that may not have been asked to land.
+  quoting: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, track: (_, r) => r.land === null ? "review" : "landing", landingStep: asked("checking") },
   approved: { ended: true, settled: false, waitsOnPerson: true, cancellable: false, track: (_, r) => r.land === null ? "review" : "landing" },
   merging: { ended: false, settled: false, waitsOnPerson: false, cancellable: true, landing: (phase) => phase.authorized === null ? null : "merges", track: "landing", landingStep: reached("merging") },
   deploying: { ended: false, settled: false, waitsOnPerson: false, cancellable: false, landing: () => "deploys", track: "landing", landingStep: reached("deploying") },

@@ -18,7 +18,7 @@ import { reservedNames } from "../contract/reserved.ts";
 import { carryWaiver, headHolds, holdsAt, landPress, secondReviewRule } from "./policy.ts";
 import { landing } from "./dashboard/cards.ts";
 import { checkBeside, liveNote, phaseNote, reviewSaid, roundNote } from "./wording.ts";
-import { cannotLand, changeOf, ended, findingsOf, humanLabel, landable, personPhase, roundsSpent, type HoldCause, type Review, type Verdict, type Waiver } from "./review-model.ts";
+import { cannotLand, changeOf, ended, findingsOf, humanLabel, landable, personPhase, roundsSpent, trackStep, type HoldCause, type Review, type Verdict, type Waiver } from "./review-model.ts";
 import { githubChecksMs, reviewerFor, reviewLoop, secondReviewerFor, type ReviewDeps } from "./review.ts";
 import { upgradeReview } from "./record-upgrade.ts";
 import { commentCap, prWatchMs } from "./pr-watch-model.ts";
@@ -4661,6 +4661,7 @@ test("a head no live check ran at, whose description does not say what could not
   f.tick(3 * 60_000);
   await loop.poll();
   assert.equal(f.review().phase.kind, "quoting", "the statement reaches the landing only through the reviewer");
+  assert.equal(trackStep(f.review()), "landing");
   assert.equal(f.sent.at(-1)!.to, reviewer);
   assert.ok(f.sent.at(-1)!.message.text.includes(body), "which reads the description as it is now");
   assert.deepEqual(f.merges, []);
@@ -4688,6 +4689,7 @@ test("a review that stops at approval asks its builder for the statement of what
   await loop.poll();
   assert.equal(f.review().phase.kind, "quoting");
   assert.doesNotMatch(f.sent.at(-1)!.message.text, /Nexus is landing/, "no landing was asked for");
+  assert.equal(trackStep(f.review()), "review", "so its quote is no step of one");
   const asked = f.sent.filter((m) => m.to === f.builder).length;
   f.reply(reviewer, `Quoted.\n\`\`\`nexus-quote\n${JSON.stringify({ token: f.review().expect, notCheckedLive: null })}\n\`\`\``);
   await loop.poll();

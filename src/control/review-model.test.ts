@@ -56,7 +56,8 @@ test("the store's SQL filters read the kinds they filtered before", () => {
 const landingAtBefore = (r: Review) => {
   switch (r.phase.kind) {
     case "checking": case "verifying": return r.land === null ? null : { step: r.phase.kind, failed: false };
-    case "quoting": return { step: "checking", failed: false };
+    // Then only a Land press asked for a quote, so none was asked for with no landing. One asked for a builder's statement is no step of one.
+    case "quoting": return r.land === null ? null : { step: "checking", failed: false };
     case "merging": case "deploying": case "landed": return { step: r.phase.kind, failed: false };
     case "rolling-back": return { step: "deploying", failed: true };
     case "needs-person": return r.merged !== null && r.land !== null ? { step: "deploying", failed: true } : null;
