@@ -235,6 +235,7 @@ ${card}`];
     }
     case "nudge": return [label, nudgeCard(t, "inbox")];
     case "resume": return [label, resumeCard(t, n.why, "inbox")];
+    case "unreviewed": return [label, html`<p class="land-note">Pull request <a class="link" href="${n.url}" target="_blank" rel="noreferrer">#${n.pr}</a> is open, and ${n.why}.</p>`];
     case "question": {
       const q = n.question;
       if (q.kind === "holds") return [label, html`${questionCard(c, q)}${landing(c, d, lands, "inbox")}`];

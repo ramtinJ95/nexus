@@ -47,6 +47,7 @@ function healthy(over: Partial<DoctorFacts> = {}): DoctorFacts {
     github: { kind: "accepted", expiresAt: iso(now + 90 * day) },
     tailnet: [device(node, iso(now + 120 * day)), device(peer, null)],
     keptArchives: [],
+    unreviewed: [],
     image: { current, holders: [node, peer], fetches: [] },
     ...over,
   };
@@ -69,7 +70,7 @@ test("a healthy install passes every check, the control plane's first and then e
   assert.equal(r.at, iso(now));
   assert.equal(r.status, "ok");
   assert.deepEqual(r.checks.map((c) => [c.node, c.name, c.status]), [
-    [null, "release", "ok"], [null, "backup", "ok"], [null, "login", "ok"], [null, "github-token", "ok"], [null, "certificate", "ok"], [null, "archived-disks", "ok"],
+    [null, "release", "ok"], [null, "backup", "ok"], [null, "login", "ok"], [null, "github-token", "ok"], [null, "certificate", "ok"], [null, "archived-disks", "ok"], [null, "unreviewed-prs", "ok"],
     [node, "online", "ok"], [node, "release", "ok"], [node, "disk", "ok"], [node, "pylons", "ok"], [node, "tailnet-key", "ok"], [node, "image", "ok"],
     [peer, "online", "ok"], [peer, "release", "ok"], [peer, "disk", "ok"], [peer, "pylons", "ok"], [peer, "tailnet-key", "ok"], [peer, "image", "ok"],
   ]);

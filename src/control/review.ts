@@ -22,7 +22,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { checkCaller, mint, reviewerCaller, tokenBlocks, verifyCaller } from "./agent-protocol.ts";
 import { scopedFlight } from "../single-flight.ts";
 import type { SecretGrant } from "../protocol/secret-grants.ts";
-import { agentKinds } from "../protocol/agent-kinds.ts";
+import { grantsClaude, type Owed } from "./owed-review.ts";
 import { defaultClaudeModel } from "../protocol/models.ts";
 import type { ChangedFile, GitHub, PrSnapshot, PullRequest } from "./github.ts";
 import { NoRoom, Refusal } from "./refusal.ts";
@@ -47,7 +47,7 @@ import { landsOnItsOwn, type Project } from "./project.ts";
 import { landing } from "./landing.ts";
 import { deliverDurable } from "./durable-message.ts";
 import type { Start } from "./start-request.ts";
-import { servesReview, threadRole } from "./work-model.ts";
+import { owedOf, servesReview, threadRole } from "./work-model.ts";
 import { builderFindings, builderNotes, fencedAnswers, nextRound, quoteRequest, reminder, reviewerRequest, type FencedAnswer } from "./prompts.ts";
 import { isOpenStatus, openStatuses } from "./reconcile.ts";
 
@@ -155,10 +155,6 @@ ${why === null ? "" : `${why.text}\n`}Land waives these at ${at}, and at a rebas
   return { kind: "holds", id, thread: r.builder, text, options: holdOptions, reserved: holds.map((h) => caseOf(h.code)).find((c) => c !== null) ?? null, answerer: "deployer", askedAt, holds: asked };
 }
 
-// A Claude worker logs in from a granted token. Interactive /login needs a person, so it cannot serve a reviewer.
-const grantsClaude = (secrets: readonly SecretGrant[]) =>
-  agentKinds["claude-code"].signIn.grants.some((grant) => secrets.some((s) => s.name === grant.name && grant.hosts.every((host) => s.hosts.includes(host))));
-
 /** The reviewer's kind and model: another model family than the builder's where one can run, or why none can. */
 export function reviewerFor(builder: { claude: boolean; model: string }, secrets: readonly SecretGrant[], harnessModel: string): { claude: boolean; model: string } | { why: string } {
   if (builder.claude) return { claude: false, model: harnessModel };
@@ -199,8 +195,8 @@ export function reviewLoop(deps: ReviewDeps) {
 
   /** Each PR as GitHub said it in this pass, which a step reads rather than GitHub again. A landing reads it afresh. */
   let reads = new Map<string, Promise<PrSnapshot>>();
-  const prKey = (r: Pick<Review, "pr">) => `${r.pr.repo}:${r.pr.number}`;
-  const read = (r: Pick<Review, "pr">) => {
+  const prKey = (r: { pr: Pick<Review["pr"], "repo" | "number"> }) => `${r.pr.repo}:${r.pr.number}`;
+  const read = (r: { pr: Pick<Review["pr"], "repo" | "number"> }) => {
     if (!reads.has(prKey(r))) reads.set(prKey(r), github.poll(r.pr.repo, r.pr.number));
     return reads.get(prKey(r))!;
   };
@@ -938,6 +934,22 @@ export function reviewLoop(deps: ReviewDeps) {
    */
   const finished = (...ids: ThreadId[]): Thread[] => ids.map((id) => registry.threads.thread(id))
     .filter((t): t is Thread => t !== undefined && !t.working && isOpenStatus(t.status));
+  /**
+   * Whether a builder whose review landed still has work open: another pull request the PR watch linked that GitHub says
+   * is open now, whose review runs after this one or waits on its builder, and whose landing archives the builder in
+   * turn. GitHub is asked, since the watch may not have read a merge yet, and the links are read again after each
+   * answer, since the watch may link another meanwhile. A read that fails throws, so the pass tries the step again.
+   * Its turn is `finished`'s to judge.
+   */
+  const keepsWork = async (r: Review) => {
+    const asked = new Set([prKey(r)]);
+    for (;;) {
+      const pr = watchedPrs(registry.prWatches.prWatch(r.builder)).find((pr) => pr.state === "open" && !asked.has(prKey({ pr })));
+      if (pr === undefined) return false;
+      asked.add(prKey({ pr }));
+      if ((await read({ pr })).pr.state === "open") return true;
+    }
+  };
 
   /**
    * Whether `r` may still use its reviewer: while it runs, or while it waits at approval or for the person, unmerged, in
@@ -967,7 +979,7 @@ export function reviewLoop(deps: ReviewDeps) {
       deps.wake(t);
     }
     // So has a builder whose turn ran on past its review's landing, once the turn ends, unless the person wrote to it
-    // since the landing, which makes it theirs.
+    // since the landing, which makes it theirs, or another of its pull requests is open, whose own landing archives it.
     for (const r of registry.reviews.landedInTurn()) {
       try {
         if (r.phase.kind !== "landed" || r.phase.inTurn === undefined) continue;
@@ -982,7 +994,11 @@ export function reviewLoop(deps: ReviewDeps) {
         // The read yields, so a turn, an archive or a delete meanwhile decides instead.
         const fresh = registry.threads.thread(r.builder);
         if (fresh?.working === true && isOpenStatus(fresh.status)) continue;
-        const archive = !theirs && fresh !== undefined && isOpenStatus(fresh.status) ? [fresh] : [];
+        // A pull request the builder opened in its turn keeps it for that pull request's own landing. The read yields too.
+        const kept = !theirs && fresh !== undefined && isOpenStatus(fresh.status) && await keepsWork(r);
+        const latest = registry.threads.thread(r.builder);
+        if (latest?.working === true && isOpenStatus(latest.status)) continue;
+        const archive = !theirs && !kept && latest !== undefined && isOpenStatus(latest.status) ? [latest] : [];
         if (registry.reviews.saveReview({ ...r, phase }, archive.map((t) => t.id), r)) for (const t of archive) deps.wake(t);
         retried.ok(`${r.id} builder`);
       } catch (err) {
@@ -990,6 +1006,7 @@ export function reviewLoop(deps: ReviewDeps) {
       }
     }
     await stepEach(reviews);
+    await startOwed();
     // A review no pass steps any more, such as one saved settled outside the loop's steps, asks nothing.
     const stepped = new Set(reviews.map((r) => r.builder));
     try {
@@ -1004,6 +1021,53 @@ export function reviewLoop(deps: ReviewDeps) {
     }
   }
 
+  /** When the loop last tried each owed review's start, by PR, so one that waits reads GitHub as often as the PR watch. */
+  const owedTries = new Map<string, number>();
+  /**
+   * Starts each builder's owed review that is due (owed-review.ts), as its project's setting asks, or else asks GitHub
+   * whether one that waits only on a clean merge now has it, since the PR watch may no longer read it. A start refused
+   * for a conflict GitHub reports, or has not judged yet, is tried again a PR watch interval later, by when the watch
+   * has told the builder of the conflict.
+   */
+  async function startOwed() {
+    let threads: ThreadId[];
+    try {
+      threads = registry.threads.storedThreads({ status: ["active"] }).map((t) => t.id);
+      retried.ok("owed reviews");
+    } catch (err) {
+      retried.failed("owed reviews", `the owed reviews were not read and will be tried again (${(err as Error).name})`);
+      return;
+    }
+    for (const id of threads) {
+      let owed: Owed[];
+      try {
+        const t = registry.threads.thread(id);
+        owed = t === undefined ? [] : owedOf(registry, t);
+      } catch (err) {
+        retried.failed(`${id} owed`, `${id}: its owed reviews were not read and will be tried again (${(err as Error).name})`);
+        continue;
+      }
+      // The due one first, then each other one no running review holds back, since one the watch no longer reads may
+      // have closed, and another behind it merge cleanly. The first that starts is the builder's one review.
+      const candidates = [...owed.filter((o) => o.kind === "due"), ...owed.filter((o) => o.kind === "waiting" && o.asks === true)];
+      for (const { pr } of candidates) {
+        const key = `${pr.repo}:${pr.number} owed`;
+        if (now() - (owedTries.get(key) ?? -Infinity) < prWatchMs) continue;
+        owedTries.set(key, now());
+        try {
+          const t = registry.threads.thread(id)!;
+          const setting = registry.projects.project(t.project)!.autoReview!;
+          await begin(t, pr, { land: landsOnItsOwn(setting) ? { requestedBy: setting.enabledBy, fromProject: true } : null, auto: true, mergeable: true });
+          owedTries.delete(key);
+          retried.ok(key);
+          break;
+        } catch (err) {
+          retried.failed(key, `${id}: its owed review of pull request #${pr.number} did not start and will be tried again (${err instanceof Refusal ? err.message : (err as Error).name})`);
+        }
+      }
+    }
+  }
+
   async function stepEach(reviews: readonly Review[]) {
     for (const stored of reviews) {
       let r = stored;
@@ -1014,9 +1078,10 @@ export function reviewLoop(deps: ReviewDeps) {
           if (next === r) break;
           let archive: Thread[] = [];
           if (next.phase.kind === "landed" && r.phase.kind !== "landed") {
-            archive = finished(next.builder, ...reviewersOf(next));
+            const kept = await keepsWork(next);
+            archive = finished(...kept ? [] : [next.builder], ...reviewersOf(next));
             const builder = registry.threads.thread(next.builder);
-            if (builder?.working === true && isOpenStatus(builder.status)) next = { ...next, phase: { ...next.phase, inTurn: now() } };
+            if (!kept && builder?.working === true && isOpenStatus(builder.status)) next = { ...next, phase: { ...next.phase, inTurn: now() } };
           }
           // A save made while this step ran, such as the person's land or cancel, wins, and the next pass steps from it.
           // A gate thread the step started is then no review's, so it goes now rather than at the next pass's sweep.
@@ -1057,7 +1122,7 @@ export function reviewLoop(deps: ReviewDeps) {
    * Records a review of `pr`, a PR of the builder's, with its first request. The loop's next pass starts its reviewer
    * threads, whose starts read the remote and may take longer than the person's request waits.
    */
-  async function begin(builder: Thread, { repo, number }: Pick<PullRequest, "repo" | "number">, request: { rounds?: number | undefined; land: Review["land"]; auto: boolean }): Promise<Review> {
+  async function begin(builder: Thread, { repo, number }: Pick<PullRequest, "repo" | "number">, request: { rounds?: number | undefined; land: Review["land"]; auto: boolean; mergeable?: true }): Promise<Review> {
     refuseIfReviewed(builder.id, repo, number);
     // A later review of a PR spends what the earlier ones left, unless the person grants rounds.
     const earlierRounds = registry.reviews.roundsSpentOn(repo, number);
@@ -1065,6 +1130,7 @@ export function reviewLoop(deps: ReviewDeps) {
     if (rounds < 1) throw new Refusal("conflict", `pull request #${number} has had ${earlierRounds} rounds over its reviews, and Nexus gives one ${maxRounds} without the person's word. Run nexus review ${builder.id} --rounds N to grant it N more`);
     const snapshot = await github.poll(repo, number);
     if (snapshot.pr.state !== "open") throw new Refusal("conflict", `pull request #${number} is ${snapshot.pr.state}`);
+    if (request.mergeable && snapshot.pr.conflict !== false) throw new Refusal("conflict", `pull request #${number} ${snapshot.pr.conflict === true ? "conflicts with its base, so its review waits for the builder's rebase" : "may conflict with its base, which GitHub has not said yet"}`);
     const agent = registry.threads.agent(builder);
     const builderModel = agent.kind === "claude" ? agent.worker.model ?? defaultClaudeModel : deps.harnessModel;
     const project = registry.projects.project(builder.project)!;
@@ -1091,9 +1157,15 @@ export function reviewLoop(deps: ReviewDeps) {
     };
     // A Claude reviewer's first request is its first prompt, which still takes the first message's number.
     const review = kind.claude ? { ...started, sent: 1 } : resend(started, "reviewer");
-    // Again, since another start of the PR may have recorded its review while this one read GitHub.
+    // Again, since another start of the PR may have recorded its review while this one read GitHub. An automatic start
+    // also gives way to any review of the PR since, and to the builder's review that has not settled, which it would replace.
     refuseIfReviewed(builder.id, repo, number);
     refuseIfRunning(builder.id);
+    if (request.auto) {
+      if (registry.reviews.prReviewed(repo, number)) throw new Refusal("conflict", `pull request #${number} got a review while this start read GitHub`);
+      const current = registry.reviews.review(builder.id);
+      if (current !== null && !settled(current)) throw new Refusal("conflict", `review ${current.id} of ${builder.id} is ${current.phase.kind}, so pull request #${number} waits for it`);
+    }
     registry.reviews.saveReview(review);
     void poll();
     return review;
@@ -1191,15 +1263,21 @@ export function reviewLoop(deps: ReviewDeps) {
     /**
      * Starts a review of a PR the PR watch has just linked, when the builder's project asks for it, and lands it when
      * the project says so. It never starts for a thread the loop started, nor twice for one PR, so a review that ended
-     * stays ended until the person starts one. A refusal, such as no reviewer on another model, is logged and final.
+     * stays ended until the person starts one. Behind the builder's review that has not settled, the PR waits as an
+     * owed review, which a pass starts once that review settles. A refusal is logged, and one that lasts, such as no
+     * reviewer on another model, is the thread's attention, as owed-review.ts says.
      */
     async auto(t: Thread, pr: Pick<PullRequest, "repo" | "number">): Promise<void> {
       const setting = registry.projects.project(t.project)?.autoReview;
       if (setting == null || servesReview(threadRole(registry, t))) return;
       // Another thread on the same branch links the same PR, which has had its review, even one its builder's next replaced.
       if (registry.reviews.prReviewed(pr.repo, pr.number)) return;
+      const current = registry.reviews.review(t.id);
+      if (current !== null && !settled(current)) {
+        log(`${t.id}: the review of pull request #${pr.number} starts once review ${current.id} of #${current.pr.number} ends, which is ${current.phase.kind}`);
+        return;
+      }
       try {
-        refuseIfRunning(t.id);
         await begin(t, pr, { land: landsOnItsOwn(setting) ? { requestedBy: setting.enabledBy, fromProject: true } : null, auto: true });
       } catch (err) {
         if (!(err instanceof Refusal)) throw err;

@@ -28,7 +28,7 @@ export interface PrWatchState {
 
 export const holding = { tables: { pr_watches: { record: "thread", purge: "thread = $thread" } } } as const satisfies Holding;
 
-export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: ThreadId, payload: Record<string, unknown>) => unknown) {
+export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: ThreadId, payload: Record<string, unknown>) => unknown, updateAttention: (thread: ThreadId) => void) {
   const { transaction, sql } = db;
   const watches = db.hold(holding).records<PrWatchState>("pr_watches");
   return {
@@ -46,6 +46,9 @@ export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: Thre
     /** The threads with a pull request the watch last read open. */
     withOpenPr: (): ThreadId[] => sql(`SELECT DISTINCT w.thread FROM pr_watches w, json_each(w.record, '$.links') l WHERE json_extract(l.value, '$.pr.state') = 'open'`)
       .all().map((r) => r.thread as ThreadId),
+    /** The threads that link pull request `number` of `repo`. */
+    linking: (repo: string, number: number): ThreadId[] => sql(`SELECT DISTINCT w.thread FROM pr_watches w, json_each(w.record, '$.links') l
+      WHERE json_extract(l.value, '$.pr.repo') = ? AND json_extract(l.value, '$.pr.number') = ?`).all(repo, number).map((r) => r.thread as ThreadId),
     /** The number of each pull request linked to each of `threads`, or to every thread, in one read. */
     prNumbers(threads?: readonly ThreadId[]): ReadonlyMap<ThreadId, number[]> {
       const links = "SELECT thread, json_extract(link.value, '$.pr.number') AS number FROM pr_watches, json_each(pr_watches.record, '$.links') AS link";
@@ -54,7 +57,8 @@ export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: Thre
     },
     /**
      * Replaces the thread's PR watch, and tells the event log of new feedback, of each PR linked since the last save, and
-     * of an error that starts or clears.
+     * of an error that starts or clears. The thread's attention is recomputed, as a PR that opens or closes changes the
+     * reviews it is owed.
      */
     savePrWatch(thread: ThreadId, state: PrWatchState) {
       transaction(() => {
@@ -68,6 +72,7 @@ export function prWatchStore(db: Db, appendEvent: (kind: EventKind, thread: Thre
         if ((previous?.error ?? null) === null && state.error !== null) appendEvent("pull-request.error", thread, { error: state.error });
         if ((previous?.error ?? null) !== null && state.error === null) appendEvent("pull-request.error-cleared", thread, {});
         watches.save(thread, state);
+        updateAttention(thread);
       });
     },
   };
