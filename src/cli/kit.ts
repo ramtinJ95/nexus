@@ -68,7 +68,7 @@ export interface Command {
 
 /** The flags every command takes, before or after its name. */
 export const globalOptions: ParseArgsOptionsConfig = {
-  json: { type: "boolean" }, url: { type: "string" }, socks: { type: "string" }, help: { type: "boolean", short: "h" },
+  json: { type: "boolean" }, url: { type: "string" }, socks: { type: "string" }, timeout: { type: "string" }, help: { type: "boolean", short: "h" },
 };
 
 export const str = (v: Values, key: string) => v[key] as string | undefined;

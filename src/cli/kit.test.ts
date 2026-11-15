@@ -60,7 +60,7 @@ async function restarting(t: import("node:test").TestContext, port: number, sche
   const notes: string[] = [];
   let noted!: () => void;
   const first = new Promise<void>((resolve) => { noted = resolve; });
-  const endpoint = { url: new URL(`${scheme}://127.0.0.1:${port}`), socks: null };
+  const endpoint = { url: new URL(`${scheme}://127.0.0.1:${port}`), socks: null, idleMs: apiIdleMs };
   const api = ridingRestarts((method, path, body, idleMs) => call(endpoint, method, path, body, idleMs), (line) => { notes.push(line); noted(); });
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   return { endpoint, notes, first, api };

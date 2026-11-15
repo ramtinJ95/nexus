@@ -5,7 +5,7 @@ import { saveJson } from "../../node-base/json-file.ts";
 import { version } from "../../version.ts";
 import { call, CliError, UsageError } from "../transport.ts";
 import { type Command, type Io, type Versions, noteTo, str } from "../kit.ts";
-import { controlPorts, configFile, readConfig, socksOf, controlUrl, skewNote, versionsOf, versionsText } from "../config.ts";
+import { controlPorts, configFile, readConfig, socksOf, idleMsOf, controlUrl, skewNote, versionsOf, versionsText } from "../config.ts";
 
 function candidatesOf(host: string): URL[] {
   if (host.includes("://")) return [controlUrl(host)];
@@ -41,9 +41,10 @@ export const connectCommands: Readonly<Record<string, Command>> = {
       const file = configFile(io.env);
       const config = await readConfig(file);
       const socks = socksOf(v, config, io.env);
+      const idleMs = idleMsOf(v, config, io.env);
       const tried: string[] = [];
       for (const url of candidatesOf(host!)) {
-        const endpoint = { url, socks };
+        const endpoint = { url, socks, idleMs };
         let health: unknown;
         try {
           health = await call(endpoint, "GET", "/v1/health");

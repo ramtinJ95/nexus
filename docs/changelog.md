@@ -2,9 +2,13 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), except in the commands [Version skew](cli.md#version-skew) names, so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
-## 0.92.0
+## 0.93.0
 
 Adds `boot-held` to `Attention`, between `limited` and `reply`, which `GET /v1/threads`, `GET /v1/threads/<thread>`, `threads --json` and `show --json` answer once the planner has held a pylon's boot or wake for a minute: its node's probe has not been handed a secret the control plane holds, such as the token of the harness's ChatGPT sign-in, or its node has no memory for it. It waits on the person, so `threads --needs-me` lists it. Adds `pylon.held`, `{ why, since, lasting }`, to `ThreadDetail` from the first pass that holds the boot until one that does not, and `said.held`, the sentence `show` prints under `held:`. `wake` reads the thread up to seven times, half a second apart, and says a held wake and why. `send` to a Claude worker, and every other command that waits for a paused pylon to run, fails at once with the reason once the hold is `lasting`, and names it in its wait and its timeout before that. The `login` check of `doctor` names the projects whose pylons take their token from the harness's sign-in, since a sign-in that fails stops their boots too.
+
+## 0.92.0
+
+Adds the CLI's timeout setting: `--timeout SECONDS`, `NEXUS_TIMEOUT` or `"timeout"` in the config file, whole seconds from 1 to 3600, 30 when unset as before. It is how long the CLI lets a connection stay silent, as [Where it connects](cli.md#where-it-connects) describes. A control plane that took the connection and then sent nothing, in the TLS handshake too, is now named as busy or stuck, with the setting that waits longer. Before, a silence in the handshake was reported as the SOCKS proxy's. The API contract is unchanged, and a 0.91.0 control plane serves this CLI.
 
 ## 0.91.0
 
