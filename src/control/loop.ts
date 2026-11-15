@@ -5,6 +5,7 @@
  *
  * Each node has one pass at a time. A pass that is asked for while one runs is coalesced into a single
  * pass after it, so no two ticks of the same pylon overlap and a slow probe holds up only its own node.
+ * A pass gives the event loop a turn between its pylons, so a request waits for one tick, never for a pass.
  *
  * Previews: each ingested event gives every service a running pylon wants previewed a port from `previewPorts`,
  * and drops the preview of each port the pylon no longer links.
@@ -17,7 +18,7 @@
  * once a job, preview, disk delete, retry, Claude launch, wake for reading, failure to record or unarchive gives it
  * something to settle.
  */
-import { setTimeout as delay } from "node:timers/promises";
+import { setImmediate as nextTurn, setTimeout as delay } from "node:timers/promises";
 import { desiredPhase, type RegistryWrite } from "./reconcile.ts";
 import { linkedPort } from "../services-file.ts";
 import { liveHashOf, type GitIdentity } from "../protocol/spawn.ts";
@@ -194,7 +195,11 @@ export function startLoop(options: LoopOptions): Loop {
     const present = [...seen?.pylons.map((p) => p.pylonId) ?? [], ...seen?.previewRoutes.map((r) => r.pylonId) ?? []];
     // Each record is read just before its tick, because an API retry may change it while earlier ticks wait on
     // the probe, and saving an older copy would undo it.
+    let ticked = 0;
     for (const pylonId of registry.threads.pylonIdsToTick(node, present)) {
+      // A tick that submits nothing only reads the registry, so without this a pass runs from its first pylon to its last
+      // in one turn of the event loop, and health, the deployer's calls and the CLI wait for all of it.
+      if (ticked++ > 0) await nextTurn();
       const found = registry.threads.pylon(pylonId);
       // A failed pylon a judgment moved meanwhile is its new node's to tick, and one retention purged meanwhile is gone.
       if (found === undefined || found.node !== node) continue;

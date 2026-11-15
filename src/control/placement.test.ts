@@ -184,7 +184,7 @@ test("a wake counts a held builder's memory until its node reports it freed, so 
   const registry = {
     now: () => now,
     placement: { reserved: () => [] },
-    threads: { pylonsWithThreadsOn: () => [], pylonsWithHeldThreadsOn: () => [builder("pylon-held-1"), builder("pylon-held-2")] },
+    threads: { pylonsSpawningOn: () => [], pylonsWithHeldThreadsOn: () => [builder("pylon-held-1"), builder("pylon-held-2")] },
   } as unknown as Parameters<typeof wakeShort>[0];
   const waking = { pylonId: "pylon-wake", node: "small", submitted: null, retrying: false, boot: { resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 } } } as unknown as Parameters<typeof wakeShort>[1];
   const observed = (committedMemoryGiB: number) => ({ pylons: [], capacity: { memoryGiB: 16, committedMemoryGiB } }) as unknown as Parameters<typeof wakeShort>[2];
