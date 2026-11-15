@@ -74,6 +74,7 @@ const labelStates = { adding: `, adding the label "${humanLabel}"`, added: `, la
 /** How a review's line in `nexus show` and the dashboard ends. A refused label's why is already one of the reasons. */
 export const phaseNote = (r: Review) => r.phase.kind === "cancelled" ? r.phase.who === "person" ? `, cancelled by ${r.phase.by}` : `, the ${r.phase.who} thread ${r[r.phase.who]} was ${r.phase.status}`
   : r.phase.kind === "merging" && r.phase.waiting !== undefined ? `, waiting while ${r.phase.waiting}`
+  : r.phase.kind === "merging" && r.phase.checks !== undefined ? `, waiting for the pull request's GitHub checks to pass since ${new Date(r.phase.checks).toISOString().slice(11, 16)} UTC`
   : r.phase.kind === "needs-person" && r.phase.label ? labelStates[r.phase.label.state]
   : `${(r.phase.kind === "reviewing" || r.phase.kind === "fixing" || r.phase.kind === "quoting") && r.phase.failing ? failingNote(r.phase.kind === "fixing" ? "builder" : "reviewer", r.phase.failing) : ""}${r.phase.kind === "reviewing" && r.second?.kind === "claude" && r.second.failing ? failingNote("second reviewer", r.second.failing) : ""}`;
 const failingNote = (who: string, failing: ModelFailure) => `, the ${who}'s model is failing (${failing.count} in a row, last: ${failing.last}), retrying at ${new Date(failing.retryAt).toISOString().slice(11, 16)} UTC`;

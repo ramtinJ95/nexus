@@ -926,6 +926,17 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       return pylonsOn(node).map((pylon) => ({ pylon, thread: threads.get(pylon.thread)! }));
     },
     /**
+     * The node's pylons that are up or may come up, each with its thread as thread() reads it: those of its open
+     * threads, of the archived threads a feature reads now, and the ones among `ids`, such as those the node reports.
+     * Reads only those, however many pylons the node ever had.
+     */
+    pylonsWithThreadsAmong(node: NodeName, ids: readonly PylonId[]): { pylon: StoredPylon; thread: Thread }[] {
+      const among = `p.node = $node AND (t.status NOT IN ('deleted', 'archived') OR t.id IN (SELECT value FROM json_each($reading)) OR p.id IN (SELECT value FROM json_each($ids)))`;
+      const named = { $node: node, $reading: JSON.stringify(participants.flatMap((p) => p.reading?.() ?? [])), $ids: JSON.stringify(ids) };
+      const threads = new Map(withSessions(sql(`SELECT t.* FROM threads t JOIN pylons p ON p.thread = t.id WHERE ${among}`).all(named)).map((t) => [t.id, t]));
+      return sql(`SELECT p.* FROM pylons p JOIN threads t ON t.id = p.thread WHERE ${among} ORDER BY p.id`).all(named).map((r) => { const pylon = pylonRow(r); return { pylon, thread: threads.get(pylon.thread)! }; });
+    },
+    /**
      * The node's pylon of each thread a participant holds up now (`awaitedUntil`), with its thread as thread() reads it,
      * reading only those threads. Only an open thread's pylon is up for a hold to keep.
      */

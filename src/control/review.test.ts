@@ -9,6 +9,7 @@ import type { Thread } from "./thread-store.ts";
 import type { NodeName, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { AutoReview, SecondReview } from "./project.ts";
 import type { ProjectId } from "../ids.ts";
+import { freeHeldRoom } from "./placement.ts";
 import type { SecretGrant } from "../protocol/secret-grants.ts";
 import type { ChangedFile, LabelResult, MergeResult, PrSnapshot } from "./github.ts";
 import type { AutomatedMessage } from "./inbox.ts";
@@ -18,7 +19,7 @@ import { carryWaiver, headHolds, holdsAt, landPress, secondReviewRule } from "./
 import { landing } from "./dashboard/cards.ts";
 import { checkBeside, liveNote, phaseNote, reviewSaid, roundNote } from "./wording.ts";
 import { cannotLand, changeOf, ended, findingsOf, humanLabel, landable, personPhase, roundsSpent, type HoldCause, type Review, type Verdict, type Waiver } from "./review-model.ts";
-import { reviewerFor, reviewLoop, secondReviewerFor, type ReviewDeps } from "./review.ts";
+import { githubChecksMs, reviewerFor, reviewLoop, secondReviewerFor, type ReviewDeps } from "./review.ts";
 import { upgradeReview } from "./record-upgrade.ts";
 import { commentCap, prWatchMs } from "./pr-watch-model.ts";
 import { personNeeds } from "./work-model.ts";
@@ -35,7 +36,7 @@ import { claudeHook, claudeProjects } from "../../images/pylon/nexus-contract.ts
 import type { ProbeClient } from "../protocol/client.ts";
 import { fakeHarness } from "../test-support/fake-harness.ts";
 import { parseRecord, transcriptStart, type ClaudeEntry } from "./claude-transcript.ts";
-import { runningPylon, tempDir, until, watch } from "../test-support/kit.ts";
+import { runningPylon, tempDir, testCapacity, testObservation, until, watch } from "../test-support/kit.ts";
 import { testPr, testPylon, testReview, testThread, claudeWorkerAt, observeNode, storedTranscripts } from "../test-support/registry-kit.ts";
 import { checkCaller, reviewerCaller, senders, verifyCaller } from "./agent-protocol.ts";
 import { desiredPhase, idlePolicy } from "./reconcile.ts";
@@ -133,6 +134,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   let heldPoll: { skip: number; entered: () => void; released: Promise<void> } | null = null;
   let polls = 0;
   let onFiles = () => {};
+  let onPoll = () => {};
   let onStart = async () => {};
   /** Why the control plane refuses a reviewer thread's start, by the start's model, or null to start it. */
   let refuseStart: (request: StartRequest) => string | null = () => null;
@@ -148,7 +150,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     registry, harnessModel: "gpt-6-astra",
     github: {
       find: async () => [7],
-      async poll(_, n) { polls++; if (heldPoll !== null && heldPoll.skip-- <= 0) { heldPoll.entered(); await heldPoll.released; } return structuredClone(read(n)); },
+      async poll(_, n) { polls++; onPoll(); if (heldPoll !== null && heldPoll.skip-- <= 0) { heldPoll.entered(); await heldPoll.released; } return structuredClone(read(n)); },
       files: async () => { onFiles(); return files; },
       // Unless a test says otherwise, each head's change is its own, as a push of fixes makes it.
       change: async (_, __, head) => changes.has(head) ? changes.get(head)! : files.map((f) => ({ ...f, patch: f.patch && `${f.patch}\n+// ${head}` })),
@@ -247,6 +249,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     changes,
     /** Runs while the loop reads the PR's changed files. */
     set onFiles(hook: () => void) { onFiles = hook; },
+    /** Runs at each read of a pull request, so a test can fail it. */
+    set onPoll(hook: () => void) { onPoll = hook; },
     /** Runs once a reviewer thread exists, before startThread returns it. */
     set onStart(hook: () => Promise<void>) { onStart = hook; },
     set refuseStart(why: (request: StartRequest) => string | null) { refuseStart = why; },
@@ -386,6 +390,32 @@ test("a Claude builder's PR gets a harness reviewer, and findings, fixes and new
   assert.deepEqual(f.registry.threads.events("0", { kinds: ["review.changed"] }).map((e) => [(e.payload.phase as { kind: string }).kind, e.payload.round]),
     [["reviewing", 1], ["fixing", 1], ["reviewing", 2], ["checking", 2], ["approved", 2]]);
   assert.equal(f.registry.threads.thread(f.builder)!.lastHumanActivityAt, 1, "nothing in the loop is human activity");
+});
+
+test("whether a node needs a held builder's room back is asked without reading every pylon the node ever had", async (t) => {
+  // Placement reads the registry's clock, the real one, so the review began 8 minutes before it, just after the builder's turn.
+  const f = fixture(t);
+  f.tick(Date.now() - idlePolicy.agentIdleMs - 3 * 60_000 - f.now);
+  f.registry.threads.recordActivity(f.builder, { agent: f.now - 60_000 });
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  const pylon = f.registry.threads.pylon(f.registry.threads.thread(f.builder)!.pylonId)!;
+  const reads: string[] = [];
+  const counted = { ...f.registry, threads: { ...f.registry.threads,
+    pylonsWithThreadsOn: (name: NodeName) => { reads.push("every pylon with its thread"); return f.registry.threads.pylonsWithThreadsOn(name); },
+    pylonsWithStatusOn: (name: NodeName) => { reads.push("every pylon with its status"); return f.registry.threads.pylonsWithStatusOn(name); },
+    pylonsWithThreadsAmong: (name: NodeName, ids: readonly PylonId[]) => { reads.push(`among ${ids.join(" ")}`); return f.registry.threads.pylonsWithThreadsAmong(name, ids); },
+  } };
+  const observed = (committedMemoryGiB: number) => {
+    const capacity = testCapacity({ memoryGiB: 16, committedMemoryGiB });
+    f.registry.threads.ingested(testObservation(pylon.node, { capacity, pylons: [runningPylon(pylon.pylonId)] }), [{ record: "node", node: pylon.node, state: "online", capacity }]);
+  };
+  observed(pylon.boot.resources.memoryGiB);
+  assert.deepEqual(freeHeldRoom(counted, pylon.node), [], "a node with room keeps the hold");
+  observed(20);
+  assert.deepEqual(freeHeldRoom(counted, pylon.node), [f.builder], "one committed past its memory takes the held builder's room back");
+  assert.deepEqual(reads, [`among ${pylon.pylonId}`, `among ${pylon.pylonId}`], "each time by one read of the pylons that are up or may come up");
 });
 
 test("a builder's pylon stays up while its reviewer reads a round, so its findings need no wake, and never while the review waits on the person", async (t) => {
@@ -4918,17 +4948,125 @@ test("a Land press at a head whose check passed keeps that check and merges", as
   assert.deepEqual(f.merges, [head1]);
 });
 
-test("a landing held for checks that later pass lands on the next press at the same head with no second check", async (t) => {
+test("a landing whose only hold is pending GitHub checks waits for them, asking as often as the PR watch, and merges when they pass", async (t) => {
   const f = fixture(t);
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "pending" } };
-  await approved(f, "nLAPTOP");
-  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The pull request's GitHub checks are pending."] });
-  const loop = f.loop();
+  const loop = await approved(f, "nLAPTOP");
+  const since = f.now;
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, checks: since }, "it waits, and authorizes nothing meanwhile");
+  assert.equal(phaseNote(f.review()), `, waiting for the pull request's GitHub checks to pass since ${new Date(since).toISOString().slice(11, 16)} UTC`);
+  const polls = f.polls;
+  f.tick(prWatchMs - 1);
+  await loop.poll();
+  assert.equal(f.polls, polls, "GitHub is not asked again within a PR watch interval");
+  f.tick(1);
+  await loop.poll();
+  assert.equal(f.polls, polls + 1);
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, checks: since }, "still pending, and the wait counts from its start");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "passing" } };
+  f.tick(prWatchMs);
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1]);
+  assert.equal(f.checkThreads.length, 1, "the check that passed at that head is kept");
+});
+
+test("a landing that waits for GitHub checks goes to the person when one fails", async (t) => {
+  const f = fixture(t);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "pending" } };
+  const loop = await approved(f, "nLAPTOP");
+  assert.equal(f.review().phase.kind, "merging");
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "failed" } };
+  f.tick(prWatchMs);
+  await loop.poll();
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The pull request's GitHub checks are failed."] });
+  assert.deepEqual(f.merges, []);
+});
+
+test("a landing that has waited an hour for GitHub checks goes to the person, and lands on their press once the checks pass", async (t) => {
+  const f = fixture(t);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "pending" } };
+  const loop = await approved(f, "nLAPTOP");
+  f.tick(githubChecksMs - 1);
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "merging", "not before the hour is over");
+  f.tick(prWatchMs);
+  await loop.poll();
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The pull request's GitHub checks are still pending, 62 minutes after its landing began to wait for them."] });
+  const held = f.review().phase;
+  assert.deepEqual(held.kind === "needs-person" && held.holds.map((h) => h.code), ["github-checks"]);
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "passing" } };
   loop.land(f.builder, "nLAPTOP", head1);
   await loop.poll();
   assert.equal(f.checkThreads.length, 1, "the press kept the check that passed at that head");
   assert.deepEqual(f.merges, [head1]);
+});
+
+test("a landing that waits for GitHub checks and then for its turn to deploy says which it waits for, and waits for the checks anew after", async (t) => {
+  const f = fixture(t);
+  released(f, previous);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "pending" } };
+  const loop = await approved(f, "nLAPTOP");
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, checks: f.now });
+  f.registry.releases.setDrain({ commit: previous, expiresAt: Date.now() + 60_000 });
+  f.tick(prWatchMs);
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, waiting: "a deploy drains the control plane" }, "its turn comes first, and the wait for checks is over");
+  f.registry.releases.setDrain(null);
+  f.tick(githubChecksMs);
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, checks: f.now }, "the hour counts from when its turn came");
+  assert.match(phaseNote(f.review()), /^, waiting for the pull request's GitHub checks to pass since /);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "passing" } };
+  f.tick(prWatchMs);
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1]);
+});
+
+test("a landing that waits for GitHub checks which GitHub then cannot report asks no more often, and goes to the person after the hour", async (t) => {
+  const f = fixture(t);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "pending" } };
+  const loop = await approved(f, "nLAPTOP");
+  const since = f.now;
+  f.snapshot = { ...f.snapshot, checksUnread: true };
+  f.tick(prWatchMs);
+  const polls = f.polls;
+  await loop.poll();
+  await loop.poll();
+  assert.equal(f.polls, polls + 1, "a read that failed is tried again an interval later, not at every pass");
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, checks: since });
+  f.tick(githubChecksMs);
+  await loop.poll();
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The landing waited 62 minutes for the pull request's GitHub checks, and its last try failed (Error). Land it again once GitHub answers."] });
+  assert.deepEqual(f.merges, []);
+});
+
+test("a landing that waits for GitHub checks while GitHub refuses the read asks no more often, and goes to the person after the hour", async (t) => {
+  const f = fixture(t);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "pending" } };
+  const loop = await approved(f, "nLAPTOP");
+  const since = f.now;
+  f.onPoll = () => { throw new Error("GitHub answered 503"); };
+  f.tick(prWatchMs);
+  const polls = f.polls;
+  await loop.poll();
+  await loop.poll();
+  assert.equal(f.polls, polls + 1, "a read GitHub refused is tried again an interval later, not at every pass");
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, checks: since });
+  f.tick(githubChecksMs);
+  await loop.poll();
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The landing waited 62 minutes for the pull request's GitHub checks, and its last try failed (Error). Land it again once GitHub answers."] });
+  f.onPoll = () => {};
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "passing" } };
+  loop.land(f.builder, "nLAPTOP", head1);
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1], "and lands on the person's press once GitHub answers");
+});
+
+test("a landing that pending GitHub checks hold beside something else goes to the person at once", async (t) => {
+  const f = fixture(t);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "pending", conflict: true } };
+  await approved(f, "nLAPTOP");
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The branch conflicts with its base.", "The pull request's GitHub checks are pending."] });
 });
 
 test("a Land press on a round with no check runs it before merging", async (t) => {

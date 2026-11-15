@@ -2018,6 +2018,25 @@ test("threads() reads each thread's session facts as thread() does, whichever fa
   assert.equal(of("th-1").working, false);
 });
 
+test("the node's pylons that are up or may come up are those of its open threads, of an archive being read and the ones named, each as the whole read gives it", (t) => {
+  const registry = seeded(t, tempDb());
+  sessionFactThreads(registry);
+  addPylon(registry, "th-gone");
+  registry.threads.setThreadStatus("th-gone" as ThreadId, "archived");
+  const listed = addPylon(registry, "th-listed");
+  registry.threads.setThreadStatus("th-listed" as ThreadId, "archived");
+  const peer = "infra-testbench" as NodeName;
+  registry.nodes.upsertNode({ name: peer, tailnetHost: "infra-testbench.tail.ts.net", tailnetNodeId: "nTESTBENCH" as TailnetNodeId });
+  const elsewhere = addPylon(registry, "th-elsewhere", peer);
+  const whole = registry.threads.pylonsWithThreadsOn(node);
+  const among = registry.threads.pylonsWithThreadsAmong(node, [listed, elsewhere]);
+  const left = whole.filter(({ pylon }) => !among.some((a) => a.pylon.pylonId === pylon.pylonId)).map(({ thread }) => thread.id);
+  assert.deepEqual(left.sort(), ["th-deleted", "th-gone"], "a deleted thread's pylon, and an archived one's that nothing reads or names, are left out");
+  assert.deepEqual(among, whole.filter(({ thread }) => !left.includes(thread.id)), "the rest are as the whole read gives them, and the other node's pylon is not among them");
+  assert.equal(among.find(({ thread }) => thread.id === "th-reading")?.thread.readingUsage, true);
+  assert.deepEqual(registry.threads.pylonsWithThreadsAmong(peer, []).map(({ pylon }) => pylon.pylonId), [elsewhere]);
+});
+
 test("storedThreads reads only the threads' own rows, by status and by who started them", (t) => {
   const registry = seeded(t, tempDb());
   const ids = sessionFactThreads(registry);
