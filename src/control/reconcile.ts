@@ -164,7 +164,9 @@ export const noAttempts: Readonly<Attempts> = Object.freeze({ count: 0, last: nu
  */
 export type PlanStep =
   | { kind: "done" }
-  | { kind: "wait"; reason: "node-offline" | "in-flight" | "backoff" | "transitioning" | "held-secret" | "no-room" }
+  | { kind: "wait"; reason: "node-offline" | "in-flight" | "backoff" | "transitioning" }
+  /** A boot or a wake that waits for something no retry brings. `why` goes on after "its boot waits, as ", for the thread's detail, its attention and the CLI. */
+  | { kind: "wait"; reason: "held-secret" | "no-room"; why: string }
   | { kind: "submit"; job: Job; uncounted?: true }
   | { kind: "fail"; code: JobErrorCode; reason: string; uncounted?: true }; // the registry marks the pylon failed until a human retries
 
@@ -186,7 +188,8 @@ export function backoffMs(attempt: number): number {
 type Rule = (input: PlanInput, now: number) => PlanStep | null;
 
 const done: PlanStep = { kind: "done" };
-const wait = (reason: Extract<PlanStep, { kind: "wait" }>["reason"]): PlanStep => ({ kind: "wait", reason });
+const wait = (reason: "node-offline" | "in-flight" | "backoff" | "transitioning"): PlanStep => ({ kind: "wait", reason });
+const held = (reason: "held-secret" | "no-room", why: string): PlanStep => ({ kind: "wait", reason, why });
 const submit = (job: Job): PlanStep => ({ kind: "submit", job });
 const fail = (code: JobErrorCode, reason: string): PlanStep => ({ kind: "fail", code, reason });
 
@@ -261,11 +264,24 @@ const planRules: readonly Rule[] = [
   ({ observed: o, liveHash, desired }) => o !== "absent" && o.phase === "running" && (o.liveHash === liveHash || desired === "reading") ? done : null,
   // 7d. A probe older than a held secret fails the spawn for good, as in a deploy that upgrades the control plane first,
   // and one that has not been handed it yet, as after a restart, would boot a pylon whose first requests are refused.
-  (i) => i.boot.network.secrets.some((s) => heldSecrets.includes(s.name) && !i.nodeSecrets.has(s.name)) ? wait("held-secret") : null,
+  (i) => {
+    const missing = i.boot.network.secrets.find((s) => heldSecrets.includes(s.name) && !i.nodeSecrets.has(s.name));
+    return missing === undefined ? null : held("held-secret", secretNotHandedOver(i.node, missing.name));
+  },
   // 7e. A boot or a wake never commits more memory than its node has. It waits, with no attempt counted, until a pause or a delete frees it.
-  (i) => i.noRoom() !== null ? wait("no-room") : null,
+  (i) => {
+    const short = i.noRoom();
+    return short === null ? null : held("no-room", short);
+  },
   (i) => submit({ kind: "spawn", pylonId: i.pylonId, boot: { ...i.boot, source: bootSource(i) }, live: i.live, liveHash: i.liveHash, ...(i.desired === "reading" ? { relaunch: false } : {}) }),
 ];
+
+/**
+ * Why rule 7d holds a boot. The handover takes a moment after a probe starts, and never comes while the control plane's
+ * own sign-in gives no token, which `nexus doctor`'s login check says.
+ */
+export const secretNotHandedOver = (node: NodeName, name: string) =>
+  `the control plane has not handed ${node}'s probe ${name}, which the pylon is granted. That takes a moment after a probe starts, and never happens while the control plane's own sign-in fails, which \`nexus doctor\` says`;
 
 /**
  * Why a human retry of a pylon observed this way cannot help, or null when it can. A disk that holds a failed setup

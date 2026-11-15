@@ -10,6 +10,7 @@ import type { QueuedThread } from "../../contract/threads.ts";
 import type { Thread } from "../thread-store.ts";
 import type { ThreadDetail } from "../wire.ts";
 import { addThread, observeNode, testPr, testReview, claudeWorkerAt, testThread, testPylon } from "../../test-support/registry-kit.ts";
+import { holdShownAfterMs } from "../attention.ts";
 import { personPhase, type Review } from "../review-model.ts";
 import type { ReviewLoop } from "../review.ts";
 import type { HoldsQuestion } from "../questions.ts";
@@ -692,7 +693,7 @@ test("a hold the policy reserves for the person is marked waivable, and pressing
 function needsOf(page: string) {
   const region = page.split('id="needs-you"')[1]!.split('<div class="split-peek" id="peek"')[0]!;
   return {
-    cards: [...region.matchAll(/<article class="need need-(\w+)(?: picked)?" id="([^"]+)" data-thread="([^"]+)" data-attention="(\w+)"[\s\S]*?<\/article>/g)].map((m) => ({ kind: m[1], id: m[2], thread: m[3], attention: m[4], text: textOf(m[0]), html: m[0] })),
+    cards: [...region.matchAll(/<article class="need need-(\w+)(?: picked)?" id="([^"]+)" data-thread="([^"]+)" data-attention="([\w-]+)"[\s\S]*?<\/article>/g)].map((m) => ({ kind: m[1], id: m[2], thread: m[3], attention: m[4], text: textOf(m[0]), html: m[0] })),
     text: textOf(region.replace(/^[^>]*>/, "")),
   };
 }
@@ -756,6 +757,26 @@ test("Needs you lists, oldest first, each held review, open question and ask, an
   assert.match(by(failed.id).text, /^Failed beta \/ Port the CLI .* The Claude worker failed: Claude launch did not complete: executable missing Archive$/);
   assert.match(by(failed.id).html, new RegExp(`data-action="archive" data-thread="${failed.id}"`));
   assert.match(by(limited.id).text, new RegExp(`^Usage limit acme / Write the docs .* It stopped on its usage limit until ${new Date(resetsAt).toISOString().slice(11, 16)} UTC\\. Nexus has it continue once the limit resets, or archive it to stop it\\. Archive$`));
+});
+
+test("Needs you gives a thread whose boot the planner has held for a minute a card that says why, and its pages still render", async (t) => {
+  let shift = 0;
+  const s = await seeded(t, { clock: () => Date.now() + shift });
+  const stuck = await s.start("acme", "Wake me");
+  const why = "rj-firebat has 62 of 64 GiB of memory committed, and the pylon needs 4 GiB";
+  s.registry.threads.holdBoot(stuck.pylonId, stuck.id, why);
+  assert.ok(!needsOf((await s.call("GET", "/")).text).cards.some((c) => c.thread === stuck.id), "a hold that began a moment ago waits on no one");
+  shift = holdShownAfterMs;
+  s.registry.threads.holdBoot(stuck.pylonId, stuck.id, why);
+  const home = await s.call("GET", "/");
+  assert.equal(home.status, 200);
+  const card = needsOf(home.text).cards.find((c) => c.thread === stuck.id)!;
+  assert.deepEqual([card.kind, card.attention], ["thread", "boot-held"]);
+  assert.match(card.text, /^Pylon held acme \/ Wake me .* The planner holds its pylon's boot, as rj-firebat has 62 of 64 GiB of memory committed, and the pylon needs 4 GiB\. Nexus boots it once that ends, or archive it to stop it waiting\. Archive$/);
+  assert.match(card.html, new RegExp(`data-action="archive" data-thread="${stuck.id}"`));
+  const page = await s.call("GET", `/threads/${stuck.id}`);
+  assert.equal(page.status, 200);
+  assert.match(page.text, /its pylon is held/);
 });
 
 test("a thread in Needs you has its call to action once, in its card, with where its work is, and its line in the work in flight leads to that card instead of a preview", async (t) => {

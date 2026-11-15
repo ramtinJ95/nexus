@@ -75,6 +75,20 @@ test("show says a pylon's guest is not answering, since when and what to do, and
   ]);
 });
 
+test("show says the planner holds a pylon's boot, since when and why, and nothing once the boot goes out", async (t) => {
+  const s = await setup(t);
+  const { id, pylonId }: Thread = await s.json(["start", "--project", "acme", "--title", "Held boot"]);
+  const held = async () => timeless((await s.nexus(["show", id])).stdout).split("\n").filter((line) => line.startsWith("held:"));
+  assert.deepEqual(await held(), []);
+  s.registry.threads.holdBoot(pylonId, id, "rj-firebat has 62 of 64 GiB of memory committed, and the pylon needs 4 GiB");
+  const { since } = s.registry.threads.bootHold(pylonId)!;
+  assert.deepEqual(await held(), [`held: since ${localTime(since)}. The planner holds its pylon's boot, as rj-firebat has 62 of 64 GiB of memory committed, and the pylon needs 4 GiB`]);
+  assert.deepEqual((await s.json(["show", id]) as ThreadDetail).pylon.held, { why: "rj-firebat has 62 of 64 GiB of memory committed, and the pylon needs 4 GiB", since, lasting: false });
+  s.registry.threads.holdBoot(pylonId, id, null);
+  assert.deepEqual(await held(), []);
+  assert.equal((await s.json(["show", id]) as ThreadDetail).pylon.held, undefined);
+});
+
 test("show prints a review's lines as the API words them, then what it needs from the person and its waiver", async (t) => {
   const s = await setup(t);
   const { id } = await s.json(["start", "--project", "acme", "--title", "Held review"]);

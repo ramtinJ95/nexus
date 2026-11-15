@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { ImageId, JobId, NodeName, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
+import type { ImageId, JobId, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { ReleaseReport } from "../protocol/deploy.ts";
 import type { DiskFact } from "../protocol/observations.ts";
 import { testCapacity } from "../test-support/kit.ts";
@@ -41,8 +41,10 @@ function healthy(over: Partial<DoctorFacts> = {}): DoctorFacts {
     nodes: [nodeOf(node), nodeOf(peer)],
     release: { desired: { commit, requestedBy: "nLAPTOP", requestedAt: now - day }, nodes: [report(node, "control"), report(node, "probe"), report(peer, "probe")] },
     controlNode: node,
+    loop: { slowest: { overMs: 60_000, p99Ms: 3, maxMs: 40, busy: 0.05 }, minutes: 5 },
     backup: { ranAt: iso(now - 3 * hour), succeeded: true, newest: { name: "2026-11-01T09-00-00Z", verified: true, createdAt: iso(now - 3 * hour) } },
     login: { provider: "openai", modelId: "gpt-6-astra", credential: "oauth", offered: ["gpt-6-astra", "gpt-6-mini"], refresh: { ok: true } },
+    tokenProjects: [],
     certificate: { kind: "served", hostname: "rj-firebat.example.ts.net", validTo: iso(now + 60 * day), forHostname: true },
     github: { kind: "accepted", expiresAt: iso(now + 90 * day) },
     tailnet: [device(node, iso(now + 120 * day)), device(peer, null)],
@@ -70,10 +72,24 @@ test("a healthy install passes every check, the control plane's first and then e
   assert.equal(r.at, iso(now));
   assert.equal(r.status, "ok");
   assert.deepEqual(r.checks.map((c) => [c.node, c.name, c.status]), [
-    [null, "release", "ok"], [null, "backup", "ok"], [null, "login", "ok"], [null, "github-token", "ok"], [null, "certificate", "ok"], [null, "archived-disks", "ok"], [null, "unreviewed-prs", "ok"],
+    [null, "release", "ok"], [null, "event-loop", "ok"], [null, "backup", "ok"], [null, "login", "ok"], [null, "github-token", "ok"], [null, "certificate", "ok"], [null, "archived-disks", "ok"], [null, "unreviewed-prs", "ok"],
     [node, "online", "ok"], [node, "release", "ok"], [node, "disk", "ok"], [node, "pylons", "ok"], [node, "tailnet-key", "ok"], [node, "image", "ok"],
     [peer, "online", "ok"], [peer, "release", "ok"], [peer, "disk", "ok"], [peer, "pylons", "ok"], [peer, "tailnet-key", "ok"], [peer, "image", "ok"],
   ]);
+});
+
+test("the event loop's check says how late the control plane ran in its slowest minute, warns from half a second and fails from 2 seconds", () => {
+  const loop = (p99Ms: number, maxMs: number, busy: number, minutes = 5, overMs = 60_000) => healthy({ loop: { slowest: { overMs, p99Ms, maxMs, busy }, minutes } });
+  expect(loop(3, 40, 0.05), null, "event-loop", "ok", /^in the slowest of its last 5 minutes the control plane ran what was due 3 ms late at the 99th percentile, 40 ms at worst, and was at work 5 % of the time$/);
+  expect(loop(499, 3_000, 0.2, 1), null, "event-loop", "ok", /^in its last minute the control plane ran what was due 499 ms late at the 99th percentile, 3\.0 s at worst/);
+  expect(loop(0, 0, 0, 0, 12_400), null, "event-loop", "ok", /^in the 12 s since it started the control plane ran what was due 0 ms late/);
+  // The evening of 2026-11-14, hours before the control plane stopped answering.
+  expect(loop(1_500, 1_600, 0.3), null, "event-loop", "warn", /ran what was due 1\.5 s late at the 99th percentile, 1\.6 s at worst, and was at work 30 % of the time\. Every request and every probe's event waits that long\. A loop at work most of that time is held by its own work, which a restart helps only until it returns\. One at work little of it was more likely stopped, or its machine suspended or short of CPU\. journalctl -u nexus-control on its machine shows what it logged$/);
+  expect(loop(500, 500, 0.1), null, "event-loop", "warn", /500 ms late/);
+  // A machine suspended for nearly the whole minute: late, and at work none of it.
+  expect(loop(59_180, 59_180, 0), null, "event-loop", "fail", /59\.2 s late at the 99th percentile, 59\.2 s at worst, and was at work 0 % of the time\. Every request/);
+  // And the night that followed.
+  expect(loop(2_000, 5_800, 1), null, "event-loop", "fail", /2\.0 s late at the 99th percentile, 5\.8 s at worst, and was at work 100 % of the time\. Every request/);
 });
 
 test("the report is as bad as its worst check", () => {
@@ -168,6 +184,13 @@ test("the harness's login is ok signed in and offering its model, and fails with
   expect(healthy({ login: { ...login, credential: null, offered: [] } }), null, "login", "fail", /not signed in to openai.*src\/control\/login\.ts/);
   expect(healthy({ login: { ...login, refresh: { ok: false, code: "oauth" } } }), null, "login", "fail", /no longer resolves, with pi-ai's oauth error\. Stop the control plane and sign it in/);
   expect(healthy({ login: { ...login, offered: ["gpt-6-mini"] } }), null, "login", "fail", /does not offer harness\.model gpt-6-astra\. Name one of gpt-6-mini/);
+  // A dead sign-in stops more than the reviews: the probes get no token, so the pylons granted it stop booting.
+  const granted = { tokenProjects: ["first-game", "nexus"] as ProjectId[] };
+  const stopsBoots = /sign it in with node src\/control\/login\.ts as nexus-control\. Pylons of first-game, nexus reach OpenAI with its token, so none of them boots or wakes on a node whose probe has restarted since, which `nexus show` says of each thread it holds$/;
+  expect(healthy({ ...granted, login: { ...login, refresh: { ok: false, code: "oauth" } } }), null, "login", "fail", stopsBoots);
+  expect(healthy({ ...granted, login: { ...login, credential: null, offered: [] } }), null, "login", "fail", stopsBoots);
+  expect(healthy(granted), null, "login", "ok", /^signed in to openai with ChatGPT, which offers gpt-6-astra$/);
+  expect(healthy({ ...granted, login: { ...login, provider: "anthropic", credential: null, offered: ["claude"] } }), null, "login", "fail", /as nexus-control$/);
 });
 
 test("the dashboard's certificate is ok with weeks left or without https, warns under 6 days, and fails under 2, expired, for another name, or unreachable", () => {

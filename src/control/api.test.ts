@@ -293,6 +293,14 @@ test("health reports the version of the API contract, which the CLI reads", asyn
   assert.equal((await api.call("GET", "/v1/health")).body.version, version);
 });
 
+test("health reports how late the event loop ran in its last minute, read anew at each request", async (t) => {
+  let loop = { overMs: 60_000, p99Ms: 3, maxMs: 41, busy: 0.06 };
+  const api = await testApi(t, { loop: () => loop });
+  assert.deepEqual((await api.call("GET", "/v1/health")).body.loop, loop);
+  loop = { overMs: 60_000, p99Ms: 1480, maxMs: 5800, busy: 0.97 };
+  assert.deepEqual((await api.call("GET", "/v1/health")).body.loop, loop);
+});
+
 test("HTTP starts while certificate issuance is pending, survives failure, and HTTPS starts on retry", async (t) => {
   const { testCertificate } = await import("../test-certificate.ts");
   const { request: tlsRequest } = await import("node:https");

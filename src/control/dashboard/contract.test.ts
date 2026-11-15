@@ -40,6 +40,7 @@ test("a time ago's minute tick is no change to its region, as the server or a br
 
 test("a notice's hash names the thread and the attention its card is for", () => {
   assert.deepEqual(noticeOf(noticeHash("th-0123456789ab", "decision")), { thread: "th-0123456789ab", attention: "decision" });
+  assert.deepEqual(noticeOf(noticeHash("th-0123456789ab", "boot-held")), { thread: "th-0123456789ab", attention: "boot-held" }, "an attention of two words");
   assert.equal(noticeOf("#needs-you"), null);
 });
 

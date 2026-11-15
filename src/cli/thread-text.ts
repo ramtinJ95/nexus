@@ -67,6 +67,7 @@ export function detailText({ thread: t, pylon: p, agent, sessions, previews, por
     ...t.usageLimit === undefined ? [] : [`usage limit: ${usageLimitText(t.usageLimit, Date.now())}. \`nexus send ${t.id} continue\` resumes it once the limit resets`],
     `status: ${t.status}${t.working ? ", agent working" : ""}`,
     `pylon: ${p.id} on ${p.node}, ${p.actualState}${observed}`,
+    ...p.held === undefined || !said.held ? [] : [`held: since ${when(p.held.since)}. ${said.held}`],
     ...p.notAnswering === undefined || !said.guest ? [] : [`guest: not answering since ${when(Date.parse(p.notAnswering.since))}, ${said.guest}`],
     ...!said.disk ? [] : [`disk: ${said.disk}`],
     ...!said.usage ? [] : [`usage: ${said.usage}`],

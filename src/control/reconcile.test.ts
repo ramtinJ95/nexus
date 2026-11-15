@@ -53,7 +53,10 @@ const del: PlanStep = { kind: "submit", job: { kind: "delete", pylonId } };
 const gaveUpDeleting = (code: JobErrorCode) => `gave up deleting after 5 failed attempts, the last with ${code}: the probe's ${code} message. It is tried again every 10 min`;
 const fetch = (artifact: ArtifactId, from: NodeName): PlanStep => ({ kind: "submit", job: { kind: "fetch-artifact", artifact, from, sha256: `sha-${artifact}` } });
 const done: PlanStep = { kind: "done" };
-const wait = (reason: "node-offline" | "in-flight" | "backoff" | "transitioning" | "held-secret" | "no-room"): PlanStep => ({ kind: "wait", reason });
+const wait = (reason: "node-offline" | "in-flight" | "backoff" | "transitioning"): PlanStep => ({ kind: "wait", reason });
+const noRoom = "rj-firebat has 30 of 31.2 GiB of memory committed, and the pylon needs 4 GiB";
+const notHandedOver = "the control plane has not handed rj-firebat's probe NEXUS_CHATGPT_TOKEN, which the pylon is granted. That takes a moment after a probe starts, and never happens while the control plane's own sign-in fails, which `nexus doctor` says";
+const held = (reason: "held-secret" | "no-room"): PlanStep => ({ kind: "wait", reason, why: reason === "no-room" ? noRoom : notHandedOver });
 
 const jobInFlight = (state: "running" | "succeeded"): JobStatus => state === "running"
   ? { jobId: "j1" as JobId, subject: pylonId, kind: "spawn", state, startedAt: "2027-01-01T00:00:00Z" }
@@ -109,8 +112,8 @@ const rows: Record<string, Row> = {
   "a delete the planner gave up on goes again after 10 min": { desired: "deleted", observed: phase("booting"), inFlight: null, attempts: [5, 600_000, "deadline", "delete"], failed: gaveUpDeleting("deadline"), online: true, present: imageOnly, expect: del },
   "a delete that keeps failing after the verdict keeps it, so it notifies once": { desired: "deleted", observed: phase("booting"), inFlight: null, attempts: [7, 600_000, "backend", "delete"], failed: gaveUpDeleting("deadline"), online: true, present: imageOnly, expect: del },
   "a deleted pylon that is gone needs nothing, whatever its deletes failed": { desired: "deleted", observed: "absent", inFlight: null, attempts: [5, 1_000_000, "backend", "delete"], online: true, present: [], expect: done },
-  "a wake its node has no memory for waits, with no attempt counted": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, noRoom: "rj-firebat has 30 of 31.2 GiB of memory committed, and the pylon needs 4 GiB", expect: wait("no-room") },
-  "a first boot its node has no memory for waits": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, noRoom: "rj-firebat has 30 of 31.2 GiB of memory committed, and the pylon needs 4 GiB", expect: wait("no-room") },
+  "a wake its node has no memory for waits, with no attempt counted": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, noRoom, expect: held("no-room") },
+  "a first boot its node has no memory for waits": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, noRoom, expect: held("no-room") },
   "a pause goes on though the node has no memory to spare": { desired: "paused", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, noRoom: "short", expect: pause },
   "a delete goes on though the node has no memory to spare": { desired: "deleted", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, noRoom: "short", expect: del },
   "delete does not wait for a transition": { desired: "deleted", observed: phase("stopping"), inFlight: null, attempts: none, online: true, present: imageOnly, expect: del },
@@ -176,10 +179,10 @@ const rows: Record<string, Row> = {
   "a pylon read with its sessions left out gets a spawn that brings them back once its thread runs": { desired: "running", observed: running(null), inFlight: null, attempts: none, online: true, present: imageOnly, expect: spawn(fresh) },
   "absent boots from the template": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: [image, template], firstBoot: fromTemplate, expect: spawn(fromTemplate) },
   // 7d
-  "a boot asking for a held secret waits for a probe that has not got it": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: ["GH_TOKEN", chatgptTokenGrant.name], holds: ["GH_TOKEN"] }, expect: wait("held-secret") },
-  "a wake asking for a held secret waits for a probe that has not got it": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], holds: [] }, expect: wait("held-secret") },
+  "a boot asking for a held secret waits for a probe that has not got it": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: ["GH_TOKEN", chatgptTokenGrant.name], holds: ["GH_TOKEN"] }, expect: held("held-secret") },
+  "a wake asking for a held secret waits for a probe that has not got it": { desired: "running", observed: stopped(lastCheckpoint), inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], holds: [] }, expect: held("held-secret") },
   "a boot asking for a held secret boots on a probe that has it": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], holds: [chatgptTokenGrant.name] }, expect: spawnAsking([chatgptTokenGrant.name], fresh) },
-  "a running pylon with an older liveHash waits for a probe that has not got its held secret": { desired: "running", observed: running("hash-old" as LiveHash), inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], holds: [] }, expect: wait("held-secret") },
+  "a running pylon with an older liveHash waits for a probe that has not got its held secret": { desired: "running", observed: running("hash-old" as LiveHash), inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], holds: [] }, expect: held("held-secret") },
   "a running pylon with a matching liveHash is done, whether or not its probe has its held secret": { desired: "running", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], holds: [] }, expect: done },
   "a pylon whose probe has not got its held secret still pauses": { desired: "paused", observed: running(liveHash), inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: [chatgptTokenGrant.name], holds: [] }, expect: pause },
   "a boot asking only for a file secret boots, and the probe judges it": { desired: "running", observed: "absent", inFlight: null, attempts: none, online: true, present: imageOnly, secrets: { asked: ["GH_TOKEN"], holds: [] }, expect: spawnAsking(["GH_TOKEN"], fresh) },

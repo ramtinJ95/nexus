@@ -3,7 +3,7 @@
  * holds, gathered by src/control/doctor-run.ts. Each gives ok, warn or fail with one line that says what is wrong and
  * what to do.
  */
-import type { ImageId, NodeName, ThreadId } from "../ids.ts";
+import type { ImageId, NodeName, ProjectId, ThreadId } from "../ids.ts";
 import { diskText, keptFreeGiB, lowDisk } from "../disk-space.ts";
 import { keptPastDay, settleFailuresFail, settleOverdueMs, type ActivityFacts, type ArchiveFacts } from "./reconcile.ts";
 import type { ReleaseReport, ReleaseView } from "../protocol/deploy.ts";
@@ -13,6 +13,7 @@ import type { NodeSummary } from "./wire.ts";
 import type { TokenAnswer } from "./github.ts";
 import type { TailnetDevice } from "../tailscale.ts";
 import { maxImageFetches, type ImageFetch } from "./image-store.ts";
+import type { LoopLate } from "./loop-delay.ts";
 import { worst, type Check, type ControlCheckName, type DoctorReport, type NodeCheckName, type Verdict } from "./doctor-model.ts";
 
 /** The dashboard's certificate as a TLS client sees it on the dashboard's port, or `none` without control.json's https. */
@@ -29,9 +30,13 @@ export interface DoctorFacts {
   release: ReleaseView;
   /** The node the control plane runs on, which alone reports the control role. Null when no node is it. */
   controlNode: NodeName | null;
+  /** How late the control plane's event loop ran in the slowest of its last minutes. */
+  loop: LoopLate;
   backup: BackupStatusRead;
   /** `unreadable` holds the error's code, never its message, which can carry the login's own text. */
   login: LoginState | { unreadable: string };
+  /** The projects whose pylons are granted the token of the harness's ChatGPT sign-in, which the control plane hands every probe. */
+  tokenProjects: readonly ProjectId[];
   certificate: CertificateFact;
   /** What GitHub last said of the control plane's token, `none` when control.json names no github.tokenFile, or why GitHub gave no answer. */
   github: TokenAnswer | { kind: "none" } | { kind: "unread"; error: string };
@@ -61,6 +66,13 @@ export const rolloutMs = 30 * minute;
 /** The API asks tailscaled for a certificate valid a week and reloads it every 12 hours, so less than this left means renewal fails. */
 export const certificateWarnMs = 6 * day;
 export const certificateFailMs = 2 * day;
+/**
+ * How late the event loop may run at the 99th percentile of a minute before its check warns, and fails. A healthy
+ * control plane runs a few milliseconds late. On 2026-11-15 it ran about 1.5 s late for hours before it stopped
+ * answering, and 2 to 6 s late once it had.
+ */
+export const loopWarnMs = 500;
+export const loopFailMs = 2_000;
 /** A credential that expires sooner warns, so the person has two weeks to renew it. */
 export const expiryWarnMs = 14 * day;
 
@@ -75,6 +87,18 @@ function online(n: NodeSummary, f: DoctorFacts): Verdict {
   if (n.state === "offline") return fail(`offline, last observed ${span(age)} ago. Check nexus-probe on it and its tailnet connection`);
   if (age > staleObservationMs) return warn(`online, but last observed ${span(age)} ago. Its probe sends a snapshot every minute, so check journalctl -u nexus-probe on it`);
   return ok("online and observed in the last 5 min");
+}
+
+const late = (ms: number) => ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
+
+function eventLoop(f: DoctorFacts): Verdict {
+  const { slowest: l, minutes } = f.loop;
+  const when = minutes === 0 ? `in the ${Math.max(1, Math.round(l.overMs / 1000))} s since it started` : minutes === 1 ? "in its last minute" : `in the slowest of its last ${minutes} minutes`;
+  const found = `${when} the control plane ran what was due ${late(l.p99Ms)} late at the 99th percentile, ${late(l.maxMs)} at worst, and was at work ${Math.round(l.busy * 100)} % of the time`;
+  if (l.p99Ms < loopWarnMs) return ok(found);
+  // The share at work is a hint, not a proof: a process stopped in the middle of its work counts the stop as work.
+  const look = "Every request and every probe's event waits that long. A loop at work most of that time is held by its own work, which a restart helps only until it returns. One at work little of it was more likely stopped, or its machine suspended or short of CPU. journalctl -u nexus-control on its machine shows what it logged";
+  return (l.p99Ms < loopFailMs ? warn : fail)(`${found}. ${look}`);
 }
 
 function release(report: ReleaseReport | undefined, desired: ReleaseView["desired"], now: number): Verdict {
@@ -139,7 +163,10 @@ function backup(f: DoctorFacts): Verdict {
 function login(f: DoctorFacts): Verdict {
   if ("unreadable" in f.login) return fail(`the harness's login could not be read, with a ${f.login.unreadable} error. Check that nexus-control can read harness.credentials in control.json`);
   const { provider, modelId, credential, offered, refresh } = f.login;
-  const signIn = "Stop the control plane and sign it in with node src/control/login.ts as nexus-control";
+  // The sign-in is the control plane's own, for its reviews and judgments, and its token is what a probe is handed for such a project's pylons.
+  const boots = provider !== "openai" || f.tokenProjects.length === 0 ? ""
+    : `. Pylons of ${f.tokenProjects.join(", ")} reach OpenAI with its token, so none of them boots or wakes on a node whose probe has restarted since, which \`nexus show\` says of each thread it holds`;
+  const signIn = `Stop the control plane and sign it in with node src/control/login.ts as nexus-control${boots}`;
   if (offered === null) return fail(`harness.model names provider ${provider}, which the harness does not have. Fix control.json`);
   if (credential === null || offered.length === 0) return fail(`the harness is not signed in to ${provider}, so every thread fails at its first turn. ${signIn}`);
   if (!refresh.ok) return fail(`the harness's ${provider} login no longer resolves, with pi-ai's ${refresh.code} error. ${signIn}`);
@@ -250,6 +277,7 @@ const nodeChecks: Readonly<Record<NodeCheckName, (n: NodeSummary, f: DoctorFacts
 };
 const controlChecks: Readonly<Record<ControlCheckName, (f: DoctorFacts) => Verdict>> = {
   release: (f) => release(f.release.nodes.find((r) => r.node === f.controlNode && r.role === "control"), f.release.desired, f.now),
+  "event-loop": eventLoop,
   backup,
   login,
   "github-token": githubToken,
