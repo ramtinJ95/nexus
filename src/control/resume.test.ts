@@ -5,6 +5,7 @@ import { personPhase, type Phase } from "./review-model.ts";
 import { agentInbox } from "./inbox.ts";
 import { agentReader } from "./agent-conversation.ts";
 import { deadTurnResumer, resumeWaitsMs } from "./resume.ts";
+import { resumeStartMs } from "./claude-worker.ts";
 import { claudeLaunch } from "./claude-launch.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
@@ -393,6 +394,69 @@ test("a builder whose review is not finished gets no resume for a model error, n
   f.tick(resumeWaitsMs[0]!);
   await f.resumer.poll();
   assert.deepEqual(f.typed.map((c) => c.requestId!.split(":")[1]).sort(), phases.filter(([, , , resumed]) => resumed).map(([name]) => name).sort());
+});
+
+test("a death in a builder whose review waits on the person is told to them with why, beside the review, until a turn of it starts", async (t) => {
+  const f = fixture(t);
+  const id = f.add("th-1");
+  f.registry.reviews.saveReview(testReview({ id: "rv-1", builder: id, reviewer: "th-reviewer" as ThreadId, phase: personPhase("agent", "The builder gave no answer Nexus could read within 3 hours in round 1.") }));
+  await f.resumer.poll();
+  assert.equal(f.registry.threads.claudeResume(id), null, "a builder that did not die has no record");
+  f.report(id, "session.turn-started");
+  await f.resumer.poll();
+  assert.equal(f.registry.threads.claudeResume(id), null, "nor has one whose turn runs");
+  f.tick(3_000);
+  f.report(id, "session.ended");
+  const died = f.registry.threads.thread(id)!.turnDied!;
+  await f.resumer.poll();
+  const record = { state: "person", turn: died.at, count: 0, why: `Its turn died (${died.reason}). Its review waits on you, so Nexus did not resume it.`, review: true };
+  assert.deepEqual(f.registry.threads.claudeResume(id), record);
+  assert.equal(f.registry.threads.attention(id), "decision", "the review still comes first");
+  f.tick(resumeWaitsMs[0]! + resumeStartMs);
+  await f.resumer.poll();
+  assert.equal(f.typed.length, 0, "and no resume goes out");
+  assert.deepEqual(f.registry.threads.claudeResume(id), record);
+
+  f.tick(1_000);
+  f.report(id, "session.turn-started");
+  await f.resumer.poll();
+  assert.equal(f.registry.threads.claudeResume(id), null, "the turn the person's message started ends the death");
+});
+
+test("a death left to the person only for a review that waits on them is resumed once the review moves on", async (t) => {
+  const f = fixture(t);
+  const held = personPhase("agent", "The builder gave no answer Nexus could read within 3 hours in round 1.");
+  const fresh = f.add("th-fresh");
+  const old = f.add("th-old");
+  const gone = f.add("th-gone");
+  for (const [i, id] of [fresh, old, gone].entries()) f.registry.reviews.saveReview(testReview({ id: `rv-${i}`, builder: id, reviewer: `th-reviewer-${i}` as ThreadId, phase: held }));
+  f.turn(old, "session-ended");
+  f.tick(61 * minute);
+  f.turn(fresh, "session-ended");
+  f.turn(gone, "session-ended");
+  await f.resumer.poll();
+  for (const id of [fresh, old, gone]) assert.equal(f.registry.threads.claudeResume(id)?.state, "person");
+
+  for (const [i, id] of [fresh, old, gone].entries()) f.registry.reviews.saveReview(testReview({ id: `rv-${i}`, builder: id, reviewer: `th-reviewer-${i}` as ThreadId, phase: { kind: "fixing" } }));
+  f.tick(1_000);
+  f.report(gone, "session.turn-started");
+  await f.resumer.poll();
+  assert.equal(f.registry.threads.claudeResume(fresh)?.state, "waiting", "the death waits for its resume, as one in a builder under no held review");
+  const kept = f.registry.threads.claudeResume(old);
+  assert.equal(kept?.state === "person" && kept.review, undefined, "a death more than an hour old stays the person's, for that reason now");
+  assert.match(kept?.state === "person" ? kept.why : "", /more than 60 minutes before Nexus saw it/);
+  assert.equal(f.registry.threads.claudeResume(gone), null, "a turn that started since ends the record");
+  for (let cycle = 0; cycle < 4; cycle++) {
+    f.registry.reviews.saveReview(testReview({ id: "rv-0", builder: fresh, reviewer: "th-reviewer-0" as ThreadId, phase: held }));
+    await f.resumer.poll();
+    assert.deepEqual([f.registry.threads.claudeResume(fresh)?.state, f.registry.threads.claudeResume(fresh)?.count], ["person", 0]);
+    f.registry.reviews.saveReview(testReview({ id: "rv-0", builder: fresh, reviewer: "th-reviewer-0" as ThreadId, phase: { kind: "fixing" } }));
+    await f.resumer.poll();
+    assert.deepEqual([f.registry.threads.claudeResume(fresh)?.state, f.registry.threads.claudeResume(fresh)?.count], ["waiting", 1], "a review that goes to the person and back counts the one death once");
+  }
+  f.tick(resumeWaitsMs[0]!);
+  await f.resumer.poll();
+  assert.deepEqual(f.typed.map((c) => c.requestId!.split(":")[1]), ["th-fresh"]);
 });
 
 test("a session that ends after a turn the transcript shows ended, with a background task still running, did not die", async (t) => {
