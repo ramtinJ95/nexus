@@ -730,6 +730,8 @@ export function reviewLoop(deps: ReviewDeps) {
       // act on the read of the step that authorized it.
       reads.delete(prKey(r));
       const snapshot = await read(r);
+      // Whatever this read leads to, the next one of a landing that waits for its checks is an interval away.
+      if (phase.checks !== undefined) checkReads.set(r.id, now());
       if (snapshot.pr.state === "closed") return end(r, { kind: "closed" });
       // The change the person pressed Land for is read at once, so a rebase after it can still be compared with it.
       if (r.waiver !== null && r.waiver.change === null && r.waiver.head === head) return { ...r, waiver: { ...r.waiver, change: await changeAt(r, snapshot.detail.base, head) } };
@@ -773,6 +775,10 @@ export function reviewLoop(deps: ReviewDeps) {
         // A head pushed after the approval, such as a rebase on the PR watch's news of a conflict, gets its own round.
         if (snapshot.detail.head !== head) return await newHead(r, snapshot.detail.head, snapshot.detail.base, `The pull request's head moved to ${snapshot.detail.head}`);
         if (retargeted) return await newHead(r, head, snapshot.detail.base, `The pull request's base changed from ${base} to ${snapshot.detail.base}`);
+        // Checks GitHub cannot report are tried again, as any failed read is, but not past the wait for them.
+        if (phase.checks !== undefined && snapshot.checksUnread && now() - phase.checks >= githubChecksMs) {
+          return toPerson(r, "policy", { code: "github-checks", text: `GitHub cannot say whether the pull request's checks passed, ${Math.round((now() - phase.checks) / 60_000)} minutes after its landing began to wait for them.` });
+        }
         // Every attempt checks the whole policy again with what GitHub says now, since checks and the PR can change
         // between attempts and branch protection may not enforce them.
         const { all, left, review, why } = await holds();

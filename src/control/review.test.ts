@@ -5019,6 +5019,24 @@ test("a landing that waits for GitHub checks and then for its turn to deploy say
   assert.deepEqual(f.merges, [head1]);
 });
 
+test("a landing that waits for GitHub checks which GitHub then cannot report asks no more often, and goes to the person after the hour", async (t) => {
+  const f = fixture(t);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "pending" } };
+  const loop = await approved(f, "nLAPTOP");
+  const since = f.now;
+  f.snapshot = { ...f.snapshot, checksUnread: true };
+  f.tick(prWatchMs);
+  const polls = f.polls;
+  await loop.poll();
+  await loop.poll();
+  assert.equal(f.polls, polls + 1, "a read that failed is tried again an interval later, not at every pass");
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, checks: since });
+  f.tick(githubChecksMs);
+  await loop.poll();
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["GitHub cannot say whether the pull request's checks passed, 62 minutes after its landing began to wait for them."] });
+  assert.deepEqual(f.merges, []);
+});
+
 test("a landing that pending GitHub checks hold beside something else goes to the person at once", async (t) => {
   const f = fixture(t);
   f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "pending", conflict: true } };
