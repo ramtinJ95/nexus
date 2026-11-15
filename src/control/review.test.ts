@@ -6087,7 +6087,7 @@ const github8 = (f: ReturnType<typeof fixture>, over: Partial<PrSnapshot["pr"]>,
   f.others.set(8, { ...s, pr: { ...s.pr, ...over }, detail: { ...s.detail, head } });
 };
 const doctorOf = (f: ReturnType<typeof fixture>) => runDoctor({
-  registry: f.registry, self, clock: () => f.now, startedAt: f.now,
+  registry: f.registry, self, clock: () => f.now, startedAt: f.now, loop: () => ({ slowest: { overMs: 60_000, p99Ms: 3, maxMs: 40, busy: 0.05 }, minutes: 5 }),
   backupStatus: async () => "missing", login: async () => ({ provider: "openai", modelId: "gpt-6-astra", credential: null, offered: [], refresh: { ok: true } }),
   certificate: async () => ({ kind: "none" }), githubToken: async () => ({ kind: "none" }),
   tailnet: async () => parseTailscaleStatus(JSON.stringify({ Self: null, Peer: {} })),

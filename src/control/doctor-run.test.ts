@@ -176,7 +176,7 @@ test("the doctor reads each node, the release and the control node from the regi
   registry.images.setCurrentImage(image.id);
   registry.images.saveImageFetches([{ node, image: image.id, state: "running", job: { id: "j-fetch" as JobId, notAfter: new Date(now).toISOString() }, failures: 0, failedAt: null, reason: null }]);
   const doctor = () => runDoctor({
-    registry, self: "nFIREBAT" as TailnetNodeId, clock: () => now, startedAt: now - 3 * day,
+    registry, self: "nFIREBAT" as TailnetNodeId, clock: () => now, startedAt: now - 3 * day, loop: () => ({ slowest: { overMs: 60_000, p99Ms: 2_400, maxMs: 5_800, busy: 0.97 }, minutes: 5 }),
     backupStatus: async () => "missing",
     login: async () => ({ provider: "openai", modelId: "gpt-6-astra", credential: null, offered: [], refresh: { ok: true } }),
     certificate: async () => ({ kind: "none" }),
@@ -186,7 +186,7 @@ test("the doctor reads each node, the release and the control node from the regi
   const r = await doctor();
   const status = Object.fromEntries(r.checks.map((c) => [`${c.node ?? "control"} ${c.name}`, c.status]));
   assert.deepEqual(status, {
-    "control release": "warn", "control backup": "fail", "control login": "fail", "control github-token": "warn", "control certificate": "ok", "control archived-disks": "ok", "control unreviewed-prs": "ok",
+    "control release": "warn", "control event-loop": "fail", "control backup": "fail", "control login": "fail", "control github-token": "warn", "control certificate": "ok", "control archived-disks": "ok", "control unreviewed-prs": "ok",
     "rj-firebat online": "ok", "rj-firebat release": "warn", "rj-firebat disk": "fail", "rj-firebat pylons": "ok", "rj-firebat tailnet-key": "fail", "rj-firebat image": "warn",
   }, "no deployer has reported, so both roles are pending, the pylons' filesystem is under its reserve, the token expires in 3 days, the control node's own key, tailscaled's Self, expired, and the node lacks the current image");
   assert.match(r.checks.find((c) => c.node === null && c.name === "release")!.text, /control on rj-firebat .* no deployer report/);
@@ -206,7 +206,7 @@ test("the doctor counts each archived disk kept past its 24 hours for its usage 
   registry.threads.setThreadStatus(young!.id, "archived");
   observeNode(registry, { node: "rj-firebat" as NodeName, pylons: [stoppedPylon(kept!.pylonId), stoppedPylon(young!.pylonId)] });
   const doctor = () => runDoctor({
-    registry, self: "nFIREBAT" as TailnetNodeId, startedAt: clock - 3 * day,
+    registry, self: "nFIREBAT" as TailnetNodeId, startedAt: clock - 3 * day, loop: () => ({ slowest: { overMs: 60_000, p99Ms: 3, maxMs: 40, busy: 0.05 }, minutes: 5 }),
     backupStatus: async () => "missing", certificate: async () => ({ kind: "none" }), githubToken: async () => ({ kind: "none" }), tailnet: async () => ({ running: true, magicDns: true, certificates: true, self: null, peers: [] }),
     login: async () => ({ provider: "openai", modelId: "gpt-6-astra", credential: "oauth", offered: ["gpt-6-astra"], refresh: { ok: true } }),
   });
@@ -297,7 +297,7 @@ test("a source that throws fails only its own check, with the error's code and n
   registry.nodes.upsertNode({ name: "rj-firebat" as NodeName, tailnetHost: "rj-firebat.example.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
   const failing = (code: string) => async () => { throw Object.assign(new Error("the file holds sk-secret"), { code }); };
   const r = await runDoctor({
-    registry, self: "nFIREBAT" as TailnetNodeId, clock: () => start, startedAt: start,
+    registry, self: "nFIREBAT" as TailnetNodeId, clock: () => start, startedAt: start, loop: () => ({ slowest: { overMs: 60_000, p99Ms: 3, maxMs: 40, busy: 0.05 }, minutes: 5 }),
     backupStatus: failing("EIO"), login: failing("EACCES"), certificate: failing("ECONNRESET"), githubToken: failing("ETIMEDOUT"), tailnet: failing("ENOENT"),
   });
   const of = (name: string) => r.checks.find((c) => c.node === null && c.name === name)!;

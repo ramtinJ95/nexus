@@ -58,6 +58,7 @@ import { backupStatusFile, controlPath, ports } from "../node-base/node-layout.t
 import { backgroundReadMs, recordingHealth, sampleOf } from "./node-metrics.ts";
 import { drainNodeMetrics } from "./node-metrics-store.ts";
 import { healthSampling } from "./health-sampling.ts";
+import { loopWatch } from "./loop-delay.ts";
 import { services as startServices } from "./services.ts";
 
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
@@ -255,8 +256,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   services.start({ everyMs: passMs, ...judgmentPass({ registry, harness, probes: probeMap, wake }) });
   const cleanup = services.start({ everyMs: cleanupEveryMs, ...cleanupPass({ registry, probes: probeMap, log }) });
   const startedAt = Date.now();
+  const loopDelay = services.start(loopWatch());
   const doctor = () => runDoctor({
-    registry, self: config.self.tailnetNodeId, startedAt,
+    registry, self: config.self.tailnetNodeId, startedAt, loop: loopDelay.late,
     backupStatus: () => readBackupStatus(backupStatusFile),
     login: () => loginState(models, config.harness.model),
     // The API listens on one address, or on every one, where the loopback reaches it too.
@@ -298,6 +300,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     probes: probeMap,
     previewPorts: config.previewPorts,
     health: health.latest,
+    loop: loopDelay.latest,
     log,
   }));
   // After the API, whose delete it shares, so it closes first.
