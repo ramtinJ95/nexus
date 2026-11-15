@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { fullCommit } from "../protocol/deploy.ts";
-import { maxOpenPromptChars, maxPromptChars as maxPersonPromptChars } from "../protocol/commands.ts";
+import { inlinePromptChars, maxOpenPromptChars, maxPromptChars as maxPersonPromptChars } from "../protocol/commands.ts";
 import type { HarnessHost } from "./harness/host.ts";
 import { chooseTemplate, setupHashOf, type ProjectMirror, type SetupInputs, type ThreadSetup } from "./templates.ts";
 import { bootSecrets, effectiveAllowedHosts, gitIdentityOf, hasRemote, withHttpsHosts, type Project, type RemoteProject } from "./project.ts";
@@ -144,6 +144,11 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
       : request.near !== undefined ? placeNear(registry, need, request.near, request.ifRoom === true)
       : { how: "default", node: project.defaultNode as NodeName };
     const { node } = placement;
+    // An older probe refuses a first prompt past the command line's room, and its worker would stay failed, so the start
+    // is refused at once, naming the node to upgrade.
+    if (claudePrompt !== undefined && claudePrompt.length > inlinePromptChars && registry.nodes.node(node)?.observation?.longPrompts !== true) {
+      throw new Refusal("conflict", `${node}'s probe cannot start a Claude session with a first prompt of ${claudePrompt.length} characters, over the ${inlinePromptChars} its command line takes, so it needs this release of Nexus on its probe`, "probe-too-old");
+    }
     // `auto` passes such a node by, and a review's start beside its builder goes there all the same.
     const short = named || placement.how === "default" ? namedDiskShort(registry, node, resources) : null;
     if (short !== null) throw new Refusal("conflict", `${node} ${short}`);

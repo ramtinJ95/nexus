@@ -164,9 +164,14 @@ test("a start beside a node too small for it ever is refused, not left to wait, 
     (err: unknown) => err instanceof NoRoom && /bare has 15 of 16 GiB of memory committed, and the pylon needs 4/.test((err as Error).message));
 });
 
-test("a reviewer's first request far past 16384 characters starts whole, and a person's prompt keeps that limit", async (t) => {
+test("a reviewer's first request far past 16384 characters starts whole on a probe that takes it, is refused at once on one that does not, and a person's prompt keeps that limit", async (t) => {
   const s = await withImage(t);
   observeNode(s, node, { total: 64, committed: 0 });
+  const request0 = `Review #7.\n${"d".repeat(30_000)}`;
+  await assert.rejects(s.startThread({ request: { project: "acme", title: "Review of #7", claude: request0 }, caller: "nexus-review", role: "reviewer" }),
+    (err: unknown) => err instanceof Refusal && err.code === "probe-too-old" && err.message.startsWith(`${node}'s probe cannot start a Claude session with a first prompt of 30011 characters`));
+  assert.equal(s.registry.threads.threads().length, 0, "the refused start made no thread");
+  observeNode(s, node, { total: 64, committed: 0 }, { longPrompts: true });
   const request = `Review #7.\n<description>\n${"d".repeat(30_000)}\n</description>\n<brief>\n${"b".repeat(20_000)}\n</brief>`;
   const reviewer = await s.startThread({ request: { project: "acme", title: "Review of #7", claude: request }, caller: "nexus-review", role: "reviewer" });
   assert.equal(s.registry.threads.claudeWorker(reviewer.id)!.prompt, request, "the whole request is the worker's first prompt");

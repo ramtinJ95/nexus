@@ -1158,9 +1158,11 @@ export function reviewLoop(deps: ReviewDeps) {
     } catch (err) {
       // A start fails before it records the thread, so trying again later starts none twice.
       const why = (err as Error).message;
-      if (now() - second.since < secondStartMs) return { ...r, second: { ...second, tried: now(), why } };
+      // One that no wait can change, as a probe too old for its first prompt, goes to the person at once.
+      const final = err instanceof Refusal && err.code === "probe-too-old";
+      if (!final && now() - second.since < secondStartMs) return { ...r, second: { ...second, tried: now(), why } };
       const { secondVerdict: _, ...alone } = round;
-      return { ...r, second: { kind: "none", rule: second.rule, why: `its thread did not start within ${secondStartMs / 60_000} minutes: ${why}` }, rounds: [...r.rounds.slice(0, -1), alone] };
+      return { ...r, second: { kind: "none", rule: second.rule, why: final ? `its thread cannot start: ${why}` : `its thread did not start within ${secondStartMs / 60_000} minutes: ${why}` }, rounds: [...r.rounds.slice(0, -1), alone] };
     }
   }
 

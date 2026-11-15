@@ -205,7 +205,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     brief: async (target) => { const agent = registry.threads.agent(target); return agent.kind === "claude" ? agent.worker.prompt : briefs.get(target.id) ?? null; },
     async startThread(start) {
       const refused = refuseStart(start.request);
-      if (refused !== null) throw new Refusal("conflict", refused);
+      if (refused !== null) throw new Refusal("conflict", refused, refused.includes("probe cannot start") ? "probe-too-old" : null);
       const short = noRoomStart(start.request);
       if (short !== null) throw new NoRoom("conflict", short);
       const failed = failStart(start.request);
@@ -5833,6 +5833,17 @@ test("a pull request that grows into the second reviewer's rule in a fix round, 
   await pushed.poll();
   assert.equal(g.review().rounds.at(-1)!.head, head3);
   assert.equal(secondOf(g.review()).rule, "the change has 200 changed lines, at least the 150 the project sets");
+});
+
+test("a second reviewer a node's probe is too old to start goes to the person at once, not after 30 minutes", async (t) => {
+  const f = fixture(t, { secondReview: { always: true }, secrets: claudeToken });
+  const old = "rj-firebat's probe cannot start a Claude session with a first prompt of 30011 characters, over the 16384 its command line takes, so it needs this release of Nexus on its probe";
+  f.refuseStart = (request) => request.model === "claude-opus-5-5" ? old : null;
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual(f.review().second, { kind: "none", rule: "the project gives every pull request one", why: `its thread cannot start: ${old}` });
 });
 
 test("a second reviewer whose start keeps failing other than by a refusal goes the way a refused one does", async (t) => {
