@@ -134,6 +134,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   let heldPoll: { skip: number; entered: () => void; released: Promise<void> } | null = null;
   let polls = 0;
   let onFiles = () => {};
+  let onPoll = () => {};
   let onStart = async () => {};
   /** Why the control plane refuses a reviewer thread's start, by the start's model, or null to start it. */
   let refuseStart: (request: StartRequest) => string | null = () => null;
@@ -149,7 +150,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     registry, harnessModel: "gpt-6-astra",
     github: {
       find: async () => [7],
-      async poll(_, n) { polls++; if (heldPoll !== null && heldPoll.skip-- <= 0) { heldPoll.entered(); await heldPoll.released; } return structuredClone(read(n)); },
+      async poll(_, n) { polls++; onPoll(); if (heldPoll !== null && heldPoll.skip-- <= 0) { heldPoll.entered(); await heldPoll.released; } return structuredClone(read(n)); },
       files: async () => { onFiles(); return files; },
       // Unless a test says otherwise, each head's change is its own, as a push of fixes makes it.
       change: async (_, __, head) => changes.has(head) ? changes.get(head)! : files.map((f) => ({ ...f, patch: f.patch && `${f.patch}\n+// ${head}` })),
@@ -248,6 +249,8 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
     changes,
     /** Runs while the loop reads the PR's changed files. */
     set onFiles(hook: () => void) { onFiles = hook; },
+    /** Runs at each read of a pull request, so a test can fail it. */
+    set onPoll(hook: () => void) { onPoll = hook; },
     /** Runs once a reviewer thread exists, before startThread returns it. */
     set onStart(hook: () => Promise<void>) { onStart = hook; },
     set refuseStart(why: (request: StartRequest) => string | null) { refuseStart = why; },
@@ -5033,8 +5036,30 @@ test("a landing that waits for GitHub checks which GitHub then cannot report ask
   assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, checks: since });
   f.tick(githubChecksMs);
   await loop.poll();
-  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["GitHub cannot say whether the pull request's checks passed, 62 minutes after its landing began to wait for them."] });
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The pull request's GitHub checks could not be read, 62 minutes after its landing began to wait for them."] });
   assert.deepEqual(f.merges, []);
+});
+
+test("a landing that waits for GitHub checks while GitHub refuses the read asks no more often, and goes to the person after the hour", async (t) => {
+  const f = fixture(t);
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "pending" } };
+  const loop = await approved(f, "nLAPTOP");
+  const since = f.now;
+  f.onPoll = () => { throw new Error("GitHub answered 503"); };
+  f.tick(prWatchMs);
+  const polls = f.polls;
+  await loop.poll();
+  await loop.poll();
+  assert.equal(f.polls, polls + 1, "a read GitHub refused is tried again an interval later, not at every pass");
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, checks: since });
+  f.tick(githubChecksMs);
+  await loop.poll();
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: ["The pull request's GitHub checks could not be read, 62 minutes after its landing began to wait for them."] });
+  f.onPoll = () => {};
+  f.snapshot = { ...f.snapshot, pr: { ...f.snapshot.pr, checks: "passing" } };
+  loop.land(f.builder, "nLAPTOP", head1);
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1], "and lands on the person's press once GitHub answers");
 });
 
 test("a landing that pending GitHub checks hold beside something else goes to the person at once", async (t) => {

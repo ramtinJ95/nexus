@@ -723,15 +723,29 @@ export function reviewLoop(deps: ReviewDeps) {
       return after;
     },
     async merging(r, phase, builder) {
+      if (phase.checks === undefined) return await merge(r, phase, builder);
+      // GitHub's checks take minutes, so a landing that waits for them asks about them as often as the PR watch does,
+      // whatever the last try came to. A try that fails is made again, as any failed step is, but not past the wait.
+      if (!due(checkReads, r)) return r;
+      checkReads.set(r.id, now());
+      try {
+        return await merge(r, phase, builder);
+      } catch (err) {
+        if (now() - phase.checks < githubChecksMs) throw err;
+        log(`review ${r.id} of ${r.builder}: its pull request's checks could not be read (${(err as Error).name}), and its wait for them is over`);
+        return toPerson(r, "policy", { code: "github-checks", text: `The pull request's GitHub checks could not be read, ${Math.round((now() - phase.checks) / 60_000)} minutes after its landing began to wait for them.` });
+      }
+    },
+    ...landings.steps,
+  };
+
+  /** One try at a landing's merge: the policy checked again with what GitHub says now, then the merge it authorized. */
+  async function merge(r: Review, phase: Extract<Phase, { kind: "merging" }>, builder: Thread): Promise<Review> {
       const head = r.rounds.at(-1)!.head;
-      // GitHub's checks take minutes, so a landing that waits for them asks about them as often as the PR watch does.
-      if (phase.checks !== undefined && !due(checkReads, r)) return r;
       // The policy is checked again with what GitHub says now, before every attempt, so the step that merges does not
       // act on the read of the step that authorized it.
       reads.delete(prKey(r));
       const snapshot = await read(r);
-      // Whatever this read leads to, the next one of a landing that waits for its checks is an interval away.
-      if (phase.checks !== undefined) checkReads.set(r.id, now());
       if (snapshot.pr.state === "closed") return end(r, { kind: "closed" });
       // The change the person pressed Land for is read at once, so a rebase after it can still be compared with it.
       if (r.waiver !== null && r.waiver.change === null && r.waiver.head === head) return { ...r, waiver: { ...r.waiver, change: await changeAt(r, snapshot.detail.base, head) } };
@@ -775,10 +789,6 @@ export function reviewLoop(deps: ReviewDeps) {
         // A head pushed after the approval, such as a rebase on the PR watch's news of a conflict, gets its own round.
         if (snapshot.detail.head !== head) return await newHead(r, snapshot.detail.head, snapshot.detail.base, `The pull request's head moved to ${snapshot.detail.head}`);
         if (retargeted) return await newHead(r, head, snapshot.detail.base, `The pull request's base changed from ${base} to ${snapshot.detail.base}`);
-        // Checks GitHub cannot report are tried again, as any failed read is, but not past the wait for them.
-        if (phase.checks !== undefined && snapshot.checksUnread && now() - phase.checks >= githubChecksMs) {
-          return toPerson(r, "policy", { code: "github-checks", text: `GitHub cannot say whether the pull request's checks passed, ${Math.round((now() - phase.checks) / 60_000)} minutes after its landing began to wait for them.` });
-        }
         // Every attempt checks the whole policy again with what GitHub says now, since checks and the PR can change
         // between attempts and branch protection may not enforce them.
         const { all, left, review, why } = await holds();
@@ -821,9 +831,7 @@ export function reviewLoop(deps: ReviewDeps) {
         commit = merged.commit;
       }
       return landings.merged(toLand, commit);
-    },
-    ...landings.steps,
-  };
+  }
 
   const watchedPr = (r: Review) => {
     const watch = registry.prWatches.prWatch(r.builder);
