@@ -944,6 +944,62 @@ test("a newer heartbeat resumes waiting with a fresh lease, while older or equal
   assert.equal(desiredPhase(registry.threads.thread(threadId)!, now), "running", "the renewed lease outlasts ordinary idle grace");
 });
 
+test("a dialog that opens during a turn keeps the turn's lease, so the idle rules do not pause the pylon while Claude answers it itself and works on", async (t) => {
+  const { desiredPhase, idlePolicy } = await import("./reconcile.ts");
+  const { sessionActivityTtlMs } = await import("./events.ts");
+  let now = 10_000_000;
+  const registry = seeded(t, tempDb(), () => now);
+  let sequence = 0;
+  const report = (kind: import("../protocol/observations.ts").PylonEvent["kind"], session = "c1") => registry.threads.reportSession(node, {
+    sequence: ++sequence, time: now, pylon: pylonId, event: { kind, session, at: now },
+  });
+  const read = () => registry.threads.thread(threadId)!;
+
+  report("session.turn-started");
+  const before = read();
+  now += 90_000;
+  const opened = now;
+  report("session.waiting");
+  assert.equal(read().sessionWaiting, true);
+  assert.equal(read().sessionTurnRunning, undefined, "the session waits, so the thread does not read as working");
+  assert.equal(read().sessionActiveUntil, opened + sessionActivityTtlMs);
+  assert.equal(read().lastAgentActivityAt, before.lastAgentActivityAt, "the dialog is not agent activity");
+  now = opened + 25 * 60_000;
+  registry.threads.pruneSessions();
+  assert.equal(desiredPhase(read(), now), "running", "Claude Code refused the command itself and works on, with no report yet");
+  now = opened + sessionActivityTtlMs;
+  assert.equal(read().sessionActiveUntil, undefined);
+  assert.equal(read().sessionWaiting, true, "the unanswered dialog still waits");
+  assert.equal(desiredPhase(read(), now), "paused", "a dialog nobody answers holds the pylon no longer than a silent turn");
+
+  now++;
+  report("session.heartbeat");
+  now++;
+  report("session.waiting");
+  now++;
+  report("session.waiting");
+  assert.equal(read().sessionActiveUntil, now + sessionActivityTtlMs, "a second prompt of the same turn renews it");
+
+  now++;
+  report("session.turn-ended");
+  now++;
+  report("session.waiting");
+  assert.equal(read().sessionWaiting, true);
+  assert.equal(read().sessionActiveUntil, undefined, "a wait after the turn's end, as at the two-hour cap, keeps no lease");
+  now += idlePolicy.humanIdleMs;
+  assert.equal(desiredPhase(read(), now), "paused");
+  report("session.waiting", "c2");
+  assert.equal(read().sessionActiveUntil, undefined, "a session whose first report is a wait has no turn to keep");
+
+  now++;
+  report("session.turn-started", "c3");
+  now++;
+  report("session.waiting", "c3");
+  assert.equal(read().sessionActiveUntil, now + sessionActivityTtlMs);
+  registry.threads.ingested(testObservation(node, { observedAt: "2027-01-01T00:00:00Z", capacity, pylons: [stoppedPylon(pylonId, { sessions: null })] }), []);
+  assert.equal(read().sessionActiveUntil, undefined, "a stopped pylon runs no turn, as for a working session");
+});
+
 test("a repeated parked report changes nothing, and a later process's report clears a stale one", (t) => {
   const path = tempDb();
   const first = seed(openRegistry(path));
