@@ -937,13 +937,18 @@ export function reviewLoop(deps: ReviewDeps) {
   /**
    * Whether a builder whose review landed still has work open: another pull request the PR watch linked that GitHub says
    * is open now, whose review runs after this one or waits on its builder, and whose landing archives the builder in
-   * turn. GitHub is asked, since the watch may not have read a merge yet. Its turn is `finished`'s to judge.
+   * turn. GitHub is asked, since the watch may not have read a merge yet, and the links are read again after each
+   * answer, since the watch may link another meanwhile. A read that fails throws, so the pass tries the step again.
+   * Its turn is `finished`'s to judge.
    */
   const keepsWork = async (r: Review) => {
-    for (const pr of watchedPrs(registry.prWatches.prWatch(r.builder)).filter((pr) => pr.state === "open" && !(pr.repo === r.pr.repo && pr.number === r.pr.number))) {
+    const asked = new Set([prKey(r)]);
+    for (;;) {
+      const pr = watchedPrs(registry.prWatches.prWatch(r.builder)).find((pr) => pr.state === "open" && !asked.has(prKey({ pr })));
+      if (pr === undefined) return false;
+      asked.add(prKey({ pr }));
       if ((await read({ pr })).pr.state === "open") return true;
     }
-    return false;
   };
 
   /**
@@ -1061,8 +1066,7 @@ export function reviewLoop(deps: ReviewDeps) {
           if (next === r) break;
           let archive: Thread[] = [];
           if (next.phase.kind === "landed" && r.phase.kind !== "landed") {
-            // A read that fails keeps the builder, which the next pull request's landing archives.
-            const kept = await keepsWork(next).catch(() => true);
+            const kept = await keepsWork(next);
             archive = finished(...kept ? [] : [next.builder], ...reviewersOf(next));
             const builder = registry.threads.thread(next.builder);
             if (!kept && builder?.working === true && isOpenStatus(builder.status)) next = { ...next, phase: { ...next.phase, inTurn: now() } };

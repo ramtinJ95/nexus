@@ -6125,3 +6125,48 @@ test("a project edit, and another thread's review of the same pull request, reco
   f.registry.reviews.saveReview(testReview({ id: "rv-other", builder: other, pr: { ...testReview().pr, repo: f.pr.repo, number: f.pr.number } }));
   assert.equal(f.registry.threads.attention(f.builder), null, "#7 got its review from the thread beside it");
 });
+
+test("a pull request the PR watch links while a landing asks GitHub about the builder's others keeps the builder open", async (t) => {
+  let asked = () => {};
+  const f = fixture(t, { repo: "acme/shop", autoReview: { mode: "land", enabledBy: "nLAPTOP" }, personWrote: () => async () => { asked(); return false; } });
+  const loop = f.loop();
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
+  await loop.poll();
+  secondPr(f);
+  github8(f, { state: "closed" });
+  f.registry.threads.recordActivity(f.builder, { agent: f.now, agentTurnRunning: true });
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "landed");
+  const holding = Promise.withResolvers<ReturnType<typeof f.holdPolls>>();
+  asked = () => { holding.resolve(f.holdPolls()); };
+  f.tick(60_000);
+  f.registry.threads.recordActivity(f.builder, { agent: f.now, agentTurnRunning: false });
+  f.tick(1_000);
+  claudeRead(f, [{ kind: "reply", at: f.now, text: "Opened #9." }], []);
+  const pass = loop.poll();
+  const hold = await holding.promise;
+  await hold.entered;
+  const nine = testPr({ repo: f.pr.repo, number: 9, title: "Name the constant" });
+  f.others.set(9, { pr: { ...nine }, detail: { head: "9".repeat(40), branch: "name", base: "main", body: "Names it.", mergeCommit: null }, failures: [], comments: [] });
+  watchRead(f, 9, {});
+  hold.release();
+  await pass;
+  assert.equal(f.registry.threads.thread(f.builder)!.status, "active", "#9, linked while GitHub was asked about the closed #8, keeps the builder");
+});
+
+test("a landing whose read of the builder's other pull request fails is stepped again, and archives the builder once GitHub answers", async (t) => {
+  const f = fixture(t, { repo: "acme/shop", autoReview: { mode: "land", enabledBy: "nLAPTOP" } });
+  const loop = f.loop();
+  await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
+  await loop.poll();
+  watchRead(f, 8, {});
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.equal(f.registry.threads.thread(f.builder)!.status, "active", "GitHub did not answer about #8");
+  assert.notEqual(f.review().phase.kind, "landed", "so the landing is not saved yet");
+  f.others.set(8, { pr: testPr({ repo: f.pr.repo, number: 8, title: "Trim the cache", state: "closed" }), detail: { head: head2, branch: "trim", base: "main", body: "", mergeCommit: null }, failures: [], comments: [] });
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
+  assert.equal(f.registry.threads.thread(f.builder)!.status, "archived", "#8 is closed, so nothing keeps the builder");
+});
