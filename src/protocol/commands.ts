@@ -97,8 +97,19 @@ export type CommandResult =
   /** `refused` says why the pylon left a port a service's preview owns, for a person to read. Null once the port is not linked. */
   | { kind: "unlink-port"; refused: string | null };
 
-/** The longest prompt an open session starts with, and the longest message a Claude session is sent. */
+/** The longest message a Claude session is sent. */
 export const maxPromptChars = 16_384;
+/**
+ * The longest prompt an open session starts with. One longer than `inlinePromptChars` goes to the session in a file it
+ * is told to read (probe/guest/sessions.ts), so this bounds only what the control plane stores and sends the probe.
+ */
+export const maxOpenPromptChars = 1_048_576;
+/**
+ * The longest first prompt passed on Claude's command line. It goes there as one argument, inside a Herdr Core request
+ * that the guest runs as one shell-quoted argument, and Linux takes at most 131,072 bytes in one argument
+ * (MAX_ARG_STRLEN). Quoting turns an apostrophe into 5 bytes, so 16,384 characters keep any text under it.
+ */
+export const inlinePromptChars = 16_384;
 
 const port = z.int().min(1).max(65535).refine((p) => !reservedPorts.has(p), reservedPortMessage);
 /** Refuses an open-session field that only some kinds of session take, and names them. */
@@ -111,7 +122,7 @@ const openSession = (harness: SessionHarness) => {
   return z.looseObject({
     kind: z.literal("open-session"), title: nonEmpty, harness: z.literal(harness),
     resume: takes.resume ? nonEmpty.exactOptional() : z.never({ error: `a ${harness} session has nothing to resume` }).exactOptional(),
-    prompt: takes.prompt ? nonEmpty.max(maxPromptChars).exactOptional() : onlyFor("prompt"),
+    prompt: takes.prompt ? nonEmpty.max(maxOpenPromptChars).exactOptional() : onlyFor("prompt"),
     model: takes.model ? nonEmpty.max(200).exactOptional() : onlyFor("model"),
   });
 };

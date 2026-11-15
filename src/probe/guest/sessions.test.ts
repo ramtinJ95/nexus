@@ -181,6 +181,15 @@ const launchDir = `${claudeLaunchesDir}/${launched}`;
 const prompted = { harness: "claude-code" as const, title: "worker", cwd: "/home/user/workspace/repo", resume: launched, prompt: "work" };
 const tricky = "/poteto-mode fix \"quotes\" and 'single' and `ticks` and $(not-a-shell-command) $HOME !! \\n\nthen\ttest\r\n\n  ünïcode\n";
 
+test("a first prompt too long for the command line goes whole to a file in the launch's directory, which the prompt it is passed as names", async () => {
+  const core = fakeCore();
+  const guest = pylon(core, { transcripts: false });
+  const long = `${tricky}${"review the description ".repeat(2_000)}`;
+  assert.equal(await openSession(guest, { ...prompted, prompt: long }), "t1");
+  assert.deepEqual(guest.written, [{ path: `${launchDir}/prompt.md`, mode: 0o644, owner: "user", content: long }], "the whole prompt, as given");
+  assert.equal(program(core.terminals[0]!).at(-1), `Your first message is ${long.length} characters, too long for the command line, so it is in ${launchDir}/prompt.md. Read all of it now and act on it as if it were this message.`);
+});
+
 test("a worker starts Claude with its first prompt as the last argument, in a terminal named after the session, and waits for the prompt's receipt", async () => {
   const core = fakeCore();
   const guest = pylon(core, { transcripts: false });

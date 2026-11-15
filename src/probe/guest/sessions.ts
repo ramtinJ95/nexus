@@ -20,6 +20,7 @@ import { z } from "zod";
 import type { Guest } from "../../backends/backend.ts";
 import type { TerminalStatus, PausedSession, SessionFact, SessionIdentity } from "../../protocol/observations.ts";
 import type { CommandResult, InterruptClaudeOutcome } from "../../protocol/commands.ts";
+import { inlinePromptChars } from "../../protocol/commands.ts";
 import { nonEmpty, parseJson } from "../../parse.ts";
 import { shellQuote } from "../../shell.ts";
 import { claudeCode, launchers, type Launcher } from "./launchers.ts";
@@ -275,7 +276,7 @@ async function promptedLaunch(guest: Guest, agent: Launcher, harness: SessionHar
   if (hasHistory) throw new Error(`${label} session ${id} already has a transcript, so its first prompt went in before this launch, which started nothing. Attach to check before starting another session`);
   let address: string;
   try {
-    address = (await core(guest, "terminal.run", { argv: launchArgv(agent, [...args, session.prompt]), cwd: session.cwd, name, labels: agentLabels(agent, harness, session.title, args), no_parent: true, keep: true })).address;
+    address = (await core(guest, "terminal.run", { argv: launchArgv(agent, [...args, await inlinePrompt(guest, launchDir, session.prompt)]), cwd: session.cwd, name, labels: agentLabels(agent, harness, session.title, args), no_parent: true, keep: true })).address;
   } catch (err) {
     const claimed = await liveNamed(guest, name).catch(() => null);
     if (claimed === null) throw err;
@@ -283,6 +284,20 @@ async function promptedLaunch(guest: Guest, agent: Launcher, harness: SessionHar
   }
   await awaitSubmission(guest, address, launchDir, "");
   return address;
+}
+
+/** Where a first prompt too long for the command line is written, which the prompt it is passed as names. */
+export const promptFile = (launchDir: string) => `${launchDir}/prompt.md`;
+
+/**
+ * `prompt` itself while it fits the command line, or else a short prompt that names the file it is written to, in the
+ * launch's own directory, so the session gets it whole.
+ */
+async function inlinePrompt(guest: Guest, launchDir: string, prompt: string): Promise<string> {
+  if (prompt.length <= inlinePromptChars) return prompt;
+  const path = promptFile(launchDir) as `/${string}`;
+  await guest.writeFiles([{ path, mode: 0o644, owner: "user", content: prompt }]);
+  return `Your first message is ${prompt.length} characters, too long for the command line, so it is in ${path}. Read all of it now and act on it as if it were this message.`;
 }
 
 /** The live terminal named `name` that still runs what Nexus started in it, or null. */
