@@ -66,7 +66,8 @@ export type ClaudeResume =
   | { state: "waiting"; turn: number; count: number; from: number; due: number }
   | { state: "sending"; turn: number; count: number; from: number; since: number }
   | { state: "resumed" | "answered"; turn: number; count: number; from: number; at: number }
-  | { state: "person"; turn: number; count: number; why: string };
+  /** `review` marks a death left to the person only because the builder's review waits on them, which is judged again once the review moves on. */
+  | { state: "person"; turn: number; count: number; why: string; review?: true };
 
 /** A resume types a prompt, whose turn starts at once whatever the model does, so a resume that starts none in this long has a fault of its own. */
 export const resumeStartMs = 10 * 60_000;

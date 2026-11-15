@@ -531,7 +531,9 @@ with `since` for one saved before it was first sent,
 to the thread after, which gets no resume, and `{ "state": "person", "turn", "count",
 "why" }` for a death Nexus does not resume, which makes the attention `died`, or leaves
 it `decision` beside a review that waits on the person, while
-`turnDied.at` is still `turn`. A record that an older release stored as `{ "state":
+`turnDied.at` is still `turn`. A `person` record has `review: true` when the death is the
+person's only because the builder's review waits on them, and is judged again once the
+review moves on. A record that an older release stored as `{ "state":
 "left-alone" }` reads as no record. `turn` is the `turnDied.at` of the death it answers
 and `count` the resumes in a row. A `waiting`, `sending`, `resumed` or `answered` record
 carries `from`, when Nexus began to wait on that death, and holds a pylon that was up

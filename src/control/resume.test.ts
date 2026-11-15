@@ -409,7 +409,7 @@ test("a death in a builder whose review waits on the person is told to them with
   f.report(id, "session.ended");
   const died = f.registry.threads.thread(id)!.turnDied!;
   await f.resumer.poll();
-  const record = { state: "person", turn: died.at, count: 0, why: `Its turn died (${died.reason}). Its review waits on you, so Nexus did not resume it.` };
+  const record = { state: "person", turn: died.at, count: 0, why: `Its turn died (${died.reason}). Its review waits on you, so Nexus did not resume it.`, review: true };
   assert.deepEqual(f.registry.threads.claudeResume(id), record);
   assert.equal(f.registry.threads.attention(id), "decision", "the review still comes first");
   f.tick(resumeWaitsMs[0]! + resumeStartMs);
@@ -421,6 +421,34 @@ test("a death in a builder whose review waits on the person is told to them with
   f.report(id, "session.turn-started");
   await f.resumer.poll();
   assert.equal(f.registry.threads.claudeResume(id), null, "the turn the person's message started ends the death");
+});
+
+test("a death left to the person only for a review that waits on them is resumed once the review moves on", async (t) => {
+  const f = fixture(t);
+  const held = personPhase("agent", "The builder gave no answer Nexus could read within 3 hours in round 1.");
+  const fresh = f.add("th-fresh");
+  const old = f.add("th-old");
+  const gone = f.add("th-gone");
+  for (const [i, id] of [fresh, old, gone].entries()) f.registry.reviews.saveReview(testReview({ id: `rv-${i}`, builder: id, reviewer: `th-reviewer-${i}` as ThreadId, phase: held }));
+  f.turn(old, "session-ended");
+  f.tick(61 * minute);
+  f.turn(fresh, "session-ended");
+  f.turn(gone, "session-ended");
+  await f.resumer.poll();
+  for (const id of [fresh, old, gone]) assert.equal(f.registry.threads.claudeResume(id)?.state, "person");
+
+  for (const [i, id] of [fresh, old, gone].entries()) f.registry.reviews.saveReview(testReview({ id: `rv-${i}`, builder: id, reviewer: `th-reviewer-${i}` as ThreadId, phase: { kind: "fixing" } }));
+  f.tick(1_000);
+  f.report(gone, "session.turn-started");
+  await f.resumer.poll();
+  assert.equal(f.registry.threads.claudeResume(fresh)?.state, "waiting", "the death waits for its resume, as one in a builder under no held review");
+  const kept = f.registry.threads.claudeResume(old);
+  assert.equal(kept?.state === "person" && kept.review, undefined, "a death more than an hour old stays the person's, for that reason now");
+  assert.match(kept?.state === "person" ? kept.why : "", /more than 60 minutes before Nexus saw it/);
+  assert.equal(f.registry.threads.claudeResume(gone), null, "a turn that started since ends the record");
+  f.tick(resumeWaitsMs[0]!);
+  await f.resumer.poll();
+  assert.deepEqual(f.typed.map((c) => c.requestId!.split(":")[1]), ["th-fresh"]);
 });
 
 test("a session that ends after a turn the transcript shows ended, with a background task still running, did not die", async (t) => {

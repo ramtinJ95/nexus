@@ -1559,7 +1559,9 @@ else of the thread's waits on the person too. Nexus does not resume a death in t
 cases:
 
 - The builder's review waits on the person, who decides what the builder does next. The
-  death shows beside the review, on the thread's page and in Needs you.
+  death shows beside the review, on the thread's page and in Needs you, and its record
+  has `review: true`. Once the review moves on, Nexus resumes a death less than 60
+  minutes old as any other.
 - It is the fourth death in a row.
 - It died more than 60 minutes before Nexus saw it, by the pylon's clock against the
   control plane's, as when a control plane starts after it.
