@@ -234,7 +234,7 @@ The shapes are TypeScript types. `Thread`, `Session` and `Preview` are in [`src/
 | `createdAt` | `number` | When the thread started |
 | `agentTurnRunning` | `boolean` | A turn of the Nexus agent runs |
 | `sessionTurnRunning` | optional `true` | A turn of a session in the pylon runs, as its hooks report, such as the Claude worker's. A Claude worker thread works while this is present |
-| `sessionActiveUntil` | optional `number` | When that turn's working lease runs out without another report. Present with `sessionTurnRunning` |
+| `sessionActiveUntil` | optional `number` | When that turn's working lease runs out without another report. Present with `sessionTurnRunning`, and with `sessionWaiting` while a dialog that opened during a turn keeps the turn's lease, for 30 minutes from when it opened |
 | `awaitedUntil` | optional `number` | Until when a review keeps the builder's pylon up while its reviewer reads a round and until the findings are delivered, so they find it awake. Present only while that hold lasts: for a builder up when the round started, until the reviewer's model fails in that round, for 30 minutes after the request reached the reviewer at most, and until placement releases it for room its node needs. A Claude worker whose turn died holds its pylon up the same way while Nexus resumes it, as [Turns that died](#turns-that-died) describes |
 | `sessionWaiting` | optional `true` | A session in the pylon waits for input, such as a permission prompt |
 | `sessionWaitingMessage` | optional `string` | What the latest waiting session's report said, such as "A background command was still running after 2 hours" |
@@ -1330,7 +1330,9 @@ pause rules. This bounds killed sessions and lost Stop reports; a silent single
 operation longer than the lease also expires. Session state is capped at 16 rows
 per thread, with oldest activity evicted, and ended/expired working rows are deleted.
 Waiting state has no TTL and records no activity: an unanswered question remains
-waiting until a later session event, archive or deletion. Heartbeats renew
+waiting until a later session event, archive or deletion. A dialog that opened
+during a turn keeps that turn's lease for 30 minutes from when it opened, so its
+pylon is not paused under a turn that Claude Code resumes itself. Heartbeats renew
 working sessions or resume waiting sessions when stamped later than the waiting
 event; they never create sessions or revive ended ones. Hooks capture
 the event's time before writing it to the outbox; control rejects older per-session reports.
@@ -1652,7 +1654,7 @@ A question is something a thread asks the person, with a fixed set of answers. T
 | `ask` | `ClaudeAsk`, absent | Since 0.42.0, the Claude worker's AskUserQuestion call the question is |
 | `failure` | `number`, absent | Since 0.62.0, the `thread.failed` event a [failure judgment](#failure-judgments)'s question asks about |
 | `holds` | `{ review: string, head: string, base: string \| null, holds: Hold[] }`, absent | Since 0.65.0, the review a question about holds is about, the head and base it was asked at, and the holds it names, each `{ code, text }` as `Review.phase.holds` has them. Its options are `Land` and `Leave it`, and only a deployer answers it |
-| `withdrawn` | `{ by: "archive", at: number }`, absent | Since 0.62.0, set when archiving the thread closed the failure question unanswered. It is kept, takes no answer and holds no attention |
+| `withdrawn` | `{ by: "archive", at: number }`, absent | Since 0.62.0, set when archiving the thread closed the question unanswered: a failure question, or a planning thread's proposal. It is kept, takes no answer and holds no attention |
 | `answer` | `{ option: string, by: string, at: number, choices?: Choice[] } \| null` | The option chosen, the tailnet node ID of the device that chose it, and when. Null until it is answered. An ask's answer has `choices`, and its `option` sums them up in one line |
 
 A question can be about a node instead of a thread: the control plane's [cleanup](design.md#cleanup-the-person-confirms) asks one per node about what it could delete. Its `kind` is `cleanup`. It has `node`, the node's name, in place of `thread`, never both, options `Delete` and `Keep`, and `cleanup`: `items`, each a template (`kind`, `id`, `project`), an image (`kind`, `id`) or a release (`kind`, `name`, `commit`) with the `bytes` it takes, and `outcomes`, what each delete did once the answer is `Delete`, keyed by the item's ID or `release-<name>`: `{"state": "deleted", "bytes": number}`, `{"state": "gone"}` or `{"state": "skipped", "reason": string}`. No `ThreadDetail` lists one. The dashboard shows it on the Cluster page and in Needs you, and the route below answers it as it answers any other.

@@ -47,11 +47,14 @@ export function questionStore(db: Db, clock: () => number, threadStatus: (id: Th
 
   const needs = (thread: ThreadId): Need[] => sql(`SELECT record FROM questions WHERE thread = ? AND ${openWhere}
     ORDER BY json_extract(record, '$.askedAt'), rowid`).all(thread).map((r) => { const question = json<ThreadQuestion>(r.record); return { kind: "question", question, since: question.askedAt }; });
-  /** An archived thread's failure needs nothing more from the person, so its open question is withdrawn and kept. */
+  /**
+   * An archived thread's failure needs nothing more from the person, and nor does a proposal of a planning thread they
+   * put away, whose accept would still add its item. So its open questions of both kinds are withdrawn and kept.
+   */
   function closed(thread: ThreadId) {
     sql("DELETE FROM waiting_asks WHERE thread = ?").run(thread);
     if (threadStatus(thread) !== "archived") return;
-    sql(`UPDATE questions SET record = json_set(record, '$.withdrawn', json(?)) WHERE thread = ? AND json_extract(record, '$.kind') = 'judgment' AND ${openWhere}`).run(JSON.stringify({ by: "archive", at: clock() }), thread);
+    sql(`UPDATE questions SET record = json_set(record, '$.withdrawn', json(?)) WHERE thread = ? AND json_extract(record, '$.kind') IN ('judgment', 'proposal') AND ${openWhere}`).run(JSON.stringify({ by: "archive", at: clock() }), thread);
   }
 
   /** An open question still waits for the person's answer. */

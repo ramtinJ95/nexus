@@ -181,7 +181,7 @@ A node's latest observation has `nestedVirtualization: true` from a probe whose 
 
 ## Question records
 
-`questions` stores each question a thread asked the person, one JSON record per question, keyed by the ID its asker chose, with its thread in a column. `Question` in `src/control/questions.ts` is the shape, a union on `kind`, and `ThreadDetail.questions` serves a thread's, ordered by `askedAt`, and then by the order they were asked. Asking again with an ID that exists keeps the stored record. `answer` is null until the person answers, then `{ option, by, at }`, which is never replaced, so a second answer reads the first. A failure judgment's question has `failure`, the `thread.failed` event it asks about. Archiving the thread sets `withdrawn`, `{ by: "archive", at }`, on each such question still unanswered, in the archive's transaction, and keeps the record. A withdrawn question takes no answer. A judgment's question asked before this takes its `failure` from its ID when the registry migrates, and an open one of a thread archived already is withdrawn as of the archive. A question stored before `kind` takes it from the field of its kind when the registry migrates: `cleanup` for a node's, `ask`, `holds` or `proposal` for one with that field, and `judgment` for any other. `reserved` is null on every kind but `holds`, and stays on each record because an older CLI's `show` reads it. An open question, one neither answered nor withdrawn, makes its thread's attention `decision`, recomputed in the transaction that asks, answers or withdraws it. `answerer` is `person` or `deployer`, and [the answer route](cli.md#questions) checks it against the caller.
+`questions` stores each question a thread asked the person, one JSON record per question, keyed by the ID its asker chose, with its thread in a column. `Question` in `src/control/questions.ts` is the shape, a union on `kind`, and `ThreadDetail.questions` serves a thread's, ordered by `askedAt`, and then by the order they were asked. Asking again with an ID that exists keeps the stored record. `answer` is null until the person answers, then `{ option, by, at }`, which is never replaced, so a second answer reads the first. A failure judgment's question has `failure`, the `thread.failed` event it asks about. Archiving the thread sets `withdrawn`, `{ by: "archive", at }`, on each such question still unanswered, and on each unanswered proposal of a planning thread, in the archive's transaction, and keeps the record. A withdrawn question takes no answer. A judgment's question asked before this takes its `failure` from its ID when the registry migrates, and an open one of a thread archived already is withdrawn as of the archive. A question stored before `kind` takes it from the field of its kind when the registry migrates: `cleanup` for a node's, `ask`, `holds` or `proposal` for one with that field, and `judgment` for any other. `reserved` is null on every kind but `holds`, and stays on each record because an older CLI's `show` reads it. An open question, one neither answered nor withdrawn, makes its thread's attention `decision`, recomputed in the transaction that asks, answers or withdraws it. `answerer` is `person` or `deployer`, and [the answer route](cli.md#questions) checks it against the caller.
 
 A review's question about its holds is `holds-<review>-<digest>`, the digest made from the head, the base and the holds, whose `holds` holds the review, that head and base, and the holds it names. The review loop asks it, and in the same transaction deletes each other unanswered one of the builder's whose ID starts `holds-`, so one question is open per builder and an answer to a replaced one finds none.
 
@@ -418,7 +418,10 @@ expire on upgrade rather than receiving an invented fresh lease.
 
 A start gives a session a 30-minute working lease. A `session.heartbeat` renews
 an existing working lease, or resumes an existing waiting session with a fresh
-lease when stamped later than its waiting event. It cannot create a session or
+lease when stamped later than its waiting event. A `session.waiting` report for a session whose turn runs keeps that turn's
+lease, 30 minutes from the report, as a dialog Claude Code answers itself leaves the
+turn working with no report; one for a session with no running turn, as after a
+turn's end, gives none. It cannot create a session or
 revive an ended turn. It revives an expired turn's row only while the session's
 `session_order` still has that turn open, its latest report a turn start or a
 heartbeat, as after a gap in the node's link longer than the lease. The revived row
@@ -448,7 +451,8 @@ message is kept with it as `Thread.sessionWaitingMessage`, and the dashboard sho
 it as the thread's state.
 
 `Thread.sessionTurnRunning` and `sessionWaiting` are optional current facts;
-`sessionActiveUntil` lets the pure planner enforce expiry even on an older read.
+`sessionActiveUntil`, present while a turn runs or a dialog that opened during one
+keeps its lease, lets the pure planner enforce expiry even on an older read.
 `Thread.working` is true while the harness turn or a live session turn runs, so a
 Claude worker's turn counts as a harness turn does wherever a thread reads as working.
 `Thread.workingSince` is the earliest known start, in Unix milliseconds, of the
@@ -458,7 +462,8 @@ when its tracker saw the turn begin, or the retry that resumed a parked run. A w
 time of its `session.turn-started`, or of the heartbeat that resumed it from
 waiting; later heartbeats keep it. Turns running before the migration have no
 start, and none is invented.
-After expiry or an ended/waiting turn, normal agent and human idle rules apply.
+After expiry, an ended turn or a wait that follows one, normal agent and human idle rules apply; a dialog
+that opened during a turn keeps the turn's lease first, until a stop of its pylon or a usage limit ends that turn.
 Expiry itself records no new activity. Session turn ends use the existing strictly
 increasing `lastReplyAt` identity. Attention keeps its precedence: failed pylon or
 worker launch, decision, died, parked, limited, unread reply, working, waiting, then null. Seen still changes

@@ -199,6 +199,9 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     endTurn(thread, session, at) {
       sql("DELETE FROM session_activity WHERE thread = ? AND session = ? AND state = 'session.turn-started' AND EXISTS (SELECT 1 FROM session_order o WHERE o.thread = ? AND o.session = ? AND o.at <= ?)")
         .run(thread, session, thread, session, at);
+      // A dialog that waited under the ended turn keeps waiting, without the turn's lease.
+      sql("UPDATE session_activity SET started_at = NULL WHERE thread = ? AND session = ? AND state = 'session.waiting' AND EXISTS (SELECT 1 FROM session_order o WHERE o.thread = ? AND o.session = ? AND o.at <= ?)")
+        .run(thread, session, thread, session, at);
     },
   });
   /**
@@ -312,6 +315,13 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       .all(ids, clock() - sessionActivityTtlMs).flatMap((r) => ((r.heard as number | null) ?? -Infinity) < (cuts.get(r.thread as ThreadId) ?? -Infinity) ? [] : [[r.thread as ThreadId, r] as const]));
     const waiting = new Map(sql(`SELECT thread, message FROM (SELECT thread, message, row_number() OVER (PARTITION BY thread ORDER BY updated_at DESC, rowid DESC) AS n
       FROM session_activity WHERE thread IN (SELECT value FROM json_each(?)) AND state = 'session.waiting') WHERE n = 1`).all(ids).map((r) => [r.thread as ThreadId, r]));
+    // A dialog that opened during a turn keeps the turn's lease from when it opened: Claude Code answers some itself, as
+    // when its safety check refuses a command, and works on with no report until its next heartbeat is due. Without the
+    // lease the idle rules paused the pylon under such a turn. A wait that follows a turn's end, as the cap's, has none.
+    const dialogs = new Map(sql(`SELECT a.thread, max(a.updated_at) AS at, max(o.at) AS heard FROM session_activity a
+      LEFT JOIN session_order o ON o.thread = a.thread AND o.session = a.session
+      WHERE a.thread IN (SELECT value FROM json_each(?)) AND a.state = 'session.waiting' AND a.started_at IS NOT NULL AND a.updated_at > ? GROUP BY a.thread`)
+      .all(ids, clock() - sessionActivityTtlMs).flatMap((r) => ((r.heard as number | null) ?? -Infinity) < (cuts.get(r.thread as ThreadId) ?? -Infinity) ? [] : [[r.thread as ThreadId, r.at as number] as const]));
     const archived = new Map(sql("SELECT * FROM thread_archives WHERE thread IN (SELECT value FROM json_each(?))").all(ids).map((r) => [r.thread as ThreadId, r]));
     const backedUp = backedUpAt();
     const stops = claudeStops(rows.map((r) => r.id as ThreadId).filter((id) => !live.has(id)), cuts);
@@ -322,11 +332,13 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       const thread = threadRow(row);
       const working = (live.get(thread.id)?.at ?? null) as number | null;
       const wait = waiting.get(thread.id);
+      const leased = Math.max(working ?? -Infinity, dialogs.get(thread.id) ?? -Infinity);
       const starts = [thread.agentTurnRunning ? row.agent_turn_started_at : null, live.get(thread.id)?.since].filter((at): at is number => typeof at === "number");
       const archive = archived.get(thread.id);
       return {
         ...thread, working: thread.agentTurnRunning || working !== null,
-        ...(working === null ? {} : { sessionTurnRunning: true, sessionActiveUntil: working + sessionActivityTtlMs }), ...(wait === undefined ? {} : { sessionWaiting: true }),
+        ...(working === null ? {} : { sessionTurnRunning: true }), ...(leased === -Infinity ? {} : { sessionActiveUntil: leased + sessionActivityTtlMs }),
+        ...(wait === undefined ? {} : { sessionWaiting: true }),
         ...(typeof wait?.message === "string" ? { sessionWaitingMessage: wait.message } : {}),
         ...(starts.length === 0 ? {} : { workingSince: Math.min(...starts) }), ...stops.get(thread.id),
         ...(archive === undefined ? {} : archiveFacts(archive, backedUp)),
@@ -688,8 +700,9 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
         if (event.kind === "session.ended" || event.kind === "session.turn-ended") {
           sql("DELETE FROM session_activity WHERE thread = ? AND session = ?").run(thread, session);
         } else {
-          // A heartbeat keeps a running turn's start and starts a new turn for a waiting session.
-          const startedAt = event.kind === "session.waiting" ? null
+          // A heartbeat keeps a running turn's start and starts a new turn for a waiting session. A wait keeps the start
+          // of the turn it interrupts, which marks it as a dialog under a turn, whose lease it keeps (withSessions).
+          const startedAt = event.kind === "session.waiting" ? (current?.state === "session.turn-started" || current?.state === "session.waiting" ? current.started_at as number | null : null)
             : event.kind === "session.heartbeat" && current?.state === "session.turn-started" ? current.started_at as number | null
             : clock();
           sql(`INSERT INTO session_activity (thread, session, state, updated_at, started_at, message) VALUES (?, ?, ?, ?, ?, ?)
@@ -1001,6 +1014,8 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
           if (thread === undefined) continue;
           pylonStopped(thread);
           if (sql("DELETE FROM session_activity WHERE thread = ? AND state = 'session.turn-started' RETURNING thread").all(thread).length > 0) updateAttention(thread);
+          // A dialog that waited under such a turn keeps waiting, without the turn's lease, also once the pylon runs again.
+          sql("UPDATE session_activity SET started_at = NULL WHERE thread = ? AND state = 'session.waiting' AND started_at IS NOT NULL").run(thread);
         }
       });
     },

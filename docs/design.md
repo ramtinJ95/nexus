@@ -308,6 +308,8 @@ The control plane's machine backs up its own state once a day, to `/var/backups/
 | Date | Decision |
 |---|---|
 | 2026-11-15 | A turn that dies in a builder whose review waits on the person is told to them with why, beside the review: in `nexus show`, on the thread's page and in Needs you. Nexus still sends no resume there, as the person decides what such a builder does next. Before, the resumer left such a builder out and wrote nothing, so on 2026-11-15 a builder whose pylon was paused mid-turn read as one that waited on its review, and nothing ran for 44 minutes. The attention stays `decision`, which already asks for the person. |
+| 2026-11-15 | Archiving a planning thread withdraws its open proposals, as an archive withdraws a failure question: each is kept, takes no answer and holds no attention. Before, the card stayed in Needs you and the archived thread kept the `decision` attention until someone answered it, and an accept still added a pipeline item for a plan the person had put away ([#455](https://github.com/ramtinJ95/nexus/issues/455)). An unarchive does not ask a withdrawn proposal again, since a block read twice asks nothing new, so the person asks the thread to propose it again. A review's question about its holds stays open through an archive, as before. |
+| 2026-11-15 | A dialog that opens during a turn keeps the turn's 30-minute lease, counted from when it opened, so the idle rules do not pause the pylon under it. Before, any waiting report dropped the lease at once. On 2026-11-15 Claude Code's own safety check refused a builder's shell command: the permission prompt reported the session waiting, Claude Code denied the prompt itself two minutes later and the turn worked on, its next heartbeat not yet due, and five minutes after the last agent activity the pylon was paused under a running command. The turn died, and nothing ran until a message from a person woke the pylon 44 minutes later. A wait that follows a turn's end, as at the two-hour cap, still keeps no lease, so a dev server does not hold its pylon up. A dialog nobody answers now holds its pylon for 30 minutes rather than the idle rules' 5 to 20, the price of not telling it from one Claude Code answers itself, which the report does not say. |
 | 2026-11-15 | A message the person writes to a builder after its turn died answers that death only, and every death Nexus does not resume goes to the person as the `died` attention, with why. Before, the person's first message after the builder's first reply left it alone for good, so a conductor who steered builders with `nexus send` switched their resumes off, and a builder whose turn then died stopped overnight with nothing said. A death Nexus did not resume read as a reply, or as nothing for a session that ended, and one more than an hour old was skipped without a word. `died` waits on the person, so its row stays bright and it notifies, and it ranks after `decision` as one card among the person's other needs. A pylon paused 5 idle minutes into a 10- or 30-minute wait and ended the background jobs the resumed turn needed, so a resume that waits now holds the pylon up as a review's round does. A pause or reboot ends a session with no hook, so a turn its pylon stopped under is now a death too. [Resuming a turn that died](#resuming-a-turn-that-died) has the rule. |
 | 2026-11-14 | Committed memory never passes a node's memory, on every way in: `auto`, a start that names a node or goes to its pinned default, a reviewer beside its builder and a wake. The nodes swap to zram, so a swapped-out guest still takes real memory, and overcommitting turned into 17 hours of full nodes. A reviewer with no node to take it waits for room rather than overcommit its builder's node, and goes to the person after 30 minutes. |
 | 2026-11-14 | A node keeps the controller and serial logs of a boot that never finished for 14 days, the newest 20, at most 1 MiB of each. No serial log was kept on 2026-11-14, so why twelve boot hooks never ended is still not known. |
@@ -597,7 +599,7 @@ A planning thread is a Nexus agent thread the person opens to plan, with `nexus 
 
 The control plane puts a guide in front of the thread's first message: the token, and the `nexus-plan` block to end a turn with, which holds each proposed item's key, title, brief, and the keys of earlier items in the block or the IDs of pipeline items it waits on. A pass every 15 seconds reads the replies of each planning thread whose turn ended since its last read, and asks the person one question per item of every block that echoes the token, with the brief in full and the options `accept` and `reject`. The question's ID is made from the thread, a hash of the block's items and the item's place in it, and asking with an ID that exists asks nothing, so a block read twice, by passes that overlap or after a restart cut a read short, makes each card once. A revised block is another block, with new cards.
 
-Only a person answers, as with any question. An accept adds the pipeline item through the same code as `nexus item add`, in the transaction that records the answer, with the person who answered as its adder and an ID made from the question. Its `after` resolves an earlier item of the block to the item that item became, so an accept before the earlier one is accepted, or after it was rejected, is refused and leaves the card open. The item then moves as any item does, under the project's pipeline setting. A reject records only the answer. The next message to the planning thread, under its request ID, starts with what the person accepted, with each new item's ID, and what they rejected, so the thread can revise. Each message's request ID is stored with the guide and answers it carries before it is sent, so a resend sends the same text, and only a message the harness took counts, so a send that failed leaves them for the next message. The nudge pass leaves a planning thread alone, since it is not meant to open a pull request.
+Only a person answers, as with any question. An accept adds the pipeline item through the same code as `nexus item add`, in the transaction that records the answer, with the person who answered as its adder and an ID made from the question. Its `after` resolves an earlier item of the block to the item that item became, so an accept before the earlier one is accepted, or after it was rejected, is refused and leaves the card open. The item then moves as any item does, under the project's pipeline setting. A reject records only the answer. Archiving the thread withdraws each proposal still unanswered, which then takes no answer and adds no item, and an unarchive does not ask it again. A pass whose read of the replies an archive overtook asks nothing, and leaves them for the pass after an unarchive. The next message to the planning thread, under its request ID, starts with what the person accepted, with each new item's ID, and what they rejected, so the thread can revise. Each message's request ID is stored with the guide and answers it carries before it is sent, so a resend sends the same text, and only a message the harness took counts, so a send that failed leaves them for the next message. The nudge pass leaves a planning thread alone, since it is not meant to open a pull request.
 
 A planning thread is a Nexus agent thread, whose replies the control plane's harness records, rather than a Claude worker, whose transcript is read from its pylon, where code it runs could write it. A wrong block still makes only cards, which the person reads before any item exists.
 
@@ -705,7 +707,7 @@ AskUserQuestion's PostToolUse and any input whose first key is not `session_id`.
 session states per thread are kept, and ended or expired working rows are removed.
 Waiting persists without refreshing activity. Hook timestamps and bounded durable
 ordering cursors reject stale reports after an end; heartbeats renew existing
-working leases or resume waiting sessions when newer than their waiting event. A waiting or ended turn returns to the normal
+working leases or resume waiting sessions when newer than their waiting event. A dialog that opens during a turn keeps the turn's lease from when it opened. An ended turn, and a wait that follows one, return to the normal
 idle policy; seen remains unrelated to activity.
 
 A main turn can end while background subagents keep working, as `/poteto-mode`
@@ -748,8 +750,8 @@ sender to finish before it sends the waiting report, so the turn end cannot remo
 Nothing tells a dev server from finite work. A command still running after 2 hours
 has its turn ended, and the hold also reports `session.waiting` with the message
 "A background command was still running after 2 hours", which the dashboard shows
-in place of "waiting for input" once the reply is read. A waiting session does not
-keep its pylon awake, so with no other activity the pylon pauses after the idle
+in place of "waiting for input" once the reply is read. This wait follows the turn's end, so it does not
+keep its pylon awake, and with no other activity the pylon pauses after the idle
 rules and stops the command. A held process does not survive a pause either, but
 before the cap the session is working, so its pylon is not paused.
 
@@ -759,6 +761,13 @@ which AskUserQuestion also fires, and `elicitation_dialog` report waiting. The
 event does not say which notification fired, so the control plane cannot drop an
 idle prompt without risking a real wait whose turn start was lost or late. Until
 the image is rebuilt, the old matcher's idle prompt still counts.
+
+A permission prompt can open in the middle of a turn, and Claude Code answers some
+itself: its safety check refuses a shell command, denies the prompt and the turn
+works on, with no report until its next heartbeat is due. A waiting report for a
+session whose turn runs therefore keeps that turn's lease, 30 minutes from the
+report, so the idle rules do not pause the pylon under the turn. The thread reads
+as waiting, not working, until a heartbeat resumes it.
 
 An AskUserQuestion dialog can be answered from the dashboard, as [questions for
 the person](#questions-for-the-person) describes. Claude Code 2.1.310 runs a
