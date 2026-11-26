@@ -1,15 +1,15 @@
 {
-  "syncCommit": "51ace6db81a71cc6dc7c10df2bb9f14a55d114bf",
+  "syncCommit": "155188614ab773629d4a5c70ec5d70b006967915",
   "covers": {
-    "src/control/review.ts": "931c39e3bcc3c73c1b0fa7aaafc800a8510d9b40bfbb34e1d2ec666f5eb34219",
-    "src/control/landing.ts": "05d7cfdd02cd8a7ecd57549735a0c0b06c7ffa489769144c42841b18b6093d20",
+    "src/control/review.ts": "a8c5bd40f09c7b874058f72cc2d92182c8e348d7919372ddff4c1d5addc493d0",
+    "src/control/landing.ts": "fbc0ccc0cbdf22925538c0e230dd38e9d281716b694db12199d160c9b700b9f4",
     "src/control/review-model.ts": "2c4e9a50ba387a6cacf929dfe467b5d0e4c3221f4590be346b35dadc862436a0",
     "src/control/release-store.ts": "e98714acc4aca87e436b140bf05e5c86afe9b2d26b2a2186589ff0661dc2dbb0",
-    "src/control/api/release-routes.ts": "f81f1fe9280ac9e08177387d269ec8f43d66df05380f633380bd414ff9901266",
-    "src/protocol/deploy.ts": "a05394fc0e983b5fa2933834df3bd955cd9d96cbf92d596db32ff801d4cb1e5a",
+    "src/control/api/release-routes.ts": "8f54059373e63eeac8679d162fed09005f26d4167b997dddc09a5cac211333e0",
+    "src/protocol/deploy.ts": "0a3214b10f4da49702b7c1c91e1e058dab917353f0a6341a39614c5afe96571c",
     "src/deploy/plan.ts": "8d5a5d594f0cc9d3000508fcf70d2ec201b92260882859d7e52228667f9be285",
-    "src/deploy/worker.ts": "ade10941612bb47a12c5b19e8165c2c18f82ca732a0d76ceb977ba162f3fd8b4",
-    "src/deploy/install.ts": "48576e472bd606513f743ac0ae2ed8a5009c1e3dea8d58ce2ec7cd0d19ee8949"
+    "src/deploy/worker.ts": "5b8a24aa7acebeb9f20171069764b73965954dd95a9ff33c2b847b568e1fba20",
+    "src/deploy/install.ts": "e79308658a628d6c27672cb7db37e90ede0914da24b10bf76c38d92102678086"
   },
   "tlc": {
     "version": "1.7.4",
