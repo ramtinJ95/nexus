@@ -14,5 +14,5 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["src", "images", "dev"]
+  "include": ["src", "images", "dev", "scripts/mp-probe.ts"]
 }

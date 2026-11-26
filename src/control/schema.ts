@@ -1,13 +1,16 @@
 /**
- * The registry's schema: every migration, in order, under the one user_version that db.ts reads. Each table is made
- * here, so the log stays one ordered history across features. The merge policy holds a change to it as irreversible.
+ * The registry's schema: every migration, in order, in the two lists that db.ts applies. Each table is made here, so
+ * the log stays one ordered history across features. The merge policy holds a change to it as irreversible.
  */
+/** An ordered list of migrations. Each list is applied in order, and none that has shipped is ever edited. */
+export type Migrations = readonly string[];
+
 /**
  * Applied in order. The database's user_version counts the ones already applied. Never edit one that has shipped.
  * From the passkeys' migration on, one that alters and drops no table an earlier migration made applies again unchanged
  * to a registry rewound past it, which schema.test.ts checks.
  */
-export const migrations: readonly string[] = [
+export const migrations: Migrations = [
   `
   CREATE TABLE nodes (
     name TEXT PRIMARY KEY,
@@ -330,4 +333,14 @@ export const migrations: readonly string[] = [
    UPDATE claude_workers SET turn_beat_at = coalesce((SELECT o.at FROM session_order o WHERE o.thread = claude_workers.thread AND o.session = claude_workers.turn_session), turn_at),
      turn_ended_at = CASE WHEN (SELECT o.kind FROM session_order o WHERE o.thread = claude_workers.thread AND o.session = claude_workers.turn_session) IN ('session.turn-started', 'session.heartbeat') OR coalesce(died_at, -1) >= turn_at THEN NULL ELSE turn_at END
      WHERE turn_at IS NOT NULL;`,
+];
+
+/**
+ * The multiplayer arc's migrations, which the long-lived `multiplayer` branch appends to in place of `migrations`, so a
+ * merge from main never meets a second migration under the same number. db.ts applies them after `migrations` and
+ * counts them in the registry's arc_schema table, which the first one applied makes. A rewound registry loses that
+ * table, so each one applies again unchanged unless it alters or drops a table an earlier migration made, which
+ * schema.test.ts checks.
+ */
+export const arcMigrations: Migrations = [
 ];

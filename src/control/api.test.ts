@@ -14,7 +14,7 @@ import type { ProjectId } from "../ids.ts";
 import { tokenDigest } from "../protocol/deploy.ts";
 import { until } from "../test-support/kit.ts";
 import type { NodeName, TailnetNodeId } from "../ids.ts";
-import { node, laptop, phone, project, dir, testApi, withThread, attachTo, attached, attachPathOf, deployCommit, deployment, reporterHeaders, withQueue } from "../test-support/api-kit.ts";
+import { node, laptop, phone, alice, bob, project, dir, testApi, withThread, attachTo, attached, attachPathOf, deployCommit, deployment, reporterHeaders, withQueue } from "../test-support/api-kit.ts";
 
 test("callers off the allowlist, or unknown to tailscaled, are refused", async (t) => {
   const s = await testApi(t);
@@ -24,6 +24,23 @@ test("callers off the allowlist, or unknown to tailscaled, are refused", async (
   assert.equal((await s.call("GET", "/v1/projects")).status, 403);
   s.callAs(laptop);
   assert.deepEqual(await s.call("GET", "/v1/projects"), { status: 200, body: [] });
+});
+
+test("alice and bob are two people the API allows, each named by their own device", async (t) => {
+  const s = await testApi(t);
+  const answers = [];
+  for (const who of [alice, bob]) {
+    s.callAs(who);
+    answers.push((await s.call("GET", "/v1/whoami")).body);
+  }
+  assert.deepEqual(answers, [
+    { node: "nALICE", allowed: true, person: true, deployer: false },
+    { node: "nBOB", allowed: true, person: true, deployer: false },
+  ]);
+  const users = [alice, bob].map((who) => { s.callAs(who); return s.whoisAnswer()?.UserProfile?.LoginName; });
+  assert.deepEqual(users, ["alice@example.com", "bob@example.com"], "the fake whois holds a different user for each");
+  s.callAs("nNEXUSNODE" as TailnetNodeId);
+  assert.deepEqual([s.whoisAnswer()?.Node.Tags, s.whoisAnswer()?.UserProfile], [["tag:nexus-node"], undefined], "the node has tags and no user");
 });
 
 test("a path that does not decode is a 400 to an allowed caller and a 403 to any other, and a Host that does not parse is a 403", async (t) => {

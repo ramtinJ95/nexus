@@ -1,0 +1,141 @@
+{
+  "recorded": "2026-11-26",
+  "machine": "Nexus pylon, 2 CPU, 3.8 GiB, Docker 20.10 in the pylon",
+  "howToCompare": "Run node scripts/mp-probe.ts <name> on the same kind of machine and compare medians. The api probe needs NEXUS_VERIFY_BASE when Docker Hub is unreachable; check must run without it.",
+  "api": {
+    "commit": "10b83064",
+    "note": "Measured at mp-00 head, which changes no Nexus behaviour over multiplayer 81dfad56; multiplayer at 81dfad56 has no probe to run.",
+    "runs": [
+      {
+        "revision": "10b83064",
+        "medianMs": 3.6,
+        "p95Ms": 5.4,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.5,
+        "bobMedianMs": 3.7
+      },
+      {
+        "revision": "10b83064",
+        "medianMs": 3.6,
+        "p95Ms": 5.3,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.5,
+        "bobMedianMs": 3.7
+      },
+      {
+        "revision": "10b83064",
+        "medianMs": 3.8,
+        "p95Ms": 13.7,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.7,
+        "bobMedianMs": 3.9
+      },
+      {
+        "revision": "10b83064",
+        "medianMs": 3.5,
+        "p95Ms": 5.1,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.4,
+        "bobMedianMs": 3.6
+      },
+      {
+        "revision": "10b83064",
+        "medianMs": 3.8,
+        "p95Ms": 5.7,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.6,
+        "bobMedianMs": 4
+      }
+    ],
+    "medianSpreadPct": 8.6,
+    "outlier": "Run 3 p95 13.7 ms against 5.1-5.7 in the other four. Unexplained: three later runs on an idle machine gave p95 6.0, 6.1, 6.9 ms.",
+    "laterRuns": [
+      {
+        "revision": "10b83064",
+        "medianMs": 3.8,
+        "p95Ms": 6.1,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.8,
+        "bobMedianMs": 3.9
+      },
+      {
+        "revision": "10b83064",
+        "medianMs": 3.8,
+        "p95Ms": 6,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.6,
+        "bobMedianMs": 4
+      },
+      {
+        "revision": "10b83064",
+        "medianMs": 4.2,
+        "p95Ms": 6.9,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 4.1,
+        "bobMedianMs": 4.5
+      }
+    ]
+  },
+  "check": {
+    "baseline": {
+      "commit": "10b83064",
+      "runs": [
+        {
+          "revision": "10b83064",
+          "wallMs": 858839.1,
+          "exitCode": 0,
+          "failed": 0
+        },
+        {
+          "revision": "10b83064",
+          "wallMs": 856916.7,
+          "exitCode": 0,
+          "failed": 0
+        }
+      ]
+    },
+    "context": {
+      "commit": "81dfad56",
+      "note": "multiplayer base, as context. Run 3 failed on a 600 s timeout in src/cli/nexus-watch.test.ts:610 and is not a timing.",
+      "runs": [
+        {
+          "revision": "81dfad56",
+          "wallMs": 870323.5,
+          "exitCode": 0,
+          "failed": 0
+        },
+        {
+          "revision": "81dfad56",
+          "wallMs": 860818.3,
+          "exitCode": 0,
+          "failed": 0
+        },
+        {
+          "revision": "81dfad56",
+          "wallMs": 1496779.2,
+          "exitCode": 1,
+          "failed": 1
+        }
+      ]
+    }
+  },
+  "boot": {
+    "open": "Not measured. A template boot needs a 3 GiB pylon plus 1 GiB spare, more than this pylon's 3.8 GiB."
+  }
+}

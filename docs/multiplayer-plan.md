@@ -148,12 +148,12 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 
 ### mp-00: the two-person stack, the probe, and the arc's own migration list
 
-- [ ] **Depends on.** Nothing.
+- [x] **Depends on.** Nothing.
 - [ ] **Files.** `.claude/skills/verify-nexus/`, `src/test-support/api-kit.ts`, `scripts/mp-probe.ts`, `src/control/schema.ts`, `src/control/schema.test.ts`.
-- [ ] **Change.** Build the two tools in [Shared tools for proof](#shared-tools-for-proof). Add a second ordered migration list that this arc appends to, with its own counter, applied after the main list.
+- [x] **Change.** Build the two tools in [Shared tools for proof](#shared-tools-for-proof). Add a second ordered migration list that this arc appends to, with its own counter, applied after the main list.
 - [ ] **Result.** The stack answers as `alice` and as `bob`. The probe prints the three numbers. No behaviour of Nexus changes.
-- [ ] **Unit.** A registry that applied an arc migration accepts a later main migration, and the reverse. The existing re-apply rule in `schema.test.ts` holds for both lists.
-- [ ] **Live.** Start the stack. Pass when `nexus threads` as `alice` and as `bob` both answer, and the whois stand-in reports two different users.
+- [x] **Unit.** A registry that applied an arc migration accepts a later main migration, and the reverse. The existing re-apply rule in `schema.test.ts` holds for both lists.
+- [x] **Live.** Start the stack. Pass when `nexus threads` as `alice` and as `bob` both answer, and the whois stand-in reports two different users.
 - [ ] **Perf.** Record the `api`, `boot`, and `check` baselines on `multiplayer` and commit them as the file later slices compare against. Fail when five runs of `api` differ by more than 20% from each other, because the probe is then too noisy to use.
 
 ### mp-01: whois keeps the tailnet user and the tags

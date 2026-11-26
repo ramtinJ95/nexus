@@ -5,20 +5,25 @@
  * It composes the real parts the way src/checks/control/thread-on-node.ts does: the control plane from
  * startControlPlane (registry, loop, pi-durable harness, API and dashboard) and a probe from startProbe with
  * the Docker backend. Only the production boundaries are doubles:
- * - tailscaled's LocalAPI is a Unix socket in a directory under /tmp, named in <runDir>/socket-dir. whois names 127.0.0.1:7480 as the probe and
- *   every other address as the person's laptop, which the API allows as a person, as for the CLI on a Mac. The probe's own whois names
- *   every caller as the control plane.
+ * - tailscaled's LocalAPI is a Unix socket in a directory under /tmp, named in <runDir>/socket-dir. whois answers with the shapes of
+ *   src/test-support/people.ts: 127.0.0.1:7480 is the node, a connection that came through bob's port 7471 is bob, and every
+ *   other address is alice. The API allows both as people, as for the CLI on a Mac. The probe's own whois names every caller as the
+ *   control plane.
  * - the model is the scripted one from src/control/harness/test-fixture.ts: `bash: <command>` runs one bash tool call, and
  *   `stream: <n>` streams an answer of n words.
  * - `tailscale serve` is src/probe/fake-tailscale.ts, so the Mac's work tailnet is never touched.
+ *
+ * With NEXUS_VERIFY_THREADS=<n>, the registry starts with n archived threads of spoon, started in turn by alice and bob, so a
+ * read of the thread list has rows to read and reconcile boots none of them.
  *
  * Everything Docker holds for the run carries the label nexus.verify=<run>. The process writes <runDir>/state.json
  * once a thread can be started, and closes the probe and the control plane on SIGTERM or SIGINT. Containers
  * outlive it, as pylons outlive a probe. `verify-nexus down` removes them.
  */
 import { execFile } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { connect, createServer as createTcpServer } from "node:net";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { packagedDaemon } from "@earendil-works/pi-env";
@@ -30,8 +35,11 @@ import { nodeSecrets } from "../../../../src/probe/config.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "../../../../src/probe/fake-tailscale.ts";
 import { startProbe } from "../../../../src/probe/server.ts";
 import type { ImageId, NodeName, ProjectId, TailnetNodeId } from "../../../../src/ids.ts";
+import { defaultReleaseBranch } from "../../../../src/protocol/deploy.ts";
 import { probePort } from "../../../../src/protocol/routes.ts";
-import type { ImageManifest } from "../../../../src/image/images.ts";
+import { testPylon, testThread } from "../../../../src/test-support/registry-kit.ts";
+import { tailnet, type WhoisAnswer } from "../../../../src/test-support/people.ts";
+import type { ImageManifest } from "../../../../src/protocol/images.ts";
 import type { Project } from "../../../../src/control/project.ts";
 
 const exec = promisify(execFile);
@@ -44,11 +52,10 @@ const run = basename(runDir);
 const repoRoot = new URL("../../../../", import.meta.url).pathname;
 
 // Fixed, because the control plane reaches probes on probePort only and containers keep the bridge port they booted with.
-const ports = { api: 7470, probe: probePort, gateway: 7481, bridge: 7482 } as const;
+const ports = { api: 7470, bob: 7471, probe: probePort, gateway: 7481, bridge: 7482 } as const;
 const node = "verify-node" as NodeName;
 const controlPlaneId = "nVERIFYCONTROL" as TailnetNodeId;
-const probeId = "nVERIFYPROBE" as TailnetNodeId;
-const laptopId = "nVERIFYLAPTOP" as TailnetNodeId;
+const probeId = tailnet.node.Node.StableID;
 const labels = { "nexus.verify": run };
 const tag = `nexus-verify-pylon:${run}`;
 const imageId = "img-0000000000aa" as ImageId;
@@ -59,6 +66,20 @@ const log = (message: string) => console.error(`${new Date().toISOString()} ${me
 const base = process.env.NEXUS_VERIFY_BASE;
 /** The repository in the stack's image that the project names and the dotfiles layer is pulled from. */
 const verifyRepo = "/srv/verify.git";
+/**
+ * A second repository, at the same absolute path on this machine and in the stack's image, so the control plane can
+ * read a project's .nexus/setup from it as `file://`, which a template needs, and a pylon can clone it. `/srv/verify.git`
+ * is only in the image, so spoon always boots fresh. Not under the run directory: where the checkout is
+ * /home/user/workspace/repo, as in a Nexus pylon, that is where a pylon clones its own checkout, which the copy would block.
+ */
+const templateRoot = `/var/tmp/nexus-verify-${run}`;
+const templateRepo = join(templateRoot, "template.git");
+const seededThreads = (() => {
+  const n = process.env.NEXUS_VERIFY_THREADS;
+  if (n === undefined || n === "") return 0;
+  if (!/^[1-9][0-9]*$/.test(n)) throw new Error(`NEXUS_VERIFY_THREADS must be a positive integer, not ${JSON.stringify(n)}`);
+  return Number(n);
+})();
 
 async function buildImage() {
   const arch = await docker("info", "--format", "{{.Architecture}}");
@@ -69,6 +90,7 @@ async function buildImage() {
   await mkdir(dir, { recursive: true });
   await copyFile(packagedDaemon({ platform: "linux", arch: daemonArch }), join(dir, "pi-env"));
   await copyFile(join(repoRoot, "images/pylon/nexus"), join(dir, "nexus"));
+  await cp(templateRepo, join(dir, "template.git"), { recursive: true });
   // The slice test's image, plus the harness's daemon, the in-pylon CLI and git, so `git status` outputs read a checkout,
   // and procps, whose pgrep counts the terminals attached to Herdr Core.
   await writeFile(join(dir, "Dockerfile"), [
@@ -90,20 +112,66 @@ async function buildImage() {
     "RUN mkdir -p /root/.config/herdr-core && printf 'notes = false\\n' > /root/.config/herdr-core/config.toml",
     "COPY pi-env /usr/local/libexec/nexus/pi-env",
     "COPY nexus /usr/local/bin/nexus",
+    `COPY --chown=user:user template.git ${templateRepo}`,
     "RUN chmod 0755 /usr/local/libexec/nexus/pi-env /usr/local/bin/nexus",
   ].join("\n") + "\n");
   log(`building ${tag}`);
   await docker("build", "--quiet", "--label", `nexus.verify=${run}`, "--build-arg", `HERDR_CORE_VERSION=${herdrCore}`, "--tag", tag, dir);
 }
 
-/** tailscaled's LocalAPI whois for the control plane, answered by port: the probe's is the probe, everything else is the laptop. */
+/**
+ * The local ports of the forwarder's connections to the API, each of which carries a request of bob's. A closed one
+ * stays a minute, with the timer that forgets it, because the API may still be asking whois about its last request.
+ */
+const bobPorts = new Map<number, NodeJS.Timeout | null>();
+
+/**
+ * tailscaled's LocalAPI whois for the control plane, answered by port: the probe's is the node, one of bob's forwarded
+ * connections is bob, and everything else is alice. It logs each identity the first time it names it.
+ */
 async function fakeTailscaled(socket: string) {
+  const named = new Set<string>();
   const server = createServer((req, res) => {
     const addr = new URL(req.url ?? "/", "http://local-tailscaled.sock").searchParams.get("addr") ?? "";
-    const id = addr.endsWith(`:${ports.probe}`) ? probeId : laptopId;
-    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ Node: { StableID: id } }));
+    const port = Number(addr.slice(addr.lastIndexOf(":") + 1));
+    const answer: WhoisAnswer = port === ports.probe ? tailnet.node : bobPorts.has(port) ? tailnet.bob : tailnet.alice;
+    if (!named.has(answer.Node.StableID)) {
+      named.add(answer.Node.StableID);
+      log(`whois: answered ${answer.Node.StableID} as ${answer.UserProfile?.LoginName ?? `tags ${answer.Node.Tags?.join(",")}`}`);
+    }
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer));
   });
   await new Promise<void>((resolve, reject) => server.once("error", reject).listen(socket, resolve));
+  return server;
+}
+
+/**
+ * Bob's way in: a TCP forwarder from 127.0.0.1:7471 to the API. Each connection's local port is recorded before any of
+ * its bytes reach the API, so the API's whois of that connection finds it.
+ */
+async function bobForwarder() {
+  const server = createTcpServer((client) => {
+    const upstream = connect(ports.api, "127.0.0.1");
+    let port: number | undefined;
+    upstream.once("connect", () => {
+      port = upstream.localPort!;
+      clearTimeout(bobPorts.get(port) ?? undefined);
+      bobPorts.set(port, null);
+      client.pipe(upstream);
+      upstream.pipe(client);
+    });
+    upstream.once("close", () => {
+      if (port !== undefined) {
+        const closed = port;
+        bobPorts.set(closed, setTimeout(() => bobPorts.delete(closed), 60_000).unref());
+      }
+      client.destroy();
+    });
+    upstream.on("error", () => client.destroy());
+    client.on("error", () => upstream.destroy());
+    client.once("close", () => upstream.destroy());
+  });
+  await new Promise<void>((resolve, reject) => server.once("error", reject).listen(ports.bob, "127.0.0.1", resolve));
   return server;
 }
 
@@ -128,7 +196,21 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
   });
 }
 
+async function makeTemplateRepo() {
+  const work = join(runDir, "template-work");
+  const git = (...args: string[]) => exec("git", ["-C", work, "-c", "user.name=verify", "-c", "user.email=verify@invalid", ...args]);
+  await mkdir(work, { recursive: true });
+  await git("init", "--quiet", "--initial-branch=main");
+  await writeFile(join(work, "README.md"), "# verify-nexus template repository\n");
+  await git("add", "README.md");
+  await git("commit", "--quiet", "-m", "init");
+  await exec("git", ["clone", "--quiet", "--bare", work, templateRepo]);
+  await rm(work, { recursive: true, force: true });
+}
+
 await mkdir(runDir, { recursive: true });
+closers.push(() => rm(templateRoot, { recursive: true, force: true }));
+await makeTemplateRepo();
 await buildImage();
 // Not in the run directory: a socket path must fit macOS's 104-byte sun_path, and a worktree's path can be too long.
 // verify-nexus down removes the directory.
@@ -137,6 +219,8 @@ await writeFile(join(runDir, "socket-dir"), `${socketDir}\n`);
 const socket = join(socketDir, "tailscaled.sock");
 const tailscaled = await fakeTailscaled(socket);
 closers.push(() => { tailscaled.close(); });
+const forwarder = await bobForwarder();
+closers.push(() => { forwarder.close(); });
 const serve = fakeTailscale();
 
 const probe = await startProbe({
@@ -160,9 +244,30 @@ const manifest: ImageManifest = {
     neovim: "0.0.0", neovimSha256: "0".repeat(64),
   },
 };
+// One project on the node. The API adds it, unless threads are seeded, which need it in the registry first.
+const project: Project = {
+  id: "spoon" as ProjectId, repoUrl: verifyRepo, defaultBranch: "main", defaultNode: node,
+  resources: { cpus: 1, memoryGiB: 3, diskGiB: 1 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
+};
 const seed = openRegistry(join(runDir, "registry.db"));
 seed.images.saveImage(manifest, null);
 seed.images.setCurrentImage(imageId);
+if (seededThreads > 0) {
+  seed.nodes.upsertNode({ name: node, tailnetHost: "127.0.0.1", tailnetNodeId: probeId });
+  seed.projects.createProject(project);
+  const now = Date.now();
+  for (let i = 0; i < seededThreads; i++) {
+    const thread = testThread({
+      project: project.id, title: `Seeded ${i + 1}`, startedBy: (i % 2 === 0 ? tailnet.alice : tailnet.bob).Node.StableID,
+      createdAt: now - (seededThreads - i) * 60_000, lastAgentActivityAt: now - 3_600_000, lastHumanActivityAt: now - 3_600_000,
+    });
+    seed.threads.createThread(thread, testPylon(thread, {
+      node, boot: { image: imageId, resources: project.resources, repo: { kind: "clone", url: verifyRepo, checkout: { branch: "main", commit: "origin/main" } }, dotfiles: { repo: verifyRepo, ref: "main" } },
+    }));
+    seed.threads.setThreadStatus(thread.id, "archived");
+  }
+  log(`seeded ${seededThreads} archived threads of ${project.id}`);
+}
 seed.close();
 
 const controlPlane = await startControlPlane({
@@ -170,7 +275,9 @@ const controlPlane = await startControlPlane({
   listen: { host: "127.0.0.1", port: ports.api, hostnames: ["127.0.0.1", "localhost"] },
   self: { tailnetNodeId: controlPlaneId },
   nodes: [{ name: node, tailnetHost: "127.0.0.1", tailnetNodeId: probeId }],
-  callers: [laptopId],
+  imageBuildNode: node,
+  releaseBranch: defaultReleaseBranch,
+  callers: [tailnet.alice.Node.StableID, tailnet.bob.Node.StableID],
   dotfiles: { repo: verifyRepo, ref: "main" },
   harness: { storage: join(runDir, "harness.sqlite"), credentials: join(runDir, "unused-credentials.json"), model: scriptedModel },
   tailscaledSocket: socket,
@@ -179,12 +286,7 @@ const controlPlane = await startControlPlane({
 }, scriptedModels());
 closers.push(() => controlPlane.close());
 
-// One project on the node, through the API.
-const project: Project = {
-  id: "spoon" as ProjectId, repoUrl: verifyRepo, defaultBranch: "main", defaultNode: node,
-  resources: { cpus: 1, memoryGiB: 3, diskGiB: 1 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
-};
-await call("POST", "/v1/projects", project);
+if (seededThreads === 0) await call("POST", "/v1/projects", project);
 
 // Ready means a thread can start and its pylon can be planned: the node is online in the registry.
 const deadline = Date.now() + 60_000;
@@ -198,7 +300,7 @@ for (;;) {
 const head = (await exec("git", ["-C", repoRoot, "rev-parse", "--short", "HEAD"])).stdout.trim();
 const dirty = (await exec("git", ["-C", repoRoot, "status", "--porcelain", "--untracked-files=no"])).stdout.trim() !== "";
 await writeFile(join(runDir, "state.json"), JSON.stringify({
-  run, pid: process.pid, api, ports, node, project: project.id, image: imageId, dockerTag: tag, label: `nexus.verify=${run}`,
-  revision: `${head}${dirty ? "-dirty" : ""}`, startedAt: new Date().toISOString(),
+  run, pid: process.pid, api, bobApi: `http://127.0.0.1:${ports.bob}`, ports, node, project: project.id, image: imageId, dockerTag: tag, label: `nexus.verify=${run}`,
+  revision: `${head}${dirty ? "-dirty" : ""}`, seededThreads, templateRepo: `file://${templateRepo}`, startedAt: new Date().toISOString(),
 }, null, 2) + "\n");
 log(`nexus-verify: ready ${api} run ${run}`);

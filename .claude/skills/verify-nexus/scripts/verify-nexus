@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
 # Verification scaffolding for Nexus: one local stack (scripts/stack.ts) and the drivers that record evidence.
 #   verify-nexus up                          start the stack, wait until a thread can start, print the run
+#                                            (NEXUS_VERIFY_THREADS=<n> seeds n archived threads)
+#                                            (NEXUS_VERIFY_RUN=<name> names the run, so its caller knows the run is its own)
 #   verify-nexus doctor                      read-only: is the current run's stack worth driving?
-#   verify-nexus cli <step> -- <nexus args>  run the Mac nexus CLI against the stack, record cmd/stdout/stderr/exit
+#   verify-nexus cli <step> [--as alice|bob] -- <nexus args>
+#                                            run the Mac nexus CLI as alice (the default) or bob, record cmd/stdout/stderr/exit
 #   verify-nexus browser <step> -- <args>    run playwright-cli in the run's browser session, from the evidence dir
 #   verify-nexus pylon <step> <thread> -- <cmd...>  run a command in the thread's pylon container, recorded
 #   verify-nexus evidence                    print the current run's evidence directory
 #   verify-nexus down                        stop what this run started, keep the evidence
+#                                            (NEXUS_VERIFY_RUN=<name> stops only that run)
 set -euo pipefail
 
 skill_dir=$(cd "$(dirname "$(realpath "$0")")/.." && pwd)
 repo=$(cd "$skill_dir/../../.." && pwd)
 base="$repo/.verify/nexus"
 current_file="$base/current"
-ports=(7470 7480 7481 7482)
+ports=(7470 7471 7480 7481 7482)
 
 die() { echo "verify-nexus: $*" >&2; exit 1; }
 current_run() { [ -f "$current_file" ] || die "no current run. Start one with: verify-nexus up"; cat "$current_file"; }
@@ -48,11 +52,15 @@ up() {
     if [ -n "$pid" ] && ours "$pid" "$(run_dir "$old")"; then die "run $old is still up (pid $pid). Drive it, or stop it with: verify-nexus down"; fi
     die "run $old was not cleaned up. Run: verify-nexus down"
   fi
-  local run; run=$(date +%Y%m%d-%H%M%S)-$(openssl rand -hex 2)
+  local run; run=${NEXUS_VERIFY_RUN:-$(date +%Y%m%d-%H%M%S)-$(openssl rand -hex 2)}
+  [[ "$run" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]] || die "NEXUS_VERIFY_RUN must be letters, digits and dashes, not $run"
   mkdir -p "$base"
   # The claim on the stack: noclobber makes it atomic, so a second `up` racing this one stops here.
   ( set -C; echo "$run" > "$current_file" ) 2> /dev/null || die "another verify-nexus up claimed the stack first, as run $(cat "$current_file")"
   release() { rm -f "$current_file"; die "$@"; }
+  # An up that is stopped takes its own run down. Bash runs this once the command in progress returns, so a stack it
+  # launched already has its pid file.
+  trap 'echo "verify-nexus: up was stopped, so run $run goes down" >&2; NEXUS_VERIFY_RUN=$run down >&2; exit 143' TERM INT
   for p in "${ports[@]}"; do
     local holder; holder=$(listener "$p")
     [ -z "$holder" ] || release "port $p is taken by pid $holder ($(ps -o command= -p "$holder")). This stack needs 127.0.0.1:${ports[*]} and runs one at a time"
@@ -64,14 +72,16 @@ up() {
   # In its own session, so the caller's shell, its process group and its hangup never reach the stack.
   local pid
   pid=$(node -e '
-    const { openSync } = require("node:fs");
+    // A Ctrl-C reaches this launcher too. Ignoring it lets the stack it spawns always get its pid file.
+    process.on("SIGINT", () => {}).on("SIGTERM", () => {});
+    const { openSync, writeFileSync } = require("node:fs");
     const [stack, dir] = process.argv.slice(1);
     const out = openSync(`${dir}/stack.log`, "a");
     const child = require("node:child_process").spawn(process.execPath, [stack, dir], { detached: true, stdio: ["ignore", out, out] });
+    writeFileSync(`${dir}/pid`, `${child.pid}\n`);
     console.log(child.pid);
     child.unref();
   ' "$skill_dir/scripts/stack.ts" "$dir")
-  echo "$pid" > "$dir/pid"
   echo "verify-nexus: run $run, pid $pid, log $dir/stack.log. The first run builds the pylon image and can take minutes" >&2
   local deadline=$((SECONDS + 900))
   until [ -f "$dir/state.json" ]; do
@@ -82,6 +92,7 @@ up() {
     [ $SECONDS -lt $deadline ] || { tail -30 "$dir/stack.log" >&2; die "not ready after 15 minutes. Clean up with: verify-nexus down"; }
     sleep 2
   done
+  trap - TERM INT
   cp "$dir/state.json" "$(evidence_dir "$run")/stack-state.json"
   echo "verify-nexus: ready. API and dashboard at $(state "$run" api), evidence in $(evidence_dir "$run")"
 }
@@ -105,6 +116,8 @@ doctor() {
   check "stack revision $revision is the checkout's HEAD $head" "[ '${revision%-dirty}' = '$head' ]"
   check "Docker answers and holds $tag" "[ -n \"\$(docker images -q $tag)\" ]"
   check "the API allows this machine and verify-node is online" "NEXUS_URL=$api NEXUS_SOCKS=none node '$repo/src/cli/nexus.ts' nodes --json | grep -q '\"state\": \"online\"'"
+  check "whois names alice through $api" "curl -fsS '$api/v1/whoami' | grep -q '\"node\": *\"nALICE\"'"
+  check "whois names bob through $(state "$run" bobApi)" "curl -fsS '$(state "$run" bobApi)/v1/whoami' | grep -q '\"node\": *\"nBOB\"'"
   echo "pylons of this run: $(docker ps -a --filter "label=$label" --format '{{.Names}}:{{.Status}}' | tr '\n' ' ')"
   [ "${revision%-dirty}" = "$revision" ] || echo "note  the stack started from a checkout with uncommitted changes"
   return $failed
@@ -112,9 +125,18 @@ doctor() {
 
 cli() {
   local run; run=$(current_run)
-  local step=${1:?usage: verify-nexus cli <step> -- <nexus args>}; shift
+  local step=${1:?usage: verify-nexus cli <step> [--as alice|bob] -- <nexus args>}; shift
+  local person=alice
+  if [ "${1:-}" = "--as" ]; then person=${2:-}; shift 2 || true; fi
+  local url
+  case "$person" in
+    alice) url=$(state "$run" api) ;;
+    bob) url=$(state "$run" bobApi) ;;
+    *) echo "verify-nexus: --as takes alice or bob, not '$person'" >&2; exit 64 ;;
+  esac
   [ "${1:-}" = "--" ] && shift
-  record "$run" "$step" env "NEXUS_URL=$(state "$run" api)" NEXUS_SOCKS=none node "$repo/src/cli/nexus.ts" "$@"
+  # NEXUS_VERIFY_AS changes nothing the CLI does. It puts the person in the recorded .cmd.
+  record "$run" "$step" env "NEXUS_VERIFY_AS=$person" "NEXUS_URL=$url" NEXUS_SOCKS=none node "$repo/src/cli/nexus.ts" "$@"
 }
 
 # playwright-cli exits 0 when an action fails, and prints the failure under `### Error`, so that output fails the step.
@@ -144,6 +166,8 @@ pylon() {
 down() {
   [ -f "$current_file" ] || { echo "verify-nexus: no current run, nothing to stop"; return 0; }
   local run; run=$(cat "$current_file")
+  # A caller that names its run never stops another's, as a run that replaced its own would be.
+  if [ -n "${NEXUS_VERIFY_RUN:-}" ] && [ "$run" != "$NEXUS_VERIFY_RUN" ]; then echo "verify-nexus: the current run is $run, not $NEXUS_VERIFY_RUN, so nothing was stopped"; return 0; fi
   local dir; dir=$(run_dir "$run")
   local pid; pid=$(cat "$dir/pid" 2>/dev/null || true)
   if [ -n "$pid" ] && ours "$pid" "$dir"; then
@@ -169,6 +193,8 @@ down() {
     rmdir "$sockets" || echo "verify-nexus: left $sockets, which holds more than the socket" >&2
   fi
   rm -rf "$dir"
+  # stack.ts's template repository, outside the run directory. Only a run name that could have been made is a path here.
+  if [[ "$run" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]]; then rm -rf "/var/tmp/nexus-verify-$run"; fi
   rm -f "$current_file"
   echo "verify-nexus: run $run is down. Evidence kept in $(evidence_dir "$run")"
 }
@@ -181,5 +207,5 @@ case "${1:-}" in
   pylon) shift; pylon "$@" ;;
   evidence) evidence_dir "$(current_run)" ;;
   down) down ;;
-  *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
+  *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 64 ;;
 esac

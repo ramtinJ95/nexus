@@ -30,6 +30,7 @@ import type { UsageBackfillJob } from "../control/usage-backfill.ts";
 import type { ProjectMirror } from "../control/templates.ts";
 import { processStream } from "../process-stream.ts";
 import { tokenDigest } from "../protocol/deploy.ts";
+import { tailnet, type WhoisAnswer } from "./people.ts";
 import { call as callJson, runningPylon, tempDir, testCapacity, testImage, testObservation } from "./kit.ts";
 import type { ImageId, NodeName, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { NodeObservation, ServiceFact } from "../protocol/observations.ts";
@@ -41,6 +42,11 @@ export const node = "rj-firebat" as NodeName;
 export const laptop = "nLAPTOP" as TailnetNodeId;
 /** An allowed person's device that is not a deployer. */
 export const phone = "nPHONE" as TailnetNodeId;
+/** Two allowed people, each on their own device, whose whois answers people.ts holds. */
+export const alice = tailnet.alice.Node.StableID;
+export const bob = tailnet.bob.Node.StableID;
+/** The whois answer tailscaled would give for each caller people.ts knows, user fields and tags included. */
+const answers = new Map<TailnetNodeId, WhoisAnswer>(Object.values(tailnet).map((a) => [a.Node.StableID, a]));
 /** The step a refusal names that lets a person's device `caller` do `what`. */
 export const admitStep = (caller: TailnetNodeId, what: string) => `. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it ${what}: sudo deploy/install.sh --admit ${caller}`;
 export const project = {
@@ -137,7 +143,7 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
       return caller;
     },
     // infra-testbench is allowed as a node in control.json's callers would be, so a test can show the API still tells it from a person.
-    allowed: new Set([laptop, phone, "nFIREBAT" as TailnetNodeId, "nTESTBENCH" as TailnetNodeId]),
+    allowed: new Set([laptop, phone, alice, bob, "nFIREBAT" as TailnetNodeId, "nTESTBENCH" as TailnetNodeId]),
     joins: { configured: new Set(["nFIREBAT", "nBENCH"] as TailnetNodeId[]), whois: async () => caller === null ? null : { id: caller, host: hosts.get(caller) ?? "unnamed.tail.ts.net" }, joined: (n) => { joined.push(n); } },
     // The control plane runs on rj-firebat and deploys nothing unless a test says so.
     ...(deployment === null ? {} : { deployment: deployment ?? { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} } }),
@@ -185,6 +191,8 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
     /** How many requests the API has admitted. */
     requests: () => requests,
     callAs(id: TailnetNodeId | null) { caller = id; },
+    /** The whole answer the fake whois holds for the current caller, which the API reads only the node of until mp-01. */
+    whoisAnswer: () => caller === null ? null : answers.get(caller) ?? null,
     nodeHealth(next: typeof health) { health = next; },
     /** Holds each whois from now on until `release`. `asked` settles once one is held. */
     holdWhois() {
