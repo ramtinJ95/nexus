@@ -22,7 +22,10 @@ export interface LoginStore {
 export const tokenFault = (kind: LoginKind, token: string): string | undefined =>
   token.length > 4096 ? "a token is at most 4096 characters" : tokenChecks[kind](token);
 
-export function loginStore(dir: string): LoginStore {
+/** The two writes a change makes, which a test fails partway. */
+type Writes = { writeFile: typeof writeFile; rename: typeof rename };
+
+export function loginStore(dir: string, io: Writes = { writeFile, rename }): LoginStore {
   // A login holds an @ and may hold a slash, so the name is encoded, and no login names a file outside `dir`.
   const fileOf = (person: Person) => join(dir, `${encodeURIComponent(person)}.json`);
   /** Each person's writes, one after another, so two at once do not lose one of them. */
@@ -44,8 +47,8 @@ export function loginStore(dir: string): LoginStore {
       if (Object.keys(stored).length === 0) return void await rm(fileOf(person), { force: true });
       const partial = `${fileOf(person)}.${randomUUID()}.partial`;
       try {
-        await writeFile(partial, `${JSON.stringify(stored)}\n`, { flag: "wx", mode: 0o600 });
-        await rename(partial, fileOf(person));
+        await io.writeFile(partial, `${JSON.stringify(stored)}\n`, { flag: "wx", mode: 0o600 });
+        await io.rename(partial, fileOf(person));
       } finally {
         await rm(partial, { force: true });
       }
