@@ -10,7 +10,7 @@ import { z } from "zod";
 import type { SecretSource } from "../backends/backend.ts";
 import { parseJson } from "../parse.ts";
 import type { ControlPlane } from "../deploy/control-plane.ts";
-import { type ImageId, isImageId, type TailnetNodeId } from "../ids.ts";
+import { type ImageId, isImageId, type PylonId, type TailnetNodeId } from "../ids.ts";
 import { nodeNameSchema, tailnetNodeIdSchema } from "../protocol/fields.ts";
 import { heldSecrets } from "../protocol/observations.ts";
 import { probePort, type ProbeAuthConfig } from "../protocol/routes.ts";
@@ -75,8 +75,14 @@ export async function readProbeConfig(path: string): Promise<ProbeConfig> {
   }
 }
 
-/** The node's secret file, plus the held secrets the control plane hands over, which are kept in memory only. */
-export interface NodeSecrets extends SecretSource { hold(name: string, value: string): void }
+/**
+ * The node's secret file, plus what the control plane hands over, which is kept in memory only: the held secrets, and
+ * the values that belong to one pylon. A probe restart loses both, and the control plane hands them over again.
+ */
+export interface NodeSecrets extends SecretSource {
+  hold(name: string, value: string): void;
+  holdFor(pylonId: PylonId, name: string, value: string): void;
+}
 
 /**
  * A pylon can boot before the first handoff, when the probe restarts between the snapshot the control plane boots it on
@@ -88,10 +94,13 @@ const notHandedOver = "nexus-held-secret-not-handed-over-yet";
 /** `names` lists a held secret only once it is handed over, so the control plane holds a boot that needs it until then. */
 export function nodeSecrets(file: SecretSource): NodeSecrets {
   const held = new Map<string, string>();
+  const pylons = new Map<PylonId, Map<string, string>>();
+  const nodeValue = (name: string) => heldSecrets.includes(name) ? held.get(name) ?? notHandedOver : file.value(name);
   return {
-    value: (name) => heldSecrets.includes(name) ? held.get(name) ?? notHandedOver : file.value(name),
+    value: (name, pylonId) => (pylonId === undefined ? undefined : pylons.get(pylonId)?.get(name)) ?? nodeValue(name),
     names: () => [...file.names(), ...held.keys()],
     hold(name, value) { held.set(name, value); },
+    holdFor(pylonId, name, value) { pylons.set(pylonId, (pylons.get(pylonId) ?? new Map<string, string>()).set(name, value)); },
   };
 }
 

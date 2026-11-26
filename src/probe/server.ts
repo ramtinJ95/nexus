@@ -15,7 +15,8 @@ import { pipeline } from "node:stream/promises";
 import { type BackendPylon, type VmBackend } from "../backends/backend.ts";
 import type { ProbeDeps } from "./run.ts";
 import { createJobTable } from "./jobs.ts";
-import { isPortableArtifactId, type JobId, type NodeName, type PylonId, type TailnetNodeId } from "../ids.ts";
+import { isPortableArtifactId, isPylonId, type JobId, type NodeName, type PylonId, type TailnetNodeId } from "../ids.ts";
+import { secretNamePattern } from "../protocol/secret-grants.ts";
 import { jobDeadlineMs, JobFailure, type Job } from "../protocol/jobs.ts";
 import { encodeProbeEvent, heldSecrets, type NodeObservation, type ProbeEvent } from "../protocol/observations.ts";
 import { parsePylonCommand, type PylonCommand } from "../protocol/commands.ts";
@@ -305,6 +306,25 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     return { name, params };
   }
 
+  /** No reply or log carries the value, so a refusal says what a value must be, never what this one was. Null: refused, and answered. */
+  async function secretValue(req: IncomingMessage, res: ServerResponse): Promise<string | null> {
+    let value: string;
+    try {
+      value = await readBody(req, maxSecretBytes);
+    } catch (err) {
+      if (!(err instanceof BodyTooLarge)) throw err;
+      send(res, 400, `a secret value is at most ${maxSecretBytes} bytes`);
+      return null;
+    }
+    if (tokenAlphabet.test(value)) return value;
+    send(res, 400, "a secret value is a token: letters, digits and -._~+/ with optional = padding");
+    return null;
+  }
+
+  async function applySecret(name: string, only: PylonId | null): Promise<void> {
+    for (const { pylonId, reason } of await backend.updateSecret(name, only)) log(`${pylonId}: ${name} was not updated: ${reason}`);
+  }
+
   const handlers: { [K in HttpRouteName]: (req: IncomingMessage, res: ServerResponse, params: ParamsOf<(typeof probeRoutes)[K]["path"]>) => Promise<unknown> | void } = {
     async submit(req, res, { jobId }) {
       const reply = jobs.submit(jobId as JobId, await readBody(req));
@@ -344,21 +364,23 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     },
     async putSecret(req, res, { name }) {
       if (!heldSecrets.includes(name)) return send(res, 404, `${name} is not a secret the control plane hands over`);
-      // No reply or log carries the value, so a refusal says what a value must be, never what this one was.
-      let value: string;
-      try {
-        value = await readBody(req, maxSecretBytes);
-      } catch (err) {
-        if (!(err instanceof BodyTooLarge)) throw err;
-        return send(res, 400, `a secret value is at most ${maxSecretBytes} bytes`);
-      }
-      if (!tokenAlphabet.test(value)) return send(res, 400, "a secret value is a token: letters, digits and -._~+/ with optional = padding");
+      const value = await secretValue(req, res);
+      if (value === null) return;
       const first = !options.secrets.names().includes(name);
       options.secrets.hold(name, value);
-      for (const { pylonId, reason } of await backend.updateSecret(name, value)) log(`${pylonId}: ${name} was not updated: ${reason}`);
+      await applySecret(name, null);
       res.writeHead(204).end();
       // Boots that need it wait for a snapshot that lists it.
       if (first) void publishSnapshot();
+    },
+    async putPylonSecret(req, res, { name, pylon }) {
+      if (!secretNamePattern.test(name)) return send(res, 400, `${JSON.stringify(name)} is not a secret name`);
+      if (!isPylonId(pylon)) return send(res, 400, `${JSON.stringify(pylon)} is not a pylon ID`);
+      const value = await secretValue(req, res);
+      if (value === null) return;
+      options.secrets.holdFor(pylon, name, value);
+      await applySecret(name, pylon);
+      res.writeHead(204).end();
     },
     async putPeers(req, res) {
       let next: readonly TailnetNodeId[];
@@ -537,7 +559,7 @@ const tablePaths = [...new Set(Object.values(probeRoutes).map((route) => route.p
   names: (Object.keys(probeRoutes) as RouteName[]).filter((name) => probeRoutes[name].path === path),
 }));
 /** A method no route of a path serves answers 405, with the entry after the reason, at these paths, and 404 at the others. */
-const notAllowed: Partial<Record<RouteName, string>> = { submit: "", putSecret: "", putPeers: "", wakeDeployer: "", health: ": node health is read-only" };
+const notAllowed: Partial<Record<RouteName, string>> = { submit: "", putSecret: "", putPylonSecret: "", putPeers: "", wakeDeployer: "", health: ": node health is read-only" };
 
 function send(res: ServerResponse, status: number, body: string, contentType = "text/plain; charset=utf-8") {
   res.writeHead(status, { "content-type": contentType }).end(body);

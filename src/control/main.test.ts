@@ -135,7 +135,7 @@ async function controlPlaneOf(t: import("node:test").TestContext, config: Record
     followed.push([node.name, node.tailnetHost, node.tailnetNodeId]);
     const unused = () => Promise.reject(new Error("unused"));
     return {
-      node: node.name, submit: unused, job: unused, command: unused, stream: unused, manifest: unused, putSecret: unused, health: options.health ?? unused,
+      node: node.name, submit: unused, job: unused, command: unused, stream: unused, manifest: unused, putSecret: unused, putPylonSecret: unused, health: options.health ?? unused,
       // The probe has nothing to clean up.
       artifactUsage: async () => ({ artifacts: [] }), dropArtifacts: unused,
       async wakeDeployer() { wakes.push([node.name, Date.now()]); },

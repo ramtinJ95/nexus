@@ -42,6 +42,8 @@ export interface ProbeClient {
   manifest(artifact: PortableArtifactId): Promise<ArtifactManifest | null>;
   /** PUT /v1/secrets/{name}: the current value of one of heldSecrets. The probe holds it in memory and applies it to its running pylons. */
   putSecret(name: string, value: string): Promise<void>;
+  /** PUT /v1/secrets/{name}/pylons/{pylon}: one pylon's own value of a secret, which it reads before the node's. The probe holds it in memory and applies it to that pylon alone. */
+  putPylonSecret(pylonId: PylonId, name: string, value: string): Promise<void>;
   /** PUT /v1/peers: every other node, whose probes may fetch this node's images and templates and serve it theirs. */
   putPeers(peers: readonly TailnetNodeId[]): Promise<void>;
   /** GET /v1/node-health: the node's host as the probe reads it now. It answers after sampling its pylons' CPU for a second. */
@@ -199,6 +201,10 @@ export function connectProbe(node: NodeName, tailnetHost: string, expected: Tail
     },
     async putSecret(name, value) {
       const res = await call(probeRoutes.putSecret.method, routePath(probeRoutes.putSecret, { name }), value, requestTimeoutMs, "text/plain; charset=utf-8");
+      expectStatus(res, 204);
+    },
+    async putPylonSecret(pylonId, name, value) {
+      const res = await call(probeRoutes.putPylonSecret.method, routePath(probeRoutes.putPylonSecret, { name, pylon: pylonId }), value, requestTimeoutMs, "text/plain; charset=utf-8");
       expectStatus(res, 204);
     },
     async artifactUsage() {

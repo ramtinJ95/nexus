@@ -272,7 +272,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     }
     const secrets: BootSpec["secrets"] = {};
     for (const grant of boot.network.secrets) {
-      const value = options.secrets.value(grant.name);
+      const value = options.secrets.value(grant.name, boot.pylonId);
       if (value === undefined) throw new JobFailure("secret-missing", `secret ${grant.name} is not in this node's secret file`);
       secrets[grant.name] = { hosts: [...grant.hosts], value };
     }
@@ -596,11 +596,14 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       return pylonGuest(pylonId, instanceDir(pylonId), sandbox, statuses, shells);
     },
 
-    async updateSecret(secret, value, signal) {
+    async updateSecret(secret, only, signal) {
       const instances = await sandbox({ action: "list", kind: "instances" });
       const limit = () => signal === undefined ? AbortSignal.timeout(secretUpdateMs) : AbortSignal.any([signal, AbortSignal.timeout(secretUpdateMs)]);
       // A controller whose boot did not grant the secret answers that it does not hold it, which is no failure.
-      const failures = await Promise.all(instances.filter((instance) => instance.status.state === "running").map(async ({ name }) => {
+      const running = instances.filter((instance) => instance.status.state === "running" && (only === null || instance.name === only));
+      const failures = await Promise.all(running.map(async ({ name }) => {
+        const value = options.secrets.value(secret, name as PylonId);
+        if (value === undefined) return [];
         try {
           await sandbox({ action: "update-secret", name, secret, value }, limit());
           return [];
