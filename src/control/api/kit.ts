@@ -4,6 +4,7 @@
 import type { ServerResponse } from "node:http";
 import { z } from "zod";
 import type { TailnetNodeId } from "../../ids.ts";
+import type { TailnetIdentity } from "../../node-base/tailscaled.ts";
 import type { ClaudeConversations } from "../claude-conversation.ts";
 import type { TurnGate } from "../drain.ts";
 import { HttpError } from "../http-error.ts";
@@ -25,8 +26,11 @@ export type Reply =
   | { status: number; headers: Record<string, string>; body: string | Buffer; encode?: Encode; file?: never; stream?: never }
   | { status: number; file: Buffer; type: string; cache?: string; stream?: never }
   | { stream(res: ServerResponse): Promise<void> | void; status?: never; file?: never };
-/** `roles` are what roleOf gives the caller, and `host` its MagicDNS name, which only the join's whois gives. */
-interface Request { query: URLSearchParams; body(empty?: unknown): Promise<unknown>; caller: TailnetNodeId; roles: ReadonlySet<Role>; host: string | null }
+/**
+ * `identity` is who owns the caller's device, as whois names it, `roles` what roleOf gives the caller, and `host` its
+ * MagicDNS name, which only the join's whois gives.
+ */
+interface Request { query: URLSearchParams; body(empty?: unknown): Promise<unknown>; caller: TailnetNodeId; identity: TailnetIdentity; roles: ReadonlySet<Role>; host: string | null }
 export type Route = (match: RegExpExecArray, req: Request) => Reply | Promise<Reply>;
 /** A route any allowed caller or tailnet node changes state with says why it may. */
 type WritePolicy = Policy & ({ role: Exclude<Policy["role"], "allowed" | "tailnet"> } | { why: string });

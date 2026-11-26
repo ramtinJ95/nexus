@@ -158,13 +158,13 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 
 ### mp-01: whois keeps the tailnet user and the tags
 
-- [ ] **Depends on.** `mp-00`.
-- [ ] **Files.** `src/node-base/tailscaled.ts`, `src/control/api/server.ts`, their tests.
-- [ ] **Change.** The whois client keeps `UserProfile.LoginName` and the node's tags beside `Node.StableID`. `admitted` passes them on. No policy reads them yet.
-- [ ] **Result.** A request's caller carries a user and tags. Every decision is the same as before.
-- [ ] **Unit.** A whois answer for a user-owned device yields the user. A whois answer for a tagged device yields tags and no user.
+- [x] **Depends on.** `mp-00`.
+- [x] **Files.** `src/node-base/tailscaled.ts`, `src/control/api/server.ts`, their tests.
+- [x] **Change.** The whois client keeps `UserProfile.LoginName` and the node's tags beside `Node.StableID`. `admitted` passes them on. No policy reads them yet.
+- [x] **Result.** A request's caller carries a user and tags. Every decision is the same as before.
+- [x] **Unit.** A whois answer for a user-owned device yields the user. A whois answer for a tagged device yields tags and no user.
 - [ ] **Live.** On the company tailnet, call the control plane from a personal device and from a tagged device. Pass when the log names the user for the first and no user for the second. This also settles what the install exploration could not check, the whois answer for a tagged device.
-- [ ] **Perf.** `api`. Fail above 15% over base.
+- [x] **Perf.** `api`. Fail above 15% over base.
 
 ### mp-02: people, roles, and a thread's owner
 

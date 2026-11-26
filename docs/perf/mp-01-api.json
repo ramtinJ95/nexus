@@ -1,0 +1,203 @@
+{
+  "slice": "mp-01",
+  "probe": "api",
+  "recorded": "2026-11-26",
+  "machine": "Nexus pylon, 4 CPU, Docker in the pylon, NEXUS_VERIFY_BASE=nexus-verify-base:pylon",
+  "order": "base first, then head, alternating, five runs a side",
+  "limit": "fail when the head median of medians is over 15% above base and outside base range",
+  "base": {
+    "commit": "6018a1f7",
+    "runs": [
+      {
+        "probe": "api",
+        "revision": "6018a1f7",
+        "dirty": false,
+        "medianMs": 3.4,
+        "p95Ms": 5.3,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.3,
+        "bobMedianMs": 3.5
+      },
+      {
+        "probe": "api",
+        "revision": "6018a1f7",
+        "dirty": false,
+        "medianMs": 3.1,
+        "p95Ms": 4.4,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3,
+        "bobMedianMs": 3.2
+      },
+      {
+        "probe": "api",
+        "revision": "6018a1f7",
+        "dirty": false,
+        "medianMs": 3.3,
+        "p95Ms": 3.9,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.2,
+        "bobMedianMs": 3.3
+      },
+      {
+        "probe": "api",
+        "revision": "6018a1f7",
+        "dirty": false,
+        "medianMs": 4,
+        "p95Ms": 11.5,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.8,
+        "bobMedianMs": 4.5
+      },
+      {
+        "probe": "api",
+        "revision": "6018a1f7",
+        "dirty": false,
+        "medianMs": 3.3,
+        "p95Ms": 4,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.2,
+        "bobMedianMs": 3.4
+      }
+    ]
+  },
+  "head": {
+    "commit": "e8492327",
+    "runs": [
+      {
+        "probe": "api",
+        "revision": "e8492327",
+        "dirty": false,
+        "medianMs": 3.4,
+        "p95Ms": 4.4,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.2,
+        "bobMedianMs": 3.5
+      },
+      {
+        "probe": "api",
+        "revision": "e8492327",
+        "dirty": false,
+        "medianMs": 3.2,
+        "p95Ms": 4.1,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3,
+        "bobMedianMs": 3.3
+      },
+      {
+        "probe": "api",
+        "revision": "e8492327",
+        "dirty": false,
+        "medianMs": 3.6,
+        "p95Ms": 6.5,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.5,
+        "bobMedianMs": 3.7
+      },
+      {
+        "probe": "api",
+        "revision": "e8492327",
+        "dirty": false,
+        "medianMs": 3.4,
+        "p95Ms": 6.3,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.3,
+        "bobMedianMs": 3.5
+      },
+      {
+        "probe": "api",
+        "revision": "e8492327",
+        "dirty": false,
+        "medianMs": 6.3,
+        "p95Ms": 16.4,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 5.9,
+        "bobMedianMs": 6.8
+      }
+    ]
+  },
+  "summary": {
+    "baseMedianMs": 3.3,
+    "baseRangeMs": [
+      3.1,
+      4
+    ],
+    "headMedianMs": 3.4,
+    "headRangeMs": [
+      3.2,
+      6.3
+    ]
+  },
+  "extra": {
+    "note": "Two more alternating pairs after the five, to see whether head run 5 (6.3 ms) recurs. Not part of the box.",
+    "runs": [
+      {
+        "probe": "api",
+        "revision": "6018a1f7",
+        "dirty": false,
+        "medianMs": 3.6,
+        "p95Ms": 8.8,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.4,
+        "bobMedianMs": 3.6
+      },
+      {
+        "probe": "api",
+        "revision": "6018a1f7",
+        "dirty": false,
+        "medianMs": 3.3,
+        "p95Ms": 4.8,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.2,
+        "bobMedianMs": 3.3
+      },
+      {
+        "probe": "api",
+        "revision": "e8492327",
+        "dirty": false,
+        "medianMs": 3.5,
+        "p95Ms": 4.5,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.4,
+        "bobMedianMs": 3.5
+      },
+      {
+        "probe": "api",
+        "revision": "e8492327",
+        "dirty": false,
+        "medianMs": 3,
+        "p95Ms": 3.7,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 2.9,
+        "bobMedianMs": 3.1
+      }
+    ]
+  }
+}

@@ -33,6 +33,7 @@ import { tokenDigest } from "../protocol/deploy.ts";
 import { tailnet, type WhoisAnswer } from "./people.ts";
 import { call as callJson, runningPylon, tempDir, testCapacity, testImage, testObservation } from "./kit.ts";
 import type { ImageId, NodeName, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
+import { parseWhois, type TailnetCaller } from "../node-base/tailscaled.ts";
 import type { NodeObservation, ServiceFact } from "../protocol/observations.ts";
 import type { CommandResult, PylonCommand } from "../protocol/commands.ts";
 import type { ByteStream } from "../protocol/streams.ts";
@@ -47,6 +48,11 @@ export const alice = tailnet.alice.Node.StableID;
 export const bob = tailnet.bob.Node.StableID;
 /** The whois answer tailscaled would give for each caller people.ts knows, user fields and tags included. */
 const answers = new Map<TailnetNodeId, WhoisAnswer>(Object.values(tailnet).map((a) => [a.Node.StableID, a]));
+/** What the API's whois keeps of `id`'s answer. A device people.ts does not know answers with no user and no tags. */
+const callerOf = (id: TailnetNodeId): TailnetCaller => {
+  const { identity } = parseWhois(answers.get(id) ?? { Node: { StableID: id } });
+  return { id, ...identity };
+};
 /** The step a refusal names that lets a person's device `caller` do `what`. */
 export const admitStep = (caller: TailnetNodeId, what: string) => `. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it ${what}: sudo deploy/install.sh --admit ${caller}`;
 export const project = {
@@ -140,11 +146,11 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
       requests++;
       asked();
       await admitted;
-      return caller;
+      return caller === null ? null : callerOf(caller);
     },
     // infra-testbench is allowed as a node in control.json's callers would be, so a test can show the API still tells it from a person.
     allowed: new Set([laptop, phone, alice, bob, "nFIREBAT" as TailnetNodeId, "nTESTBENCH" as TailnetNodeId]),
-    joins: { configured: new Set(["nFIREBAT", "nBENCH"] as TailnetNodeId[]), whois: async () => caller === null ? null : { id: caller, host: hosts.get(caller) ?? "unnamed.tail.ts.net" }, joined: (n) => { joined.push(n); } },
+    joins: { configured: new Set(["nFIREBAT", "nBENCH"] as TailnetNodeId[]), whois: async () => caller === null ? null : { ...callerOf(caller), host: hosts.get(caller) ?? "unnamed.tail.ts.net" }, joined: (n) => { joined.push(n); } },
     // The control plane runs on rj-firebat and deploys nothing unless a test says so.
     ...(deployment === null ? {} : { deployment: deployment ?? { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} } }),
     startThread,
@@ -191,7 +197,7 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
     /** How many requests the API has admitted. */
     requests: () => requests,
     callAs(id: TailnetNodeId | null) { caller = id; },
-    /** The whole answer the fake whois holds for the current caller, which the API reads only the node of until mp-01. */
+    /** The whole answer the fake whois holds for the current caller. */
     whoisAnswer: () => caller === null ? null : answers.get(caller) ?? null,
     nodeHealth(next: typeof health) { health = next; },
     /** Holds each whois from now on until `release`. `asked` settles once one is held. */
