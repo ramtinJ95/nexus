@@ -58,7 +58,7 @@ const tempDb = () => join(registries, `${randomUUID()}.db`);
 const previous = "p".repeat(40);
 
 /** `agentState` replaces the fake that reads replies and model failures from the fixture's maps. */
-function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview; secondReview?: SecondReview; agentState?: (registry: Registry) => ReviewDeps["agentState"]; personWrote?: (registry: Registry) => ReviewDeps["personWrote"] } = {}) {
+function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; releaseBranch?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview; secondReview?: SecondReview; agentState?: (registry: Registry) => ReviewDeps["agentState"]; personWrote?: (registry: Registry) => ReviewDeps["personWrote"] } = {}) {
   const registry = openRegistry(options.path ?? ":memory:");
   t.after(() => { try { registry.close(); } catch { /* closed by a restart */ } });
   const repo = options.repo ?? "ramtinJ95/nexus";
@@ -203,7 +203,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
         discard(id) { archived.push(id); registry.threads.setThreadStatus(id, "archived"); },
       },
     }),
-    release: { self, repo: "ramtinJ95/nexus" },
+    release: { self, repo: "ramtinJ95/nexus", branch: options.releaseBranch ?? "main" },
     mayLand: (caller) => deployers.has(caller),
     wake: (target) => { woken.push(target.id); },
     log: (message) => { logged.push(message); },
@@ -893,6 +893,42 @@ test("a landing under the policy merges the approved head, deploys it and waits 
   assert.equal(g.registry.releases.desiredRelease()?.commit, merged);
 });
 
+test("a landing into a branch other than the release branch merges and lands with no deploy", async (t) => {
+  const f = fixture(t);
+  released(f, previous);
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "multiplayer" } };
+  await approved(f, "nLAPTOP");
+  assert.deepEqual(f.merges, [head1]);
+  assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
+  assert.deepEqual(f.registry.releases.desiredRelease(), { commit: previous, requestedBy: "person", requestedAt: 1 });
+});
+
+test("a landing follows the configured release branch: into it deploys, into main does not", async (t) => {
+  const into = async (base: string) => {
+    const f = fixture(t, { releaseBranch: "multiplayer" });
+    released(f, previous);
+    f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base } };
+    await approved(f, "nLAPTOP");
+    assert.deepEqual(f.merges, [head1]);
+    return f;
+  };
+  const release = await into("multiplayer");
+  assert.equal(release.review().phase.kind, "deploying");
+  assert.equal(release.registry.releases.desiredRelease()?.commit, merged);
+  const main = await into("main");
+  assert.deepEqual(main.review().phase, { kind: "landed", commit: merged });
+  assert.deepEqual(main.registry.releases.desiredRelease(), { commit: previous, requestedBy: "person", requestedAt: 1 });
+});
+
+test("a landing into a branch other than the release branch still meets the reserved paths' holds", async (t) => {
+  const f = fixture(t);
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "multiplayer" } };
+  f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
+  await approved(f, "nLAPTOP");
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: reservedHolds });
+});
+
 test("a deploy that fails rolls back to the previous release and tells the person what still needs reverting", async (t) => {
   const f = fixture(t);
   released(f, previous);
@@ -906,7 +942,7 @@ test("a deploy that fails rolls back to the previous release and tells the perso
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [
     `The deploy of ${merged} failed: node control rolled-back (health check failed).`,
     `Rolled back to the previous release, ${previous}, which every service reports healthy.`,
-    `${merged} is still on the default branch. Revert it before the next deploy only if it caused the failure: a deploy that failed before the release ran, as when the deployer could not reach the control plane, needs no revert.`,
+    `${merged} is still on main. Revert it before the next deploy only if it caused the failure: a deploy that failed before the release ran, as when the deployer could not reach the control plane, needs no revert.`,
   ] });
   assert.throws(() => loop.land(f.builder, "nLAPTOP"), /already merged/, "a merged review cannot land again");
 });
@@ -997,7 +1033,7 @@ test("landings deploy one at a time: the second merges once the first is healthy
   assert.deepEqual((f.registry.reviews.review(second)!.phase as { reasons: string[] }).reasons, [
     `The deploy of ${merged2} failed: node control rolled-back (health check failed).`,
     `Rolled back to the previous release, ${merged}, which every service reports healthy.`,
-    `${merged2} is still on the default branch. Revert it before the next deploy only if it caused the failure: a deploy that failed before the release ran, as when the deployer could not reach the control plane, needs no revert.`,
+    `${merged2} is still on main. Revert it before the next deploy only if it caused the failure: a deploy that failed before the release ran, as when the deployer could not reach the control plane, needs no revert.`,
   ]);
 });
 
@@ -1045,6 +1081,57 @@ test("a landing waits to merge while the desired release is not healthy everywhe
   await loop.poll();
   assert.deepEqual(f.merges, [head1, head2]);
   assert.equal((f.registry.reviews.review(second)!.phase as { previous: string }).previous, previous);
+});
+
+const manual = "c".repeat(40);
+/** The person's `nexus deploy`, whose route sets the desired release unless a deploy drains. */
+const deployByHand = (f: ReturnType<typeof fixture>) => f.registry.releases.setDesiredRelease({ commit: manual, requestedBy: "nLAPTOP", requestedAt: Date.now() });
+
+test("a release the person deploys while a landing merges is not its rollback target: a failed deploy rolls back to the release the turn was taken at", async (t) => {
+  const f = fixture(t);
+  released(f, previous);
+  f.mergeAnswer = () => {
+    deployByHand(f);
+    return { kind: "merged", commit: merged };
+  };
+  const loop = await approved(f, "nLAPTOP");
+  assert.equal((f.review().phase as { previous: string }).previous, previous, "the rollback target was healthy when the landing took its turn");
+  assert.equal(f.registry.releases.desiredRelease()?.commit, merged);
+  f.registry.releases.reportRelease({ node, role: "control", commit: previous, target: merged, state: "rolled-back", reason: "health check failed", observedAt: Date.now() });
+  await loop.poll();
+  assert.equal(f.review().phase.kind, "rolling-back");
+  assert.equal(f.registry.releases.desiredRelease()?.commit, previous, "never the release that has not run");
+});
+
+test("a release the person deploys after a landing took its turn gives the turn back, and the landing merges once that release is healthy, with it as the rollback target", async (t) => {
+  const f = fixture(t);
+  released(f, previous);
+  // The deploy arrives between the step that saved the turn and the step that merges.
+  f.onPoll = () => {
+    const phase = f.registry.reviews.review(f.builder)?.phase;
+    if (phase?.kind === "merging" && phase.authorized !== null && f.registry.releases.desiredRelease()?.commit === previous) deployByHand(f);
+  };
+  const loop = await approved(f, "nLAPTOP");
+  assert.deepEqual(f.merges, [], "its merge would replace a release that has not run yet");
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: null, waiting: `not every service reports ${manual.slice(0, 12)} healthy` });
+  healthy(f, manual);
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1]);
+  assert.equal((f.review().phase as { previous: string }).previous, manual);
+});
+
+test("a turn saved before Nexus recorded the release it was taken at rolls back to the desired release", async (t) => {
+  const f = fixture(t);
+  released(f, previous);
+  f.mergeAnswer = () => { throw new Error("connection reset"); };
+  const loop = await approved(f, "nLAPTOP");
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: head1, previous });
+  f.registry.reviews.saveReview({ ...f.review(), phase: { kind: "merging", authorized: head1 } }, []);
+  released(f, manual);
+  f.mergeAnswer = () => ({ kind: "merged", commit: merged });
+  await loop.poll();
+  assert.deepEqual(f.merges, [head1, head1], "a turn without the release it was taken at is not given back");
+  assert.equal((f.review().phase as { previous: string }).previous, manual);
 });
 
 test("a review that lands archives its builder and reviewer, once, whether its PR deploys or not", async (t) => {
@@ -2925,7 +3012,7 @@ test("this review's own merge, recorded before the merge call, deploys after a c
     throw new Error("connection reset");
   };
   await approved(f, "nLAPTOP");
-  assert.deepEqual(f.review().phase, { kind: "merging", authorized: head1 }, "the head is authorized before the merge call");
+  assert.deepEqual(f.review().phase, { kind: "merging", authorized: head1, previous }, "the head is authorized before the merge call, with the release the turn was taken at");
   f.files = [{ path: "images/pylon/Dockerfile", previous: null, patch: "" }];
   await f.loop().poll();
   assert.deepEqual(f.merges, [head1]);

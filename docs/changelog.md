@@ -2,6 +2,14 @@
 
 What each version of the API contract and the Mac `nexus` CLI changed, newest first. The top entry is the version in [`src/version.ts`](../src/version.ts), which `nexus --version` prints and the control plane reports. The CLI refuses a control plane older than `minControlVersion` in [`src/cli/config.ts`](../src/cli/config.ts), except in the commands [Version skew](cli.md#version-skew) names, so an entry says what an older control plane does only while that floor is below it, and raising the floor deletes those notes. [`src/docs.test.ts`](../src/docs.test.ts) checks both.
 
+## 0.99.0
+
+A landing of a pull request of Nexus's own repository into another branch than `main`, the branch the deployer releases from, now ends `landed` at its merge with no deploy, and leaves the desired release as it was. Its `merging` phase has no `previous`, and it waits behind no other landing, nor holds one. Before, it went to `deploying` and set its merge as the desired release, which the deployer refuses since the commit is not on `main`, and every other landing waited behind that failed deploy. The reserved paths' holds and the second reviewer still apply to it, as [the design's landing](design.md#the-review-loop-and-landing) describes. The CLI reads no new field.
+
+## 0.98.0
+
+Adds `previous` to a review's `merging` phase: the release a failed deploy of the landing's merge rolls back to, saved with `authorized` as the landing takes its turn, null when there was none, and absent for a pull request that does not deploy. A landing now rolls back to that release, and gives its turn back when another release is requested before it merges, as by `nexus deploy`, until every service reports that one healthy, as [the design's landing](design.md#the-review-loop-and-landing) describes. Before, the landing read the desired release after the merge call, so a release deployed by hand between its turn and its merge, which no service had run yet, became its rollback target. The CLI does not read the field.
+
 ## 0.97.0
 
 Adds `unstated` to a review's `Round`, `asked` or `answered`, and the finding `STATEMENT` (P0) among those a round's builder answers. A review whose head has no `.nexus/verify`, and whose reviewer quoted nothing from the description of what could not be checked live, now goes to `fixing` once its check passes, where the builder is asked to add that section to the description, and to `quoting` once it did, as [the design's review loop](design.md#the-review-loop-and-landing) describes. Before, such a review stopped at `approved`, or its landing ended `needs-person` with `No live check ran, and the pull request does not say what could not be checked live.`, and the builder was told nothing. A builder that rejects the finding ends the review `needs-person` with `No live check ran at <head>, and the builder did not add to the pull request's description what could not be checked live: <its reason>`.
