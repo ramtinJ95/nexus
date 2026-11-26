@@ -161,7 +161,7 @@ test("with the release branch multiplayer, a commit on multiplayer installs and 
   await assert.rejects(checkoutMerged(clone, onlyMain, command, remote, "multiplayer"), /not an ancestor of origin\/multiplayer/);
   assert.equal(await command("git", ["rev-parse", "HEAD"], clone), onMultiplayer, "a refused release leaves the checkout as it was");
   await assert.rejects(checkoutMerged(clone, onMultiplayer, command, remote), /not an ancestor of origin\/main/, "without a release branch the deployer still follows main");
-  for (const branch of ["--upload-pack=evil", "a..b", "x/", "refs/heads/main:refs/heads/x"]) {
+  for (const branch of ["--upload-pack=evil", "a..b", "x/", "refs/heads/main:refs/heads/x", "release.lock", "x.lock/y"]) {
     await assert.rejects(checkoutMerged(clone, onMultiplayer, async () => { assert.fail("git must not run"); }, remote, branch), /not a branch name/);
   }
 });
