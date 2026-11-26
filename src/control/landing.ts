@@ -12,7 +12,10 @@ import { landsOnItsOwn } from "./project.ts";
 import { releaseView } from "./releases.ts";
 import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
-import { landingVerb, type HoldCause, type Phase, type Review } from "./review-model.ts";
+import { landingVerb, type HoldCause, type Phase, type Review, type Round } from "./review-model.ts";
+
+/** The branch the deployer installs releases from: it refuses a commit that is not on it. */
+export const releaseBranch = "main";
 
 type LandingRegistry = Pick<Registry, "releases" | "nodes" | "now" | "projects" | "reviews">;
 type Releasing = Extract<Phase, { kind: "deploying" | "rolling-back" }>;
@@ -31,8 +34,20 @@ const failedNodes = (view: ReleaseView, commit: string) => view.nodes.filter((n)
   .map((n) => `${n.node} ${n.role} ${n.state}${n.reason ? ` (${n.reason})` : ""}`).join("; ");
 
 export function landing({ registry, release, mayLand, now, toPerson }: LandingDeps) {
-  /** Only a PR of the repository releases come from deploys once it merges. */
-  const deploys = (r: { pr: Pick<Review["pr"], "repo"> }) => r.pr.repo.toLowerCase() === release.repo.toLowerCase();
+  /**
+   * A PR of the repository releases come from, into any of its branches. A branch other than the release branch
+   * reaches it by a later merge, so a PR into it meets the reserved paths' holds and second reviewer all the same.
+   */
+  const ofReleaseRepo = (r: { pr: Pick<Review["pr"], "repo"> }) => r.pr.repo.toLowerCase() === release.repo.toLowerCase();
+  /**
+   * Only a PR of that repository into the release branch deploys once it merges. A retarget gets a round of its own
+   * before any merge, so the latest round's base is the one it merges into. A round from before rounds recorded their
+   * base deploys, as every landing of the repository did then.
+   */
+  const deploys = (r: { pr: Pick<Review["pr"], "repo">; rounds: readonly Pick<Round, "base">[] }) => {
+    const base = r.rounds.at(-1)?.base;
+    return ofReleaseRepo(r) && (base === undefined || base === releaseBranch);
+  };
   const view = () => releaseView(registry, release.self, now());
   /** Makes `commit` the desired release, unless it is already, and marks the deploy or rollback requested. */
   const requestRelease = (r: Review, phase: Releasing, commit: string, by: string): Review => {
@@ -48,6 +63,7 @@ export function landing({ registry, release, mayLand, now, toPerson }: LandingDe
 
   return {
     deploys,
+    ofReleaseRepo,
 
     /**
      * Why `r` may not merge yet, read fresh: a pass saves after every step, so it sees what earlier reviews did in it.
@@ -76,10 +92,28 @@ export function landing({ registry, release, mayLand, now, toPerson }: LandingDe
       return mayLand(by) ? [] : [{ code: "loop", text: `${by}, who ${land.fromProject ? `turned on landing for project ${builder.project}` : "asked for this landing"}, is not among the control plane's deployers, so only the person can land it.` }];
     },
 
-    /** `r` once its PR merged as `commit`: landed, or deploying it with the desired release as its rollback target. */
-    merged(r: Review, commit: string): Review {
+    /**
+     * The release a failed deploy of `r`'s merge rolls back to, for a turn `r` takes now: the desired release, read in
+     * the same tick as `ahead` found it healthy everywhere, or null when there is none. Undefined for a PR that does
+     * not deploy.
+     */
+    rollbackTarget: (r: Review): string | null | undefined => deploys(r) ? registry.releases.desiredRelease()?.commit ?? null : undefined,
+
+    /**
+     * Whether the desired release is no longer the one `r` took its turn at, as after the person's `nexus deploy`. Its
+     * merge would replace a release that has not run yet, and a failed deploy would roll back past it.
+     */
+    turnLost: (r: Review, previous: string | null | undefined): boolean =>
+      deploys(r) && previous !== undefined && (registry.releases.desiredRelease()?.commit ?? null) !== previous,
+
+    /**
+     * `r` once its PR merged as `commit`: landed, or deploying it with `previous`, the release its turn was taken at,
+     * as its rollback target. A turn saved before Nexus recorded that release rolls back to the desired one.
+     */
+    merged(r: Review, commit: string, previous: string | null | undefined): Review {
       if (!deploys(r)) return { ...r, merged: commit, phase: { kind: "landed", commit } };
-      return { ...r, merged: commit, phase: { kind: "deploying", commit, previous: registry.releases.desiredRelease()?.commit ?? null, requested: false, deadline: now() + deployWaitMs } };
+      const target = previous === undefined ? registry.releases.desiredRelease()?.commit ?? null : previous;
+      return { ...r, merged: commit, phase: { kind: "deploying", commit, previous: target, requested: false, deadline: now() + deployWaitMs } };
     },
 
     steps: {

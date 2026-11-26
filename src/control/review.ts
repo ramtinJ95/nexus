@@ -224,7 +224,7 @@ export function reviewLoop(deps: ReviewDeps) {
   };
   const toPerson = (r: Review, cause: HoldCause, ...items: (Hold | string)[]): Review => end(r, personPhase(cause, ...items));
   const landings = landing({ registry, release, mayLand: deps.mayLand, now, toPerson });
-  const { deploys } = landings;
+  const { deploys, ofReleaseRepo } = landings;
   /** A review that lands still decides whether a merge made outside it deploys. */
   const outside = (r: Review, state: PullRequest["state"] | undefined): Review | null =>
     state === "closed" || (state === "merged" && r.land === null) ? end(r, { kind: state }) : null;
@@ -247,7 +247,7 @@ export function reviewLoop(deps: ReviewDeps) {
     reads.delete(prKey(r));
     const { detail } = await read(r);
     if (detail.head !== round.head || detail.base !== base) return null;
-    return withRound(r, { heldAt: { base, holds: headHolds({ review: r, files, deploys: deploys(r) }) } });
+    return withRound(r, { heldAt: { base, holds: headHolds({ review: r, files, deploys: ofReleaseRepo(r) }) } });
   };
   /** Past every check, a review records what holds its head, then stops at approval, or lands when asked to. */
   const checked = async (r: Review): Promise<Review> => {
@@ -336,7 +336,7 @@ export function reviewLoop(deps: ReviewDeps) {
     if (second?.kind === "none" || second?.kind === "starting") return r;
     if (second?.kind === "claude") return registry.threads.thread(second.thread)?.status === "active" ? r : { ...r, second: starting(second.rule, second.model) };
     const project = registry.projects.project(registry.threads.thread(r.builder)!.project)!;
-    const rule = project.secondReview == null ? null : secondReviewRule(project.secondReview, await github.files(r.pr.repo, r.pr.number), deploys(r));
+    const rule = project.secondReview == null ? null : secondReviewRule(project.secondReview, await github.files(r.pr.repo, r.pr.number), ofReleaseRepo(r));
     return rule === null ? r : { ...r, second: secondFor(rule, r.models, project.secrets) };
   };
   const withRound = (r: Review, round: Partial<Round>): Review => ({ ...r, rounds: [...r.rounds.slice(0, -1), { ...r.rounds.at(-1)!, ...round }] });
@@ -492,7 +492,7 @@ export function reviewLoop(deps: ReviewDeps) {
       if (early.get(r.id)?.at !== at) early.set(r.id, { at, files: await github.change(r.pr.repo, round.base, round.head) });
       files = early.get(r.id)!.files;
     }
-    const press = landPress(r, files === null ? null : headHolds({ review: r, files, deploys: deploys(r) }));
+    const press = landPress(r, files === null ? null : headHolds({ review: r, files, deploys: ofReleaseRepo(r) }));
     const holds = press.kind === "lands" ? press.waives : [];
     const base = async () => round.base ?? (await read(r)).detail.base;
     // As the landing does, the change a waiver is for is read once the person gave it, so a rebase can be compared with it.
@@ -763,12 +763,16 @@ export function reviewLoop(deps: ReviewDeps) {
       if (snapshot.pr.state === "closed") return end(r, { kind: "closed" });
       // The change the person pressed Land for is read at once, so a rebase after it can still be compared with it.
       if (r.waiver !== null && r.waiver.change === null && r.waiver.head === head) return { ...r, waiver: { ...r.waiver, change: await changeAt(r, snapshot.detail.base, head) } };
-      // A landing that has authorized its merge holds the turn, which every other waits for.
+      // A landing that has authorized its merge holds the turn, which every other waits for, and the release it
+      // took the turn at, which a failed deploy of its merge rolls back to.
+      let previous = phase.previous;
       if (phase.authorized !== head) {
         const waiting = landings.ahead(r);
         // Its turn comes before its checks: a wait for them ends here, and begins anew if they still run when the turn comes.
-        const { checks: _, ...turn } = phase;
+        const { checks: _, previous: __, ...turn } = phase;
         if (waiting !== null) return phase.waiting === waiting && phase.checks === undefined ? r : { ...r, phase: { ...turn, waiting } };
+        // Read before anything yields, so it is the release `ahead` found healthy.
+        previous = landings.rollbackTarget(r);
       }
       // `left` is what the person's waiver does not get past, once carried to this head if its change is the one they
       // waived, and `why` why it did not carry. A landing that holds goes to the person with every hold, those it
@@ -832,7 +836,9 @@ export function reviewLoop(deps: ReviewDeps) {
           reads.delete(prKey(r));
           return { ...review, phase: { kind: "merging", authorized: null, updated: now() } };
         }
-        if (phase.authorized !== head) return { ...review, phase: { kind: "merging", authorized: head } };
+        if (phase.authorized !== head) return { ...review, phase: { kind: "merging", authorized: head, ...previous !== undefined && { previous } } };
+        // A release requested since the turn was taken has not run yet, so the turn goes back until it is healthy.
+        if (landings.turnLost(r, previous)) return { ...review, phase: { kind: "merging", authorized: null } };
         const merged = await github.merge(r.pr.repo, r.pr.number, head);
         reads.delete(prKey(r));
         if (merged.kind !== "merged") {
@@ -844,7 +850,7 @@ export function reviewLoop(deps: ReviewDeps) {
         }
         commit = merged.commit;
       }
-      return landings.merged(toLand, commit);
+      return landings.merged(toLand, commit, previous);
   }
 
   const watchedPr = (r: Review) => {
@@ -1201,7 +1207,7 @@ export function reviewLoop(deps: ReviewDeps) {
     if ("why" in kind) throw new Refusal("conflict", kind.why);
     const models = { builder: builderModel, reviewer: kind.model };
     // A later round whose head the rule names gets a second reviewer then, which stays for every round after it.
-    const rule = project.secondReview == null ? null : secondReviewRule(project.secondReview, await github.files(repo, number), deploys({ pr: { repo } }));
+    const rule = project.secondReview == null ? null : secondReviewRule(project.secondReview, await github.files(repo, number), ofReleaseRepo({ pr: { repo } }));
     const brief = await deps.brief(builder).then((text) => text?.slice(0, 8_000) ?? null, (err: unknown) => {
       log(`${builder.id}: the review of pull request #${number} starts without the builder's brief, which could not be read (${(err as Error).name})`);
       return null;
