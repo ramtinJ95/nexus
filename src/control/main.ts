@@ -12,6 +12,8 @@ import { connectProbe, type ProbeClient } from "../protocol/client.ts";
 import { wakesDeployers } from "./releases.ts";
 import { isDeployer, threadWaker } from "./api/access.ts";
 import { peopleOf, peopleSchema } from "./people.ts";
+import { loginStore } from "./logins.ts";
+import { personStore } from "../deploy/credentials.ts";
 import { gitIdentitySchema } from "../protocol/spawn.ts";
 import { gitUrl } from "./project.ts";
 import { ingest } from "./reconcile.ts";
@@ -295,6 +297,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     registry, whois: localApiWhoisCaller(tailscaled), host: config.listen.host, port: config.listen.port,
     allowed: new Set([config.self.tailnetNodeId, ...config.callers ?? []]),
     people,
+    logins: loginStore(personStore(config.harness.credentials)),
     joins: {
       whois: localApiWhoisNode(tailscaled),
       configured: new Set(config.nodes.map((n) => n.tailnetNodeId)),

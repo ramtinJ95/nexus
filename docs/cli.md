@@ -186,6 +186,9 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | none: the dashboard's Cluster page reads it | `GET /v1/nodes/<name>/metrics?from=<ms>[&to=<ms>]` | `NodeMetrics` |
 | `usage [--since today\|7d\|30d\|all\|DATE] [--project P] [--by model\|project\|kind\|role\|day]` | `GET /v1/usage?since=<since>[&project=P][&by=B]`, with `since=7d` unless `--since` is given | `UsageReport` |
 | `usage backfill [--dry-run \| --stop]` | `POST /v1/usage/backfill`, or `GET` with `--dry-run`, or `DELETE` with `--stop` | `UsageBackfill`, or `{ backfill: UsageBackfill, plan: BackfillPlanRow[] }` with `--dry-run` |
+| `login claude\|github` | `PUT /v1/logins/<kind>` with `{"token": string}`, the token read from stdin. A terminal's stdin is refused, so the token never shows | `Logins`, `{ person: string, set: { claude: boolean, github: boolean } }`. No route answers a stored token |
+| `logout claude\|github` | `DELETE /v1/logins/<kind>` with `{}`. A kind that is not set stays unset | `Logins` |
+| `logins` | `GET /v1/logins` | `Logins`, the caller's own. On an install without `people` the person is `operator` |
 
 These commands need more explanation:
 

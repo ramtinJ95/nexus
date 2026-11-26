@@ -22,6 +22,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { scriptedModel, scriptedModels, streamedAnswer, streamedWordMs } from "../../control/harness/test-fixture.ts";
 import type { ImageId, NodeName, ProjectId, TailnetNodeId } from "../../ids.ts";
 import { testImage } from "../../test-support/kit.ts";
+import { loginStore } from "../../control/logins.ts";
 import { startApi } from "../../control/api/server.ts";
 import { claudeConversations } from "../../control/claude-conversation.ts";
 import { noFeatures } from "../../control/features.ts";
@@ -78,7 +79,7 @@ const api = await startApi({
     registry, harness: threads, wake: () => {}, dotfiles: { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" },
     mirror: { setupInputs: () => Promise.reject(new Error("the stream check reads no remote")) },
   }),
-  probes: new Map(), previewPorts: { first: 10200, last: 10299 },
+  probes: new Map(), previewPorts: { first: 10200, last: 10299 }, logins: loginStore(join(dir, "people")),
 });
 const url = `http://127.0.0.1:${api.port}`;
 const post = async (path: string, body: unknown) => {

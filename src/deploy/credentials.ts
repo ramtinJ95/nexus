@@ -8,7 +8,7 @@ import { execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { access, appendFile, open, readFile, rename, rm, type FileHandle } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { appendSecret, parseSecretsFile, replaceSecret } from "../node-base/secrets-env.ts";
 import { chatgptTokenGrant } from "../protocol/secret-grants.ts";
@@ -25,14 +25,19 @@ export interface Store {
   mode: number;
 }
 
+/** Each person's own credentials, beside the harness's: a directory with one file for each person, which the control plane writes. */
+export const personStore = (harnessCredentials: string) => join(dirname(harnessCredentials), "people");
+
+const harnessFile = join(stateDirs.control, "harness-credentials.json");
+
 /**
- * Where each kind of credential lives. Every one serves the whole install. This is the one place a per-person mode
- * would change: it would give a kind a per-person store beside this one, so a shared install keeps its files where
- * they are.
+ * Where each kind of credential lives. `person` holds each person's Claude and GitHub tokens, which the control plane
+ * writes when the person signs in, so the installer never asks for them. Every other kind serves the whole install.
  * A file here is the default a new install gets. Where an existing config names its own, `locations` reads that.
  */
 export const stores = {
-  harness: { machines: "control", file: join(stateDirs.control, "harness-credentials.json"), owner: `${users.control}:${users.control}`, mode: 0o600 },
+  harness: { machines: "control", file: harnessFile, owner: `${users.control}:${users.control}`, mode: 0o600 },
+  person: { machines: "control", file: personStore(harnessFile), owner: `${users.control}:${users.control}`, mode: 0o600 },
   claude: { machines: "every", file: configFiles.secrets, owner: `root:${users.probe}`, mode: 0o640 },
   githubWatch: { machines: "control", file: configFiles.githubToken, owner: `root:${users.control}`, mode: 0o640 },
   gitKey: { machines: "every", file: configFiles.gitKey, owner: `${users.probe}:${users.probe}`, mode: 0o400 },
@@ -72,6 +77,8 @@ export function githubHostKeys(scan: string): string {
 
 const token = (value: string) => /^[\x21-\x7e]+$/.test(value) ? undefined : "a token is one line of printable characters with no spaces";
 const githubToken = (value: string) => /^[A-Za-z0-9_]+$/.test(value) ? undefined : "a GitHub token is letters, digits and underscores";
+/** What is wrong with a person's token of each kind. Neither repeats the value. */
+export const tokenChecks = { claude: token, github: githubToken } as const;
 
 /** What GitHub's `GET /user` says of a token. `expires` is the github-authentication-token-expiration header as GitHub wrote it, null without one. */
 export type GithubAnswer =

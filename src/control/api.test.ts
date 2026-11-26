@@ -634,6 +634,7 @@ test("the route table holds the routes it always has, and each path matches one 
     return `${entry[0]} ${entry[1].source} ${policy.role}${said}${"admin" in policy ? ", admin" : ""}${policy.startsTurn ? ", startsTurn" : ""}`;
   });
   assert.deepEqual(described.sort(), [
+    "DELETE ^\\/v1\\/logins\\/([^/]+)$ person: remove a login",
     "DELETE ^\\/v1\\/projects\\/([^/]+)$ person: remove a project",
     "DELETE ^\\/v1\\/threads\\/([^/]+)$ owner: delete a thread, admin",
     "DELETE ^\\/v1\\/threads\\/([^/]+)\\/previews\\/([^/]+)$ owner: unpublish a preview",
@@ -661,6 +662,7 @@ test("the route table holds the routes it always has, and each path matches one 
     "GET ^\\/v1\\/images\\/current$ allowed",
     "GET ^\\/v1\\/items$ allowed",
     "GET ^\\/v1\\/items\\/([^/]+)$ allowed",
+    "GET ^\\/v1\\/logins$ person: read their logins",
     "GET ^\\/v1\\/nodes$ allowed",
     "GET ^\\/v1\\/nodes\\/([^/]+)\\/health$ deployer: read a node's health",
     "GET ^\\/v1\\/nodes\\/([^/]+)\\/metrics$ deployer: read a node's metrics",
@@ -713,6 +715,7 @@ test("the route table holds the routes it always has, and each path matches one 
     "POST ^\\/v1\\/threads\\/([^/]+)\\/unarchive$ owner: unarchive a thread",
     "POST ^\\/v1\\/threads\\/([^/]+)\\/unseen$ allowed: each person's own mark of what they have read changes no thread or pylon",
     "POST ^\\/v1\\/usage\\/backfill$ deployer: start or stop the usage backfill",
+    "PUT ^\\/v1\\/logins\\/([^/]+)$ person: set a login",
     "PUT ^\\/v1\\/release$ deployer: deploy",
   ]);
   const routes = [["GET", /^\/v1\/health$/] as const, ...table];

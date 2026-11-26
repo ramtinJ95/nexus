@@ -51,6 +51,8 @@ import { Refusal, type RefusalCode, type RefusalKind } from "../refusal.ts";
 import { ok, parse, type ApiKit, type RouteEntry } from "./kit.ts";
 import { admit, anyAllowed, apiAccess, demand, type Policy, type Role } from "./access.ts";
 import type { People } from "../people.ts";
+import type { LoginStore } from "../logins.ts";
+import { loginRoutes } from "./login-routes.ts";
 import { pylonAccess } from "./pylon-access.ts";
 import { eventStreams, maxStreams } from "./sse.ts";
 import { threadViews } from "./thread-view.ts";
@@ -94,6 +96,8 @@ export interface ApiOptions {
   allowed: ReadonlySet<TailnetNodeId>;
   /** Who uses the install. Solo when omitted. */
   people?: People;
+  /** Each person's own credentials, which only their own person routes set. */
+  logins: LoginStore;
   /** `POST /v1/join`, the one route a machine that is no node or caller yet may call. Omitted: no machine can join. */
   joins?: { whois: WhoisNode; configured: ReadonlySet<TailnetNodeId>; joined(node: JoinedNode): void };
   /** Names the API answers to in the Host header. Any other name is a DNS rebinding page on an allowed machine. */
@@ -145,6 +149,7 @@ export function featureRoutes(kit: ApiKit, options: ApiOptions, nodeHealth: (nam
     ...pylonRoutes(kit, options),
     ...imageRoutes(kit, options.features),
     ...doctorRoutes(kit, options),
+    ...loginRoutes(kit, options.logins),
   ];
 }
 
@@ -574,8 +579,9 @@ async function readJson(req: IncomingMessage, empty?: unknown): Promise<unknown>
   if (body === "" && empty !== undefined) return empty;
   try {
     return JSON.parse(body);
-  } catch (err) {
-    throw new Refusal("invalid", `body is not JSON: ${(err as Error).message}`);
+  } catch {
+    // JSON.parse's message quotes the body, which may be a token.
+    throw new Refusal("invalid", "body is not JSON");
   }
 }
 

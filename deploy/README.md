@@ -105,6 +105,27 @@ The installer writes the new file beside the old one, opened without following a
 
 The deployer never runs this step. `nexus deploy` runs only the role installers, in preparation mode, which read no input and leave every credential alone.
 
+#### Each person's own tokens
+
+A person stores their own Claude token and GitHub token on the control plane with the `nexus` CLI. The installer never asks for these. The Claude token is the one `claude setup-token` prints. Copy it, then:
+
+```sh
+pbpaste | nexus login claude
+pbpaste | nexus login github
+nexus logins
+nexus logout github
+```
+
+`nexus login` reads the token from stdin and refuses a terminal, so the token never shows on screen. `nexus logins` says which kinds are set, and no route or command prints a stored token. Each person's tokens are one file in `people/` beside `harness-credentials.json`, `/var/lib/nexus-control/people/` by default, mode 0600 and owned by `nexus-control`. On an install without `people` in `control.json`, the one person is `operator`, whatever device they call from. Only a person may call these routes, never a node, a pylon or the control plane's own machine, and a person reaches only their own file. The daily backup does not copy `people/`, so after a restore each person runs `nexus login` again.
+
+A person's GitHub token is a fine-grained token for the repositories their projects use, with these repository permissions and no others:
+
+- Contents: read and write.
+- Pull requests: read and write.
+- Metadata: read, which GitHub adds.
+
+It must not hold Workflows or Administration. A token with Workflows can push a workflow file, and that workflow then runs on GitHub, past the network guard that refuses merges and approvals at the pylon's edge. Administration can change branch protection and merge rules. A pylon does not use these tokens yet: the slice that boots a pylon with its owner's credentials does.
+
 The installer ends with what is left and the command for each, in the order to do them. First come the rest of the setup: admitting your Mac or joining the node, the `nexus` CLI on the Mac with `deploy/mac/install` and `nexus connect`, and Docker with buildx for image builds and the probe's access to it. Next comes a rerun for any credential that was skipped. Last comes the first image, which needs the control plane running. A rerun lists only what is still missing, and says `Nothing is left to do.` once that is nothing. The control plane's machine lists the CLI until it holds an image, since the first image is built from the Mac with it, and a node's list leaves the CLI out, as the control plane's names it.
 
 ### Rerun to upgrade, admit or recover
