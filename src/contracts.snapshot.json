@@ -2,6 +2,7 @@
   "holdsOnEveryChange": [
     ".claude/skills/verify-nexus/scripts/live-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/new-project-shots.ts: verify-changed",
+    ".claude/skills/verify-nexus/scripts/people-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/stack.ts: verify-changed",
     ".claude/skills/verify-nexus/scripts/tsconfig.json: verify-changed",
     ".claude/skills/verify-nexus/scripts/verify-nexus: verify-changed",
