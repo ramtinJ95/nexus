@@ -126,9 +126,10 @@ doctor() {
 
 cli() {
   local run; run=$(current_run)
-  local step=${1:?usage: verify-nexus cli <step> [--as alice|bob] -- <nexus args>}; shift
-  local person=alice
+  local step=${1:?usage: verify-nexus cli <step> [--as alice|bob] [--tty] -- <nexus args>}; shift
+  local person=alice tty=
   if [ "${1:-}" = "--as" ]; then person=${2:-}; shift 2 || true; fi
+  if [ "${1:-}" = "--tty" ]; then tty=1; shift; fi
   local url
   case "$person" in
     alice) url=$(state "$run" api) ;;
@@ -137,7 +138,10 @@ cli() {
   esac
   [ "${1:-}" = "--" ] && shift
   # NEXUS_VERIFY_AS changes nothing the CLI does. It puts the person in the recorded .cmd.
-  record "$run" "$step" env "NEXUS_VERIFY_AS=$person" "NEXUS_URL=$url" NEXUS_SOCKS=none node "$repo/src/cli/nexus.ts" "$@"
+  local command=(env "NEXUS_VERIFY_AS=$person" "NEXUS_URL=$url" NEXUS_SOCKS=none node "$repo/src/cli/nexus.ts" "$@")
+  # A command that needs a terminal, such as attach, runs on a pty, whose one stream the step records as its stdout.
+  if [ -n "$tty" ]; then record "$run" "$step" script -qefc "stty cols 120 rows 40; $(printf '%q ' "${command[@]}")" /dev/null
+  else record "$run" "$step" "${command[@]}"; fi
 }
 
 # playwright-cli exits 0 when an action fails, and prints the failure under `### Error`, so that output fails the step.
