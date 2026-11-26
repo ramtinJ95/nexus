@@ -130,7 +130,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     get: options.previews.get,
   });
   /** What leaves the node in a failure, with every value this probe holds, and what looks like a secret, redacted. */
-  const redacted = (text: string) => redact(text, options.secrets.names().flatMap((name) => options.secrets.value(name) ?? []));
+  const redacted = (text: string) => redact(text, options.secrets.values());
   const pylons = createPylonStates({ backend, log, redacted });
   const serve = previews ?? noPreviews;
   const deps: ProbeDeps = {

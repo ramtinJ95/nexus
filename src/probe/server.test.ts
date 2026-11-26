@@ -615,9 +615,11 @@ test("a broken pylon's log tail and a failed job's log leave the node with the v
   secrets.hold("NEXUS_CHATGPT_TOKEN", "held-token-value-0123");
   const { base, client, fake } = await setup(t, { secrets });
   assert.equal((await fetch(`${base}/v1/secrets/NEXUS_CHATGPT_TOKEN`, { method: "PUT", body: "held-token-value-0123" })).status, 204);
+  await client.putPylonSecret("pylon-alice" as PylonId, "GH_TOKEN", "opaque-pylon-value-0123");
   const log = [
     "request to api.stripe.com with rk_live_0123456789abcdef failed",
     "pi: refresh with held-token-value-0123",
+    "git push with opaque-pylon-value-0123",
     "guest env GH_TOKEN=GONDOLIN_SECRET_0123456789abcdef0123456789abcdef0123456789abcdef",
     "curl sent 0123456789abcdef0123456789abcdef0123456789abcdef.stripe_key",
     "Error: Guest command got no answer within 13000 ms",
@@ -625,6 +627,7 @@ test("a broken pylon's log tail and a failed job's log leave the node with the v
   const redactedLog = [
     "request to api.stripe.com with [redacted] failed",
     "pi: refresh with [redacted]",
+    "git push with [redacted]",
     "guest env GH_TOKEN=[redacted]",
     "curl sent [redacted].stripe_key",
     "Error: Guest command got no answer within 13000 ms",

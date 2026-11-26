@@ -82,6 +82,8 @@ export async function readProbeConfig(path: string): Promise<ProbeConfig> {
 export interface NodeSecrets extends SecretSource {
   hold(name: string, value: string): void;
   holdFor(pylonId: PylonId, name: string, value: string): void;
+  /** Every value it holds, the pylons' own too, which is what a failure that leaves the node is redacted of. */
+  values(): readonly string[];
 }
 
 /**
@@ -96,9 +98,11 @@ export function nodeSecrets(file: SecretSource): NodeSecrets {
   const held = new Map<string, string>();
   const pylons = new Map<PylonId, Map<string, string>>();
   const nodeValue = (name: string) => heldSecrets.includes(name) ? held.get(name) ?? notHandedOver : file.value(name);
+  const names = () => [...file.names(), ...held.keys()];
   return {
     value: (name, pylonId) => (pylonId === undefined ? undefined : pylons.get(pylonId)?.get(name)) ?? nodeValue(name),
-    names: () => [...file.names(), ...held.keys()],
+    names,
+    values: () => [...names().flatMap((name) => nodeValue(name) ?? []), ...[...pylons.values()].flatMap((own) => [...own.values()])],
     hold(name, value) { held.set(name, value); },
     holdFor(pylonId, name, value) { pylons.set(pylonId, (pylons.get(pylonId) ?? new Map<string, string>()).set(name, value)); },
   };
