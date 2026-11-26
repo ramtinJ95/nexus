@@ -35,6 +35,7 @@ import { nodeSecrets } from "../../../../src/probe/config.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "../../../../src/probe/fake-tailscale.ts";
 import { startProbe } from "../../../../src/probe/server.ts";
 import type { ImageId, NodeName, ProjectId, TailnetNodeId } from "../../../../src/ids.ts";
+import { defaultReleaseBranch } from "../../../../src/protocol/deploy.ts";
 import { probePort } from "../../../../src/protocol/routes.ts";
 import { testPylon, testThread } from "../../../../src/test-support/registry-kit.ts";
 import { tailnet, type WhoisAnswer } from "../../../../src/test-support/people.ts";
@@ -262,6 +263,7 @@ const controlPlane = await startControlPlane({
   self: { tailnetNodeId: controlPlaneId },
   nodes: [{ name: node, tailnetHost: "127.0.0.1", tailnetNodeId: probeId }],
   imageBuildNode: node,
+  releaseBranch: defaultReleaseBranch,
   callers: [tailnet.alice.Node.StableID, tailnet.bob.Node.StableID],
   dotfiles: { repo: verifyRepo, ref: "main" },
   harness: { storage: join(runDir, "harness.sqlite"), credentials: join(runDir, "unused-credentials.json"), model: scriptedModel },
