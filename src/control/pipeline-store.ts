@@ -1,6 +1,6 @@
 /** An item's phase is derived, so it is not stored. */
 import { json, type Db, type Holding } from "./db.ts";
-import { requestIds, type ItemId, type ProjectId, type ThreadId } from "../ids.ts";
+import { requestIds, type ItemId, type Person, type ProjectId, type ThreadId } from "../ids.ts";
 import type { StartRequest } from "./start-request.ts";
 
 export interface ItemRecord {
@@ -14,6 +14,8 @@ export interface ItemRecord {
   /** Items of the same project whose threads must merge their pull requests first. Each was added before this one. */
   after: readonly ItemId[];
   addedBy: string;
+  /** Who owns its thread: the person who added it. Absent from an item added before owners, which is the operator's. */
+  owner?: Person;
   addedAt: number;
   /** The person's go-ahead, which an item needs only in a project whose pipeline waits for one. */
   approved: { by: string; at: number } | null;

@@ -1,4 +1,5 @@
 /** Questions a thread asks, and a Claude worker's AskUserQuestion. */
+import { operator } from "./people.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ThreadDetail } from "./wire.ts";
@@ -48,7 +49,7 @@ test("without deployment options the control node is unknown, so no one answers 
   assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
   s.registry.images.setCurrentImage(image.id as ImageId);
-  const thread = await s.startThread({ request: { project: "acme", title: "Fix checkout" }, caller: laptop, role: "builder" });
+  const thread = await s.startThread({ request: { project: "acme", title: "Fix checkout" }, caller: laptop, owner: operator, role: "builder" });
   for (const answerer of ["person", "deployer"] as const) {
     s.registry.questions.askQuestion({ kind: "judgment", id: `qn-${answerer}`, thread: thread.id, text: "Go?", options: ["Yes", "No"], reserved: null, answerer, askedAt: 1, failure: 0 });
   }

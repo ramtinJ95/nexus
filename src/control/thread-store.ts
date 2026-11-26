@@ -10,7 +10,7 @@ import { standingRulesSender, type StandingRulesStamp } from "./standing-rules.t
 import { Refusal } from "./refusal.ts";
 import { json, jsonOrNull, type Db, type Holding, type Row } from "./db.ts";
 import { desiredPhase, finalCodes, isOpenStatus, maxAttempts, noAttempts, type ActivityFacts, type ArchiveFacts, type FailedAttempt, type RegistryWrite, type ThreadStatus } from "./reconcile.ts";
-import { pylonIdOf, type NodeName, type PylonId, type ThreadId } from "../ids.ts";
+import { pylonIdOf, type NodeName, type Person, type PylonId, type ThreadId } from "../ids.ts";
 import type { JobStatus, Subject } from "../protocol/jobs.ts";
 import { pylonEventSchema, type TerminalStatus, type NodeObservation, type ReportedEvent } from "../protocol/observations.ts";
 import type { ProjectId } from "../ids.ts";
@@ -32,6 +32,8 @@ export interface StoredThread extends Pick<ActivityFacts, "status" | "agentTurnR
   pylonId: PylonId;
   conversationId: string | null; // set once pi-durable runs the thread's agent
   startedBy: string;
+  /** The person whose thread it is. A reviewer, check or verify thread is its builder's owner's. */
+  owner: Person;
   createdAt: number;
   seenAt: number | null;
   lastReplyAt: number | null;
@@ -105,6 +107,7 @@ function threadRow(r: Row): StoredThread {
     status: r.status as ThreadStatus,
     conversationId: r.conversation_id as string | null,
     startedBy: r.started_by as string,
+    owner: r.owner as Person,
     createdAt: r.created_at as number,
     agentTurnRunning: r.agent_turn_running === 1,
     lastAgentActivityAt: r.last_agent_activity_at as number,
@@ -778,9 +781,9 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
       if (pylon.pylonId !== thread.pylonId || pylon.thread !== thread.id) throw new Error(`pylon ${pylon.pylonId} does not belong to thread ${thread.id}`);
       transaction(() => {
         if (queued) for (const p of participants) p.startQueued?.(thread.id, thread.createdAt);
-        sql(`INSERT INTO threads (id, title, project, status, conversation_id, started_by, created_at,
-          agent_turn_running, last_agent_activity_at, last_human_activity_at, placement, setup, standing_rules) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-          .run(thread.id, thread.title, thread.project, thread.status, thread.conversationId, thread.startedBy, thread.createdAt,
+        sql(`INSERT INTO threads (id, title, project, status, conversation_id, started_by, owner, created_at,
+          agent_turn_running, last_agent_activity_at, last_human_activity_at, placement, setup, standing_rules) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          .run(thread.id, thread.title, thread.project, thread.status, thread.conversationId, thread.startedBy, thread.owner, thread.createdAt,
           thread.agentTurnRunning ? 1 : 0, thread.lastAgentActivityAt, thread.lastHumanActivityAt, thread.placement === undefined ? null : JSON.stringify(thread.placement),
           thread.setup === undefined ? null : JSON.stringify(thread.setup), thread.standingRules === undefined ? null : JSON.stringify(thread.standingRules));
         sql(`INSERT INTO pylons (id, thread, node, boot, first_boot, live, live_hash, pauses, submitted, attempts, failed, retrying)

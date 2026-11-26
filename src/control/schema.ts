@@ -343,4 +343,6 @@ export const migrations: Migrations = [
  * schema.test.ts checks.
  */
 export const arcMigrations: Migrations = [
+  // Each thread's owner. A thread started before is the operator's, the one person of the install that started it.
+  `ALTER TABLE threads ADD COLUMN owner TEXT NOT NULL DEFAULT 'operator';`,
 ];

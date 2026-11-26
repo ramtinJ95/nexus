@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { promisify } from "node:util";
-import { migrations } from "../control/schema.ts";
+import { arcMigrations, migrations } from "../control/schema.ts";
 import { tempDir } from "../test-support/kit.ts";
 import { parseConfig } from "../control/main.ts";
 import { parseProbeConfig } from "../probe/config.ts";
@@ -171,6 +171,17 @@ test("a rerun over a config without imageBuildNode leaves image builds on the de
   const written = files(run([], { ...first, control }));
   assert.equal(parseConfig(JSON.stringify(value(written, paths.control))).imageBuildNode, "infra-testbench");
   assert.equal(written.get(paths.control)!.state, "unchanged");
+});
+
+test("a rerun over a shared install's control.json keeps it free of callers and deployers, so it still loads, and refuses --admit", () => {
+  const { callers: _, deployers: __, ...control } = onDisk(files(run(["--admit", "ramtins-macbook-pro"]))).control as Record<string, Json>;
+  const shared = { ...onDisk(files(run(["--admit", "ramtins-macbook-pro"]))), control: { ...control, people: { "alice@example.com": "admin" } } };
+  const written = files(run([], shared));
+  const rerun = value(written, paths.control);
+  assert.equal(rerun.callers, undefined);
+  assert.equal(rerun.deployers, undefined);
+  assert.deepEqual(parseConfig(JSON.stringify(rerun)).people, { "alice@example.com": "admin" });
+  assert.match(errors(run(["--admit", "ramtins-macbook-pro"], shared)).join("\n"), /--admit writes callers and deployers, which a control.json with people refuses/);
 });
 
 test("--add-node adds the node, its deploy key and the probe peer, once", () => {
@@ -542,7 +553,7 @@ test("--upgrade reaches each role's installer, which installs this checkout's re
   assert.equal(parseFlags(["install", "--admit", "macbook"]).flags.upgrade, false);
 });
 
-test("setup.ts registry refuses a registry newer than this checkout's migrations, and passes one it migrates, its own and none", async (t) => {
+test("setup.ts registry refuses a registry newer than this checkout's migrations in either list, and passes one it migrates, its own and none", async (t) => {
   const dir = await tempDir("nexus-registry-", t);
   const config = join(dir, "control.json");
   const db = join(dir, "registry.db");
@@ -551,18 +562,25 @@ test("setup.ts registry refuses a registry newer than this checkout's migrations
     execFile(process.execPath, [join(repo, "src/deploy/setup.ts"), "registry", config], (err, _stdout, stderr) => done({ code: err === null ? 0 : err.code as number, stderr }));
   });
   assert.deepEqual(await check(), { code: 0, stderr: "" }, "no registry yet");
-  const at = (version: number) => {
+  const at = (version: number, arc?: number) => {
     const registry = new DatabaseSync(db);
-    registry.exec(`PRAGMA user_version = ${version}`);
+    registry.exec(`PRAGMA user_version = ${version}; DROP TABLE IF EXISTS arc_schema`);
+    if (arc !== undefined) registry.exec(`CREATE TABLE arc_schema (one INTEGER PRIMARY KEY CHECK (one = 1), version INTEGER NOT NULL) STRICT; INSERT INTO arc_schema VALUES (1, ${arc})`);
     registry.close();
   };
-  for (const version of [migrations.length - 1, migrations.length]) {
-    at(version);
-    assert.deepEqual(await check(), { code: 0, stderr: "" }, `a registry at ${version}`);
+  const applies = `${migrations.length} registry migrations and ${arcMigrations.length} of the arc's`;
+  for (const [version, arc] of [[migrations.length - 1], [migrations.length], [migrations.length, arcMigrations.length - 1], [migrations.length, arcMigrations.length]] as const) {
+    at(version, arc);
+    assert.deepEqual(await check(), { code: 0, stderr: "" }, `a registry at ${version}, arc ${arc ?? "none"}`);
   }
   at(migrations.length + 1);
   assert.deepEqual(await check(), {
     code: 1,
-    stderr: `install: the registry is at schema version ${migrations.length + 1}, newer than the ${migrations.length} migrations this checkout applies, so its control plane would refuse to start. Install from a newer checkout, or deploy one with nexus deploy\n`,
+    stderr: `install: the registry is at schema version ${migrations.length + 1}, newer than the ${applies} this checkout applies, so its control plane would refuse to start. Install from a newer checkout, or deploy one with nexus deploy\n`,
   });
+  at(migrations.length, arcMigrations.length + 1);
+  assert.deepEqual(await check(), {
+    code: 1,
+    stderr: `install: the registry is at schema version ${migrations.length} and arc schema version ${arcMigrations.length + 1}, newer than the ${applies} this checkout applies, so its control plane would refuse to start. Install from a newer checkout, or deploy one with nexus deploy\n`,
+  }, "a registry ahead in the arc's list alone");
 });

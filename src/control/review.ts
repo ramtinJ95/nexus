@@ -1248,7 +1248,7 @@ export function reviewLoop(deps: ReviewDeps) {
    */
   const startReviewer = (builder: Thread, title: string, branch: string, model: string, claude: boolean, request: string, id?: ThreadId) => deps.startThread({
     request: { project: builder.project, title: title.slice(0, 200), near: registry.threads.pylon(builder.pylonId)!.node, branch, ...(claude ? { claude: request, model } : {}) },
-    caller: reviewerCaller, role: "reviewer", id,
+    caller: reviewerCaller, owner: builder.owner, role: "reviewer", id,
   });
   /**
    * The first reviewer's thread, under the ID its review was recorded with, unless a start that went through before a

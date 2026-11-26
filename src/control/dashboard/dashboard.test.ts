@@ -1,3 +1,4 @@
+import { operator } from "../people.ts";
 import { test, type TestContext } from "node:test";
 import { envelope } from "../reconcile.ts";
 import assert from "node:assert/strict";
@@ -2725,7 +2726,7 @@ test("a harness, a Claude worker and a bare thread each show the conversation, s
   const s = await seeded(t);
   const harness = await s.start("acme", "Harness");
   const claude = await claudeThread(s, [{ kind: "reply", at: 1, text: "Done." }]);
-  const bare = await s.startThread({ request: { project: "acme", title: "Check" }, caller: laptop, role: "check" });
+  const bare = await s.startThread({ request: { project: "acme", title: "Check" }, caller: laptop, owner: operator, role: "check" });
   s.observe(harness, claude, bare);
   /** What the thread page shows of its agent: the conversation region's stream, its text, the run bar and the composer. */
   const agentParts = async (thread: Thread) => {

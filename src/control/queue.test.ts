@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { operator } from "./people.ts";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { turnGate } from "./drain.ts";
@@ -88,7 +89,7 @@ test("a predecessor is waiting, landed or blocked by what its thread, review and
   const f = fixture(t);
   const q = f.queue();
   assert.equal(wait(f.registry, "th-none"), "blocked: does not exist");
-  const queued = q.add(f.request(), null, [f.thread("th-a")], laptop);
+  const queued = q.add(f.request(), null, [f.thread("th-a")], { caller: laptop, owner: operator });
   assert.equal(wait(f.registry, queued.id), "waiting: is queued");
   q.setStatus(queued.id, "archived");
   assert.equal(wait(f.registry, queued.id), "blocked: was cancelled while queued");
@@ -133,28 +134,28 @@ test("a queue record is checked as a start is, and freezes the size the project 
   const q = f.queue();
   const a = f.thread("th-a");
   const refused = (fn: () => unknown, kind: string, message: RegExp) => assert.throws(fn, (err: { kind?: string; message: string }) => err.kind === kind && message.test(err.message));
-  refused(() => q.add(f.request(), null, ["th-none"], laptop), "missing", /no thread th-none/);
-  refused(() => q.add(f.request({ project: "nope" }), null, [a], laptop), "missing", /no project nope/);
-  refused(() => q.add(f.request({ node: "nowhere" }), null, [a], laptop), "invalid", /no node nowhere/);
-  refused(() => q.add(f.request({ commit: "abc" }), null, [a], laptop), "invalid", /scratch project/);
-  refused(() => q.add(f.request({ claude: "fix it" }), "Fix it.", [a], laptop), "invalid", /message is for a Nexus agent thread/);
-  refused(() => q.add(f.request({ claude: "fix it", model: "claude-fable-5-1" }), null, [a], laptop), "invalid", /Fable models are not available in pylons/);
-  refused(() => q.add(f.request(), null, [f.thread("th-review", reviewerCaller)], laptop), "invalid", /reviewer, check or verify thread/);
-  refused(() => q.add(f.request(), null, [f.thread("th-check", checkCaller)], laptop), "invalid", /reviewer, check or verify thread/);
-  refused(() => q.add(f.request(), null, [f.thread("th-verify", verifyCaller)], laptop), "invalid", /reviewer, check or verify thread/);
+  refused(() => q.add(f.request(), null, ["th-none"], { caller: laptop, owner: operator }), "missing", /no thread th-none/);
+  refused(() => q.add(f.request({ project: "nope" }), null, [a], { caller: laptop, owner: operator }), "missing", /no project nope/);
+  refused(() => q.add(f.request({ node: "nowhere" }), null, [a], { caller: laptop, owner: operator }), "invalid", /no node nowhere/);
+  refused(() => q.add(f.request({ commit: "abc" }), null, [a], { caller: laptop, owner: operator }), "invalid", /scratch project/);
+  refused(() => q.add(f.request({ claude: "fix it" }), "Fix it.", [a], { caller: laptop, owner: operator }), "invalid", /message is for a Nexus agent thread/);
+  refused(() => q.add(f.request({ claude: "fix it", model: "claude-fable-5-1" }), null, [a], { caller: laptop, owner: operator }), "invalid", /Fable models are not available in pylons/);
+  refused(() => q.add(f.request(), null, [f.thread("th-review", reviewerCaller)], { caller: laptop, owner: operator }), "invalid", /reviewer, check or verify thread/);
+  refused(() => q.add(f.request(), null, [f.thread("th-check", checkCaller)], { caller: laptop, owner: operator }), "invalid", /reviewer, check or verify thread/);
+  refused(() => q.add(f.request(), null, [f.thread("th-verify", verifyCaller)], { caller: laptop, owner: operator }), "invalid", /reviewer, check or verify thread/);
   assert.deepEqual(f.registry.queue.queuedThreads(), [], "a refused start records nothing");
 
-  const record = q.add(f.request({ resources: { cpus: 4 } }), "Fix it.", [a, a], laptop);
+  const record = q.add(f.request({ resources: { cpus: 4 } }), "Fix it.", [a, a], { caller: laptop, owner: operator });
   assert.deepEqual(record.after, [a]);
   assert.deepEqual(record.request, { project: project.id, title: "After", resources: { cpus: 4, memoryGiB: 4, diskGiB: 10 } });
-  const nested = q.add(f.request({ resources: { nestedVirtualization: true } }), null, [a], laptop);
+  const nested = q.add(f.request({ resources: { nestedVirtualization: true } }), null, [a], { caller: laptop, owner: operator });
   assert.deepEqual(nested.request.resources, { ...project.resources, nestedVirtualization: true }, "the queue fills a size as a start does");
   assert.match(record.id, /^th-[0-9a-f]{12}$/);
   assert.deepEqual(f.registry.queue.queuedThread(record.id), record);
   assert.equal(queuedView(f.registry, record).node, node, "a start that names no node shows the project's default");
   assert.equal(f.registry.threads.thread(record.id), undefined, "a queued thread has no row");
   assert.deepEqual(f.registry.threads.threads().map((x) => x.id).sort(), ["th-a", "th-check", "th-review", "th-verify"]);
-  const claude = q.add(f.request({ claude: "Fix it", node: "auto" }), null, [record.id], laptop);
+  const claude = q.add(f.request({ claude: "Fix it", node: "auto" }), null, [record.id], { caller: laptop, owner: operator });
   assert.deepEqual(queuedView(f.registry, f.registry.queue.queuedThread(claude.id)!), {
     id: claude.id, title: "After", project: project.id, startedBy: laptop, createdAt: claude.createdAt, status: "queued", after: [record.id],
     waits: [{ thread: record.id, state: "waiting", why: "is queued" }], blocked: false, node: "auto", worker: "claude", model: "claude-opus-5-5",
@@ -169,8 +170,8 @@ test("a queued thread starts once its predecessor's PR merged, as the PR watch o
   const q = f.queue();
   const a = f.thread("th-a");
   const b = f.thread("th-b");
-  const first = q.add(f.request({ title: "After A" }), null, [a], laptop);
-  const second = q.add(f.request({ title: "After B", claude: "Fix it" }), null, [b], laptop);
+  const first = q.add(f.request({ title: "After A" }), null, [a], { caller: laptop, owner: operator });
+  const second = q.add(f.request({ title: "After B", claude: "Fix it" }), null, [b], { caller: laptop, owner: operator });
   f.links(a, f.pr(3, "open"));
   await q.poll();
   assert.deepEqual(f.starts, []);
@@ -199,7 +200,7 @@ test("a closed PR blocks the queued thread and a reopened one unblocks it, and s
   const q = f.queue();
   const a = f.thread("th-a");
   const b = f.thread("th-b");
-  const record = q.add(f.request(), null, [a, b], laptop);
+  const record = q.add(f.request(), null, [a, b], { caller: laptop, owner: operator });
   const view = () => queuedView(f.registry, f.registry.queue.queuedThread(record.id)!);
   f.links(a, f.pr(3, "closed"));
   f.links(b, f.pr(4, "merged"));
@@ -222,8 +223,8 @@ test("a chain starts in order: C after B, which is queued after A", async (t) =>
   const f = fixture(t);
   const q = f.queue();
   const a = f.thread("th-a");
-  const b = q.add(f.request({ title: "B" }), null, [a], laptop);
-  const c = q.add(f.request({ title: "C" }), null, [b.id], laptop);
+  const b = q.add(f.request({ title: "B" }), null, [a], { caller: laptop, owner: operator });
+  const c = q.add(f.request({ title: "C" }), null, [b.id], { caller: laptop, owner: operator });
   assert.deepEqual(queuedView(f.registry, f.registry.queue.queuedThread(c.id)!).waits, [{ thread: b.id, state: "waiting", why: "is queued" }]);
   f.links(a, f.pr(3, "merged"));
   await q.poll();
@@ -239,7 +240,7 @@ test("two passes and a start-queued at once start the thread once", async (t) =>
   const one = f.queue();
   const other = f.queue();
   const a = f.thread("th-a");
-  const record = one.add(f.request(), null, [a], laptop);
+  const record = one.add(f.request(), null, [a], { caller: laptop, owner: operator });
   f.links(a, f.pr(3, "merged"));
   const release = f.holdStarts();
   const passes = [one.poll(), one.poll()];
@@ -259,7 +260,7 @@ test("two passes and a start-queued at once start the thread once", async (t) =>
 test("archiving a queued thread while its start is in flight leaves no thread row", async (t) => {
   const f = fixture(t);
   const q = f.queue();
-  const record = q.add(f.request(), null, [f.thread("th-a")], laptop);
+  const record = q.add(f.request(), null, [f.thread("th-a")], { caller: laptop, owner: operator });
   const release = f.holdStarts();
   const started = q.startNow(record.id, laptop);
   await new Promise((resolve) => setImmediate(resolve));
@@ -280,7 +281,7 @@ test("a start refused while a deploy drains stays queued with why, and the next 
   const f = fixture(t);
   const q = f.queue();
   const a = f.thread("th-a");
-  const record = q.add(f.request(), null, [a], laptop);
+  const record = q.add(f.request(), null, [a], { caller: laptop, owner: operator });
   f.links(a, f.pr(3, "merged"));
   f.draining = true;
   await q.poll();
@@ -297,7 +298,7 @@ test("an auto start with no node that has room stays queued, then starts once ro
   const f = fixture(t);
   const q = f.queue();
   const a = f.thread("th-a");
-  const record = q.add(f.request({ node: "auto" }), null, [a], laptop);
+  const record = q.add(f.request({ node: "auto" }), null, [a], { caller: laptop, owner: operator });
   f.links(a, f.pr(3, "merged"));
   await q.poll();
   assert.match(f.registry.queue.queuedThread(record.id)!.lastError!, /no node can run this pylon: rj-firebat is offline/);
@@ -315,21 +316,21 @@ test("a queued builder does not start while a review's gate pylon waits for room
   const q = f.queue();
   const a = f.thread("th-a");
   f.links(a, f.pr(3, "merged"));
-  const record = q.add(f.request(), null, [a], laptop);
+  const record = q.add(f.request(), null, [a], { caller: laptop, owner: operator });
   const gated = f.thread("th-gated");
   f.review(gated, { kind: "verifying", startedAt: 1, thread: null, refused: "no node can run this pylon: rj-firebat is overcommitted", room: true });
   await q.poll();
   assert.deepEqual(f.starts, [], "the verify pylon gets the room first");
   assert.deepEqual(queuedView(f.registry, f.registry.queue.queuedThread(record.id)!).waits.at(-1), { thread: gated, state: "waiting", why: "PR #9's verify pylon waits for a node to have room, which goes to it first" }, "the thread says what it waits for");
-  const now = q.add(f.request({ title: "Now" }), null, [a], laptop);
+  const now = q.add(f.request({ title: "Now" }), null, [a], { caller: laptop, owner: operator });
   await q.startNow(now.id, laptop);
   assert.deepEqual(f.starts, [now.id], "the person's start now does not wait");
   f.review(gated, { kind: "verifying", startedAt: 2, thread: "th-verify-1" as ThreadId });
   await q.poll();
   assert.deepEqual(f.starts, [now.id, record.id]);
 
-  const first = q.add(f.request({ title: "First" }), null, [a], laptop);
-  const second = q.add(f.request({ title: "Second" }), null, [a], laptop);
+  const first = q.add(f.request({ title: "First" }), null, [a], { caller: laptop, owner: operator });
+  const second = q.add(f.request({ title: "Second" }), null, [a], { caller: laptop, owner: operator });
   const release = f.holdStarts();
   const pass = q.poll();
   await new Promise((resolve) => setImmediate(resolve));
@@ -351,7 +352,7 @@ test("a queued builder does not start while a review's gate pylon waits for room
 test("a Nexus agent thread's first message is sent once under its queued request ID, and again under it after a crash", async (t) => {
   const f = fixture(t);
   const a = f.thread("th-a");
-  const record = f.queue().add(f.request(), "Fix the checkout.\nThen push.", [a], laptop);
+  const record = f.queue().add(f.request(), "Fix the checkout.\nThen push.", [a], { caller: laptop, owner: operator });
   f.links(a, f.pr(3, "merged"));
   await f.queue().poll();
   assert.deepEqual(f.sent, [[record.id, "Fix the checkout.\nThen push.", `queued:${record.id}`]]);
@@ -370,7 +371,7 @@ test("a queued thread survives a restart, and a pass after it starts the thread"
   const path = join(dir, "registry.db");
   const before = fixture(t, path);
   const a = before.thread("th-a");
-  const record = before.queue().add(before.request(), null, [a], laptop);
+  const record = before.queue().add(before.request(), null, [a], { caller: laptop, owner: operator });
   before.registry.close();
   const after = fixture(t, path);
   assert.deepEqual(after.registry.queue.queuedThread(record.id), record);
@@ -383,7 +384,7 @@ test("a queued thread survives a restart, and a pass after it starts the thread"
 test("a queue record's status moves only as archive, unarchive and delete allow", (t) => {
   const f = fixture(t);
   const q = f.queue();
-  const record: QueuedRecord = q.add(f.request(), null, [f.thread("th-a")], laptop);
+  const record: QueuedRecord = q.add(f.request(), null, [f.thread("th-a")], { caller: laptop, owner: operator });
   assert.throws(() => q.setStatus(record.id, "queued"), /is queued, not cancelled/);
   assert.throws(() => q.setStatus("th-none" as ThreadId, "archived"), /no queued thread th-none/);
   assert.equal(q.setStatus(record.id, "deleted").status, "deleted");

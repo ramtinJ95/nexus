@@ -7,9 +7,12 @@ import { DatabaseSync } from "node:sqlite";
 import { arcMigrations, migrations, type Migrations } from "./schema.ts";
 import { migrate } from "./db.ts";
 import { headHolds } from "./policy.ts";
-import { testReview } from "../test-support/registry-kit.ts";
+import { addThread, seedRegistry, testReview } from "../test-support/registry-kit.ts";
+import { openRegistry } from "./registry.ts";
+import { operator } from "./people.ts";
+import type { Person } from "../ids.ts";
 import { tempDir } from "../test-support/kit.ts";
-import { versionBefore } from "../test-support/schema-kit.ts";
+import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
 
 const tables = (db: DatabaseSync) => db.prepare("SELECT name, wr FROM pragma_table_list WHERE schema = 'main' AND type = 'table'").all() as { name: string; wr: number }[];
 // The questions migration keeps rowids for the order of questions asked in one millisecond, so a row's rowid is part of it.
@@ -120,11 +123,28 @@ test("a registry ahead of either list is refused, and nothing is written first",
   arcAhead.close();
 });
 
+test("the arc's first migration gives every thread that came before it the operator as its owner", async (t) => {
+  const dir = await tempDir("nexus-owner-", t);
+  const path = join(dir, "registry.db");
+  const before = openRegistry(path);
+  const old = addThread(seedRegistry(before), { thread: { owner: "someone@example.com" as Person } });
+  before.close();
+  rewindTo(path, migrations.length);
+  const rewound = new DatabaseSync(path);
+  assert.equal(rewound.prepare("SELECT count(*) AS n FROM pragma_table_info('threads') WHERE name = 'owner'").get()!.n, 0, "a registry from before the arc has no owner");
+  rewound.close();
+  const after = openRegistry(path);
+  t.after(() => after.close());
+  assert.equal(after.threads.thread(old.id)?.owner, operator);
+});
+
 test("the merge policy holds a change inside the arc list as irreversible, even one that names no table", async (t) => {
   const dir = await tempDir("nexus-schema-diff-", t);
-  const source = readFileSync(new URL("./schema.ts", import.meta.url), "utf8");
   const declaration = "export const arcMigrations: Migrations = [\n";
-  assert.ok(source.includes(declaration));
+  const shipped = readFileSync(new URL("./schema.ts", import.meta.url), "utf8");
+  assert.ok(shipped.includes(declaration));
+  // The arc's own migrations name tables, which the diff's context would show, so the list starts empty here.
+  const source = shipped.slice(0, shipped.indexOf(declaration) + declaration.length) + shipped.slice(shipped.indexOf("\n];", shipped.indexOf(declaration)) + 1);
   const withArc = (...entries: string[]) => source.replace(declaration, declaration + entries.join(""));
   const first = "  `UPDATE threads SET title = title;`,\n";
   const long = "  // A long one.\n  `UPDATE threads\n     SET title = title\n     WHERE 1;`,\n";

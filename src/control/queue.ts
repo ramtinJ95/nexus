@@ -10,6 +10,7 @@
  * pass and read rather than stored, so a reopened or later-merged pull request unblocks it. None starts on its own while
  * a review's gate pylon waits for room (`gateAhead`), so the gate gets the room that frees first, and its record says so.
  */
+import { operator, type Starter } from "./people.ts";
 import { defaultClaudeModel } from "../protocol/models.ts";
 import { newThreadId, requestIds, type ProjectId, type ThreadId } from "../ids.ts";
 import { singleFlight } from "../single-flight.ts";
@@ -31,7 +32,7 @@ type QueueRegistry = Pick<Registry, "threads" | "images" | "reviews" | "nodeMetr
 
 export interface ThreadQueue {
   /** Validates and records, with `key` if given; throws a Refusal. Does not start it; the caller calls poll() after. */
-  add(request: StartRequest, message: string | null, after: readonly string[], caller: string, key?: StartKey): QueuedRecord;
+  add(request: StartRequest, message: string | null, after: readonly string[], by: Starter, key?: StartKey): QueuedRecord;
   /**
    * Records startNow, then starts it now and returns the thread, or throws the start's error. The thread then stays
    * queued with startNow, so a later pass starts it once there is room.
@@ -133,7 +134,7 @@ export function threadQueue(options: {
     if (record?.status !== "queued") throw new Refusal("conflict", `thread ${id} is no longer queued`);
     let t: Thread;
     try {
-      t = await gate.run(() => startThread({ request: record.request, caller: record.startedBy, role: "builder", queued: id }));
+      t = await gate.run(() => startThread({ request: record.request, caller: record.startedBy, owner: record.owner ?? operator, role: "builder", queued: id }));
     } catch (err) {
       const message = (err as Error).message;
       const now = registry.queue.queuedThread(id);
@@ -176,7 +177,7 @@ export function threadQueue(options: {
 
   const passes = singleFlight(pass);
   return {
-    add(request, message, after, caller, key) {
+    add(request, message, after, { caller, owner }, key) {
       const broken = brokenRule(startRules, { ...request, message });
       if (broken !== undefined) throw new Refusal("invalid", broken);
       const project = checkStart(registry, { request, role: "builder" });
@@ -187,7 +188,7 @@ export function threadQueue(options: {
         if (t !== undefined && servesReview(threadRole(registry, t))) throw new Refusal("invalid", `thread ${id} is a review loop's reviewer, check or verify thread, which merges no pull request of its own`);
       }
       const record: QueuedRecord = {
-        id: newThreadId(), title: request.title, project: project.id, startedBy: caller, createdAt: Date.now(), after: ids,
+        id: newThreadId(), title: request.title, project: project.id, startedBy: caller, owner, createdAt: Date.now(), after: ids,
         request: { ...request, resources: resourcesOf(request.resources, project) },
         message, status: "queued", startNow: null, lastError: null, startedAt: null, firstMessage: null,
       };

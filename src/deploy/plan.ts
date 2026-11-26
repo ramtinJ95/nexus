@@ -69,17 +69,27 @@ export function planDeploy(input: DeployInput): DeployStep {
 }
 
 /**
- * The registry's user_version, and how many migrations a release's code applies. Either is null before the control
- * plane has made a registry, or for a release from before src/control/schema.ts.
+ * How many migrations of each of schema.ts's lists a registry applied or a release's code applies: the main list's,
+ * which a registry counts in user_version, and the multiplayer arc's, which it counts in arc_schema. A registry without
+ * arc_schema, and a release from before the arc's list, count none of the arc's.
  */
-export interface SchemaVersions { registry: number | null; release: number | null }
+export interface SchemaCounts { main: number; arc: number }
+
+/** The registry's counts and a release's. Either is null before the control plane has made a registry, or for a release from before src/control/schema.ts. */
+export interface SchemaVersions { registry: SchemaCounts | null; release: SchemaCounts | null }
 
 /**
- * What a release's control plane does to the registry as db.ts opens it: migrates one behind it, refuses one ahead. A
- * release from before schema.ts kept the same refusal in registry.ts, so one whose count is unknown counts as refusing.
+ * What a release's control plane does to the registry as db.ts opens it: migrates one behind it in either list, refuses
+ * one ahead in either. A release from before schema.ts kept the same refusal in registry.ts, so one whose count is
+ * unknown counts as refusing.
  */
 export function schemaStep({ registry, release }: SchemaVersions): "starts" | "migrates" | "refuses" {
   if (registry === null) return "starts";
-  if (release === null || registry > release) return "refuses";
-  return registry < release ? "migrates" : "starts";
+  if (release === null || registry.main > release.main || registry.arc > release.arc) return "refuses";
+  return registry.main < release.main || registry.arc < release.arc ? "migrates" : "starts";
 }
+
+/** The registry's version as a refusal names it, the arc's only once it applied one, so an install without them reads as before. */
+export const registryVersion = ({ main, arc }: SchemaCounts) => arc === 0 ? `schema version ${main}` : `schema version ${main} and arc schema version ${arc}`;
+/** The migrations a release applies, as a refusal names them. */
+export const releaseMigrations = ({ main, arc }: SchemaCounts) => arc === 0 ? `${main} registry migrations` : `${main} registry migrations and ${arc} of the arc's`;

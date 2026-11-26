@@ -1,4 +1,5 @@
 /** Project routes: add, edit, grants and the identity a pylon boots with. */
+import { operator } from "./people.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Thread } from "./thread-store.ts";
@@ -58,7 +59,7 @@ test("only a person's device can remove a project, and callers cannot forge a re
 test("queued work and unstarted pipeline items block removal; cancelled history cannot restart", async (t) => {
   const s = await testApi(t, { pipeline: true });
   await s.call("POST", "/v1/projects", project);
-  const queued = s.queue!.add({ project: "acme", title: "Later" }, null, [], laptop);
+  const queued = s.queue!.add({ project: "acme", title: "Later" }, null, [], { caller: laptop, owner: operator });
   assert.equal((await s.call("DELETE", "/v1/projects/acme")).status, 409);
   await s.call("POST", `/v1/threads/${queued.id}/archive`);
   await s.call("PATCH", "/v1/projects/acme", { pipeline: { autoStart: false } });

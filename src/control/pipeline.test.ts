@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { operator } from "./people.ts";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { turnGate } from "./drain.ts";
@@ -37,7 +38,7 @@ function fixture(t: import("node:test").TestContext, setting: PipelineSetting | 
   const pr = (number: number, state: PullRequest["state"]): PullRequest => testPr({ repo: "acme/acme", number, title: `PR ${number}`, state });
   return {
     registry, queue, items, fake, request, pr,
-    add: (title: string, after: readonly ItemId[] = [], over: Partial<StartRequest> = {}) => items.add(request(title, over), over.claude === undefined ? `Build ${title}.` : null, after, laptop).id,
+    add: (title: string, after: readonly ItemId[] = [], over: Partial<StartRequest> = {}) => items.add(request(title, over), over.claude === undefined ? `Build ${title}.` : null, after, { caller: laptop, owner: operator }).id,
     /** A pass of the pipeline, then of the queue, as their timers run them. */
     async passes() { await items.poll(); await queue.poll(); },
     links(id: ThreadId, ...prs: PullRequest[]) { registry.prWatches.savePrWatch(id, { links: prs.map((p) => ({ pr: p, seen: [], failed: false })), commentWakes: 0, pending: null, error: null }); },
@@ -216,12 +217,12 @@ test("an item is queued once across passes and restarts, under its request ID", 
 test("an item is checked as a start is, and its pass records why a queue refused it", async (t) => {
   const f = fixture(t);
   const refused = (fn: () => unknown, kind: string, message: RegExp) => assert.throws(fn, (err: { kind?: string; message: string }) => err.kind === kind && message.test(err.message));
-  refused(() => f.items.add(f.request("X", { project: "nope" }), "Go.", [], laptop), "missing", /no project nope/);
-  refused(() => f.items.add(f.request("X"), "Go.", ["it-000000000000"], laptop), "missing", /no item it-000000000000/);
-  refused(() => f.items.add(f.request("X", { claude: "Go" }), "Go.", [], laptop), "invalid", /message is for a Nexus agent thread/);
-  refused(() => f.items.add(f.request("X"), null, [], laptop), "invalid", /an item needs a brief/);
-  refused(() => f.items.add(f.request("X", { model: "m" }), "Go.", [], laptop), "invalid", /model requires claude/);
-  refused(() => f.items.add(f.request("X", { claude: "Go", model: "fable" }), null, [], laptop), "invalid", /Fable models are not available in pylons/);
+  refused(() => f.items.add(f.request("X", { project: "nope" }), "Go.", [], { caller: laptop, owner: operator }), "missing", /no project nope/);
+  refused(() => f.items.add(f.request("X"), "Go.", ["it-000000000000"], { caller: laptop, owner: operator }), "missing", /no item it-000000000000/);
+  refused(() => f.items.add(f.request("X", { claude: "Go" }), "Go.", [], { caller: laptop, owner: operator }), "invalid", /message is for a Nexus agent thread/);
+  refused(() => f.items.add(f.request("X"), null, [], { caller: laptop, owner: operator }), "invalid", /an item needs a brief/);
+  refused(() => f.items.add(f.request("X", { model: "m" }), "Go.", [], { caller: laptop, owner: operator }), "invalid", /model requires claude/);
+  refused(() => f.items.add(f.request("X", { claude: "Go", model: "fable" }), null, [], { caller: laptop, owner: operator }), "invalid", /Fable models are not available in pylons/);
   refused(() => f.items.approve(f.add("A"), laptop), "conflict", /starts its items on their own/);
   assert.equal(f.registry.pipeline.items().length, 1, "a refused item records nothing");
 

@@ -168,13 +168,13 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 
 ### mp-02: people, roles, and a thread's owner
 
-- [ ] **Depends on.** `mp-01`.
-- [ ] **Files.** `src/control/main.ts`, `src/control/api/access.ts`, `src/control/thread-store.ts`, `src/control/threads.ts`, `src/control/queue.ts`, the arc's migration list.
-- [ ] **Change.** `control.json` gains `people`, a map from tailnet user to `admin` or `engineer`. With `people` set, a caller is admitted by user, a device with tags or in the node registry is never a person, and `callers` and `deployers` must be absent. An admin holds what a deployer holds today. Each thread gets an `owner`. `startedBy` keeps its meaning, a device or a role name. One value built at startup says whether the install is shared, and modules read that value, not the config.
-- [ ] **Result.** On a shared install every thread has an owning person. On an install without `people`, the one person owns every thread and nothing else changes.
-- [ ] **Unit.** `interrogate/node-is-not-person.test.ts` asserts the fault. Turn it round, so that it shows a tagged device refused on person routes. A config with both `people` and `callers` fails to load. The migration gives every existing thread the single person as owner.
-- [ ] **Live.** On the two-person stack, `alice` starts a thread. Pass when `nexus show` as `bob` names `alice` as its owner, and a call from the node's identity to a person route gets 403.
-- [ ] **Perf.** `api`. Fail above 15% over base.
+- [x] **Depends on.** `mp-01`.
+- [x] **Files.** `src/control/main.ts`, `src/control/api/access.ts`, `src/control/thread-store.ts`, `src/control/threads.ts`, `src/control/queue.ts`, the arc's migration list.
+- [x] **Change.** `control.json` gains `people`, a map from tailnet user to `admin` or `engineer`. With `people` set, a caller is admitted by user, a device with tags or in the node registry is never a person, and `callers` and `deployers` must be absent. An admin holds what a deployer holds today. Each thread gets an `owner`. `startedBy` keeps its meaning, a device or a role name. One value built at startup says whether the install is shared, and modules read that value, not the config.
+- [x] **Result.** On a shared install every thread has an owning person. On an install without `people`, the one person owns every thread and nothing else changes.
+- [x] **Unit.** `interrogate/node-is-not-person.test.ts` asserts the fault. Turn it round, so that it shows a tagged device refused on person routes. A config with both `people` and `callers` fails to load. The migration gives every existing thread the single person as owner.
+- [x] **Live.** On the two-person stack, `alice` starts a thread. Pass when `nexus show` as `bob` names `alice` as its owner, and a call from the node's identity to a person route gets 403.
+- [x] **Perf.** `api`. Fail above 15% over base.
 
 ### mp-03: only the owner acts on a thread
 

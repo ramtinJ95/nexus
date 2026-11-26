@@ -254,8 +254,8 @@ test("a failed deploy that migrated the registry stays on its release with a bac
       return "";
     },
     registry: {
-      version: async () => schema,
-      known: async (release: string): Promise<number> => release === `releases/${commit}` ? 4 : 3,
+      version: async () => ({ main: schema, arc: 0 }),
+      known: async (release: string) => ({ main: release === `releases/${commit}` ? 4 : 3, arc: 0 }),
       backUp: async () => { calls.push(`backup at ${schema}`); return "2026-11-04T00-00-00Z"; },
     },
   };
@@ -282,7 +282,7 @@ test("a failed deploy that migrated the registry stays on its release with a bac
   await rm(join(dir, "control-deploy.json"));
   calls.length = 0;
   desired = third;
-  boundary.registry.known = async (release) => release === `releases/${third}` ? 5 : release === `releases/${commit}` ? 4 : 3;
+  boundary.registry.known = async (release) => ({ main: release === `releases/${third}` ? 5 : release === `releases/${commit}` ? 4 : 3, arc: 0 });
   const version = boundary.registry.version;
   boundary.registry.version = async () => { if (calls.includes("stop")) throw new Error("registry unreadable"); return version(); };
   await reconcileRole("control", config, api, boundary);
@@ -673,11 +673,16 @@ test("the node's registry reads give the registry's version and a release's migr
   assert.equal(await registry.version(), null, "the control plane has not made a registry yet");
   const db = new DatabaseSync(join(dir, "home/registry.db"));
   db.exec("PRAGMA journal_mode = WAL; CREATE TABLE t (x); PRAGMA user_version = 7");
-  assert.equal(await registry.version(), 7, "read while another connection holds the registry open");
+  assert.deepEqual(await registry.version(), { main: 7, arc: 0 }, "read while another connection holds the registry open, with no arc_schema table");
+  db.exec("CREATE TABLE arc_schema (one INTEGER PRIMARY KEY CHECK (one = 1), version INTEGER NOT NULL) STRICT; INSERT INTO arc_schema VALUES (1, 2)");
+  assert.deepEqual(await registry.version(), { main: 7, arc: 2 }, "the arc's version from arc_schema");
   db.close();
-  await writeFile(join(dir, "releases/new/src/control/schema.ts"), "export const migrations: readonly string[] = [`CREATE TABLE a (x)`, `CREATE TABLE b (x)`];\n");
-  assert.equal(await registry.known("releases/new"), 2);
-  assert.equal(await registry.known(join(dir, "releases/new")), 2, "an absolute link target");
+  await writeFile(join(dir, "releases/new/src/control/schema.ts"), "export const migrations: readonly string[] = [`CREATE TABLE a (x)`, `CREATE TABLE b (x)`];\nexport const arcMigrations: readonly string[] = [`CREATE TABLE c (x)`];\n");
+  assert.deepEqual(await registry.known("releases/new"), { main: 2, arc: 1 });
+  assert.deepEqual(await registry.known(join(dir, "releases/new")), { main: 2, arc: 1 }, "an absolute link target");
+  await mkdir(join(dir, "releases/main-only/src/control"), { recursive: true });
+  await writeFile(join(dir, "releases/main-only/src/control/schema.ts"), "export const migrations: readonly string[] = [`CREATE TABLE a (x)`];\n");
+  assert.deepEqual(await registry.known("releases/main-only"), { main: 1, arc: 0 }, "a release from before the arc's list applies none of it");
   assert.equal(await registry.known("releases/old"), null, "a release from before schema.ts");
   await writeFile(join(dir, "releases/broken/src/control/schema.ts"), "export const migrations = [;\n");
   await assert.rejects(registry.known("releases/broken"), SyntaxError);

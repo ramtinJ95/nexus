@@ -16,6 +16,9 @@
  * With NEXUS_VERIFY_THREADS=<n>, the registry starts with n archived threads of spoon, started in turn by alice and bob, so a
  * read of the thread list has rows to read and reconcile boots none of them.
  *
+ * With NEXUS_VERIFY_PEOPLE=1, control.json names `people` in place of `callers`: alice is an admin and bob an engineer, each
+ * admitted by their tailnet login, and each owns the threads they start. Without it the install is solo, as before.
+ *
  * Everything Docker holds for the run carries the label nexus.verify=<run>. The process writes <runDir>/state.json
  * once a thread can be started, and closes the probe and the control plane on SIGTERM or SIGINT. Containers
  * outlive it, as pylons outlive a probe. `verify-nexus down` removes them.
@@ -34,7 +37,8 @@ import { openRegistry } from "../../../../src/control/registry.ts";
 import { nodeSecrets } from "../../../../src/probe/config.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "../../../../src/probe/fake-tailscale.ts";
 import { startProbe } from "../../../../src/probe/server.ts";
-import type { ImageId, NodeName, ProjectId, TailnetNodeId } from "../../../../src/ids.ts";
+import type { ImageId, NodeName, Person, ProjectId, TailnetNodeId } from "../../../../src/ids.ts";
+import { operator } from "../../../../src/control/people.ts";
 import { defaultReleaseBranch } from "../../../../src/protocol/deploy.ts";
 import { probePort } from "../../../../src/protocol/routes.ts";
 import { testPylon, testThread } from "../../../../src/test-support/registry-kit.ts";
@@ -74,6 +78,12 @@ const verifyRepo = "/srv/verify.git";
  */
 const templateRoot = `/var/tmp/nexus-verify-${run}`;
 const templateRepo = join(templateRoot, "template.git");
+const shared = (() => {
+  const v = process.env.NEXUS_VERIFY_PEOPLE;
+  if (v === undefined || v === "") return false;
+  if (v !== "1") throw new Error(`NEXUS_VERIFY_PEOPLE must be 1 or unset, not ${JSON.stringify(v)}`);
+  return true;
+})();
 const seededThreads = (() => {
   const n = process.env.NEXUS_VERIFY_THREADS;
   if (n === undefined || n === "") return 0;
@@ -259,8 +269,9 @@ if (seededThreads > 0) {
   seed.projects.createProject(project);
   const now = Date.now();
   for (let i = 0; i < seededThreads; i++) {
+    const person = i % 2 === 0 ? tailnet.alice : tailnet.bob;
     const thread = testThread({
-      project: project.id, title: `Seeded ${i + 1}`, startedBy: (i % 2 === 0 ? tailnet.alice : tailnet.bob).Node.StableID,
+      project: project.id, title: `Seeded ${i + 1}`, startedBy: person.Node.StableID, owner: shared ? person.UserProfile!.LoginName as Person : operator,
       createdAt: now - (seededThreads - i) * 60_000, lastAgentActivityAt: now - 3_600_000, lastHumanActivityAt: now - 3_600_000,
     });
     seed.threads.createThread(thread, testPylon(thread, {
@@ -279,7 +290,8 @@ const controlPlane = await startControlPlane({
   nodes: [{ name: node, tailnetHost: "127.0.0.1", tailnetNodeId: probeId }],
   imageBuildNode: node,
   releaseBranch: defaultReleaseBranch,
-  callers: [tailnet.alice.Node.StableID, tailnet.bob.Node.StableID],
+  ...shared ? { people: { [tailnet.alice.UserProfile!.LoginName]: "admin", [tailnet.bob.UserProfile!.LoginName]: "engineer" } }
+    : { callers: [tailnet.alice.Node.StableID, tailnet.bob.Node.StableID] },
   dotfiles: { repo: verifyRepo, ref: "main" },
   harness: { storage: join(runDir, "harness.sqlite"), credentials: join(runDir, "unused-credentials.json"), model: scriptedModel },
   tailscaledSocket: socket,

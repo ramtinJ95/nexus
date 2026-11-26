@@ -43,6 +43,18 @@ test("a config without the harness, or with a relative harness path, is refused"
   assert.throws(() => parseConfig(JSON.stringify({ ...rest, harness: { ...harness, storage: "harness.sqlite" } })), /absolute path/);
 });
 
+test("people makes the install shared, admits by tailnet login alone, and a config with it and callers or deployers fails to load", () => {
+  const { callers, deployers, ...rest } = JSON.parse(example);
+  const people = { "alice@example.com": "admin", "bob@example.com": "engineer" };
+  assert.deepEqual(parseConfig(JSON.stringify({ ...rest, people })).people, people);
+  assert.throws(() => parseConfig(JSON.stringify({ ...rest, people, callers })), /people admits callers by tailnet login, so callers must be absent/);
+  assert.throws(() => parseConfig(JSON.stringify({ ...rest, people, callers: [], deployers })), /so callers and deployers must be absent/);
+  assert.throws(() => parseConfig(JSON.stringify(rest)), /callers is required without people/, "a solo install still names its callers");
+  assert.throws(() => parseConfig(JSON.stringify({ ...rest, people: { operator: "admin" } })), /must be a tailnet login/, "no person can be the operator");
+  assert.throws(() => parseConfig(JSON.stringify({ ...rest, people: { "bob@example.com": "engineer" } })), /at least one admin/);
+  assert.equal(parseConfig(JSON.stringify({ ...rest, callers, deployers })).people, undefined, "without people the config parses as before");
+});
+
 test("no node may be named auto, which start --node auto asks for", () => {
   const config = JSON.parse(example);
   assert.throws(() => parseConfig(JSON.stringify({ ...config, nodes: [{ ...config.nodes[0], name: "auto" }] })), /no node may be named it/);

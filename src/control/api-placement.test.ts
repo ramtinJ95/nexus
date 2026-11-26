@@ -1,4 +1,5 @@
 /** Where a thread start boots its pylon, from which template, and at what size. */
+import { operator } from "./people.ts";
 import { NoRoom, Refusal } from "./refusal.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -100,7 +101,7 @@ test("a pylon that asks for nested virtualization goes only to a node whose prob
   const s = await withImage(t);
   observeNode(s, "flat", { total: 64, committed: 0 });
   observeNode(s, "nests", { total: 16, committed: 0 }, { nestedVirtualization: true });
-  const nested = await s.startThread({ request: { project: "acme", title: "Verify", node: "auto", resources: { memoryGiB: 8, nestedVirtualization: true } }, caller: "nexus-verify", role: "verify" });
+  const nested = await s.startThread({ request: { project: "acme", title: "Verify", node: "auto", resources: { memoryGiB: 8, nestedVirtualization: true } }, caller: "nexus-verify", owner: operator, role: "verify" });
   const placement = nested.placement?.how === "auto" ? nested.placement : assert.fail("placed auto");
   assert.equal(placement.node, "nests");
   assert.deepEqual(placement.weighed.find((w) => w.node === "flat"), { node: "flat", refused: "cannot give a pylon KVM of its own: its probe does not report nested virtualization" });
@@ -136,9 +137,9 @@ test("a start near a node boots there while it has room, on the roomiest node on
   const s = await withImage(t);
   observeNode(s, "big", { total: 64, committed: 0 });
   observeNode(s, "full", { total: 32, committed: 40 });
-  const beside = await s.startThread({ request: { project: "acme", title: "Beside", near: "big" as NodeName }, caller: "nexus-review", role: "reviewer" });
+  const beside = await s.startThread({ request: { project: "acme", title: "Beside", near: "big" as NodeName }, caller: "nexus-review", owner: operator, role: "reviewer" });
   assert.deepEqual(beside.placement, { how: "named", node: "big" });
-  const spilled = await s.startThread({ request: { project: "acme", title: "Spilled", near: "full" as NodeName }, caller: "nexus-review", role: "reviewer" });
+  const spilled = await s.startThread({ request: { project: "acme", title: "Spilled", near: "full" as NodeName }, caller: "nexus-review", owner: operator, role: "reviewer" });
   assert.deepEqual(spilled.placement, {
     how: "auto", node: "big", weighed: [
       { node: "big", left: { cpus: 8, memoryGiB: 56, diskGiB: 180 } },
@@ -147,7 +148,7 @@ test("a start near a node boots there while it has room, on the roomiest node on
     ],
   });
   observeNode(s, "big", { total: 64, committed: 70 });
-  await assert.rejects(s.startThread({ request: { project: "acme", title: "Waits", near: "full" as NodeName }, caller: "nexus-review", role: "reviewer" }),
+  await assert.rejects(s.startThread({ request: { project: "acme", title: "Waits", near: "full" as NodeName }, caller: "nexus-review", owner: operator, role: "reviewer" }),
     (err: unknown) => err instanceof NoRoom && /^no node has room for this pylon: big is overcommitted, with \d+ of 64 GiB of memory committed; full is overcommitted/.test((err as Error).message),
     "no node has room, so it waits rather than overcommit the node it was asked to be near");
 });
@@ -155,12 +156,12 @@ test("a start near a node boots there while it has room, on the roomiest node on
 test("a start beside a node too small for it ever is refused, not left to wait, and so is a named start on a full node that still lacks the image", async (t) => {
   const s = await withImage(t);
   observeNode(s, "small", { total: 8, committed: 0 });
-  await assert.rejects(s.startThread({ request: { project: "acme", title: "Huge", near: "small" as NodeName, resources: { memoryGiB: 12 } }, caller: "nexus-review", role: "reviewer" }),
+  await assert.rejects(s.startThread({ request: { project: "acme", title: "Huge", near: "small" as NodeName, resources: { memoryGiB: 12 } }, caller: "nexus-review", owner: operator, role: "reviewer" }),
     (err: unknown) => err instanceof Refusal && !(err instanceof NoRoom) && /small has 8 GiB of memory, and the pylon needs 12 GiB with 1 GiB to spare/.test((err as Error).message));
   s.registry.nodes.upsertNode({ name: "bare" as NodeName, tailnetHost: "bare.tail.ts.net", tailnetNodeId: "nBARE" as TailnetNodeId });
   s.registry.threads.apply({ record: "node", node: "bare" as NodeName, state: "online", capacity: testCapacity({ memoryGiB: 16, committedMemoryGiB: 15 }) });
   s.registry.threads.ingested(testObservation("bare" as NodeName, { capacity: testCapacity({ memoryGiB: 16, committedMemoryGiB: 15 }), artifacts: [] }), []);
-  await assert.rejects(s.startThread({ request: { project: "acme", title: "Bare", node: "bare" }, caller: "nexus-laptop", role: "builder" }),
+  await assert.rejects(s.startThread({ request: { project: "acme", title: "Bare", node: "bare" }, caller: "nexus-laptop", owner: operator, role: "builder" }),
     (err: unknown) => err instanceof NoRoom && /bare has 15 of 16 GiB of memory committed, and the pylon needs 4/.test((err as Error).message));
 });
 
@@ -168,14 +169,14 @@ test("a reviewer's first request far past 16384 characters starts whole on a pro
   const s = await withImage(t);
   observeNode(s, node, { total: 64, committed: 0 });
   const request0 = `Review #7.\n${"d".repeat(30_000)}`;
-  await assert.rejects(s.startThread({ request: { project: "acme", title: "Review of #7", claude: request0 }, caller: "nexus-review", role: "reviewer" }),
+  await assert.rejects(s.startThread({ request: { project: "acme", title: "Review of #7", claude: request0 }, caller: "nexus-review", owner: operator, role: "reviewer" }),
     (err: unknown) => err instanceof Refusal && err.code === "probe-too-old" && err.message.startsWith(`${node}'s probe cannot start a Claude session with a first prompt of 30011 characters`));
   assert.equal(s.registry.threads.threads().length, 0, "the refused start made no thread");
   observeNode(s, node, { total: 64, committed: 0 }, { longPrompts: true });
   const request = `Review #7.\n<description>\n${"d".repeat(30_000)}\n</description>\n<brief>\n${"b".repeat(20_000)}\n</brief>`;
-  const reviewer = await s.startThread({ request: { project: "acme", title: "Review of #7", claude: request }, caller: "nexus-review", role: "reviewer" });
+  const reviewer = await s.startThread({ request: { project: "acme", title: "Review of #7", claude: request }, caller: "nexus-review", owner: operator, role: "reviewer" });
   assert.equal(s.registry.threads.claudeWorker(reviewer.id)!.prompt, request, "the whole request is the worker's first prompt");
-  await assert.rejects(s.startThread({ request: { project: "acme", title: "Long", claude: "b".repeat(16_384) }, caller: "nexus-laptop", role: "builder" }),
+  await assert.rejects(s.startThread({ request: { project: "acme", title: "Long", claude: "b".repeat(16_384) }, caller: "nexus-laptop", owner: operator, role: "builder" }),
     /^Error: Claude prompt including \/poteto-mode exceeds 16384 characters$/);
 });
 

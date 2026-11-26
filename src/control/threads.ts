@@ -129,7 +129,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
 
   /** The conversation is created before the registry row, as HarnessHost.startThread requires. */
   return async function startThread(start: Start): Promise<Thread> {
-    const { request, caller, role, queued, key } = start;
+    const { request, caller, owner, role, queued, key } = start;
     const project = checkStart(registry, start);
     // Decided once from the project as read now, so the thread records the rules its first message carries.
     const rules = standingRulesFor(project, start);
@@ -179,7 +179,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
       const { setup, firstBoot, repo } = setUp(project, read, freshRepo, image, branch, node, now);
       const boot: Omit<BootInputs, "source"> = { pylonId, image, resources, gitIdentity: gitIdentityOf(project, gitIdentity), network, repo, dotfiles };
       const t: Thread = {
-        id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, createdAt: now,
+        id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, owner, createdAt: now,
         // Starting a thread is human activity, so its pylon is wanted at once.
         agentTurnRunning: false, working: false, lastAgentActivityAt: 0, lastHumanActivityAt: now, seenAt: null, lastReplyAt: null, placement, setup,
         ...rules?.carriedBy == null ? {} : { standingRulesRevision: rules.revision },

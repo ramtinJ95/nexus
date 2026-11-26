@@ -8,6 +8,7 @@
  * phase is derived on every read from the records that thread has: the queued record, the thread, its pull request
  * links, its review, its attention and what of it waits on the person.
  */
+import { operator, type Starter } from "./people.ts";
 import { defaultClaudeModel } from "../protocol/models.ts";
 import { singleFlight } from "../single-flight.ts";
 import { newItemId, requestIds, type ItemId, type ProjectId, type ThreadId } from "../ids.ts";
@@ -201,7 +202,7 @@ export function pipeline(options: { registry: PipelineRegistry; queue: Pick<Thre
       if (itemThread(registry, item.id) !== null || unqueued(registry, item) !== null) continue;
       const after = item.after.map((id) => itemThread(registry, id)!);
       try {
-        queue.add(item.request, item.message, after, item.addedBy, startKey(requestIds.pipeline(item.id), { request: item.request, message: item.message, after }));
+        queue.add(item.request, item.message, after, { caller: item.addedBy, owner: item.owner ?? operator }, startKey(requestIds.pipeline(item.id), { request: item.request, message: item.message, after }));
         queuedAny = true;
         if (item.lastError !== null) registry.pipeline.saveItem({ ...item, lastError: null });
       } catch (err) {
@@ -219,7 +220,7 @@ export function pipeline(options: { registry: PipelineRegistry; queue: Pick<Thre
      * Validates and records. The route polls after, so an item with nothing ahead of it is queued at once. An accepted
      * proposal's item takes an ID made from its question, which the planning thread is told.
      */
-    add(request: StartRequest, message: string | null, after: readonly string[], caller: string, id = newItemId()): ItemRecord {
+    add(request: StartRequest, message: string | null, after: readonly string[], { caller, owner }: Starter, id = newItemId()): ItemRecord {
       const broken = brokenRule(itemRules, { ...request, message });
       if (broken !== undefined) throw new Refusal("invalid", broken);
       const project = checkStart(registry, { request, role: "builder" });
@@ -233,7 +234,7 @@ export function pipeline(options: { registry: PipelineRegistry; queue: Pick<Thre
         if (thread !== null && purged(registry, thread)) throw new Refusal("conflict", `item ${id}: ${purgedAhead(ahead.title)}`);
       }
       const record: ItemRecord = {
-        id, project: project.id, title: request.title, request, message, after: ids, addedBy: caller, addedAt: Date.now(),
+        id, project: project.id, title: request.title, request, message, after: ids, addedBy: caller, owner, addedAt: Date.now(),
         approved: null, cancelled: null, lastError: null,
       };
       registry.pipeline.saveItem(record);

@@ -50,6 +50,7 @@ import { refusalStatus } from "../http-error.ts";
 import { Refusal, type RefusalCode, type RefusalKind } from "../refusal.ts";
 import { ok, parse, type ApiKit, type RouteEntry } from "./kit.ts";
 import { admit, anyAllowed, apiAccess, demand, type Policy, type Role } from "./access.ts";
+import type { People } from "../people.ts";
 import { pylonAccess } from "./pylon-access.ts";
 import { eventStreams, maxStreams } from "./sse.ts";
 import { threadViews } from "./thread-view.ts";
@@ -91,6 +92,8 @@ export interface ApiOptions {
   port: number;
   whois: WhoisCaller;
   allowed: ReadonlySet<TailnetNodeId>;
+  /** Who uses the install. Solo when omitted. */
+  people?: People;
   /** `POST /v1/join`, the one route a machine that is no node or caller yet may call. Omitted: no machine can join. */
   joins?: { whois: WhoisNode; configured: ReadonlySet<TailnetNodeId>; joined(node: JoinedNode): void };
   /** Names the API answers to in the Host header. Any other name is a DNS rebinding page on an allowed machine. */
@@ -243,7 +246,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    */
   async function admitted(req: IncomingMessage, policy: Policy | undefined): Promise<{ caller: TailnetNodeId; identity: TailnetIdentity; roles: ReadonlySet<Role>; host: string | null }> {
     const named: (TailnetCaller & { host: string | null }) | null = policy?.role === "joiner" ? await callerOf(req, options.joins!.whois) : await callerOf(req, whois).then((c) => c === null ? null : { ...c, host: null });
-    const roles: ReadonlySet<Role> = named === null ? new Set() : policy?.role === "joiner" ? new Set(["joiner"]) : roleOf(named.id, req.headers.authorization);
+    const roles: ReadonlySet<Role> = named === null ? new Set() : policy?.role === "joiner" ? new Set(["joiner"]) : roleOf(named.id, named, req.headers.authorization);
     admit(roles, policy, named !== null && admittable(named.id) ? named.id : null);
     checkHost(req);
     const { id, host, ...identity } = named!;

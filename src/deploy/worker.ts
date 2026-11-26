@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 import { command, checkoutMerged, repository, type Command, type InstallBoundary, NotSwitched, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
-import { controlReady, planDeploy, prepareTries, quarantined, retryAfter, schemaStep, type Attempt, type DeployStep, type ReleaseHealth, type SchemaVersions } from "./plan.ts";
+import { controlReady, planDeploy, prepareTries, quarantined, registryVersion, releaseMigrations, retryAfter, schemaStep, type Attempt, type DeployStep, type ReleaseHealth, type SchemaCounts, type SchemaVersions } from "./plan.ts";
 import { digestPattern, type DrainBody, type DrainReply, type ReleaseReport, type ReleaseView, type ReportBody, type Role } from "../protocol/deploy.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
 import { awaitHealthy } from "./health.ts";
@@ -80,10 +80,10 @@ type Api = (path: string, body?: unknown) => Promise<any>;
 
 /** What a control install reads of the registry, and the backup that undoes a migration. */
 export interface RegistrySchema {
-  /** The registry's user_version, or null before the control plane has made one. */
-  version(): Promise<number | null>;
-  /** How many migrations the release at `dir`, relative to the prefix, applies, or null for one from before schema.ts. */
-  known(dir: string): Promise<number | null>;
+  /** The registry's user_version and arc_schema version, or null before the control plane has made one. */
+  version(): Promise<SchemaCounts | null>;
+  /** How many migrations of each list the release at `dir`, relative to the prefix, applies, or null for one from before schema.ts. */
+  known(dir: string): Promise<SchemaCounts | null>;
   /** Runs the daily backup's unit now and resolves the backup's name. */
   backUp(): Promise<string>;
 }
@@ -112,14 +112,20 @@ export function nodeRegistry(paths: RegistryPaths, run: Command = command, budge
       try { await stat(path); }
       catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
       const db = new DatabaseSync(path, { readOnly: true });
-      try { return (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version; } finally { db.close(); }
+      try {
+        const main = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
+        const hasArc = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'arc_schema'").get() !== undefined;
+        const arc = hasArc ? (db.prepare("SELECT version FROM arc_schema").get() as { version: number } | undefined)?.version ?? 0 : 0;
+        return { main, arc };
+      } finally { db.close(); }
     },
     async known(dir) {
       const file = join(resolve(paths.prefix, dir), "src/control/schema.ts");
       try { await stat(file); }
       catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
       // schema.ts imports nothing, so a release's own list loads without its node_modules.
-      return ((await import(file)) as { migrations: readonly string[] }).migrations.length;
+      const schema = (await import(file)) as { migrations: readonly string[]; arcMigrations?: readonly string[] };
+      return { main: schema.migrations.length, arc: schema.arcMigrations?.length ?? 0 };
     },
     async backUp() {
       const started = Date.now();
@@ -139,7 +145,7 @@ const nodeBoundary = { prefix, etc, units: unitDir, run: command, checkout: chec
 type NodeBoundary = Omit<typeof nodeBoundary, "registry"> & { registry?: RegistrySchema; worker?: string | undefined; now?: () => number };
 
 const restoreSteps = `deploy/README.md's "A failed deploy past a registry migration"`;
-const applies = ({ release }: SchemaVersions) => release === null ? "has no src/control/schema.ts to say which migrations it applies" : `applies ${release} registry migrations`;
+const applies = ({ release }: SchemaVersions) => release === null ? "has no src/control/schema.ts to say which migrations it applies" : `applies ${releaseMigrations(release)}`;
 
 function controlHealth(view: ReleaseView): ReleaseHealth {
   const control = view.nodes.find((r) => r.role === "control");
@@ -241,7 +247,7 @@ function controlSteps({ api, run, prefix, service, config, registry, desired, re
       const versions = await schemaAt(target);
       const step = schemaStep(versions);
       if (step === "refuses") {
-        throw new SchemaRefused(`release ${desired()} ${applies(versions)}, but the registry is at schema version ${versions.registry}, so its control plane would refuse to start. Deploy a newer commit, or restore a backup from before the migration as ${restoreSteps} says`);
+        throw new SchemaRefused(`release ${desired()} ${applies(versions)}, but the registry is at ${registryVersion(versions.registry!)}, so its control plane would refuse to start. Deploy a newer commit, or restore a backup from before the migration as ${restoreSteps} says`);
       }
       return step === "migrates" ? registry.backUp() : null;
     },
@@ -262,7 +268,7 @@ function controlSteps({ api, run, prefix, service, config, registry, desired, re
       if (schemaStep(versions) !== "refuses") return null;
       const failed = await startAgain();
       const backup = transaction.backup === undefined ? "a backup from before it" : `backup ${transaction.backup}, taken just before it,`;
-      return `the registry is at schema version ${versions.registry}, and the previous release, ${transaction.previous}, ${applies(versions)}, so its control plane would refuse to start. Control stays on ${transaction.target}. Deploy a fixed commit to keep what control recorded since the migration, or restore ${backup} and point control back at ${transaction.previous}, which discards that, as ${restoreSteps} says${failed}`;
+      return `the registry is at ${registryVersion(versions.registry!)}, and the previous release, ${transaction.previous}, ${applies(versions)}, so its control plane would refuse to start. Control stays on ${transaction.target}. Deploy a fixed commit to keep what control recorded since the migration, or restore ${backup} and point control back at ${transaction.previous}, which discards that, as ${restoreSteps} says${failed}`;
     },
     async activate() {
       const view = await api("release") as ReleaseView;

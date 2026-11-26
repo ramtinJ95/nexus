@@ -1,3 +1,4 @@
+import type { Starter } from "../people.ts";
 import type { z } from "zod";
 import { isPipelineRequestId, requestIds, type ProjectId, type ThreadId } from "../../ids.ts";
 import type { StartKey } from "../start-request.ts";
@@ -18,7 +19,7 @@ import { activitySchema, messageSchema, seenSchema, startSchema } from "../../co
 const keptStatuses = Object.keys({ active: true, idle: true, archived: true } satisfies Record<Exclude<ThreadStatus, "deleted">, true>) as ThreadStatus[];
 
 export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEntry[] {
-  const { lookup, thread, guard, wakeThread, rows, shown, open, registry, harness, startThread, agents, agentOf, deleteThread } = kit;
+  const { lookup, thread, guard, wakeThread, rows, shown, open, registry, harness, startThread, agents, agentOf, deleteThread, starter } = kit;
 
   const queueOrRefuse = () => feature(features, "queue");
 
@@ -72,10 +73,10 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
    * thread as it is now and sends an immediate start's first message again, which the harness delivers once. A repeat
    * with another body is refused. A start that failed made nothing, so its ID is free.
    */
-  function start(body: unknown, caller: string): Promise<Thread | QueuedThread> {
+  function start(body: unknown, by: Starter): Promise<Thread | QueuedThread> {
     const { requestId, ...fields } = parse(startSchema, body);
     if (requestId !== undefined && isPipelineRequestId(requestId)) throw new HttpError(400, "request IDs that start with pipeline: are the pipeline's own, which names each item's thread by one");
-    if (requestId === undefined) return startOnce(fields, caller);
+    if (requestId === undefined) return startOnce(fields, by);
     const key = startKey(requestId, fields);
     const pending = starting.get(requestId);
     const made = registry.threads.startRequest(requestId);
@@ -85,7 +86,7 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
     }
     if (pending !== undefined) return pending.answer;
     if (made !== undefined) refuseEnded(requestId, made.thread);
-    const answer = startOnce(fields, caller, key, made?.thread).finally(() => starting.delete(requestId));
+    const answer = startOnce(fields, by, key, made?.thread).finally(() => starting.delete(requestId));
     starting.set(requestId, { body: key.body, answer });
     return answer;
   }
@@ -102,10 +103,10 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
     }
   }
 
-  async function startOnce({ after, message, planning, ...request }: Omit<z.infer<typeof startSchema>, "requestId">, caller: string, key?: StartKey, made?: ThreadId): Promise<Thread | QueuedThread> {
+  async function startOnce({ after, message, planning, ...request }: Omit<z.infer<typeof startSchema>, "requestId">, by: Starter, key?: StartKey, made?: ThreadId): Promise<Thread | QueuedThread> {
     const plans = planning ? feature(features, "planning") : null;
     if (after === undefined) {
-      const t = made === undefined ? await startThread({ request, caller, role: planning ? "planning" : "builder", key }) : registry.threads.thread(made)!;
+      const t = made === undefined ? await startThread({ request, ...by, role: planning ? "planning" : "builder", key }) : registry.threads.thread(made)!;
       plans?.begin(t);
       if (message !== undefined && isOpenStatus(t.status)) {
         const requestId = requestIds.brief(t.id);
@@ -119,7 +120,7 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
       return t;
     }
     const queue = queueOrRefuse();
-    const record = made === undefined ? queue.add(request, message ?? null, after, caller, key) : registry.queue.queuedThread(made)!;
+    const record = made === undefined ? queue.add(request, message ?? null, after, by, key) : registry.queue.queuedThread(made)!;
     void queue.poll();
     return record.status === "started" ? registry.threads.thread(record.id)! : queuedView(registry, record);
   }
@@ -139,7 +140,7 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
       return ok(rows(registry.threads.threads({ project: project as ProjectId | undefined, status: statuses })));
     }),
     on(routes.start, { role: "person", action: "start a thread", startsTurn: true }, async (_, r) => {
-      return created(await start(await r.body(), r.caller));
+      return created(await start(await r.body(), starter(r)));
     }),
     on(routes.queued, anyAllowed, (_, r) => {
       const { project, status } = r.query;
