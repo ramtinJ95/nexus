@@ -66,6 +66,7 @@ All of it is `model/Landing.tla`. Each action there has a comment that names the
 - The fleet is one unit. It installs the desired release, fails and stays on what it ran, or fails and is left on the new release, unhealthy. It tries a failed request again only when the release is requested again.
 - A deadline that passes is a step that may happen at any time while a deploy is pending.
 - A report from the fleet counts for the request that is desired when it arrives.
+- The control plane and the deployer agree on the release branch. `control.json` and `deployer.json` each hold `releaseBranch`, and the installer's `--release-branch` writes both. An install whose two files name different branches is outside the model: its landings would request releases its deployer refuses.
 
 ### Left out
 
