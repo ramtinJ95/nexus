@@ -139,6 +139,33 @@ test("a preparation failure never touches the running release", async (t) => {
   assert.equal(await installer.observed(), null);
 });
 
+test("with the release branch multiplayer, a commit on multiplayer installs and a commit only on main is refused", async (t) => {
+  const dir = await directory(t);
+  const remote = join(dir, "remote");
+  const clone = join(dir, "clone");
+  await mkdir(remote);
+  const git = (args: string[]) => command("git", args, remote);
+  await git(["init", "-b", "main"]);
+  await git(["config", "user.name", "Test"]);
+  await git(["config", "user.email", "test@example.com"]);
+  await git(["commit", "--allow-empty", "-m", "initial"]);
+  await git(["checkout", "-b", "multiplayer"]);
+  await git(["commit", "--allow-empty", "-m", "on multiplayer"]);
+  const onMultiplayer = await git(["rev-parse", "HEAD"]);
+  await git(["checkout", "main"]);
+  await git(["commit", "--allow-empty", "-m", "only on main"]);
+  const onlyMain = await git(["rev-parse", "HEAD"]);
+  await checkoutMerged(clone, onMultiplayer, command, remote, "multiplayer");
+  assert.equal(await command("git", ["rev-parse", "HEAD"], clone), onMultiplayer);
+  await command("git", ["fetch", remote, "main"], clone);
+  await assert.rejects(checkoutMerged(clone, onlyMain, command, remote, "multiplayer"), /not an ancestor of origin\/multiplayer/);
+  assert.equal(await command("git", ["rev-parse", "HEAD"], clone), onMultiplayer, "a refused release leaves the checkout as it was");
+  await assert.rejects(checkoutMerged(clone, onMultiplayer, command, remote), /not an ancestor of origin\/main/, "without a release branch the deployer still follows main");
+  for (const branch of ["--upload-pack=evil", "a..b", "x/", "refs/heads/main:refs/heads/x", "release.lock", "x.lock/y"]) {
+    await assert.rejects(checkoutMerged(clone, onMultiplayer, async () => { assert.fail("git must not run"); }, remote, branch), /not a branch name/);
+  }
+});
+
 test("git accepts merged commits, refuses a fetched non-main commit, and rejects revisions before running git", async (t) => {
   const dir = await directory(t);
   const remote = join(dir, "remote");

@@ -88,6 +88,20 @@ test("a fresh control install writes configs the control plane and probe accept,
 
 const nodeTailnet = tailnetDevices(parseTailscaleStatus(status.replaceAll("rj-firebat", "x-self").replaceAll("infra-testbench", "rj-firebat")));
 
+test("--release-branch names the branch in control.json and deployer.json, and an install without it names none", () => {
+  const written = files(run(["--admit", "Ramtins-MacBook-Pro", "--release-branch", "multiplayer"]));
+  assert.equal(parseConfig(JSON.stringify(value(written, paths.control))).releaseBranch, "multiplayer");
+  assert.equal(value(written, paths.deployer).releaseBranch, "multiplayer");
+  const node = files(run(["--node", "rj-firebat", "--release-branch", "multiplayer"], fresh, nodeTailnet));
+  assert.equal(node.has(paths.control), false);
+  assert.equal(value(node, paths.deployer).releaseBranch, "multiplayer", "a joined node's deployer names the branch too");
+  const plain = files(run(["--admit", "Ramtins-MacBook-Pro"]));
+  assert.equal("releaseBranch" in value(plain, paths.control), false);
+  assert.equal(parseConfig(JSON.stringify(value(plain, paths.control))).releaseBranch, "main");
+  const refused = run(["--release-branch=-x"]);
+  assert.equal(refused.ok, false);
+});
+
 test("a node rerun keeps a control plane URL the person set, since the remote port is not this machine's to know", () => {
   const first = onDisk(files(run(["--node", "rj-firebat"], fresh, nodeTailnet)));
   const controlPlane = { ...(first.controlPlane as Record<string, Json>), url: "http://rj-firebat.tail1234.ts.net:7471/" };

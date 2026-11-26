@@ -13,7 +13,7 @@ import { isDeepStrictEqual, promisify } from "node:util";
 import { readJson, saveJson } from "../node-base/json-file.ts";
 import { tailnetNodeIdPattern } from "../node-base/tailscaled.ts";
 import { configFiles, unitNames } from "../node-base/node-layout.ts";
-import { digestPattern } from "../protocol/deploy.ts";
+import { digestPattern, releaseBranchPattern } from "../protocol/deploy.ts";
 
 export interface ControlPlane { tailnetNodeId: string; url: string }
 
@@ -25,13 +25,22 @@ export interface WorkerConfig {
   token: string;
   drainTimeoutMs: number;
   healthTimeoutMs: number;
+  /**
+   * The branch a release must be an ancestor of, or absent for `main`. It lives here, in a root-owned file, because the
+   * branch decides what root installs, so the control plane must not be the one to name it.
+   */
+  releaseBranch?: string;
 }
 export function parseWorkerConfig(deployer: unknown, control: ControlPlane): WorkerConfig {
   const v = deployer as WorkerConfig;
   if (typeof v !== "object" || v === null || typeof v.token !== "string" || !digestPattern.test(v.token) ||
       !Number.isInteger(v.drainTimeoutMs) || v.drainTimeoutMs < 0 || v.drainTimeoutMs > 600_000 ||
       !Number.isInteger(v.healthTimeoutMs) || v.healthTimeoutMs < 1000 || v.healthTimeoutMs > 60_000) throw new Error("invalid deployer.json");
-  return { controlUrl: control.url, controlNodeId: control.tailnetNodeId, token: v.token, drainTimeoutMs: v.drainTimeoutMs, healthTimeoutMs: v.healthTimeoutMs };
+  if (v.releaseBranch !== undefined && (typeof v.releaseBranch !== "string" || !releaseBranchPattern.test(v.releaseBranch))) throw new Error("invalid deployer.json: releaseBranch is not a branch name");
+  return {
+    controlUrl: control.url, controlNodeId: control.tailnetNodeId, token: v.token, drainTimeoutMs: v.drainTimeoutMs, healthTimeoutMs: v.healthTimeoutMs,
+    ...v.releaseBranch === undefined ? {} : { releaseBranch: v.releaseBranch },
+  };
 }
 
 export function parseControlPlane(value: unknown): ControlPlane {

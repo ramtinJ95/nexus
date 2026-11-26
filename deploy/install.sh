@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs or upgrades Nexus on this machine from the checkout this script is in: the control plane, a probe and the
 # deployer, or with --node only a probe and the deployer. Run as root:
-#   sudo deploy/install.sh --admit <your Mac's tailnet name> [--dotfiles <git URL>]
+#   sudo deploy/install.sh --admit <your Mac's tailnet name> [--dotfiles <git URL>] [--release-branch <branch>]
 #   sudo deploy/install.sh --join-token                                  on the control plane's machine, which prints:
 #   sudo deploy/install.sh --join <token> --node <the control plane's tailnet name>     on the new node
 #   sudo deploy/install.sh --rotate claude|github                         replaces this machine's stored token
@@ -19,7 +19,7 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=deploy/release.sh
 . "$repo/deploy/release.sh"
 
-usage="usage: sudo deploy/install.sh [--check] [--node <control plane device> [--join <token>]] [--admit <device>]... [--add-node <device>=<deploy key digest>]... [--peer <device>]... [--dotfiles <git URL>] [--non-interactive] [--upgrade]
+usage="usage: sudo deploy/install.sh [--check] [--node <control plane device> [--join <token>]] [--admit <device>]... [--add-node <device>=<deploy key digest>]... [--peer <device>]... [--dotfiles <git URL>] [--release-branch <branch>] [--non-interactive] [--upgrade]
        sudo deploy/install.sh --join-token
        sudo deploy/install.sh --rotate claude|github [--non-interactive]"
 

@@ -1,4 +1,5 @@
 import { HttpError } from "../http-error.ts";
+import { defaultReleaseBranch } from "../../protocol/deploy.ts";
 import { releaseView, resolveMain } from "../releases.ts";
 import { feature, type Features } from "../features.ts";
 import { ok, on, parse, type RouteEntry, type ApiKit } from "./kit.ts";
@@ -6,8 +7,8 @@ import { anyAllowed, demand, type Deployment } from "./access.ts";
 import { releaseRoutes as routes } from "../../contract/release.ts";
 import { commitSchema, deploySchema, drainSchema, releasesSchema, reportSchema } from "../../contract/release-parse.ts";
 
-/** The deployment, and what `main` resolves to, which a test fixes. */
-export type DeploymentOptions = Deployment & { resolveMain?: () => Promise<string> };
+/** The deployment, the branch it releases from, absent for `main`, and what the tip of that branch is, which a test fixes. */
+export type DeploymentOptions = Deployment & { releaseBranch?: string; resolveMain?: (branch: string) => Promise<string> };
 
 export function releaseRoutes(kit: ApiKit, options: { deployment?: DeploymentOptions | undefined; features: Features }): readonly RouteEntry[] {
   const { registry, agents, draining, gate } = kit;
@@ -25,7 +26,7 @@ export function releaseRoutes(kit: ApiKit, options: { deployment?: DeploymentOpt
     on(routes.release, anyAllowed, () => ok(releaseView(registry, options.deployment?.self))),
     on(routes.deploy, { role: "deployer", action: "deploy" }, async (_, r) => {
       const input = parse(deploySchema, await r.body());
-      const commit = input.commit === "main" ? await (options.deployment?.resolveMain ?? resolveMain)() : input.commit;
+      const commit = input.commit === "main" ? await (options.deployment?.resolveMain ?? resolveMain)(options.deployment?.releaseBranch ?? defaultReleaseBranch) : input.commit;
       if (draining()) throw new HttpError(409, "control plane is draining; wait for this deployment to finish");
       registry.releases.setDesiredRelease({ commit: commitSchema.parse(commit), requestedBy: r.caller, requestedAt: Date.now() });
       return ok(releaseView(registry, options.deployment?.self));

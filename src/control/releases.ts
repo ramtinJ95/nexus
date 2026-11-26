@@ -29,7 +29,12 @@ export function wakesDeployers(registry: { releases: Pick<Registry["releases"], 
   return desired !== undefined || (role === "control" && state === "healthy" && commit === registry.releases.desiredRelease()?.commit);
 }
 
-export async function resolveMain(): Promise<string> {
-  const result = await command("git", ["ls-remote", repository, "refs/heads/main"], "/tmp", 10_000);
-  return commitSchema.parse(result.split(/\s/)[0]);
+/** The tip of `branch` on GitHub, which `nexus deploy main` names. */
+export async function resolveMain(branch: string, remote = repository): Promise<string> {
+  const ref = `refs/heads/${branch}`;
+  // ls-remote matches the pattern against the end of each ref, so refs/heads/x/refs/heads/main matches too.
+  const result = await command("git", ["ls-remote", remote, ref], "/tmp", 10_000);
+  const line = result.split("\n").map((l) => l.split(/\s+/)).find(([, name]) => name === ref);
+  if (line === undefined) throw new Error(`${remote} has no branch ${branch}`);
+  return commitSchema.parse(line[0]);
 }

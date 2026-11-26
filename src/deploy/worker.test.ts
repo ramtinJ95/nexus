@@ -13,11 +13,41 @@ import { releaseOutcome } from "../protocol/deploy.ts";
 const commit = "a".repeat(40);
 const supervisorLacks = ["flock", "timeout", "node"].filter((tool) => !["/usr/local/bin", "/usr/bin", "/bin"].some((dir) => existsSync(join(dir, tool))));
 
+test("with a release branch, a worker from before the setting is not promoted, and without one it still is", async (t) => {
+  const { promoteWorker } = await import("./worker.ts");
+  const dir = await mkdtemp(join(tmpdir(), "nexus-promote-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const older = "b".repeat(40);
+  const readsOnly = "c".repeat(40);
+  await mkdir(join(dir, "deployer"), { recursive: true });
+  await mkdir(join(dir, "releases", older, "src/protocol"), { recursive: true });
+  await writeFile(join(dir, "releases", older, "src/protocol/deploy.ts"), "export const fullCommit = /^[0-9a-f]{40}$/;\n");
+  await mkdir(join(dir, "releases", readsOnly, "src/protocol"), { recursive: true });
+  await writeFile(join(dir, "releases", readsOnly, "src/protocol/deploy.ts"), "export const releaseBranchPattern = /^main$/;\n");
+  await mkdir(join(dir, "releases", commit, "src"), { recursive: true });
+  await cp(join(dirname(import.meta.dirname), "protocol"), join(dir, "releases", commit, "src/protocol"), { recursive: true });
+  const checked: string[] = [];
+  const run = async (_program: string, args: readonly string[]) => { checked.push(args[0]!); return ""; };
+  await promoteWorker(older, dir, dir, run, "multiplayer");
+  assert.equal(existsSync(join(dir, "deployer-current")), false, "a worker that would follow main keeps the deployer's own");
+  assert.equal((await readFile(join(dir, "deployer/rejected"), "utf8")).trim(), `releases/${older}`);
+  await promoteWorker(readsOnly, dir, dir, run, "multiplayer");
+  assert.equal(existsSync(join(dir, "deployer-current")), false, "a worker that reads the branch but would promote one that ignores it is refused too");
+  assert.deepEqual(checked, [], "a worker refused for the branch is never run");
+  await promoteWorker(commit, dir, dir, run, "multiplayer");
+  assert.equal(await readlink(join(dir, "deployer-current")), `releases/${commit}`, "a worker that reads the branch is promoted");
+  await rm(join(dir, "deployer/rejected"));
+  await promoteWorker(older, dir, dir, run);
+  assert.equal(await readlink(join(dir, "deployer-current")), `releases/${older}`, "without a release branch an older worker is promoted as before");
+});
+
 test("worker config bounds drain and health and takes the control plane from control-plane.json", () => {
   const deployer = { token: "a".repeat(64), drainTimeoutMs: 300000, healthTimeoutMs: 60000 };
   const control = { tailnetNodeId: "nControl", url: "http://control:7470/" };
   assert.deepEqual(parseWorkerConfig(deployer, control), { controlUrl: "http://control:7470/", controlNodeId: "nControl", ...deployer });
   for (const patch of [{ healthTimeoutMs: 0 }, { drainTimeoutMs: -1 }, { token: "" }]) assert.throws(() => parseWorkerConfig({ ...deployer, ...patch }, control));
+  assert.equal(parseWorkerConfig({ ...deployer, releaseBranch: "multiplayer" }, control).releaseBranch, "multiplayer");
+  for (const releaseBranch of [7, "", "-x", "a..b"]) assert.throws(() => parseWorkerConfig({ ...deployer, releaseBranch }, control), /releaseBranch/);
 });
 
 test("wait outcome trusts the view's health from every role, whatever the caller's clock, and detects rollback and supersession", () => {

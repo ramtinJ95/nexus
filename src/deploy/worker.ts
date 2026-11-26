@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
-import { command, checkoutMerged, type Command, type InstallBoundary, NotSwitched, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
+import { command, checkoutMerged, repository, type Command, type InstallBoundary, NotSwitched, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
 import { controlReady, planDeploy, prepareTries, quarantined, retryAfter, schemaStep, type Attempt, type DeployStep, type ReleaseHealth, type SchemaVersions } from "./plan.ts";
 import { digestPattern, type DrainBody, type DrainReply, type ReleaseReport, type ReleaseView, type ReportBody, type Role } from "../protocol/deploy.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
@@ -357,7 +357,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   const steps = roleSteps[role]({ api, run, prefix, service, config, registry: boundary.registry, desired: () => desired, report });
   const installer = new ReleaseInstaller(prefix, role, {
     async prepare(commit) {
-      await checkout(repo, commit);
+      await checkout(repo, commit, run, repository, config.releaseBranch);
       await copyFile(files.unit, files.savedUnit);
       await run("env", [`NEXUS_COMMIT=${commit}`, "bash", "-c", '. "$1/deploy/release.sh"; install_release "$1"', "build", repo], repo);
       return `${releasesDir}/${commit}`;
@@ -426,7 +426,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
     await report("installing", desired);
     const result = await installer.install(step.commit, view.desired!.requestedAt);
     await settled(result);
-    if (result.state === "healthy") await promoteWorker(step.commit, repo, prefix, run);
+    if (result.state === "healthy") await promoteWorker(step.commit, repo, prefix, run, config.releaseBranch);
   } catch (error) {
     const cause = error instanceof NotSwitched ? error.cause : error;
     if (cause instanceof WaitingForControl) await report("waiting-for-control", desired, String(cause).slice(-20_000));
@@ -444,7 +444,16 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   }
 }
 
-async function promoteWorker(commit: string, repo: string, prefix: string, run: typeof command): Promise<void> {
+/** Whether the release at `dir` keeps deployer.json's releaseBranch. Its protocol file imports only builtins, so it loads without node_modules. */
+async function keepsBranch(dir: string): Promise<boolean> {
+  return import(join(dir, "src/protocol/deploy.ts")).then((module: Record<string, unknown>) => module.keepsReleaseBranch === true, () => false);
+}
+
+/**
+ * Hands the deployer to the worker of the release it installed. With a release branch, a worker that does not keep it
+ * would follow main, or hand over to one that does, so the deployer keeps its own.
+ */
+export async function promoteWorker(commit: string, repo: string, prefix: string, run: typeof command, releaseBranch?: string): Promise<void> {
   const target = `${releasesDir}/${commit}`;
   const rejected = join(prefix, deployerFiles.rejected);
   const marked = await readFile(rejected, "utf8").catch((error: NodeJS.ErrnoException) => {
@@ -452,6 +461,11 @@ async function promoteWorker(commit: string, repo: string, prefix: string, run: 
     return "";
   });
   if (marked.trim() === target) return;
+  if (releaseBranch !== undefined && !await keepsBranch(join(prefix, target))) {
+    console.error(`the worker in ${target} does not read deployer.json's releaseBranch ${releaseBranch}, so the deployer keeps its own`);
+    await writeFile(rejected, target);
+    return;
+  }
   try { await run(process.execPath, [join(prefix, target, "src/deploy/worker.ts"), "--check"], repo); }
   catch (error) {
     console.error(`the worker in ${target} failed its check, so the deployer keeps its own: ${String(error)}`);
