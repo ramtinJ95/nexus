@@ -81,6 +81,10 @@ For every perf box, measure the base commit first. Run each side five times, alt
 
 A slice is verified only when its unit, live, and perf boxes are all checked. Tests alone do not verify a slice.
 
+### The review's tests
+
+The scripts that the review of this design wrote are in [`interrogate/`](../interrogate/README.md). No check runs that folder. Seven slices start from eight of its tests. Four of those tests fail today and pass when the slice is done. The other four pass today because they assert the fault, and the slice turns each one round. A slice moves its test into `src/` and deletes it from `interrogate/`.
+
 ## Slices in landing order
 
 | ID | Change | Waits for | Main files |
@@ -166,7 +170,7 @@ A slice is verified only when its unit, live, and perf boxes are all checked. Te
 - [ ] **Files.** `src/control/main.ts`, `src/control/api/access.ts`, `src/control/thread-store.ts`, `src/control/threads.ts`, `src/control/queue.ts`, the arc's migration list.
 - [ ] **Change.** `control.json` gains `people`, a map from tailnet user to `admin` or `engineer`. With `people` set, a caller is admitted by user, a device with tags or in the node registry is never a person, and `callers` and `deployers` must be absent. An admin holds what a deployer holds today. Each thread gets an `owner`. `startedBy` keeps its meaning, a device or a role name. One value built at startup says whether the install is shared, and modules read that value, not the config.
 - [ ] **Result.** On a shared install every thread has an owning person. On an install without `people`, the one person owns every thread and nothing else changes.
-- [ ] **Unit.** `node-is-not-person.test.ts` from the review passes: a tagged device is refused person routes. A config with both `people` and `callers` fails to load. The migration gives every existing thread the single person as owner.
+- [ ] **Unit.** `interrogate/node-is-not-person.test.ts` asserts the fault. Turn it round, so that it shows a tagged device refused on person routes. A config with both `people` and `callers` fails to load. The migration gives every existing thread the single person as owner.
 - [ ] **Live.** On the two-person stack, `alice` starts a thread. Pass when `nexus show` as `bob` names `alice` as its owner, and a call from the node's identity to a person route gets 403.
 - [ ] **Perf.** `api`. Fail above 15% over base.
 
@@ -176,7 +180,7 @@ A slice is verified only when its unit, live, and perf boxes are all checked. Te
 - [ ] **Files.** `src/control/api/thread-routes.ts`, `src/control/api/pylon-routes.ts`, `src/control/api/question-routes.ts`, `src/control/questions.ts`, `src/control/api/server.ts`, `src/control/pipeline.ts`, `src/control/api/auth-matrix.txt`.
 - [ ] **Change.** A new route policy, owner. It guards message, abort, retry, pylon retry, unarchive, previews, sessions, attach, exec, review start and cancel, and question answers. Archive, abort, and delete also admit an admin. `seen` becomes one mark for each person, not one for the thread. A pipeline item becomes the thread of the person who approves it.
 - [ ] **Result.** A teammate who tries to act on another engineer's thread gets 403 with a message that names the owner.
-- [ ] **Unit.** `03-another-user-starts-your-thread.test.ts` from the review passes. Each guarded route refuses a non-owner and admits the owner. The auth matrix snapshot lists the owner policy.
+- [ ] **Unit.** `interrogate/03-another-user-starts-your-thread.test.ts` passes. Each guarded route refuses a non-owner and admits the owner. The auth matrix snapshot lists the owner policy.
 - [ ] **Live.** As `bob`, run `nexus send`, `nexus attach`, and `nexus archive` on a thread of `alice`. Pass when all three are refused and the thread's conversation shows no new message. As an admin, `nexus archive` succeeds.
 - [ ] **Perf.** `api`. Fail above 15% over base.
 
@@ -186,7 +190,7 @@ A slice is verified only when its unit, live, and perf boxes are all checked. Te
 - [ ] **Files.** `src/control/api/pylon-access.ts`, `src/control/api/pylon-routes.ts`, `src/control/api/thread-routes.ts`, `src/control/reconcile.ts`, `src/probe/gateway.ts`, `src/control/dashboard/page.js`.
 - [ ] **Change.** The activity route admits the owner only. Files, file content, changes, and diff record human activity and wake the pylon only for the owner. For anyone else they answer from a running pylon, and say the pylon is paused when it is not. A preview hit counts as activity only when its tailnet user is the owner.
 - [ ] **Result.** A teammate browsing a thread leaves its pylon's state and idle clock as they were.
-- [ ] **Unit.** `reader-wakes-owner-pylon.test.ts` and `read-wakes.test.ts` from the review pass.
+- [ ] **Unit.** `interrogate/read-wakes.test.ts` passes. `interrogate/reader-wakes-owner-pylon.test.ts` asserts the fault. Turn it round, so that it shows a reader's visit leaving the pylon paused.
 - [ ] **Live.** Pause a pylon of `alice`. As `bob`, open the thread in the dashboard and its diff. Pass when the pylon is still paused after 60 seconds and `lastHumanActivityAt` has not moved.
 - [ ] **Perf.** `api`. Fail above 15% over base.
 
@@ -236,7 +240,7 @@ A slice is verified only when its unit, live, and perf boxes are all checked. Te
 - [ ] **Files.** `src/control/threads.ts`, `src/control/project.ts`, `src/control/placement.ts`, `src/backends/pylon-boot.ts`, `src/protocol/secret-grants.ts`.
 - [ ] **Change.** On a shared install a thread's Claude token and `GH_TOKEN` come from its owner's store, fixed when the thread starts and delivered as values for that one pylon. A start with a missing login fails and names the login. There is no fallback to a shared value. A project can no longer grant those names. The git author is the owner's, read from their GitHub login when they sign in. The project's and the install's `gitIdentity` are ignored. A thread the control plane starts for a person, such as a check, uses the credentials of the person whose action led to it.
 - [ ] **Result.** Whatever an agent does with a token in a pylon, it does as that pylon's owner.
-- [ ] **Unit.** `project-edit-redirects-token.test.ts` from the review passes: a project edit by one person changes no host that receives another person's token and no commit author. A start without a Claude login fails with a reason that names it.
+- [ ] **Unit.** `interrogate/project-edit-redirects-token.test.ts` asserts the fault. Turn it round, so that it shows a project edit by one person changing no host that receives another person's token and no commit author. A start without a Claude login fails with a reason that names it.
 - [ ] **Live.** `alice` and `bob` each start a thread on one project on one VM node. Pass when a recording host sees `alice`'s token only from `alice`'s pylon, and a commit made in each pylon has that owner's name and address.
 - [ ] **Perf.** `boot`. Fail above 10% over base.
 
@@ -246,7 +250,7 @@ A slice is verified only when its unit, live, and perf boxes are all checked. Te
 - [ ] **Files.** `src/pylon-vm/network.ts`, `src/backends/pylon-vm/pylon-vm-backend.ts`, `src/control/api/project-routes.ts`, `src/contract/projects-parse.ts`.
 - [ ] **Change.** Today git over SSH uses one key for the whole node, so every engineer would push as the same identity and no HTTP guard would see the push. On a shared install a project's `repoUrl` must be HTTPS, a boot carries no SSH key and no SSH remote, and git authenticates with the owner's `GH_TOKEN` placeholder.
 - [ ] **Result.** Every push from a pylon carries its owner's token and passes through the HTTP hook.
-- [ ] **Unit.** `ssh-node-key-shared.test.ts` from the review passes. Adding a project with an SSH URL is refused on a shared install.
+- [ ] **Unit.** `interrogate/ssh-node-key-shared.test.ts` asserts the fault. Turn it round, so that it shows a boot with no SSH key and no SSH remote. Adding a project with an SSH URL is refused on a shared install.
 - [ ] **Live.** In `alice`'s pylon, push a branch to the scratch repository. Pass when GitHub shows the push as hers and `ssh -T git@github.com` from the pylon is refused.
 - [ ] **Perf.** Time a push of a 5 MiB commit from a VM pylon. The review measured 0.9 seconds for that push through Gondolin. Fail above 3 seconds.
 
@@ -294,7 +298,7 @@ A slice is verified only when its unit, live, and perf boxes are all checked. Te
 
 ### mp-15: the network guard refuses merge and approve
 
-A prototype settled the shape of this guard before the plan was written. It ran three times, 77 probes each, from a real VM against a private scratch repository. The pull request that adds this plan carries the full table.
+A prototype settled the shape of this guard before the plan was written. It ran three times, 77 probes each, from a real VM against a private scratch repository. The prototype is in `interrogate/guard-github/`, and the pull request that adds this plan carries the full table as a comment.
 
 - A guard that lists forbidden operations let three landings through: the GraphQL mutations `mergeBranch` and `createCommitOnBranch` on the default branch, and a REST change of the repository's default branch. GitHub has more ways to land a change than a list of known ones will hold.
 - A guard that lists allowed operations refused all of them and broke none of the twelve operations that must work.
@@ -324,7 +328,7 @@ Three limits of this guard, each handled elsewhere:
 - [ ] **Files.** `src/contract/threads-parse.ts`, `src/control/threads.ts`, `src/control/api/thread-routes.ts`, `src/control/planning.ts`, `src/control/pipeline.ts`, `src/control/review.ts`, `src/control/dashboard/`.
 - [ ] **Change.** On a shared install a person's thread start must name a pylon agent, and no harness conversation is created for it. Routes that only a harness thread has are refused with a reason: a `message` brief, harness `retry`, and planning. A pipeline item must name a pylon agent. A review start is refused until `mp-17`. Failure judgments keep running on the install's one login.
 - [ ] **Result.** No engineer's work spends the install's shared model login. The dashboard and the CLI do not offer what is off.
-- [ ] **Unit.** `02-harness-login-is-one.test.ts` from the review passes in this form: on a shared install two people's thread starts make no model request from the control plane. Each refused route names its reason.
+- [ ] **Unit.** `interrogate/02-harness-login-is-one.test.ts` passes in this form: on a shared install two people's thread starts make no model request from the control plane. Each refused route names its reason.
 - [ ] **Live.** As `alice`, start a thread with no agent named. Pass when the start is refused with a message that says which agents are available, and a start with Claude Code runs a turn on her token.
 - [ ] **Perf.** `boot`. Fail above 10% over base.
 
@@ -344,7 +348,7 @@ Three limits of this guard, each handled elsewhere:
 - [ ] **Files.** `src/control/templates.ts`, `src/control/threads.ts`, `src/control/template-builds.ts`, `src/protocol/images.ts`.
 - [ ] **Change.** A template's key holds no branch, commit, or owner, and a build checks out the starting thread's commit. So one engineer's branch can leave code on the disk another engineer's pylon boots from. On a shared install a build always runs at the default branch's head. A thread whose setup inputs differ from the default branch's boots fresh.
 - [ ] **Result.** The only code that ran on a shared boot disk is code that was merged after review.
-- [ ] **Unit.** `01-template-crosses-principals.test.ts` from the review passes.
+- [ ] **Unit.** `interrogate/01-template-crosses-principals.test.ts` passes.
 - [ ] **Live.** On the two-person stack, `alice` starts a thread on a branch that changes a script that setup runs. Then `bob` starts a thread on the default branch. Pass when `bob`'s checkout holds no file that `alice`'s branch wrote.
 - [ ] **Perf.** `boot` for a template boot on the default branch. Fail above 10% over base. Record the fresh-boot time for a branch that changes setup inputs, so the cost of the rule is known.
 
