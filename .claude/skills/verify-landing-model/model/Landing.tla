@@ -39,7 +39,7 @@ X == "x"          \* a commit on the release branch that the person deploys by h
 Commits == {C0, X} \cup Reviews
 OnBranch(c) == c \notin OffBranch
 
-\* landing.ts `deploys`: only a pull request of the repository releases come from deploys once it merges.
+\* landing.ts `deploys`: only a pull request of the repository releases come from, into the release branch, deploys once it merges.
 Deploys(r) == IF BaseChecked THEN r \notin OffBranch ELSE TRUE
 
 \* review-model.ts `landingVerb`: a landing that can no longer be stopped.

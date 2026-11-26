@@ -40,7 +40,7 @@ The script runs the four configs in `model/` and compares each with what `covera
 | 2 | The checks could not run. |
 | 3 | Every check gave the expected result, but a covered file changed since the model was confirmed. The pass does not yet count. |
 
-One config is expected to break a rule. It is the finding below, kept failing so that a fix shows up as a change.
+A config may be expected to break a rule. It is a finding, kept failing so that a fix shows up as a change. None is open now.
 
 ## What the model covers
 
@@ -76,16 +76,16 @@ All of it is `model/Landing.tla`. Each action there has a comment that names the
 - Whether a waiting landing is served in the end. The model checks no liveness rule.
 - A pull request of another repository, which merges without a deploy.
 - A turn saved before Nexus recorded the release it was taken at, which rolls back to the desired release as before.
+- A round saved before Nexus recorded its base, which deploys, as every landing of Nexus's repository did then.
 
 A pass says nothing about any of these.
 
 ## Findings in the confirmed code
 
-It was replayed against the real review loop with a temporary test in `src/control/review.test.ts`.
+None is open. Each was replayed against the real review loop with a temporary test in `src/control/review.test.ts`, then fixed and retired.
 
-**F2. A landing into another branch sets the desired release.** `Finding-OffBranch.cfg` breaks `ReleaseIsOnTheReleaseBranch` in four steps: approve, take the turn, merge, request the deploy. `deploys` in `src/control/landing.ts` compares only the repository, so a pull request merged into any branch of Nexus's repository deploys. `checkoutMerged()` then refuses the commit.
-
-When a fix for F2 lands, `deploys` also compares the base. Set `BaseChecked = TRUE` in every config, add `ReleaseIsOnTheReleaseBranch` to `OffBranch.cfg`, delete `Finding-OffBranch.cfg` and its entry in `coverage.json`, and delete this finding.
+- **F1.** A manual deploy became a landing's rollback target.
+- **F2.** A landing into another branch of Nexus's repository set the desired release, which `checkoutMerged()` refuses. `deploys` now also compares the base, and `BaseChecked` is `TRUE` in every config.
 
 ## Each rule was seen to fail
 
@@ -97,7 +97,7 @@ A rule that never failed proves nothing. When the model was written, each rule b
 | `Ahead` ignores an unhealthy desired release | `RollbackTargetWasHealthy` |
 | `OthersMergeSeen` accepts a merge at any head | `DeploysOnlyApprovedHead` |
 | `Merge` saves the desired release after the merge as the rollback target, as `merged()` did before finding F1 was fixed, with one manual deploy | `RollbackTargetWasHealthy` |
-| `BaseChecked = FALSE` with a pull request off the release branch | `ReleaseIsOnTheReleaseBranch` |
+| `BaseChecked = FALSE` with a pull request off the release branch, as `deploys` did before finding F2 was fixed | `ReleaseIsOnTheReleaseBranch` |
 | `RollbackFails` ends the review as landed | `BlockedLandingIsSomeonesToFix` |
 
 ## When you change covered code
@@ -118,7 +118,7 @@ Then replay the path against the real code, one step for each action, as a test 
 
 - **A step cannot happen in the code.** The model is wrong. Fix the model, and say what was wrong.
 - **Every step happens and the rule is broken in the code.** It is a bug. Report the path in the code's words and the harm. Do not change the rule. Fix the code only if that is your task.
-- **A finding config now holds.** If the code was fixed and the model updated to describe the fix, retire the finding as F2's paragraph says. F1, a manual deploy that became a landing's rollback target, was retired that way. If the model changed for another reason, the model lost the path. Find out why before you accept it.
+- **A finding config now holds.** If the code was fixed and the model updated to describe the fix, retire the finding. Set the model to describe the fix in every config, add the broken rule to every config that left it out, delete the finding's config and its entry in `coverage.json`, and list it as fixed under the findings. F1 and F2 were retired that way. If the model changed for another reason, the model lost the path. Find out why before you accept it.
 
 ## The chart
 

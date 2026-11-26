@@ -27,15 +27,7 @@
     },
     {
       "config": "OffBranch.cfg",
-      "says": "One pull request whose base is not the release branch, for every rule but the one finding F2 breaks."
-    },
-    {
-      "config": "Finding-OffBranch.cfg",
-      "breaks": [
-        "ReleaseIsOnTheReleaseBranch"
-      ],
-      "finding": "F2",
-      "says": "A landing into another branch makes its merge the desired release, which the deployer refuses."
+      "says": "One pull request whose base is not the release branch, which lands with no deploy."
     }
   ]
 }
