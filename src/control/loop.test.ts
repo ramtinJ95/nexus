@@ -876,7 +876,7 @@ test("a wake its node has no memory for waits with no attempt counted, and boots
   assert.equal(registry.threads.bootHold(thread.pylonId), undefined, "the wake that went out is held no longer");
 });
 
-test("a person's pylon past their cap waits, naming the cap and their running threads, and a start or a wake boots once they archive one", async (t) => {
+test("a person's pylon past their cap waits, naming the cap and their running threads, and a start or a wake boots once they archive one, while a wake for reading never waits for it", async (t) => {
   const registry = openRegistry(tempDb());
   seedRegistry(registry, { nodes: [node] });
   const alice = "alice@example.com" as Person;
@@ -912,6 +912,11 @@ test("a person's pylon past their cap waits, naming the cap and their running th
   registry.threads.setThreadStatus(a2.id, "archived");
   await until("her wake boots once she archives another", () => phase(a1) === "running");
   assert.equal(registry.threads.bootHold(a1.pylonId), undefined);
+
+  await until("her archived pylon pauses", () => phase(a2) === "stopped");
+  registry.usage.startUsageBackfill([a2.id], Date.now());
+  registry.usage.holdUsageBackfill(a2.id, Date.now());
+  await until("a wake to read her archive's usage is no start of hers, so her cap never holds it", () => phase(a2) === "running");
 });
 
 test("a pylon whose boot outlasts the idle time is not paused as it comes up, so its worker gets its first prompt", async (t) => {

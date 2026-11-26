@@ -239,7 +239,8 @@ export function startLoop(options: LoopOptions): Loop {
         // A thread retention purged during the tick keeps the phase the tick began with.
         desired: () => { const now = registry.threads.thread(found.thread); return now === undefined ? pylon.desired : desiredPhase(now, registry.now()); },
         sealedBoot: () => registry.threads.sealedBoot(pylonId),
-        noRoom: (observation) => wakeShort(registry, stored, observation, pylonCapOf(people, thread.owner)),
+        // A wake for reading is Nexus's own short boot to read usage, which the usage backfill weighs for room itself.
+        noRoom: (observation) => wakeShort(registry, stored, observation, pylon.desired === "reading" ? null : pylonCapOf(people, thread.owner)),
         uncountedFailed: (failure) => {
           registry.usage.failUsageRead(thread.id, failure);
           void wake(node);
