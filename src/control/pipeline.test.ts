@@ -71,11 +71,11 @@ test("an item moves through every phase its records put it in, from planned to l
   assert.equal(phase(r, b), "planned: waits for A to be queued");
   assert.equal(itemThread(r, a), null, "an item waiting for approval is not queued");
 
-  f.items.approve(a, laptop);
+  f.items.approve(a, { caller: laptop, owner: operator });
   await f.items.poll();
   assert.notEqual(itemThread(r, a), null, "an approved item is queued on the next pass");
   assert.equal(phase(r, b), "held: project acme waits for the person to approve each item: nexus item approve " + b);
-  f.items.approve(b, laptop);
+  f.items.approve(b, { caller: laptop, owner: operator });
   await f.passes();
   const ta = thread(r, a);
   assert.equal(r.threads.thread(ta)?.title, "A", "an item with nothing ahead of it starts on the queue's next pass");
@@ -223,7 +223,7 @@ test("an item is checked as a start is, and its pass records why a queue refused
   refused(() => f.items.add(f.request("X"), null, [], { caller: laptop, owner: operator }), "invalid", /an item needs a brief/);
   refused(() => f.items.add(f.request("X", { model: "m" }), "Go.", [], { caller: laptop, owner: operator }), "invalid", /model requires claude/);
   refused(() => f.items.add(f.request("X", { claude: "Go", model: "fable" }), null, [], { caller: laptop, owner: operator }), "invalid", /Fable models are not available in pylons/);
-  refused(() => f.items.approve(f.add("A"), laptop), "conflict", /starts its items on their own/);
+  refused(() => f.items.approve(f.add("A"), { caller: laptop, owner: operator }), "conflict", /starts its items on their own/);
   assert.equal(f.registry.pipeline.items().length, 1, "a refused item records nothing");
 
   const gone = f.add("On a node that goes", [], { node });

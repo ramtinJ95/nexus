@@ -4,15 +4,16 @@ import { HttpError } from "../http-error.ts";
 import { answerDelivered, answerExits, claudeHook } from "../../../images/pylon/nexus-contract.ts";
 import { askAnswer, choicesSchema, choicesSummary, type AnswerRefusal, type Choice, type ClaudeQuestion, type Question, type QuestionKind, type QuestionOf } from "../questions.ts";
 import { ok, on, parse, type RouteEntry, type ApiKit } from "./kit.ts";
-import { anyAllowed, refusalOf } from "./access.ts";
+import { anyAllowed } from "./access.ts";
 import { questionRoutes as routes } from "../../contract/reviews.ts";
 import { answerSchema } from "../../contract/reviews-parse.ts";
 import type { z } from "zod";
 
 const answeredConflict = (q: Question) => new HttpError(409, `question ${q.id} was answered ${JSON.stringify(q.answer!.option)} by ${q.answer!.by}`);
-const answerRefusals: Record<AnswerRefusal, string> = {
-  "not a person": "only a person's device may, never infrastructure nodes or pylons",
-  "not a deployer": "its answer may deploy, so only deployers may",
+const answerRefusals: Record<AnswerRefusal, (owner: string | undefined) => string> = {
+  "not a person": () => "only a person's device may, never infrastructure nodes or pylons",
+  "not a deployer": () => "its answer may deploy, so only deployers may",
+  "not the owner": (owner) => `its thread is ${owner}'s, so only ${owner} may`,
 };
 
 type Body = z.output<typeof answerSchema>;
@@ -31,7 +32,7 @@ function answeredWith<Q extends Question>(answered: Q, option: string): Q {
 }
 
 export function questionRoutes(kit: ApiKit, features: Features): readonly RouteEntry[] {
-  const { execInPylon, registry, claude } = kit;
+  const { execInPylon, registry, claude, answerRefusalOf } = kit;
 
   /**
    * Hands the person's choices to the Claude worker's AskUserQuestion dialog through the hook that waits in its pylon,
@@ -108,8 +109,8 @@ export function questionRoutes(kit: ApiKit, features: Features): readonly RouteE
       const question = registry.questions.question(id);
       if (question === null) throw new HttpError(404, `no question ${id}`);
       if (question.withdrawn !== undefined) throw new HttpError(409, `question ${question.id} was withdrawn when its thread was archived`);
-      const refused = refusalOf(r.roles, question);
-      if (refused !== null) throw new HttpError(403, `caller may not answer this question: ${answerRefusals[refused]}`);
+      const refused = answerRefusalOf(r, question);
+      if (refused !== null) throw new HttpError(403, `caller may not answer this question: ${answerRefusals[refused]("thread" in question ? registry.threads.thread(question.thread)?.owner : undefined)}`);
       const answer = answering[question.kind] as (question: Question, body: Body, caller: TailnetNodeId) => Question | Promise<Question>;
       return ok(await answer(question, body, r.caller));
     }),

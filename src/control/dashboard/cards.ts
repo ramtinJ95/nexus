@@ -26,6 +26,7 @@ const landRefusals: Record<LandRefusal, (caller: TailnetNodeId) => string> = {
 const answerRefusals: Record<AnswerRefusal, (caller: TailnetNodeId) => string> = {
   "not a person": (caller) => `This device cannot answer: tailnet node ${caller} is the control plane or one of its nodes, whose pylons call under its identity, and only a person's device may answer. Answer it from your laptop or phone.`,
   "not a deployer": (caller) => `This device cannot answer: the answer may deploy, so only the control plane's deployers may, and this device (tailnet node ${caller}) is not one. Answer it from a deployer, or add this node to deployers in the control plane's config.`,
+  "not the owner": () => "Only the person whose thread this is may answer its questions.",
 };
 /** Where a thread's card shows: on its page, or in the Needs you inbox beside other threads' cards. */
 export type Place = "page" | "inbox";

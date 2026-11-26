@@ -45,7 +45,7 @@ export interface PipelineItem {
   id: ItemId;
   project: ProjectId;
   title: string;
-  /** Who added it, and its thread's startedBy. */
+  /** Who added it, and its thread's startedBy unless someone approved it. */
   addedBy: string;
   /** Unix milliseconds. */
   addedAt: number;
@@ -173,11 +173,15 @@ export function itemView(registry: PipelineRegistry, item: ItemRecord, now: numb
   return {
     id: item.id, project: item.project, title: item.title, addedBy: item.addedBy, addedAt: item.addedAt, after: item.after,
     worker: claude ? "claude" : "harness", model: claude ? item.request.model ?? defaultClaudeModel : null, brief: item.message ?? item.request.claude ?? null,
-    thread: itemThread(registry, item.id), phase: itemPhase(registry, item, now), approved: item.approved,
+    thread: itemThread(registry, item.id), phase: itemPhase(registry, item, now), approved: item.approved === null ? null : { by: item.approved.by, at: item.approved.at },
   };
 }
 
 export type Pipeline = ReturnType<typeof pipeline>;
+
+/** Who an item's thread is started as: whoever approved it, or without an approval whoever added it. */
+const starterOf = ({ approved, addedBy, owner }: ItemRecord): Starter =>
+  approved === null ? { caller: addedBy, owner: owner ?? operator } : { caller: approved.by, owner: approved.owner ?? owner ?? operator };
 
 export function pipeline(options: { registry: PipelineRegistry; queue: Pick<ThreadQueue, "add" | "poll">; log?: (message: string) => void }) {
   const { registry, queue, log = () => {} } = options;
@@ -202,7 +206,7 @@ export function pipeline(options: { registry: PipelineRegistry; queue: Pick<Thre
       if (itemThread(registry, item.id) !== null || unqueued(registry, item) !== null) continue;
       const after = item.after.map((id) => itemThread(registry, id)!);
       try {
-        queue.add(item.request, item.message, after, { caller: item.addedBy, owner: item.owner ?? operator }, startKey(requestIds.pipeline(item.id), { request: item.request, message: item.message, after }));
+        queue.add(item.request, item.message, after, starterOf(item), startKey(requestIds.pipeline(item.id), { request: item.request, message: item.message, after }));
         queuedAny = true;
         if (item.lastError !== null) registry.pipeline.saveItem({ ...item, lastError: null });
       } catch (err) {
@@ -240,12 +244,12 @@ export function pipeline(options: { registry: PipelineRegistry; queue: Pick<Thre
       registry.pipeline.saveItem(record);
       return record;
     },
-    approve(id: string, caller: string): ItemRecord {
+    approve(id: string, { caller, owner }: Starter): ItemRecord {
       const item = find(id);
       unstarted(item, "approved");
       if (registry.projects.project(item.project)?.pipeline?.autoStart !== false) throw new Refusal("conflict", `project ${item.project} ${registry.projects.project(item.project)?.pipeline == null ? "has the pipeline off" : "starts its items on their own"}, so item ${item.id} needs no approval`);
       if (item.approved !== null) return item;
-      const next = { ...item, approved: { by: caller, at: Date.now() } };
+      const next = { ...item, approved: { by: caller, owner, at: Date.now() } };
       registry.pipeline.saveItem(next);
       return next;
     },

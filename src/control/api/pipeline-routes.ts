@@ -34,7 +34,7 @@ export function pipelineRoutes(kit: ApiKit, features: Features): readonly RouteE
     on(routes.cancel, { role: "person", action: "cancel an item" }, ({ item: id }, r) => ok(itemView(registry, pipelineOrRefuse().cancel(id, r.caller), Date.now()))),
     on(routes.approve, { role: "person", action: "approve an item" }, async ({ item: id }, r) => {
       const pipeline = pipelineOrRefuse();
-      const approved = pipeline.approve(id, r.caller);
+      const approved = pipeline.approve(id, kit.starter(r));
       await pipeline.poll();
       return ok(itemView(registry, approved, Date.now()));
     }),

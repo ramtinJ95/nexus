@@ -16,6 +16,7 @@
  * human's visit, so they are read when asked for rather than with every poll.
  */
 import type { ItemId, NodeName, ProjectId, TailnetNodeId, ThreadId } from "../../ids.ts";
+import type { TailnetIdentity } from "../../node-base/tailscaled.ts";
 import type { ThreadDetail, ThreadRow } from "../wire.ts";
 import type { Thread } from "../thread-store.ts";
 import type { AgentView, QueuedThread } from "../../contract/threads.ts";
@@ -48,10 +49,10 @@ import type { DoctorReport } from "../doctor-model.ts";
 import { threadPage, queuedPage } from "../dashboard/thread-page.ts";
 import { liveStreams, type ItemsOf } from "../dashboard/live-frames.ts";
 import type { ApiKit, RouteEntry } from "./kit.ts";
-import { anyAllowed, landing, refusal, refusalOf, type Role } from "./access.ts";
+import { anyAllowed, landing, refusal, type Role } from "./access.ts";
 import { readHealth } from "./node-routes.ts";
 
-type Caller = { caller: TailnetNodeId; roles: ReadonlySet<Role> };
+type Caller = { caller: TailnetNodeId; roles: ReadonlySet<Role>; identity: TailnetIdentity };
 
 /** The thread as the list would report it, from its detail, so its state agrees with the rest of the detail. */
 const rowOf = (d: ThreadDetail): ThreadRow => ({ ...d.thread, attention: d.attention, desired: d.desired, pylon: d.pylon, pullRequestNumbers: d.pullRequests.map((pr) => pr.number) });
@@ -77,7 +78,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
   }
 
   /** `now` is when the request came, read before any await, so the render tells time as of then. */
-  const context = ({ caller, roles }: Caller, now = Date.now()): Context => {
+  const context = ({ caller, roles, identity }: Caller, now = Date.now()): Context => {
     // The sidebar and the home table show the same threads.
     const rows = new Map<ThreadId, ThreadRow>();
     let reviews: readonly Review[] | undefined;
@@ -95,7 +96,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
     const queuedIn = (project: string) => queued.get(project) ?? [];
     return {
       now, caller, deploys, landRefusal: options.features.reviews === null ? "no review loop" : refusal(roles, landing) === null ? null : "not a deployer",
-      answerRefusal: (question) => refusalOf(roles, question),
+      answerRefusal: (question) => kit.answerRefusalOf({ roles, identity }, question),
       projects: registry.projects.projects(), nodes: registry.nodes.nodes(), image: registry.images.currentImage(),
       health: { states: registry.health.healthStates(), changes: registry.health.healthChanges() },
       threads, threadsIn: (project) => byProject.get(project) ?? [], queuedIn, pipeline, items,

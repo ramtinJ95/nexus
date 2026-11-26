@@ -345,4 +345,7 @@ export const migrations: Migrations = [
 export const arcMigrations: Migrations = [
   // Each thread's owner. A thread started before is the operator's, the one person of the install that started it.
   `ALTER TABLE threads ADD COLUMN owner TEXT NOT NULL DEFAULT 'operator';`,
+  // What each person has seen of a thread someone else owns. The owner's mark stays threads.seen_at, which the thread's
+  // attention reads, so a teammate reading the thread leaves the owner's unread reply unread.
+  `CREATE TABLE IF NOT EXISTS seen_marks (thread TEXT NOT NULL REFERENCES threads (id), person TEXT NOT NULL, seen_at INTEGER, PRIMARY KEY (thread, person)) STRICT;`,
 ];

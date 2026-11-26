@@ -54,6 +54,7 @@ export function on<R extends ApiRoute>(
   policy: R["method"] extends "GET" ? Policy : WritePolicy,
   handle: (params: ParamsOf<R["path"]>, req: Omit<Request, "query"> & { query: RawQueryOf<R> }) => RouteReply<ReplyOf<R>> | Promise<RouteReply<ReplyOf<R>>>,
 ): RouteEntry {
+  if (policy.role === "owner" && !route.path.startsWith("/v1/threads/{thread}")) throw new Error(`${route.path} takes an owner policy, so its path must start with the thread it acts on`);
   const entry: Route = (m, r) => handle(matchedParams<R["path"]>(route.path, m), { ...r, query: route.query?.decode(r.query) as RawQueryOf<R> });
   return [route.method, pathPattern(route.path), policy, entry] as RouteEntry;
 }

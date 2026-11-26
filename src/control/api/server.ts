@@ -153,7 +153,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   asset(entry);
   const { registry, whois, allowed, hostnames, harness, claude, startThread, wake, probes, streamStallMs = 30_000, attachTiming: timing = attachTiming, closeWaitMs = 5_000 } = options;
   const access = apiAccess(registry, wake, options);
-  const { thread, threadRefusal, guard, current, roleOf, admittable } = access;
+  const { thread, threadRefusal, guard, current, roleOf, admittable, actsOn } = access;
   const pylon = pylonAccess({ registry, probes, wake, guard, current });
   const { inPylon, whileRunning } = pylon;
   const wakeThread = access.wakeThread;
@@ -281,6 +281,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (match === undefined) throw new Refusal("method", `${req.method} is not allowed on ${path}`);
     const { entry: [, , policy, route], m } = match;
     demand(roles, policy, caller);
+    // An owner route's path starts with its thread, which kit.ts's `on` checks.
+    if (policy.role === "owner") actsOn(m[1]!, { identity, roles }, policy);
     const url = new URL(req.url ?? "/", "http://nexus");
     const run = () => route(m, { query: url.searchParams, caller, identity, roles, host, body: (empty) => readJson(req, empty) });
     const reply = policy.startsTurn ? await gate.run(async () => run()) : await run();
@@ -383,14 +385,16 @@ export async function startApi(options: ApiOptions): Promise<Api> {
 
   async function upgrade(req: IncomingMessage, socket: Duplex, head: Buffer) {
     if (execRoute.test(pathOf(req.url) ?? "")) return await upgradeExec(req, socket, head);
-    const { caller, roles } = await admitted(req, attach);
+    const { caller, identity, roles } = await admitted(req, attach);
     demand(roles, attach, caller);
+    const id = attachRoute.exec(pathOf(req.url)!)![1]!;
+    actsOn(id, { identity, roles }, attach);
     if (stopping) throw new Refusal("unavailable", "the control plane is stopping");
     // CORS does not guard a WebSocket handshake, so without this a preview's page could open a terminal from the
     // browser of anyone allowed.
     const foreign = foreignSite(req);
     if (foreign !== null) throw new Refusal("forbidden", `the attach route does not answer pages from ${foreign}`);
-    const { t, pylon, probe, request } = attachable(attachRoute.exec(pathOf(req.url)!)![1]!, new URL(req.url ?? "/", "http://nexus").searchParams, caller);
+    const { t, pylon, probe, request } = attachable(id, new URL(req.url ?? "/", "http://nexus").searchParams, caller);
     if (socket.destroyed) return;
     const stop = new AbortController();
     const handle = { thread: t.id, caller, end: () => stop.abort("deleted" satisfies Ending) };
@@ -412,11 +416,13 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   }
 
   async function upgradeExec(req: IncomingMessage, socket: Duplex, head: Buffer) {
-    const { caller, roles } = await admitted(req, attach);
-    demand(roles, attach, caller);
+    const { caller, identity, roles } = await admitted(req, exec);
+    demand(roles, exec, caller);
+    const id = execRoute.exec(pathOf(req.url)!)![1]!;
+    actsOn(id, { identity, roles }, exec);
     const foreign = foreignSite(req);
     if (foreign !== null) throw new Refusal("forbidden", `the exec route does not answer pages from ${foreign}`);
-    const { t, pylon, probe, line } = execable(execRoute.exec(pathOf(req.url)!)![1]!, new URL(req.url ?? "/", "http://nexus").searchParams, caller);
+    const { t, pylon, probe, line } = execable(id, new URL(req.url ?? "/", "http://nexus").searchParams, caller);
     const stop = new AbortController();
     const handle = { thread: t.id, caller, end: () => stop.abort("deleted" satisfies Ending) };
     execs.add(handle);
@@ -532,7 +538,8 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   };
 }
 
-const attach = { role: "person", action: "attach to a thread's pylon" } satisfies Policy;
+const attach = { role: "owner", action: "attach to a thread's pylon" } satisfies Policy;
+const exec = { role: "owner", action: "run a command in a thread's pylon" } satisfies Policy;
 const execRoute = /^\/v1\/threads\/([^/]+)\/exec$/;
 export const maxExecs = 64;
 export const maxExecsPerCaller = 32;

@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# The live box of docs/multiplayer-plan.md's mp-03: on the stack started with people, alice an admin and bob an engineer,
+# bob's `nexus send`, `nexus attach` and `nexus archive` on alice's thread are each refused with a 403 that names alice,
+# her thread's conversation, which holds alice's own message, and its status stay as they were, and alice archives bob's thread.
+# Exits 0 only if every step did what it should.
+set -euo pipefail
+V="$(cd "$(dirname "$0")" && pwd)/verify-nexus"
+fail() { echo "owner check: $*" >&2; exit 1; }
+
+trap '"$V" down >&2 || true' EXIT
+NEXUS_VERIFY_PEOPLE=1 "$V" up
+"$V" doctor
+evidence=$("$V" evidence)
+
+T=$("$V" cli owner-start-alice -- start --project spoon --title "owner: alice's" --json | jq -r .id)
+B=$("$V" cli owner-start-bob --as bob -- start --project spoon --title "owner: bob's" --json | jq -r .id)
+echo "alice started $T, bob started $B"
+entries() { "$V" cli "$1" -- conversation "$T" --json 2>/dev/null | jq '.entries | length'; }
+"$V" cli owner-send-alice -- send "$T" "alice was here" --json >/dev/null || fail "alice's own send was refused"
+for _ in $(seq 60); do
+  before=$(entries owner-conversation-before || echo 0)
+  [ "$before" -gt 0 ] && break
+  sleep 2
+done
+[ "$before" -gt 0 ] || fail "alice's message never reached her conversation"
+
+# A refused CLI call exits 3 and puts {"error","kind","status","code"} on stderr, which the driver records, or on the
+# pty's one stream for attach, which needs a terminal.
+refused() {
+  local step=$1 tty=$2; shift 2
+  local code=0
+  "$V" cli "$step" --as bob $tty -- "$@" --json </dev/null >/dev/null 2>&1 || code=$?
+  local said
+  said=$(cat "$(ls "$evidence"/*-"$step".stdout | tail -1)" "$(ls "$evidence"/*-"$step".stderr | tail -1)" | tr -d '\r' | grep -o '{"error".*}' | tail -1)
+  echo "bob nexus $1: exit $code $said"
+  [ "$code" = 3 ] || fail "bob's nexus $1 exited $code, not 3"
+  jq -e '.status == 403' <<< "$said" >/dev/null || fail "bob's nexus $1 was not a 403"
+  grep -q "is alice@example.com's" <<< "$said" || fail "bob's nexus $1 refusal does not name alice"
+}
+refused owner-send-bob "" send "$T" "bob was here"
+refused owner-attach-bob --tty attach "$T"
+refused owner-archive-bob "" archive "$T"
+
+after=$(entries owner-conversation-after)
+status=$("$V" cli owner-show-after -- show "$T" --json | jq -r .thread.status)
+echo "alice's $T: $before conversation entries before, $after after, status $status"
+[ "$after" = "$before" ] || fail "the conversation went from $before to $after entries"
+[ "$status" = active ] || fail "alice's thread is $status"
+
+archived=$("$V" cli owner-archive-admin -- archive "$B" --json | jq -r .status)
+echo "alice, an admin, archived bob's $B: $archived"
+[ "$archived" = archived ] || fail "the admin's archive of bob's thread left it $archived"
+echo "owner check: alice sent to her thread, bob was refused send, attach and archive on it with alice named, it did not change, and alice archived bob's thread as an admin"

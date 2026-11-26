@@ -183,7 +183,7 @@ export const holding = {
   tables: {
     threads: {}, pylons: byThread, sessions: byPylon, previews: byPylon, outputs: byThread, jobs: { purge: "subject = $pylon" },
     events: { keptOnPurge: "retainEvents keeps the newest 10,000, and deleting a thread's from among them could move the oldest past a cursor, which then reads as expired" },
-    event_receipts: {}, session_activity: byThread, session_order: deleted, session_order_floor: deleted, thread_attention: byThread,
+    event_receipts: {}, session_activity: byThread, session_order: deleted, session_order_floor: deleted, thread_attention: byThread, seen_marks: byThread,
     start_requests: { keptOnPurge: "a repeat of the request ID would start the thread again, and the pipeline would queue its item again" },
     aborted_conversations: { purge: "conversation = $conversation" }, thread_archives: byThread, disk_cleanups: deleted,
   },
@@ -243,6 +243,13 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
   const threadRecord = (id: ThreadId) => sql("SELECT * FROM threads WHERE id = ?").get(id);
   const humanActivity = (at: number, id: ThreadId) => sql("UPDATE threads SET last_human_activity_at = max(last_human_activity_at, ?) WHERE id = ?").run(at, id);
   const agentActivity = (at: number, id: ThreadId) => sql("UPDATE threads SET last_agent_activity_at = max(last_agent_activity_at, ?) WHERE id = ?").run(at, id);
+  function markSeen(id: ThreadId, unread: boolean, now = clock(), lastReplyAt?: number | null) {
+    if (!unread && lastReplyAt === null) return;
+    transaction(() => {
+      sql("UPDATE threads SET seen_at = CASE WHEN ? THEN last_reply_at - 1 ELSE max(coalesce(seen_at, 0), min(max(?, coalesce(last_reply_at, 0)), ?)) END WHERE id = ?").run(unread ? 1 : 0, now, lastReplyAt ?? Number.MAX_SAFE_INTEGER, id);
+      updateAttention(id);
+    });
+  }
   const recordReply = (at: number, id: ThreadId) => sql("UPDATE threads SET last_reply_at = max(coalesce(last_reply_at, 0) + 1, coalesce(seen_at, 0) + 1, ?) WHERE id = ?").run(at, id);
 
   function pylon(id: PylonId): StoredPylon | undefined {
@@ -852,12 +859,21 @@ export function threadStore(db: Db, clock: () => number, nodes: Pick<NodeStore, 
     harnessThreads: (): StoredThread[] => sql(`SELECT * FROM threads t WHERE conversation_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM claude_workers WHERE thread = t.id)
       AND (status <> 'deleted' OR conversation_id NOT IN (SELECT conversation FROM aborted_conversations)) ORDER BY created_at, id`).all().map(threadRow),
     recordAborted(conversationId: string) { sql("INSERT OR IGNORE INTO aborted_conversations (conversation) VALUES (?)").run(conversationId); },
-    markSeen(id: ThreadId, unread: boolean, now = clock(), lastReplyAt?: number | null) {
+    markSeen,
+    /**
+     * Marks the thread seen or unread for `person`: the owner's mark, or another person's own, which is never past the
+     * newest reply, so the next reply is unread to them as recordReply keeps it for the owner.
+     */
+    markSeenBy(id: ThreadId, person: Person, unread: boolean, now = clock(), lastReplyAt?: number | null) {
+      if (sql("SELECT owner FROM threads WHERE id = ?").get(id)?.owner === person) return markSeen(id, unread, now, lastReplyAt);
       if (!unread && lastReplyAt === null) return;
-      transaction(() => {
-        sql("UPDATE threads SET seen_at = CASE WHEN ? THEN last_reply_at - 1 ELSE max(coalesce(seen_at, 0), min(max(?, coalesce(last_reply_at, 0)), ?)) END WHERE id = ?").run(unread ? 1 : 0, now, lastReplyAt ?? Number.MAX_SAFE_INTEGER, id);
-        updateAttention(id);
-      });
+      sql(`INSERT INTO seen_marks (thread, person, seen_at) SELECT id, $person, CASE WHEN $unread THEN last_reply_at - 1 ELSE min(coalesce(last_reply_at, 0), $through) END FROM threads WHERE id = $id
+        ON CONFLICT (thread, person) DO UPDATE SET seen_at = CASE WHEN $unread THEN excluded.seen_at ELSE max(coalesce(seen_at, 0), excluded.seen_at) END`)
+        .run({ $id: id, $person: person, $unread: unread ? 1 : 0, $through: lastReplyAt ?? Number.MAX_SAFE_INTEGER });
+    },
+    /** What `person` has seen of each thread they do not own and have marked. */
+    seenMarks(person: Person): ReadonlyMap<ThreadId, number | null> {
+      return new Map(sql("SELECT thread, seen_at FROM seen_marks WHERE person = ?").all(person).map((r) => [r.thread as ThreadId, r.seen_at as number | null]));
     },
     // The timestamp also identifies a reply, including two events in one millisecond or a clock correction.
     recordReply(id: ThreadId, at: number) {

@@ -631,13 +631,13 @@ test("the route table holds the routes it always has, and each path matches one 
   const described = table.map((entry) => {
     const policy = entry[2];
     const said = "action" in policy ? `: ${policy.action}` : policy.why === undefined ? "" : `: ${policy.why}`;
-    return `${entry[0]} ${entry[1].source} ${policy.role}${said}${policy.startsTurn ? ", startsTurn" : ""}`;
+    return `${entry[0]} ${entry[1].source} ${policy.role}${said}${"admin" in policy ? ", admin" : ""}${policy.startsTurn ? ", startsTurn" : ""}`;
   });
   assert.deepEqual(described.sort(), [
     "DELETE ^\\/v1\\/projects\\/([^/]+)$ person: remove a project",
-    "DELETE ^\\/v1\\/threads\\/([^/]+)$ person: delete a thread",
-    "DELETE ^\\/v1\\/threads\\/([^/]+)\\/previews\\/([^/]+)$ person: unpublish a preview",
-    "DELETE ^\\/v1\\/threads\\/([^/]+)\\/sessions\\/([^/]+)$ person: close a session in a thread's pylon",
+    "DELETE ^\\/v1\\/threads\\/([^/]+)$ owner: delete a thread, admin",
+    "DELETE ^\\/v1\\/threads\\/([^/]+)\\/previews\\/([^/]+)$ owner: unpublish a preview",
+    "DELETE ^\\/v1\\/threads\\/([^/]+)\\/sessions\\/([^/]+)$ owner: close a session in a thread's pylon",
     "DELETE ^\\/v1\\/usage\\/backfill$ deployer: start or stop the usage backfill",
     "GET ^\\/$ allowed",
     "GET ^\\/assets\\/([\\w.-]+)$ allowed",
@@ -697,21 +697,21 @@ test("the route table holds the routes it always has, and each path matches one 
     "POST ^\\/v1\\/projects$ allowed: adding a project changes no thread, pylon or project there is",
     "POST ^\\/v1\\/questions\\/([^/]+)\\/answer$ allowed: each question says who may answer it, which refusalOf checks",
     "POST ^\\/v1\\/threads$ person: start a thread, startsTurn",
-    "POST ^\\/v1\\/threads\\/([^/]+)\\/abort$ person: abort a thread's turn",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/abort$ owner: abort a thread's turn, admin",
     "POST ^\\/v1\\/threads\\/([^/]+)\\/activity$ allowed: a page open on the thread only keeps its pylon awake",
-    "POST ^\\/v1\\/threads\\/([^/]+)\\/archive$ person: archive a thread",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/archive$ owner: archive a thread, admin",
     "POST ^\\/v1\\/threads\\/([^/]+)\\/land$ deployer: land a pull request, which deploys",
-    "POST ^\\/v1\\/threads\\/([^/]+)\\/messages$ person: message a thread, startsTurn",
-    "POST ^\\/v1\\/threads\\/([^/]+)\\/previews$ person: publish a preview",
-    "POST ^\\/v1\\/threads\\/([^/]+)\\/pylon\\/retry$ person: retry a thread's pylon",
-    "POST ^\\/v1\\/threads\\/([^/]+)\\/retry$ person: retry a thread's turn, startsTurn",
-    "POST ^\\/v1\\/threads\\/([^/]+)\\/review$ person: start a review",
-    "POST ^\\/v1\\/threads\\/([^/]+)\\/review\\/cancel$ person: cancel a review",
-    "POST ^\\/v1\\/threads\\/([^/]+)\\/seen$ allowed: what the person has read changes no thread or pylon",
-    "POST ^\\/v1\\/threads\\/([^/]+)\\/sessions$ person: open a session in a thread's pylon",
-    "POST ^\\/v1\\/threads\\/([^/]+)\\/start$ person: start a queued thread, startsTurn",
-    "POST ^\\/v1\\/threads\\/([^/]+)\\/unarchive$ person: unarchive a thread",
-    "POST ^\\/v1\\/threads\\/([^/]+)\\/unseen$ allowed: what the person has read changes no thread or pylon",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/messages$ owner: message a thread, startsTurn",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/previews$ owner: publish a preview",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/pylon\\/retry$ owner: retry a thread's pylon",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/retry$ owner: retry a thread's turn, startsTurn",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/review$ owner: start a review",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/review\\/cancel$ owner: cancel a review",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/seen$ allowed: each person's own mark of what they have read changes no thread or pylon",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/sessions$ owner: open a session in a thread's pylon",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/start$ owner: start a queued thread, startsTurn",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/unarchive$ owner: unarchive a thread",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/unseen$ allowed: each person's own mark of what they have read changes no thread or pylon",
     "POST ^\\/v1\\/usage\\/backfill$ deployer: start or stop the usage backfill",
     "PUT ^\\/v1\\/release$ deployer: deploy",
   ]);
