@@ -893,6 +893,25 @@ test("a landing under the policy merges the approved head, deploys it and waits 
   assert.equal(g.registry.releases.desiredRelease()?.commit, merged);
 });
 
+test("a landing into a branch other than the release branch merges and lands with no deploy", async (t) => {
+  const f = fixture(t);
+  released(f, previous);
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "multiplayer" } };
+  await approved(f, "nLAPTOP");
+  assert.deepEqual(f.merges, [head1]);
+  assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
+  assert.deepEqual(f.registry.releases.desiredRelease(), { commit: previous, requestedBy: "person", requestedAt: 1 });
+});
+
+test("a landing into a branch other than the release branch still meets the reserved paths' holds", async (t) => {
+  const f = fixture(t);
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base: "multiplayer" } };
+  f.files = [{ path: "src/control/schema.ts", previous: null, patch: "" }];
+  await approved(f, "nLAPTOP");
+  assert.deepEqual(f.merges, []);
+  assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: reservedHolds });
+});
+
 test("a deploy that fails rolls back to the previous release and tells the person what still needs reverting", async (t) => {
   const f = fixture(t);
   released(f, previous);
