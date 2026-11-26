@@ -21,7 +21,7 @@
  * outlive it, as pylons outlive a probe. `verify-nexus down` removes them.
  */
 import { execFile } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { connect, createServer as createTcpServer } from "node:net";
 import { basename, join } from "node:path";
@@ -65,6 +65,12 @@ const log = (message: string) => console.error(`${new Date().toISOString()} ${me
 const base = process.env.NEXUS_VERIFY_BASE;
 /** The repository in the stack's image that the project names and the dotfiles layer is pulled from. */
 const verifyRepo = "/srv/verify.git";
+/**
+ * A second repository, at the same absolute path on this machine and in the stack's image, so the control plane can
+ * read a project's .nexus/setup from it as `file://`, which a template needs, and a pylon can clone it. `/srv/verify.git`
+ * is only in the image, so spoon always boots fresh.
+ */
+const templateRepo = join(runDir, "template.git");
 const seededThreads = (() => {
   const n = process.env.NEXUS_VERIFY_THREADS;
   if (n === undefined || n === "") return 0;
@@ -81,6 +87,7 @@ async function buildImage() {
   await mkdir(dir, { recursive: true });
   await copyFile(packagedDaemon({ platform: "linux", arch: daemonArch }), join(dir, "pi-env"));
   await copyFile(join(repoRoot, "images/pylon/nexus"), join(dir, "nexus"));
+  await cp(templateRepo, join(dir, "template.git"), { recursive: true });
   // The slice test's image, plus the harness's daemon, the in-pylon CLI and git, so `git status` outputs read a checkout,
   // and procps, whose pgrep counts the terminals attached to Herdr Core.
   await writeFile(join(dir, "Dockerfile"), [
@@ -102,6 +109,7 @@ async function buildImage() {
     "RUN mkdir -p /root/.config/herdr-core && printf 'notes = false\\n' > /root/.config/herdr-core/config.toml",
     "COPY pi-env /usr/local/libexec/nexus/pi-env",
     "COPY nexus /usr/local/bin/nexus",
+    `COPY --chown=user:user template.git ${templateRepo}`,
     "RUN chmod 0755 /usr/local/libexec/nexus/pi-env /usr/local/bin/nexus",
   ].join("\n") + "\n");
   log(`building ${tag}`);
@@ -175,7 +183,20 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
   });
 }
 
+async function makeTemplateRepo() {
+  const work = join(runDir, "template-work");
+  const git = (...args: string[]) => exec("git", ["-C", work, "-c", "user.name=verify", "-c", "user.email=verify@invalid", ...args]);
+  await mkdir(work, { recursive: true });
+  await git("init", "--quiet", "--initial-branch=main");
+  await writeFile(join(work, "README.md"), "# verify-nexus template repository\n");
+  await git("add", "README.md");
+  await git("commit", "--quiet", "-m", "init");
+  await exec("git", ["clone", "--quiet", "--bare", work, templateRepo]);
+  await rm(work, { recursive: true, force: true });
+}
+
 await mkdir(runDir, { recursive: true });
+await makeTemplateRepo();
 await buildImage();
 // Not in the run directory: a socket path must fit macOS's 104-byte sun_path, and a worktree's path can be too long.
 // verify-nexus down removes the directory.
@@ -265,6 +286,6 @@ const head = (await exec("git", ["-C", repoRoot, "rev-parse", "--short", "HEAD"]
 const dirty = (await exec("git", ["-C", repoRoot, "status", "--porcelain", "--untracked-files=no"])).stdout.trim() !== "";
 await writeFile(join(runDir, "state.json"), JSON.stringify({
   run, pid: process.pid, api, bobApi: `http://127.0.0.1:${ports.bob}`, ports, node, project: project.id, image: imageId, dockerTag: tag, label: `nexus.verify=${run}`,
-  revision: `${head}${dirty ? "-dirty" : ""}`, seededThreads, startedAt: new Date().toISOString(),
+  revision: `${head}${dirty ? "-dirty" : ""}`, seededThreads, templateRepo: `file://${templateRepo}`, startedAt: new Date().toISOString(),
 }, null, 2) + "\n");
 log(`nexus-verify: ready ${api} run ${run}`);
