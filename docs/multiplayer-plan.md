@@ -386,13 +386,13 @@ Three limits of this guard, each handled elsewhere:
 
 ### mp-22: a cap on running pylons for each person
 
-- [ ] **Depends on.** `mp-02`.
-- [ ] **Files.** `src/control/placement.ts`, `src/control/main.ts`.
-- [ ] **Change.** A pylon's QEMU process never returns memory, so each running pylon holds its full size plus about 0.15 GiB on the host. Admission refuses a start or a wake when the owner already runs their cap, two by default, set for each person in `people`.
-- [ ] **Result.** One engineer cannot take the whole machine.
-- [ ] **Unit.** A third start is refused with a reason that names the cap and the owner's running threads. An admin's higher cap for one person applies to that person only.
-- [ ] **Live.** As `alice`, start three threads. Pass when the third is held with the reason shown by `nexus show`, and starts once she pauses one.
-- [ ] **Perf.** `api`. Fail above 15% over base.
+- [x] **Depends on.** `mp-02`.
+- [x] **Files.** `src/control/placement.ts`, `src/control/main.ts`, `src/control/people.ts`, and the cap's way into the planner, `src/control/loop.ts` and `src/control/placement-model.ts`.
+- [x] **Change.** A pylon's QEMU process never returns memory, so each running pylon holds its full size plus about 0.15 GiB on the host. Admission refuses a start or a wake when the owner already runs their cap, two by default, set for each person in `people`.
+- [x] **Result.** One engineer cannot take the whole machine.
+- [x] **Unit.** A third start is refused with a reason that names the cap and the owner's running threads. An admin's higher cap for one person applies to that person only.
+- [x] **Live.** As `alice`, start three threads. Pass when the third is held with the reason shown by `nexus show`, and starts once she pauses one.
+- [x] **Perf.** `api`. Fail above 15% over base.
 
 ### ops-1: the office machine can run pylons
 
