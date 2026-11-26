@@ -173,6 +173,17 @@ test("a rerun over a config without imageBuildNode leaves image builds on the de
   assert.equal(written.get(paths.control)!.state, "unchanged");
 });
 
+test("a rerun over a shared install's control.json keeps it free of callers and deployers, so it still loads, and refuses --admit", () => {
+  const { callers: _, deployers: __, ...control } = onDisk(files(run(["--admit", "ramtins-macbook-pro"]))).control as Record<string, Json>;
+  const shared = { ...onDisk(files(run(["--admit", "ramtins-macbook-pro"]))), control: { ...control, people: { "alice@example.com": "admin" } } };
+  const written = files(run([], shared));
+  const rerun = value(written, paths.control);
+  assert.equal(rerun.callers, undefined);
+  assert.equal(rerun.deployers, undefined);
+  assert.deepEqual(parseConfig(JSON.stringify(rerun)).people, { "alice@example.com": "admin" });
+  assert.match(errors(run(["--admit", "ramtins-macbook-pro"], shared)).join("\n"), /--admit writes callers and deployers, which a control.json with people refuses/);
+});
+
 test("--add-node adds the node, its deploy key and the probe peer, once", () => {
   const digest = "b".repeat(64);
   const first = onDisk(files(run(["--dotfiles", dotfiles])));

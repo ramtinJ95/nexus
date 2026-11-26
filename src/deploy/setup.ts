@@ -258,6 +258,9 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
   const admitted = flags.admit.flatMap((name) => resolve(tailnet, "--admit", name, errors) ?? []);
 
   const controlOnDisk = isObject(existing.control) ? existing.control : undefined;
+  // A shared install admits by login, and its control.json refuses callers and deployers, so a rerun writes neither.
+  const shared = isObject(controlOnDisk?.people);
+  if (shared && flags.admit.length > 0) errors.push("--admit writes callers and deployers, which a control.json with people refuses. Add the person's tailnet login to people in /etc/nexus/control.json instead");
   const nodeIds = new Set([self.id, ...addNodes.map((a) => a.node.id)]);
   if (Array.isArray(controlOnDisk?.nodes)) for (const n of controlOnDisk.nodes) if (isObject(n) && typeof n.tailnetNodeId === "string") nodeIds.add(n.tailnetNodeId);
   for (const d of admitted) {
@@ -293,8 +296,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
       nodes: [nodeEntry(self), ...addNodes.map((a) => nodeEntry(a.node))],
       // Only a new config names this machine: an existing one without it keeps building on the schema's default node.
       ...existing.control === undefined ? { imageBuildNode: self.name } : {},
-      callers: admitted.map((d) => d.id),
-      deployers: admitted.map((d) => d.id),
+      ...shared ? {} : { callers: admitted.map((d) => d.id), deployers: admitted.map((d) => d.id) },
       deployKeys: Object.fromEntries([[self.id, tokenDigest(token)], ...addNodes.map((a) => [a.node.id, a.digest])]),
       ...flags.dotfiles === undefined ? {} : { dotfiles: { repo: flags.dotfiles, ref: dotfilesRef } },
       ...releaseBranch,
@@ -543,8 +545,10 @@ async function gather(flags: Flags, manager: PackageManager): Promise<Facts> {
     if (control === undefined) throw new Error(errors.join("; "));
     return { ...common, role: "node", control, joined: flags.join !== undefined };
   }
-  const { callers } = controlFields(await readJson(paths.control), paths.control);
-  if (callers === undefined) throw new Error(`${paths.control} has no callers`);
+  const config = await readJson(paths.control);
+  const { callers } = controlFields(config, paths.control);
+  const shared = isObject(config as Json) && isObject((config as JsonObject).people);
+  if (callers === undefined && !shared) throw new Error(`${paths.control} has no callers`);
   const credentials = await system.read(at.harness).catch(() => undefined);
   const groups = await exec("id", ["-nG", users.probe]).then(({ stdout }) => stdout.trim().split(/\s+/), (): string[] => []);
   const succeeds = (args: string[]) => exec("docker", args, { env: { PATH: servicePath } }).then(() => true, () => false);
@@ -552,7 +556,7 @@ async function gather(flags: Flags, manager: PackageManager): Promise<Facts> {
   const image = await holdsImage(paths.artifacts);
   return {
     ...common, role: "control", signedIn: credentials !== undefined && harnessSignedIn(credentials),
-    admitted: callers.length > 0, docker, dockerGroup: groups.includes("docker"), image,
+    admitted: shared || callers!.length > 0, docker, dockerGroup: groups.includes("docker"), image,
   };
 }
 
