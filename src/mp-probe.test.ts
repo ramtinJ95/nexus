@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "./test-support/kit.ts";
@@ -116,4 +116,16 @@ test("an up stopped while its stack starts takes that stack down and releases th
   assert.equal(await exited(up), 143);
   assert.equal(alive(stack), false, "the stack is stopped");
   assert.equal(await v.current(), null, "the claim is released");
+});
+
+test("down removes the run's template repository, which lives outside the run directory", async (t) => {
+  const v = await verifyCheckout(t);
+  const run = `mp-probe-test-${process.pid}-${Date.now()}`;
+  const template = join("/var/tmp", `nexus-verify-${run}`);
+  await mkdir(join(template, "template.git"), { recursive: true });
+  t.after(() => rm(template, { recursive: true, force: true }));
+  await mkdir(v.base, { recursive: true });
+  await writeFile(join(v.base, "current"), `${run}\n`);
+  assert.equal(await exited(v.verify(["down"], run)), 0);
+  assert.equal(existsSync(template), false);
 });

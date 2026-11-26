@@ -69,9 +69,11 @@ const verifyRepo = "/srv/verify.git";
 /**
  * A second repository, at the same absolute path on this machine and in the stack's image, so the control plane can
  * read a project's .nexus/setup from it as `file://`, which a template needs, and a pylon can clone it. `/srv/verify.git`
- * is only in the image, so spoon always boots fresh.
+ * is only in the image, so spoon always boots fresh. Not under the run directory: where the checkout is
+ * /home/user/workspace/repo, as in a Nexus pylon, that is where a pylon clones its own checkout, which the copy would block.
  */
-const templateRepo = join(runDir, "template.git");
+const templateRoot = `/var/tmp/nexus-verify-${run}`;
+const templateRepo = join(templateRoot, "template.git");
 const seededThreads = (() => {
   const n = process.env.NEXUS_VERIFY_THREADS;
   if (n === undefined || n === "") return 0;
@@ -207,6 +209,7 @@ async function makeTemplateRepo() {
 }
 
 await mkdir(runDir, { recursive: true });
+closers.push(() => rm(templateRoot, { recursive: true, force: true }));
 await makeTemplateRepo();
 await buildImage();
 // Not in the run directory: a socket path must fit macOS's 104-byte sun_path, and a worktree's path can be too long.

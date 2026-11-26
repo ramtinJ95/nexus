@@ -193,6 +193,8 @@ down() {
     rmdir "$sockets" || echo "verify-nexus: left $sockets, which holds more than the socket" >&2
   fi
   rm -rf "$dir"
+  # stack.ts's template repository, outside the run directory. Only a run name that could have been made is a path here.
+  if [[ "$run" =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]]; then rm -rf "/var/tmp/nexus-verify-$run"; fi
   rm -f "$current_file"
   echo "verify-nexus: run $run is down. Evidence kept in $(evidence_dir "$run")"
 }
