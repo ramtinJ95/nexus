@@ -9,11 +9,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { parseTailscaleStatus, selfDnsName, tailscaleCli } from "./tailscale.ts";
-import { localApiStatus, localApiWhois, localApiWhoisNode, PeerRefused, tailnetNodeIdPattern, verifyPeer } from "./node-base/tailscaled.ts";
+import { localApiStatus, localApiWhois, localApiWhoisCaller, localApiWhoisNode, PeerRefused, tailnetNodeIdPattern, verifyPeer } from "./node-base/tailscaled.ts";
 import { tailnetDevices } from "./deploy/setup.ts";
 import { tailnetNodeIdSchema } from "./protocol/fields.ts";
 import type { Whois } from "./protocol/http.ts";
 import type { TailnetNodeId } from "./ids.ts";
+import { tailnet } from "./test-support/people.ts";
 
 // A stand-in for tailscaled's LocalAPI on a Unix socket. The real daemon is never contacted.
 test("localApiWhois asks LocalAPI whois for ip:port and returns the stable node ID", async (t) => {
@@ -50,9 +51,39 @@ test("localApiWhois asks LocalAPI whois for ip:port and returns the stable node 
   assert.deepEqual(seen[0], { path: "/localapi/v0/whois?addr=100.64.0.7%3A41641", host: "local-tailscaled.sock" });
 
   const whoisNode = localApiWhoisNode(socketPath);
-  assert.deepEqual(await whoisNode("100.64.0.7", 41641), { id: "nStable7CNTRL", host: "rj-firebat.example.ts.net" }, "the MagicDNS name, without its root dot");
+  assert.deepEqual(await whoisNode("100.64.0.7", 41641), { id: "nStable7CNTRL", host: "rj-firebat.example.ts.net", user: null, tags: [] }, "the MagicDNS name, without its root dot");
   assert.equal(await whoisNode("100.64.0.8", 5), null);
   await assert.rejects(whoisNode("fd7a:115c:a1e0::7", 80), /response has no Node\.Name/);
+});
+
+test("the API's whois keeps a person's device's login, and a tagged device's tags and no user", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "nexus-whois-"));
+  const socketPath = join(dir, "tailscaled.sock");
+  const byAddr: Record<string, unknown> = {
+    "100.64.0.1:1": tailnet.alice,
+    "100.64.0.3:1": tailnet.node,
+    "100.64.0.4:1": { Node: { StableID: "nBARE" } },
+    "100.64.0.5:1": { Node: { StableID: "nODD", Tags: [] }, UserProfile: { LoginName: "" } },
+  };
+  const server = createServer((req, res) => {
+    const answer = byAddr[new URL(req.url!, "http://x").searchParams.get("addr")!];
+    if (answer === undefined) return res.writeHead(404).end("no match for IP:port");
+    res.end(JSON.stringify(answer));
+  });
+  await new Promise<void>((resolve, reject) => server.once("error", reject).listen(socketPath, resolve));
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(dir, { recursive: true });
+  });
+
+  const whois = localApiWhoisCaller(socketPath);
+  assert.deepEqual(await whois("100.64.0.1", 1), { id: "nALICE", user: "alice@example.com", tags: [] }, "a person's device yields its owner's login");
+  assert.deepEqual(await whois("100.64.0.3", 1), { id: "nNEXUSNODE", user: null, tags: ["tag:nexus-node"] }, "a tagged device yields its tags and not tailscaled's placeholder user");
+  assert.deepEqual(await whois("100.64.0.4", 1), { id: "nBARE", user: null, tags: [] }, "an answer without a user profile yields neither");
+  assert.deepEqual(await whois("100.64.0.5", 1), { id: "nODD", user: null, tags: [] }, "an empty login is no user");
+  assert.equal(await whois("100.64.0.9", 1), null);
+  const node = await localApiWhoisNode(socketPath)("100.64.0.3", 1);
+  assert.deepEqual(node, { id: "nNEXUSNODE", host: "nexus-node.tail.ts.net", user: null, tags: ["tag:nexus-node"] }, "the join's whois keeps the same");
 });
 
 test("LocalAPI certificates use cert-only access, request renewal, and reject invalid replies", async (t) => {

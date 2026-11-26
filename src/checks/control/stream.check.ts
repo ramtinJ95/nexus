@@ -71,7 +71,7 @@ registry.images.saveImage(testImage({ id: image }), null);
 registry.images.setCurrentImage(image);
 const claude = claudeConversations({ registry, probes: new Map(), log: (message) => console.error(message) });
 const api = await startApi({
-  registry, host: "127.0.0.1", port: 0, whois: async () => laptop, allowed: new Set([laptop]), hostnames: new Set(["127.0.0.1"]),
+  registry, host: "127.0.0.1", port: 0, whois: async () => ({ id: laptop, user: null, tags: [] }), allowed: new Set([laptop]), hostnames: new Set(["127.0.0.1"]),
   deployment: { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} },
   harness: threads, claude, wake: () => {}, log: (message) => console.error(message), features: noFeatures, gate: turnGate(() => isDraining(registry.releases.drain(), registry.now())), health: () => null, loop: () => ({ overMs: 0, p99Ms: 0, maxMs: 0, busy: 0 }),
   startThread: threadStarter({

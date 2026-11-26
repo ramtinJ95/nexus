@@ -14,7 +14,7 @@ import { isDeployer, threadWaker } from "./api/access.ts";
 import { gitIdentitySchema } from "../protocol/spawn.ts";
 import { gitUrl } from "./project.ts";
 import { ingest } from "./reconcile.ts";
-import { linuxTailscaledSocket, localApiWhois, localApiWhoisNode, localApiCertificate, localApiStatus } from "../node-base/tailscaled.ts";
+import { linuxTailscaledSocket, localApiWhois, localApiWhoisCaller, localApiWhoisNode, localApiCertificate, localApiStatus } from "../node-base/tailscaled.ts";
 import { parseTailscaleStatus } from "../tailscale.ts";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { chatgptToken, harnessModels, loginState, openCredentials, requireModel } from "./harness/credentials.ts";
@@ -284,7 +284,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     startThread,
     gate,
     deployment: { ...deployment, releaseBranch: config.releaseBranch },
-    registry, whois, host: config.listen.host, port: config.listen.port,
+    registry, whois: localApiWhoisCaller(tailscaled), host: config.listen.host, port: config.listen.port,
     allowed: new Set([config.self.tailnetNodeId, ...config.callers]),
     joins: {
       whois: localApiWhoisNode(tailscaled),

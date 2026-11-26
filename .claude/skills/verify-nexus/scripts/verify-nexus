@@ -17,7 +17,7 @@ skill_dir=$(cd "$(dirname "$(realpath "$0")")/.." && pwd)
 repo=$(cd "$skill_dir/../../.." && pwd)
 base="$repo/.verify/nexus"
 current_file="$base/current"
-ports=(7470 7471 7480 7481 7482)
+ports=(7470 7471 7472 7480 7481 7482)
 
 die() { echo "verify-nexus: $*" >&2; exit 1; }
 current_run() { [ -f "$current_file" ] || die "no current run. Start one with: verify-nexus up"; cat "$current_file"; }
@@ -118,6 +118,7 @@ doctor() {
   check "the API allows this machine and verify-node is online" "NEXUS_URL=$api NEXUS_SOCKS=none node '$repo/src/cli/nexus.ts' nodes --json | grep -q '\"state\": \"online\"'"
   check "whois names alice through $api" "curl -fsS '$api/v1/whoami' | grep -q '\"node\": *\"nALICE\"'"
   check "whois names bob through $(state "$run" bobApi)" "curl -fsS '$(state "$run" bobApi)/v1/whoami' | grep -q '\"node\": *\"nBOB\"'"
+  check "whois names the node through $(state "$run" nodeApi)" "curl -fsS '$(state "$run" nodeApi)/v1/whoami' | grep -q '\"node\": *\"nNEXUSNODE\"'"
   echo "pylons of this run: $(docker ps -a --filter "label=$label" --format '{{.Names}}:{{.Status}}' | tr '\n' ' ')"
   [ "${revision%-dirty}" = "$revision" ] || echo "note  the stack started from a checkout with uncommitted changes"
   return $failed

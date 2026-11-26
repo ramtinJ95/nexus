@@ -33,8 +33,7 @@ import type { NodeName, TailnetNodeId, ThreadId } from "../../ids.ts";
 import { probeError, type ProbeError } from "../../protocol/http.ts";
 import { runsSealed } from "../locator.ts";
 import type { NodeHealth, ProbeClient } from "../../protocol/client.ts";
-import type { WhoisNode } from "../../node-base/tailscaled.ts";
-import type { Whois } from "../../protocol/http.ts";
+import type { TailnetCaller, TailnetIdentity, WhoisCaller, WhoisNode } from "../../node-base/tailscaled.ts";
 import { joinNode, joinRequestSchema } from "../join.ts";
 import type { Registry } from "../registry.ts";
 import type { JoinedNode } from "../node-store.ts";
@@ -90,7 +89,7 @@ export interface ApiOptions {
   host: string;
   /** 0 picks a free port. */
   port: number;
-  whois: Whois;
+  whois: WhoisCaller;
   allowed: ReadonlySet<TailnetNodeId>;
   /** `POST /v1/join`, the one route a machine that is no node or caller yet may call. Omitted: no machine can join. */
   joins?: { whois: WhoisNode; configured: ReadonlySet<TailnetNodeId>; joined(node: JoinedNode): void };
@@ -242,12 +241,23 @@ export async function startApi(options: ApiOptions): Promise<Api> {
    * The caller and its roles, once it may reach `policy`'s route, or with none any route, asked under one of the API's
    * names. Every request and upgrade passes here.
    */
-  async function admitted(req: IncomingMessage, policy: Policy | undefined): Promise<{ caller: TailnetNodeId; roles: ReadonlySet<Role>; host: string | null }> {
-    const named = policy?.role === "joiner" ? await callerOf(req, options.joins!.whois) : await callerOf(req, whois).then((id) => id === null ? null : { id, host: null });
+  async function admitted(req: IncomingMessage, policy: Policy | undefined): Promise<{ caller: TailnetNodeId; identity: TailnetIdentity; roles: ReadonlySet<Role>; host: string | null }> {
+    const named: (TailnetCaller & { host: string | null }) | null = policy?.role === "joiner" ? await callerOf(req, options.joins!.whois) : await callerOf(req, whois).then((c) => c === null ? null : { ...c, host: null });
     const roles: ReadonlySet<Role> = named === null ? new Set() : policy?.role === "joiner" ? new Set(["joiner"]) : roleOf(named.id, req.headers.authorization);
     admit(roles, policy, named !== null && admittable(named.id) ? named.id : null);
     checkHost(req);
-    return { caller: named!.id, roles, host: named!.host };
+    const { id, host, ...identity } = named!;
+    met(id, identity);
+    return { caller: id, identity, roles, host };
+  }
+
+  /** Each admitted device's owner, logged the first time the API admits it and again if whois names another. */
+  const owners = new Map<TailnetNodeId, string>();
+  function met(id: TailnetNodeId, { user, tags }: TailnetIdentity) {
+    const owner = user === null ? `no user, tags ${tags.length === 0 ? "none" : tags.join(",")}` : `user ${user}`;
+    if (owners.get(id) === owner) return;
+    owners.set(id, owner);
+    options.log(`api: caller ${id} is ${owner}`);
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse) {
@@ -258,7 +268,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
       return m === null ? [] : [{ entry, m }];
     });
     const match = atPath.find(({ entry }) => entry[0] === req.method);
-    const { caller, roles, host } = await admitted(req, (match ?? atPath[0])?.entry[2]);
+    const { caller, identity, roles, host } = await admitted(req, (match ?? atPath[0])?.entry[2]);
     const foreign = foreignSite(req);
     if (foreign !== null && !(path !== null && opensPage(req, path))) throw new Refusal("forbidden", `${path ?? "the API"} does not answer pages from ${foreign}`);
     if (req.method !== "GET") requireJson(req);
@@ -269,7 +279,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const { entry: [, , policy, route], m } = match;
     demand(roles, policy, caller);
     const url = new URL(req.url ?? "/", "http://nexus");
-    const run = () => route(m, { query: url.searchParams, caller, roles, host, body: (empty) => readJson(req, empty) });
+    const run = () => route(m, { query: url.searchParams, caller, identity, roles, host, body: (empty) => readJson(req, empty) });
     const reply = policy.startsTurn ? await gate.run(async () => run()) : await run();
     if (reply.stream !== undefined) {
       if (foreign !== null) throw new Refusal("forbidden", `${path} streams to no page from ${foreign}`);

@@ -12,8 +12,20 @@ import { BodyTooLarge, readBody } from "./request-body.ts";
 import type { TailnetNodeId } from "../ids.ts";
 import type { Whois } from "../protocol/http.ts";
 
+/**
+ * Who owns a tailnet device: a person's device carries its owner's login, UserProfile.LoginName, and a tagged device
+ * its tags and no user, because tailscaled names every tagged device's owner "tagged-devices".
+ */
+export type TailnetIdentity = { user: string; tags: readonly [] } | { user: null; tags: readonly string[] };
+
+/** A caller as whois names it: the stable node ID and who owns the device. */
+export type TailnetCaller = { id: TailnetNodeId } & TailnetIdentity;
+
+/** Whois with who owns the device. */
+export type WhoisCaller = (address: string, port: number) => Promise<TailnetCaller | null>;
+
 /** Whois with the node's MagicDNS name, such as infra-testbench.example.ts.net, which tailscaled reports as Node.Name. */
-export type WhoisNode = (address: string, port: number) => Promise<{ id: TailnetNodeId; host: string } | null>;
+export type WhoisNode = (address: string, port: number) => Promise<TailnetCaller & { host: string } | null>;
 
 /** Tailscale's stable node ID, for the bootstrap deployer, which has neither zod nor tailnetNodeIdSchema in protocol/fields.ts. */
 export const tailnetNodeIdPattern = /^n[A-Za-z0-9]+$/;
@@ -25,28 +37,50 @@ export function localApiWhois(socketPath: string = linuxTailscaledSocket): Whois
   return async (address, port) => (await whois(socketPath, address, port))?.id ?? null;
 }
 
-export function localApiWhoisNode(socketPath: string = linuxTailscaledSocket): WhoisNode {
+export function localApiWhoisCaller(socketPath: string = linuxTailscaledSocket): WhoisCaller {
   return async (address, port) => {
-    const node = await whois(socketPath, address, port);
-    if (node?.host === null) throw new Error(`tailscaled whois ${hostPort(address, port)}: response has no Node.Name`);
-    return node as { id: TailnetNodeId; host: string } | null;
+    const answer = await whois(socketPath, address, port);
+    return answer === null ? null : { id: answer.id, ...answer.identity };
   };
 }
 
-async function whois(socketPath: string, address: string, port: number): Promise<{ id: TailnetNodeId; host: string | null } | null> {
+export function localApiWhoisNode(socketPath: string = linuxTailscaledSocket): WhoisNode {
+  return async (address, port) => {
+    const answer = await whois(socketPath, address, port);
+    if (answer === null) return null;
+    if (answer.host === null) throw new Error(`tailscaled whois ${hostPort(address, port)}: response has no Node.Name`);
+    return { id: answer.id, host: answer.host, ...answer.identity };
+  };
+}
+
+async function whois(socketPath: string, address: string, port: number): Promise<KeptWhois | null> {
   const addr = hostPort(address, port);
   const res = await localApiGet(socketPath, `/localapi/v0/whois?addr=${encodeURIComponent(addr)}`, `whois ${addr}`, 1 << 20);
   if (res.status === 404) return null;
   if (res.status !== 200) throw new Error(`tailscaled whois ${addr}: HTTP ${res.status}: ${res.body.trim()}`);
-  let node: { StableID?: unknown; Name?: unknown } | undefined;
   try {
-    node = (JSON.parse(res.body) as { Node?: { StableID?: unknown; Name?: unknown } }).Node;
+    return parseWhois(JSON.parse(res.body));
   } catch (err) {
     throw new Error(`tailscaled whois ${addr}: ${(err as Error).message}`);
   }
-  if (typeof node?.StableID !== "string" || node.StableID === "") throw new Error(`tailscaled whois ${addr}: response has no Node.StableID`);
+}
+
+/** What Nexus keeps of a LocalAPI whois answer. */
+export interface KeptWhois { id: TailnetNodeId; host: string | null; identity: TailnetIdentity }
+
+/**
+ * Node.StableID, Node.Name without its trailing dot, and who owns the device. A device with Node.Tags is tagged, and
+ * its UserProfile is tailscaled's placeholder. Any other device's user is UserProfile.LoginName, or none when the
+ * answer has none.
+ */
+export function parseWhois(answer: unknown): KeptWhois {
+  const { Node: node, UserProfile: profile } = (answer ?? {}) as { Node?: { StableID?: unknown; Name?: unknown; Tags?: unknown }; UserProfile?: { LoginName?: unknown } };
+  if (typeof node?.StableID !== "string" || node.StableID === "") throw new Error("response has no Node.StableID");
   const host = typeof node.Name === "string" && node.Name !== "" ? node.Name.replace(/\.$/, "") : null;
-  return { id: node.StableID as TailnetNodeId, host };
+  const tags = Array.isArray(node.Tags) ? node.Tags.filter((tag): tag is string => typeof tag === "string") : [];
+  const login = profile?.LoginName;
+  const identity: TailnetIdentity = tags.length > 0 || typeof login !== "string" || login === "" ? { user: null, tags } : { user: login, tags: [] };
+  return { id: node.StableID as TailnetNodeId, host, identity };
 }
 
 function hostPort(address: string, port: number): string {

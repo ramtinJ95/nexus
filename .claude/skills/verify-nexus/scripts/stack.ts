@@ -6,8 +6,8 @@
  * startControlPlane (registry, loop, pi-durable harness, API and dashboard) and a probe from startProbe with
  * the Docker backend. Only the production boundaries are doubles:
  * - tailscaled's LocalAPI is a Unix socket in a directory under /tmp, named in <runDir>/socket-dir. whois answers with the shapes of
- *   src/test-support/people.ts: 127.0.0.1:7480 is the node, a connection that came through bob's port 7471 is bob, and every
- *   other address is alice. The API allows both as people, as for the CLI on a Mac. The probe's own whois names every caller as the
+ *   src/test-support/people.ts: 127.0.0.1:7480 is the node, a connection that came through bob's port 7471 is bob, one through
+ *   the node's port 7472 is the node, and every other address is alice. The API allows both as people, as for the CLI on a Mac. The probe's own whois names every caller as the
  *   control plane.
  * - the model is the scripted one from src/control/harness/test-fixture.ts: `bash: <command>` runs one bash tool call, and
  *   `stream: <n>` streams an answer of n words.
@@ -52,7 +52,7 @@ const run = basename(runDir);
 const repoRoot = new URL("../../../../", import.meta.url).pathname;
 
 // Fixed, because the control plane reaches probes on probePort only and containers keep the bridge port they booted with.
-const ports = { api: 7470, bob: 7471, probe: probePort, gateway: 7481, bridge: 7482 } as const;
+const ports = { api: 7470, bob: 7471, node: 7472, probe: probePort, gateway: 7481, bridge: 7482 } as const;
 const node = "verify-node" as NodeName;
 const controlPlaneId = "nVERIFYCONTROL" as TailnetNodeId;
 const probeId = tailnet.node.Node.StableID;
@@ -120,24 +120,24 @@ async function buildImage() {
 }
 
 /**
- * The local ports of the forwarder's connections to the API, each of which carries a request of bob's. A closed one
- * stays a minute, with the timer that forgets it, because the API may still be asking whois about its last request.
+ * The local port of each forwarder's connection to the API, with whose request it carries. A closed one stays a minute,
+ * with the timer that forgets it, because the API may still be asking whois about its last request.
  */
-const bobPorts = new Map<number, NodeJS.Timeout | null>();
+const forwarded = new Map<number, { answer: WhoisAnswer; forget: NodeJS.Timeout | null }>();
 
 /**
- * tailscaled's LocalAPI whois for the control plane, answered by port: the probe's is the node, one of bob's forwarded
- * connections is bob, and everything else is alice. It logs each identity the first time it names it.
+ * tailscaled's LocalAPI whois for the control plane, answered by port: the probe's is the node, a forwarded connection
+ * is whoever its forwarder carries, and everything else is alice. It logs each identity the first time it names it.
  */
 async function fakeTailscaled(socket: string) {
   const named = new Set<string>();
   const server = createServer((req, res) => {
     const addr = new URL(req.url ?? "/", "http://local-tailscaled.sock").searchParams.get("addr") ?? "";
     const port = Number(addr.slice(addr.lastIndexOf(":") + 1));
-    const answer: WhoisAnswer = port === ports.probe ? tailnet.node : bobPorts.has(port) ? tailnet.bob : tailnet.alice;
+    const answer: WhoisAnswer = port === ports.probe ? tailnet.node : forwarded.get(port)?.answer ?? tailnet.alice;
     if (!named.has(answer.Node.StableID)) {
       named.add(answer.Node.StableID);
-      log(`whois: answered ${answer.Node.StableID} as ${answer.UserProfile?.LoginName ?? `tags ${answer.Node.Tags?.join(",")}`}`);
+      log(`whois: answered ${answer.Node.StableID} as ${answer.Node.Tags?.length ? `tags ${answer.Node.Tags.join(",")}` : answer.UserProfile?.LoginName}`);
     }
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(answer));
   });
@@ -146,24 +146,24 @@ async function fakeTailscaled(socket: string) {
 }
 
 /**
- * Bob's way in: a TCP forwarder from 127.0.0.1:7471 to the API. Each connection's local port is recorded before any of
- * its bytes reach the API, so the API's whois of that connection finds it.
+ * A way in as `answer`: a TCP forwarder from 127.0.0.1:`listen` to the API. Each connection's local port is recorded
+ * before any of its bytes reach the API, so the API's whois of that connection finds it.
  */
-async function bobForwarder() {
+async function forwarder(listen: number, answer: WhoisAnswer) {
   const server = createTcpServer((client) => {
     const upstream = connect(ports.api, "127.0.0.1");
     let port: number | undefined;
     upstream.once("connect", () => {
       port = upstream.localPort!;
-      clearTimeout(bobPorts.get(port) ?? undefined);
-      bobPorts.set(port, null);
+      clearTimeout(forwarded.get(port)?.forget ?? undefined);
+      forwarded.set(port, { answer, forget: null });
       client.pipe(upstream);
       upstream.pipe(client);
     });
     upstream.once("close", () => {
       if (port !== undefined) {
         const closed = port;
-        bobPorts.set(closed, setTimeout(() => bobPorts.delete(closed), 60_000).unref());
+        forwarded.set(closed, { answer, forget: setTimeout(() => forwarded.delete(closed), 60_000).unref() });
       }
       client.destroy();
     });
@@ -171,7 +171,7 @@ async function bobForwarder() {
     client.on("error", () => upstream.destroy());
     client.once("close", () => upstream.destroy());
   });
-  await new Promise<void>((resolve, reject) => server.once("error", reject).listen(ports.bob, "127.0.0.1", resolve));
+  await new Promise<void>((resolve, reject) => server.once("error", reject).listen(listen, "127.0.0.1", resolve));
   return server;
 }
 
@@ -219,8 +219,10 @@ await writeFile(join(runDir, "socket-dir"), `${socketDir}\n`);
 const socket = join(socketDir, "tailscaled.sock");
 const tailscaled = await fakeTailscaled(socket);
 closers.push(() => { tailscaled.close(); });
-const forwarder = await bobForwarder();
-closers.push(() => { forwarder.close(); });
+for (const [listen, answer] of [[ports.bob, tailnet.bob], [ports.node, tailnet.node]] as const) {
+  const server = await forwarder(listen, answer);
+  closers.push(() => { server.close(); });
+}
 const serve = fakeTailscale();
 
 const probe = await startProbe({
@@ -300,7 +302,7 @@ for (;;) {
 const head = (await exec("git", ["-C", repoRoot, "rev-parse", "--short", "HEAD"])).stdout.trim();
 const dirty = (await exec("git", ["-C", repoRoot, "status", "--porcelain", "--untracked-files=no"])).stdout.trim() !== "";
 await writeFile(join(runDir, "state.json"), JSON.stringify({
-  run, pid: process.pid, api, bobApi: `http://127.0.0.1:${ports.bob}`, ports, node, project: project.id, image: imageId, dockerTag: tag, label: `nexus.verify=${run}`,
+  run, pid: process.pid, api, bobApi: `http://127.0.0.1:${ports.bob}`, nodeApi: `http://127.0.0.1:${ports.node}`, ports, node, project: project.id, image: imageId, dockerTag: tag, label: `nexus.verify=${run}`,
   revision: `${head}${dirty ? "-dirty" : ""}`, seededThreads, templateRepo: `file://${templateRepo}`, startedAt: new Date().toISOString(),
 }, null, 2) + "\n");
 log(`nexus-verify: ready ${api} run ${run}`);
