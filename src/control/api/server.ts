@@ -158,7 +158,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   asset(entry);
   const { registry, whois, allowed, hostnames, harness, claude, startThread, wake, probes, streamStallMs = 30_000, attachTiming: timing = attachTiming, closeWaitMs = 5_000 } = options;
   const access = apiAccess(registry, wake, options);
-  const { thread, threadRefusal, guard, current, roleOf, admittable, actsOn } = access;
+  const { thread, threadRefusal, guard, current, roleOf, admittable, actsOn, administers } = access;
   const pylon = pylonAccess({ registry, probes, wake, guard, current });
   const { inPylon, whileRunning } = pylon;
   const wakeThread = access.wakeThread;
@@ -288,6 +288,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     demand(roles, policy, caller);
     // An owner route's path starts with its thread, which kit.ts's `on` checks.
     if (policy.role === "owner") actsOn(m[1]!, { identity, roles }, policy);
+    if (policy.role === "admin") administers({ roles }, policy);
     const url = new URL(req.url ?? "/", "http://nexus");
     const run = () => route(m, { query: url.searchParams, caller, identity, roles, host, body: (empty) => readJson(req, empty) });
     const reply = policy.startsTurn ? await gate.run(async () => run()) : await run();

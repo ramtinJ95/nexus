@@ -120,8 +120,8 @@ test("each caller gets the allow, deny or 404 auth-matrix.txt records for every 
 });
 
 /**
- * On a shared install, every request above that acts on a thread, sent by an engineer to an admin's thread and by the
- * admin to the engineer's, which shows who the owner policy admits. The admin's delete comes last, as it ends the thread.
+ * On a shared install, every request above that acts on a thread or changes a project, sent by an engineer to an
+ * admin's thread and by the admin to the engineer's, which shows who the owner and admin policies admit. The admin's delete comes last, as it ends the thread.
  */
 async function sharedLines(t: Parameters<typeof testApi>[0]): Promise<string[]> {
   const as = (a: WhoisAnswer): TailnetCaller => ({ id: a.Node.StableID, ...parseWhois(a).identity });
@@ -134,7 +134,7 @@ async function sharedLines(t: Parameters<typeof testApi>[0]): Promise<string[]> 
   const owned = { alice: (await s.call("POST", "/v1/threads", { project: "acme", title: "alice's" })).body.id as string, bob: "" };
   caller = as(tailnet.bob);
   owned.bob = (await s.call("POST", "/v1/threads", { project: "acme", title: "bob's" })).body.id as string;
-  const acting = requests.filter(([method, path]) => method !== "GET" && path.startsWith(`/v1/threads/${t0}`));
+  const acting = requests.filter(([method, path]) => method !== "GET" && (path.startsWith(`/v1/threads/${t0}`) || path.startsWith("/v1/projects")));
   const ordered = [...acting.filter(([method, path]) => !(method === "DELETE" && path === `/v1/threads/${t0}`)), ...acting.filter(([method, path]) => method === "DELETE" && path === `/v1/threads/${t0}`)];
   const lines: string[] = [];
   for (const [who, other] of [["engineer", "alice"], ["admin", "bob"]] as const) {
