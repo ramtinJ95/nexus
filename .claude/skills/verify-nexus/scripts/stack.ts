@@ -6,7 +6,7 @@
  * startControlPlane (registry, loop, pi-durable harness, API and dashboard) and a probe from startProbe with
  * the Docker backend. Only the production boundaries are doubles:
  * - tailscaled's LocalAPI is a Unix socket in a directory under /tmp, named in <runDir>/socket-dir. whois answers with the shapes of
- *   src/test-support/tailnet-people.ts: 127.0.0.1:7480 is the node, a connection that came through bob's port 7471 is bob, and every
+ *   src/test-support/people.ts: 127.0.0.1:7480 is the node, a connection that came through bob's port 7471 is bob, and every
  *   other address is alice. The API allows both as people, as for the CLI on a Mac. The probe's own whois names every caller as the
  *   control plane.
  * - the model is the scripted one from src/control/harness/test-fixture.ts: `bash: <command>` runs one bash tool call, and
@@ -37,7 +37,7 @@ import { startProbe } from "../../../../src/probe/server.ts";
 import type { ImageId, NodeName, ProjectId, TailnetNodeId } from "../../../../src/ids.ts";
 import { probePort } from "../../../../src/protocol/routes.ts";
 import { testPylon, testThread } from "../../../../src/test-support/registry-kit.ts";
-import { tailnet, type WhoisAnswer } from "../../../../src/test-support/tailnet-people.ts";
+import { tailnet, type WhoisAnswer } from "../../../../src/test-support/people.ts";
 import type { ImageManifest } from "../../../../src/protocol/images.ts";
 import type { Project } from "../../../../src/control/project.ts";
 

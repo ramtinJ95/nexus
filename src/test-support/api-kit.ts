@@ -30,7 +30,7 @@ import type { UsageBackfillJob } from "../control/usage-backfill.ts";
 import type { ProjectMirror } from "../control/templates.ts";
 import { processStream } from "../process-stream.ts";
 import { tokenDigest } from "../protocol/deploy.ts";
-import { tailnet } from "./tailnet-people.ts";
+import { tailnet } from "./people.ts";
 import { call as callJson, runningPylon, tempDir, testCapacity, testImage, testObservation } from "./kit.ts";
 import type { ImageId, NodeName, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { NodeObservation, ServiceFact } from "../protocol/observations.ts";
@@ -42,7 +42,7 @@ export const node = "rj-firebat" as NodeName;
 export const laptop = "nLAPTOP" as TailnetNodeId;
 /** An allowed person's device that is not a deployer. */
 export const phone = "nPHONE" as TailnetNodeId;
-/** Two allowed people, each on their own device, whose whois answers tailnet-people.ts holds. */
+/** Two allowed people, each on their own device, whose whois answers people.ts holds. */
 export const alice = tailnet.alice.Node.StableID;
 export const bob = tailnet.bob.Node.StableID;
 /** The step a refusal names that lets a person's device `caller` do `what`. */
