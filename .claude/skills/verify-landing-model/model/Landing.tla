@@ -18,7 +18,7 @@ VARIABLES
   waiting,        \* phase.waiting is set (the review said why it has no turn)
   round,          \* the head of the review's latest round
   requested,      \* phase.requested of a deploying or rolling-back review
-  previous,       \* phase.previous, the release a failed deploy rolls back to
+  previous,       \* phase.previous, the release a failed deploy rolls back to, saved with the turn
   merged,         \* Review.merged is set
   prHead, prOpen, prMergedHead,   \* the pull request on GitHub: its head, open or not, and the head it merged at (0: not merged)
   desired, desiredBy, result,     \* the desired release, who requested it, and what the fleet reported for that request
@@ -62,6 +62,11 @@ SetDesired(c, by) == /\ desired' = c
 
 To(r, p) == phase' = [phase EXCEPT ![r] = p]
 Drop(r) == auth' = [auth EXCEPT ![r] = FALSE] /\ waiting' = [waiting EXCEPT ![r] = FALSE]
+\* A merging phase without the turn carries no rollback target.
+Forget(r) == previous' = [previous EXCEPT ![r] = None]
+
+\* landing.ts `turnLost`: the desired release is no longer the one r took its turn at.
+TurnLost(r) == Deploys(r) /\ desired # previous[r]
 
 Init ==
   /\ phase = [r \in Reviews |-> "review"]
@@ -90,7 +95,7 @@ Approve(r) ==
   /\ To(r, "merging") /\ Drop(r)
   /\ UNCHANGED <<round, requested, previous, merged, prVars, relVars, unitVars, deploysLeft>>
 
-\* review.ts `merge` lines 767-771: without the turn, the step only records why it waits.
+\* review.ts `merge` lines 769-773: without the turn, the step only records why it waits.
 Wait(r) ==
   /\ phase[r] = "merging" /\ ~auth[r] /\ Ahead(r)
   /\ waiting' = [waiting EXCEPT ![r] = TRUE]
@@ -99,69 +104,79 @@ Wait(r) ==
 \* A merging step gets past the turn check when it holds the turn or nothing is ahead of it.
 PastTurn(r) == phase[r] = "merging" /\ (auth[r] \/ ~Ahead(r))
 
-\* review.ts `merge` line 792: the pull request merged at a head no round approved.
+\* review.ts `merge` line 796: the pull request merged at a head no round approved.
 MergedAtOtherHead(r) ==
   /\ PastTurn(r) /\ prMergedHead[r] \notin {0, round[r]}
-  /\ To(r, "person") /\ Drop(r)
-  /\ UNCHANGED <<round, requested, previous, merged, prVars, relVars, unitVars, deploysLeft>>
+  /\ To(r, "person") /\ Drop(r) /\ Forget(r)
+  /\ UNCHANGED <<round, requested, merged, prVars, relVars, unitVars, deploysLeft>>
 
-\* landing.ts `merged`: landed, or deploying with the desired release as the rollback target.
-MergedEffects(r) ==
+\* landing.ts `merged`: landed, or deploying with `target`, the release the turn was taken at, as the rollback target.
+MergedEffects(r, target) ==
   /\ merged' = [merged EXCEPT ![r] = TRUE]
   /\ Drop(r)
   /\ IF Deploys(r)
        THEN /\ To(r, "deploying")
-            /\ previous' = [previous EXCEPT ![r] = desired]
+            /\ previous' = [previous EXCEPT ![r] = target]
             /\ requested' = [requested EXCEPT ![r] = FALSE]
        ELSE /\ To(r, "landed")
             /\ UNCHANGED <<previous, requested>>
 
-\* review.ts `merge` lines 791-801 with `authorized` at the head: after a crash, a merge at the authorized head is the review's own.
+\* review.ts `merge` lines 795-805 with `authorized` at the head: after a crash, a merge at the authorized head is the review's own.
 OwnMergeSeen(r) ==
   /\ phase[r] = "merging" /\ auth[r] /\ prMergedHead[r] = round[r]
-  /\ MergedEffects(r)
+  /\ MergedEffects(r, previous[r])
   /\ UNCHANGED <<round, prVars, relVars, unitVars, deploysLeft>>
 
-\* review.ts `merge` lines 796-800: someone else merged the approved head, and the policy would have let the review merge it.
+\* review.ts `merge` lines 800-804: someone else merged the approved head, and the policy would have let the review merge it.
+\* landing.ts `rollbackTarget` is read in the tick in which `ahead` found the desired release healthy.
 OthersMergeSeen(r) ==
   /\ phase[r] = "merging" /\ ~auth[r] /\ ~Ahead(r) /\ prMergedHead[r] = round[r]
-  /\ MergedEffects(r)
+  /\ MergedEffects(r, desired)
   /\ UNCHANGED <<round, prVars, relVars, unitVars, deploysLeft>>
 
-\* review.ts `merge` lines 804-805 and `newHead`: a head pushed after the approval gets a round of its own.
+\* review.ts `merge` lines 808-809 and `newHead`: a head pushed after the approval gets a round of its own.
 NewRound(r) ==
   /\ PastTurn(r) /\ prOpen[r] /\ prHead[r] # round[r]
-  /\ To(r, "review") /\ Drop(r)
+  /\ To(r, "review") /\ Drop(r) /\ Forget(r)
   /\ round' = [round EXCEPT ![r] = prHead[r]]
-  /\ UNCHANGED <<requested, previous, merged, prVars, relVars, unitVars, deploysLeft>>
+  /\ UNCHANGED <<requested, merged, prVars, relVars, unitVars, deploysLeft>>
 
-\* review.ts `merge` lines 798, 822, 824, 841: a hold the waiver does not cover, or GitHub's refusal, goes to the person.
+\* review.ts `merge` lines 802, 826, 828, 847: a hold the waiver does not cover, or GitHub's refusal, goes to the person.
 Held(r) ==
   /\ PastTurn(r)
   /\ \/ prOpen[r] /\ prHead[r] = round[r]
      \/ ~auth[r] /\ prMergedHead[r] = round[r]
-  /\ To(r, "person") /\ Drop(r)
-  /\ UNCHANGED <<round, requested, previous, merged, prVars, relVars, unitVars, deploysLeft>>
+  /\ To(r, "person") /\ Drop(r) /\ Forget(r)
+  /\ UNCHANGED <<round, requested, merged, prVars, relVars, unitVars, deploysLeft>>
 
-\* review.ts `merge` lines 829-833: the base moved since the head's check, so nothing stays authorized.
+\* review.ts `merge` lines 833-837: the base moved since the head's check, so nothing stays authorized.
 BaseMoved(r) ==
   /\ phase[r] = "merging" /\ auth[r] /\ prOpen[r] /\ prHead[r] = round[r]
-  /\ auth' = [auth EXCEPT ![r] = FALSE]
-  /\ UNCHANGED <<phase, waiting, round, requested, previous, merged, prVars, relVars, unitVars, deploysLeft>>
+  /\ auth' = [auth EXCEPT ![r] = FALSE] /\ Forget(r)
+  /\ UNCHANGED <<phase, waiting, round, requested, merged, prVars, relVars, unitVars, deploysLeft>>
 
-\* review.ts `merge` line 835: the review takes the turn, saved before the merge call.
+\* review.ts `merge`, before the merge call: a release requested since the turn was taken has not run yet, so the turn goes back.
+GiveTurnBack(r) ==
+  /\ phase[r] = "merging" /\ auth[r] /\ prOpen[r] /\ prHead[r] = round[r] /\ TurnLost(r)
+  /\ auth' = [auth EXCEPT ![r] = FALSE] /\ Forget(r)
+  /\ UNCHANGED <<phase, waiting, round, requested, merged, prVars, relVars, unitVars, deploysLeft>>
+
+\* review.ts `merge`: the review takes the turn, saved before the merge call with the release the turn was taken at.
+\* landing.ts `rollbackTarget` is read in the tick in which `ahead` found that release healthy.
 Authorize(r) ==
   /\ phase[r] = "merging" /\ ~auth[r] /\ ~Ahead(r) /\ prOpen[r] /\ prHead[r] = round[r]
   /\ auth' = [auth EXCEPT ![r] = TRUE]
   /\ waiting' = [waiting EXCEPT ![r] = FALSE]
-  /\ UNCHANGED <<phase, round, requested, previous, merged, prVars, relVars, unitVars, deploysLeft>>
+  /\ previous' = [previous EXCEPT ![r] = IF Deploys(r) THEN desired ELSE None]
+  /\ UNCHANGED <<phase, round, requested, merged, prVars, relVars, unitVars, deploysLeft>>
 
-\* review.ts `merge` lines 836-847: GitHub merges the authorized head, which it compares with the pull request's own.
+\* review.ts `merge`, the merge call and after: GitHub merges the authorized head, which it compares with the pull request's own.
+\* The step does not need `~TurnLost(r)`: the code checks `turnLost` and then waits for GitHub, and a release may be requested meanwhile.
 Merge(r) ==
   /\ phase[r] = "merging" /\ auth[r] /\ prOpen[r] /\ prHead[r] = round[r]
   /\ prOpen' = [prOpen EXCEPT ![r] = FALSE]
   /\ prMergedHead' = [prMergedHead EXCEPT ![r] = round[r]]
-  /\ MergedEffects(r)
+  /\ MergedEffects(r, previous[r])
   /\ UNCHANGED <<round, prHead, relVars, unitVars, deploysLeft>>
 
 \* The same merge call, with the control plane stopped before the step was saved.
@@ -280,7 +295,7 @@ Done ==
 Next ==
   \/ \E r \in Reviews :
        \/ Approve(r) \/ Wait(r) \/ MergedAtOtherHead(r) \/ OwnMergeSeen(r) \/ OthersMergeSeen(r)
-       \/ NewRound(r) \/ Held(r) \/ BaseMoved(r) \/ Authorize(r) \/ Merge(r) \/ MergeThenCrash(r)
+       \/ NewRound(r) \/ Held(r) \/ BaseMoved(r) \/ GiveTurnBack(r) \/ Authorize(r) \/ Merge(r) \/ MergeThenCrash(r)
        \/ RequestDeploy(r) \/ DeployHealthy(r) \/ DeploySuperseded(r) \/ DeployFails(r)
        \/ RequestRollback(r) \/ RolledBack(r) \/ RollbackFails(r) \/ HeldNewHead(r)
        \/ Push(r) \/ OutsideMerge(r) \/ PersonLand(r)

@@ -123,7 +123,7 @@ for (const check of coverage.checks) {
 }
 console.log("");
 if (differs > 0) {
-  console.log(`${differs} check${differs === 1 ? "" : "s"} differ. TLC's output for each run is in ${out}. Read SKILL.md, "When a check differs".`);
+  console.log(`${differs} check${differs === 1 ? " differs" : "s differ"}. TLC's output for each run is in ${out}. Read SKILL.md, "When a check differs".`);
   process.exit(1);
 }
 if (drifted.length > 0) {

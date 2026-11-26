@@ -1,9 +1,9 @@
 {
   "syncCommit": "0f7834d679ebaaf1eb5cd5763106241a35ba83f6",
   "covers": {
-    "src/control/review.ts": "062bd33031275afed65ca219e25fedb5c35c7d78bbe284184778183e5bbb27cb",
-    "src/control/landing.ts": "c40a12361b5603512c98819ec9e46aa12ad54c897a7bfc0dece26188f5b81c4d",
-    "src/control/review-model.ts": "3fcb507835c696bf55ff348fffc844a7a1b19d4b029ea0f93278bf180040ed08",
+    "src/control/review.ts": "213d53712c4b8a072b8d19dcb24833c0c5e64decfdfcd4124541a04d6c73810e",
+    "src/control/landing.ts": "2c74120a4e840d8b6d50968a00429abb66fbb2515add3759105a02ee87f090ee",
+    "src/control/review-model.ts": "2c4e9a50ba387a6cacf929dfe467b5d0e4c3221f4590be346b35dadc862436a0",
     "src/control/release-store.ts": "e98714acc4aca87e436b140bf05e5c86afe9b2d26b2a2186589ff0661dc2dbb0",
     "src/control/api/release-routes.ts": "f81f1fe9280ac9e08177387d269ec8f43d66df05380f633380bd414ff9901266",
     "src/protocol/deploy.ts": "a05394fc0e983b5fa2933834df3bd955cd9d96cbf92d596db32ff801d4cb1e5a",
@@ -23,15 +23,7 @@
     },
     {
       "config": "ManualDeploy.cfg",
-      "says": "The same with one manual `nexus deploy`, for every rule but the one finding F1 breaks."
-    },
-    {
-      "config": "Finding-ManualDeploy.cfg",
-      "breaks": [
-        "RollbackTargetWasHealthy"
-      ],
-      "finding": "F1",
-      "says": "A manual deploy while a landing holds the turn becomes its rollback target, though it never ran healthy."
+      "says": "The same with one manual `nexus deploy`."
     },
     {
       "config": "OffBranch.cfg",

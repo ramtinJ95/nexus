@@ -901,13 +901,17 @@ type Phase =
   | { kind: "approved" }
   /**
    * `authorized` is the head this review is about to merge, saved before the merge call, so after a restart a PR that
-   * merged at it is this review's own merge, and any other merge is someone else's. `waiting` is why a review that
+   * merged at it is this review's own merge, and any other merge is someone else's. `previous` is the release a failed
+   * deploy of that merge rolls back to, saved with `authorized`: the desired release when the review took its turn,
+   * which every service then reported healthy, or null when there was none. A release requested since, such as the
+   * person's `nexus deploy`, is never the rollback target, and gives the turn back until it is healthy. It is absent
+   * for a PR that does not deploy, and from a turn saved before Nexus recorded it. `waiting` is why a review that
    * deploys has not authorized its merge yet: another landing that deploys is under way, a deploy drains the control
    * plane, or the desired release is not healthy everywhere. `updated` is when the loop asked GitHub to bring the
    * branch up to date with a base that moved since its head's check, whose new head GitHub pushes later. `checks` is
    * since when the landing has waited for the pull request's GitHub checks, the one condition it has not met, to pass.
    */
-  | { kind: "merging"; authorized: string | null; waiting?: string; updated?: number; checks?: number }
+  | { kind: "merging"; authorized: string | null; previous?: string | null; waiting?: string; updated?: number; checks?: number }
   /** `requested` once the desired release is set. `previous` is the release to roll back to, null if there was none. */
   | { kind: "deploying"; commit: string; previous: string | null; requested: boolean; deadline: number }
   /** The deploy of `commit` failed for `why`, and the fleet goes back to `previous`, the desired release once `requested`. */
