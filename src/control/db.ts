@@ -3,7 +3,7 @@
  * synchronous statement on it and no two writes interleave.
  */
 import { DatabaseSync, type StatementSync } from "node:sqlite";
-import { migrations } from "./schema.ts";
+import { arcMigrations, migrations, type Migrations } from "./schema.ts";
 
 export type Row = Record<string, unknown>;
 export const json = <T>(value: unknown): T => JSON.parse(value as string) as T;
@@ -125,13 +125,28 @@ export function openDb(path: string) {
   return { db, transaction, afterCommit, sql, hold, deleteThreadRows, purgeThreadRows };
 }
 
-function migrate(db: DatabaseSync) {
+/**
+ * Applies the migrations of each list the registry has not seen, the main list's first. user_version counts the main
+ * list's, and arc_schema's one row the arc's, read as none while the table is absent. A registry ahead of either list
+ * is refused before anything is written.
+ */
+export function migrate(db: DatabaseSync, lists: { main: Migrations; arc: Migrations } = { main: migrations, arc: arcMigrations }) {
   const applied = (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
-  if (applied > migrations.length) throw new Error(`the registry is at schema version ${applied}, newer than this control plane's ${migrations.length}`);
-  for (let version = applied; version < migrations.length; version++) {
+  if (applied > lists.main.length) throw new Error(`the registry is at schema version ${applied}, newer than this control plane's ${lists.main.length}`);
+  const hasArc = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'arc_schema'").get() !== undefined;
+  const arcApplied = hasArc ? (db.prepare("SELECT version FROM arc_schema").get() as { version: number } | undefined)?.version ?? 0 : 0;
+  if (arcApplied > lists.arc.length) throw new Error(`the registry is at arc schema version ${arcApplied}, newer than this control plane's ${lists.arc.length}`);
+  for (let version = applied; version < lists.main.length; version++) {
     inTransaction(db, () => {
-      db.exec(migrations[version]!);
+      db.exec(lists.main[version]!);
       db.exec(`PRAGMA user_version = ${version + 1}`);
+    });
+  }
+  for (let version = arcApplied; version < lists.arc.length; version++) {
+    inTransaction(db, () => {
+      db.exec("CREATE TABLE IF NOT EXISTS arc_schema (one INTEGER PRIMARY KEY CHECK (one = 1), version INTEGER NOT NULL) STRICT");
+      db.exec(lists.arc[version]!);
+      db.prepare("INSERT INTO arc_schema (one, version) VALUES (1, ?) ON CONFLICT (one) DO UPDATE SET version = excluded.version").run(version + 1);
     });
   }
 }
