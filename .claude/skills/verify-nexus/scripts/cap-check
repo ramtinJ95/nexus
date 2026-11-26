@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# The live box of docs/multiplayer-plan.md's mp-22: on the stack started with people, alice, whose cap is the default of
+# two, starts three threads. Her third is held with the reason her `nexus show` gives, and boots once she archives one.
+# Exits 0 only if every step did what it should.
+set -euo pipefail
+V="$(cd "$(dirname "$0")" && pwd)/verify-nexus"
+fail() { echo "cap check: $*" >&2; exit 1; }
+# Polls a CLI step every 3 s, for up to $2 s, until jq's filter $3 on its stdout is true.
+until_json() {
+  local step=$1 seconds=$2 filter=$3; shift 3
+  for _ in $(seq 1 $((seconds / 3))); do
+    "$V" cli "$step" -- "$@" --json 2>/dev/null | jq -e "$filter" >/dev/null && return 0
+    sleep 3
+  done
+  fail "$step: $filter never held"
+}
+
+trap '"$V" down >&2 || true' EXIT
+NEXUS_VERIFY_PEOPLE=1 "$V" up
+"$V" doctor
+T1=$("$V" cli cap-start-1 -- start --project spoon --title "cap: one" --json | jq -r .id)
+T2=$("$V" cli cap-start-2 -- start --project spoon --title "cap: two" --json | jq -r .id)
+until_json cap-running-1 120 '.pylon.actualState == "running"' show "$T1"
+until_json cap-running-2 120 '.pylon.actualState == "running"' show "$T2"
+
+T3=$("$V" cli cap-start-3 -- start --project spoon --title "cap: three" --json | jq -r .id)
+until_json cap-held-3 60 '.pylon.held.why | test("^alice@example.com already runs 2 pylons, and may run 2 at once: ")' show "$T3"
+held=$("$V" cli cap-show-held -- show "$T3")
+echo "$held"
+grep -q "^held: .*$T1 (cap: one)" <<<"$held" || fail "alice's show of $T3 does not name $T1 among her running threads"
+grep -q "^held: .*$T2 (cap: two)" <<<"$held" || fail "alice's show of $T3 does not name $T2 among her running threads"
+state=$("$V" cli cap-state-held -- show "$T3" --json | jq -r .pylon.actualState)
+[ "$state" != running ] || fail "$T3 runs while alice already runs two"
+
+"$V" cli cap-archive-1 -- archive "$T1" --json >/dev/null
+until_json cap-paused-1 120 '.pylon.actualState == "paused"' show "$T1"
+until_json cap-running-3 120 '.pylon.actualState == "running" and .pylon.held == null' show "$T3"
+echo "cap check: alice's third thread $T3 was held, naming her cap of 2 and $T1 and $T2, and booted once she archived $T1"

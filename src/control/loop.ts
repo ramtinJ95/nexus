@@ -31,6 +31,7 @@ import type { ProbeClient } from "../protocol/client.ts";
 import { pylonLive } from "./live.ts";
 import { gitIdentityOf } from "./project.ts";
 import { freeHeldRoom, wakeShort } from "./placement.ts";
+import { pylonCapOf, solo, type People } from "./people.ts";
 import { claudeLaunch } from "./claude-launch.ts";
 import type { Registry } from "./registry.ts";
 import type { PortRange, StoredPylon, Thread } from "./thread-store.ts";
@@ -54,6 +55,8 @@ export interface LoopOptions {
   /** One client per registry node. */
   probes: readonly ProbeClient[];
   ingest: Ingest;
+  /** Who uses the install, for the cap on how many pylons each person runs at once. Solo when absent, with no cap. */
+  people?: People;
   /** Hears each snapshot a node sends, before it is ingested. */
   onSnapshot?: (node: NodeName, observation: NodeObservation) => void;
   /** The https ports each node's previews are allocated from. */
@@ -102,7 +105,7 @@ interface Link {
 }
 
 export function startLoop(options: LoopOptions): Loop {
-  const { registry, ingest, previewPorts } = options;
+  const { registry, ingest, previewPorts, people = solo } = options;
   const offlineAfterMs = options.offlineAfterMs ?? 30_000;
   const reconnectMs = options.reconnectMs ?? 2_000;
   const silenceMs = options.silenceMs ?? 90_000;
@@ -236,7 +239,7 @@ export function startLoop(options: LoopOptions): Loop {
         // A thread retention purged during the tick keeps the phase the tick began with.
         desired: () => { const now = registry.threads.thread(found.thread); return now === undefined ? pylon.desired : desiredPhase(now, registry.now()); },
         sealedBoot: () => registry.threads.sealedBoot(pylonId),
-        noRoom: (observation) => wakeShort(registry, stored, observation),
+        noRoom: (observation) => wakeShort(registry, stored, observation, pylonCapOf(people, thread.owner)),
         uncountedFailed: (failure) => {
           registry.usage.failUsageRead(thread.id, failure);
           void wake(node);

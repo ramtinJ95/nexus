@@ -11,23 +11,40 @@ import { Refusal } from "./refusal.ts";
 
 export type PersonRole = "admin" | "engineer";
 
-/** A tailnet login always holds an `@`, which the operator's name does not, so no login in `people` can be the operator. */
-export const peopleSchema = z.record(z.string(), z.enum(["admin", "engineer"])).superRefine((people, ctx) => {
+const role = z.enum(["admin", "engineer"]);
+/** How many pylons a person may run at once when `people` gives them no `pylonCap`. Each holds its memory until it pauses. */
+export const defaultPylonCap = 2;
+
+/**
+ * Each person's role, or their role and how many pylons they may run at once. A tailnet login always holds an `@`, which
+ * the operator's name does not, so no login in `people` can be the operator.
+ */
+export const peopleSchema = z.record(z.string(), z.union([role, z.strictObject({ role, pylonCap: z.int().positive() })], { error: 'must be "admin" or "engineer", or { "role": "admin" or "engineer", "pylonCap": the number of pylons they may run at once, 1 or more }' })).superRefine((people, ctx) => {
   for (const login of Object.keys(people)) {
     if (!/^[^@\s]+@[^@\s]+$/.test(login)) ctx.addIssue({ code: "custom", path: [login], message: `${login} must be a tailnet login, such as alice@example.com` });
   }
-  if (!Object.values(people).includes("admin")) ctx.addIssue({ code: "custom", message: "must name at least one admin, who deploys" });
+  if (!Object.values(people).some((p) => p === "admin" || (typeof p === "object" && p.role === "admin"))) ctx.addIssue({ code: "custom", message: "must name at least one admin, who deploys" });
 });
 
 /** The one person of a solo install, and the owner the arc's first migration gives every thread that came before it. */
 export const operator = "operator" as Person;
 
-export type People = { shared: false } | { shared: true; roles: ReadonlyMap<Person, PersonRole> };
+export type People = { shared: false } | { shared: true; roles: ReadonlyMap<Person, PersonRole>; pylonCaps: ReadonlyMap<Person, number> };
 
 export const solo: People = { shared: false };
 
-export const peopleOf = (people: z.infer<typeof peopleSchema> | undefined): People =>
-  people === undefined ? solo : { shared: true, roles: new Map(Object.entries(people) as [Person, PersonRole][]) };
+export function peopleOf(people: z.infer<typeof peopleSchema> | undefined): People {
+  if (people === undefined) return solo;
+  const entries = Object.entries(people).map(([login, p]) => [login as Person, typeof p === "string" ? { role: p, pylonCap: defaultPylonCap } : p] as const);
+  return { shared: true, roles: new Map(entries.map(([person, p]) => [person, p.role])), pylonCaps: new Map(entries.map(([person, p]) => [person, p.pylonCap])) };
+}
+
+export interface PylonCap { person: Person; pylons: number }
+/** How many pylons a thread's owner may run at once. Null for no cap: the operator, who owns every thread of a solo install. */
+export function pylonCapOf(people: People, owner: Person): PylonCap | null {
+  const pylons = people.shared ? people.pylonCaps.get(owner) : undefined;
+  return pylons === undefined ? null : { person: owner, pylons };
+}
 
 /** The person and role a device's identity names on a shared install, or null for a tagged device or a login not in `people`. */
 export function personOf(people: Extract<People, { shared: true }>, identity: TailnetIdentity): { person: Person; role: PersonRole } | null {

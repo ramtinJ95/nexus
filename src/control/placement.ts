@@ -10,6 +10,7 @@ import type { Registry } from "./registry.ts";
 import type { NodeRecord } from "./node-store.ts";
 import type { StoredPylon, Thread } from "./thread-store.ts";
 import type { Placement, Room, Weighed } from "./placement-model.ts";
+import type { PylonCap } from "./people.ts";
 
 /** A controller that exited or failed to boot the VM leaves it down, holding only its disk. */
 const crashed = (p: PylonObservation) => p.phase === "broken" && p.cause === "controller";
@@ -23,7 +24,7 @@ type PlacementRegistry = Pick<Registry, "now"> & {
 };
 type TallyRegistry = PlacementRegistry & { nodes: Pick<Registry["nodes"], "transitions">; threads: Pick<Registry["threads"], "deletesAskedOn"> };
 type WeighingRegistry = PlacementRegistry & { nodeMetrics: Pick<Registry["nodeMetrics"], "latestHealthSample"> };
-type WakeRegistry = { placement: Pick<Registry["placement"], "reserved">; threads: Pick<Registry["threads"], "pylonsSpawningOn"> };
+type WakeRegistry = { nodes: Pick<Registry["nodes"], "nodes">; placement: Pick<Registry["placement"], "reserved">; threads: Pick<Registry["threads"], "pylonsSpawningOn" | "pylonsWithThreadsAmong"> };
 
 type Need = Pick<BootInputs, "image" | "resources" | "network" | "repo" | "dotfiles">;
 
@@ -152,10 +153,12 @@ const tooSmall = (c: NodeCapacity, need: Need): string | null => need.resources.
  * pylons that wait for room never hold each other back. Committed memory never passes the node's: its swap is zram, which
  * keeps a swapped-out guest's pages in the same memory.
  */
-export function wakeShort(registry: WakeRegistry, p: StoredPylon, o: NodeObservation): string | null {
+export function wakeShort(registry: WakeRegistry, p: StoredPylon, o: NodeObservation, cap: PylonCap | null = null): string | null {
   const seen = new Map(o.pylons.map((s) => [s.pylonId, s]));
   const need = uncounted(p, seen.get(p.pylonId)).memoryGiB;
   if (need === 0) return null;
+  const capped = cap === null ? null : capShort(registry, p, o, cap);
+  if (capped !== null) return capped;
   const c = o.capacity;
   // Asked on every pass of each pylon that waits for room, so it reads the spawns alone and not every pylon the node ever had.
   const inFlight = registry.threads.pylonsSpawningOn(p.node)
@@ -166,6 +169,22 @@ export function wakeShort(registry: WakeRegistry, p: StoredPylon, o: NodeObserva
   const committed = c.committedMemoryGiB + inFlight + reserved;
   if (committed + need <= c.memoryGiB) return null;
   return `${p.node} has ${gib(committed)} of ${gib(c.memoryGiB)} GiB of memory committed, and the pylon needs ${need} GiB`;
+}
+
+/**
+ * Why the owner may not boot or wake `p` now, as they already run as many pylons as their cap: up on a node, or with a
+ * spawn in flight. A pylon that waits to boot holds nothing, so pylons held by the cap never hold each other back.
+ */
+function capShort(registry: WakeRegistry, p: StoredPylon, o: NodeObservation, cap: PylonCap): string | null {
+  const running = registry.nodes.nodes().flatMap((n) => {
+    const observed = n.name === p.node ? o : n.observation;
+    const up = new Set([...observed?.pylons.filter(isUp).map((s) => s.pylonId) ?? [], ...registry.threads.pylonsSpawningOn(n.name).map((s) => s.pylonId)]);
+    up.delete(p.pylonId);
+    return up.size === 0 ? [] : registry.threads.pylonsWithThreadsAmong(n.name, [...up])
+      .filter(({ pylon, thread }) => up.has(pylon.pylonId) && thread.owner === cap.person).map(({ thread }) => thread);
+  });
+  if (running.length < cap.pylons) return null;
+  return `${cap.person} already runs ${running.length} pylons, and may run ${cap.pylons} at once: ${running.map((t) => `${t.id} (${t.title})`).join(", ")}. Archiving one of them frees its place`;
 }
 
 /** `short` marks a node that refused the pylon for its room alone. */

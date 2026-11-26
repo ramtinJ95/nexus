@@ -194,7 +194,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const owners = services.start(people.shared ? ownerLogins({ registry, logins, probes: probeMap, log }) : null);
   const peers = services.start(peerHandoff({ registry, probes: probeMap, log }));
   const loop = services.start(startLoop({
-    registry, probes: [...probeMap.values()], previewPorts: config.previewPorts, gitIdentity: config.gitIdentity, ingest,
+    registry, probes: [...probeMap.values()], previewPorts: config.previewPorts, gitIdentity: config.gitIdentity, ingest, people,
     onSnapshot(node, observation) {
       handoff?.observed(observation);
       owners?.observed(node, observation);
