@@ -74,7 +74,7 @@ Slice `mp-00` builds two tools. Every later slice uses them.
 - **The two-person stack.** The local stack of the `verify-nexus` skill, with a fake whois that knows two people, `alice` and `bob`, and one node. Today that stack names every caller as one laptop, so nothing about two people can be shown live.
 - **The probe.** `node scripts/mp-probe.ts <name>` prints one of three numbers.
 	- `api`: the median and the 95th percentile of 200 `GET /v1/threads` requests against the two-person stack holding 50 threads.
-	- `boot`: the time from `POST /v1/threads` to a running pylon with its sessions started, for a template boot.
+	- `boot`: the time from `POST /v1/threads` to a running pylon booted from its template whose `resume` has exited, for a template boot. The time from `running` to a session's first prompt is not measured on the verify stack, because that stack starts no terminal session, so a slice that changes how a session starts needs its own measure.
 	- `check`: the wall time of `.nexus/check`.
 
 For every perf box, measure the base commit first, and alternate base and head. Run `api` and `boot` five times on each side. Run `check` twice on each side. One `check` run takes about 15 minutes in a pylon with 2 CPUs, so five on each side takes about 2.5 hours, which `main-1` spent on a change to one function. A slice fails its perf box when the head's median is above the limit the box names and outside the base's run-to-run range. Two runs give a narrow range, so a `check` result above its limit is run a third time on each side before it fails the box.
@@ -151,7 +151,7 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 - [x] **Depends on.** Nothing.
 - [ ] **Files.** `.claude/skills/verify-nexus/`, `src/test-support/api-kit.ts`, `scripts/mp-probe.ts`, `src/control/schema.ts`, `src/control/schema.test.ts`.
 - [x] **Change.** Build the two tools in [Shared tools for proof](#shared-tools-for-proof). Add a second ordered migration list that this arc appends to, with its own counter, applied after the main list.
-- [ ] **Result.** The stack answers as `alice` and as `bob`. The probe prints the three numbers. No behaviour of Nexus changes.
+- [x] **Result.** The stack answers as `alice` and as `bob`. The probe prints the three numbers. No behaviour of Nexus changes.
 - [x] **Unit.** A registry that applied an arc migration accepts a later main migration, and the reverse. The existing re-apply rule in `schema.test.ts` holds for both lists.
 - [x] **Live.** Start the stack. Pass when `nexus threads` as `alice` and as `bob` both answer, and the whois stand-in reports two different users.
 - [ ] **Perf.** Record the `api`, `boot`, and `check` baselines on `multiplayer` and commit them as the file later slices compare against. Fail when five runs of `api` differ by more than 20% from each other, because the probe is then too noisy to use.
@@ -224,7 +224,7 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 - [ ] **Result.** Two pylons on one node can hold different values under one secret name.
 - [x] **Unit.** Two pylons with different values for one name each send their own value. Updating one leaves the other unchanged. A probe restart loses the values and the control plane hands them over again.
 - [ ] **Live.** On a VM node, boot two pylons with different values for a test secret granted to a recording host. Pass when the recorder sees each pylon's own value and neither guest can read its value from the environment or disk.
-- [ ] **Perf.** `boot`. Fail above 10% over base.
+- [x] **Perf.** `boot`. Fail above 10% over base.
 
 ### mp-08: each person stores their own credentials
 

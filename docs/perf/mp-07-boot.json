@@ -1,0 +1,151 @@
+{
+  "box": "mp-07 Perf: boot. Fail above 10% over base.",
+  "machine": "Nexus pylon pylon-th-04fde7a42c56 on node infra-testbench, 4 CPU, 7.8 GiB, kernel 6.18.58-0-virt, no /dev/kvm, Docker 20.10.24 in the pylon (cgroup v2, overlay2, dockerd --iptables=false as .nexus/verify starts it)",
+  "probe": "scripts/mp-probe.ts from 3e29a578 copied into each checkout, so dirty is true on both sides. Both commits hold the probe whose DELETE got HTTP 415 and whose boot waited for a session the verify stack never starts, so neither commit's own probe can measure boot.",
+  "env": "NEXUS_VERIFY_BASE=nexus-verify-base:pylon",
+  "order": "alternating, base first",
+  "base": {
+    "commit": "e1618893",
+    "runs": [
+      {
+        "revision": "e1618893",
+        "bootMs": 3674.5,
+        "template": "tpl-f0ee3d3a4935",
+        "failed": 0
+      },
+      {
+        "revision": "e1618893",
+        "bootMs": 3490.4,
+        "template": "tpl-56c6c0da4b1a",
+        "failed": 0
+      },
+      {
+        "revision": "e1618893",
+        "bootMs": 4885.9,
+        "template": "tpl-f1fd1fdef252",
+        "failed": 0
+      },
+      {
+        "revision": "e1618893",
+        "bootMs": 4303.1,
+        "template": "tpl-a069a9b530e2",
+        "failed": 0
+      },
+      {
+        "revision": "e1618893",
+        "bootMs": 4304.3,
+        "template": "tpl-c3673b7640e9",
+        "failed": 0
+      }
+    ],
+    "medianMs": 4303.1,
+    "rangeMs": [
+      3490.4,
+      4885.9
+    ]
+  },
+  "head": {
+    "commit": "cec05df9",
+    "runs": [
+      {
+        "revision": "cec05df9",
+        "bootMs": 3513.8,
+        "template": "tpl-16d6afe0ccf5",
+        "failed": 0
+      },
+      {
+        "revision": "cec05df9",
+        "bootMs": 5095.6,
+        "template": "tpl-e37da9089a8f",
+        "failed": 0
+      },
+      {
+        "revision": "cec05df9",
+        "bootMs": 4260.6,
+        "template": "tpl-961cb3c567b1",
+        "failed": 0
+      },
+      {
+        "revision": "cec05df9",
+        "bootMs": 3660.7,
+        "template": "tpl-9906838c080e",
+        "failed": 0
+      },
+      {
+        "revision": "cec05df9",
+        "bootMs": 3426.3,
+        "template": "tpl-e5701e2c8a4a",
+        "failed": 0
+      }
+    ],
+    "medianMs": 3660.7,
+    "rangeMs": [
+      3426.3,
+      5095.6
+    ]
+  },
+  "headOverBasePct": -14.9,
+  "verdict": "pass: the head's median is within 10% of the base's",
+  "sequence": [
+    {
+      "side": "base",
+      "commit": "e1618893",
+      "at": "2026-11-26T21:46:01Z",
+      "bootMs": 3674.5
+    },
+    {
+      "side": "head",
+      "commit": "cec05df9",
+      "at": "2026-11-26T21:46:34Z",
+      "bootMs": 3513.8
+    },
+    {
+      "side": "base",
+      "commit": "e1618893",
+      "at": "2026-11-26T21:47:10Z",
+      "bootMs": 3490.4
+    },
+    {
+      "side": "head",
+      "commit": "cec05df9",
+      "at": "2026-11-26T21:47:43Z",
+      "bootMs": 5095.6
+    },
+    {
+      "side": "base",
+      "commit": "e1618893",
+      "at": "2026-11-26T21:48:19Z",
+      "bootMs": 4885.9
+    },
+    {
+      "side": "head",
+      "commit": "cec05df9",
+      "at": "2026-11-26T21:48:49Z",
+      "bootMs": 4260.6
+    },
+    {
+      "side": "base",
+      "commit": "e1618893",
+      "at": "2026-11-26T21:49:20Z",
+      "bootMs": 4303.1
+    },
+    {
+      "side": "head",
+      "commit": "cec05df9",
+      "at": "2026-11-26T21:49:49Z",
+      "bootMs": 3660.7
+    },
+    {
+      "side": "base",
+      "commit": "e1618893",
+      "at": "2026-11-26T21:50:18Z",
+      "bootMs": 4304.3
+    },
+    {
+      "side": "head",
+      "commit": "cec05df9",
+      "at": "2026-11-26T21:50:46Z",
+      "bootMs": 3426.3
+    }
+  ]
+}

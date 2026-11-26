@@ -1,141 +1,327 @@
 {
-  "recorded": "2026-11-26",
-  "machine": "Nexus pylon, 2 CPU, 3.8 GiB, Docker 20.10 in the pylon",
-  "howToCompare": "Run node scripts/mp-probe.ts <name> on the same kind of machine and compare medians. The api probe needs NEXUS_VERIFY_BASE when Docker Hub is unreachable; check must run without it.",
-  "api": {
-    "commit": "10b83064",
-    "note": "Measured at mp-00 head, which changes no Nexus behaviour over multiplayer 81dfad56; multiplayer at 81dfad56 has no probe to run.",
-    "runs": [
-      {
-        "revision": "10b83064",
-        "medianMs": 3.6,
-        "p95Ms": 5.4,
-        "requests": 200,
-        "failed": 0,
-        "threads": 50,
-        "aliceMedianMs": 3.5,
-        "bobMedianMs": 3.7
-      },
-      {
-        "revision": "10b83064",
-        "medianMs": 3.6,
-        "p95Ms": 5.3,
-        "requests": 200,
-        "failed": 0,
-        "threads": 50,
-        "aliceMedianMs": 3.5,
-        "bobMedianMs": 3.7
-      },
-      {
-        "revision": "10b83064",
-        "medianMs": 3.8,
-        "p95Ms": 13.7,
-        "requests": 200,
-        "failed": 0,
-        "threads": 50,
-        "aliceMedianMs": 3.7,
-        "bobMedianMs": 3.9
-      },
-      {
-        "revision": "10b83064",
-        "medianMs": 3.5,
-        "p95Ms": 5.1,
-        "requests": 200,
-        "failed": 0,
-        "threads": 50,
-        "aliceMedianMs": 3.4,
-        "bobMedianMs": 3.6
-      },
-      {
-        "revision": "10b83064",
-        "medianMs": 3.8,
-        "p95Ms": 5.7,
-        "requests": 200,
-        "failed": 0,
-        "threads": 50,
-        "aliceMedianMs": 3.6,
-        "bobMedianMs": 4
-      }
-    ],
-    "medianSpreadPct": 8.6,
-    "outlier": "Run 3 p95 13.7 ms against 5.1-5.7 in the other four. Unexplained: three later runs on an idle machine gave p95 6.0, 6.1, 6.9 ms.",
-    "laterRuns": [
-      {
-        "revision": "10b83064",
-        "medianMs": 3.8,
-        "p95Ms": 6.1,
-        "requests": 200,
-        "failed": 0,
-        "threads": 50,
-        "aliceMedianMs": 3.8,
-        "bobMedianMs": 3.9
-      },
-      {
-        "revision": "10b83064",
-        "medianMs": 3.8,
-        "p95Ms": 6,
-        "requests": 200,
-        "failed": 0,
-        "threads": 50,
-        "aliceMedianMs": 3.6,
-        "bobMedianMs": 4
-      },
-      {
-        "revision": "10b83064",
-        "medianMs": 4.2,
-        "p95Ms": 6.9,
-        "requests": 200,
-        "failed": 0,
-        "threads": 50,
-        "aliceMedianMs": 4.1,
-        "bobMedianMs": 4.5
-      }
-    ]
-  },
-  "check": {
-    "baseline": {
-      "commit": "10b83064",
+  "howToCompare": "Compare medians only within one size. Run node scripts/mp-probe.ts <name> on a pylon of the size you compare against. api and boot need NEXUS_VERIFY_BASE=nexus-verify-base:pylon when Docker Hub is unreachable, which .nexus/verify's Docker start imports; check must run without it.",
+  "current": {
+    "size": "4 CPU, 8 GiB",
+    "recorded": "2026-11-26",
+    "machine": "Nexus pylon pylon-th-04fde7a42c56 on node infra-testbench, 4 CPU, 7.8 GiB, kernel 6.18.58-0-virt, no /dev/kvm, Docker 20.10.24 in the pylon (cgroup v2, overlay2, dockerd --iptables=false as .nexus/verify starts it)",
+    "commit": "3e29a578",
+    "note": "multiplayer 771393d1 plus the probe fixes of this branch, which change scripts/mp-probe.ts and its test only, so no Nexus behaviour differs from 771393d1.",
+    "api": {
       "runs": [
         {
-          "revision": "10b83064",
-          "wallMs": 858839.1,
+          "revision": "3e29a578",
+          "medianMs": 3.8,
+          "p95Ms": 5.2,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 3.6,
+          "bobMedianMs": 3.9
+        },
+        {
+          "revision": "3e29a578",
+          "medianMs": 5.4,
+          "p95Ms": 9.5,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 5.1,
+          "bobMedianMs": 5.5
+        },
+        {
+          "revision": "3e29a578",
+          "medianMs": 3.5,
+          "p95Ms": 5.3,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 3.4,
+          "bobMedianMs": 3.7
+        },
+        {
+          "revision": "3e29a578",
+          "medianMs": 7,
+          "p95Ms": 8.6,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 6.7,
+          "bobMedianMs": 7.1
+        },
+        {
+          "revision": "3e29a578",
+          "medianMs": 3.5,
+          "p95Ms": 8,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 3.4,
+          "bobMedianMs": 3.6
+        }
+      ],
+      "medians": [
+        3.8,
+        5.4,
+        3.5,
+        7,
+        3.5
+      ],
+      "medianOfMediansMs": 3.8,
+      "medianSpreadPct": 100,
+      "noisy": "The five runs differ by 100%, above mp-00's 20% limit. Their medians fall in two clusters, near 3.5 ms and near 7 ms. Unexplained: CPU steal stayed near 0.1% and no other container or stack ran. Five later runs on the idle machine repeat it.",
+      "laterRuns": [
+        {
+          "revision": "3e29a578",
+          "medianMs": 3.2,
+          "p95Ms": 3.9,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 3.1,
+          "bobMedianMs": 3.3
+        },
+        {
+          "revision": "3e29a578",
+          "medianMs": 5.5,
+          "p95Ms": 10.6,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 5.3,
+          "bobMedianMs": 5.6
+        },
+        {
+          "revision": "3e29a578",
+          "medianMs": 7.9,
+          "p95Ms": 9.6,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 7.6,
+          "bobMedianMs": 8.1
+        },
+        {
+          "revision": "3e29a578",
+          "medianMs": 7.2,
+          "p95Ms": 9.3,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 7,
+          "bobMedianMs": 7.5
+        },
+        {
+          "revision": "3e29a578",
+          "medianMs": 7.9,
+          "p95Ms": 9.5,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 7.5,
+          "bobMedianMs": 8
+        }
+      ],
+      "laterMedianSpreadPct": 146.9
+    },
+    "boot": {
+      "definition": "POST /v1/threads to a running pylon booted from its template whose resume exited 0, read from the container log. It does not cover the time from running to a session's first prompt, since the verify stack starts no terminal session.",
+      "runs": [
+        {
+          "revision": "3e29a578",
+          "bootMs": 5030.7,
+          "template": "tpl-6031b44e030c",
+          "failed": 0
+        },
+        {
+          "revision": "3e29a578",
+          "bootMs": 3435.3,
+          "template": "tpl-80b023ce12b6",
+          "failed": 0
+        },
+        {
+          "revision": "3e29a578",
+          "bootMs": 3974.7,
+          "template": "tpl-dc1a61a61bd9",
+          "failed": 0
+        },
+        {
+          "revision": "3e29a578",
+          "bootMs": 6122.2,
+          "template": "tpl-f0b590c38a11",
+          "failed": 0
+        },
+        {
+          "revision": "3e29a578",
+          "bootMs": 3690,
+          "template": "tpl-aa7a20cc61b7",
+          "failed": 0
+        }
+      ],
+      "medianMs": 3974.7,
+      "rangeMs": [
+        3435.3,
+        6122.2
+      ]
+    },
+    "check": {
+      "runs": [
+        {
+          "revision": "3e29a578",
+          "wallMs": 395839.5,
           "exitCode": 0,
           "failed": 0
         },
         {
-          "revision": "10b83064",
-          "wallMs": 856916.7,
+          "revision": "3e29a578",
+          "wallMs": 411698.1,
           "exitCode": 0,
           "failed": 0
+        }
+      ],
+      "medianMs": 403768.8
+    }
+  },
+  "oldSize": {
+    "size": "2 CPU, 3.8 GiB",
+    "warning": "From the old pylon size. Do not compare a 4 CPU run against these.",
+    "recorded": "2026-11-26",
+    "machine": "Nexus pylon, 2 CPU, 3.8 GiB, Docker 20.10 in the pylon",
+    "howToCompare": "Run node scripts/mp-probe.ts <name> on the same kind of machine and compare medians. The api probe needs NEXUS_VERIFY_BASE when Docker Hub is unreachable; check must run without it.",
+    "api": {
+      "commit": "10b83064",
+      "note": "Measured at mp-00 head, which changes no Nexus behaviour over multiplayer 81dfad56; multiplayer at 81dfad56 has no probe to run.",
+      "runs": [
+        {
+          "revision": "10b83064",
+          "medianMs": 3.6,
+          "p95Ms": 5.4,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 3.5,
+          "bobMedianMs": 3.7
+        },
+        {
+          "revision": "10b83064",
+          "medianMs": 3.6,
+          "p95Ms": 5.3,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 3.5,
+          "bobMedianMs": 3.7
+        },
+        {
+          "revision": "10b83064",
+          "medianMs": 3.8,
+          "p95Ms": 13.7,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 3.7,
+          "bobMedianMs": 3.9
+        },
+        {
+          "revision": "10b83064",
+          "medianMs": 3.5,
+          "p95Ms": 5.1,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 3.4,
+          "bobMedianMs": 3.6
+        },
+        {
+          "revision": "10b83064",
+          "medianMs": 3.8,
+          "p95Ms": 5.7,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 3.6,
+          "bobMedianMs": 4
+        }
+      ],
+      "medianSpreadPct": 8.6,
+      "outlier": "Run 3 p95 13.7 ms against 5.1-5.7 in the other four. Unexplained: three later runs on an idle machine gave p95 6.0, 6.1, 6.9 ms.",
+      "laterRuns": [
+        {
+          "revision": "10b83064",
+          "medianMs": 3.8,
+          "p95Ms": 6.1,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 3.8,
+          "bobMedianMs": 3.9
+        },
+        {
+          "revision": "10b83064",
+          "medianMs": 3.8,
+          "p95Ms": 6,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 3.6,
+          "bobMedianMs": 4
+        },
+        {
+          "revision": "10b83064",
+          "medianMs": 4.2,
+          "p95Ms": 6.9,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 4.1,
+          "bobMedianMs": 4.5
         }
       ]
     },
-    "context": {
-      "commit": "81dfad56",
-      "note": "multiplayer base, as context. Run 3 failed on a 600 s timeout in src/cli/nexus-watch.test.ts:610 and is not a timing.",
-      "runs": [
-        {
-          "revision": "81dfad56",
-          "wallMs": 870323.5,
-          "exitCode": 0,
-          "failed": 0
-        },
-        {
-          "revision": "81dfad56",
-          "wallMs": 860818.3,
-          "exitCode": 0,
-          "failed": 0
-        },
-        {
-          "revision": "81dfad56",
-          "wallMs": 1496779.2,
-          "exitCode": 1,
-          "failed": 1
-        }
-      ]
+    "check": {
+      "baseline": {
+        "commit": "10b83064",
+        "runs": [
+          {
+            "revision": "10b83064",
+            "wallMs": 858839.1,
+            "exitCode": 0,
+            "failed": 0
+          },
+          {
+            "revision": "10b83064",
+            "wallMs": 856916.7,
+            "exitCode": 0,
+            "failed": 0
+          }
+        ]
+      },
+      "context": {
+        "commit": "81dfad56",
+        "note": "multiplayer base, as context. Run 3 failed on a 600 s timeout in src/cli/nexus-watch.test.ts:610 and is not a timing.",
+        "runs": [
+          {
+            "revision": "81dfad56",
+            "wallMs": 870323.5,
+            "exitCode": 0,
+            "failed": 0
+          },
+          {
+            "revision": "81dfad56",
+            "wallMs": 860818.3,
+            "exitCode": 0,
+            "failed": 0
+          },
+          {
+            "revision": "81dfad56",
+            "wallMs": 1496779.2,
+            "exitCode": 1,
+            "failed": 1
+          }
+        ]
+      }
+    },
+    "boot": {
+      "open": "Not measured. A template boot needs a 3 GiB pylon plus 1 GiB spare, more than this pylon's 3.8 GiB."
     }
-  },
-  "boot": {
-    "open": "Not measured. A template boot needs a 3 GiB pylon plus 1 GiB spare, more than this pylon's 3.8 GiB."
   }
 }
