@@ -127,20 +127,20 @@ export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortR
   }
 
   return [
-    on(routes.preview, { role: "person", action: "publish a preview" }, async ({ thread: id }, r) => {
+    on(routes.preview, { role: "owner", action: "publish a preview" }, async ({ thread: id }, r) => {
       const body = await r.body();
       return ok(await linkPort(thread(id), body));
     }),
-    on(routes.unpreview, { role: "person", action: "unpublish a preview" }, async ({ thread: id, port: given }) => {
+    on(routes.unpreview, { role: "owner", action: "unpublish a preview" }, async ({ thread: id, port: given }) => {
       const { port } = parse(previewSchema, { port: /^\d+$/.test(given) ? Number(given) : given });
       await unlinkPort(thread(id), port);
       return noContent;
     }),
-    on(routes.openSession, { role: "person", action: "open a session in a thread's pylon" }, async ({ thread: id }, r) => {
+    on(routes.openSession, { role: "owner", action: "open a session in a thread's pylon" }, async ({ thread: id }, r) => {
       const body = await r.body();
       return created(await openSession(thread(id), body));
     }),
-    on(routes.closeSession, { role: "person", action: "close a session in a thread's pylon" }, async ({ thread: id, session }) => {
+    on(routes.closeSession, { role: "owner", action: "close a session in a thread's pylon" }, async ({ thread: id, session }) => {
       await closeSession(thread(id), session);
       return noContent;
     }),

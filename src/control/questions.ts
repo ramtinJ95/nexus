@@ -89,12 +89,18 @@ export interface WaitingAsk { ask: ClaudeAsk; at: number }
 /** The person's answer to one asked question: the options they picked, an answer of their own, and notes. */
 export interface Choice { picked: readonly string[]; own?: string; notes?: string }
 
-export type AnswerRefusal = "not a person" | "not a deployer";
+export type AnswerRefusal = "not a person" | "not a deployer" | "not the owner";
 
 /** Why the caller may not answer the question, or null when it may. */
-export function answerRefusal(question: Pick<Question, "answerer">, caller: { person: boolean; deployer: boolean }): AnswerRefusal | null {
+/**
+ * Why the caller may not answer the question, or null. A question about a thread is its owner's to answer, unless its
+ * answer may deploy, which a deployer's is. `owner` says whether the caller owns the question's thread, true for a
+ * question about none.
+ */
+export function answerRefusal(question: Pick<Question, "answerer">, caller: { person: boolean; deployer: boolean; owner: boolean }): AnswerRefusal | null {
   if (!caller.person) return "not a person";
-  return question.answerer === "deployer" && !caller.deployer ? "not a deployer" : null;
+  if (question.answerer === "deployer") return caller.deployer ? null : "not a deployer";
+  return caller.owner ? null : "not the owner";
 }
 
 /** Claude's answer is keyed by the question's text and names labels, so one the transcript cut (textLimits.input) answers nothing. */

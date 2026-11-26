@@ -14,13 +14,13 @@ export function reviewRoutes(kit: ApiKit, features: Features): readonly RouteEnt
   const reviewsOrRefuse = () => feature(features, "reviews");
 
   return [
-    on(routes.start, { role: "person", action: "start a review" }, async (params, r) => {
+    on(routes.start, { role: "owner", action: "start a review" }, async (params, r) => {
       const body = parse(reviewSchema, await r.body({}));
       const t = thread(params.thread);
       if (body.land) demand(r.roles, landing, r.caller);
       return created(said(await reviewsOrRefuse().start(t.id, { pr: body.pr, rounds: body.rounds, land: body.land ? r.caller : null, replace: body.replace })));
     }),
-    on(routes.cancel, { role: "person", action: "cancel a review" }, (params, r) => ok(said(reviewsOrRefuse().cancel(thread(params.thread).id, r.caller)))),
+    on(routes.cancel, { role: "owner", action: "cancel a review" }, (params, r) => ok(said(reviewsOrRefuse().cancel(thread(params.thread).id, r.caller)))),
     on(routes.land, landing, async (params, r) => {
       const body = parse(landSchema, await r.body({}));
       const t = thread(params.thread);

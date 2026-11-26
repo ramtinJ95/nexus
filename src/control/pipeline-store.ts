@@ -14,11 +14,14 @@ export interface ItemRecord {
   /** Items of the same project whose threads must merge their pull requests first. Each was added before this one. */
   after: readonly ItemId[];
   addedBy: string;
-  /** Who owns its thread: the person who added it. Absent from an item added before owners, which is the operator's. */
+  /** Who added it. Its thread is theirs unless someone approves it. Absent from an item added before owners, which is the operator's. */
   owner?: Person;
   addedAt: number;
-  /** The person's go-ahead, which an item needs only in a project whose pipeline waits for one. */
-  approved: { by: string; at: number } | null;
+  /**
+   * The person's go-ahead, which an item needs only in a project whose pipeline waits for one. Its thread is started as
+   * the approver, whose `owner` is absent from an approval from before owners.
+   */
+  approved: { by: string; owner?: Person; at: number } | null;
   /** Cancelled before it became a thread. A queued thread is cancelled by archiving it, as any queued thread is. */
   cancelled: { by: string; at: number } | null;
   /** Why the pass could not queue it last time. Cleared once it is queued. */

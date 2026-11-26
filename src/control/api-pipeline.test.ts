@@ -211,3 +211,19 @@ test("a planning thread's proposals become cards only a person answers, an accep
     "Go on.",
   ], "the next message tells what the person answered, once");
 });
+
+test("an item becomes the thread of whoever approves it, so one person's approval never starts a thread as the person who added it", async (t) => {
+  const s = await testApi(t, { pipeline: true, deployment });
+  assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
+  assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
+  s.registry.images.setCurrentImage(image.id as ImageId);
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { pipeline: { autoStart: false } })).status, 200);
+  const added = await s.call("POST", "/v1/items", { project: "acme", title: "Rewrite billing", claude: "Rewrite the billing module and open a pull request." });
+  assert.equal(added.status, 201, JSON.stringify(added.body));
+  s.callAs(phone);
+  const approved = await s.call("POST", `/v1/items/${(added.body as PipelineItem).id}/approve`, {});
+  assert.equal(approved.status, 200, JSON.stringify(approved.body));
+  const after = approved.body as PipelineItem;
+  assert.equal(after.addedBy, laptop);
+  assert.equal(s.registry.queue.queuedThread(after.thread!)?.startedBy, phone, "the thread is started as the approver's device");
+});

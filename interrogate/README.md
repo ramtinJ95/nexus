@@ -14,7 +14,6 @@ Some tests fail today and pass when their slice is done. Others pass today, beca
 |---|---|---|---|
 | `01-template-crosses-principals.test.ts` | fails | `mp-18` | One engineer's pylon boots from a template that ran another engineer's branch. |
 | `02-harness-login-is-one.test.ts` | fails | `mp-16` | Two engineers' harness threads send one login. |
-| `03-another-user-starts-your-thread.test.ts` | fails | `mp-03` | An item becomes its adder's thread when someone else approves it. |
 | `read-wakes.test.ts` | fails | `mp-04` | A diff or files read wakes the pylon. |
 | `reader-wakes-owner-pylon.test.ts` | passes, asserts the fault | `mp-04` | A reader's visit wakes the owner's paused pylon. |
 | `project-edit-redirects-token.test.ts` | passes, asserts the fault | `mp-09` | One person's project edit redirects another person's token and git author. |

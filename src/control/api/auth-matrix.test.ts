@@ -7,8 +7,11 @@ import assert from "node:assert/strict";
 import { request } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
 import { tokenDigest } from "../../protocol/deploy.ts";
-import type { NodeName, TailnetNodeId } from "../../ids.ts";
-import { laptop, phone, testApi, attachTo } from "../../test-support/api-kit.ts";
+import type { ImageId, NodeName, TailnetNodeId } from "../../ids.ts";
+import { laptop, phone, testApi, attachTo, image, project } from "../../test-support/api-kit.ts";
+import { tailnet, type WhoisAnswer } from "../../test-support/people.ts";
+import { parseWhois, type TailnetCaller } from "../../node-base/tailscaled.ts";
+import { peopleOf } from "../people.ts";
 
 const update = process.env.NEXUS_AUTH_MATRIX_UPDATE === "1";
 const file = new URL("./auth-matrix.txt", import.meta.url);
@@ -109,7 +112,41 @@ test("each caller gets the allow, deny or 404 auth-matrix.txt records for every 
     assert.ok("status" in attach, `${who} opened no terminal`);
     lines.push(`${who} attach -> ${attach.status} ${attach.body.error}`);
   }
+  lines.push(...await sharedLines(t));
   const text = `${lines.join("\n")}\n`;
   if (update) return void await writeFile(file, text);
   assert.equal(text, await readFile(file, "utf8"));
 });
+
+/**
+ * On a shared install, every request above that acts on a thread, sent by an engineer to an admin's thread and by the
+ * admin to the engineer's, which shows who the owner policy admits. The admin's delete comes last, as it ends the thread.
+ */
+async function sharedLines(t: Parameters<typeof testApi>[0]): Promise<string[]> {
+  const as = (a: WhoisAnswer): TailnetCaller => ({ id: a.Node.StableID, ...parseWhois(a).identity });
+  let caller = as(tailnet.alice);
+  const people = peopleOf({ [tailnet.alice.UserProfile!.LoginName]: "admin", [tailnet.bob.UserProfile!.LoginName]: "engineer" });
+  const s = await testApi(t, { people, allowed: new Set(), whois: async () => caller });
+  await s.call("POST", "/v1/projects", project);
+  await s.call("POST", "/v1/images", image);
+  s.registry.images.setCurrentImage(image.id as ImageId);
+  const owned = { alice: (await s.call("POST", "/v1/threads", { project: "acme", title: "alice's" })).body.id as string, bob: "" };
+  caller = as(tailnet.bob);
+  owned.bob = (await s.call("POST", "/v1/threads", { project: "acme", title: "bob's" })).body.id as string;
+  const acting = requests.filter(([method, path]) => method !== "GET" && path.startsWith(`/v1/threads/${t0}`));
+  const ordered = [...acting.filter(([method, path]) => !(method === "DELETE" && path === `/v1/threads/${t0}`)), ...acting.filter(([method, path]) => method === "DELETE" && path === `/v1/threads/${t0}`)];
+  const lines: string[] = [];
+  for (const [who, other] of [["engineer", "alice"], ["admin", "bob"]] as const) {
+    caller = as(who === "engineer" ? tailnet.bob : tailnet.alice);
+    const id = owned[other];
+    const shown = (path: string) => path.replace(id, `{${other}'s thread}`);
+    const attach = await attachTo(s.port, `/v1/threads/${id}/attach?cols=100&rows=30`);
+    assert.ok("status" in attach, `${who} opened a terminal on ${other}'s thread`);
+    lines.push(`shared ${who} attach to ${other}'s thread -> ${attach.status} ${shown(attach.body.error)}`);
+    for (const [method, path, body] of ordered) {
+      const sent = path.replace(t0, id);
+      lines.push(`shared ${who} ${method} ${shown(sent)} -> ${shown(await send(s.port, method, sent, body, {}, false))}`);
+    }
+  }
+  return lines;
+}

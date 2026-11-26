@@ -1820,7 +1820,7 @@ interface PipelineItem {
   id: ItemId;
   project: ProjectId;
   title: string;
-  /** Who added it, and its thread's startedBy. */
+  /** Who added it, and its thread's startedBy unless someone approved it. */
   addedBy: string;
   /** Unix milliseconds. */
   addedAt: number;
