@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
-import { command, checkoutMerged, type Command, type InstallBoundary, NotSwitched, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
+import { command, checkoutMerged, repository, type Command, type InstallBoundary, NotSwitched, pointLink, releaseLink, ReleaseInstaller, type Transaction } from "./install.ts";
 import { controlReady, planDeploy, prepareTries, quarantined, retryAfter, schemaStep, type Attempt, type DeployStep, type ReleaseHealth, type SchemaVersions } from "./plan.ts";
 import { digestPattern, type DrainBody, type DrainReply, type ReleaseReport, type ReleaseView, type ReportBody, type Role } from "../protocol/deploy.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
@@ -357,7 +357,7 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   const steps = roleSteps[role]({ api, run, prefix, service, config, registry: boundary.registry, desired: () => desired, report });
   const installer = new ReleaseInstaller(prefix, role, {
     async prepare(commit) {
-      await checkout(repo, commit);
+      await checkout(repo, commit, run, repository, config.releaseBranch);
       await copyFile(files.unit, files.savedUnit);
       await run("env", [`NEXUS_COMMIT=${commit}`, "bash", "-c", '. "$1/deploy/release.sh"; install_release "$1"', "build", repo], repo);
       return `${releasesDir}/${commit}`;

@@ -8,6 +8,13 @@ export const fullCommit = /^[0-9a-f]{40}$/;
 export const digestPattern = /^[0-9a-f]{64}$/;
 export const tsNet = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net$/;
 
+/**
+ * The branch of Nexus's repository an install releases from: control.json's and deployer.json's `releaseBranch`, which
+ * `--release-branch` writes to both. Absent, it is `main`. A name git refuses, or one that could pass as an option, never parses.
+ */
+export const defaultReleaseBranch = "main";
+export const releaseBranchPattern = /^[A-Za-z0-9][A-Za-z0-9_-]*(?:[./][A-Za-z0-9][A-Za-z0-9_-]*)*$/;
+
 /** The deploy key a deployer's token gives: what the control plane keeps and compares a reporter's bearer token against. */
 export const tokenDigest = (token: string): string => createHash("sha256").update(token).digest("hex");
 

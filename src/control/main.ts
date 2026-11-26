@@ -36,7 +36,7 @@ import { threadServices } from "./thread-services.ts";
 import { projectMirror } from "./mirror.ts";
 import { checkRuns, verifyGate } from "./gate.ts";
 import { repository } from "../deploy/install.ts";
-import { digestPattern, tsNet } from "../protocol/deploy.ts";
+import { defaultReleaseBranch, digestPattern, releaseBranchPattern, tsNet } from "../protocol/deploy.ts";
 import { prWatcher } from "./pr-watch.ts";
 import { prWatchMs } from "./pr-watch-model.ts";
 import { builderNudger } from "./nudge.ts";
@@ -94,6 +94,8 @@ const configSchema = z.strictObject({
   callers: z.array(tailnetNodeIdSchema),
   deployers: z.array(tailnetNodeIdSchema).optional(),
   deployKeys: z.record(tailnetNodeIdSchema, z.string().regex(digestPattern)).optional(),
+  /** The branch `nexus deploy main` resolves, which each node's deployer.json must name too. */
+  releaseBranch: z.string().regex(releaseBranchPattern).default(defaultReleaseBranch),
   /** The common dotfiles layer every new pylon pulls on boot. Absent, pylons keep the image's baked layer. */
   dotfiles: z.strictObject({ repo: gitUrl, ref: z.string().min(1) }).optional(),
   harness: z.strictObject({
@@ -281,7 +283,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     features: { reviews, queue, pipeline, planning, cleanup, images, usageBackfill: backfill, doctor },
     startThread,
     gate,
-    deployment,
+    deployment: { ...deployment, releaseBranch: config.releaseBranch },
     registry, whois, host: config.listen.host, port: config.listen.port,
     allowed: new Set([config.self.tailnetNodeId, ...config.callers]),
     joins: {

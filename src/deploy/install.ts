@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { readJson, saveJson } from "../node-base/json-file.ts";
 import { deployJournal, roleLinks, rootPath } from "../node-base/node-layout.ts";
-import { fullCommit, type Role } from "../protocol/deploy.ts";
+import { defaultReleaseBranch, fullCommit, releaseBranchPattern, type Role } from "../protocol/deploy.ts";
 
 const exec = promisify(execFile);
 export const repository = "https://github.com/ramtinJ95/nexus.git";
@@ -21,16 +21,17 @@ export async function command(program: string, args: readonly string[], cwd: str
 export type Command = typeof command;
 
 /** The caller supplies a private, root-owned directory, never a person's checkout. */
-export async function checkoutMerged(directory: string, commit: string, run: Command = command, remote = repository): Promise<void> {
+export async function checkoutMerged(directory: string, commit: string, run: Command = command, remote = repository, branch = defaultReleaseBranch): Promise<void> {
   if (!fullCommit.test(commit)) throw new Error("release must be a full lower-case commit hash");
+  if (!releaseBranchPattern.test(branch)) throw new Error(`release branch ${JSON.stringify(branch)} is not a branch name`);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   await run("git", ["init", "--quiet", directory], directory);
-  await run("git", ["fetch", "--no-tags", "--force", remote, "+refs/heads/main:refs/remotes/origin/main"], directory);
+  await run("git", ["fetch", "--no-tags", "--force", remote, `+refs/heads/${branch}:refs/remotes/origin/${branch}`], directory);
   if (await run("git", ["cat-file", "-t", commit], directory) !== "commit") throw new Error("release object must be a commit");
   try {
-    await run("git", ["merge-base", "--is-ancestor", commit, "refs/remotes/origin/main"], directory);
+    await run("git", ["merge-base", "--is-ancestor", commit, `refs/remotes/origin/${branch}`], directory);
   } catch {
-    throw new Error(`release ${commit} is not an ancestor of origin/main`);
+    throw new Error(`release ${commit} is not an ancestor of origin/${branch}`);
   }
   await run("git", ["checkout", "--force", "--detach", commit], directory);
   await run("git", ["clean", "-ffdqx"], directory);

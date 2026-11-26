@@ -23,7 +23,7 @@ import { CliError } from "./transport.ts";
 import type { Api, Result } from "./kit.ts";
 import { answeredText, pressOf } from "./commands/release.ts";
 import { version } from "../version.ts";
-import { node, laptop, image, setup, timeless } from "../test-support/cli-kit.ts";
+import { branchTips, node, laptop, image, setup, timeless } from "../test-support/cli-kit.ts";
 import { localTime } from "./kit.ts";
 
 const approvedRound = { head: "1".repeat(40), verdict: { token: "a", verdict: "approve" as const, findings: [], reserved: [], notCheckedLive: null }, check: { passed: true, output: "ok" }, live: { kind: "ran" as const, thread: "th-0123456789ab" as ThreadId, passed: true, output: "ok" }, answers: null };
@@ -40,6 +40,11 @@ function confirmingTerminal(answer: string | null, isTTY = true) {
   });
   return { terminal: { input, output }, shown: () => shown.join("") };
 }
+
+test("deploy main names the tip of the branch the control plane releases from", async (t) => {
+  assert.equal((await (await setup(t)).json(["deploy", "main"])).desired.commit, branchTips.main, "an install with no release branch resolves main");
+  assert.equal((await (await setup(t, { releaseBranch: "multiplayer" })).json(["deploy", "main"])).desired.commit, branchTips.multiplayer);
+});
 
 test("deploy and release use the shared release view and wait for both roles", async (t) => {
   const s = await setup(t);

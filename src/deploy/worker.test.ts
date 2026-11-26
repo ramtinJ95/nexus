@@ -18,6 +18,8 @@ test("worker config bounds drain and health and takes the control plane from con
   const control = { tailnetNodeId: "nControl", url: "http://control:7470/" };
   assert.deepEqual(parseWorkerConfig(deployer, control), { controlUrl: "http://control:7470/", controlNodeId: "nControl", ...deployer });
   for (const patch of [{ healthTimeoutMs: 0 }, { drainTimeoutMs: -1 }, { token: "" }]) assert.throws(() => parseWorkerConfig({ ...deployer, ...patch }, control));
+  assert.equal(parseWorkerConfig({ ...deployer, releaseBranch: "multiplayer" }, control).releaseBranch, "multiplayer");
+  for (const releaseBranch of [7, "", "-x", "a..b"]) assert.throws(() => parseWorkerConfig({ ...deployer, releaseBranch }, control), /releaseBranch/);
 });
 
 test("wait outcome trusts the view's health from every role, whatever the caller's clock, and detects rollback and supersession", () => {

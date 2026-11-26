@@ -16,6 +16,7 @@ import { exit, type Exit } from "../../exec.ts";
 import { shellQuote } from "../../shell.ts";
 import { isImageId, type TailnetNodeId } from "../../ids.ts";
 import { probePort } from "../../protocol/routes.ts";
+import { defaultReleaseBranch } from "../../protocol/deploy.ts";
 import { scriptedModel, scriptedModels } from "../../control/harness/test-fixture.ts";
 import { localApiWhois } from "../../node-base/tailscaled.ts";
 import { nodePreviews, readNodeFacts } from "./node-facts.ts";
@@ -62,6 +63,7 @@ export async function openNodeCheck(options: { image: string | undefined; opens:
     harness: { storage: join(dir, "harness.sqlite"), credentials: join(dir, "unused-credentials.json"), model: scriptedModel },
     previewPorts: defaultPreviewPorts,
     resumeAfterUsageLimit: false,
+    releaseBranch: defaultReleaseBranch,
   });
 
   const startPlane = async (config: ControlPlaneConfig) => {

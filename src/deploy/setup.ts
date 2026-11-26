@@ -1,7 +1,7 @@
 /**
  * The installer once `deploy/install.sh` has checked the prerequisites: `node src/deploy/setup.ts install --package-manager
  * apt|dnf|other [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]...
- * [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--upgrade]` writes /etc/nexus/{control,control-plane,probe,deployer}.json,
+ * [--peer <device>]... [--dotfiles <git url>] [--release-branch <branch>] [--non-interactive] [--upgrade]` writes /etc/nexus/{control,control-plane,probe,deployer}.json,
  * runs the role installers, which keep the release a role runs unless --upgrade, joins a node to its control
  * plane with a join token, gives the agents their credentials (src/deploy/credentials.ts) and says what is left for the person. `write`, with the same flags and `--github-watch`, writes
  * the configs alone, which `install` runs under the deployer's lock.
@@ -18,7 +18,7 @@ import { claudeNames, harnessSignedIn, locations, provision, rotatable, rotate, 
 import { parseWorkerConfig, readControlPlane, type WorkerConfig } from "./control-plane.ts";
 import { parseSecretsFile } from "../node-base/secrets-env.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
-import { digestPattern, tokenDigest, tsNet } from "../protocol/deploy.ts";
+import { digestPattern, releaseBranchPattern, tokenDigest, tsNet } from "../protocol/deploy.ts";
 import { readJson, saveJson } from "../node-base/json-file.ts";
 import { controlFields, listenAddress } from "../node-base/node-config.ts";
 import { isImageId } from "../ids.ts";
@@ -71,6 +71,8 @@ export interface Flags {
   addNode: readonly string[];
   peer: readonly string[];
   dotfiles?: string;
+  /** The branch this install releases from, written to control.json and deployer.json. Absent, both mean `main`. */
+  releaseBranch?: string;
   nonInteractive: boolean;
   /** Names the control plane's GitHub token file as github.tokenFile, which the credentials step wrote. */
   githubWatch: boolean;
@@ -94,6 +96,7 @@ export function parseFlags(args: readonly string[]): { command: string | undefin
       "add-node": { type: "string", multiple: true, default: [] },
       peer: { type: "string", multiple: true, default: [] },
       dotfiles: { type: "string" },
+      "release-branch": { type: "string" },
       "non-interactive": { type: "boolean", default: false },
       "github-watch": { type: "boolean", default: false },
       upgrade: { type: "boolean", default: false },
@@ -107,6 +110,7 @@ export function parseFlags(args: readonly string[]): { command: string | undefin
     ...values.node === undefined ? {} : { node: values.node },
     ...values.join === undefined ? {} : { join: values.join },
     ...values.dotfiles === undefined ? {} : { dotfiles: values.dotfiles },
+    ...values["release-branch"] === undefined ? {} : { releaseBranch: values["release-branch"] },
     ...manager === undefined ? {} : { packageManager: manager as PackageManager },
   };
   return { command: positionals[0], operands: positionals.slice(1), flags };
@@ -269,10 +273,12 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
     }
   }
   if (flags.dotfiles?.startsWith("https://") && !URL.canParse(flags.dotfiles)) errors.push(`--dotfiles ${flags.dotfiles}: not a valid https:// URL`);
+  if (flags.releaseBranch !== undefined && !releaseBranchPattern.test(flags.releaseBranch)) errors.push(`--release-branch ${flags.releaseBranch}: not a branch name`);
 
   if (errors.length > 0) return { ok: false, errors };
 
   const token = typeof deployerOnDisk?.token === "string" ? deployerOnDisk.token : newToken;
+  const releaseBranch = flags.releaseBranch === undefined ? {} : { releaseBranch: flags.releaseBranch };
   const controlId = control?.id ?? self.id;
   const files: FileWrite[] = [];
 
@@ -291,6 +297,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
       deployers: admitted.map((d) => d.id),
       deployKeys: Object.fromEntries([[self.id, tokenDigest(token)], ...addNodes.map((a) => [a.node.id, a.digest])]),
       ...flags.dotfiles === undefined ? {} : { dotfiles: { repo: flags.dotfiles, ref: dotfilesRef } },
+      ...releaseBranch,
       ...flags.githubWatch ? { github: { tokenFile: stores.githubWatch.file } } : {},
       harness: {
         storage: `${stateDirs.control}/harness.sqlite`,
@@ -320,7 +327,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
     previews: { gatewayPort: ports.gateway },
   }));
 
-  files.push(file(paths.deployer, 0o600, existing.deployer, { token, drainTimeoutMs: 300_000, healthTimeoutMs: 60_000 }, [], { token: "deployer token" }));
+  files.push(file(paths.deployer, 0o600, existing.deployer, { token, drainTimeoutMs: 300_000, healthTimeoutMs: 60_000, ...releaseBranch }, [], { token: "deployer token" }));
   return { ok: true, files };
 }
 

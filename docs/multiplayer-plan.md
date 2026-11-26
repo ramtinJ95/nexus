@@ -378,7 +378,7 @@ Three limits of this guard, each handled elsewhere:
 - [ ] **Files.** `src/deploy/install.ts`, `src/control/api/release-routes.ts`, `deploy/install.sh`, `deploy/README.md`.
 - [ ] **Change.** The deployer installs only a commit that is an ancestor of `origin/main`. A setting names the release branch, with `main` as the default. The installer takes the first admin's tailnet user and writes `people`.
 - [ ] **Result.** A shared install releases from `multiplayer`. Every other install is unchanged.
-- [ ] **Unit.** With the setting at `multiplayer`, a commit on `multiplayer` installs and a commit only on `main` is refused. With no setting, today's tests pass.
+- [x] **Unit.** With the setting at `multiplayer`, a commit on `multiplayer` installs and a commit only on `main` is refused. With no setting, today's tests pass.
 - [ ] **Live.** On a fresh machine, install with the release branch set to `multiplayer` and run `nexus deploy`. Pass when the running release is the head of `multiplayer` and every service reports healthy.
 - [ ] **Perf.** Wall time of one `nexus deploy --wait`. Fail above 10% over base.
 
