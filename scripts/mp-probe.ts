@@ -73,7 +73,7 @@ function send(url: string, agent: Agent, method = "GET", body?: unknown): Promis
   return new Promise((done, fail) => {
     const start = process.hrtime.bigint();
     const payload = body === undefined ? undefined : JSON.stringify(body);
-    const req = request(url, { method, agent, headers: payload === undefined ? {} : { "content-type": "application/json" } }, (res) => {
+    const req = request(url, { method, agent, headers: method === "GET" ? {} : { "content-type": "application/json" } }, (res) => {
       const chunks: Buffer[] = [];
       res.on("data", (chunk: Buffer) => chunks.push(chunk));
       res.on("end", () => {
