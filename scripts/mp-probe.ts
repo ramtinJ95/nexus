@@ -36,35 +36,28 @@ function revision(dir: string) {
   return { revision: head.stdout.trim(), dirty: git("status", "--porcelain", "--untracked-files=no").stdout.trim() !== "" };
 }
 
-/** Runs verify-nexus with its stdout on this process's stderr, so stdout carries only the probe's JSON line. */
-function verify(args: readonly string[], env: NodeJS.ProcessEnv = {}): Promise<number> {
-  return new Promise((done, fail) => spawn(verifyNexus, args, { stdio: ["ignore", 2, 2], env: { ...process.env, ...env } }).once("error", fail).once("exit", (code) => done(code ?? 1)));
-}
-
 /**
- * Starts the stack, runs `body` against it, and takes it down whatever happens. A stack that was up before is
- * someone else's, so it is refused, and `down` runs only once this probe's `up` made the claim.
+ * Starts the stack under a run name of its own, runs `body` against it, and takes it down whatever happens. A stack
+ * that was up before is someone else's, so it is refused. `down` runs only while the claim names this probe's run,
+ * so a probe that lost the claim to another never stops the other's stack.
  */
 async function withStack(env: NodeJS.ProcessEnv, body: (state: StackState, run: string) => Promise<Result>): Promise<Result> {
   const current = join(stackBase, "current");
   if (existsSync(current)) throw new Error(`a verify-nexus stack is up, run ${readFileSync(current, "utf8").trim()}. The probe measures only a stack it starts itself`);
-  let claimed = false;
-  /** Whether the stack is down, so a run whose stack stays up is a failed one. */
-  const down = () => {
-    if (!claimed) return true;
-    claimed = false;
-    return spawnSync(verifyNexus, ["down"], { stdio: ["ignore", 2, 2] }).status === 0;
+  const run = `probe-${Date.now()}-${process.pid}`;
+  const ours = () => existsSync(current) && readFileSync(current, "utf8").trim() === run;
+  /** Whether this probe's stack is down, so a run whose stack stays up is a failed one. */
+  const down = () => !ours() || spawnSync(verifyNexus, ["down"], { stdio: ["ignore", 2, 2], env: { ...process.env, NEXUS_VERIFY_RUN: run } }).status === 0;
+  const up = spawn(verifyNexus, ["up"], { stdio: ["ignore", 2, 2], env: { ...process.env, ...env, NEXUS_VERIFY_RUN: run } });
+  const upExited = new Promise<number>((done, fail) => up.once("error", fail).once("exit", (c) => done(c ?? 1)));
+  /** A stopped up takes its own run down, so the probe waits for it before making sure. */
+  const stop = (signal: NodeJS.Signals) => {
+    up.kill("SIGTERM");
+    void upExited.catch(() => 1).then(() => { down(); process.exit(signal === "SIGINT" ? 130 : 143); });
   };
-  const stop = (signal: NodeJS.Signals) => { down(); process.exit(signal === "SIGINT" ? 130 : 143); };
   process.once("SIGINT", stop).once("SIGTERM", stop);
   try {
-    const up = verify(["up"], env);
-    claimed = true;
-    if (await up !== 0) {
-      claimed = existsSync(current);
-      throw new Error("verify-nexus up failed");
-    }
-    const run = readFileSync(current, "utf8").trim();
+    if (await upExited !== 0) throw new Error("verify-nexus up failed");
     const result = await body(JSON.parse(readFileSync(join(stackBase, "runs", run, "state.json"), "utf8")) as StackState, run);
     return down() ? result : { ...result, failed: result.failed + 1, error: `verify-nexus down failed, so run ${run} may still be up` };
   } finally {

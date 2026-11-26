@@ -37,6 +37,10 @@ test("alice and bob are two people the API allows, each named by their own devic
     { node: "nALICE", allowed: true, person: true, deployer: false },
     { node: "nBOB", allowed: true, person: true, deployer: false },
   ]);
+  const users = [alice, bob].map((who) => { s.callAs(who); return s.whoisAnswer()?.UserProfile?.LoginName; });
+  assert.deepEqual(users, ["alice@example.com", "bob@example.com"], "the fake whois holds a different user for each");
+  s.callAs("nNEXUSNODE" as TailnetNodeId);
+  assert.deepEqual([s.whoisAnswer()?.Node.Tags, s.whoisAnswer()?.UserProfile], [["tag:nexus-node"], undefined], "the node has tags and no user");
 });
 
 test("a path that does not decode is a 400 to an allowed caller and a 403 to any other, and a Host that does not parse is a 403", async (t) => {
