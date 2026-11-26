@@ -151,7 +151,7 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 - [x] **Depends on.** Nothing.
 - [ ] **Files.** `.claude/skills/verify-nexus/`, `src/test-support/api-kit.ts`, `scripts/mp-probe.ts`, `src/control/schema.ts`, `src/control/schema.test.ts`.
 - [x] **Change.** Build the two tools in [Shared tools for proof](#shared-tools-for-proof). Add a second ordered migration list that this arc appends to, with its own counter, applied after the main list.
-- [ ] **Result.** The stack answers as `alice` and as `bob`. The probe prints the three numbers. No behaviour of Nexus changes.
+- [x] **Result.** The stack answers as `alice` and as `bob`. The probe prints the three numbers. No behaviour of Nexus changes.
 - [x] **Unit.** A registry that applied an arc migration accepts a later main migration, and the reverse. The existing re-apply rule in `schema.test.ts` holds for both lists.
 - [x] **Live.** Start the stack. Pass when `nexus threads` as `alice` and as `bob` both answer, and the whois stand-in reports two different users.
 - [ ] **Perf.** Record the `api`, `boot`, and `check` baselines on `multiplayer` and commit them as the file later slices compare against. Fail when five runs of `api` differ by more than 20% from each other, because the probe is then too noisy to use.
@@ -224,7 +224,7 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 - [ ] **Result.** Two pylons on one node can hold different values under one secret name.
 - [x] **Unit.** Two pylons with different values for one name each send their own value. Updating one leaves the other unchanged. A probe restart loses the values and the control plane hands them over again.
 - [ ] **Live.** On a VM node, boot two pylons with different values for a test secret granted to a recording host. Pass when the recorder sees each pylon's own value and neither guest can read its value from the environment or disk.
-- [ ] **Perf.** `boot`. Fail above 10% over base.
+- [x] **Perf.** `boot`. Fail above 10% over base.
 
 ### mp-08: each person stores their own credentials
 
