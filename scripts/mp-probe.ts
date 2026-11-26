@@ -20,6 +20,7 @@ const stackBase = join(root, ".verify/nexus");
 const seeded = 50;
 const warmups = 20;
 const timed = 200;
+const requestTimeoutMs = 30_000;
 
 type Result = Record<string, unknown> & { failed: number };
 
@@ -48,10 +49,11 @@ async function withStack(env: NodeJS.ProcessEnv, body: (state: StackState, run: 
   const current = join(stackBase, "current");
   if (existsSync(current)) throw new Error(`a verify-nexus stack is up, run ${readFileSync(current, "utf8").trim()}. The probe measures only a stack it starts itself`);
   let claimed = false;
+  /** Whether the stack is down, so a run whose stack stays up is a failed one. */
   const down = () => {
-    if (!claimed) return;
+    if (!claimed) return true;
     claimed = false;
-    spawnSync(verifyNexus, ["down"], { stdio: ["ignore", 2, 2] });
+    return spawnSync(verifyNexus, ["down"], { stdio: ["ignore", 2, 2] }).status === 0;
   };
   const stop = (signal: NodeJS.Signals) => { down(); process.exit(signal === "SIGINT" ? 130 : 143); };
   process.once("SIGINT", stop).once("SIGTERM", stop);
@@ -63,7 +65,8 @@ async function withStack(env: NodeJS.ProcessEnv, body: (state: StackState, run: 
       throw new Error("verify-nexus up failed");
     }
     const run = readFileSync(current, "utf8").trim();
-    return await body(JSON.parse(readFileSync(join(stackBase, "runs", run, "state.json"), "utf8")) as StackState, run);
+    const result = await body(JSON.parse(readFileSync(join(stackBase, "runs", run, "state.json"), "utf8")) as StackState, run);
+    return down() ? result : { ...result, failed: result.failed + 1, error: `verify-nexus down failed, so run ${run} may still be up` };
   } finally {
     down();
     process.off("SIGINT", stop).off("SIGTERM", stop);
@@ -90,6 +93,7 @@ function send(url: string, agent: Agent, method = "GET", body?: unknown): Promis
       res.on("error", fail);
     });
     req.on("error", fail);
+    req.setTimeout(requestTimeoutMs, () => req.destroy(new Error(`${method} ${url} sent no answer within ${requestTimeoutMs} ms`)));
     req.end(payload);
   });
 }
@@ -202,7 +206,7 @@ async function boot(): Promise<Result> {
           if (d.pylon.failed !== null) throw new Error(`${timedThread.id}'s pylon failed: ${d.pylon.failed}`);
           const failedSession = d.sessions.find((s) => s.state === "failed");
           if (failedSession !== undefined) throw new Error(`a session of ${timedThread.id} failed: ${failedSession.message}`);
-          return d.pylon.actualState === "running" && d.sessions.every((s) => s.state === "running")
+          return d.pylon.actualState === "running" && d.sessions.length > 0 && d.sessions.every((s) => s.state === "running")
             ? { done: { ns: process.hrtime.bigint() - start, sessions: d.sessions.length, setup: d.thread.setup } }
             : { seen: `${d.pylon.actualState}, sessions ${d.sessions.map((s) => s.state).join(",") || "none"}` };
         });

@@ -117,8 +117,11 @@ async function buildImage() {
   await docker("build", "--quiet", "--label", `nexus.verify=${run}`, "--build-arg", `HERDR_CORE_VERSION=${herdrCore}`, "--tag", tag, dir);
 }
 
-/** The local ports of the forwarder's connections to the API, each of which carries a request of bob's. */
-const bobPorts = new Set<number>();
+/**
+ * The local ports of the forwarder's connections to the API, each of which carries a request of bob's. A closed one
+ * stays a minute, with the timer that forgets it, because the API may still be asking whois about its last request.
+ */
+const bobPorts = new Map<number, NodeJS.Timeout | null>();
 
 /**
  * tailscaled's LocalAPI whois for the control plane, answered by port: the probe's is the node, one of bob's forwarded
@@ -150,11 +153,18 @@ async function bobForwarder() {
     let port: number | undefined;
     upstream.once("connect", () => {
       port = upstream.localPort!;
-      bobPorts.add(port);
+      clearTimeout(bobPorts.get(port) ?? undefined);
+      bobPorts.set(port, null);
       client.pipe(upstream);
       upstream.pipe(client);
     });
-    upstream.once("close", () => { if (port !== undefined) bobPorts.delete(port); client.destroy(); });
+    upstream.once("close", () => {
+      if (port !== undefined) {
+        const closed = port;
+        bobPorts.set(closed, setTimeout(() => bobPorts.delete(closed), 60_000).unref());
+      }
+      client.destroy();
+    });
     upstream.on("error", () => client.destroy());
     client.on("error", () => upstream.destroy());
     client.once("close", () => upstream.destroy());
