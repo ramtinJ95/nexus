@@ -228,13 +228,13 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 
 ### mp-08: each person stores their own credentials
 
-- [ ] **Depends on.** `mp-02`.
-- [ ] **Files.** `src/deploy/credentials.ts`, a new route module, `src/cli/commands/`, the arc's migration list.
-- [ ] **Change.** The `stores` table gains a per-person store on the control plane's machine, one file for each person, mode 0600, as [the install exploration](explorations/install.md#per-person-credentials) sketched. A person sets or removes only their own credential. No route returns a stored value. `nexus login claude` and `nexus login github` read a token from standard input and store it. `nexus logins` says which kinds the caller has set. `deploy/README.md` says which permissions an engineer's GitHub token needs: contents and pull requests, read and write. It must not hold the workflows or the administration permission, for the reasons in [mp-15](#mp-15-the-network-guard-refuses-merge-and-approve).
-- [ ] **Result.** An engineer runs two commands once, and the control plane holds their Claude token and GitHub token.
-- [ ] **Unit.** `alice` cannot set or remove a credential of `bob`. A node or a pylon cannot call the routes. No response body contains a stored value.
-- [ ] **Live.** As `alice`, pipe a token into `nexus login claude`. Pass when `nexus logins` shows Claude as set for `alice` and not for `bob`, and the store file is mode 0600 and owned by the control plane's user.
-- [ ] **Perf.** `check`. Fail above 10% over base.
+- [x] **Depends on.** `mp-02`.
+- [x] **Files.** `src/deploy/credentials.ts`, a new route module, `src/cli/commands/`, the arc's migration list.
+- [x] **Change.** The `stores` table gains a per-person store on the control plane's machine, one file for each person, mode 0600, as [the install exploration](explorations/install.md#per-person-credentials) sketched. A person sets or removes only their own credential. No route returns a stored value. `nexus login claude` and `nexus login github` read a token from standard input and store it. `nexus logins` says which kinds the caller has set. `deploy/README.md` says which permissions an engineer's GitHub token needs: contents and pull requests, read and write. It must not hold the workflows or the administration permission, for the reasons in [mp-15](#mp-15-the-network-guard-refuses-merge-and-approve).
+- [x] **Result.** An engineer runs two commands once, and the control plane holds their Claude token and GitHub token.
+- [x] **Unit.** `alice` cannot set or remove a credential of `bob`. A node or a pylon cannot call the routes. No response body contains a stored value.
+- [x] **Live.** As `alice`, pipe a token into `nexus login claude`. Pass when `nexus logins` shows Claude as set for `alice` and not for `bob`, and the store file is mode 0600 and owned by the control plane's user.
+- [x] **Perf.** `check`. Fail above 10% over base.
 
 ### mp-09: a pylon boots with its owner's credentials and git identity
 

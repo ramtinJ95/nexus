@@ -1,0 +1,76 @@
+{
+  "slice": "mp-08",
+  "probe": "check",
+  "recorded": "2026-11-26",
+  "machine": "Nexus pylon, 4 CPU, nothing else running",
+  "order": "base first, then head, alternating, two runs a side, in separate worktrees with npm ci and npm run build done before the first run",
+  "limit": "fail when the head median is over 10% above base and outside base range",
+  "base": {
+    "commit": "537f6a59",
+    "runs": [
+      {
+        "probe": "check",
+        "revision": "537f6a59",
+        "dirty": false,
+        "dir": "/tmp/claude-1000/perf/base",
+        "wallMs": 444373,
+        "exitCode": 0,
+        "failed": 0
+      },
+      {
+        "probe": "check",
+        "revision": "537f6a59",
+        "dirty": false,
+        "dir": "/tmp/claude-1000/perf/base",
+        "wallMs": 440234.8,
+        "exitCode": 0,
+        "failed": 0
+      }
+    ]
+  },
+  "head": {
+    "commit": "8a9ac81d",
+    "runs": [
+      {
+        "probe": "check",
+        "revision": "8a9ac81d",
+        "dirty": false,
+        "dir": "/tmp/claude-1000/perf/head",
+        "wallMs": 439486.8,
+        "exitCode": 1,
+        "failed": 1
+      },
+      {
+        "probe": "check",
+        "revision": "8a9ac81d",
+        "dirty": false,
+        "dir": "/tmp/claude-1000/perf/head",
+        "wallMs": 420482.2,
+        "exitCode": 1,
+        "failed": 1
+      }
+    ],
+    "note": "Both head runs exited 1 on one 30 ms assertion, the reserved-path snapshot in src/contracts.test.ts, which did not list the new login files yet. 3acead9d adds them to src/contracts.snapshot.json and changes no code. Each run still ran the whole typecheck and test suite."
+  },
+  "confirm": {
+    "commit": "3acead9d",
+    "runs": [
+      {
+        "probe": "check",
+        "revision": "3acead9d",
+        "dirty": false,
+        "dir": "/tmp/claude-1000/perf/head",
+        "wallMs": 404875.5,
+        "exitCode": 0,
+        "failed": 0
+      }
+    ],
+    "note": "One run at the head after the snapshot fix, to show .nexus/check passes there. Not part of the alternation."
+  },
+  "result": {
+    "baseMedianMs": 442303.9,
+    "headMedianMs": 429984.5,
+    "change": "-2.8%",
+    "verdict": "pass: the head median is below base"
+  }
+}
