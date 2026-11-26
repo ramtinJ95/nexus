@@ -178,13 +178,13 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 
 ### mp-03: only the owner acts on a thread
 
-- [ ] **Depends on.** `mp-02`.
-- [ ] **Files.** `src/control/api/thread-routes.ts`, `src/control/api/pylon-routes.ts`, `src/control/api/question-routes.ts`, `src/control/questions.ts`, `src/control/api/server.ts`, `src/control/pipeline.ts`, `src/control/api/auth-matrix.txt`.
-- [ ] **Change.** A new route policy, owner. It guards message, abort, retry, pylon retry, unarchive, previews, sessions, attach, exec, review start and cancel, and question answers. Archive, abort, and delete also admit an admin. `seen` becomes one mark for each person, not one for the thread. A pipeline item becomes the thread of the person who approves it.
-- [ ] **Result.** A teammate who tries to act on another engineer's thread gets 403 with a message that names the owner.
-- [ ] **Unit.** `interrogate/03-another-user-starts-your-thread.test.ts` passes. Each guarded route refuses a non-owner and admits the owner. The auth matrix snapshot lists the owner policy.
-- [ ] **Live.** As `bob`, run `nexus send`, `nexus attach`, and `nexus archive` on a thread of `alice`. Pass when all three are refused and the thread's conversation shows no new message. As an admin, `nexus archive` succeeds.
-- [ ] **Perf.** `api`. Fail above 15% over base.
+- [x] **Depends on.** `mp-02`.
+- [x] **Files.** `src/control/api/thread-routes.ts`, `src/control/api/pylon-routes.ts`, `src/control/api/question-routes.ts`, `src/control/questions.ts`, `src/control/api/server.ts`, `src/control/pipeline.ts`, `src/control/api/auth-matrix.txt`.
+- [x] **Change.** A new route policy, owner. It guards message, abort, retry, pylon retry, unarchive, previews, sessions, attach, exec, review start and cancel, and question answers. Archive, abort, and delete also admit an admin. `seen` becomes one mark for each person, not one for the thread. A pipeline item becomes the thread of the person who approves it.
+- [x] **Result.** A teammate who tries to act on another engineer's thread gets 403 with a message that names the owner.
+- [x] **Unit.** `interrogate/03-another-user-starts-your-thread.test.ts` passes. Each guarded route refuses a non-owner and admits the owner. The auth matrix snapshot lists the owner policy.
+- [x] **Live.** As `bob`, run `nexus send`, `nexus attach`, and `nexus archive` on a thread of `alice`. Pass when all three are refused and the thread's conversation shows no new message. As an admin, `nexus archive` succeeds.
+- [x] **Perf.** `api`. Fail above 15% over base.
 
 ### mp-04: a read never wakes a pylon
 
