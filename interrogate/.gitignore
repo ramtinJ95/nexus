@@ -1,0 +1,7 @@
+vm/cache-home/
+vm/cache/
+vm/st/
+vm/docker-assets/
+*.out
+guard-github/out-*.txt
+guard-github/results-*.json
