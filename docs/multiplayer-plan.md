@@ -74,7 +74,7 @@ Slice `mp-00` builds two tools. Every later slice uses them.
 - **The two-person stack.** The local stack of the `verify-nexus` skill, with a fake whois that knows two people, `alice` and `bob`, and one node. Today that stack names every caller as one laptop, so nothing about two people can be shown live.
 - **The probe.** `node scripts/mp-probe.ts <name>` prints one of three numbers.
 	- `api`: the median and the 95th percentile of 200 `GET /v1/threads` requests against the two-person stack holding 50 threads.
-	- `boot`: the time from `POST /v1/threads` to a running pylon with its sessions started, for a template boot.
+	- `boot`: the time from `POST /v1/threads` to a running pylon booted from its template whose `resume` has exited, for a template boot. The time from `running` to a session's first prompt is not measured on the verify stack, because that stack starts no terminal session, so a slice that changes how a session starts needs its own measure.
 	- `check`: the wall time of `.nexus/check`.
 
 For every perf box, measure the base commit first, and alternate base and head. Run `api` and `boot` five times on each side. Run `check` twice on each side. One `check` run takes about 15 minutes in a pylon with 2 CPUs, so five on each side takes about 2.5 hours, which `main-1` spent on a change to one function. A slice fails its perf box when the head's median is above the limit the box names and outside the base's run-to-run range. Two runs give a narrow range, so a `check` result above its limit is run a third time on each side before it fails the box.

@@ -1,7 +1,7 @@
 /**
  * The multiplayer arc's perf probe, which docs/multiplayer-plan.md's perf boxes compare against a baseline:
  *   node scripts/mp-probe.ts api           200 GET /v1/threads, alternating alice and bob, on a stack holding 50 threads
- *   node scripts/mp-probe.ts boot          POST /v1/threads to a running pylon with its sessions started, for a template boot
+ *   node scripts/mp-probe.ts boot          POST /v1/threads to a running pylon whose resume exited, for a template boot
  *   node scripts/mp-probe.ts check [dir]   the wall time of .nexus/check, in the repo root or in `dir`
  *
  * It prints one JSON line on stdout and a summary on stderr, and exits 1 when anything it measured failed, so a run that
@@ -135,8 +135,7 @@ async function api(): Promise<Result> {
 
 interface Detail {
   thread: { id: string; status: string; setup?: { how: "template"; template: string } | { how: "fresh"; reason: string; building?: string } };
-  pylon: { actualState: string; failed: string | null };
-  sessions: { state: string; message: string | null }[];
+  pylon: { id: string; actualState: string; failed: string | null };
 }
 
 /** Polls `read` every `everyMs` until it returns a value, or throws once `seconds` pass, naming `what` and the last seen state. */
@@ -194,19 +193,21 @@ async function boot(): Promise<Result> {
       const timedThread = await call("POST", "/v1/threads", { project, title: "mp-probe: boots from the template" }, 201) as Detail["thread"];
       try {
         if (timedThread.setup?.how !== "template" || timedThread.setup.template !== template) throw new Error(`${timedThread.id} does not boot from template ${template}: ${JSON.stringify(timedThread.setup)}`);
-        const booted = await until(`${timedThread.id} running with its sessions started`, 600, 250, async () => {
+        const booted = await until(`${timedThread.id} running from its template with its resume exited`, 600, 250, async () => {
           const d = await detail(timedThread.id);
           if (d.pylon.failed !== null) throw new Error(`${timedThread.id}'s pylon failed: ${d.pylon.failed}`);
-          const failedSession = d.sessions.find((s) => s.state === "failed");
-          if (failedSession !== undefined) throw new Error(`a session of ${timedThread.id} failed: ${failedSession.message}`);
-          return d.pylon.actualState === "running" && d.sessions.length > 0 && d.sessions.every((s) => s.state === "running")
-            ? { done: { ns: process.hrtime.bigint() - start, sessions: d.sessions.length, setup: d.thread.setup } }
-            : { seen: `${d.pylon.actualState}, sessions ${d.sessions.map((s) => s.state).join(",") || "none"}` };
+          if (d.pylon.actualState !== "running" || d.thread.setup?.how !== "template") return { seen: `${d.pylon.actualState}, setup ${d.thread.setup?.how ?? "none"}` };
+          // The API does not report the resume, and the Docker backend logs its outcome in the container log.
+          const log = spawnSync("docker", ["logs", d.pylon.id], { encoding: "utf8" });
+          const exit = /^resume: exited (\d+)/m.exec(`${log.stdout}${log.stderr}`)?.[1];
+          if (exit === undefined) return { seen: "running, resume not exited" };
+          if (exit !== "0") throw new Error(`${timedThread.id}'s resume exited ${exit}`);
+          return { done: { ns: process.hrtime.bigint() - start, setup: d.thread.setup } };
         });
         if (booted.setup?.how !== "template") throw new Error(`${timedThread.id} reads ${JSON.stringify(booted.setup)} once running`);
         const bootMs = ms(booted.ns);
-        console.error(`boot: ${timedThread.id} ran from template ${template} with ${booted.sessions} sessions started, ${bootMs} ms after POST /v1/threads`);
-        return { bootMs, template, sessions: booted.sessions, failed: 0 };
+        console.error(`boot: ${timedThread.id} ran from template ${template} with its resume exited 0, ${bootMs} ms after POST /v1/threads`);
+        return { bootMs, template, failed: 0 };
       } finally {
         await call("DELETE", `/v1/threads/${timedThread.id}`).catch((err: unknown) => console.error(`boot: deleting ${timedThread.id} failed: ${(err as Error).message}`));
       }

@@ -80,7 +80,11 @@ test("a probe stopped during its up stops the up and takes its own run down", as
   assert.equal(await p.current(), null);
 });
 
-test("boot's deletes carry content-type application/json, which the API requires of every request that is not a GET", async (t) => {
+/**
+ * Runs `boot` against a stand-in API, which refuses with 415 a request that changes state without JSON as the real one
+ * does, and a stand-in docker whose log of the timed pylon shows `resumeLine` from its third read on.
+ */
+async function bootAgainstFakes(t: { after(fn: () => Promise<void>): void }, resumeLine: string) {
   const p = await probeCheckout(t);
   const registry = join(p.dir, "registry.db");
   const db = new DatabaseSync(registry);
@@ -88,6 +92,14 @@ test("boot's deletes carry content-type application/json, which the API requires
   db.prepare("INSERT INTO templates VALUES (?, ?)").run("tpl-1", JSON.stringify({ state: "ready" }));
   db.prepare("INSERT INTO nodes VALUES (?, ?)").run("n1", JSON.stringify({ artifacts: ["tpl-1"] }));
   db.close();
+  const bin = join(p.dir, "bin");
+  const reads = join(p.dir, "docker-reads");
+  await mkdir(bin);
+  await writeFile(join(bin, "docker"), `#!/bin/sh
+echo "$*" >> ${reads}
+[ "$(wc -l < ${reads})" -ge 3 ] && echo "${resumeLine}"
+exit 0
+`, { mode: 0o755 });
   const deletes: string[] = [];
   let posted = 0;
   const server = createServer((req, res) => {
@@ -101,27 +113,46 @@ test("boot's deletes carry content-type application/json, which the API requires
         return answer(201, posted === 1 ? { id: "th-warm", setup: { how: "fresh", reason: "no template", building: "tpl-1" } } : { id: "th-timed", setup: { how: "template", template: "tpl-1" } });
       }
       if (req.method === "DELETE") { deletes.push(req.url!); return answer(200, {}); }
-      if (req.url === "/v1/threads/th-warm") return answer(200, { thread: { id: "th-warm" }, pylon: { actualState: "absent", failed: null }, sessions: [] });
+      if (req.url === "/v1/threads/th-warm") return answer(200, { thread: { id: "th-warm" }, pylon: { id: "pylon-th-warm", actualState: "absent", failed: null } });
       if (req.url === "/v1/threads/th-timed") {
-        return answer(200, { thread: { id: "th-timed", setup: { how: "template", template: "tpl-1" } }, pylon: { actualState: "running", failed: null }, sessions: [{ state: "running", message: null }] });
+        return answer(200, { thread: { id: "th-timed", setup: { how: "template", template: "tpl-1" } }, pylon: { id: "pylon-th-timed", actualState: "running", failed: null } });
       }
       answer(404, {});
     });
   });
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
   t.after(() => new Promise<void>((done) => server.close(() => done())));
-  const address = server.address() as { port: number };
-  const api = `http://127.0.0.1:${address.port}`;
+  const api = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const state = join(p.dir, "state.json");
   await writeFile(state, JSON.stringify({ api, bobApi: api, node: "n1", project: "spoon", templateRepo: "/tmp/template.git" }));
-  const run = p.start("ready", "boot", { FAKE_STATE: state, FAKE_REGISTRY: registry });
+  const run = p.start("ready", "boot", { FAKE_STATE: state, FAKE_REGISTRY: registry, PATH: `${bin}:${process.env.PATH}` });
   const code = await run.exit;
-  const line = JSON.parse(run.out()) as { failed: number; error?: string; template?: string };
-  assert.equal(line.error, undefined);
-  assert.equal(code, 0);
-  assert.equal(line.template, "tpl-1");
-  assert.deepEqual(deletes, ["/v1/threads/th-warm", "/v1/threads/th-timed"]);
-  assert.equal(await p.current(), null, "the probe took its run down");
+  return {
+    code,
+    line: JSON.parse(run.out()) as { failed: number; error?: string; template?: string; bootMs?: number },
+    deletes,
+    dockerReads: (await readFile(reads, "utf8")).split("\n").filter(Boolean),
+    current: await p.current(),
+  };
+}
+
+test("boot stops its clock once the template's pylon runs and its resume exited, and its deletes carry JSON", async (t) => {
+  const r = await bootAgainstFakes(t, "resume: exited 0");
+  assert.equal(r.line.error, undefined);
+  assert.equal(r.code, 0);
+  assert.equal(r.line.template, "tpl-1");
+  assert.equal(typeof r.line.bootMs, "number");
+  assert.deepEqual(r.dockerReads, ["logs pylon-th-timed", "logs pylon-th-timed", "logs pylon-th-timed"], "the clock ran until the log showed the resume's exit");
+  assert.deepEqual(r.deletes, ["/v1/threads/th-warm", "/v1/threads/th-timed"], "the API took both deletes, which it refuses without JSON");
+  assert.equal(r.current, null, "the probe took its run down");
+});
+
+test("a boot whose resume exited non-zero is a failed run", async (t) => {
+  const r = await bootAgainstFakes(t, "resume: exited 3");
+  assert.equal(r.code, 1);
+  assert.equal(r.line.failed, 1);
+  assert.match(r.line.error!, /th-timed's resume exited 3/);
+  assert.deepEqual(r.deletes, ["/v1/threads/th-warm", "/v1/threads/th-timed"]);
 });
 
 /** The real verify-nexus in a checkout whose Docker answers with nothing and whose stack.ts only waits. */
