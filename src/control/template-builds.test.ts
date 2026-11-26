@@ -49,6 +49,7 @@ function fakeProbe() {
     stream: () => Promise.reject(new Error("unused")),
     manifest: () => Promise.reject(new Error("unused")),
     putSecret: () => Promise.reject(new Error("unused")),
+    putPylonSecret: () => Promise.reject(new Error("unused")),
     putPeers: () => Promise.reject(new Error("unused")),
     health: () => Promise.reject(new Error("unused")),
     artifactUsage: () => Promise.reject(new Error("unused")),

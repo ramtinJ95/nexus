@@ -47,10 +47,11 @@ export interface VmBackend {
   guest(pylonId: PylonId): Guest;
   readonly artifacts: ArtifactStore;
   /**
-   * Swap in a secret's new value on every running pylon whose boot granted it. Best effort per pylon: it returns
-   * the pylons it could not reach and why. A pylon booting meanwhile starts with whatever value it was given.
+   * Swap in a secret's current value, as the backend's SecretSource gives it for each pylon, on every running pylon whose
+   * boot granted it, or on `only` alone. Best effort per pylon: it returns the pylons it could not reach and why. A
+   * pylon booting meanwhile starts with whatever value it was given.
    */
-  updateSecret(name: string, value: string, signal?: AbortSignal): Promise<readonly { pylonId: PylonId; reason: string }[]>;
+  updateSecret(name: string, only: PylonId | null, signal?: AbortSignal): Promise<readonly { pylonId: PylonId; reason: string }[]>;
   /** Whether the node has a git SSH key, so a pylon can clone over SSH. */
   readonly gitSsh: boolean;
   /** Whether a pylon whose boot asks for nested virtualization gets KVM of its own here. */
@@ -140,5 +141,6 @@ export interface ArtifactStore {
 /**
  * Node-local secret values, from a root-owned file such as /etc/nexus/secrets.env.
  * `names` lists the secrets the node holds, which its probe reports. Values never leave the node.
+ * `value` with a pylon gives that pylon's own value when it has one, and the node's otherwise.
  */
-export interface SecretSource { value(name: string): string | undefined; names(): readonly string[] }
+export interface SecretSource { value(name: string, pylonId?: PylonId): string | undefined; names(): readonly string[] }

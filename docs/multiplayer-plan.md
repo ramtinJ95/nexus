@@ -218,11 +218,11 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 
 ### mp-07: a secret value can belong to one pylon
 
-- [ ] **Depends on.** `mp-00`.
-- [ ] **Files.** `src/probe/config.ts`, `src/probe/server.ts`, `src/protocol/routes.ts`, `src/backends/pylon-vm/pylon-vm-backend.ts`, `src/backends/docker-backend.ts`.
-- [ ] **Change.** Today a node holds one value for each secret name, so two engineers' tokens cannot both exist on a node. The control plane can now hand a probe a value for one pylon, kept in memory only. A boot reads the pylon's value before the node's. A changed value reaches that running pylon and no other.
+- [x] **Depends on.** `mp-00`.
+- [x] **Files.** `src/probe/config.ts`, `src/probe/server.ts`, `src/protocol/routes.ts`, `src/backends/pylon-vm/pylon-vm-backend.ts`, `src/backends/docker-backend.ts`.
+- [x] **Change.** Today a node holds one value for each secret name, so two engineers' tokens cannot both exist on a node. The control plane can now hand a probe a value for one pylon, kept in memory only. A boot reads the pylon's value before the node's. A changed value reaches that running pylon and no other.
 - [ ] **Result.** Two pylons on one node can hold different values under one secret name.
-- [ ] **Unit.** Two pylons with different values for one name each send their own value. Updating one leaves the other unchanged. A probe restart loses the values and the control plane hands them over again.
+- [x] **Unit.** Two pylons with different values for one name each send their own value. Updating one leaves the other unchanged. A probe restart loses the values and the control plane hands them over again.
 - [ ] **Live.** On a VM node, boot two pylons with different values for a test secret granted to a recording host. Pass when the recorder sees each pylon's own value and neither guest can read its value from the environment or disk.
 - [ ] **Perf.** `boot`. Fail above 10% over base.
 

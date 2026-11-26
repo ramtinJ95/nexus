@@ -39,6 +39,7 @@ export const probeRoutes = {
   stream: { method: "GET", path: "/v1/pylons/{pylonId}/stream", role: "control-plane", upgrade: "nexus-stream" },
   manifest: { method: "GET", path: "/v1/manifests/{artifact}", role: "control-plane" },
   putSecret: { method: "PUT", path: "/v1/secrets/{name}", role: "control-plane" },
+  putPylonSecret: { method: "PUT", path: "/v1/secrets/{name}/pylons/{pylon}", role: "control-plane" },
   putPeers: { method: "PUT", path: "/v1/peers", role: "control-plane" },
   health: { method: "GET", path: "/v1/node-health", role: "control-plane" },
   artifactUsage: { method: "GET", path: "/v1/cleanup", role: "control-plane" },

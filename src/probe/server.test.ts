@@ -61,7 +61,7 @@ function fakeBackend(guest: Guest | null = null) {
   const offered = new Map<PortableArtifactId, { manifest: ArtifactManifest; body: string }>();
   const imported = new Map<PortableArtifactId, { manifest: ArtifactManifest; body: string }>();
   /** Each secret update the backend was asked for, and the pylons it then fails to reach. */
-  const secretUpdates: [string, string][] = [];
+  const secretUpdates: [string, PylonId | null][] = [];
   const unreachable: PylonId[] = [];
   const relaunches: boolean[] = [];
   let gate: PromiseWithResolvers<void> | null = null;
@@ -89,8 +89,8 @@ function fakeBackend(guest: Guest | null = null) {
     async buildImage(id, _recipe, on) { calls.push(`build-image ${id} on ${on}`); },
     guest: () => { if (guest === null) throw new Error("this test has no guest"); return guest; },
     gitSsh: false, nestedVirtualization: false, eventJournal: null, hostBridge: null, storage: null, processes: async () => null,
-    async updateSecret(name, value) {
-      secretUpdates.push([name, value]);
+    async updateSecret(name, only) {
+      secretUpdates.push([name, only]);
       return unreachable.map((id) => ({ pylonId: id, reason: "its controller did not answer" }));
     },
     artifacts: {
@@ -173,7 +173,7 @@ test("the probe trusts the control plane control-plane.json names, and no other"
 
 test("each route of the table answers only its caller role, and refuses every other caller with 403", async (t) => {
   const { base, probe, callAs } = await setup(t);
-  const params: Record<string, string> = { jobId: "job-x", pylonId: "pylon-x", artifact: image, name: "NOT_A_SECRET" };
+  const params: Record<string, string> = { jobId: "job-x", pylonId: "pylon-x", artifact: image, name: "NOT_A_SECRET", pylon: "pylon-x" };
   const status = async (route: ProbeRoute): Promise<number> => {
     const path = route.path.replace(/\{(\w+)\}/g, (_, key: string) => params[key]!);
     if (route.upgrade !== undefined) {
@@ -190,7 +190,7 @@ test("each route of the table answers only its caller role, and refuses every ot
     return res.status;
   };
   const answered: Record<keyof typeof probeRoutes, number> = {
-    submit: 400, job: 404, observe: 200, command: 409, readGit: 409, stream: 409, manifest: 404, putSecret: 404, putPeers: 400,
+    submit: 400, job: 404, observe: 200, command: 409, readGit: 409, stream: 409, manifest: 404, putSecret: 404, putPylonSecret: 400, putPeers: 400,
     health: process.platform === "linux" ? 200 : 500, artifactUsage: 200, dropArtifacts: 400, wakeDeployer: 404, fetchArtifact: 400,
   };
   const callers: [CallerRole | null, TailnetNodeId | null][] = [["control-plane", controlPlane], ["peer-probe", peer], [null, "nSTRANGER" as TailnetNodeId], [null, null]];
@@ -615,9 +615,11 @@ test("a broken pylon's log tail and a failed job's log leave the node with the v
   secrets.hold("NEXUS_CHATGPT_TOKEN", "held-token-value-0123");
   const { base, client, fake } = await setup(t, { secrets });
   assert.equal((await fetch(`${base}/v1/secrets/NEXUS_CHATGPT_TOKEN`, { method: "PUT", body: "held-token-value-0123" })).status, 204);
+  await client.putPylonSecret("pylon-alice" as PylonId, "GH_TOKEN", "opaque-pylon-value-0123");
   const log = [
     "request to api.stripe.com with rk_live_0123456789abcdef failed",
     "pi: refresh with held-token-value-0123",
+    "git push with opaque-pylon-value-0123",
     "guest env GH_TOKEN=GONDOLIN_SECRET_0123456789abcdef0123456789abcdef0123456789abcdef",
     "curl sent 0123456789abcdef0123456789abcdef0123456789abcdef.stripe_key",
     "Error: Guest command got no answer within 13000 ms",
@@ -625,6 +627,7 @@ test("a broken pylon's log tail and a failed job's log leave the node with the v
   const redactedLog = [
     "request to api.stripe.com with [redacted] failed",
     "pi: refresh with [redacted]",
+    "git push with [redacted]",
     "guest env GH_TOKEN=[redacted]",
     "curl sent [redacted].stripe_key",
     "Error: Guest command got no answer within 13000 ms",
@@ -691,7 +694,7 @@ test("a held secret from the control plane is held, applied to the running pylon
   fake.unreachable.push("pylon-stuck" as PylonId);
   const put = await fetch(`${base}/v1/secrets/NEXUS_CHATGPT_TOKEN`, { method: "PUT", body: token });
   assert.equal(put.status, 204);
-  assert.deepEqual(fake.secretUpdates, [["NEXUS_CHATGPT_TOKEN", token]]);
+  assert.deepEqual(fake.secretUpdates, [["NEXUS_CHATGPT_TOKEN", null]]);
   assert.equal(secrets.value("NEXUS_CHATGPT_TOKEN"), token, "the backend boots new pylons with it");
   assert.deepEqual(logged, ["pylon-stuck: NEXUS_CHATGPT_TOKEN was not updated: its controller did not answer"]);
   for await (const e of client.observe(AbortSignal.timeout(60_000))) {
@@ -721,6 +724,55 @@ test("a held secret is taken only from the control plane, only under a held name
   assert.equal((await fetch(`${base}/v1/secrets/NEXUS_CHATGPT_TOKEN`)).status, 405);
   assert.deepEqual(fake.secretUpdates, [], "nothing refused reached a pylon");
   assert.deepEqual(secrets.names(), []);
+});
+
+test("two pylons hold their own values under one secret name, an update reaches only its pylon, and a probe restart loses them until the control plane hands them over again", async (t) => {
+  const file = parseSecretsEnv("GH_TOKEN=ghp_node\n", []);
+  const [alice, bob, carol] = ["pylon-alice" as PylonId, "pylon-bob" as PylonId, "pylon-carol" as PylonId];
+  const first = nodeSecrets(file);
+  const { client, fake, probe } = await setup(t, { secrets: first });
+  await client.putPylonSecret(alice, "GH_TOKEN", "ghp_alice");
+  await client.putPylonSecret(bob, "GH_TOKEN", "ghp_bob");
+  assert.deepEqual([first.value("GH_TOKEN", alice), first.value("GH_TOKEN", bob)], ["ghp_alice", "ghp_bob"]);
+  assert.equal(first.value("GH_TOKEN", carol), "ghp_node", "a pylon with no value of its own reads the node's");
+  assert.equal(first.value("GH_TOKEN"), "ghp_node");
+  await client.putPylonSecret(alice, "GH_TOKEN", "ghp_alice2");
+  assert.deepEqual([first.value("GH_TOKEN", alice), first.value("GH_TOKEN", bob)], ["ghp_alice2", "ghp_bob"], "bob's value is unchanged");
+  assert.deepEqual(fake.secretUpdates, [["GH_TOKEN", alice], ["GH_TOKEN", bob], ["GH_TOKEN", alice]], "each update reaches its own pylon alone");
+  assert.deepEqual(first.names(), ["GH_TOKEN"], "a pylon's value adds nothing the node reports holding");
+  for await (const e of client.observe(AbortSignal.timeout(60_000))) {
+    assert.ok(!JSON.stringify(e).includes("ghp_alice") && !JSON.stringify(e).includes("ghp_bob"));
+    break;
+  }
+  await probe.close();
+
+  const second = nodeSecrets(file);
+  const restarted = await setup(t, { secrets: second });
+  assert.deepEqual([second.value("GH_TOKEN", alice), second.value("GH_TOKEN", bob)], ["ghp_node", "ghp_node"], "the restart lost both values");
+  await restarted.client.putPylonSecret(alice, "GH_TOKEN", "ghp_alice2");
+  await restarted.client.putPylonSecret(bob, "GH_TOKEN", "ghp_bob");
+  assert.deepEqual([second.value("GH_TOKEN", alice), second.value("GH_TOKEN", bob)], ["ghp_alice2", "ghp_bob"]);
+});
+
+test("a pylon's value is taken only from the control plane, under a secret name, for a pylon ID, and only as a token, and a refusal never echoes the value", async (t) => {
+  const secrets = nodeSecrets({ value: () => undefined, names: () => [] });
+  const { base, fake, callAs } = await setup(t, { secrets });
+  const put = (name: string, pylon: string, body: string) => fetch(`${base}/v1/secrets/${name}/pylons/${pylon}`, { method: "PUT", body });
+  callAs(peer);
+  assert.equal((await put("GH_TOKEN", "pylon-a", "ghp_peer")).status, 403);
+  callAs(controlPlane);
+  assert.equal((await put("gh-token", "pylon-a", "ghp_x")).status, 400, "a lower-case name");
+  assert.equal((await put("GH_TOKEN", "Pylon_A", "ghp_x")).status, 400, "not a pylon ID");
+  for (const [value, what] of [["", "empty"], ["hunter2".repeat(2341), "over 16 KiB"], ["bad hunter2", "a space"], ["hunter2\nX-Injected: 1", "a newline"]] as const) {
+    const response = await put("GH_TOKEN", "pylon-a", value);
+    assert.equal(response.status, 400, what);
+    assert.doesNotMatch(await response.text(), /hunter2/, `${what}: the refusal echoes the value`);
+  }
+  assert.equal((await fetch(`${base}/v1/secrets/GH_TOKEN/pylons/pylon-a`)).status, 405);
+  assert.deepEqual(fake.secretUpdates, [], "nothing refused reached a pylon");
+  assert.equal(secrets.value("GH_TOKEN", "pylon-a" as PylonId), undefined);
+  assert.equal((await put("GH_TOKEN", "pylon-a", "ghp_x")).status, 204, "a pylon that is not running yet takes its value for its next boot");
+  assert.equal(secrets.value("GH_TOKEN", "pylon-a" as PylonId), "ghp_x");
 });
 
 test("a secret body that is not valid HTTP is answered as malformed, not as too large, and the probe logs why it read none", async (t) => {

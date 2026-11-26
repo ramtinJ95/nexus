@@ -221,6 +221,18 @@ test("a secret grant whose value this node lacks fails as secret-missing", async
   assert.equal(existsSync(join(instances, "pylon-sec")), false);
 });
 
+test("a boot reads its pylon's own value before the node's, and keeps it out of the instance directory", async () => {
+  const secrets = { value: (_name: string, pylonId?: PylonId) => pylonId === "pylon-alice" ? "nexus-alice-own-value" : undefined, names: () => [] };
+  const { backend, instances } = await backendWith({ secrets });
+  const grant = { network: { allowedHosts: ["api.stripe.com"], secrets: [{ name: "GH_TOKEN", hosts: ["api.stripe.com"] }] } };
+  // The assets are a bare manifest, so a boot that passes the secret check fails once it reaches Gondolin.
+  await assert.rejects(backend.ensureRunning(bootOf("pylon-alice", grant), live, AbortSignal.timeout(60_000)), (err: { code?: string }) => err.code !== "secret-missing");
+  for (const name of await readdir(join(instances, "pylon-alice"))) {
+    assert.ok(!(await readFile(join(instances, "pylon-alice", name), "utf8").catch(() => "")).includes("nexus-alice-own-value"), `${name} holds alice's value`);
+  }
+  await assert.rejects(backend.ensureRunning(bootOf("pylon-bob", grant), live, signal()), { code: "secret-missing", message: /GH_TOKEN/ }, "alice's value is not bob's");
+});
+
 test("a boot granted the ChatGPT token signs pi in after the dotfiles pull, as user, and only such a boot", () => {
   const gitIdentity = { name: "Example Person", email: "person@example.com" };
   const granted = bootHooks(bootOf("pylon-pi", { gitIdentity, network: { allowedHosts: ["api.openai.com"], secrets: [chatgptTokenGrant] } }));
@@ -470,18 +482,33 @@ test("a PID handed out again, or one from an earlier boot of the host, is a dead
 });
 
 test("a secret update reaches every running pylon's controller, and reports by pylon the ones that fail, not the ones that do not hold it", async () => {
-  const { backend, instances } = await backendWith();
+  const { backend, instances } = await backendWith({ secrets: { value: () => "eyJ.second", names: () => [] } });
   const holder = await fakeController(await leftInstance(instances, "pylon-holds", "running"), "pylon-holds", () => ({ held: true }));
   const other = await fakeController(await leftInstance(instances, "pylon-other", "running"), "pylon-other", () => ({ held: false }));
   await fakeController(await leftInstance(instances, "pylon-failing", "running"), "pylon-failing", () => { throw new Error("Sandbox is stopping, so update-secret waits until it runs again"); });
   const paused = await fakeController(await leftInstance(instances, "pylon-paused", "stopped"), "pylon-paused");
   paused.state.current = "stopped";
-  const failures = await backend.updateSecret("NEXUS_CHATGPT_TOKEN", "eyJ.second", signal());
+  const failures = await backend.updateSecret("NEXUS_CHATGPT_TOKEN", null, signal());
   const update = { action: "update-secret", secret: "NEXUS_CHATGPT_TOKEN", value: "eyJ.second" };
   assert.deepEqual(holder.actions, [{ ...update, name: "pylon-holds" }]);
   assert.deepEqual(other.actions, [{ ...update, name: "pylon-other" }]);
   assert.deepEqual(paused.actions, [], "a paused pylon gets the value when it next boots");
   assert.deepEqual(failures, [{ pylonId: "pylon-failing", reason: "Sandbox is stopping, so update-secret waits until it runs again" }]);
+});
+
+test("a secret update sends each running pylon its own value, and an update for one pylon reaches that pylon alone", async () => {
+  const own: Record<string, string> = { "pylon-alice": "ghp_alice" };
+  const secrets = { value: (_name: string, pylonId?: PylonId) => (pylonId === undefined ? undefined : own[pylonId]) ?? "ghp_node", names: () => ["GH_TOKEN"] };
+  const { backend, instances } = await backendWith({ secrets });
+  const alice = await fakeController(await leftInstance(instances, "pylon-alice", "running"), "pylon-alice", () => ({ held: true }));
+  const bob = await fakeController(await leftInstance(instances, "pylon-bob", "running"), "pylon-bob", () => ({ held: true }));
+  const update = { action: "update-secret", secret: "GH_TOKEN" };
+  assert.deepEqual(await backend.updateSecret("GH_TOKEN", null, signal()), []);
+  assert.deepEqual([alice.actions, bob.actions], [[{ ...update, name: "pylon-alice", value: "ghp_alice" }], [{ ...update, name: "pylon-bob", value: "ghp_node" }]], "the node's new value leaves alice's own in place");
+  own["pylon-alice"] = "ghp_alice2";
+  assert.deepEqual(await backend.updateSecret("GH_TOKEN", "pylon-alice" as PylonId, signal()), []);
+  assert.deepEqual(alice.actions.at(-1), { ...update, name: "pylon-alice", value: "ghp_alice2" });
+  assert.equal(bob.actions.length, 1, "bob's pylon is not touched");
 });
 
 test("a spawn with previews on a node without a preview host fails as invalid and creates nothing", async () => {
