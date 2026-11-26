@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { startApi, type ApiOptions } from "../control/api/server.ts";
+import { loginStore } from "../control/logins.ts";
 import { threadServices } from "../control/thread-services.ts";
 import { isDraining, turnGate } from "../control/drain.ts";
 import { noFeatures, type Features } from "../control/features.ts";
@@ -139,6 +140,8 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
   });
   const { startThread, queue, pipeline, planning: plans } = services.api;
   /** The options of an API on `port`, so a restart serves the same registry and services. */
+  /** Each person's logins, in a directory of this API's own. */
+  const logins = loginStore(join(dir, randomUUID()));
   const optionsAt = (port: number): ApiOptions => ({
     registry, host: "127.0.0.1", port,
     // Every loopback caller is whoever the test says. Tests never ask tailscaled.
@@ -166,6 +169,7 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
     probes,
     previewPorts: { first: 10200, last: 10299 },
     log: (message) => { logged.push(message); },
+    logins,
     ...apiOptions,
   });
   let api = await startApi(optionsAt(0));

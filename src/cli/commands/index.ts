@@ -10,13 +10,14 @@ import { nodesCommands } from "./nodes.ts";
 import { doctorCommands } from "./doctor.ts";
 import { questionsCommands } from "./questions.ts";
 import { completionCommands } from "./completion.ts";
+import { loginsCommands } from "./logins.ts";
 import type { Command } from "../kit.ts";
 
-export const commandGroups: readonly Readonly<Record<string, Command>>[] = [connectCommands, eventsCommands, releaseCommands, threadsCommands, watchCommands, itemsCommands, projectsCommands, usageCommands, nodesCommands, doctorCommands, questionsCommands, completionCommands(() => commands)];
+export const commandGroups: readonly Readonly<Record<string, Command>>[] = [connectCommands, eventsCommands, releaseCommands, threadsCommands, watchCommands, itemsCommands, projectsCommands, usageCommands, nodesCommands, doctorCommands, questionsCommands, loginsCommands, completionCommands(() => commands)];
 const grouped: Readonly<Record<string, Command>> = Object.assign({}, ...commandGroups);
 /** nexus --help lists the commands under these headers, in this order. */
 export const sections: readonly { title: string; names: readonly string[] }[] = [
-  { title: "Setup", names: ["connect", "doctor", "completion"] },
+  { title: "Setup", names: ["connect", "doctor", "completion", "login", "logout", "logins"] },
   { title: "Threads", names: ["threads", "show", "thread show", "ports", "preview", "unpreview", "files", "cat", "changes", "diff", "conversation", "session open", "session close", "attach", "exec"] },
   { title: "Work", names: ["start", "start-queued", "send", "answer", "watch", "seen", "abort", "retry", "retry-pylon", "wake", "archive", "unarchive", "delete"] },
   { title: "Pipeline", names: ["items", "item add", "item show", "item approve", "item cancel"] },

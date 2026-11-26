@@ -123,6 +123,12 @@ deployer GET /v1/checks/changes -> 200
 deployer POST /v1/checks/seen -> 400 ✖ Unrecognized key: "bogus"
 ✖ Invalid input: expected number, received undefined
   → at through
+deployer GET /v1/logins -> 200
+deployer PUT /v1/logins/claude -> 400 ✖ Unrecognized key: "bogus"
+✖ Invalid input: expected string, received undefined
+  → at token
+deployer DELETE /v1/logins/claude -> 200
+deployer POST /v1/logins/claude -> 405 POST is not allowed on /v1/logins/claude
 deployer GET / -> 200
 deployer GET /threads/new -> 200
 deployer GET /projects/new -> 200
@@ -269,6 +275,12 @@ person GET /v1/checks/changes -> 200
 person POST /v1/checks/seen -> 400 ✖ Unrecognized key: "bogus"
 ✖ Invalid input: expected number, received undefined
   → at through
+person GET /v1/logins -> 200
+person PUT /v1/logins/claude -> 400 ✖ Unrecognized key: "bogus"
+✖ Invalid input: expected string, received undefined
+  → at token
+person DELETE /v1/logins/claude -> 200
+person POST /v1/logins/claude -> 405 POST is not allowed on /v1/logins/claude
 person GET / -> 200
 person GET /threads/new -> 200
 person GET /projects/new -> 200
@@ -425,6 +437,10 @@ control-node GET /v1/checks/changes -> 200
 control-node POST /v1/checks/seen -> 400 ✖ Unrecognized key: "bogus"
 ✖ Invalid input: expected number, received undefined
   → at through
+control-node GET /v1/logins -> 403 caller may not read their logins: only a person may, never the control plane, infrastructure nodes or pylons
+control-node PUT /v1/logins/claude -> 403 caller may not set a login: only a person may, never the control plane, infrastructure nodes or pylons
+control-node DELETE /v1/logins/claude -> 403 caller may not remove a login: only a person may, never the control plane, infrastructure nodes or pylons
+control-node POST /v1/logins/claude -> 405 POST is not allowed on /v1/logins/claude
 control-node GET / -> 200
 control-node GET /threads/new -> 200
 control-node GET /projects/new -> 200
@@ -567,6 +583,10 @@ control-node-without-key GET /v1/checks/changes -> 200
 control-node-without-key POST /v1/checks/seen -> 400 ✖ Unrecognized key: "bogus"
 ✖ Invalid input: expected number, received undefined
   → at through
+control-node-without-key GET /v1/logins -> 403 caller may not read their logins: only a person may, never the control plane, infrastructure nodes or pylons
+control-node-without-key PUT /v1/logins/claude -> 403 caller may not set a login: only a person may, never the control plane, infrastructure nodes or pylons
+control-node-without-key DELETE /v1/logins/claude -> 403 caller may not remove a login: only a person may, never the control plane, infrastructure nodes or pylons
+control-node-without-key POST /v1/logins/claude -> 405 POST is not allowed on /v1/logins/claude
 control-node-without-key GET / -> 200
 control-node-without-key GET /threads/new -> 200
 control-node-without-key GET /projects/new -> 200
@@ -703,6 +723,10 @@ reporter GET /v1/doctor -> 403 caller is not a tailnet node this control plane a
 reporter GET /v1/checks -> 403 caller is not a tailnet node this control plane allows
 reporter GET /v1/checks/changes -> 403 caller is not a tailnet node this control plane allows
 reporter POST /v1/checks/seen -> 403 caller is not a tailnet node this control plane allows
+reporter GET /v1/logins -> 403 caller is not a tailnet node this control plane allows
+reporter PUT /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
+reporter DELETE /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
+reporter POST /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
 reporter GET / -> 403 caller is not a tailnet node this control plane allows
 reporter GET /threads/new -> 403 caller is not a tailnet node this control plane allows
 reporter GET /projects/new -> 403 caller is not a tailnet node this control plane allows
@@ -827,6 +851,10 @@ reporter-wrong-key GET /v1/doctor -> 403 caller is not a tailnet node this contr
 reporter-wrong-key GET /v1/checks -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /v1/checks/changes -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key POST /v1/checks/seen -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key GET /v1/logins -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key PUT /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key DELETE /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key POST /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET / -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /threads/new -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /projects/new -> 403 caller is not a tailnet node this control plane allows
@@ -951,6 +979,10 @@ node-without-key GET /v1/doctor -> 403 caller is not a tailnet node this control
 node-without-key GET /v1/checks -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /v1/checks/changes -> 403 caller is not a tailnet node this control plane allows
 node-without-key POST /v1/checks/seen -> 403 caller is not a tailnet node this control plane allows
+node-without-key GET /v1/logins -> 403 caller is not a tailnet node this control plane allows
+node-without-key PUT /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
+node-without-key DELETE /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
+node-without-key POST /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET / -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /threads/new -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /projects/new -> 403 caller is not a tailnet node this control plane allows
@@ -1075,6 +1107,10 @@ stranger GET /v1/doctor -> 403 caller is not a tailnet node this control plane a
 stranger GET /v1/checks -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET /v1/checks/changes -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger POST /v1/checks/seen -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/logins -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger PUT /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger DELETE /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET / -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET /threads/new -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET /projects/new -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
@@ -1193,6 +1229,10 @@ unnamed GET /v1/doctor -> 403 caller is not a tailnet node this control plane al
 unnamed GET /v1/checks -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /v1/checks/changes -> 403 caller is not a tailnet node this control plane allows
 unnamed POST /v1/checks/seen -> 403 caller is not a tailnet node this control plane allows
+unnamed GET /v1/logins -> 403 caller is not a tailnet node this control plane allows
+unnamed PUT /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
+unnamed DELETE /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
+unnamed POST /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
 unnamed GET / -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /threads/new -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /projects/new -> 403 caller is not a tailnet node this control plane allows

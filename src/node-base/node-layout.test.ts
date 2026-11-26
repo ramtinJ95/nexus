@@ -61,6 +61,7 @@ test("each layout constant is the literal it replaced", () => {
   assert.equal(layout.releaseCommitFile("/opt/nexus/releases/x"), "/opt/nexus/releases/x/release-commit");
   assert.deepEqual(stores, {
     harness: { machines: "control", file: "/var/lib/nexus-control/harness-credentials.json", owner: "nexus-control:nexus-control", mode: 0o600 },
+    person: { machines: "control", file: "/var/lib/nexus-control/people", owner: "nexus-control:nexus-control", mode: 0o600 },
     claude: { machines: "every", file: "/etc/nexus/secrets.env", owner: "root:nexus", mode: 0o640 },
     githubWatch: { machines: "control", file: "/etc/nexus/github-token", owner: "root:nexus-control", mode: 0o640 },
     gitKey: { machines: "every", file: "/etc/nexus/git_ed25519", owner: "nexus:nexus", mode: 0o400 },
