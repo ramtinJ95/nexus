@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# The live box of docs/multiplayer-plan.md's mp-08: on the stack started with people, alice pipes a made-up token into
+# `nexus login claude`. `nexus logins` shows Claude set for alice and not for bob, the store file is mode 0600 and owned
+# by the control plane's user, the node's identity is refused, and no output or log of the run holds the token.
+# Exits 0 only if every step did what it should.
+set -euo pipefail
+V="$(cd "$(dirname "$0")" && pwd)/verify-nexus"
+base="$(cd "$(dirname "$0")/../../../.." && pwd)/.verify/nexus"
+token="sk-ant-oat01-made-up-$(date +%s)-not-a-real-token"
+refused=$(mktemp)
+fail() { echo "logins check: $*" >&2; exit 1; }
+
+trap '"$V" down >&2 || true; rm -f "$refused"' EXIT
+NEXUS_VERIFY_PEOPLE=1 "$V" up
+run=$(cat "$base/current")
+dir="$base/runs/$run"
+state() { node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))[process.argv[2]])' "$dir/state.json" "$1"; }
+nodeApi=$(state nodeApi)
+
+printf '%s\n' "$token" | "$V" cli logins-alice-login -- login claude
+alice=$("$V" cli logins-alice -- logins --json | jq -c .)
+bob=$("$V" cli logins-bob --as bob -- logins --json | jq -c .)
+echo "alice's nexus logins: $alice"
+echo "bob's nexus logins:   $bob"
+[ "$alice" = '{"person":"alice@example.com","set":{"claude":true,"github":false}}' ] || fail "alice's logins are $alice"
+[ "$bob" = '{"person":"bob@example.com","set":{"claude":false,"github":false}}' ] || fail "bob's logins are $bob"
+"$V" cli logins-alice-text -- logins
+
+file="$dir/people/alice%40example.com.json"
+echo "store: $(stat -c '%A %a %U:%G %n' "$dir/people" "$file" | tr '\n' ';')"
+echo "control plane runs as: $(ps -o user= -p "$(state pid)")"
+[ "$(stat -c %a "$file")" = 600 ] || fail "$file is mode $(stat -c %a "$file")"
+[ "$(stat -c %U "$file")" = "$(ps -o user= -p "$(state pid)" | tr -d ' ')" ] || fail "$file is not owned by the control plane's user"
+[ "$(ls "$dir/people")" = "alice%40example.com.json" ] || fail "the store holds $(ls "$dir/people")"
+[ "$(jq -r .claude "$file")" = "$token" ] || fail "alice's file does not hold the token she piped in"
+
+code=$(curl -sS -o "$refused" -w '%{http_code}' -X PUT -H 'content-type: application/json' --data "{\"token\":\"$token\"}" "$nodeApi/v1/logins/claude")
+echo "node PUT /v1/logins/claude: $code $(sed "s/$token/<token>/g" "$refused")"
+[ "$code" = 403 ] || fail "the node's PUT /v1/logins/claude got $code"
+grep -q -- "$token" "$refused" && fail "the node's refusal repeats the token"
+
+leaks=$(grep -rl --exclude-dir=people -- "$token" "$dir" || true)
+[ -z "$leaks" ] || fail "the token is in $leaks"
+echo "logins check: alice's Claude token is stored for her alone in a 0600 file of the control plane's user, the node is refused, and no output or log of run $run holds the token"

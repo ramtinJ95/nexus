@@ -85,6 +85,7 @@ test("a refused token is not stored and its refusal never repeats it", async (t)
     ["PUT", "/v1/logins/claude", { token: "has a space" }, 400],
     ["PUT", "/v1/logins/claude", { token: "x".repeat(4097) }, 400],
     ["PUT", "/v1/logins/claude", { token: 42, extra: "a-secret-value" }, 400],
+    ["PUT", "/v1/logins/claude", { "sk-ant-pasted-as-a-key": true }, 400],
     ["PUT", "/v1/logins/codex", { token: aliceToken }, 404],
   ];
   for (const [method, path, body, status] of refusals) {
@@ -93,7 +94,7 @@ test("a refused token is not stored and its refusal never repeats it", async (t)
   }
   const malformed = await s.call("PUT", "/v1/logins/claude", undefined);
   assert.equal(malformed.status, 400);
-  for (const body of s.bodies) assert.ok(!/has a space|xxxx|a-secret-value|alice-made-up/.test(body), `${body} repeats no value`);
+  for (const body of s.bodies) assert.ok(!/has a space|xxxx|a-secret-value|alice-made-up|sk-ant/.test(body), `${body} repeats no value`);
   assert.deepEqual((await s.call("GET", "/v1/logins")).body.set, none);
 });
 

@@ -124,9 +124,7 @@ deployer POST /v1/checks/seen -> 400 ✖ Unrecognized key: "bogus"
 ✖ Invalid input: expected number, received undefined
   → at through
 deployer GET /v1/logins -> 200
-deployer PUT /v1/logins/claude -> 400 ✖ Unrecognized key: "bogus"
-✖ Invalid input: expected string, received undefined
-  → at token
+deployer PUT /v1/logins/claude -> 400 the body must be {"token": string} and nothing else
 deployer DELETE /v1/logins/claude -> 200
 deployer POST /v1/logins/claude -> 405 POST is not allowed on /v1/logins/claude
 deployer GET / -> 200
@@ -276,9 +274,7 @@ person POST /v1/checks/seen -> 400 ✖ Unrecognized key: "bogus"
 ✖ Invalid input: expected number, received undefined
   → at through
 person GET /v1/logins -> 200
-person PUT /v1/logins/claude -> 400 ✖ Unrecognized key: "bogus"
-✖ Invalid input: expected string, received undefined
-  → at token
+person PUT /v1/logins/claude -> 400 the body must be {"token": string} and nothing else
 person DELETE /v1/logins/claude -> 200
 person POST /v1/logins/claude -> 405 POST is not allowed on /v1/logins/claude
 person GET / -> 200

@@ -43,8 +43,12 @@ export function loginStore(dir: string): LoginStore {
       await mkdir(dir, { recursive: true, mode: 0o700 });
       if (Object.keys(stored).length === 0) return void await rm(fileOf(person), { force: true });
       const partial = `${fileOf(person)}.${randomUUID()}.partial`;
-      await writeFile(partial, `${JSON.stringify(stored)}\n`, { flag: "wx", mode: 0o600 });
-      await rename(partial, fileOf(person));
+      try {
+        await writeFile(partial, `${JSON.stringify(stored)}\n`, { flag: "wx", mode: 0o600 });
+        await rename(partial, fileOf(person));
+      } finally {
+        await rm(partial, { force: true });
+      }
     });
     writes.set(person, next);
     return next;
