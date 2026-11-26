@@ -16,12 +16,13 @@ This skill never drives the home-lab deployment on `rj-firebat` and `infra-testb
 - The real control plane comes from `startControlPlane`: the registry, the reconcile loop, the pi-durable harness, the API and the dashboard. It listens on `http://127.0.0.1:7470`.
 - A real probe comes from `startProbe`, on `127.0.0.1:7480`, with the Docker backend (`src/backends/docker-backend.ts`). Each pylon is a container named `pylon-<thread>`, built from an image the stack builds: Node 24, git, Herdr Core, the pi-env daemon, the in-pylon CLI and a one-commit bare repository at `/srv/verify.git`. Each pylon's first boot clones it into `/home/user/workspace/repo` and records `refs/nexus/base` at its commit, as a pylon-vm does.
 - Only the production boundaries are replaced:
-  - tailscaled's whois is a fake LocalAPI socket. It names port 7480 as the probe and every other caller as the person's laptop, which the API allows and counts as a person, so the CLI and the dashboard may start and message threads. The probe's whois names every caller as the control plane.
+  - tailscaled's whois is a fake LocalAPI socket. It answers with the real LocalAPI's shapes from `src/test-support/tailnet-people.ts`, which holds two people and one node. `alice` (`alice@example.com`, node `nALICE`) and `bob` (`bob@example.com`, node `nBOB`) each have a device with a user. The node (`nNEXUSNODE`) has the tag `tag:nexus-node` and no user. Port 7480 is the node, which is the probe. A connection through bob's port, `127.0.0.1:7471`, is bob. Every other caller is alice. The API allows both people, so the CLI and the dashboard may start and message threads as either. The first time whois names an identity, `stack.log` gets a line such as `whois: answered nBOB as bob@example.com` or `whois: answered nNEXUSNODE as tags tag:nexus-node`. The probe's whois names every caller as the control plane.
   - The model is scripted (`src/control/harness/test-fixture.ts`). A message `bash: <command>` makes exactly one bash tool call in the pylon, then the answer `scripted answer after toolResult`. A message `stream: <n>` gets the answer `word0 word1 ...` of n words, written one word every 20 ms, so it streams as a real model's does. Any other message gets `scripted answer after user`.
   - `tailscale serve` is `src/probe/fake-tailscale.ts`, so the Mac's work tailnet is never touched.
 - Seed data, created through the API: image `img-0000000000aa` made current, node `verify-node`, and project `spoon` (`/srv/verify.git` on `main`, 1 CPU, 3 GiB, 1 GiB disk).
+- With `NEXUS_VERIFY_THREADS=<n>` set for `up`, the registry also starts with n archived threads of `spoon`, started in turn by alice and bob, and `spoon` is written to the registry with them rather than added through the API. Reconcile boots none of them. `scripts/mp-probe.ts api` uses it.
 
-Isolation: one stack per machine. The control plane reaches probes only on port 7480, and containers keep the bridge port they booted with, so all four ports are fixed: 7470 API, 7480 probe, 7481 preview gateway, 7482 in-pylon CLI bridge. `up` refuses to start while any of them is taken or a previous run was not cleaned up. Never drive a stack this skill did not start. If `doctor` fails on a stack you did not start, stop and report it rather than killing it.
+Isolation: one stack per machine. The control plane reaches probes only on port 7480, and containers keep the bridge port they booted with, so all five ports are fixed: 7470 API as alice, 7471 API as bob, 7480 probe, 7481 preview gateway, 7482 in-pylon CLI bridge. `up` refuses to start while any of them is taken or a previous run was not cleaned up. Never drive a stack this skill did not start. If `doctor` fails on a stack you did not start, stop and report it rather than killing it.
 
 All state lives under `<repo>/.verify/nexus/`, which `.gitignore` ignores. A run's scratch state is in `runs/<run>/`, including `stack.log`, the registry and the harness storage. The fake tailscaled socket is in a `/tmp/nexus-verify-*` directory instead, which `socket-dir` names, because a socket path in a long worktree path would pass macOS's 104-byte limit. `down` removes it. A run's evidence is in `evidence/<run>/`. `current` names the run that is up.
 
@@ -46,10 +47,11 @@ This is read-only. Each check prints one `ok` or `FAIL` line, and the exit code 
 
 - the run's `state.json` exists;
 - the recorded pid is still this run's `stack.ts`;
-- the stack's pid holds each of the four ports;
+- the stack's pid holds each of the five ports;
 - the stack was started from the checkout's current `HEAD`, with a note if the tree was dirty;
 - Docker answers and holds the run's pylon image;
-- `nexus nodes --json` through the API shows `verify-node` online.
+- `nexus nodes --json` through the API shows `verify-node` online;
+- `GET /v1/whoami` through 7470 names `nALICE`, and through 7471 names `nBOB`.
 
 It also lists the run's pylon containers. Run it before driving, and again whenever a result looks wrong. After you change code under `src/`, the running stack is stale. Run `$V down` and `$V up` again: doctor's revision line only catches new commits, not uncommitted edits.
 
@@ -57,11 +59,12 @@ It also lists the run's pylon containers. Run it before driving, and again whene
 
 Every driver records evidence. Each call writes `NN-<step>.cmd`, `.stdout`, `.stderr` and `.exit` into the run's evidence directory. Then it echoes stdout and stderr and exits with the command's own exit code. The one exception is `$V browser`: playwright-cli exits 0 when an action fails, so a step whose output reports `### Error` exits 1 and records 1. Give each step a short, unique name.
 
-- **Mac CLI**, which is the primary surface. `$V cli <step> -- <nexus args>` runs `node src/cli/nexus.ts` with `NEXUS_URL=http://127.0.0.1:7470` and `NEXUS_SOCKS=none`, which is the documented direct mode. Add `--json` for assertions. Stdout is then one JSON value, and on failure stderr is `{"error","kind","status","code"}`. Exit codes follow `docs/cli.md`: 0 for ok, 1 failed, 2 unreachable, 3 refused, 4 not-found, 5 conflict, 64 invalid.
+- **Mac CLI**, which is the primary surface. `$V cli <step> -- <nexus args>` runs `node src/cli/nexus.ts` as alice, with `NEXUS_URL=http://127.0.0.1:7470` and `NEXUS_SOCKS=none`, which is the documented direct mode. `$V cli <step> --as bob -- <nexus args>` runs it as bob, with `NEXUS_URL=http://127.0.0.1:7471`. The recorded `.cmd` names the person in `NEXUS_VERIFY_AS`. Add `--json` for assertions. Stdout is then one JSON value, and on failure stderr is `{"error","kind","status","code"}`. Exit codes follow `docs/cli.md`: 0 for ok, 1 failed, 2 unreachable, 3 refused, 4 not-found, 5 conflict, 64 invalid.
 
   ```sh
   $V cli start -- start --project spoon --title "Proof thread" --json
   $V cli show -- show th-0123456789ab --json
+  $V cli threads-bob --as bob -- threads --json
   ```
 
 - **Dashboard.** `$V browser <step> -- <playwright-cli args>` runs the global `playwright-cli` in the browser session `nexus-verify-<run>`, from the evidence directory, so a relative `--filename` saves into it. Open the session first with `$V browser open -- open http://127.0.0.1:7470/`. Targets are Playwright selectors. Prefer the dashboard's stable handles: `#start-dialog`, `#start-title`, `#start-hint`, `#project-dialog`, `#project-id`, `#project-repo`, `#prompt-text`, `#send`, `#archive`, `#unarchive`, `#delete`, `#filter`, `#changes-base`, `#changes-reload`, and `role=link[name="<thread title>"]`. The thread page's inspector shows one tab at a time and remembers it, so select one with `click 'label.seg-tab:has(input[value="changes"])'`, or `previews` or `pylon`, before asserting on it. Take `snapshot` before clicking by ref. The page polls every 5 s, so wait for the state you need rather than sleeping a fixed time.
@@ -84,7 +87,7 @@ Proof standards:
 - Exercise the user's path: the CLI or the dashboard. Don't write to the registry, call the backend, or `docker exec` to make something happen. `$V pylon` only observes.
 - Capture both the action and the resulting state, such as the `send` reply plus the conversation entry it produced, or a click plus a later snapshot of the page. A final screen alone is not proof.
 - Verify side effects alongside what's visible. A tool call's file is on the pylon's disk. A paused pylon has no container and does have a checkpoint image (`docker images --filter label=nexus.verify=<run>`). A deleted thread's container and checkpoints are gone.
-- Mocks stand only at the boundaries listed above: whois, the model and `tailscale serve`. A behavior that depends on what those fakes replace, such as real model output, ts-home's SOCKS proxy, tailnet identity, a real MagicDNS preview URL or Gondolin's network policy, is not proven by this stack. Say so in your report rather than claiming it.
+- Mocks stand only at the boundaries listed above: whois, the model and `tailscale serve`. A behavior that depends on what those fakes replace, such as real model output, a real tailnet's users and tags, ts-home's SOCKS proxy, tailnet identity, a real MagicDNS preview URL or Gondolin's network policy, is not proven by this stack. Say so in your report rather than claiming it.
 - Report each entry point you drove. An entry point you skipped is unverified, even if a sibling entry point passed.
 
 Evidence is never committed. The pull request carries it:
