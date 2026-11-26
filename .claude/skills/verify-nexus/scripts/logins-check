@@ -39,6 +39,6 @@ echo "node PUT /v1/logins/claude: $code $(sed "s/$token/<token>/g" "$refused")"
 [ "$code" = 403 ] || fail "the node's PUT /v1/logins/claude got $code"
 grep -q -- "$token" "$refused" && fail "the node's refusal repeats the token"
 
-leaks=$(grep -rl --exclude-dir=people -- "$token" "$dir" || true)
+leaks=$(grep -rl --exclude-dir=people -- "$token" "$dir" "$base/evidence/$run" || true)
 [ -z "$leaks" ] || fail "the token is in $leaks"
 echo "logins check: alice's Claude token is stored for her alone in a 0600 file of the control plane's user, the node is refused, and no output or log of run $run holds the token"
