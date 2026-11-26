@@ -631,11 +631,11 @@ test("the route table holds the routes it always has, and each path matches one 
   const described = table.map((entry) => {
     const policy = entry[2];
     const said = "action" in policy ? `: ${policy.action}` : policy.why === undefined ? "" : `: ${policy.why}`;
-    return `${entry[0]} ${entry[1].source} ${policy.role}${said}${"admin" in policy ? ", admin" : ""}${policy.startsTurn ? ", startsTurn" : ""}`;
+    return `${entry[0]} ${entry[1].source} ${policy.role}${said}${"admin" in policy ? ", admin" : ""}${"solo" in policy ? `, solo ${policy.solo.role}` : ""}${policy.startsTurn ? ", startsTurn" : ""}`;
   });
   assert.deepEqual(described.sort(), [
     "DELETE ^\\/v1\\/logins\\/([^/]+)$ person: remove a login",
-    "DELETE ^\\/v1\\/projects\\/([^/]+)$ person: remove a project",
+    "DELETE ^\\/v1\\/projects\\/([^/]+)$ admin: remove a project, solo person",
     "DELETE ^\\/v1\\/threads\\/([^/]+)$ owner: delete a thread, admin",
     "DELETE ^\\/v1\\/threads\\/([^/]+)\\/previews\\/([^/]+)$ owner: unpublish a preview",
     "DELETE ^\\/v1\\/threads\\/([^/]+)\\/sessions\\/([^/]+)$ owner: close a session in a thread's pylon",
@@ -684,7 +684,7 @@ test("the route table holds the routes it always has, and each path matches one 
     "GET ^\\/v1\\/threads\\/([^/]+)\\/image$ allowed",
     "GET ^\\/v1\\/usage$ allowed",
     "GET ^\\/v1\\/usage\\/backfill$ allowed",
-    "PATCH ^\\/v1\\/projects\\/([^/]+)$ person: edit a project",
+    "PATCH ^\\/v1\\/projects\\/([^/]+)$ admin: edit a project, solo person",
     "POST ^\\/v1\\/checks\\/seen$ allowed: what the person has seen changes no check",
     "POST ^\\/v1\\/deployer\\/drain$ control-node: drains",
     "POST ^\\/v1\\/deployer\\/releases$ reporter",
@@ -696,7 +696,7 @@ test("the route table holds the routes it always has, and each path matches one 
     "POST ^\\/v1\\/items$ person: add an item",
     "POST ^\\/v1\\/items\\/([^/]+)\\/approve$ person: approve an item",
     "POST ^\\/v1\\/items\\/([^/]+)\\/cancel$ person: cancel an item",
-    "POST ^\\/v1\\/projects$ allowed: adding a project changes no thread, pylon or project there is",
+    "POST ^\\/v1\\/projects$ admin: add a project, solo allowed",
     "POST ^\\/v1\\/questions\\/([^/]+)\\/answer$ allowed: each question says who may answer it, which refusalOf checks",
     "POST ^\\/v1\\/threads$ person: start a thread, startsTurn",
     "POST ^\\/v1\\/threads\\/([^/]+)\\/abort$ owner: abort a thread's turn, admin",
