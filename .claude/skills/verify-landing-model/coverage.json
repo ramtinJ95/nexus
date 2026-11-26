@@ -1,0 +1,49 @@
+{
+  "syncCommit": "0f7834d679ebaaf1eb5cd5763106241a35ba83f6",
+  "covers": {
+    "src/control/review.ts": "062bd33031275afed65ca219e25fedb5c35c7d78bbe284184778183e5bbb27cb",
+    "src/control/landing.ts": "c40a12361b5603512c98819ec9e46aa12ad54c897a7bfc0dece26188f5b81c4d",
+    "src/control/review-model.ts": "3fcb507835c696bf55ff348fffc844a7a1b19d4b029ea0f93278bf180040ed08",
+    "src/control/release-store.ts": "e98714acc4aca87e436b140bf05e5c86afe9b2d26b2a2186589ff0661dc2dbb0",
+    "src/control/api/release-routes.ts": "f81f1fe9280ac9e08177387d269ec8f43d66df05380f633380bd414ff9901266",
+    "src/protocol/deploy.ts": "a05394fc0e983b5fa2933834df3bd955cd9d96cbf92d596db32ff801d4cb1e5a",
+    "src/deploy/plan.ts": "8d5a5d594f0cc9d3000508fcf70d2ec201b92260882859d7e52228667f9be285",
+    "src/deploy/worker.ts": "ade10941612bb47a12c5b19e8165c2c18f82ca732a0d76ceb977ba162f3fd8b4",
+    "src/deploy/install.ts": "48576e472bd606513f743ac0ae2ed8a5009c1e3dea8d58ce2ec7cd0d19ee8949"
+  },
+  "tlc": {
+    "version": "1.7.4",
+    "url": "https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar",
+    "sha256": "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88"
+  },
+  "checks": [
+    {
+      "config": "Landing.cfg",
+      "says": "Two landings, pushes and outside merges, no manual deploy."
+    },
+    {
+      "config": "ManualDeploy.cfg",
+      "says": "The same with one manual `nexus deploy`, for every rule but the one finding F1 breaks."
+    },
+    {
+      "config": "Finding-ManualDeploy.cfg",
+      "breaks": [
+        "RollbackTargetWasHealthy"
+      ],
+      "finding": "F1",
+      "says": "A manual deploy while a landing holds the turn becomes its rollback target, though it never ran healthy."
+    },
+    {
+      "config": "OffBranch.cfg",
+      "says": "One pull request whose base is not the release branch, for every rule but the one finding F2 breaks."
+    },
+    {
+      "config": "Finding-OffBranch.cfg",
+      "breaks": [
+        "ReleaseIsOnTheReleaseBranch"
+      ],
+      "finding": "F2",
+      "says": "A landing into another branch makes its merge the desired release, which the deployer refuses."
+    }
+  ]
+}
