@@ -87,8 +87,8 @@ export interface ReviewDeps {
   startThread(start: Start): Promise<Thread>;
   /** The model the harness runs every thread on. */
   harnessModel: string;
-  /** The control plane's own node, for the release view, and the repository its releases come from. */
-  release: { self: string | undefined; repo: string };
+  /** The control plane's own node, for the release view, the repository its releases come from, and the branch it releases from. */
+  release: { self: string | undefined; repo: string; branch: string };
   /** Whether `caller` may land, which takes the right to deploy. A landing asks again before every merge. */
   mayLand(caller: string): boolean;
   /** Tells the planner a thread's status changed, so an archived thread's pylon pauses at once. */

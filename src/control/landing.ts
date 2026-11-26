@@ -14,16 +14,13 @@ import type { Registry } from "./registry.ts";
 import type { Thread } from "./thread-store.ts";
 import { landingVerb, type HoldCause, type Phase, type Review, type Round } from "./review-model.ts";
 
-/** The branch the deployer installs releases from: it refuses a commit that is not on it. */
-export const releaseBranch = "main";
-
 type LandingRegistry = Pick<Registry, "releases" | "nodes" | "now" | "projects" | "reviews">;
 type Releasing = Extract<Phase, { kind: "deploying" | "rolling-back" }>;
 
 export interface LandingDeps {
   registry: LandingRegistry;
-  /** The control plane's own node, for the release view, and the repository its releases come from. */
-  release: { self: string | undefined; repo: string };
+  /** The control plane's own node, for the release view, the repository its releases come from, and control.json's `releaseBranch`, the branch the deployer installs from. */
+  release: { self: string | undefined; repo: string; branch: string };
   mayLand(caller: string): boolean;
   now: () => number;
   toPerson(r: Review, cause: HoldCause, ...items: (Hold | string)[]): Review;
@@ -46,7 +43,7 @@ export function landing({ registry, release, mayLand, now, toPerson }: LandingDe
    */
   const deploys = (r: { pr: Pick<Review["pr"], "repo">; rounds: readonly Pick<Round, "base">[] }) => {
     const base = r.rounds.at(-1)?.base;
-    return ofReleaseRepo(r) && (base === undefined || base === releaseBranch);
+    return ofReleaseRepo(r) && (base === undefined || base === release.branch);
   };
   const view = () => releaseView(registry, release.self, now());
   /** Makes `commit` the desired release, unless it is already, and marks the deploy or rollback requested. */

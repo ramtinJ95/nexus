@@ -235,7 +235,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     brief: agents.brief,
     personWrote: agents.personWrote,
     runs: (ended) => ({ checks: checkRuns({ ...checkRunDeps, ended }), live: checkRuns({ ...checkRunDeps, gate: verifyGate, ended }) }),
-    release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)! },
+    release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)!, branch: config.releaseBranch },
     mayLand: (caller) => isDeployer(registry, deployment, caller as TailnetNodeId),
     wake: wakeThread,
     log,

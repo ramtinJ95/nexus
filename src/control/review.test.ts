@@ -58,7 +58,7 @@ const tempDb = () => join(registries, `${randomUUID()}.db`);
 const previous = "p".repeat(40);
 
 /** `agentState` replaces the fake that reads replies and model failures from the fixture's maps. */
-function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview; secondReview?: SecondReview; agentState?: (registry: Registry) => ReviewDeps["agentState"]; personWrote?: (registry: Registry) => ReviewDeps["personWrote"] } = {}) {
+function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; releaseBranch?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview; secondReview?: SecondReview; agentState?: (registry: Registry) => ReviewDeps["agentState"]; personWrote?: (registry: Registry) => ReviewDeps["personWrote"] } = {}) {
   const registry = openRegistry(options.path ?? ":memory:");
   t.after(() => { try { registry.close(); } catch { /* closed by a restart */ } });
   const repo = options.repo ?? "ramtinJ95/nexus";
@@ -203,7 +203,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
         discard(id) { archived.push(id); registry.threads.setThreadStatus(id, "archived"); },
       },
     }),
-    release: { self, repo: "ramtinJ95/nexus" },
+    release: { self, repo: "ramtinJ95/nexus", branch: options.releaseBranch ?? "main" },
     mayLand: (caller) => deployers.has(caller),
     wake: (target) => { woken.push(target.id); },
     log: (message) => { logged.push(message); },
@@ -901,6 +901,23 @@ test("a landing into a branch other than the release branch merges and lands wit
   assert.deepEqual(f.merges, [head1]);
   assert.deepEqual(f.review().phase, { kind: "landed", commit: merged });
   assert.deepEqual(f.registry.releases.desiredRelease(), { commit: previous, requestedBy: "person", requestedAt: 1 });
+});
+
+test("a landing follows the configured release branch: into it deploys, into main does not", async (t) => {
+  const into = async (base: string) => {
+    const f = fixture(t, { releaseBranch: "multiplayer" });
+    released(f, previous);
+    f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, base } };
+    await approved(f, "nLAPTOP");
+    assert.deepEqual(f.merges, [head1]);
+    return f;
+  };
+  const release = await into("multiplayer");
+  assert.equal(release.review().phase.kind, "deploying");
+  assert.equal(release.registry.releases.desiredRelease()?.commit, merged);
+  const main = await into("main");
+  assert.deepEqual(main.review().phase, { kind: "landed", commit: merged });
+  assert.deepEqual(main.registry.releases.desiredRelease(), { commit: previous, requestedBy: "person", requestedAt: 1 });
 });
 
 test("a landing into a branch other than the release branch still meets the reserved paths' holds", async (t) => {
