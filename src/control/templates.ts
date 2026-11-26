@@ -51,11 +51,12 @@ export function templateIdOf(key: TemplateKey, node: NodeName, startedAt: number
 
 /**
  * A building record holds its job's inputs, and the envelope it last sent, saved before the submit as a pylon's is,
- * so a control plane that restarts mid-build asks the probe about it instead of building twice.
+ * so a control plane that restarts mid-build asks the probe about it instead of building twice. `defaultHead` marks a
+ * build a shared install asked for at its default branch's head, the only kind a shared install boots from or waits on.
  */
 export type TemplateRecord =
-  | { id: TemplateId; key: TemplateKey; state: "building"; on: NodeName; inputs: TemplateBuildInputs; submitted: JobEnvelope | null }
-  | { id: TemplateId; key: TemplateKey; state: "ready"; builtOn: NodeName; builtAt: number; commit: string }
+  | { id: TemplateId; key: TemplateKey; state: "building"; on: NodeName; inputs: TemplateBuildInputs; submitted: JobEnvelope | null; defaultHead?: true }
+  | { id: TemplateId; key: TemplateKey; state: "ready"; builtOn: NodeName; builtAt: number; commit: string; defaultHead?: true }
   | { id: TemplateId; key: TemplateKey; state: "failed"; on: NodeName; failedAt: number; logTail: string };
 
 type ReadyTemplate = Extract<TemplateRecord, { state: "ready" }>;

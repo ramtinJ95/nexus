@@ -51,7 +51,7 @@ export async function tickTemplateBuild(record: BuildingTemplate, ctx: BuildCont
   switch (status.state) {
     case "running": return;
     case "succeeded":
-      if (observation.artifacts.includes(record.id)) registry.images.saveTemplate({ id: record.id, key: record.key, state: "ready", builtOn: record.on, builtAt: Date.now(), commit: record.inputs.repo.commit });
+      if (observation.artifacts.includes(record.id)) registry.images.saveTemplate({ id: record.id, key: record.key, state: "ready", builtOn: record.on, builtAt: Date.now(), commit: record.inputs.repo.commit, ...record.defaultHead === true ? { defaultHead: true } : {} });
       return;
     case "failed": return failed(record, status.code, failureMessage(status.message, status.logTail), ctx);
   }

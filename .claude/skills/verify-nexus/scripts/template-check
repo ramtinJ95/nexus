@@ -9,10 +9,12 @@ V="$(cd "$(dirname "$0")" && pwd)/verify-nexus"
 base="$(cd "$(dirname "$0")/../../../.." && pwd)/.verify/nexus"
 fail() { echo "template check: $*" >&2; exit 1; }
 
+# Named before the trap, so a down after an up that refused stops only this check's own run, never a stack already up.
+run="template-check-$(date +%s)-$$"
+export NEXUS_VERIFY_RUN=$run
 trap '"$V" down >&2 || true' EXIT
 NEXUS_VERIFY_PEOPLE=1 "$V" up
 "$V" doctor
-run=$(cat "$base/current")
 state() { node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))[process.argv[2]])' "$base/runs/$run/state.json" "$1"; }
 repo=$(state templateRepo) stackNode=$(state node)
 main=$(git -C "${repo#file://}" rev-parse main)

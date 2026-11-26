@@ -22,7 +22,7 @@ import { projectMirror } from "./mirror.ts";
 import { peopleOf, type People } from "./people.ts";
 import { repoInitCommand, templateCheckout } from "../backends/pylon-boot.ts";
 import type { Thread } from "./thread-store.ts";
-import type { ImageId, Person, ProjectId } from "../ids.ts";
+import type { ImageId, Person, ProjectId, TemplateId } from "../ids.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
 import type { CloneRepo } from "../protocol/spawn.ts";
 
@@ -84,7 +84,7 @@ async function aliceBuilds(s: Awaited<ReturnType<typeof install>>, repo: Awaited
   const build: CloneRepo = { kind: "clone", url: repo.url, checkout: { branch: template.inputs.repo.branch, commit: template.inputs.repo.commit } };
   await sh(repoInitCommand(build, repo.disk));
   await sh("if test -e .nexus/setup; then ./.nexus/setup; fi", repo.disk);
-  s.registry.images.saveTemplate({ id: template.id, key: template.key, state: "ready", builtOn: node, builtAt: Date.now() - 60_000, commit: template.inputs.repo.commit });
+  s.registry.images.saveTemplate({ id: template.id, key: template.key, state: "ready", builtOn: node, builtAt: Date.now() - 60_000, commit: template.inputs.repo.commit, ...template.defaultHead === true ? { defaultHead: true } : {} });
   observeNode(s, node, { total: 64, committed: 0 }, { artifacts: [image.id, template.id] as NodeObservation["artifacts"] });
   return { thread: started.body as Thread, template };
 }
@@ -121,6 +121,28 @@ test("on a shared install a thread whose setup differs from the default branch's
   assert.equal(started.status, 201, JSON.stringify(started.body));
   assert.deepEqual((started.body as Thread).setup, { how: "fresh", reason: "its setup differs from main's, and on a shared install a template is built only from main" });
   assert.deepEqual(s.registry.images.templates("acme" as ProjectId), []);
+});
+
+test("on a shared install a template recorded before the install was shared is neither booted from nor waited on", async (t) => {
+  const repo = await remote(t, { setup: false });
+  const s = await install(t, repo.url, shared);
+  s.callAs(alice);
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Alice's work", branch: "alice/wip" })).status, 201);
+  const [asked] = s.registry.images.templates("acme" as ProjectId);
+  assert.ok(asked?.state === "building" && asked.defaultHead === true);
+  const legacy = { key: asked.key, on: node, inputs: { ...asked.inputs, repo: { url: repo.url, branch: "alice/wip", commit: repo.aliceCommit } }, submitted: null };
+  s.registry.images.deleteTemplate(asked.id);
+  s.registry.images.saveTemplate({ id: "tpl-0000000000a1" as TemplateId, key: asked.key, state: "ready", builtOn: node, builtAt: Date.now() - 60_000, commit: repo.aliceCommit });
+  s.registry.images.saveTemplate({ id: "tpl-0000000000a2" as TemplateId, state: "building", ...legacy });
+  observeNode(s, node, { total: 64, committed: 0 }, { artifacts: [image.id, "tpl-0000000000a1"] as NodeObservation["artifacts"] });
+  s.callAs(bob);
+  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Bob's work", branch: "main" });
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+  const setup = (started.body as Thread).setup;
+  assert.ok(setup?.how === "fresh" && setup.building !== undefined && !setup.building.endsWith("a1") && !setup.building.endsWith("a2"), JSON.stringify(setup));
+  const build = s.registry.images.templates("acme" as ProjectId).find((r) => r.id === setup.building);
+  assert.ok(build?.state === "building");
+  assert.deepEqual(build.inputs.repo, { url: repo.url, branch: "main", commit: repo.mainCommit }, "bob's start builds main's head anew");
 });
 
 test("a solo install builds a template at the starting thread's commit, as before", async (t) => {

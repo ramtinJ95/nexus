@@ -106,11 +106,12 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
   /**
    * On a shared install a template is built only at the default branch's head, so the only code that runs on a disk
    * another person's pylon boots from is merged code. A thread whose setup differs from the default branch's boots fresh.
+   * Templates built before the install was shared are passed by, since their build may have run any branch.
    */
   async function sharedBuild(project: Project, read: SetupRead, request: StartRequest, branch: string): Promise<SetupRead> {
     if (!people.shared || "fresh" in read) return read;
     const { defaultBranch } = project;
-    if (branch === defaultBranch && request.commit === undefined) return read;
+    if (branch === defaultBranch && request.commit === undefined) return { ...read, build: { branch, commit: read.inputs.commit } };
     let head: SetupInputs | null;
     try {
       head = await mirror.setupInputs(read.project, { branch: defaultBranch });
@@ -135,7 +136,8 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     if ("fresh" in read) return fresh(read.fresh);
     const { project: remote, inputs } = read;
     const key = { project: remote.id, image, setupHash: setupHashOf(remote, inputs) };
-    const choice = chooseTemplate(remote, key, read.build ?? { branch, commit: inputs.commit }, registry.images.templates(remote.id), node, registry.nodes.node(node)?.observation?.artifacts ?? [], now);
+    const templates = registry.images.templates(remote.id).filter((t) => !people.shared || t.state === "failed" || t.defaultHead === true);
+    const choice = chooseTemplate(remote, key, read.build ?? { branch, commit: inputs.commit }, templates, node, registry.nodes.node(node)?.observation?.artifacts ?? [], now);
     switch (choice.kind) {
       case "reuse": return {
         setup: { how: "template", template: choice.template, builtAt: choice.builtAt, commit: inputs.commit },
@@ -143,7 +145,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
         repo: { kind: "clone", url: remote.repoUrl, checkout: { branch, commit: inputs.commit } },
       };
       case "build":
-        registry.images.saveTemplate({ id: choice.template, key, state: "building", on: choice.on, inputs: choice.inputs, submitted: null });
+        registry.images.saveTemplate({ id: choice.template, key, state: "building", on: choice.on, inputs: choice.inputs, submitted: null, ...people.shared ? { defaultHead: true as const } : {} });
         return fresh(`no template of this setup is on ${node} yet`, choice.template);
       case "wait": return fresh(`template ${choice.template} of this setup is still building on ${node}`, choice.template);
       case "fresh": return fresh(choice.reason);
