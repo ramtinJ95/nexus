@@ -11,6 +11,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { startApi } from "../../../../src/control/api/server.ts";
+import { claudeConversations } from "../../../../src/control/claude-conversation.ts";
+import { turnGate } from "../../../../src/control/drain.ts";
+import { noFeatures } from "../../../../src/control/features.ts";
 import { fakeHarness } from "../../../../src/test-support/fake-harness.ts";
 import { openRegistry } from "../../../../src/control/registry.ts";
 import type { NodeName, ProjectId, TailnetNodeId } from "../../../../src/ids.ts";
@@ -32,6 +35,8 @@ const api = await startApi({
   whois: async () => laptop, allowed: new Set([laptop]), hostnames: new Set(["127.0.0.1"]),
   harness: fakeHarness().harness, wake: () => {}, probes: new Map(), previewPorts: { first: 10200, last: 10299 },
   startThread: () => Promise.reject(new Error("the screenshots start no thread")),
+  features: noFeatures, gate: turnGate(() => false), claude: claudeConversations({ registry, probes: new Map(), log: () => {} }),
+  health: () => null, loop: () => ({ overMs: 0, p99Ms: 0, maxMs: 0, busy: 0 }), log: () => {},
 });
 const post = async (method: string, path: string, body: unknown) => {
   const res = await fetch(`${base}${path}`, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });

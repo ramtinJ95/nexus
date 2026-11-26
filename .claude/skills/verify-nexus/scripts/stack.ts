@@ -31,7 +31,7 @@ import { fakeTailscale, nodeHost, viaGateway } from "../../../../src/probe/fake-
 import { startProbe } from "../../../../src/probe/server.ts";
 import type { ImageId, NodeName, ProjectId, TailnetNodeId } from "../../../../src/ids.ts";
 import { probePort } from "../../../../src/protocol/routes.ts";
-import type { ImageManifest } from "../../../../src/image/images.ts";
+import type { ImageManifest } from "../../../../src/protocol/images.ts";
 import type { Project } from "../../../../src/control/project.ts";
 
 const exec = promisify(execFile);
@@ -170,6 +170,7 @@ const controlPlane = await startControlPlane({
   listen: { host: "127.0.0.1", port: ports.api, hostnames: ["127.0.0.1", "localhost"] },
   self: { tailnetNodeId: controlPlaneId },
   nodes: [{ name: node, tailnetHost: "127.0.0.1", tailnetNodeId: probeId }],
+  imageBuildNode: node,
   callers: [laptopId],
   dotfiles: { repo: verifyRepo, ref: "main" },
   harness: { storage: join(runDir, "harness.sqlite"), credentials: join(runDir, "unused-credentials.json"), model: scriptedModel },
