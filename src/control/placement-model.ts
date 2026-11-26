@@ -19,11 +19,13 @@ export interface Room { cpus: number; memoryGiB: number; diskGiB: number }
  * Placement's state that lives in this process only. A reservation is room a start placed a pylon in before its row
  * exists, so an overlapping start sees it taken; a start that a crash ended took no room. A released hold is kept by the
  * `until` it had, so a later hold of the thread counts again; a restart that loses them only holds the pylons until
- * placement releases them again.
+ * placement releases them again. A restart that loses the pylons held for their owner's cap counts their room until the
+ * planner's first pass marks them again.
  */
 export function placementMemory(clock: () => number) {
   const reservations = new Map<PylonId, { node: NodeName; resources: Room }>();
   const releasedHolds = new Map<ThreadId, number>();
+  const capHeld = new Set<PylonId>();
   return {
     /** Returns what releases it, once the pylon's row counts it or the start failed. */
     reserve(pylonId: PylonId, node: NodeName, resources: Room): () => void {
@@ -37,5 +39,11 @@ export function placementMemory(clock: () => number) {
       releasedHolds.set(thread, until);
     },
     holdReleased: (thread: ThreadId, until: number) => releasedHolds.get(thread) === until,
+    /** Marks a pylon whose boot waits for its owner's cap, or clears the mark. It holds no room while it waits, so it takes none from a start. */
+    holdForCap(pylonId: PylonId, held: boolean) {
+      if (held) capHeld.add(pylonId);
+      else capHeld.delete(pylonId);
+    },
+    heldForCap: (pylonId: PylonId) => capHeld.has(pylonId),
   };
 }

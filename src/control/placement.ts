@@ -19,12 +19,12 @@ const isUp = (p: PylonObservation) => p.phase !== "stopped" && !crashed(p);
 
 type PlacementRegistry = Pick<Registry, "now"> & {
   nodes: Pick<Registry["nodes"], "nodes">;
-  placement: Pick<Registry["placement"], "reserved">;
+  placement: Pick<Registry["placement"], "reserved" | "heldForCap">;
   threads: Pick<Registry["threads"], "pylonsWithStatusOn" | "pylonsWithThreadsOn" | "pylonsWithHeldThreadsOn">;
 };
 type TallyRegistry = PlacementRegistry & { nodes: Pick<Registry["nodes"], "transitions">; threads: Pick<Registry["threads"], "deletesAskedOn"> };
 type WeighingRegistry = PlacementRegistry & { nodeMetrics: Pick<Registry["nodeMetrics"], "latestHealthSample"> };
-type WakeRegistry = { nodes: Pick<Registry["nodes"], "nodes">; placement: Pick<Registry["placement"], "reserved">; threads: Pick<Registry["threads"], "pylonsSpawningOn" | "pylonsWithThreadsAmong"> };
+type WakeRegistry = { nodes: Pick<Registry["nodes"], "nodes">; placement: Pick<Registry["placement"], "reserved" | "holdForCap">; threads: Pick<Registry["threads"], "pylonsSpawningOn" | "pylonsWithThreadsAmong"> };
 
 type Need = Pick<BootInputs, "image" | "resources" | "network" | "repo" | "dotfiles">;
 
@@ -157,8 +157,11 @@ export function wakeShort(registry: WakeRegistry, p: StoredPylon, o: NodeObserva
   const seen = new Map(o.pylons.map((s) => [s.pylonId, s]));
   const need = uncounted(p, seen.get(p.pylonId)).memoryGiB;
   if (need === 0) return null;
-  const capped = cap === null ? null : capShort(registry, p, o, cap);
-  if (capped !== null) return capped;
+  if (cap !== null) {
+    const capped = capShort(registry, p, o, cap);
+    registry.placement.holdForCap(p.pylonId, capped !== null);
+    if (capped !== null) return capped;
+  }
   const c = o.capacity;
   // Asked on every pass of each pylon that waits for room, so it reads the spawns alone and not every pylon the node ever had.
   const inFlight = registry.threads.pylonsSpawningOn(p.node)
@@ -355,7 +358,8 @@ export function namedDiskShort(registry: PlacementRegistry, name: NodeName, need
 
 /**
  * The room the node has left once a pylon that holds `need` more boots there: what its observation does not count as
- * committed, less what its pylons about to boot or wake and the starts placed there will hold (`pending`). `placed`
+ * committed, less what its pylons about to boot or wake and the starts placed there will hold (`pending`), but for those
+ * that wait for their owner's cap. `placed`
  * is the node's pylons with their threads, or at least each one that is to be up.
  */
 export function roomLeft(registry: PlacementRegistry, node: NodeName, o: NodeObservation, c: NodeCapacity, need: Room,
@@ -363,7 +367,7 @@ export function roomLeft(registry: PlacementRegistry, node: NodeName, o: NodeObs
   const now = registry.now();
   const seen = new Map(o.pylons.map((p) => [p.pylonId, p]));
   const pending = [...placed
-    .filter(({ pylon, thread }) => pylon.failed === null && wantsToRun(thread, now))
+    .filter(({ pylon, thread }) => pylon.failed === null && wantsToRun(thread, now) && !registry.placement.heldForCap(pylon.pylonId))
     .map(({ pylon }) => uncounted(pylon, seen.get(pylon.pylonId))), ...registry.placement.reserved(node)]
     .reduce((total, r) => ({ cpus: total.cpus + r.cpus, memoryGiB: total.memoryGiB + r.memoryGiB, diskGiB: total.diskGiB + r.diskGiB }), { cpus: 0, memoryGiB: 0, diskGiB: 0 });
   const left: Room = {

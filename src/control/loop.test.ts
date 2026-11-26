@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { chatgptTokenHandoff } from "./chatgpt-token.ts";
 import { startLoop, type Ingest, type Loop, type LoopOptions } from "./loop.ts";
-import { nodePylons } from "./placement.ts";
+import { nodePylons, roomLeft } from "./placement.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import { upgradeAttempts } from "./record-upgrade.ts";
 import type { PortRange, Thread } from "./thread-store.ts";
@@ -896,6 +896,8 @@ test("a person's pylon past their cap waits, naming the cap and their running th
   assert.equal(phase(a3), undefined, "alice's third start never boots");
   assert.equal(registry.threads.bootHold(a3.pylonId)?.why, `alice@example.com already runs 2 pylons, and may run 2 at once: ${byPylon([a1, a2])}. Archiving one of them frees its place`);
   assert.deepEqual(registry.threads.pylon(a3.pylonId)!.attempts, { count: 0, last: null }, "a wait for the cap is no failed attempt");
+  const observed = registry.nodes.node(node)!.observation!;
+  assert.equal(roomLeft(registry, node, observed, observed.capacity, { cpus: 0, memoryGiB: 0, diskGiB: 0 }).pending.memoryGiB, 0, "her held start takes no room from another person's start");
 
   registry.threads.setThreadStatus(a1.id, "archived");
   await until("alice's third starts once she archives one", () => phase(a3) === "running");
@@ -907,6 +909,9 @@ test("a person's pylon past their cap waits, naming the cap and their running th
   await loop.wake(node);
   assert.equal(phase(a1), "stopped", "the wake of her archived thread waits too");
   assert.equal(registry.threads.bootHold(a1.pylonId)?.why, `alice@example.com already runs 2 pylons, and may run 2 at once: ${byPylon([a2, a3])}. Archiving one of them frees its place`);
+  registry.threads.setThreadStatus(a2.id, "archived");
+  await until("her wake boots once she archives another", () => phase(a1) === "running");
+  assert.equal(registry.threads.bootHold(a1.pylonId), undefined);
 });
 
 test("a pylon whose boot outlasts the idle time is not paused as it comes up, so its worker gets its first prompt", async (t) => {

@@ -67,6 +67,7 @@ function fakeRegistry(nodes: FakeNode[]) {
     placement: {
       releaseHold: (thread: ThreadId) => { released.add(thread); },
       reserved: (name: NodeName): Room[] => { const r = byName.get(name)?.reserved; return r === undefined ? [] : [{ cpus: 0, memoryGiB: r, diskGiB: 0 }]; },
+      heldForCap: () => false,
     },
   };
 }

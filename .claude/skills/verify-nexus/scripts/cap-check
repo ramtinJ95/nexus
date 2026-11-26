@@ -15,6 +15,8 @@ until_json() {
   fail "$step: $filter never held"
 }
 
+# Named, so the trap takes down this run alone, and never one another caller has up.
+export NEXUS_VERIFY_RUN="cap-check-$(date +%Y%m%d-%H%M%S)-$$"
 trap '"$V" down >&2 || true' EXIT
 NEXUS_VERIFY_PEOPLE=1 "$V" up
 "$V" doctor
