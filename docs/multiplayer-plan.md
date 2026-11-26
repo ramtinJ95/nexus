@@ -77,7 +77,9 @@ Slice `mp-00` builds two tools. Every later slice uses them.
 	- `boot`: the time from `POST /v1/threads` to a running pylon with its sessions started, for a template boot.
 	- `check`: the wall time of `.nexus/check`.
 
-For every perf box, measure the base commit first. Run each side five times, alternating base and head. A slice fails its perf box when the head's median is above the limit the box names and outside the base's run-to-run range. Keep the runs in the pull request as a linked file.
+For every perf box, measure the base commit first, and alternate base and head. Run `api` and `boot` five times on each side. Run `check` twice on each side. One `check` run takes about 15 minutes in a pylon with 2 CPUs, so five on each side takes about 2.5 hours, which `main-1` spent on a change to one function. A slice fails its perf box when the head's median is above the limit the box names and outside the base's run-to-run range. Two runs give a narrow range, so a `check` result above its limit is run a third time on each side before it fails the box.
+
+A rebase onto a base that moved does not restart the runs, unless it conflicts in code the box measures. Keep the runs in the pull request as a linked file that names the commit each number is from.
 
 A slice is verified only when its unit, live, and perf boxes are all checked. Tests alone do not verify a slice.
 
