@@ -12,7 +12,6 @@ Some tests fail today and pass when their slice is done. Others pass today, beca
 
 | File | Today | Slice | What it shows |
 |---|---|---|---|
-| `01-template-crosses-principals.test.ts` | fails | `mp-18` | One engineer's pylon boots from a template that ran another engineer's branch. |
 | `02-harness-login-is-one.test.ts` | fails | `mp-16` | Two engineers' harness threads send one login. |
 | `read-wakes.test.ts` | fails | `mp-04` | A diff or files read wakes the pylon. |
 | `reader-wakes-owner-pylon.test.ts` | passes, asserts the fault | `mp-04` | A reader's visit wakes the owner's paused pylon. |

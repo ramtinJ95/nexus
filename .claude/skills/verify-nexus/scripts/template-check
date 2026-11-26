@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# The live box of docs/multiplayer-plan.md's mp-18: on the stack started with people, alice starts a thread of ladle,
+# whose repository is the stack's templateRepo, on alice/wip, which changes only the script .nexus/setup runs so that
+# it leaves alice-wrote-this in the checkout. Her start asks for the template of that setup. Once it is ready, bob
+# starts a thread on main, which boots from it. Pass when bob's checkout holds no alice-wrote-this.
+# Exits 0 only if every step did what it should.
+set -euo pipefail
+V="$(cd "$(dirname "$0")" && pwd)/verify-nexus"
+base="$(cd "$(dirname "$0")/../../../.." && pwd)/.verify/nexus"
+fail() { echo "template check: $*" >&2; exit 1; }
+
+trap '"$V" down >&2 || true' EXIT
+NEXUS_VERIFY_PEOPLE=1 "$V" up
+"$V" doctor
+run=$(cat "$base/current")
+state() { node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))[process.argv[2]])' "$base/runs/$run/state.json" "$1"; }
+repo=$(state templateRepo) stackNode=$(state node)
+main=$(git -C "${repo#file://}" rev-parse main)
+aliceCommit=$(git -C "${repo#file://}" rev-parse alice/wip)
+echo "ladle's remote: main $main, alice/wip $aliceCommit"
+
+"$V" cli tc-project -- project add ladle "$repo" --node "$stackNode" --cpus 1 --memory 3 --disk 1 --json >/dev/null
+A=$("$V" cli tc-start-alice -- start --project ladle --title "template: alice's" --branch alice/wip --json)
+echo "alice's start: $(jq -c '{id, setup}' <<< "$A")"
+template=$(jq -r '.setup.building // empty' <<< "$A")
+[ -n "$template" ] || fail "alice's start asked for no template build"
+A=$(jq -r .id <<< "$A")
+
+# The API shows no template record, so its state is read from the run's registry, as scripts/mp-probe.ts boot does.
+record() {
+  node -e '
+    const { DatabaseSync } = require("node:sqlite");
+    const db = new DatabaseSync(process.argv[1], { readOnly: true });
+    const row = db.prepare("SELECT record FROM templates WHERE id = ?").get(process.argv[2]);
+    const obs = db.prepare("SELECT observation FROM nodes WHERE name = ?").get(process.argv[3])?.observation;
+    const t = row === undefined ? null : JSON.parse(row.record);
+    const held = obs != null && (JSON.parse(obs).artifacts ?? []).includes(process.argv[2]);
+    console.log(JSON.stringify({ state: t?.state ?? null, commit: t?.commit ?? t?.inputs?.repo?.commit ?? null, branch: t?.inputs?.repo?.branch ?? null, held, logTail: t?.logTail }));
+  ' "$base/runs/$run/registry.db" "$template" "$stackNode"
+}
+echo "template $template asked for: $(record)"
+for _ in $(seq 450); do
+  r=$(record)
+  [ "$(jq -r .state <<< "$r")" = failed ] && fail "template $template failed: $r"
+  [ "$(jq -r '.state == "ready" and .held' <<< "$r")" = true ] && break
+  sleep 2
+done
+echo "template $template once built: $r"
+[ "$(jq -r '.state == "ready" and .held' <<< "$r")" = true ] || fail "template $template was not ready within 15 minutes"
+built=$(jq -r .commit <<< "$r")
+
+running() {
+  for _ in $(seq 300); do
+    s=$("$V" cli "$2" -- show "$1" --json | jq -r .pylon.actualState)
+    [ "$s" = running ] && return 0
+    sleep 2
+  done
+  fail "$1's pylon is $s, not running"
+}
+B=$("$V" cli tc-start-bob --as bob -- start --project ladle --title "template: bob's" --json)
+echo "bob's start: $(jq -c '{id, setup}' <<< "$B")"
+[ "$(jq -r .setup.how <<< "$B")" = template ] || fail "bob's thread does not boot from a template"
+[ "$(jq -r .setup.template <<< "$B")" = "$template" ] || fail "bob's thread boots from another template than alice's start asked for"
+B=$(jq -r .id <<< "$B")
+running "$B" tc-show-bob
+running "$A" tc-show-alice
+
+files() { "$V" pylon "$1" "$2" -- sh -c 'echo "HEAD $(git rev-parse HEAD)"; ls -A | tr "\n" " "; echo'; }
+bobFiles=$(files tc-files-bob "$B")
+aliceFiles=$(files tc-files-alice "$A")
+echo "bob's checkout:   $bobFiles"
+echo "alice's checkout: $aliceFiles"
+grep -q "HEAD $main" <<< "$bobFiles" || fail "bob's checkout is not at main"
+grep -q alice-wrote-this <<< "$aliceFiles" || fail "alice's own checkout has no alice-wrote-this, so her branch's script did not run there"
+echo "template $template was built at $built, main is $main"
+[ "$built" = "$main" ] || fail "template $template was built at $built, not at main's head"
+if grep -q alice-wrote-this <<< "$bobFiles"; then fail "bob's checkout holds alice-wrote-this, which alice/wip's install.sh wrote"; fi
+echo "template check: alice's start on alice/wip built $template at main's head, bob's pylon booted from it, and bob's checkout holds no file alice's branch wrote"

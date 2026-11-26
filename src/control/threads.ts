@@ -5,7 +5,7 @@ import type { HarnessHost } from "./harness/host.ts";
 import { chooseTemplate, setupHashOf, type ProjectMirror, type SetupInputs, type ThreadSetup } from "./templates.ts";
 import { bootSecrets, effectiveAllowedHosts, gitIdentityOf, hasRemote, withHttpsHosts, type Project, type RemoteProject } from "./project.ts";
 import type { PylonOverlay } from "./overlay.ts";
-import { liveHashOf, minPylonMemoryGiB, minPylonMemoryReason, type BootInputs, type RepoInit } from "../protocol/spawn.ts";
+import { liveHashOf, minPylonMemoryGiB, minPylonMemoryReason, type BootInputs, type Checkout, type RepoInit } from "../protocol/spawn.ts";
 import { newThreadId, pylonIdOf, type ImageId, type NodeName, type ProjectId, type TemplateId } from "../ids.ts";
 import { newPylonRecord, type PylonRecord } from "./tick.ts";
 import { NoRoom, Refusal } from "./refusal.ts";
@@ -16,6 +16,7 @@ import { pylonLive } from "./live.ts";
 import type { Registry } from "./registry.ts";
 import type { Start, StartKey, StartRequest } from "./start-request.ts";
 import { standingRulesFor, withStandingRules } from "./standing-rules.ts";
+import { solo, type People } from "./people.ts";
 
 type ThreadsRegistry = Pick<Registry, "threads" | "images" | "nodeMetrics" | "nodes" | "now" | "projects" | "placement">;
 
@@ -76,11 +77,14 @@ export const bootNetwork = (project: Project, dotfilesRepo: string | undefined):
   allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), dotfilesRepo === undefined ? [] : [dotfilesRepo]), secrets: bootSecrets(project),
 });
 
-/** What the mirror read for the thread's ref, or why the thread boots fresh without a template. */
-type SetupRead = { project: RemoteProject; inputs: SetupInputs } | { fresh: string };
+/**
+ * What the mirror read for the thread's ref, or why the thread boots fresh without a template. `build` is the checkout
+ * a template build of this setup runs at, the thread's own commit when absent.
+ */
+type SetupRead = { project: RemoteProject; inputs: SetupInputs; build?: Checkout } | { fresh: string };
 
-export function threadStarter(options: { registry: ThreadsRegistry; harness: Pick<HarnessHost, "startThread">; mirror: ProjectMirror; dotfiles: PylonOverlay["dotfiles"]; gitIdentity?: BootInputs["gitIdentity"]; wake(node: NodeName): void }) {
-  const { registry, harness, mirror, dotfiles, gitIdentity, wake } = options;
+export function threadStarter(options: { registry: ThreadsRegistry; harness: Pick<HarnessHost, "startThread">; mirror: ProjectMirror; dotfiles: PylonOverlay["dotfiles"]; gitIdentity?: BootInputs["gitIdentity"]; wake(node: NodeName): void; people?: People | undefined }) {
+  const { registry, harness, mirror, dotfiles, gitIdentity, wake, people = solo } = options;
 
   /** A branch the start names and the remote does not have refuses the start, since the pylon's checkout of it would fail. */
   async function readSetup(project: Project, request: StartRequest, branch: string): Promise<SetupRead> {
@@ -100,6 +104,25 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
   }
 
   /**
+   * On a shared install a template is built only at the default branch's head, so the only code that runs on a disk
+   * another person's pylon boots from is merged code. A thread whose setup differs from the default branch's boots fresh.
+   */
+  async function sharedBuild(project: Project, read: SetupRead, request: StartRequest, branch: string): Promise<SetupRead> {
+    if (!people.shared || "fresh" in read) return read;
+    const { defaultBranch } = project;
+    if (branch === defaultBranch && request.commit === undefined) return read;
+    let head: SetupInputs | null;
+    try {
+      head = await mirror.setupInputs(read.project, { branch: defaultBranch });
+    } catch (err) {
+      return { fresh: `the control plane could not read .nexus/setup at ${defaultBranch}, the only branch a template is built from on a shared install: ${(err as Error).message}` };
+    }
+    if (head === null) return { fresh: `the remote has no branch ${defaultBranch}, the only branch a template is built from on a shared install` };
+    if (setupHashOf(read.project, head) !== setupHashOf(read.project, read.inputs)) return { fresh: `its setup differs from ${defaultBranch}'s, and on a shared install a template is built only from ${defaultBranch}` };
+    return { ...read, build: { branch: defaultBranch, commit: head.commit } };
+  }
+
+  /**
    * The pylon boots from a template of its setup that its node holds, or fresh. A template boot checks out the commit
    * the setup was read at, so a branch that moved since cannot give the pylon a .nexus/setup its template did not run.
    * A build this start asks for is recorded here, synchronously with the choice, so a concurrent start of the same
@@ -112,7 +135,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     if ("fresh" in read) return fresh(read.fresh);
     const { project: remote, inputs } = read;
     const key = { project: remote.id, image, setupHash: setupHashOf(remote, inputs) };
-    const choice = chooseTemplate(remote, key, { branch, commit: inputs.commit }, registry.images.templates(remote.id), node, registry.nodes.node(node)?.observation?.artifacts ?? [], now);
+    const choice = chooseTemplate(remote, key, read.build ?? { branch, commit: inputs.commit }, registry.images.templates(remote.id), node, registry.nodes.node(node)?.observation?.artifacts ?? [], now);
     switch (choice.kind) {
       case "reuse": return {
         setup: { how: "template", template: choice.template, builtAt: choice.builtAt, commit: inputs.commit },
@@ -172,7 +195,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
       // Another disk uses no template, but still waits on the read of a branch the start names, since the read is what
       // refuses one the remote does not have.
       const fetched = disk === null || request.branch !== undefined ? await readSetup(project, request, branch) : null;
-      const read: SetupRead = disk ?? fetched!;
+      const read: SetupRead = disk ?? await sharedBuild(project, fetched!, request, branch);
 
       const conversationId = request.claude === undefined && role !== "check" && role !== "verify" ? await harness.startThread({ threadId: id, pylonId }) : null;
       const now = registry.now();
