@@ -444,14 +444,14 @@ export async function reconcileRole(role: Role, config: WorkerConfig, api: Api, 
   }
 }
 
-/** Whether the release at `dir` reads deployer.json's releaseBranch. Its protocol file imports only builtins, so it loads without node_modules. */
-async function readsReleaseBranch(dir: string): Promise<boolean> {
-  return import(join(dir, "src/protocol/deploy.ts")).then((module: Record<string, unknown>) => "releaseBranchPattern" in module, () => false);
+/** Whether the release at `dir` keeps deployer.json's releaseBranch. Its protocol file imports only builtins, so it loads without node_modules. */
+async function keepsBranch(dir: string): Promise<boolean> {
+  return import(join(dir, "src/protocol/deploy.ts")).then((module: Record<string, unknown>) => module.keepsReleaseBranch === true, () => false);
 }
 
 /**
- * Hands the deployer to the worker of the release it installed. With a release branch, a worker from before the
- * setting would follow main instead, so the deployer keeps its own.
+ * Hands the deployer to the worker of the release it installed. With a release branch, a worker that does not keep it
+ * would follow main, or hand over to one that does, so the deployer keeps its own.
  */
 export async function promoteWorker(commit: string, repo: string, prefix: string, run: typeof command, releaseBranch?: string): Promise<void> {
   const target = `${releasesDir}/${commit}`;
@@ -461,7 +461,7 @@ export async function promoteWorker(commit: string, repo: string, prefix: string
     return "";
   });
   if (marked.trim() === target) return;
-  if (releaseBranch !== undefined && !await readsReleaseBranch(join(prefix, target))) {
+  if (releaseBranch !== undefined && !await keepsBranch(join(prefix, target))) {
     console.error(`the worker in ${target} does not read deployer.json's releaseBranch ${releaseBranch}, so the deployer keeps its own`);
     await writeFile(rejected, target);
     return;

@@ -18,9 +18,12 @@ test("with a release branch, a worker from before the setting is not promoted, a
   const dir = await mkdtemp(join(tmpdir(), "nexus-promote-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const older = "b".repeat(40);
+  const readsOnly = "c".repeat(40);
   await mkdir(join(dir, "deployer"), { recursive: true });
   await mkdir(join(dir, "releases", older, "src/protocol"), { recursive: true });
   await writeFile(join(dir, "releases", older, "src/protocol/deploy.ts"), "export const fullCommit = /^[0-9a-f]{40}$/;\n");
+  await mkdir(join(dir, "releases", readsOnly, "src/protocol"), { recursive: true });
+  await writeFile(join(dir, "releases", readsOnly, "src/protocol/deploy.ts"), "export const releaseBranchPattern = /^main$/;\n");
   await mkdir(join(dir, "releases", commit, "src"), { recursive: true });
   await cp(join(dirname(import.meta.dirname), "protocol"), join(dir, "releases", commit, "src/protocol"), { recursive: true });
   const checked: string[] = [];
@@ -28,6 +31,8 @@ test("with a release branch, a worker from before the setting is not promoted, a
   await promoteWorker(older, dir, dir, run, "multiplayer");
   assert.equal(existsSync(join(dir, "deployer-current")), false, "a worker that would follow main keeps the deployer's own");
   assert.equal((await readFile(join(dir, "deployer/rejected"), "utf8")).trim(), `releases/${older}`);
+  await promoteWorker(readsOnly, dir, dir, run, "multiplayer");
+  assert.equal(existsSync(join(dir, "deployer-current")), false, "a worker that reads the branch but would promote one that ignores it is refused too");
   assert.deepEqual(checked, [], "a worker refused for the branch is never run");
   await promoteWorker(commit, dir, dir, run, "multiplayer");
   assert.equal(await readlink(join(dir, "deployer-current")), `releases/${commit}`, "a worker that reads the branch is promoted");

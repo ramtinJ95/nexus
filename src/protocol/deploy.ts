@@ -14,6 +14,8 @@ export const tsNet = /^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.ts\.net$/;
  */
 export const defaultReleaseBranch = "main";
 export const releaseBranchPattern = /^(?!.*\.lock(?:\/|$))[A-Za-z0-9][A-Za-z0-9_-]*(?:[./][A-Za-z0-9][A-Za-z0-9_-]*)*$/;
+/** A release whose worker reads `releaseBranch` and promotes only a worker that does too. The deployer promotes no other while a release branch is set. */
+export const keepsReleaseBranch = true;
 
 /** The deploy key a deployer's token gives: what the control plane keeps and compares a reporter's bearer token against. */
 export const tokenDigest = (token: string): string => createHash("sha256").update(token).digest("hex");
