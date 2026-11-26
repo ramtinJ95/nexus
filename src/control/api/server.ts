@@ -282,7 +282,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const { entry: [, , policy, route], m } = match;
     demand(roles, policy, caller);
     // An owner route's path starts with its thread, which kit.ts's `on` checks.
-    if (policy.role === "owner") actsOn(m[1]!, identity, roles, policy);
+    if (policy.role === "owner") actsOn(m[1]!, { identity, roles }, policy);
     const url = new URL(req.url ?? "/", "http://nexus");
     const run = () => route(m, { query: url.searchParams, caller, identity, roles, host, body: (empty) => readJson(req, empty) });
     const reply = policy.startsTurn ? await gate.run(async () => run()) : await run();
@@ -388,7 +388,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const { caller, identity, roles } = await admitted(req, attach);
     demand(roles, attach, caller);
     const id = attachRoute.exec(pathOf(req.url)!)![1]!;
-    actsOn(id, identity, roles, attach);
+    actsOn(id, { identity, roles }, attach);
     if (stopping) throw new Refusal("unavailable", "the control plane is stopping");
     // CORS does not guard a WebSocket handshake, so without this a preview's page could open a terminal from the
     // browser of anyone allowed.
@@ -419,7 +419,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     const { caller, identity, roles } = await admitted(req, exec);
     demand(roles, exec, caller);
     const id = execRoute.exec(pathOf(req.url)!)![1]!;
-    actsOn(id, identity, roles, exec);
+    actsOn(id, { identity, roles }, exec);
     const foreign = foreignSite(req);
     if (foreign !== null) throw new Refusal("forbidden", `the exec route does not answer pages from ${foreign}`);
     const { t, pylon, probe, line } = execable(id, new URL(req.url ?? "/", "http://nexus").searchParams, caller);

@@ -192,3 +192,32 @@ test("without people the operator owns every thread and a device on the allowlis
   assert.equal(r.body.startedBy, laptop);
   assert.equal(s.registry.threads.pylon(r.body.pylonId)?.node, node);
 });
+
+test("on a shared install a repeat of another person's start request is refused, so it never sends a message into their thread", async (t) => {
+  const s = await shared(t);
+  const body = { project: "acme", title: "alice's", message: "Go.", requestId: "alice:1" };
+  const first = await s.call("POST", "/v1/threads", body);
+  assert.equal(first.status, 201, JSON.stringify(first.body));
+  const sends = () => s.calls.filter((c) => c[0] === "send").length;
+  const before = sends();
+  s.as(answer(tailnet.bob));
+  const repeat = await s.call("POST", "/v1/threads", body);
+  assert.equal(repeat.status, 403);
+  assert.match(repeat.body.error, new RegExp(`started thread ${first.body.id} of alice@example\\.com's, so only alice@example\\.com may repeat it`));
+  assert.equal(sends(), before, "bob's repeat sent nothing");
+  s.as(answer(tailnet.alice));
+  assert.equal((await s.call("POST", "/v1/threads", body)).status, 201, "alice's own repeat answers her thread");
+});
+
+test("on a shared install a caller the allowlist still admits but who is no person reads threads with their owners' marks, and has no mark of its own", async (t) => {
+  const s = await shared(t, { allowed: new Set(["nFIREBAT" as TailnetNodeId]) });
+  const id = (await s.call("POST", "/v1/threads", { project: "acme", title: "alice's" })).body.id as ThreadId;
+  s.registry.threads.recordReply(id, 5_000);
+  assert.equal((await s.call("POST", `/v1/threads/${id}/seen`, { lastReplyAt: 5_000 })).status, 204);
+  s.as(nodeAsAlice);
+  assert.equal((await s.call("GET", `/v1/threads/${id}`)).body.seenAt, 5_000, "the control node reads alice's mark");
+  assert.equal((await s.call("GET", "/v1/threads")).status, 200);
+  const marked = await s.call("POST", `/v1/threads/${id}/unseen`, {});
+  assert.equal(marked.status, 403, "whatever user whois names for it, the control node marks nothing");
+  assert.equal(s.registry.threads.attention(id), null, "alice's reply stays seen");
+});

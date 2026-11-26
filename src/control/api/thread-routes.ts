@@ -1,5 +1,4 @@
-import type { Starter } from "../people.ts";
-import type { TailnetIdentity } from "../../node-base/tailscaled.ts";
+import { operator, type Starter } from "../people.ts";
 import type { z } from "zod";
 import { isPipelineRequestId, requestIds, type Person, type ProjectId, type ThreadId } from "../../ids.ts";
 import type { StartKey } from "../start-request.ts";
@@ -12,7 +11,7 @@ import { feature, type Features } from "../features.ts";
 import { isOpenStatus, openStatuses, retryRefusal, type ThreadStatus } from "../reconcile.ts";
 import { startKey } from "../threads.ts";
 import { ok, created, noContent, parse, on, type RouteEntry, type ApiKit } from "./kit.ts";
-import { anyAllowed } from "./access.ts";
+import { anyAllowed, type Caller } from "./access.ts";
 import { threadRoutes as routes, type QueuedThread } from "../../contract/threads.ts";
 import { activitySchema, messageSchema, seenSchema, startSchema } from "../../contract/threads-parse.ts";
 
@@ -22,16 +21,13 @@ const keptStatuses = Object.keys({ active: true, idle: true, archived: true } sa
 export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEntry[] {
   const { lookup, thread, guard, wakeThread, rows, shown, open, registry, harness, startThread, agents, agentOf, deleteThread, starter, personAs } = kit;
 
-  /** The person whose seen mark a request reads and writes. Every caller a seen route admits is one. */
-  function reader(identity: TailnetIdentity): Person {
-    const person = personAs(identity);
-    if (person === null) throw new Refusal("forbidden", "only a person in control.json's people has a seen mark");
-    return person;
-  }
-
-  /** The threads as `person` has seen them: with their own mark where they do not own the thread. */
-  function seenBy(person: Person, threads: readonly Thread[]): Thread[] {
-    if (threads.every((t) => t.owner === person)) return [...threads];
+  /**
+   * The threads as the caller has seen them: with their own mark where they do not own the thread. A caller who is no
+   * person, such as the control node a shared install still allows, has no mark and reads the owners'.
+   */
+  function seenBy(caller: Caller, threads: readonly Thread[]): Thread[] {
+    const person = personAs(caller);
+    if (person === null || threads.every((t) => t.owner === person)) return [...threads];
     const marks = registry.threads.seenMarks(person);
     return threads.map((t) => t.owner === person ? t : { ...t, seenAt: marks.get(t.id) ?? null });
   }
@@ -81,12 +77,19 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
   }
 
   /** Starts in flight by request ID, so a repeat that arrives before the first answers shares it. */
-  const starting = new Map<string, { body: string; answer: Promise<Thread | QueuedThread> }>();
+  const starting = new Map<string, { body: string; owner: Person; answer: Promise<Thread | QueuedThread> }>();
+
+  /** Whose thread a start request made, or undefined once retention purged it. */
+  const ownerOf = (id: ThreadId): Person | undefined => {
+    const queued = registry.queue.queuedThread(id);
+    return registry.threads.thread(id)?.owner ?? (queued === undefined ? undefined : queued.owner ?? operator);
+  };
 
   /**
    * A start with a request ID is stored with the thread or queued record it made, so a repeat of the ID answers that
    * thread as it is now and sends an immediate start's first message again, which the harness delivers once. A repeat
-   * with another body is refused. A start that failed made nothing, so its ID is free.
+   * with another body is refused, and so is a repeat by anyone but the owner of the thread it made, since it would send
+   * that thread's first message again. A start that failed made nothing, so its ID is free.
    */
   function start(body: unknown, by: Starter): Promise<Thread | QueuedThread> {
     const { requestId, ...fields } = parse(startSchema, body);
@@ -95,6 +98,10 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
     const key = startKey(requestId, fields);
     const pending = starting.get(requestId);
     const made = registry.threads.startRequest(requestId);
+    const owner = pending?.owner ?? (made === undefined ? undefined : ownerOf(made.thread));
+    if (owner !== undefined && owner !== by.owner) {
+      throw new Refusal("forbidden", `request ID ${requestId} ${made === undefined ? "is starting a thread" : `started thread ${made.thread}`} of ${owner}'s, so only ${owner} may repeat it. Start a new thread under a new request ID`);
+    }
     const earlier = pending ?? made;
     if (earlier !== undefined && earlier.body !== key.body) {
       throw new HttpError(409, `request ID ${requestId} ${made === undefined ? "is starting a thread" : `started thread ${made.thread}`} with another body. Start a new thread under a new request ID`);
@@ -102,7 +109,7 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
     if (pending !== undefined) return pending.answer;
     if (made !== undefined) refuseEnded(requestId, made.thread);
     const answer = startOnce(fields, by, key, made?.thread).finally(() => starting.delete(requestId));
-    starting.set(requestId, { body: key.body, answer });
+    starting.set(requestId, { body: key.body, owner: by.owner, answer });
     return answer;
   }
 
@@ -140,10 +147,12 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
     return record.status === "started" ? registry.threads.thread(record.id)! : queuedView(registry, record);
   }
 
-  const seen = (unseen: boolean) => async ({ thread: id }: { thread: string }, r: { identity: TailnetIdentity; body(empty?: unknown): Promise<unknown> }) => {
+  const seen = (unseen: boolean) => async ({ thread: id }: { thread: string }, r: Caller & { body(empty?: unknown): Promise<unknown> }) => {
     const t = thread(id);
     const body = parse(seenSchema, await r.body({}));
-    registry.threads.markSeenBy(t.id, reader(r.identity), unseen, registry.now(), body.lastReplyAt);
+    const person = personAs(r);
+    if (person === null) throw new Refusal("forbidden", "only a person in control.json's people has a seen mark");
+    registry.threads.markSeenBy(t.id, person, unseen, registry.now(), body.lastReplyAt);
     return noContent;
   };
 
@@ -152,7 +161,7 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
       const { project, deleted, status } = r.query;
       if (status !== undefined && status !== "open") throw new HttpError(400, `status must be "open", not ${JSON.stringify(status)}`);
       const statuses = status === "open" ? openStatuses : deleted === false ? keptStatuses : undefined;
-      return ok(rows(seenBy(reader(r.identity), registry.threads.threads({ project: project as ProjectId | undefined, status: statuses }))));
+      return ok(rows(seenBy(r, registry.threads.threads({ project: project as ProjectId | undefined, status: statuses }))));
     }),
     on(routes.start, { role: "person", action: "start a thread", startsTurn: true }, async (_, r) => {
       return created(await start(await r.body(), starter(r)));
@@ -169,7 +178,7 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
     on(routes.startQueued, { role: "owner", action: "start a queued thread", startsTurn: true }, async ({ thread: id }, r) => {
       return created(await queueOrRefuse().startNow(id as ThreadId, r.caller));
     }),
-    on(routes.show, anyAllowed, ({ thread: id }, r) => ok(shown(seenBy(reader(r.identity), [thread(id)])[0]!))),
+    on(routes.show, anyAllowed, ({ thread: id }, r) => ok(shown(seenBy(r, [thread(id)])[0]!))),
     on(routes.delete, { role: "owner", action: "delete a thread", admin: true }, async ({ thread: id }) => {
       const found = lookup(id);
       return ok("queued" in found ? queuedStatus(id, "deleted") : await deleteThread(found.thread));

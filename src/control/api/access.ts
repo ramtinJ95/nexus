@@ -38,6 +38,8 @@ export interface OwnerPolicy { role: "owner"; action: string; admin?: true }
 export const anyAllowed = { role: "allowed" } satisfies Policy;
 
 type AccessRegistry = Pick<Registry, "nodes">;
+/** Who whois names a request's device as, and the roles roleOf gives it. */
+export interface Caller { identity: TailnetIdentity; roles: ReadonlySet<Role> }
 
 /** Whom the control plane trusts beyond its allowlist: the control node, the deployers, and control.json's deploy keys. */
 export interface Deployment {
@@ -172,36 +174,39 @@ export function apiAccess(registry: Registry, wake: (node: NodeName) => void, op
    */
   const admittable = (caller: TailnetNodeId) => !people.shared && (options.deployment === undefined ? registry.nodes.nodeByTailnetId(caller) === undefined : isPerson(registry, options.deployment, caller));
 
-  /** The person a caller is: a solo install's operator, or on a shared install the login `people` names, if it names one. */
-  const personAs = (identity: TailnetIdentity): Person | null => people.shared ? personOf(people, identity)?.person ?? null : operator;
+  /**
+   * The person a caller is: a solo install's operator, or on a shared install the login of a caller roleOf names a
+   * person, never the control node or a node, whatever user whois names for it.
+   */
+  const personAs = ({ identity, roles }: Caller): Person | null => !people.shared ? operator : roles.has("person") ? personOf(people, identity)?.person ?? null : null;
 
   /** Who a person's request starts or queues a thread as. On a shared install its owner is the login the person route admitted. */
-  function starter({ caller, identity }: { caller: TailnetNodeId; identity: TailnetIdentity }): Starter {
-    const owner = personAs(identity);
+  function starter(r: Caller & { caller: TailnetNodeId }): Starter {
+    const owner = personAs(r);
     if (owner === null) throw new Refusal("forbidden", "only a person in control.json's people may start a thread");
-    return { caller, owner };
+    return { caller: r.caller, owner };
   }
 
   /**
    * Thread `id`'s owner when the caller is someone else on a shared install, or null: the caller owns it, or the
    * thread has no row and no queue record, which the route's own lookup refuses.
    */
-  function ownerOtherThan(id: string, identity: TailnetIdentity): Person | null {
+  function ownerOtherThan(id: string, caller: Caller): Person | null {
     if (!people.shared) return null;
     const found = registry.threads.thread(id as ThreadId) ?? registry.queue.queuedThread(id as ThreadId);
     const owner = found === undefined ? null : found.owner ?? operator;
-    return owner === personAs(identity) ? null : owner;
+    return owner === personAs(caller) ? null : owner;
   }
 
   /** Refuses a person who may not take `policy`'s route on thread `id`: anyone but its owner, unless the route admits an admin and the caller is one. */
-  function actsOn(id: string, identity: TailnetIdentity, roles: ReadonlySet<Role>, policy: OwnerPolicy) {
-    const owner = ownerOtherThan(id, identity);
-    if (owner === null || (policy.admin === true && roles.has("deployer"))) return;
+  function actsOn(id: string, caller: Caller, policy: OwnerPolicy) {
+    const owner = ownerOtherThan(id, caller);
+    if (owner === null || (policy.admin === true && caller.roles.has("deployer"))) return;
     throw new Refusal("forbidden", `thread ${id} is ${owner}'s, so only ${owner}${policy.admin === true ? " or an admin" : ""} may ${policy.action}`);
   }
 
-  const answerRefusalOf = ({ roles, identity }: { roles: ReadonlySet<Role>; identity: TailnetIdentity }, question: Question): AnswerRefusal | null =>
-    answerRefusal(question, { person: roles.has("person"), deployer: roles.has("deployer"), owner: !("thread" in question) || ownerOtherThan(question.thread, identity) === null });
+  const answerRefusalOf = (caller: Caller, question: Question): AnswerRefusal | null =>
+    answerRefusal(question, { person: caller.roles.has("person"), deployer: caller.roles.has("deployer"), owner: !("thread" in question) || ownerOtherThan(question.thread, caller) === null });
 
   return { lookup, thread, threadRefusal, guard, current, wakeThread: threadWaker(registry, wake), roleOf, admittable, personAs, starter, actsOn, answerRefusalOf };
 }
