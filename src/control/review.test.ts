@@ -942,7 +942,7 @@ test("a deploy that fails rolls back to the previous release and tells the perso
   assert.deepEqual(shown(f.review().phase), { kind: "needs-person", reasons: [
     `The deploy of ${merged} failed: node control rolled-back (health check failed).`,
     `Rolled back to the previous release, ${previous}, which every service reports healthy.`,
-    `${merged} is still on the default branch. Revert it before the next deploy only if it caused the failure: a deploy that failed before the release ran, as when the deployer could not reach the control plane, needs no revert.`,
+    `${merged} is still on main. Revert it before the next deploy only if it caused the failure: a deploy that failed before the release ran, as when the deployer could not reach the control plane, needs no revert.`,
   ] });
   assert.throws(() => loop.land(f.builder, "nLAPTOP"), /already merged/, "a merged review cannot land again");
 });
@@ -1033,7 +1033,7 @@ test("landings deploy one at a time: the second merges once the first is healthy
   assert.deepEqual((f.registry.reviews.review(second)!.phase as { reasons: string[] }).reasons, [
     `The deploy of ${merged2} failed: node control rolled-back (health check failed).`,
     `Rolled back to the previous release, ${merged}, which every service reports healthy.`,
-    `${merged2} is still on the default branch. Revert it before the next deploy only if it caused the failure: a deploy that failed before the release ran, as when the deployer could not reach the control plane, needs no revert.`,
+    `${merged2} is still on main. Revert it before the next deploy only if it caused the failure: a deploy that failed before the release ran, as when the deployer could not reach the control plane, needs no revert.`,
   ]);
 });
 

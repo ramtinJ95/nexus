@@ -132,7 +132,7 @@ export function landing({ registry, release, mayLand, now, toPerson }: LandingDe
         if (!phase.requested) return requestRelease(r, phase, phase.previous, `nexus review ${r.id} rollback`);
         const at = view();
         const outcome = releaseOutcome(at, phase.previous);
-        const revert = `${phase.commit} is still on the default branch. Revert it before the next deploy only if it caused the failure: a deploy that failed before the release ran, as when the deployer could not reach the control plane, needs no revert.`;
+        const revert = `${phase.commit} is still on ${release.branch}. Revert it before the next deploy only if it caused the failure: a deploy that failed before the release ran, as when the deployer could not reach the control plane, needs no revert.`;
         if (outcome === "healthy") return toPerson(r, "deploy", phase.why, `Rolled back to the previous release, ${phase.previous}, which every service reports healthy.`, revert);
         if (outcome === "superseded") return toPerson(r, "deploy", phase.why, `Another release, ${at.desired?.commit ?? "none"}, replaced the rollback to ${phase.previous} before it was healthy.`, revert);
         const waiting = pending(r, phase, at, outcome);
