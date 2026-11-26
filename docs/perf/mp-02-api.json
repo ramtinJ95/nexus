@@ -1,0 +1,235 @@
+{
+  "slice": "mp-02",
+  "probe": "api",
+  "recorded": "2026-11-26",
+  "machine": "Nexus pylon, 4 CPU, Docker in the pylon, NEXUS_VERIFY_BASE=nexus-verify-base:pylon",
+  "order": "base first, then head, alternating, five runs a side, both sides on the solo stack (no NEXUS_VERIFY_PEOPLE)",
+  "limit": "fail when the head median of medians is over 15% above base and outside base range",
+  "base": {
+    "commit": "771393d1",
+    "runs": [
+      {
+        "probe": "api",
+        "revision": "771393d1",
+        "dirty": false,
+        "medianMs": 7.5,
+        "p95Ms": 10.9,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 7.3,
+        "bobMedianMs": 7.8
+      },
+      {
+        "probe": "api",
+        "revision": "771393d1",
+        "dirty": false,
+        "medianMs": 4.2,
+        "p95Ms": 8.6,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 4.1,
+        "bobMedianMs": 4.3
+      },
+      {
+        "probe": "api",
+        "revision": "771393d1",
+        "dirty": false,
+        "medianMs": 4,
+        "p95Ms": 9.6,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.8,
+        "bobMedianMs": 4.1
+      },
+      {
+        "probe": "api",
+        "revision": "771393d1",
+        "dirty": false,
+        "medianMs": 3.6,
+        "p95Ms": 9.7,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.5,
+        "bobMedianMs": 3.7
+      },
+      {
+        "probe": "api",
+        "revision": "771393d1",
+        "dirty": false,
+        "medianMs": 3.2,
+        "p95Ms": 4.8,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.1,
+        "bobMedianMs": 3.3
+      }
+    ]
+  },
+  "head": {
+    "commit": "6793e866",
+    "note": "dirty is true because docs/multiplayer-plan.md's ticks were uncommitted during the runs. No code differed from 6793e866.",
+    "runs": [
+      {
+        "probe": "api",
+        "revision": "6793e866",
+        "dirty": true,
+        "medianMs": 3.6,
+        "p95Ms": 5.4,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.4,
+        "bobMedianMs": 3.7
+      },
+      {
+        "probe": "api",
+        "revision": "6793e866",
+        "dirty": true,
+        "medianMs": 4.1,
+        "p95Ms": 5.8,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.9,
+        "bobMedianMs": 4.2
+      },
+      {
+        "probe": "api",
+        "revision": "6793e866",
+        "dirty": true,
+        "medianMs": 4,
+        "p95Ms": 9,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.9,
+        "bobMedianMs": 4
+      },
+      {
+        "probe": "api",
+        "revision": "6793e866",
+        "dirty": true,
+        "medianMs": 3.2,
+        "p95Ms": 4.1,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.1,
+        "bobMedianMs": 3.3
+      },
+      {
+        "probe": "api",
+        "revision": "6793e866",
+        "dirty": true,
+        "medianMs": 4.3,
+        "p95Ms": 10.9,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 4,
+        "bobMedianMs": 4.5
+      }
+    ]
+  },
+  "summary": {
+    "baseMedianMs": 4,
+    "baseRangeMs": [
+      3.2,
+      7.5
+    ],
+    "headMedianMs": 4,
+    "headRangeMs": [
+      3.2,
+      4.3
+    ],
+    "verdict": "pass: no measurable difference"
+  },
+  "extra": {
+    "note": "Not part of the box. Two head runs with NEXUS_VERIFY_PEOPLE=1 after the box read about 8 ms. Two alternating pairs of people and solo on a clean head then read 8.2, 8.3, 8.0 and 6.9 ms, so the rise was drift on the machine over time, which moved both modes alike, not people. vmstat showed no steal and no containers were left. In-process, GET /v1/threads over 50 threads took a 2.5 to 2.8 ms median solo and shared alike.",
+    "peopleAfterBox": [
+      {
+        "people": true,
+        "probe": "api",
+        "revision": "6793e866",
+        "dirty": true,
+        "medianMs": 7.9,
+        "p95Ms": 9.9,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 7.7,
+        "bobMedianMs": 8.2
+      },
+      {
+        "people": true,
+        "probe": "api",
+        "revision": "6793e866",
+        "dirty": true,
+        "medianMs": 8,
+        "p95Ms": 11.6,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 7.9,
+        "bobMedianMs": 8.4
+      }
+    ],
+    "alternatingPeopleAndSolo": [
+      {
+        "people": true,
+        "probe": "api",
+        "revision": "6793e866",
+        "dirty": false,
+        "medianMs": 8.2,
+        "p95Ms": 11.6,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 8.1,
+        "bobMedianMs": 8.5
+      },
+      {
+        "probe": "api",
+        "revision": "6793e866",
+        "dirty": false,
+        "medianMs": 8.3,
+        "p95Ms": 9.9,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 8,
+        "bobMedianMs": 8.6
+      },
+      {
+        "people": true,
+        "probe": "api",
+        "revision": "6793e866",
+        "dirty": false,
+        "medianMs": 8,
+        "p95Ms": 11.3,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 7.8,
+        "bobMedianMs": 8.3
+      },
+      {
+        "probe": "api",
+        "revision": "6793e866",
+        "dirty": false,
+        "medianMs": 6.9,
+        "p95Ms": 8.8,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 6.9,
+        "bobMedianMs": 7.3
+      }
+    ]
+  }
+}
