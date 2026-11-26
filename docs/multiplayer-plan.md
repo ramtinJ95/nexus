@@ -346,13 +346,13 @@ Three limits of this guard, each handled elsewhere:
 
 ### mp-18: a template is built from the default branch only
 
-- [ ] **Depends on.** `mp-00`.
-- [ ] **Files.** `src/control/templates.ts`, `src/control/threads.ts`, `src/control/template-builds.ts`, `src/protocol/images.ts`.
-- [ ] **Change.** A template's key holds no branch, commit, or owner, and a build checks out the starting thread's commit. So one engineer's branch can leave code on the disk another engineer's pylon boots from. On a shared install a build always runs at the default branch's head. A thread whose setup inputs differ from the default branch's boots fresh.
+- [x] **Depends on.** `mp-00`.
+- [x] **Files.** `src/control/templates.ts`, `src/control/threads.ts`, `src/control/template-builds.ts`, `src/protocol/images.ts`.
+- [x] **Change.** A template's key holds no branch, commit, or owner, and a build checks out the starting thread's commit. So one engineer's branch can leave code on the disk another engineer's pylon boots from. On a shared install a build always runs at the default branch's head. A thread whose setup inputs differ from the default branch's boots fresh.
 - [ ] **Result.** The only code that ran on a shared boot disk is code that was merged after review.
-- [ ] **Unit.** `interrogate/01-template-crosses-principals.test.ts` passes.
-- [ ] **Live.** On the two-person stack, `alice` starts a thread on a branch that changes a script that setup runs. Then `bob` starts a thread on the default branch. Pass when `bob`'s checkout holds no file that `alice`'s branch wrote.
-- [ ] **Perf.** `boot` for a template boot on the default branch. Fail above 10% over base. Record the fresh-boot time for a branch that changes setup inputs, so the cost of the rule is known.
+- [x] **Unit.** `interrogate/01-template-crosses-principals.test.ts` passes.
+- [x] **Live.** On the two-person stack, `alice` starts a thread on a branch that changes a script that setup runs. Then `bob` starts a thread on the default branch. Pass when `bob`'s checkout holds no file that `alice`'s branch wrote.
+- [x] **Perf.** `boot` for a template boot on the default branch. Fail above 10% over base. Record the fresh-boot time for a branch that changes setup inputs, so the cost of the rule is known.
 
 ### mp-19: `nexus setup sync` copies an engineer's config files
 
