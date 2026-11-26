@@ -1,5 +1,5 @@
 /** What a start asks for, and the key it is stored under, which the thread starter, the queue and the pipeline share. */
-import type { NodeName, ThreadId } from "../ids.ts";
+import type { NodeName, Person, ThreadId } from "../ids.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
 import type { Role } from "./agent-protocol.ts";
 
@@ -18,9 +18,9 @@ export interface StartRequest {
 export interface StartKey { requestId: string; body: string }
 
 /**
- * A start: the request, who asks, and the role the thread takes. A reviewer's Claude prompt goes as written, where any
+ * A start: the request, who asks, the person who owns the thread, and the role the thread takes. A reviewer's Claude prompt goes as written, where any
  * other gets `/poteto-mode` in front. A check or verify thread has no agent, since it needs only its pylon. Only a
  * builder gets the project's standing rules. `queued` is the queued record the start starts, which gives the thread its
  * ID, `id` an ID the caller recorded the thread by before it started, and `key` is stored with the thread.
  */
-export interface Start { request: StartRequest; caller: string; role: Role; queued?: ThreadId | undefined; id?: ThreadId | undefined; key?: StartKey | undefined }
+export interface Start { request: StartRequest; caller: string; owner: Person; role: Role; queued?: ThreadId | undefined; id?: ThreadId | undefined; key?: StartKey | undefined }

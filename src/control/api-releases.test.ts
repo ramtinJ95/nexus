@@ -1,4 +1,5 @@
 /** Release, deployer and drain routes, and the usage backfill's. */
+import { operator } from "./people.ts";
 import { reportSchema } from "../contract/release-parse.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -124,7 +125,7 @@ test("drain reads committed live and queued work rather than a lagging activity 
 test("drain reads only harness conversations, so Claude worker and bare threads never reach the harness", async (t) => {
   const s = await withThread(t, { deployment });
   await s.call("POST", "/v1/threads", { project: "acme", title: "Claude worker", claude: "fix it" });
-  await s.startThread({ request: { project: "acme", title: "Check" }, caller: laptop, role: "check" });
+  await s.startThread({ request: { project: "acme", title: "Check" }, caller: laptop, owner: operator, role: "check" });
   await s.call("PUT", "/v1/release", { commit: deployCommit });
   s.callAs("nFIREBAT" as TailnetNodeId);
   s.calls.length = 0;

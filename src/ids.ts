@@ -16,6 +16,8 @@ export type JobId = Brand<string, "JobId">; // UUID minted by the control plane
 export type LiveHash = Brand<string, "LiveHash">;
 /** Tailscale's stable node ID, as LocalAPI whois reports it. It survives renames and address changes. */
 export type TailnetNodeId = Brand<string, "TailnetNodeId">;
+/** A person who owns threads: a tailnet login control.json's `people` names, or src/control/people.ts's operator. */
+export type Person = Brand<string, "Person">;
 
 /** At most 34 characters, so `pylon-<id>` fits pi-sandbox's 40. */
 export type ThreadId = Brand<string, "ThreadId">;

@@ -2,6 +2,7 @@
  * The registry's fixtures. A node, the "acme" project, and threads whose pylon clones
  * git@example.com:acme.git. What needs no registry is in kit.ts.
  */
+import { operator } from "../control/people.ts";
 import type { TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { testObservation } from "./kit.ts";
@@ -45,7 +46,7 @@ export function testThread(over: Partial<Thread> = {}): Thread {
   const id = over.id ?? newThreadId();
   return {
     seenAt: null, lastReplyAt: null, id, title: "t", project: "acme" as ProjectId, pylonId: pylonIdOf(id), status: "active", conversationId: null,
-    startedBy: "nLAPTOP", createdAt: Date.now(), agentTurnRunning: false, working: false, lastAgentActivityAt: 0, lastHumanActivityAt: Date.now(), ...over,
+    startedBy: "nLAPTOP", owner: operator, createdAt: Date.now(), agentTurnRunning: false, working: false, lastAgentActivityAt: 0, lastHumanActivityAt: Date.now(), ...over,
   };
 }
 

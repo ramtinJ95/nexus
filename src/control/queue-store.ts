@@ -1,6 +1,6 @@
 /** A save with a start's key stores the key, in its transaction. */
 import { json, type Db, type Holding } from "./db.ts";
-import type { ProjectId, ThreadId } from "../ids.ts";
+import type { Person, ProjectId, ThreadId } from "../ids.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
 import type { StartKey, StartRequest } from "./start-request.ts";
 
@@ -10,6 +10,8 @@ export interface QueuedRecord {
   title: string;
   project: ProjectId;
   startedBy: string;
+  /** Its thread's owner. Absent from a record queued before owners, which is the operator's. */
+  owner?: Person;
   createdAt: number;
   after: readonly ThreadId[];
   request: StartRequest & { resources: BootInputs["resources"] };

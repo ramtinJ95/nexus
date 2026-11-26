@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { planDeploy, prepareTries, retryAfter, retryBaseMs, schemaStep, type DeployInput } from "./plan.ts";
+import { type DeployInput, planDeploy, prepareTries, registryVersion, retryAfter, retryBaseMs, schemaStep } from "./plan.ts";
 
 const commit = "a".repeat(40);
 const input: DeployInput = {
@@ -66,9 +66,21 @@ test("a failure before the link switch waits out its backoff, then installs, and
 });
 
 test("a release migrates a registry behind its code, refuses one ahead of it or that it cannot name, and starts on one it matches or none", () => {
-  assert.equal(schemaStep({ registry: 3, release: 4 }), "migrates");
-  assert.equal(schemaStep({ registry: 4, release: 3 }), "refuses");
-  assert.equal(schemaStep({ registry: 4, release: 4 }), "starts");
-  assert.equal(schemaStep({ registry: null, release: 4 }), "starts", "the control plane has not made a registry yet");
-  assert.equal(schemaStep({ registry: 4, release: null }), "refuses", "a release from before schema.ts");
+  const at = (main: number, arc = 0) => ({ main, arc });
+  assert.equal(schemaStep({ registry: at(3), release: at(4) }), "migrates");
+  assert.equal(schemaStep({ registry: at(4), release: at(3) }), "refuses");
+  assert.equal(schemaStep({ registry: at(4), release: at(4) }), "starts");
+  assert.equal(schemaStep({ registry: null, release: at(4) }), "starts", "the control plane has not made a registry yet");
+  assert.equal(schemaStep({ registry: at(4), release: null }), "refuses", "a release from before schema.ts");
+});
+
+test("the arc's list counts as the main list does: a registry behind in it migrates, and one ahead in it is refused whatever the main list says", () => {
+  const at = (main: number, arc: number) => ({ main, arc });
+  assert.equal(schemaStep({ registry: at(4, 0), release: at(4, 1) }), "migrates", "a registry before the arc's first migration");
+  assert.equal(schemaStep({ registry: at(4, 1), release: at(4, 1) }), "starts");
+  assert.equal(schemaStep({ registry: at(4, 1), release: at(4, 0) }), "refuses", "a release from before the arc's migration, such as one from main");
+  assert.equal(schemaStep({ registry: at(3, 1), release: at(4, 0) }), "refuses", "a main list ahead does not hide the arc's migration it lacks");
+  assert.equal(schemaStep({ registry: at(4, 1), release: at(5, 2) }), "migrates");
+  assert.equal(registryVersion(at(4, 0)), "schema version 4", "an install without the arc's migrations reads as before");
+  assert.equal(registryVersion(at(4, 1)), "schema version 4 and arc schema version 1");
 });

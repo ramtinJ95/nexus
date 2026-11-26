@@ -11,6 +11,7 @@ import { nodeNameSchema, tailnetNodeIdSchema } from "../protocol/fields.ts";
 import { connectProbe, type ProbeClient } from "../protocol/client.ts";
 import { wakesDeployers } from "./releases.ts";
 import { isDeployer, threadWaker } from "./api/access.ts";
+import { peopleOf, peopleSchema } from "./people.ts";
 import { gitIdentitySchema } from "../protocol/spawn.ts";
 import { gitUrl } from "./project.ts";
 import { ingest } from "./reconcile.ts";
@@ -90,9 +91,11 @@ const configSchema = z.strictObject({
   })).min(1),
   /** Where `nexus image build` builds. */
   imageBuildNode: nodeNameSchema.default(defaultImageBuildNode),
-  /** Other tailnet nodes, such as your laptop and phone, whose callers may use the API. */
-  callers: z.array(tailnetNodeIdSchema),
+  /** Other tailnet nodes, such as your laptop and phone, whose callers may use the API. Required without `people`, refused with it. */
+  callers: z.array(tailnetNodeIdSchema).optional(),
   deployers: z.array(tailnetNodeIdSchema).optional(),
+  /** Each person of a shared install by tailnet login, as admin or engineer. Absent, the install is solo. */
+  people: peopleSchema.optional(),
   deployKeys: z.record(tailnetNodeIdSchema, z.string().regex(digestPattern)).optional(),
   /** The branch `nexus deploy main` resolves, which each node's deployer.json must name too. */
   releaseBranch: z.string().regex(releaseBranchPattern).default(defaultReleaseBranch),
@@ -132,6 +135,10 @@ export function parseConfig(text: string): ControlPlaneConfig {
   const { imageBuildNode } = result.data;
   if (imageBuildNode !== defaultImageBuildNode && !names.includes(imageBuildNode)) throw new Error(`invalid control plane config: imageBuildNode ${imageBuildNode} is not one of the nodes`);
   if (result.data.https && !result.data.listen.hostnames.includes(result.data.https.hostname)) throw new Error("https.hostname must be in listen.hostnames");
+  const { people, callers, deployers } = result.data;
+  if (people === undefined && callers === undefined) throw new Error("invalid control plane config: callers is required without people");
+  const devices = [...callers === undefined ? [] : ["callers"], ...deployers === undefined ? [] : ["deployers"]];
+  if (people !== undefined && devices.length > 0) throw new Error(`invalid control plane config: people admits callers by tailnet login, so ${devices.join(" and ")} must be absent`);
   return result.data;
 }
 
@@ -227,6 +234,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     queue: github !== null, planning: { replies: agents.replies },
   }));
   const { startThread, queue, pipeline, planning } = threads.api;
+  const people = peopleOf(config.people);
   const deployment = { self: config.self.tailnetNodeId, deployers: new Set(config.deployers ?? []), keys: config.deployKeys ?? {} };
   const checkRunDeps = { registry, probes: probeMap, startThread, wake: wakeThread };
   const reviews = services.start(github === null ? null : { everyMs: passMs, ...reviewLoop({
@@ -285,7 +293,8 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     gate,
     deployment: { ...deployment, releaseBranch: config.releaseBranch },
     registry, whois: localApiWhoisCaller(tailscaled), host: config.listen.host, port: config.listen.port,
-    allowed: new Set([config.self.tailnetNodeId, ...config.callers]),
+    allowed: new Set([config.self.tailnetNodeId, ...config.callers ?? []]),
+    people,
     joins: {
       whois: localApiWhoisNode(tailscaled),
       configured: new Set(config.nodes.map((n) => n.tailnetNodeId)),

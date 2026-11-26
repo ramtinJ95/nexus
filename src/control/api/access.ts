@@ -3,6 +3,7 @@
  * the route needs, and the roles the caller holds.
  */
 import type { NodeName, TailnetNodeId, ThreadId } from "../../ids.ts";
+import type { TailnetIdentity } from "../../node-base/tailscaled.ts";
 import type { QueuedRecord } from "../queue-store.ts";
 import type { Registry } from "../registry.ts";
 import type { Thread } from "../thread-store.ts";
@@ -12,6 +13,7 @@ import { answerRefusal, type AnswerRefusal, type Question } from "../questions.t
 import { tokenDigest } from "../../protocol/deploy.ts";
 import { Refusal } from "../refusal.ts";
 import { noConversation } from "../thread-agent.ts";
+import { operator, personOf, solo, type People, type Starter } from "../people.ts";
 
 /**
  * Who may call a route: any machine whois names, or the join's whois names, a caller on the allowlist, a person, a
@@ -101,20 +103,23 @@ interface Need { status?: keyof typeof statusNeeds; agent?: "harness" | "claude"
 
 export const threadWaker = (registry: Pick<Registry, "threads">, wake: (node: NodeName) => void) => (t: Pick<Thread, "pylonId">) => wake(registry.threads.pylon(t.pylonId)!.node);
 
-export function apiAccess(registry: Registry, wake: (node: NodeName) => void, options: { deployment?: Deployment | undefined; allowed: ReadonlySet<TailnetNodeId> }) {
+export function apiAccess(registry: Registry, wake: (node: NodeName) => void, options: { deployment?: Deployment | undefined; allowed: ReadonlySet<TailnetNodeId>; people?: People | undefined }) {
+  const { people = solo } = options;
   /**
    * The roles a caller whois names holds. A person or a deployer is also allowed, and the control node is the reporter
    * the control plane runs as. Without deployment options the control node is unknown, so no caller is a person or a
-   * reporter.
+   * reporter. On a shared install a person is a login in `people` on a device that is neither the control node nor a
+   * node, and an admin holds what a deployer holds.
    */
-  function roleOf(caller: TailnetNodeId, authorization?: string): ReadonlySet<Role> {
+  function roleOf(caller: TailnetNodeId, identity: TailnetIdentity, authorization?: string): ReadonlySet<Role> {
     const roles = new Set<Role>(["tailnet"]);
     const { deployment } = options;
-    const allowed = options.allowed.has(caller);
+    const named = people.shared && deployment !== undefined && isPerson(registry, deployment, caller) ? personOf(people, identity) : null;
+    const allowed = options.allowed.has(caller) || named !== null;
     if (allowed) roles.add("allowed");
     if (deployment === undefined) return roles;
-    if (allowed && isPerson(registry, deployment, caller)) roles.add("person");
-    if (allowed && isDeployer(registry, deployment, caller)) roles.add("deployer");
+    if (people.shared ? named !== null : allowed && isPerson(registry, deployment, caller)) roles.add("person");
+    if (people.shared ? named?.role === "admin" : allowed && isDeployer(registry, deployment, caller)) roles.add("deployer");
     if (isReporter(registry, deployment, caller, authorization)) {
       roles.add("reporter");
       if (caller === deployment.self) roles.add("control-node");
@@ -154,10 +159,21 @@ export function apiAccess(registry: Registry, wake: (node: NodeName) => void, op
   /** The thread with its status now, which a request that waited may have seen change. */
   const current = (t: Thread): Thread => ({ ...t, status: registry.threads.threadStatus(t.id)! });
 
-  /** A caller the installer's --admit may admit: neither the control node nor one of its nodes. */
-  const admittable = (caller: TailnetNodeId) => options.deployment === undefined ? registry.nodes.nodeByTailnetId(caller) === undefined : isPerson(registry, options.deployment, caller);
+  /**
+   * A caller the installer's --admit may admit: neither the control node nor one of its nodes. A shared install admits
+   * by login, which --admit does not write.
+   */
+  const admittable = (caller: TailnetNodeId) => !people.shared && (options.deployment === undefined ? registry.nodes.nodeByTailnetId(caller) === undefined : isPerson(registry, options.deployment, caller));
 
-  return { lookup, thread, threadRefusal, guard, current, wakeThread: threadWaker(registry, wake), roleOf, admittable };
+  /** Who a person's request starts or queues a thread as. On a shared install its owner is the login the person route admitted. */
+  function starter({ caller, identity }: { caller: TailnetNodeId; identity: TailnetIdentity }): Starter {
+    if (!people.shared) return { caller, owner: operator };
+    const named = personOf(people, identity);
+    if (named === null) throw new Refusal("forbidden", "only a person in control.json's people may start a thread");
+    return { caller, owner: named.person };
+  }
+
+  return { lookup, thread, threadRefusal, guard, current, wakeThread: threadWaker(registry, wake), roleOf, admittable, starter };
 }
 export type Access = ReturnType<typeof apiAccess>;
 

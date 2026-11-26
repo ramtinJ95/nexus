@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test, type TestContext } from "node:test";
-import { migrations } from "../control/schema.ts";
+import { arcMigrations, migrations } from "../control/schema.ts";
 import { checkoutMerged, command, NotSwitched, ReleaseInstaller, type InstallBoundary } from "./install.ts";
 import { snapshot } from "../test-support/kit.ts";
 import { answerLocalHealth } from "./health.ts";
@@ -379,7 +379,7 @@ test("an install of the control plane by hand refuses a registry newer than the 
   registry.close();
   const refused = await m.run("control", false, "--upgrade");
   assert.notEqual(refused.code, 0);
-  assert.match(refused.stderr, new RegExp(`the registry is at schema version ${migrations.length + 1}, newer than the ${migrations.length} migrations this checkout applies`));
+  assert.match(refused.stderr, new RegExp(`the registry is at schema version ${migrations.length + 1}, newer than the ${migrations.length} registry migrations and ${arcMigrations.length} of the arc's this checkout applies`));
   assert.deepEqual((await m.ran()).filter((line) => /^(install_release|link_release|install_unit|make_state|start_unit)\b/.test(line)), []);
 });
 

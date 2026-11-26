@@ -27,7 +27,7 @@ import { tailscaleCli, tailscaleStatus, type TailnetDevice, type TailscaleStatus
 import { localApiWhois } from "../node-base/tailscaled.ts";
 import { backupStatusFile, configFiles, deployerFiles, ports, prefix, readReleaseCommit, rootPath, servicePath, stateDirs, unitNames, users } from "../node-base/node-layout.ts";
 import { awaitHealthy } from "./health.ts";
-import { schemaStep } from "./plan.ts";
+import { registryVersion, releaseMigrations, schemaStep } from "./plan.ts";
 import { nodeRegistry } from "./worker.ts";
 import type { Whois } from "../protocol/http.ts";
 import { defaultHarnessModel } from "../protocol/models.ts";
@@ -597,7 +597,7 @@ async function registryRefusal(path: string): Promise<string | null> {
   const registry = nodeRegistry({ config: path, home: stateDirs.control, prefix, status: backupStatusFile });
   const versions = { registry: await registry.version(), release: await registry.known(repo) };
   if (schemaStep(versions) !== "refuses") return null;
-  return `the registry is at schema version ${versions.registry}, newer than the ${versions.release ?? 0} migrations this checkout applies, so its control plane would refuse to start. Install from a newer checkout, or deploy one with nexus deploy`;
+  return `the registry is at ${registryVersion(versions.registry!)}, newer than the ${versions.release === null ? "0 registry migrations" : releaseMigrations(versions.release)} this checkout applies, so its control plane would refuse to start. Install from a newer checkout, or deploy one with nexus deploy`;
 }
 
 /** The steps `install` takes that act on the machine, so the tests can record them. */

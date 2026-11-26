@@ -6,6 +6,7 @@
  * Each thread is a row of `threads` below: when it started, where it runs, and what it has, so the world reads as one
  * table rather than thirty scripts.
  */
+import { operator } from "../../src/control/people.ts";
 import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -644,7 +645,7 @@ async function seedPipeline(d: Demo, world: World) {
   const graphs = world.threads.get("graphs")!;
   const prune = { project: "nexus", title: "Prune events older than 90 days" };
   const pruneBrief = "Add a pruning pass for events older than 90 days.";
-  d.queue!.add(prune, pruneBrief, [graphs.id], laptop, startKey(requestIds.pipeline("it-prune" as ItemId), { request: prune, message: pruneBrief, after: [graphs.id] }));
+  d.queue!.add(prune, pruneBrief, [graphs.id], { caller: laptop, owner: operator }, startKey(requestIds.pipeline("it-prune" as ItemId), { request: prune, message: pruneBrief, after: [graphs.id] }));
   await d.call("POST", "/v1/threads", { project: "storefront", title: "Wishlist sharing links", after: [world.threads.get("rounding")!.id], message: "Let a shopper share a wishlist by link." });
   for (const i of [
     item("it-prune", "nexus", "Prune events older than 90 days", 20 * hour, { approved: { by: laptop, at: now() - 19 * hour } }),
@@ -761,9 +762,9 @@ export async function seedDemo(d: Demo) {
     const t = await back(spec.ago, async () => {
       if (spec.item !== undefined) {
         const request = { project: spec.project, title: spec.title };
-        return d.startThread({ request, caller: laptop, role: "builder", key: startKey(requestIds.pipeline(spec.item as ItemId), { request, message: null, after: [] }) });
+        return d.startThread({ request, caller: laptop, owner: operator, role: "builder", key: startKey(requestIds.pipeline(spec.item as ItemId), { request, message: null, after: [] }) });
       }
-      if (spec.by !== undefined) return d.startThread({ request: { project: spec.project, title: spec.title }, caller: spec.by, role: callerRoles[spec.by] });
+      if (spec.by !== undefined) return d.startThread({ request: { project: spec.project, title: spec.title }, caller: spec.by, owner: operator, role: callerRoles[spec.by] });
       const res = await d.call("POST", "/v1/threads", {
         project: spec.project, title: spec.title, ...(spec.worker === "claude" ? { claude: spec.title } : {}), ...(spec.worker === "planning" ? { planning: true } : {}),
       });

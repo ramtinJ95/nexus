@@ -185,7 +185,7 @@ export function checkRuns(options: {
       let t: Thread;
       try {
         t = await startThread({
-          request: { near: registry.threads.pylon(builder.pylonId)!.node, ...gate.request(builder, branch, head, projectCpus), ...ifRoom && { ifRoom } }, caller: gate.caller, role: gate.role,
+          request: { near: registry.threads.pylon(builder.pylonId)!.node, ...gate.request(builder, branch, head, projectCpus), ...ifRoom && { ifRoom } }, caller: gate.caller, owner: builder.owner, role: gate.role,
         });
       } catch (err) {
         if (!(err instanceof Refusal)) throw err;

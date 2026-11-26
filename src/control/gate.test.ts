@@ -10,7 +10,7 @@ import { NoRoom, Refusal } from "./refusal.ts";
 import type { Thread } from "./thread-store.ts";
 import { testPylon, testRegistry, testThread } from "../test-support/registry-kit.ts";
 import { processStream } from "../process-stream.ts";
-import type { LiveHash, NodeName, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
+import type { LiveHash, NodeName, Person, ProjectId, PylonId, TailnetNodeId, ThreadId } from "../ids.ts";
 import type { ByteStream } from "../protocol/streams.ts";
 import type { Start } from "./start-request.ts";
 import { runningPylon, tempDir, testCapacity, testObservation, until } from "../test-support/kit.ts";
@@ -56,9 +56,9 @@ async function fixture(t: import("node:test").TestContext, check: string | null,
   registry.nodes.upsertNode({ name: node, tailnetHost: "node.ts.net", tailnetNodeId: "nNODE" as TailnetNodeId });
   registry.projects.createProject(project);
   let count = 0;
-  function add(caller: string): Thread {
+  function add(caller: string, owner: Person): Thread {
     const id = `th-${++count}` as ThreadId;
-    const thread = testThread({ id, title: id, project: project.id, startedBy: caller, createdAt: 1, lastHumanActivityAt: 1 });
+    const thread = testThread({ id, title: id, project: project.id, startedBy: caller, owner, createdAt: 1, lastHumanActivityAt: 1 });
     const pylon = testPylon(thread, { node, liveHash: "hash", boot: { resources: project.resources, repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: head } }, dotfiles: { repo: project.repoUrl, ref: "main" } } });
     registry.threads.createThread(thread, pylon);
     return thread;
@@ -68,7 +68,7 @@ async function fixture(t: import("node:test").TestContext, check: string | null,
     const pylons = threads.map((th) => runningPylon(th.pylonId, { liveHash: "hash" as LiveHash }));
     registry.threads.ingested(testObservation(node, { pylons }), []);
   }
-  const builder = add("person");
+  const builder = add("person", "alice@example.com" as Person);
   const started: Start[] = [];
   let refuse: Error | null = null;
   const local = (argv: readonly string[]) => argv.map((a) => a.replaceAll(checkoutDir, repo).replace(imageEnv, `cat ${image}`));
@@ -76,7 +76,7 @@ async function fixture(t: import("node:test").TestContext, check: string | null,
   const runs = (gate?: typeof verifyGate, ended?: (thread: ThreadId) => void): CheckRuns => checkRuns({
     registry, wake: () => {}, ...gate === undefined ? {} : { gate }, ...ended === undefined ? {} : { ended },
     probes: new Map([[node, { stream: (pylon: PylonId, argv: readonly string[]) => stream(pylon, argv) }]]),
-    async startThread(start) { started.push(start); if (refuse !== null) throw refuse; return add(start.caller); },
+    async startThread(start) { started.push(start); if (refuse !== null) throw refuse; return add(start.caller, start.owner); },
   });
   return { registry, builder, head, repo, root, image, local, started, runs, running, set stream(s: typeof stream) { stream = s; }, set refuse(err: Error | null) { refuse = err; } };
 }
@@ -95,7 +95,7 @@ test("a check runs in a fresh bare check thread of 4 CPUs at the commit, and its
   const f = await fixture(t, "echo typecheck ok; echo tests ok");
   const runs = f.runs();
   const id = await started(runs.start(f.builder, "feature", f.head));
-  assert.deepEqual(f.started, [{ request: { project: "p", title: `Check of feature at ${f.head.slice(0, 12)}`, near: node, branch: "feature", commit: f.head, resources: { cpus: 4 } }, caller: checkCaller, role: "check" }]);
+  assert.deepEqual(f.started, [{ request: { project: "p", title: `Check of feature at ${f.head.slice(0, 12)}`, near: node, branch: "feature", commit: f.head, resources: { cpus: 4 } }, caller: checkCaller, owner: "alice@example.com", role: "check" }], "a check thread is its builder's owner's");
   assert.equal(f.registry.threads.thread(id)!.startedBy, checkCaller);
   assert.deepEqual(runs.step(id, f.head), { kind: "waiting" }, "nothing runs until the pylon does");
   f.running(f.registry.threads.thread(id)!);
@@ -164,7 +164,7 @@ test("a live check runs .nexus/verify in a fresh verify pylon of 4 CPUs and 8 Gi
       project: "p", title: `Live check of feature at ${f.head.slice(0, 12)}`, near: node, node: "auto", branch: "feature", commit: f.head,
       resources: { cpus: 4, memoryGiB: 8, nestedVirtualization: true },
     },
-    caller: verifyCaller, role: "verify",
+    caller: verifyCaller, owner: "alice@example.com", role: "verify",
   }]);
   assert.equal(f.registry.threads.thread(id)!.startedBy, verifyCaller);
   f.running(f.registry.threads.thread(id)!);

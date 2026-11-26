@@ -2,6 +2,7 @@
  * nexus watch and nexus conversation, against the control plane's real API with a fake harness behind it. src/test-
  * support/cli-kit.ts says when a test runs the CLI in its own process and when as a child.
  */
+import { operator } from "../control/people.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -355,7 +356,7 @@ test("watch ends with the API's exit code when it refuses the stream", async (t)
 
 test("a bare thread has no conversation to print, send to or watch", async (t) => {
   const s = await setup(t);
-  const bare = await s.startThread({ request: { project: "acme", title: "Check" }, caller: "nLAPTOP", role: "check" });
+  const bare = await s.startThread({ request: { project: "acme", title: "Check" }, caller: "nLAPTOP", owner: operator, role: "check" });
   const refused = { code: 5, stdout: "", stderr: `nexus: thread ${bare.id} has no conversation\n` };
   const run = async (args: string[]) => {
     const { code, stdout, stderr } = await s.nexus(args);

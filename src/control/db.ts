@@ -31,7 +31,7 @@ export interface PurgedThread { thread: string; pylon: string; conversation: str
 type RecordTable<H extends Holding> = { [T in keyof H["tables"]]: H["tables"][T] extends { record: string } ? T : never }[keyof H["tables"]] & string;
 type SettingKey<H extends Holding> = H["settings"] extends readonly (infer K extends string)[] ? K | `${Extract<K, `${string}:`>}${string}` : never;
 
-export const holding = { tables: { settings: {} } } as const satisfies Holding;
+export const holding = { tables: { settings: {}, arc_schema: {} } } as const satisfies Holding;
 
 export const deletedWithThread = (holdings: readonly Holding[]): string[] =>
   holdings.flatMap((h) => Object.entries(h.tables).flatMap(([table, t]) => t.deletedWithThread ? [table] : []));

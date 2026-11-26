@@ -175,7 +175,7 @@ export function planning(options: { registry: PlanningRegistry; pipeline: Pick<P
       if (q.answer?.option !== proposalOptions.accept) return null;
       if (options.pipeline === null) throw new Refusal("conflict", notConfigured.pipeline);
       const t = registry.threads.thread(q.thread)!;
-      return options.pipeline.add({ project: t.project, title: q.proposal.title }, q.proposal.brief, resolveAfter(q), q.answer.by, proposalItem(q.id));
+      return options.pipeline.add({ project: t.project, title: q.proposal.title }, q.proposal.brief, resolveAfter(q), { caller: q.answer.by, owner: t.owner }, proposalItem(q.id));
     },
     poll: passes.rerun,
     close: passes.settled,

@@ -26,7 +26,7 @@ export function pipelineRoutes(kit: ApiKit, features: Features): readonly RouteE
     on(routes.add, { role: "person", action: "add an item" }, async (_, r) => {
       const { after, message, ...request } = parse(itemSchema, await r.body());
       const pipeline = pipelineOrRefuse();
-      const added = pipeline.add(request, message ?? null, after ?? [], r.caller);
+      const added = pipeline.add(request, message ?? null, after ?? [], kit.starter(r));
       await pipeline.poll();
       return created(itemView(registry, added, Date.now()));
     }),
