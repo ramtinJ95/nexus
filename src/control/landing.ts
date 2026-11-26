@@ -76,10 +76,28 @@ export function landing({ registry, release, mayLand, now, toPerson }: LandingDe
       return mayLand(by) ? [] : [{ code: "loop", text: `${by}, who ${land.fromProject ? `turned on landing for project ${builder.project}` : "asked for this landing"}, is not among the control plane's deployers, so only the person can land it.` }];
     },
 
-    /** `r` once its PR merged as `commit`: landed, or deploying it with the desired release as its rollback target. */
-    merged(r: Review, commit: string): Review {
+    /**
+     * The release a failed deploy of `r`'s merge rolls back to, for a turn `r` takes now: the desired release, read in
+     * the same tick as `ahead` found it healthy everywhere, or null when there is none. Undefined for a PR that does
+     * not deploy.
+     */
+    rollbackTarget: (r: Review): string | null | undefined => deploys(r) ? registry.releases.desiredRelease()?.commit ?? null : undefined,
+
+    /**
+     * Whether the desired release is no longer the one `r` took its turn at, as after the person's `nexus deploy`. Its
+     * merge would replace a release that has not run yet, and a failed deploy would roll back past it.
+     */
+    turnLost: (r: Review, previous: string | null | undefined): boolean =>
+      deploys(r) && previous !== undefined && (registry.releases.desiredRelease()?.commit ?? null) !== previous,
+
+    /**
+     * `r` once its PR merged as `commit`: landed, or deploying it with `previous`, the release its turn was taken at,
+     * as its rollback target. A turn saved before Nexus recorded that release rolls back to the desired one.
+     */
+    merged(r: Review, commit: string, previous: string | null | undefined): Review {
       if (!deploys(r)) return { ...r, merged: commit, phase: { kind: "landed", commit } };
-      return { ...r, merged: commit, phase: { kind: "deploying", commit, previous: registry.releases.desiredRelease()?.commit ?? null, requested: false, deadline: now() + deployWaitMs } };
+      const target = previous === undefined ? registry.releases.desiredRelease()?.commit ?? null : previous;
+      return { ...r, merged: commit, phase: { kind: "deploying", commit, previous: target, requested: false, deadline: now() + deployWaitMs } };
     },
 
     steps: {

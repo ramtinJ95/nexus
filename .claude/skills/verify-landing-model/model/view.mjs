@@ -26,6 +26,7 @@ const labels = {
   Wait: "an unhealthy release or another landing is ahead",
   Authorize: "nothing is ahead",
   BaseMoved: "the base branch moves",
+  GiveTurnBack: "a release you deployed by hand has not run yet",
   Merge: "GitHub merges the approved commit",
   OwnMergeSeen: "after a crash it finds its own merge",
   OthersMergeSeen: "it finds that someone merged the approved commit",

@@ -31,7 +31,7 @@ It needs Java 11 or later on the path, or `JAVA` set to a java binary. The first
 
 A pylon has no Java and reaches only the hosts its project allows, so the check does not run in a pylon as it is built today. Run it on a developer machine. If you are in a pylon and cannot run it, say so in the pull request. Do not claim the check.
 
-The script runs the five configs in `model/` and compares each with what `coverage.json` expects. It first says whether a covered file differs from the content the model was last confirmed against.
+The script runs the four configs in `model/` and compares each with what `coverage.json` expects. It first says whether a covered file differs from the content the model was last confirmed against.
 
 | Exit code | Meaning |
 |---|---|
@@ -40,7 +40,7 @@ The script runs the five configs in `model/` and compares each with what `covera
 | 2 | The checks could not run. |
 | 3 | Every check gave the expected result, but a covered file changed since the model was confirmed. The pass does not yet count. |
 
-Two configs are expected to break a rule. They are the findings below, kept failing so that a fix shows up as a change.
+One config is expected to break a rule. It is the finding below, kept failing so that a fix shows up as a change.
 
 ## What the model covers
 
@@ -48,10 +48,10 @@ All of it is `model/Landing.tla`. Each action there has a comment that names the
 
 | Code | In the model |
 |---|---|
-| `merge()` in `src/control/review.ts` | `Wait`, `Authorize`, `BaseMoved`, `Merge`, `MergeThenCrash`, `OwnMergeSeen`, `OthersMergeSeen`, `MergedAtOtherHead`, `NewRound`, `Held` |
+| `merge()` in `src/control/review.ts` | `Wait`, `Authorize`, `BaseMoved`, `GiveTurnBack`, `Merge`, `MergeThenCrash`, `OwnMergeSeen`, `OthersMergeSeen`, `MergedAtOtherHead`, `NewRound`, `Held` |
 | `checked()`, `newHead()`, `pushedAfter()`, `landableAt()` and `pressWith()` in `src/control/review.ts` | `Approve`, `NewRound`, `HeldNewHead`, `PersonLand` |
 | `stepEach()` and `pass()` in `src/control/review.ts`: passes run one at a time and each step is saved before the next | every review action is one indivisible step |
-| `deploys`, `ahead()`, `merged()`, `requestRelease()` and `steps` in `src/control/landing.ts` | `Deploys`, `Ahead`, `MergedEffects`, `RequestDeploy`, `DeployHealthy`, `DeploySuperseded`, `DeployFails`, `RequestRollback`, `RolledBack`, `RollbackFails` |
+| `deploys`, `ahead()`, `rollbackTarget()`, `turnLost()`, `merged()`, `requestRelease()` and `steps` in `src/control/landing.ts` | `Deploys`, `Ahead`, the rollback target that `Authorize` and `OthersMergeSeen` save, `TurnLost`, `MergedEffects`, `RequestDeploy`, `DeployHealthy`, `DeploySuperseded`, `DeployFails`, `RequestRollback`, `RolledBack`, `RollbackFails` |
 | the `phases` table and `landingVerb()` in `src/control/review-model.ts` | `InLanding` |
 | `releaseOutcome()` in `src/protocol/deploy.ts` | `Outcome` |
 | `setDesiredRelease()` in `src/control/release-store.ts` | `SetDesired` |
@@ -75,25 +75,17 @@ All of it is `model/Landing.tla`. Each action there has a comment that names the
 - A report that goes stale after 90 seconds, and a failure report made for an earlier request of the same commit that arrives after a new request.
 - Whether a waiting landing is served in the end. The model checks no liveness rule.
 - A pull request of another repository, which merges without a deploy.
+- A turn saved before Nexus recorded the release it was taken at, which rolls back to the desired release as before.
 
 A pass says nothing about any of these.
 
 ## Findings in the confirmed code
 
-Each was replayed against the real review loop with a temporary test in `src/control/review.test.ts`.
-
-**F1. A manual deploy while a landing holds the turn becomes its rollback target.** `Finding-ManualDeploy.cfg` breaks `RollbackTargetWasHealthy` in four steps.
-
-1. The reviewers approve and the checks pass, so the landing begins.
-2. Nothing is ahead, so the review takes the turn. `merge()` saves `authorized`.
-3. The person runs `nexus deploy` for a commit that never ran. The deploy route sets the desired release, since only a drain refuses it.
-4. GitHub merges the approved commit. `merged()` reads the desired release as `previous`.
-
-`merge()` does not ask `ahead()` again once the review holds the turn, and `merged()` reads the desired release after the merge call. If the deploy then fails, the review rolls back to the person's release, which no service ever reported healthy, and the person's own deploy was replaced without a word. The window is the merge step's calls to GitHub, and longer when one of them fails and the pass retries.
+It was replayed against the real review loop with a temporary test in `src/control/review.test.ts`.
 
 **F2. A landing into another branch sets the desired release.** `Finding-OffBranch.cfg` breaks `ReleaseIsOnTheReleaseBranch` in four steps: approve, take the turn, merge, request the deploy. `deploys` in `src/control/landing.ts` compares only the repository, so a pull request merged into any branch of Nexus's repository deploys. `checkoutMerged()` then refuses the commit.
 
-When a fix for F2 lands, `deploys` also compares the base. Set `BaseChecked = TRUE` in every config, add `ReleaseIsOnTheReleaseBranch` to `OffBranch.cfg`, delete `Finding-OffBranch.cfg` and its entry in `coverage.json`, and delete this finding. Do the same kind of edit for F1 once the model describes its fix.
+When a fix for F2 lands, `deploys` also compares the base. Set `BaseChecked = TRUE` in every config, add `ReleaseIsOnTheReleaseBranch` to `OffBranch.cfg`, delete `Finding-OffBranch.cfg` and its entry in `coverage.json`, and delete this finding.
 
 ## Each rule was seen to fail
 
@@ -104,6 +96,7 @@ A rule that never failed proves nothing. When the model was written, each rule b
 | `Ahead` ignores other landings | `OneLandingAtATime`, `RollbackTargetWasHealthy` |
 | `Ahead` ignores an unhealthy desired release | `RollbackTargetWasHealthy` |
 | `OthersMergeSeen` accepts a merge at any head | `DeploysOnlyApprovedHead` |
+| `Merge` saves the desired release after the merge as the rollback target, as `merged()` did before finding F1 was fixed, with one manual deploy | `RollbackTargetWasHealthy` |
 | `BaseChecked = FALSE` with a pull request off the release branch | `ReleaseIsOnTheReleaseBranch` |
 | `RollbackFails` ends the review as landed | `BlockedLandingIsSomeonesToFix` |
 
@@ -125,11 +118,11 @@ Then replay the path against the real code, one step for each action, as a test 
 
 - **A step cannot happen in the code.** The model is wrong. Fix the model, and say what was wrong.
 - **Every step happens and the rule is broken in the code.** It is a bug. Report the path in the code's words and the harm. Do not change the rule. Fix the code only if that is your task.
-- **A finding config now holds.** If the code was fixed and the model updated to describe the fix, retire the finding as F2's paragraph says. If the model changed for another reason, the model lost the path. Find out why before you accept it.
+- **A finding config now holds.** If the code was fixed and the model updated to describe the fix, retire the finding as F2's paragraph says. F1, a manual deploy that became a landing's rollback target, was retired that way. If the model changed for another reason, the model lost the path. Find out why before you accept it.
 
 ## The chart
 
-`model/Chart.cfg` is a small config for one landing with one manual deploy. With the view `model/view.mjs`, the pstack `/statechart` skill draws it as a chart of a landing's life, from approval to deployed or held, and marks where F1 breaks. `chart.md` holds the chart as last drawn. Draw it again after a change to the model, replace `chart.md`, and show it to the person who decides whether the behavior is right.
+`model/Chart.cfg` is a small config for one landing with one manual deploy. With the view `model/view.mjs`, the pstack `/statechart` skill draws it as a chart of a landing's life, from approval to deployed or held. `chart.md` holds the chart as last drawn. Draw it again after a change to the model, replace `chart.md`, and show it to the person who decides whether the behavior is right.
 
 ## Upkeep
 
