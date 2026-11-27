@@ -2,9 +2,9 @@
  * On a shared install every pylon boots with its owner's own Claude and GitHub logins, and never with a value a node or a
  * project shares. A start reads the owner's logins once, is refused when one is missing, and hands what it read to the
  * probe of the pylon's node for that one pylon before the pylon exists. The probe holds them in memory only, and a
- * value handed while its pylon boots may come too late for that boot, so each snapshot hands a pylon's values again
- * until a handoff lands while the probe reports it running or stopped, and again after the probe restarts. Values are
- * read from the store at each handoff and never kept here.
+ * value handed while its pylon boots may come too late for that boot, so snapshots hand a pylon's values again until
+ * one shows them in use, and again after the probe restarts. Values are read from the store at each handoff and never
+ * kept here.
  */
 import type { NodeName, Person, PylonId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
@@ -39,9 +39,14 @@ export interface OwnerLogins {
 
 export function ownerLogins(options: { registry: OwnerRegistry; logins: Pick<LoginStore, "owned">; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "putPylonSecret">>; log: Log }): OwnerLogins {
   const { registry, logins, probes, log } = options;
-  const latest = new Map<NodeName, Pick<NodeObservation, "probeBootId" | "pylons">>();
-  /** The pylons whose values landed on each node's probe boot while it reported them running or stopped. */
-  const settled = new Map<NodeName, { bootId: string; pylons: Set<PylonId> }>();
+  /** Each node's latest snapshot, numbered in the order they arrive, so a handoff is judged only by one that came after it. */
+  const latest = new Map<NodeName, { seq: number; observation: Pick<NodeObservation, "probeBootId" | "pylons"> }>();
+  let seq = 0;
+  /**
+   * Per node and probe boot: the pylons whose values are known to be in use, and those handed and waiting on a later
+   * snapshot, with the boot the pylon was running on when the handoff began, if it ran.
+   */
+  const state = new Map<NodeName, { bootId: string; settled: Set<PylonId>; handed: Map<PylonId, { afterSeq: number; runningBoot: string | null }> }>();
   const flights = new Map<NodeName, SingleFlight>();
 
   /** Whether every value reached the probe. Each kind the owner has since removed is left out and logged by name. */
@@ -62,17 +67,37 @@ export function ownerLogins(options: { registry: OwnerRegistry; logins: Pick<Log
     return true;
   }
 
+  /**
+   * A handoff is in use once a snapshot that came after it shows the pylon stopped, whose next boot reads the values,
+   * or running on the boot it ran on before the handoff began, which the probe swapped them into. Anything else, such
+   * as a boot that may have read the stand-in, is handed again.
+   */
   async function handNode(node: NodeName) {
-    const observation = latest.get(node);
-    if (observation === undefined) return;
-    const { probeBootId } = observation;
-    if (settled.get(node)?.bootId !== probeBootId) settled.set(node, { bootId: probeBootId, pylons: new Set() });
-    const done = settled.get(node)!.pylons;
-    const phases = new Map(observation.pylons.map((p) => [p.pylonId, p.phase]));
+    const at = latest.get(node);
+    if (at === undefined) return;
+    const { seq: now, observation } = at;
+    if (state.get(node)?.bootId !== observation.probeBootId) state.set(node, { bootId: observation.probeBootId, settled: new Set(), handed: new Map() });
+    const { settled, handed } = state.get(node)!;
+    const seen = new Map(observation.pylons.map((p) => [p.pylonId, p]));
     for (const { pylon, thread } of registry.threads.pylonsWithThreadsOn(node)) {
-      if (thread.status === "deleted" || done.has(pylon.pylonId) || !ownerBoot(pylon.boot)) continue;
-      const phase = phases.get(pylon.pylonId);
-      if (await hand(node, pylon.pylonId, thread.owner, await logins.owned(thread.owner)) && (phase === "running" || phase === "stopped")) done.add(pylon.pylonId);
+      const { pylonId } = pylon;
+      if (thread.status === "deleted" || settled.has(pylonId) || !ownerBoot(pylon.boot)) continue;
+      const observed = seen.get(pylonId);
+      const runningBoot = observed?.phase === "running" ? observed.bootedAt : null;
+      const pending = handed.get(pylonId);
+      if (pending !== undefined && pending.afterSeq >= now) continue;
+      if (pending !== undefined && (observed?.phase === "stopped" || (runningBoot !== null && runningBoot === pending.runningBoot))) {
+        settled.add(pylonId);
+        continue;
+      }
+      let owned: Owned;
+      try {
+        owned = await logins.owned(thread.owner);
+      } catch (err) {
+        log(`${thread.owner}'s logins for ${pylonId} could not be read: ${(err as Error).message}`);
+        continue;
+      }
+      if (await hand(node, pylonId, thread.owner, owned)) handed.set(pylonId, { afterSeq: seq, runningBoot });
     }
   }
 
@@ -95,8 +120,8 @@ export function ownerLogins(options: { registry: OwnerRegistry; logins: Pick<Log
       await hand(node, pylonId, owner, owned);
     },
     observed(node, observation) {
-      latest.set(node, observation);
-      void flight(node);
+      latest.set(node, { seq: ++seq, observation });
+      flight(node).catch((err: unknown) => log(`handing owners' logins on ${node} failed: ${(err as Error).message}`));
     },
     close: () => Promise.all([...flights.values()].map((f) => f.settled())).then(() => undefined),
   };

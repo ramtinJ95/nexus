@@ -2,9 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { dir, image, testApi } from "../test-support/api-kit.ts";
+import { dir, image, observeNode, testApi } from "../test-support/api-kit.ts";
 import { testObservation } from "../test-support/kit.ts";
 import { loginStore } from "./logins.ts";
+import { ownerLogins } from "./owner-logins.ts";
 import { tailnet, type WhoisAnswer } from "../test-support/people.ts";
 import { parseWhois } from "../node-base/tailscaled.ts";
 import { networkOptions } from "../pylon-vm/network.ts";
@@ -116,7 +117,7 @@ test("a probe that restarted is handed each owner's values again, for that owner
   const node = "rj-firebat" as NodeName;
   const handed = async (probeBootId: string, phase: "booting" | "running") => {
     s.pylonSecrets.length = 0;
-    owners.observed(node, { probeBootId, pylons: Object.values(pylons).map((pylonId) => ({ pylonId, phase }) as NodeObservation["pylons"][number]) });
+    owners.observed(node, { probeBootId, pylons: Object.values(pylons).map((pylonId) => ({ pylonId, phase, bootedAt: "2027-01-01T00:00:00Z" }) as NodeObservation["pylons"][number]) });
     await owners.close();
     return s.pylonSecrets.map(([pylon, name, value]) => `${pylon} ${name} ${value}`).sort();
   };
@@ -156,4 +157,77 @@ test("a shared install starts no pylon on a node whose probe would fall back to 
   assert.equal(refused.body.code, "probe-too-old");
   s.registry.threads.ingested(testObservation("rj-firebat" as NodeName, { artifacts: [image.id], ownerGrants: true }), []);
   assert.equal((await s.call("POST", "/v1/threads", { project: "mono", title: "alice's work" })).status, 201);
+});
+
+/** ownerLogins over one pylon of bob's on one node, whose login reads wait for `gate` while it is set. */
+function onePylon() {
+  const node = "n1" as NodeName;
+  const pylonId = "pylon-th-000000000001" as PylonId;
+  const puts: string[] = [];
+  const logged: string[] = [];
+  let gate: Promise<void> | null = null;
+  let failing = false;
+  const owners = ownerLogins({
+    registry: { threads: { pylonsWithThreadsOn: () => [{ pylon: { pylonId, boot: { network: { secrets: [{ name: "GH_TOKEN", hosts: ["github.com"], owner: true }] } } }, thread: { status: "active", owner: bob } }] } } as never,
+    logins: { async owned() {
+      await gate;
+      if (failing) throw new Error("the logins of bob@example.com cannot be read: EACCES");
+      return { claude: bobClaude, github: { token: bobGithub, identity: bobIdentity } };
+    } },
+    probes: new Map([[node, { putPylonSecret: async (pylon: PylonId, name: string) => { puts.push(`${pylon} ${name}`); } }]]),
+    log: (message) => { logged.push(message); },
+  });
+  const observe = (phase: "booting" | "stopped" | "running", bootedAt = "2027-01-01T00:00:00Z") =>
+    owners.observed(node, { probeBootId: "b1", pylons: [{ pylonId, phase, bootedAt } as NodeObservation["pylons"][number]] });
+  return { owners, observe, puts, logged, hold() { let open!: () => void; gate = new Promise((r) => { open = r; }); return () => { gate = null; open(); }; }, fail(on: boolean) { failing = on; } };
+}
+
+test("a snapshot taken while a handoff was in flight never settles it, so a boot that read the stand-in is handed its values again", async () => {
+  const o = onePylon();
+  const release = o.hold();
+  o.observe("stopped");
+  o.observe("stopped");
+  release();
+  await o.owners.close();
+  assert.equal(o.puts.length, 2, "one handoff of both values");
+  o.observe("booting");
+  await o.owners.close();
+  assert.equal(o.puts.length, 4, "the pylon woke while its values were on the way, so it is handed them again");
+  o.observe("running", "2027-01-01T00:05:00Z");
+  await o.owners.close();
+  o.observe("running", "2027-01-01T00:05:00Z");
+  await o.owners.close();
+  const settledAt = o.puts.length;
+  o.observe("running", "2027-01-01T00:05:00Z");
+  await o.owners.close();
+  assert.equal(o.puts.length, settledAt, "once running on the boot it ran on when they were handed, they are in use");
+});
+
+test("a login file that cannot be read is logged and read again on the next snapshot", async () => {
+  const o = onePylon();
+  o.fail(true);
+  o.observe("running");
+  await o.owners.close();
+  assert.deepEqual(o.puts, []);
+  assert.match(o.logged.join("\n"), /could not be read: the logins of bob@example\.com cannot be read: EACCES/);
+  o.fail(false);
+  o.observe("running");
+  await o.owners.close();
+  assert.equal(o.puts.length, 2);
+});
+
+test("placement on a shared install passes by a node whose probe would fall back to its secret file, as a move does", async (t) => {
+  const s = await shared(t);
+  await s.call("PUT", "/v1/logins/claude", { token: "sk-ant-oat01-alice-made-up" });
+  await s.call("PUT", "/v1/logins/github", { token: "ghp_aliceMadeUp" });
+  observeNode(s, "older", { total: 64, committed: 0 });
+  const { ownerGrants: _, ...older } = s.registry.nodes.node("older" as NodeName)!.observation!;
+  s.registry.threads.ingested(older, []);
+  const refused = await s.call("POST", "/v1/threads", { project: "mono", title: "alice's work", node: "auto" });
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error, /older has a probe that would boot an owner's logins from its secret file/);
+  observeNode(s, "newer", { total: 64, committed: 0 });
+  const placed = await s.call("POST", "/v1/threads", { project: "mono", title: "alice's work", node: "auto" });
+  assert.equal(placed.status, 201);
+  assert.equal(s.registry.threads.pylon(placed.body.pylonId)!.node, "newer");
 });
