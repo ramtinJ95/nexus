@@ -193,8 +193,8 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 
 - [x] **Depends on.** `mp-03`.
 - [ ] **Files.** `src/control/api/pylon-access.ts`, `src/control/api/pylon-routes.ts`, `src/control/api/thread-routes.ts`, `src/control/reconcile.ts`, `src/probe/gateway.ts`, `src/control/dashboard/page.js`.
-- [ ] **Change.** The activity route admits the owner only. Files, file content, changes, and diff record human activity and wake the pylon only for the owner. For anyone else they answer from a running pylon, and say the pylon is paused when it is not. A preview hit counts as activity only when its tailnet user is the owner.
-- [ ] **Result.** A teammate browsing a thread leaves its pylon's state and idle clock as they were.
+- [x] **Change.** The activity route admits the owner only. Files, file content, changes, and diff record human activity and wake the pylon only for the owner. For anyone else they answer from a running pylon, and say the pylon is paused when it is not. A preview hit counts as activity only when its tailnet user is the owner.
+- [x] **Result.** A teammate browsing a thread leaves its pylon's state and idle clock as they were.
 - [x] **Unit.** `interrogate/read-wakes.test.ts` passes. `interrogate/reader-wakes-owner-pylon.test.ts` asserts the fault. Turn it round, so that it shows a reader's visit leaving the pylon paused.
 - [ ] **Live.** Pause a pylon of `alice`. As `bob`, open the thread in the dashboard and its diff. Pass when the pylon is still paused after 60 seconds and `lastHumanActivityAt` has not moved.
 - [x] **Perf.** `api`. Fail above 15% over base.
