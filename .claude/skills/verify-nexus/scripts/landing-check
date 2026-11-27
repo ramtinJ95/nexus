@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# The part of docs/multiplayer-plan.md's mp-14 live box this stack can run: on the stack started with people, alice an
+# admin and bob an engineer, `nexus land` on each one's own thread, alice's `nexus review --land`, and alice's
+# `nexus project edit spoon --auto-review land` and `yolo` are each refused with a 403 whose code is landing-off, bob's
+# refusal names no `install.sh --admit`, and alice's switch to `review` is taken. The stack configures no GitHub token,
+# so its control plane builds no GitHub client and runs no review loop, and no approved review or scratch repository
+# exists here. Exits 0 only if every step did what it should.
+set -euo pipefail
+V="$(cd "$(dirname "$0")" && pwd)/verify-nexus"
+fail() { echo "landing check: $*" >&2; exit 1; }
+
+trap '"$V" down >&2 || true' EXIT
+NEXUS_VERIFY_PEOPLE=1 "$V" up
+"$V" doctor
+evidence=$("$V" evidence)
+
+A=$("$V" cli landing-start-alice -- start --project spoon --title "landing: alice's" --json | jq -r .id)
+B=$("$V" cli landing-start-bob --as bob -- start --project spoon --title "landing: bob's" --json | jq -r .id)
+echo "alice started $A, bob started $B"
+
+off() {
+  local step=$1 who=$2; shift 2
+  local as=() code=0
+  [ "$who" = bob ] && as=(--as bob)
+  "$V" cli "$step" "${as[@]}" -- "$@" --json </dev/null >/dev/null 2>&1 || code=$?
+  local said
+  said=$(grep -ho '{"error".*}' "$(ls "$evidence"/*-"$step".stderr | tail -1)" | tail -1)
+  echo "$who nexus $*: exit $code $said"
+  [ "$code" = 3 ] || fail "$who's nexus $1 exited $code, not 3"
+  jq -e '.status == 403 and .code == "landing-off"' <<< "$said" >/dev/null || fail "$who's nexus $1 was not a 403 with code landing-off"
+  if grep -q -- "--admit" <<< "$said"; then fail "$who's nexus $1 refusal tells them to run install.sh --admit"; fi
+}
+off landing-land-alice alice land "$A"
+off landing-land-bob bob land "$B"
+off landing-review-alice alice review "$A" --land
+off landing-auto-land alice project edit spoon --auto-review land
+off landing-auto-yolo alice project edit spoon --auto-review yolo
+
+mode=$("$V" cli landing-auto-review -- project edit spoon --auto-review review --json | jq -r .autoReview.mode)
+[ "$mode" = review ] || fail "alice's switch of spoon to review left it $mode"
+echo "alice switched spoon to auto review: $mode"
+echo "landing check: every landing alice and bob asked for was refused with landing-off, and spoon takes review"

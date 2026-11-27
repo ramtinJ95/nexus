@@ -532,7 +532,7 @@ export function reviewLoop(deps: ReviewDeps) {
     const project = registry.threads.thread(r.builder)?.project;
     const setting = project === undefined ? undefined : registry.projects.project(project)?.autoReview;
     // Only a review asked to land is landed: one the person started without --land stops at approval, as they asked.
-    // A shared install has no deployer, and its landHolds refuses with landing-off.
+    // A shared install has no `lands`, so landHolds refuses the answer with landing-off.
     if (r.land === null || setting?.mode !== "yolo" || lands?.mayLand(setting.enabledBy) === false || !registry.reviews.isCurrentReview(r)) return;
     const question = askingHolds(registry.questions.questions(r.builder), r.id, r.rounds.at(-1));
     if (question === undefined) return;
