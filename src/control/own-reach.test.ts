@@ -123,6 +123,19 @@ test("a pylon keeps its start's own hosts and secrets for life, and a later hand
   assert.equal(await outdated(), true, "a host the project added since still shows it outdated");
 });
 
+test("a host the project drops after a start shows an owner's pylon outdated, whether or not its owner added hosts", async (t) => {
+  const s = await shared(t);
+  await s.call("PUT", `/v1/own/hosts/${mcpHost}`);
+  const alices = await s.start(tailnet.alice);
+  const bobs = await s.start(tailnet.bob);
+  const outdated = async (id: string) => (await s.call("GET", `/v1/threads/${id}`)).body.pylon.grantsOutdated;
+  assert.deepEqual([await outdated(alices.id), await outdated(bobs.id)], [false, false], "both fresh pylons are current");
+  s.as(tailnet.alice);
+  assert.equal((await s.call("PATCH", "/v1/projects/acme", { allowedHosts: [] })).status, 200);
+  assert.equal(await outdated(alices.id), true, "alice's pylon still reaches the host the project dropped, so it shows outdated");
+  assert.equal(await outdated(bobs.id), true, "and so does bob's, who added no host");
+});
+
 test("a template's build and setup hash carry no person's own host, so every engineer's start shares it", async (t) => {
   const s = await shared(t);
   await s.call("PUT", `/v1/own/hosts/${mcpHost}`);

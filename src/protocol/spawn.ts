@@ -44,6 +44,11 @@ export interface BootInputs {
   resources: PylonResources & { nestedVirtualization?: true };
   /** `defaultBranch` is the project's, which an owner boot's GitHub guard refuses pushes to. A pylon stored before it has none. */
   network: { allowedHosts: readonly string[]; secrets: readonly SecretGrant[]; defaultBranch?: string | undefined };
+  /**
+   * On a shared install, the hosts in `network.allowedHosts` that the pylon's owner added at its start, so the control
+   * plane can tell them from its project's. The probe does not read it.
+   */
+  ownerHosts?: readonly string[] | undefined;
   repo: RepoInit; // set up on template and fresh boots only
   /** Pulled on every boot. Absent, a boot keeps the image's baked layer. */
   dotfiles?: { repo: string; ref: string } | undefined;

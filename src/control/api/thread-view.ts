@@ -37,13 +37,9 @@ function networkGrantsKey(network: BootInputs["network"]): string {
   });
 }
 
-/**
- * What an owner's pylon got from its owner at its start, read back from its boot, so the owner's later edits do not show
- * it outdated. Its owner's hosts cannot be told apart from its project's then, so all its hosts count as its owner's, and
- * only a host its project has added since, not one it dropped, shows it outdated.
- */
-const bootReach = (boot: Pick<BootInputs, "network">): OwnerReach | undefined => !ownerBoot(boot) ? undefined
-  : { hosts: boot.network.allowedHosts, secrets: boot.network.secrets.filter((grant) => grant.owner === true && !ownerOnlyNames.includes(grant.name)) };
+/** What an owner's pylon got from its owner at its start, read back from its boot, so the owner's later edits do not show it outdated. */
+const bootReach = (boot: Pick<BootInputs, "network" | "ownerHosts">): OwnerReach | undefined => !ownerBoot(boot) ? undefined
+  : { hosts: boot.ownerHosts ?? [], secrets: boot.network.secrets.filter((grant) => grant.owner === true && !ownerOnlyNames.includes(grant.name)) };
 
 /** The planner deletes a failed pylon all the same, so a deleted thread's pylon shows the delete. */
 const gaveUp = (t: Pick<Thread, "status">, failed: string | null) => failed !== null && t.status !== "deleted";

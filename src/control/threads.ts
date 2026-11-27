@@ -230,7 +230,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
       const conversationId = request.claude === undefined && hasConversation(role) ? await harness.startThread({ threadId: id, pylonId }) : null;
       const now = registry.now();
       const { setup, firstBoot, repo } = setUp(project, read, freshRepo, image, branch, node, now);
-      const boot: Omit<BootInputs, "source"> = { pylonId, image, resources, gitIdentity: ownerLogins?.identity ?? gitIdentityOf(project, gitIdentity), network, repo, dotfiles };
+      const boot: Omit<BootInputs, "source"> = { pylonId, image, resources, gitIdentity: ownerLogins?.identity ?? gitIdentityOf(project, gitIdentity), network, ...ownerLogins === null ? {} : { ownerHosts: ownerLogins.reach.hosts }, repo, dotfiles };
       const t: Thread = {
         id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, owner, createdAt: now,
         // Starting a thread is human activity, so its pylon is wanted at once.
