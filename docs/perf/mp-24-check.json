@@ -56,6 +56,6 @@
     "headMedianMs": 420313.9,
     "overBase": "8.1%",
     "verdict": "pass: under the 10% limit",
-    "note": "Head adds about 4 s of tests. Each side ran slower on its second run (base +28 s, head +30 s), and head always ran after base, so most of the gap is drift between runs, which is a reading and not a measure. The four review-fix commits after eb81db66 touch only the person-removal path and add three unit tests; they were not timed."
+    "note": "Head adds about 4 s of tests. Each side ran slower on its second run (base +28 s, head +30 s), and head always ran after base, so most of the gap is drift between runs, which is a reading and not a measure. The four review-fix commits after eb81db66 touch only the person-removal path and add three unit tests; they were not timed. The rebase onto 97fa2b60 made eb81db66 into 88aafc5b, and it conflicted only in deploy/README.md prose."
   }
 }
