@@ -15,10 +15,11 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import type { BackendPylon } from "../backend.ts";
-import { createPylonVmBackend, hostNestsKvm, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
+import { bootSsh, createPylonVmBackend, hostNestsKvm, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
+import { networkOptions } from "../../pylon-vm/network.ts";
 import { asUserIn, bootHooks, commitMissing } from "../pylon-boot.ts";
 import { launchers } from "../../probe/guest/launchers.ts";
-import { settled, setupExited, type Inspection } from "../../pylon-vm/contracts.ts";
+import { settled, setupExited, type BootSpec, type Inspection } from "../../pylon-vm/contracts.ts";
 import { groupMembers, identityOf } from "../../pylon-vm/identity.ts";
 import { imageEnv, pylonGuest, type Sandbox } from "./pylon-guest.ts";
 import { saveJson } from "../../node-base/json-file.ts";
@@ -175,10 +176,14 @@ test("a person's pylon on a shared install boots with no SSH key and no SSH remo
   }
   await assert.rejects(backend.ensureRunning(bootOf("pylon-alice-dots", { network: owned, dotfiles: { repo: "git@github.com:acme/dotfiles.git", ref: "main" } }), live, signal()),
     { code: "invalid", message: /the dotfiles repo git@github\.com:acme\/dotfiles\.git is SSH, so an admin sets an https:\/\/ one in control\.json/ });
-  // The assets are a bare manifest, so an HTTPS boot that passes every check fails once it reaches Gondolin.
-  await assert.rejects(backend.ensureRunning(bootOf("pylon-alice-https", { network: owned }), live, AbortSignal.timeout(60_000)), (err: { code?: string }) => err.code !== "invalid");
-  // A solo install's boot, which no owner's login marks, keeps the node's key.
-  await assert.rejects(backend.ensureRunning(bootOf("pylon-solo-ssh", { repo: sshRepo }), live, AbortSignal.timeout(60_000)), (err: { code?: string }) => err.code !== "invalid");
+  const gitSsh = { privateKeyFile: keyFile, knownHostsFile: keyFile };
+  const ownedSsh = await bootSsh(bootOf("pylon-alice-https", { network: owned }), gitSsh);
+  assert.equal(ownedSsh, null, "an owner's HTTPS boot carries no key and no remote");
+  const spec: BootSpec = { resources: { cpus: 2, memoryGiB: 4 }, allowedHosts: owned.allowedHosts, secrets: {}, ssh: ownedSsh, files: [], hooks: [], publicUrls: {}, hostBridge: null };
+  assert.equal(networkOptions(spec, "pylon-alice-https").ssh, undefined, "so Gondolin opens no SSH egress for it");
+  const solo = await bootSsh(bootOf("pylon-solo-ssh", { repo: sshRepo }), gitSsh);
+  assert.deepEqual(solo, { privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nthe node's one key\n", knownHostsFile: keyFile, remotes: [{ host: "github.com", port: 22, username: "git", repo: "acme/mono.git" }] }, "a solo install's boot keeps the node's key");
+  assert.equal(networkOptions({ ...spec, ssh: solo }, "pylon-solo-ssh").ssh?.credentials?.["github.com"]?.privateKey, solo!.privateKey);
 });
 
 test("the backend tells the probe whether it has a git SSH key, journals events in its state root, and answers NEXUS_API on a socket there", async (t) => {
