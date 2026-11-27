@@ -38,6 +38,53 @@ interface Machine {
   roles: string[];
   /** What `systemctl is-active` says of each unit, "unknown" for one it does not list. */
   units: Record<string, string>;
+  /** Whether systemd runs firewalld. It filters only with firewall-cmd in `commands`. */
+  firewalld: boolean;
+  /** What firewall-cmd answers, or null when it cannot read the rules. */
+  firewall: Firewall | null;
+}
+
+/** firewalld's rules: the zone tailscale0 was put in, if any, as it runs and as saved, the default zone, each zone as it runs and as saved, and each service's ports. */
+interface Firewall {
+  interfaceZone: string | null;
+  savedInterfaceZone: string | null;
+  defaultZone: string;
+  runtime: Record<string, Zone>;
+  permanent: Record<string, Zone>;
+  services: Record<string, string[]>;
+  /** The destination a service is limited to, for the services that have one. */
+  destinations?: Record<string, string>;
+}
+
+interface Zone { target: string; services: string[]; ports: string[]; protocols?: string[] }
+
+const fedoraServer: Zone = { target: "default", services: ["cockpit", "dhcpv6-client", "ssh"], ports: [] };
+
+/** Fedora Server 44 as installed: tailscale0 in no zone, so the default zone FedoraServer applies to it. */
+const fedora: Firewall = {
+  interfaceZone: null, savedInterfaceZone: null, defaultZone: "FedoraServer",
+  runtime: { FedoraServer: fedoraServer, trusted: { target: "ACCEPT", services: [], ports: [] } },
+  permanent: { FedoraServer: fedoraServer, trusted: { target: "ACCEPT", services: [], ports: [] } },
+  services: { ssh: ["22/tcp"], cockpit: ["9090/tcp"], "dhcpv6-client": ["546/udp"] },
+};
+
+/** firewall-cmd as a function, which bash finds before any command on PATH, answering in firewall-cmd's own format. */
+function firewallCmd(f: Firewall | null): string {
+  if (f === null) return `firewall-cmd() { echo "Authorization failed." >&2; return 1; }`;
+  const listAll = (name: string, z: Zone) => [name, `  target: ${z.target}`, "  icmp-block-inversion: no", "  interfaces: ", "  sources: ",
+    `  services: ${z.services.join(" ")}`, `  ports: ${z.ports.join(" ")}`, `  protocols: ${(z.protocols ?? []).join(" ")}`, "  forward: yes", "  masquerade: no",
+    "  forward-ports: ", "  source-ports: ", "  icmp-blocks: ", "  rich rules: "].join("\n");
+  const zones = (mode: string, zs: Record<string, Zone>) => Object.entries(zs).map(([name, z]) => `"${mode}--zone=${name} --list-all") printf '%b\\n' '${listAll(name, z)}' ;;`);
+  const services = Object.entries(f.services).map(([name, ports]) => `"--info-service=${name}"|"--permanent --info-service=${name}") printf '%b\\n' '${name}\n  ports: ${ports.join(" ")}\n  protocols: \n  source-ports: \n  modules: \n  destination: ${f.destinations?.[name] ?? ""}\n  includes: \n  helpers: ' ;;`);
+  return `firewall-cmd() {
+  case "$*" in
+    --get-zone-of-interface=tailscale0) ${f.interfaceZone === null ? "echo no zone; return 2" : `echo ${f.interfaceZone}`} ;;
+    "--permanent --get-zone-of-interface=tailscale0") ${f.savedInterfaceZone === null ? "echo no zone; return 2" : `echo ${f.savedInterfaceZone}`} ;;
+    --get-default-zone) echo ${f.defaultZone} ;;
+    ${[...zones("", f.runtime), ...zones("--permanent ", f.permanent), ...services].join("\n    ")}
+    *) echo "firewall-cmd stand-in has no answer for: $*" >&2; return 1 ;;
+  esac
+}`;
 }
 
 const running = {
@@ -54,7 +101,7 @@ const complete: Machine = {
   commands: ["qemu-system-x86_64", "qemu-img", "tailscale", "git", "npm"],
   status: running, tailscaled: ["TS_PERMIT_CERT_UID=nexus-control"], controlConfig: false,
   memoryKib: 16 * gib, ss: true, free: { "/var/lib/nexus": `${200 * gib} /`, "/opt/nexus": `${200 * gib} /` }, listeners: {}, homes: {}, prefixEntries: [],
-  roles: [], units: {},
+  roles: [], units: {}, firewalld: false, firewall: fedora,
 };
 
 const fresh: Machine = {
@@ -88,6 +135,8 @@ user_home() { case $1 in ${Object.entries(m.homes).map(([user, home]) => `${user
 prefix_entries() { printf '%s\\n' ${m.prefixEntries.map((entry) => `'${entry}'`).join(" ")} | grep . || true; }
 installed_roles() { printf '%s\\n' ${m.roles.map((role) => `'${role}'`).join(" ")} | grep . || true; }
 unit_state() { case $1 in ${Object.entries(m.units).map(([unit, state]) => `${unit}) echo ${state} ;;`).join(" ")} *) echo unknown ;; esac; }
+firewalld_running() { ${m.firewalld}; }
+${firewallCmd(m.firewall)}
 `;
 }
 
@@ -155,7 +204,7 @@ check_prerequisites node 'sudo deploy/install.sh'; printf '%s\\0' "\${misses[@]}
 });
 
 test("Node older than 26 is a miss, and the fix fits the package manager", async () => {
-  assert.match((await misses({ ...complete, node: "22", manager: "dnf" }, "node")).join("\n"), /found 22\.\n {4}curl -fsSL https:\/\/rpm\.nodesource\.com\/setup_26\.x/);
+  assert.equal((await misses({ ...complete, node: "22", manager: "dnf" }, "node")).join("\n"), "- Node 26 or newer must be in /usr/local/bin:/usr/bin, found 22.\n    Install Node 26 from https://nodejs.org/en/download into /usr/local.", "Fedora's own nodejs owns /usr/bin/node, so Node 26 goes beside it in /usr/local");
   assert.match((await misses({ ...complete, node: "20", manager: "other" }, "node")).join("\n"), /https:\/\/nodejs\.org\/en\/download/);
 });
 
@@ -163,7 +212,8 @@ test("pylon images are x86_64, so another architecture is a miss, and either QEM
   const arm = { ...complete, arch: "aarch64" };
   assert.deepEqual(await misses(arm, "node"), ["- Pylons run x86_64 images under KVM, and this machine is aarch64.\n    Install on an x86_64 Linux machine."]);
   assert.match((await misses({ ...complete, commands: ["qemu-img", "tailscale"] }, "node")).join("\n"), /qemu-system-x86_64 or qemu-img[^\n]*\n {4}sudo apt-get install -y qemu-system-x86 qemu-utils/);
-  assert.match((await misses({ ...complete, manager: "dnf", commands: ["qemu-system-x86_64", "tailscale"] }, "node")).join("\n"), /sudo dnf install -y qemu-system-x86_64-core qemu-img/);
+  const dnf = (await misses({ ...complete, manager: "dnf", commands: ["qemu-system-x86_64", "tailscale"] }, "node")).join("\n");
+  assert.match(dnf, /qemu-system-x86_64 or qemu-img[^\n]*\n {4}sudo dnf install -y qemu-system-x86-core qemu-img(\n|$)/, "Fedora's package that holds qemu-system-x86_64 is qemu-system-x86-core");
 });
 
 test("/dev/kvm outside the kvm group is a miss of its own", async () => {
@@ -471,4 +521,97 @@ main --check`);
 test("a disk df cannot read is a miss that names the path", async () => {
   const run = await bash(`. "$1/deploy/install.sh"; df() { return 1; }; free_space /nonexistent/nexus`);
   assert.equal(run.stdout, "0 /\n");
+});
+
+/** The misses and the warnings check_prerequisites records for the machine. */
+async function findings(m: Machine, role: "control" | "node"): Promise<{ misses: string[]; warnings: string[] }> {
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs(m)} check_prerequisites ${role} 'sudo deploy/install.sh --check'; printf '%s\\0' "\${misses[@]}"; printf '\\1\\0'; printf '%s\\0' "\${warnings[@]}"`);
+  assert.equal(run.code, 0, run.stderr);
+  const [misses = "", warnings = ""] = run.stdout.split("\x01\0");
+  const entries = (part: string) => part.split("\0").filter((entry) => entry !== "");
+  return { misses: entries(misses), warnings: entries(warnings) };
+}
+
+const fedoraMachine: Machine = { ...complete, manager: "dnf", commands: [...complete.commands, "firewall-cmd"], firewalld: true };
+
+test("firewalld that keeps the tailnet from Nexus's ports is a miss, and its fix only adds those ports to the zone tailscale0 gets", async () => {
+  const closed = (ports: string) => `- firewalld does not let TCP ${ports} in on tailscale0, as it runs or as saved for the next reload, so other machines on the tailnet are refused there. Adding the ports to tailscale0's zone leaves the zone's other rules as they are.`;
+  assert.deepEqual(await findings(fedoraMachine, "control"), { warnings: [], misses: [
+    `${closed("7470 7443 7480")}\n` +
+    "    sudo firewall-cmd --zone=FedoraServer --add-port=7470/tcp --add-port=7443/tcp --add-port=7480/tcp\n" +
+    "    sudo firewall-cmd --permanent --zone=FedoraServer --add-port=7470/tcp --add-port=7443/tcp --add-port=7480/tcp",
+  ] });
+  assert.deepEqual((await findings(fedoraMachine, "node")).misses, [
+    `${closed("7480")}\n` +
+    "    sudo firewall-cmd --zone=FedoraServer --add-port=7480/tcp\n" +
+    "    sudo firewall-cmd --permanent --zone=FedoraServer --add-port=7480/tcp",
+  ], "a node's own preview gateway listens on 127.0.0.1, so only its probe needs the tailnet");
+  const internal = { ...fedora, interfaceZone: "internal", savedInterfaceZone: "internal", runtime: { internal: fedoraServer }, permanent: { internal: fedoraServer } };
+  assert.deepEqual((await findings({ ...fedoraMachine, firewall: internal }, "node")).misses, [
+    `${closed("7480")}\n    sudo firewall-cmd --zone=internal --add-port=7480/tcp\n    sudo firewall-cmd --permanent --zone=internal --add-port=7480/tcp`,
+  ], "the zone tailscale0 was put in, not the default");
+  const nexus = ["7470/tcp", "7443/tcp", "7480/tcp"];
+  const saved = { ...fedora, permanent: { FedoraServer: { ...fedoraServer, ports: nexus } } };
+  assert.deepEqual((await findings({ ...fedoraMachine, firewall: saved }, "control")).misses, [
+    `${closed("7470 7443 7480")}\n    sudo firewall-cmd --zone=FedoraServer --add-port=7470/tcp --add-port=7443/tcp --add-port=7480/tcp`,
+  ], "saved rules that no reload has applied yet leave the ports closed now");
+  const now = { ...fedora, runtime: { FedoraServer: { ...fedoraServer, ports: ["7470/tcp", "7480/tcp"] } } };
+  assert.deepEqual((await findings({ ...fedoraMachine, firewall: now }, "control")).misses, [
+    `${closed("7470 7443 7480")}\n    sudo firewall-cmd --zone=FedoraServer --add-port=7443/tcp\n    sudo firewall-cmd --permanent --zone=FedoraServer --add-port=7470/tcp --add-port=7443/tcp --add-port=7480/tcp`,
+  ], "rules only in the running firewall close again on the next reload, and each fix adds only what its rules lack");
+  const movedForNow = { ...fedora, interfaceZone: "trusted" };
+  assert.deepEqual((await findings({ ...fedoraMachine, firewall: movedForNow }, "node")).misses, [
+    `${closed("7480")}\n    sudo firewall-cmd --permanent --zone=FedoraServer --add-port=7480/tcp`,
+  ], "tailscale0 put in trusted only as it runs goes back to the default zone on a reload");
+  const udp = { ...fedora, runtime: { FedoraServer: { ...fedoraServer, ports: ["7480/udp"] } }, permanent: { FedoraServer: { ...fedoraServer, ports: ["7480/udp"] } } };
+  assert.equal((await findings({ ...fedoraMachine, firewall: udp }, "node")).misses.length, 1, "UDP is not TCP");
+  const elsewhere = { ...fedora, runtime: { FedoraServer: { ...fedoraServer, services: ["nexus"] } }, permanent: { FedoraServer: { ...fedoraServer, services: ["nexus"] } },
+    services: { ...fedora.services, nexus: ["7480/tcp"] }, destinations: { nexus: "ipv4:192.0.2.1" } };
+  assert.deepEqual((await findings({ ...fedoraMachine, firewall: elsewhere }, "node")).misses, [
+    `${closed("7480")}\n    sudo firewall-cmd --zone=FedoraServer --add-port=7480/tcp\n    sudo firewall-cmd --permanent --zone=FedoraServer --add-port=7480/tcp`,
+  ], "a service limited to another destination does not open the tailnet address");
+});
+
+test("firewalld that lets the tailnet in to Nexus's ports, by port, range, service or the zone's target, is no miss", async () => {
+  const both = (z: Zone) => ({ runtime: { FedoraServer: z }, permanent: { FedoraServer: z } });
+  for (const firewall of [
+    { ...fedora, ...both({ ...fedoraServer, ports: ["7470/tcp", "7443/tcp", "7480/tcp"] }) },
+    { ...fedora, ...both({ ...fedoraServer, ports: ["7400-7499/tcp"] }) },
+    { ...fedora, ...both({ ...fedoraServer, services: ["ssh", "nexus"] }), services: { ...fedora.services, nexus: ["7470/tcp", "7443/tcp", "7480-7481/tcp"] } },
+    { ...fedora, ...both({ ...fedoraServer, protocols: ["icmp", "tcp"] }) },
+    { ...fedora, interfaceZone: "trusted", savedInterfaceZone: "trusted" },
+  ]) assert.deepEqual(await findings({ ...fedoraMachine, firewall }, "control"), { misses: [], warnings: [] }, JSON.stringify(firewall));
+});
+
+test("firewalld stopped, or no firewall-cmd at all, is no miss", async () => {
+  assert.deepEqual(await findings({ ...fedoraMachine, firewalld: false }, "control"), { misses: [], warnings: [] });
+  assert.deepEqual(await findings({ ...fedoraMachine, commands: complete.commands }, "control"), { misses: [], warnings: [] });
+});
+
+test("without root firewalld's rules are not read, and the ports are a warning that says so, never a pass", async () => {
+  const open = { ...fedora, interfaceZone: "trusted", savedInterfaceZone: "trusted" };
+  const user = await findings({ ...fedoraMachine, uid: 1000, firewall: open }, "control");
+  assert.deepEqual(user.warnings, ["- firewalld runs here, and only root can read its rules, so whether tailscale0 lets in TCP 7470 7443 7480 was not checked.\n    sudo deploy/install.sh --check"]);
+  assert.ok(!user.misses.some((entry) => entry.includes("firewalld")), user.misses.join("\n"));
+  const run = await bash(`. "$1/deploy/install.sh"; ${stubs({ ...fedoraMachine, uid: 1000 })} ${steps}
+main --check`);
+  assert.equal(run.code, 1);
+  assert.match(run.stderr, /^Warnings:\n- firewalld runs here, and only root can read its rules,/);
+  assert.match(run.stderr, /\nThis machine has 1 problem\(s\)\.[^\n]*\n- The installer changes the system, so it runs as root\./);
+  const unreadable = await findings({ ...fedoraMachine, firewall: null }, "node");
+  assert.deepEqual(unreadable.misses, []);
+  assert.match(unreadable.warnings.join("\n"), /^- firewalld runs here, and its rules for tailscale0 could not be read, so TCP 7480 was not checked\./);
+});
+
+test("a closed firewall stops a first install and warns on a rerun of an installed machine, which the rerun cannot fix", async () => {
+  const first = await bash(`. "$1/deploy/install.sh"; ${stubs(fedoraMachine)} ${steps}
+main --admit macbook`);
+  assert.equal(first.code, 1);
+  assert.match(first.stderr, /^This machine is missing 1 prerequisite\(s\)\. Nothing was changed\. Fix each, then rerun:\n- firewalld does not let TCP 7470 7443 7480 in on tailscale0,/);
+  assert.doesNotMatch(first.stderr, /^node /m);
+  const rerun = await bash(`. "$1/deploy/install.sh"; ${stubs({ ...fedoraMachine, prefixEntries: ["releases"] })} ${steps}
+main --admit macbook`);
+  assert.equal(rerun.code, 0, rerun.stderr);
+  assert.match(rerun.stderr, /^Warnings:\n- firewalld does not let TCP 7470 7443 7480 in on tailscale0,[^\n]*\n {4}sudo firewall-cmd --zone=FedoraServer --add-port=7470\/tcp/);
+  assert.match(rerun.stderr, /\nnode \.\/src\/deploy\/setup\.ts install --package-manager dnf --admit macbook\n$/);
 });
