@@ -365,4 +365,16 @@ export const arcMigrations: Migrations = [
        cache_read = cache_read + excluded.cache_read, calls = calls + excluded.calls;
    DROP TABLE usage_days;
    ALTER TABLE usage_days_owned RENAME TO usage_days;`,
+  // mp-16: the harness's ChatGPT token is the install's one login, so a pylon booted with its owner's logins, which
+  // only a shared install's start gives, is granted it no more. A boot from before kept the grant, which no probe there
+  // is handed now, so its wake would wait for it for good. Its boot and any spawn it has submitted drop it.
+  `UPDATE pylons SET boot = json_set(boot, '$.network.secrets',
+     (SELECT json_group_array(json(value)) FROM json_each(boot, '$.network.secrets') WHERE json_extract(value, '$.name') <> 'NEXUS_CHATGPT_TOKEN'))
+     WHERE EXISTS (SELECT 1 FROM json_each(boot, '$.network.secrets') WHERE json_extract(value, '$.owner') = 1)
+       AND EXISTS (SELECT 1 FROM json_each(boot, '$.network.secrets') WHERE json_extract(value, '$.name') = 'NEXUS_CHATGPT_TOKEN');
+   UPDATE pylons SET submitted = json_set(submitted, '$.job.boot.network.secrets',
+     (SELECT json_group_array(json(value)) FROM json_each(submitted, '$.job.boot.network.secrets') WHERE json_extract(value, '$.name') <> 'NEXUS_CHATGPT_TOKEN'))
+     WHERE submitted IS NOT NULL AND json_extract(submitted, '$.job.kind') = 'spawn'
+       AND EXISTS (SELECT 1 FROM json_each(submitted, '$.job.boot.network.secrets') WHERE json_extract(value, '$.owner') = 1)
+       AND EXISTS (SELECT 1 FROM json_each(submitted, '$.job.boot.network.secrets') WHERE json_extract(value, '$.name') = 'NEXUS_CHATGPT_TOKEN');`,
 ];

@@ -17,6 +17,11 @@ import { image, project, sharedProject, testApi } from "../test-support/api-kit.
 import { tailnet, type WhoisAnswer } from "../test-support/people.ts";
 import { parseWhois, type TailnetCaller } from "../node-base/tailscaled.ts";
 import { tempDir } from "../test-support/kit.ts";
+import { addThread, seedRegistry } from "../test-support/registry-kit.ts";
+import { openRegistry } from "./registry.ts";
+import { DatabaseSync } from "node:sqlite";
+import { chatgptTokenGrant, ownerGrants } from "../protocol/secret-grants.ts";
+import { heldSecrets } from "../protocol/observations.ts";
 import type { ImageId, Person, PylonId } from "../ids.ts";
 
 const alice = tailnet.alice.UserProfile!.LoginName as Person;
@@ -165,4 +170,24 @@ test("a shared install's harness opens over an unfinished failure judgment and r
   await open({ judgmentsOnly: true });
   await until(() => arrived.length > 1);
   assert.deepEqual(arrived, ["judge", "judge"], "the judgment's turn resumed");
+});
+
+test("a shared pylon booted before mp-16 with the harness's ChatGPT grant loses it, so its wake waits on no secret its probe is never handed", async (t) => {
+  const path = join(await tempDir("pylon-agents-only-registry-", t), "registry.db");
+  const before = openRegistry(path);
+  seedRegistry(before);
+  const secrets = [...Object.values(ownerGrants), chatgptTokenGrant];
+  const shared = addThread(before, { boot: { network: { allowedHosts: ["api.openai.com"], secrets } }, claudePrompt: "fix it" });
+  const solo = addThread(before, { boot: { network: { allowedHosts: ["api.openai.com"], secrets: [chatgptTokenGrant] } } });
+  before.close();
+  // The registry as a control plane before this slice left it: the arc's last migration not yet applied.
+  const db = new DatabaseSync(path);
+  db.prepare("UPDATE arc_schema SET version = version - 1").run();
+  db.close();
+  const after = openRegistry(path);
+  t.after(() => after.close());
+  const held = (id: PylonId) => after.threads.pylon(id)!.boot.network.secrets.filter((s) => heldSecrets.includes(s.name)).map((s) => s.name);
+  assert.deepEqual(held(shared.pylonId), [], "the shared pylon's boot asks for no held secret, so a probe after a restart wakes it");
+  assert.deepEqual(after.threads.pylon(shared.pylonId)!.boot.network.secrets, Object.values(ownerGrants), "its owner's own logins stay");
+  assert.deepEqual(held(solo.pylonId), [chatgptTokenGrant.name], "a solo install's pylon keeps the grant its probe is still handed");
 });
