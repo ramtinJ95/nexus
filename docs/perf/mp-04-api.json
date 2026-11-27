@@ -1,0 +1,152 @@
+{
+  "slice": "mp-04",
+  "probe": "api",
+  "recorded": "2026-11-27",
+  "machine": "Nexus pylon, 4 CPU, Docker in the pylon, NEXUS_VERIFY_BASE=nexus-verify-base:pylon",
+  "order": "base first, then head, alternating, five runs a side, both sides on the two-person stack with NEXUS_VERIFY_PEOPLE=1",
+  "limit": "fail when the head median of medians is over 15% above base and outside base range",
+  "note": "GET /v1/threads, which the probe times, is not code this slice changes, so the gap between the sides is run-to-run noise. No run landed in the 7 ms cluster #708 reports",
+  "base": {
+    "commit": "a9deaa95",
+    "runs": [
+      {
+        "probe": "api",
+        "revision": "a9deaa95",
+        "dirty": false,
+        "medianMs": 3.5,
+        "p95Ms": 5.1,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.4,
+        "bobMedianMs": 3.7
+      },
+      {
+        "probe": "api",
+        "revision": "a9deaa95",
+        "dirty": false,
+        "medianMs": 4.2,
+        "p95Ms": 6.2,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 4.1,
+        "bobMedianMs": 4.4
+      },
+      {
+        "probe": "api",
+        "revision": "a9deaa95",
+        "dirty": false,
+        "medianMs": 4.3,
+        "p95Ms": 9.2,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 4.2,
+        "bobMedianMs": 4.8
+      },
+      {
+        "probe": "api",
+        "revision": "a9deaa95",
+        "dirty": false,
+        "medianMs": 4.2,
+        "p95Ms": 10.8,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 4,
+        "bobMedianMs": 4.2
+      },
+      {
+        "probe": "api",
+        "revision": "a9deaa95",
+        "dirty": false,
+        "medianMs": 3.9,
+        "p95Ms": 6,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.8,
+        "bobMedianMs": 4
+      }
+    ]
+  },
+  "head": {
+    "commit": "62f71f91",
+    "runs": [
+      {
+        "probe": "api",
+        "revision": "62f71f91",
+        "dirty": false,
+        "medianMs": 3.8,
+        "p95Ms": 6.9,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.8,
+        "bobMedianMs": 4
+      },
+      {
+        "probe": "api",
+        "revision": "62f71f91",
+        "dirty": false,
+        "medianMs": 3.5,
+        "p95Ms": 4.9,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.3,
+        "bobMedianMs": 3.6
+      },
+      {
+        "probe": "api",
+        "revision": "62f71f91",
+        "dirty": false,
+        "medianMs": 3.7,
+        "p95Ms": 4.7,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.6,
+        "bobMedianMs": 3.9
+      },
+      {
+        "probe": "api",
+        "revision": "62f71f91",
+        "dirty": false,
+        "medianMs": 4.3,
+        "p95Ms": 6.1,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 4.2,
+        "bobMedianMs": 4.4
+      },
+      {
+        "probe": "api",
+        "revision": "62f71f91",
+        "dirty": false,
+        "medianMs": 3.5,
+        "p95Ms": 4.7,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.4,
+        "bobMedianMs": 3.5
+      }
+    ]
+  },
+  "result": {
+    "baseMedianOfMediansMs": 4.2,
+    "baseRangeMs": [
+      3.5,
+      4.3
+    ],
+    "headMedianOfMediansMs": 3.7,
+    "headRangeMs": [
+      3.5,
+      4.3
+    ],
+    "verdict": "pass"
+  }
+}
