@@ -700,7 +700,7 @@ test("the route table holds the routes it always has, and each path matches one 
     "POST ^\\/v1\\/questions\\/([^/]+)\\/answer$ allowed: each question says who may answer it, which refusalOf checks",
     "POST ^\\/v1\\/threads$ person: start a thread, startsTurn",
     "POST ^\\/v1\\/threads\\/([^/]+)\\/abort$ owner: abort a thread's turn, admin",
-    "POST ^\\/v1\\/threads\\/([^/]+)\\/activity$ allowed: a page open on the thread only keeps its pylon awake",
+    "POST ^\\/v1\\/threads\\/([^/]+)\\/activity$ allowed: a page open on the thread only keeps its pylon awake, and only its owner's counts",
     "POST ^\\/v1\\/threads\\/([^/]+)\\/archive$ owner: archive a thread, admin",
     "POST ^\\/v1\\/threads\\/([^/]+)\\/land$ deployer: land a pull request, which deploys",
     "POST ^\\/v1\\/threads\\/([^/]+)\\/messages$ owner: message a thread, startsTurn",

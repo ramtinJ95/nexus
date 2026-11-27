@@ -70,12 +70,12 @@ export function threadPage(c: Context, page: ThreadView, streaming = false): Htm
   return layout(c, {
     title: t.title,
     active: t.id,
-    ...(open ? { activity: t.id } : {}),
+    ...(open && c.owns(t.id) ? { activity: t.id } : {}),
     main: html`${bar}
 ${role === "builder" ? html`<nav class="life-bar" id="life" data-live aria-label="Stages">${lifeTrack(life!)}</nav>` : html`<div class="life-bar" id="life" data-live>${roleLine(c, t.id, role)}</div>`}
 <div class="tabs" id="tabs" role="tablist" aria-label="Open views" data-thread="${t.id}"><button type="button" class="tab active" role="tab" aria-selected="true" aria-controls="scroll" data-tab="convo">${icon("chat")}<span class="tab-name">${t.title}</span></button>${life !== null && html`<button type="button" class="tab tab-tl" role="tab" aria-selected="false" aria-controls="timeline-view" data-tab="timeline">${icon("timeline")}<span class="tab-name">Timeline</span></button>`}${t.status !== "deleted" && html`<button type="button" class="tab tab-term"${!open && " hidden"} role="tab" aria-selected="false" aria-controls="term-view" data-tab="term" title="A terminal in the pylon, as nexus attach ${t.id} gives">${icon("terminal")}<span class="tab-name">Terminal</span></button>`}</div>
 <div class="strip" id="strip" data-live>${strip(d)}</div>
-<div id="facts" data-live hidden>${facts(d)}</div>
+<div id="facts" data-live hidden>${facts(d, c.owns(t.id))}</div>
 ${life !== null && html`<section class="timeline-view" id="timeline-view" role="tabpanel" aria-label="Timeline" hidden><div class="tl-wrap" id="timeline" data-live>${timeline(c, page, life)}</div></section>`}
 <div class="scroll" id="scroll" role="tabpanel"><div class="convo" id="convo" data-rendered-reply-at="${read === null ? "" : renderedReplyAt ?? ""}"${shows !== null && html` data-shows="${shows}"`} data-live${agent.kind !== "none" && t.status !== "deleted" && html` data-stream="/threads/${t.id}/stream"`}>${shows === null && convo(t, view, items, model, c.now)}</div><button type="button" class="btn btn-xs jump-end" id="jump-end" hidden>Jump to latest</button></div>
 <section class="file-view" id="file-view" role="tabpanel" aria-label="File diff" hidden></section>
@@ -185,8 +185,8 @@ ${q.lastError !== null && html`<p class="error">The last start attempt failed: $
  */
 const outputsOf = (d: ThreadDetail) => d.outputs.filter((o) => o.kind !== "pull-request" && (o.kind !== "preview" || !d.previews.some((p) => p.service === o.ref)));
 
-function facts({ thread: t, pylon }: ThreadDetail): Html {
-  return html`<span${dataset(factsData({ pylon: pylon.actualState, turn: t.working, agentAt: t.lastAgentActivityAt, status: t.status, open: isOpenStatus(t.status) }))}></span>`;
+function facts({ thread: t, pylon }: ThreadDetail, wakes: boolean): Html {
+  return html`<span${dataset(factsData({ pylon: pylon.actualState, turn: t.working, agentAt: t.lastAgentActivityAt, status: t.status, open: isOpenStatus(t.status), wakes }))}></span>`;
 }
 
 /** The phone's stand-in for the inspector: the pylon, each preview as a link where it has one, and the outputs. */

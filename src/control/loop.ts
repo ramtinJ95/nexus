@@ -19,7 +19,7 @@
  * something to settle.
  */
 import { setImmediate as nextTurn, setTimeout as delay } from "node:timers/promises";
-import { desiredPhase, type RegistryWrite } from "./reconcile.ts";
+import { desiredPhase, previewHitter, type PreviewHitter, type RegistryWrite } from "./reconcile.ts";
 import { linkedPort } from "../services-file.ts";
 import { liveHashOf, type GitIdentity } from "../protocol/spawn.ts";
 import { singleFlight, type SingleFlight } from "../single-flight.ts";
@@ -44,7 +44,7 @@ type LoopRegistry = Pick<Registry, "threads" | "images" | "nodeMetrics" | "nodes
  * the last observation say the node has, to its last ingested observation. `unlisted` names those whose session list
  * this control plane has not written since it started or since they were last left out of `known`.
  */
-export type Ingest = (event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number, unlisted: ReadonlySet<PylonId>) => readonly RegistryWrite[];
+export type Ingest = (event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number, unlisted: ReadonlySet<PylonId>, counts: PreviewHitter) => readonly RegistryWrite[];
 
 /** How often the loop polls unless its options say otherwise. */
 export const tickMs = 5_000;
@@ -106,6 +106,10 @@ interface Link {
 
 export function startLoop(options: LoopOptions): Loop {
   const { registry, ingest, previewPorts, people = solo } = options;
+  const counts = previewHitter(people, (pylonId) => {
+    const pylon = registry.threads.pylon(pylonId);
+    return pylon === undefined ? undefined : registry.threads.thread(pylon.thread)?.owner;
+  });
   const offlineAfterMs = options.offlineAfterMs ?? 30_000;
   const reconnectMs = options.reconnectMs ?? 2_000;
   const silenceMs = options.silenceMs ?? 90_000;
@@ -325,7 +329,7 @@ export function startLoop(options: LoopOptions): Loop {
             options.onSnapshot?.(node, event.observation);
           }
           if (event.type === "session-event") registry.threads.reportSession(node, event.report);
-          const writes = ingest(event, node, known, registry.now(), new Set([...known.keys()].filter((id) => !listed.has(id))));
+          const writes = ingest(event, node, known, registry.now(), new Set([...known.keys()].filter((id) => !listed.has(id))), counts);
           registry.threads.ingested(current === last ? null : current, writes);
           link.last = current;
           for (const w of writes) if (w.record === "sessions" || w.record === "sessions-paused") listed.add(w.pylonId);

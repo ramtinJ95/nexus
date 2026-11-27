@@ -14,7 +14,8 @@ import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { retryable } from "../protocol/jobs.ts";
 import { heldSecrets, logTailBounds } from "../protocol/observations.ts";
-import type { ArtifactId, CheckpointId, JobId, LiveHash, NodeName, PylonId } from "../ids.ts";
+import type { ArtifactId, CheckpointId, JobId, LiveHash, NodeName, Person, PylonId } from "../ids.ts";
+import type { People } from "./people.ts";
 import type { Job, JobEnvelope, JobErrorCode, JobStatus } from "../protocol/jobs.ts";
 import type {
   TerminalStatus, NodeObservation, PausedSession, ProbeEvent, PylonObservation, RunningFacts, SessionFact,
@@ -407,13 +408,21 @@ export type SessionRow = { id: string; harness: SessionHarness; harnessSessionId
  * - A working session is agent activity, unless its harness's hooks report its activity, as Claude Code's do. One of a
  *   harness this build does not know counts. An attached client is human activity. Both are at `now`, the time the
  *   control plane received the event. A preview hit is human activity at its own time.
+ * - A preview hit counts only when `counts` says its login may keep the pylon awake: on a shared install only its
+ *   thread's owner's, as previewHitter builds it, so a teammate browsing a preview leaves the idle clock alone.
  * - A stopped or broken pylon newly marked wakeAfterBoot is agent activity at `now`: the node's shutdown paused it while
  *   it ran, so it runs again for agentIdleMs, resumed from that checkpoint, and then sleeps under the idle policy. An
  *   archived thread ignores activity, so its pylon stays paused. Agent, not human, because a boot is not a person, and
  *   human activity says someone works on the thread. A marked pylon in `unlisted` counts again, so a control plane
  *   that stopped between ingesting the mark and the spawn still wakes it once it starts.
  */
-export function ingest(event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number, unlisted: ReadonlySet<PylonId> = new Set()): readonly RegistryWrite[] {
+/** Whether a preview hit by `login` on a pylon counts as human activity on its thread. */
+export type PreviewHitter = (pylonId: PylonId, login: string | null) => boolean;
+/** A solo install's operator owns every thread, so every hit counts. A shared install counts its thread's owner's hits alone. */
+export const previewHitter = (people: People, ownerOf: (pylonId: PylonId) => Person | undefined): PreviewHitter =>
+  people.shared ? (pylonId, login) => login !== null && login === ownerOf(pylonId) : () => true;
+
+export function ingest(event: ProbeEvent, node: NodeName, known: ReadonlyMap<PylonId, PylonObservation | "absent">, now: number, unlisted: ReadonlySet<PylonId> = new Set(), counts: PreviewHitter = () => true): readonly RegistryWrite[] {
   const observed = (pylon: PylonObservation): RegistryWrite[] => {
     const previous = known.get(pylon.pylonId);
     return previous === undefined ? [] : pylonWrites(pylon.pylonId, previous, pylon, now, unlisted.has(pylon.pylonId));
@@ -433,7 +442,7 @@ export function ingest(event: ProbeEvent, node: NodeName, known: ReadonlyMap<Pyl
     }
     case "pylon": return observed(event.pylon);
     case "job": return [{ record: "job", status: event.status }];
-    case "preview-hit": return known.has(event.pylonId) ? [{ record: "activity", pylonId: event.pylonId, human: Date.parse(event.at), agent: null }] : [];
+    case "preview-hit": return known.has(event.pylonId) && counts(event.pylonId, event.login) ? [{ record: "activity", pylonId: event.pylonId, human: Date.parse(event.at), agent: null }] : [];
   }
 }
 

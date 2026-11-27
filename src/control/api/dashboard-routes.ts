@@ -97,6 +97,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
     return {
       now, caller, mine: kit.shared ? { person: kit.personAs({ roles, identity }) } : null, deploys, landRefusal: options.people?.shared ? "landing off" : options.features.reviews === null ? "no review loop" : refusal(roles, landing) === null ? null : "not a deployer",
       answerRefusal: (question) => kit.answerRefusalOf({ roles, identity }, question),
+      owns: (id) => kit.owns(id, { roles, identity }),
       projects: registry.projects.projects(), nodes: registry.nodes.nodes(), image: registry.images.currentImage(),
       health: { states: registry.health.healthStates(), changes: registry.health.healthChanges() },
       threads, threadsIn: (project) => byProject.get(project) ?? [], queuedIn, pipeline, items,

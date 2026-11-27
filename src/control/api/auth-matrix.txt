@@ -1268,8 +1268,7 @@ shared engineer POST /v1/threads/{alice's thread}/seen -> 204
 shared engineer POST /v1/threads/{alice's thread}/unseen -> 204
 shared engineer POST /v1/threads/{alice's thread}/archive -> 403 thread {alice's thread} is alice@example.com's, so only alice@example.com or an admin may archive a thread
 shared engineer POST /v1/threads/{alice's thread}/unarchive -> 403 thread {alice's thread} is alice@example.com's, so only alice@example.com may unarchive a thread
-shared engineer POST /v1/threads/{alice's thread}/activity -> 400 ✖ Invalid input: expected "human"
-  → at kind
+shared engineer POST /v1/threads/{alice's thread}/activity -> 403 thread {alice's thread} is alice@example.com's, so only alice@example.com may record activity on a thread, which keeps its pylon awake
 shared engineer POST /v1/threads/{alice's thread}/messages -> 403 thread {alice's thread} is alice@example.com's, so only alice@example.com may message a thread
 shared engineer POST /v1/threads/{alice's thread}/abort -> 403 thread {alice's thread} is alice@example.com's, so only alice@example.com or an admin may abort a thread's turn
 shared engineer POST /v1/threads/{alice's thread}/retry -> 403 thread {alice's thread} is alice@example.com's, so only alice@example.com may retry a thread's turn
@@ -1294,8 +1293,7 @@ shared admin POST /v1/threads/{bob's thread}/seen -> 204
 shared admin POST /v1/threads/{bob's thread}/unseen -> 204
 shared admin POST /v1/threads/{bob's thread}/archive -> 200
 shared admin POST /v1/threads/{bob's thread}/unarchive -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may unarchive a thread
-shared admin POST /v1/threads/{bob's thread}/activity -> 400 ✖ Invalid input: expected "human"
-  → at kind
+shared admin POST /v1/threads/{bob's thread}/activity -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may record activity on a thread, which keeps its pylon awake
 shared admin POST /v1/threads/{bob's thread}/messages -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may message a thread
 shared admin POST /v1/threads/{bob's thread}/abort -> 204
 shared admin POST /v1/threads/{bob's thread}/retry -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may retry a thread's turn

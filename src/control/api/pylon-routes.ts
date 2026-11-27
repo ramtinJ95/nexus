@@ -6,7 +6,7 @@ import { readTranscriptImage } from "../claude-transcript.ts";
 import { partHash } from "../conversation-view.ts";
 import { ok, created, noContent, parse, on, type Reply, type RouteEntry, type ApiKit } from "./kit.ts";
 import { checkoutDir } from "../../../images/pylon/nexus-contract.ts";
-import { anyAllowed } from "./access.ts";
+import { anyAllowed, type Caller } from "./access.ts";
 import { pylonRoutes as routes, type ImageSource, type OpenedSession } from "../../contract/pylon.ts";
 import { changesBaseSchema, checkoutPath, diffPaths, imageSourceSchema, previewSchema, sessionSchema } from "../../contract/pylon-parse.ts";
 
@@ -24,7 +24,7 @@ function imageType(bytes: Buffer): string | null {
 }
 
 export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortRange }): readonly RouteEntry[] {
-  const { thread, guard, wakeThread, inPylon, whileRunning, pylonCommand, registry, agents } = kit;
+  const { thread, guard, wakeThread, inPylon, whileRunning, asReader, owns, pylonCommand, registry, agents } = kit;
 
   /** What each source of a conversation's image reads it with. Null is an image that is gone. */
   const imageReaders: { [K in ImageSource["source"]]: (t: Thread, source: Extract<ImageSource, { source: K }>) => Promise<Buffer | null> } = {
@@ -55,15 +55,18 @@ export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortR
   }
 
   /** Reads the pylon's checkout for the Files and Changes views, over one raw pipe per read. */
-  async function inCheckout<T>(t: Thread, read: (checkout: CheckoutReader) => Promise<T>, via: typeof inPylon = inPylon): Promise<T> {
+  async function inCheckout<T>(t: Thread, read: (checkout: CheckoutReader) => Promise<T>, via: typeof whileRunning): Promise<T> {
     const turn = await agents[registry.threads.agent(t).kind].latestTurn(t);
     return via(t, (probe, pylonId) => read(checkoutReader((argv) => probe.stream(pylonId, argv), checkoutDir, undefined, turn)));
   }
 
-  async function checkoutFile(t: Thread, path: string): Promise<Extract<Reply, { file: Buffer }>> {
-    const content = await inCheckout(t, (c) => c.read(path));
+  async function checkoutFile(t: Thread, path: string, via: typeof whileRunning): Promise<Extract<Reply, { file: Buffer }>> {
+    const content = await inCheckout(t, (c) => c.read(path), via);
     return { status: 200, file: content, type: contentType(path, content) };
   }
+
+  /** Whom a checkout read runs as: the owner's wakes the pylon, anyone else's only reads a running one. */
+  const readerOf = (id: string, caller: Caller) => owns(id, caller) ? inPylon : asReader;
 
   /**
    * Links the port in the pylon, then gives its service an https port at once, as the loop would at the next
@@ -146,18 +149,18 @@ export function pylonRoutes(kit: ApiKit, { previewPorts }: { previewPorts: PortR
     }),
     on(routes.files, anyAllowed, async ({ thread: id }, r) => {
       const path = parse(checkoutPath, r.query.path);
-      return ok(await inCheckout(thread(id), (c) => c.list(path)));
+      return ok(await inCheckout(thread(id), (c) => c.list(path), readerOf(id, r)));
     }),
-    on(routes.file, anyAllowed, async ({ thread: id }, r) => checkoutFile(thread(id), parse(checkoutPath.min(1), r.query.path))),
+    on(routes.file, anyAllowed, async ({ thread: id }, r) => checkoutFile(thread(id), parse(checkoutPath.min(1), r.query.path), readerOf(id, r))),
     on(routes.image, anyAllowed, async ({ thread: id }, r) => conversationImage(thread(id), parse(imageSourceSchema, r.query))),
     on(routes.changes, anyAllowed, async ({ thread: id }, r) => {
       const base = parse(changesBaseSchema, r.query.base);
-      return ok(await inCheckout(thread(id), (c) => c.changes(base)));
+      return ok(await inCheckout(thread(id), (c) => c.changes(base), readerOf(id, r)));
     }),
     on(routes.diff, anyAllowed, async ({ thread: id }, r) => {
       const base = parse(changesBaseSchema, r.query.base);
       const paths = parse(diffPaths, r.query.paths);
-      return ok(await inCheckout(thread(id), (c) => c.diff(base, paths)));
+      return ok(await inCheckout(thread(id), (c) => c.diff(base, paths), readerOf(id, r)));
     }),
   ];
 }
