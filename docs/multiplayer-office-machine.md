@@ -11,6 +11,7 @@ Decided by the operator on 2026-11-27.
 - The office machine is an install of its own. It runs its own control plane, probe and deployer, and is never joined to the operator's own install as a node.
 - It runs the `multiplayer` branch from its first install, as `ops-3` says.
 - The software the installer needs goes on the machine now, ahead of `ops-3`. The installer itself is not run yet.
+- The machine is not Nexus's alone. Other people have accounts on it, and one of them runs long-lived services there. The operator agreed with the team that the machine may be changed as Nexus needs.
 
 ## What the checks found
 
@@ -34,6 +35,29 @@ The whois result is the first look at a tagged device on a real tailnet. It matc
 
 Only the tests of the first three checks reached the machine's own network. No pylon ran, so a pylon's path to those hosts through Nexus's own interception is still untested there.
 
+## The firewall, SELinux and swap
+
+[Check 7](multiplayer-office-checks.md#7-the-host-firewall-selinux-and-swap) ran on 2026-11-27, before Docker was installed. The machine's firewall closes port 7443 to the tailnet today, so a laptop could not reach a control plane installed there.
+
+| Fact | Found |
+|---|---|
+| firewalld | Active |
+| Zones | The default zone is `FedoraServer`, and it holds the machine's LAN interface. `tailscale0` is in no zone, so the default zone's rules apply to it |
+| What the default zone lets in | Not read. Listing a zone's services and ports needs `sudo` there |
+| A laptop to port 7443 | Refused. With a server listening on the machine's tailnet address, the laptop's `curl` failed in 0.05 seconds with `http 000`. The same request from the machine to its own tailnet address answered `http 200` |
+| SELinux | `Enforcing` |
+| Swap | 8 GiB of zram, which is compressed memory and no disk |
+
+What follows from it:
+
+- The refusal came at once and not after the five-second timeout, which the checks page reads as the machine's firewall and not the tailnet policy. That is a reading of the timing. Nobody has read the rule that refused it.
+- A refusal at once also means the request reached the machine, so the tailnet policy let the operator's laptop through to that port. That says nothing yet for the engineers' group, which `ops-2` grants.
+- SSH over the tailnet works on the same interface. The firewall lets some ports in from the tailnet and not this one.
+- The check 7 box of `ops-3` applies: open port 7443 on the tailnet interface before the install. The installer checks no firewall, so it would install and report nothing wrong while laptops are refused.
+- The test covered port 7443 only. Previews are served through Tailscale and were not tested.
+- SELinux enforces, so the first install on this machine is the first time Nexus runs under it. [The checks after the install](multiplayer-office-acceptance.md#1-the-install) look for denials.
+- The swap is zram, so it takes its room from the same memory the pylons use and adds none.
+
 ## How many pylons fit
 
 A running pylon holds its full memory and about 0.15 GiB more, and never gives it back. With the checks page's estimate of 4 GiB for the host and the control plane, 27.13 GiB is left for pylons.
@@ -53,6 +77,8 @@ The plan assumed room for 16, two for each of eight engineers. This machine does
 - No size is known for the company project's pylons. Its development stack runs about twenty containers, so 8 GiB is a guess and 4 GiB may be too small. `ops-3` measures it on the first pylon.
 - A review by Nexus adds up to three pylons beside the builder's, and a CI job on Nexus is a pylon of its own. Neither fits on this machine beside eight engineers. `mp-17` and the second plan each need a second node, or a rule that runs their pylons one at a time.
 
+- The table gives Nexus the whole machine but the reserve. The machine used about 1 GiB in all when the checks ran, other people's work included. If that grows, fewer pylons fit, and admission sees it in the memory the machine reports free.
+
 The pylon size for the company project, and whether eight engineers need a second node or a larger machine, are the operator's to decide.
 
 ## The software the installer needs
@@ -67,13 +93,23 @@ What `deploy/install.sh --check` and the first check found on 2026-11-27. Nothin
 | Docker with buildx | The probe builds the pylon image with it. The installer does not check for it, and names it as a step left after the install | Missing |
 | tailscaled lets `nexus-control` fetch the dashboard's certificate | The installer stops without it. The fix names a user the installer creates and restarts tailscaled, so it belongs to the install | Not set |
 
+A look at the machine's packages on 2026-11-27, without `sudo`, found how each has to be installed there.
+
+- **QEMU.** The installer's fix for a `dnf` machine is wrong on Fedora. It prints `sudo dnf install -y qemu-system-x86_64-core qemu-img` (`deploy/install.sh:182`), which builds the package name from the binary's name. Fedora has no such package. Its package is `qemu-system-x86-core`, which holds `/usr/bin/qemu-system-x86_64`. The same line is on `main`, so the fix belongs there first.
+- **Node.** Fedora 44 offers Node 20, 22 and 24, and no 26. The machine's Node 22 is Fedora's, whose packages own `/usr/bin/node` and `/usr/bin/npm`. The installer suggests NodeSource's package, which ships the same two paths and names no Fedora package it replaces, so nobody has shown that it installs beside them. Node 26 goes on from the official tarball instead, checked against its published SHA-256, under `/usr/local` with `node`, `npm` and `npx` linked into `/usr/local/bin`. That is first in the units' path, and it leaves Fedora's Node 22 in `/usr/bin`. `dnf` will not update it.
+- **Docker.** Podman is installed and not running, and nothing there stands in for Docker. Docker goes on from Docker's own Fedora repository, which has packages for Fedora 44, with its buildx plugin.
+
+One script on the machine does the three installs, checks each, and ends with the installer's own check run as root. It waits for the operator to start it, because `sudo` there asks for a password.
+
 ## What is still open
 
-- Installing QEMU, Node 26 and Docker, which waits for the operator's `sudo`. Node 26 replaces the machine's default Node 22 for every user, so check first that nobody else there depends on it.
+- Installing QEMU, Node 26 and Docker, which waits for the operator to start the script. Docker adds firewall zones of its own, so the firewall facts above are from before it.
+- The rule that opens port 7443 to the tailnet, which `ops-3` asks the operator to write down, and what the default zone lets in today. Three commands on the machine read the second: `sudo firewall-cmd --list-services`, `sudo firewall-cmd --list-ports` and `sudo firewall-cmd --zone=FedoraServer --list-all`.
+- The installer's `dnf` line for QEMU, which names a package Fedora does not have. No slice has it yet.
 - Check 5, GitHub: the organisation's rules for personal access tokens, the branch rules and their bypass lists, and an owner's answer on the App.
 - Check 6: whether a Claude token from the team subscription works.
 - Two facts for `ops-2`: which group in the tailnet policy holds the engineers, and who merges a change to that policy.
 - Whether the probe's user joins the `docker` group, which image builds need and which is equal to root on the machine. The operator decides, as [the deploy README](../deploy/README.md#docker-access-for-the-image-build-nodes-probe) says.
 - The pylon size and the capacity question above.
-- [Check 7](multiplayer-office-checks.md#7-the-host-firewall-selinux-and-swap): whether the machine's firewall lets a laptop reach port 7443, and whether SELinux enforces. Fedora Server turns both on by default, the installer checks neither, and neither of the operator's nodes has them.
+- Whether Nexus runs under SELinux in enforcing mode, which the first install shows. Neither of the operator's nodes has it, and the installer does not look at it.
 - The installer cannot write `people` yet, so it cannot make this install. [`mp-24`](multiplayer-plan.md#mp-24-the-installer-makes-a-shared-install) adds that, and `ops-3` waits for it.
