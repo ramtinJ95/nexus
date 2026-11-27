@@ -193,9 +193,10 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
         ? new Refusal("conflict", `${node}'s probe has not reported yet, so whether it can start a Claude session with a first prompt of ${claudePrompt.length} characters is unknown`)
         : new Refusal("conflict", `${node}'s probe cannot start a Claude session with a first prompt of ${claudePrompt.length} characters, over the ${inlinePromptChars} its command line takes, so it needs this release of Nexus on its probe`, "probe-too-old");
     }
-    // A node's last observation outlives a restart, so only a node that never reported is let by, as for a long prompt.
-    if (people.shared && observed != null && observed.ownerGrants !== true) {
-      throw new Refusal("conflict", `${node}'s probe would boot an owner's logins from its secret file when it was not handed them, so on a shared install it needs this release of Nexus on its probe`, "probe-too-old");
+    if (people.shared && observed?.ownerGrants !== true) {
+      throw observed == null
+        ? new Refusal("conflict", `${node}'s probe has not reported yet, so whether it keeps an owner's logins from its secret file is unknown`)
+        : new Refusal("conflict", `${node}'s probe would boot an owner's logins from its secret file when it was not handed them, so on a shared install it needs this release of Nexus on its probe`, "probe-too-old");
     }
     // `auto` passes such a node by, and a review's start beside its builder goes there all the same.
     const short = named || placement.how === "default" ? namedDiskShort(registry, node, resources) : null;

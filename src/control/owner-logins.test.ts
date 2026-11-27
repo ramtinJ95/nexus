@@ -167,6 +167,7 @@ function onePylon() {
   const logged: string[] = [];
   let gate: Promise<void> | null = null;
   let failing = false;
+  let refusing = false;
   const owners = ownerLogins({
     registry: { threads: { pylonsWithThreadsOn: () => [{ pylon: { pylonId, boot: { network: { secrets: [{ name: "GH_TOKEN", hosts: ["github.com"], owner: true }] } } }, thread: { status: "active", owner: bob } }] } } as never,
     logins: { async owned() {
@@ -174,12 +175,15 @@ function onePylon() {
       if (failing) throw new Error("the logins of bob@example.com cannot be read: EACCES");
       return { claude: bobClaude, github: { token: bobGithub, identity: bobIdentity } };
     } },
-    probes: new Map([[node, { putPylonSecret: async (pylon: PylonId, name: string) => { puts.push(`${pylon} ${name}`); } }]]),
+    probes: new Map([[node, { async putPylonSecret(pylon: PylonId, name: string) {
+      if (refusing) throw new Error(`PUT /v1/secrets/${name}/pylons/${pylon}: HTTP 503: its running instance was not updated`);
+      puts.push(`${pylon} ${name}`);
+    } }]]),
     log: (message) => { logged.push(message); },
   });
   const observe = (phase: "booting" | "stopped" | "running", bootedAt = "2027-01-01T00:00:00Z") =>
     owners.observed(node, { probeBootId: "b1", pylons: [{ pylonId, phase, bootedAt } as NodeObservation["pylons"][number]] });
-  return { owners, observe, puts, logged, hold() { let open!: () => void; gate = new Promise((r) => { open = r; }); return () => { gate = null; open(); }; }, fail(on: boolean) { failing = on; } };
+  return { owners, observe, puts, logged, hold() { let open!: () => void; gate = new Promise((r) => { open = r; }); return () => { gate = null; open(); }; }, fail(on: boolean) { failing = on; }, refuse(on: boolean) { refusing = on; } };
 }
 
 test("a snapshot taken while a handoff was in flight never settles it, so a boot that read the stand-in is handed its values again", async () => {
@@ -230,4 +234,33 @@ test("placement on a shared install passes by a node whose probe would fall back
   const placed = await s.call("POST", "/v1/threads", { project: "mono", title: "alice's work", node: "auto" });
   assert.equal(placed.status, 201);
   assert.equal(s.registry.threads.pylon(placed.body.pylonId)!.node, "newer");
+});
+
+test("a value the probe could not swap into the running pylon is handed again on the next snapshot, not settled", async () => {
+  const o = onePylon();
+  o.refuse(true);
+  o.observe("running");
+  await o.owners.close();
+  o.observe("running");
+  await o.owners.close();
+  assert.deepEqual(o.puts, [], "every put was refused");
+  assert.match(o.logged.join("\n"), /handing bob@example\.com's logins to .* failed: .*503/);
+  o.refuse(false);
+  o.observe("running");
+  await o.owners.close();
+  assert.equal(o.puts.length, 2, "the next snapshot hands them again");
+  o.observe("running");
+  await o.owners.close();
+  assert.equal(o.puts.length, 2, "and once they landed on the same running boot they are in use");
+});
+
+test("a shared start refuses a node whose probe has not reported, since whether it keeps owner grants apart is unknown", async (t) => {
+  const s = await shared(t);
+  await s.call("PUT", "/v1/logins/claude", { token: "sk-ant-oat01-alice-made-up" });
+  await s.call("PUT", "/v1/logins/github", { token: "ghp_aliceMadeUp" });
+  s.registry.nodes.upsertNode({ name: "fresh" as NodeName, tailnetHost: "fresh.tail.ts.net", tailnetNodeId: "nFRESH" as never });
+  const refused = await s.call("POST", "/v1/threads", { project: "mono", title: "alice's work", node: "fresh" });
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error, /fresh's probe has not reported yet, so whether it keeps an owner's logins from its secret file is unknown/);
+  assert.deepEqual(s.pylonSecrets, [], "nothing was handed to it");
 });

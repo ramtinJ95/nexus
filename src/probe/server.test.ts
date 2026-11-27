@@ -754,6 +754,17 @@ test("two pylons hold their own values under one secret name, an update reaches 
   assert.deepEqual([second.value("GH_TOKEN", alice), second.value("GH_TOKEN", bob)], ["ghp_alice2", "ghp_bob"]);
 });
 
+test("a pylon's value that its running instance did not take is refused with 503, so the control plane hands it again", async (t) => {
+  const secrets = nodeSecrets({ value: () => undefined, names: () => [] });
+  const { client, fake } = await setup(t, { secrets });
+  const pylon = "pylon-bob" as PylonId;
+  fake.unreachable.push(pylon);
+  await assert.rejects(client.putPylonSecret(pylon, "GH_TOKEN", "ghp_bobUnswapped"), (err: Error) => /503/.test(err.message) && /its running instance was not updated: its controller did not answer/.test(err.message) && !err.message.includes("ghp_bobUnswapped"));
+  assert.equal(secrets.value("GH_TOKEN", pylon, true), "ghp_bobUnswapped", "the next boot reads it all the same");
+  fake.unreachable.length = 0;
+  await client.putPylonSecret(pylon, "GH_TOKEN", "ghp_bobUnswapped");
+});
+
 test("a pylon's value is taken only from the control plane, under a secret name, for a pylon ID, and only as a token, and a refusal never echoes the value", async (t) => {
   const secrets = nodeSecrets({ value: () => undefined, names: () => [] });
   const { base, fake, callAs } = await setup(t, { secrets });

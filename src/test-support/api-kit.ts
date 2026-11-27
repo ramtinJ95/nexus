@@ -96,6 +96,8 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
   const images = imagesOf?.(registry);
   const backfill = backfillOf?.(registry);
   registry.nodes.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  // A shared install starts a pylon only on a node whose probe said it keeps owner grants apart, as this release's does.
+  if (apiOptions.people?.shared === true) registry.threads.ingested(testObservation(node, { artifacts: [image.id], grants: { secrets: ["STRIPE_KEY", "NEXUS_CHATGPT_TOKEN"], gitSsh: true } }), []);
   let caller: TailnetNodeId | null = laptop;
   let requests = 0;
   /** Every whois waits for it, so a test can hold a request at admission, and tells `asked` it got there. */

@@ -322,8 +322,11 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
     return null;
   }
 
-  async function applySecret(name: string, only: PylonId | null): Promise<void> {
-    for (const { pylonId, reason } of await backend.updateSecret(name, only)) log(`${pylonId}: ${name} was not updated: ${reason}`);
+  /** The pylons the update did not reach, each logged. */
+  async function applySecret(name: string, only: PylonId | null): Promise<readonly { pylonId: PylonId; reason: string }[]> {
+    const failed = await backend.updateSecret(name, only);
+    for (const { pylonId, reason } of failed) log(`${pylonId}: ${name} was not updated: ${reason}`);
+    return failed;
   }
 
   const handlers: { [K in HttpRouteName]: (req: IncomingMessage, res: ServerResponse, params: ParamsOf<(typeof probeRoutes)[K]["path"]>) => Promise<unknown> | void } = {
@@ -380,7 +383,9 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       const value = await secretValue(req, res);
       if (value === null) return;
       options.secrets.holdFor(pylon, name, value);
-      await applySecret(name, pylon);
+      // The pylon's next boot reads the held value, but a running one keeps what it had, so the control plane hands it again.
+      const [failed] = await applySecret(name, pylon);
+      if (failed !== undefined) return send(res, 503, redacted(`${pylon} holds the new ${name}, but its running instance was not updated: ${failed.reason}`));
       res.writeHead(204).end();
     },
     async putPeers(req, res) {
