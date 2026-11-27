@@ -52,6 +52,8 @@ interface Firewall {
   runtime: Record<string, Zone>;
   permanent: Record<string, Zone>;
   services: Record<string, string[]>;
+  /** The destination a service is limited to, for the services that have one. */
+  destinations?: Record<string, string>;
 }
 
 interface Zone { target: string; services: string[]; ports: string[]; protocols?: string[] }
@@ -73,7 +75,7 @@ function firewallCmd(f: Firewall | null): string {
     `  services: ${z.services.join(" ")}`, `  ports: ${z.ports.join(" ")}`, `  protocols: ${(z.protocols ?? []).join(" ")}`, "  forward: yes", "  masquerade: no",
     "  forward-ports: ", "  source-ports: ", "  icmp-blocks: ", "  rich rules: "].join("\n");
   const zones = (mode: string, zs: Record<string, Zone>) => Object.entries(zs).map(([name, z]) => `"${mode}--zone=${name} --list-all") printf '%b\\n' '${listAll(name, z)}' ;;`);
-  const services = Object.entries(f.services).map(([name, ports]) => `"--info-service=${name}"|"--permanent --info-service=${name}") printf '%b\\n' '${name}\n  ports: ${ports.join(" ")}\n  protocols: ' ;;`);
+  const services = Object.entries(f.services).map(([name, ports]) => `"--info-service=${name}"|"--permanent --info-service=${name}") printf '%b\\n' '${name}\n  ports: ${ports.join(" ")}\n  protocols: \n  source-ports: \n  modules: \n  destination: ${f.destinations?.[name] ?? ""}\n  includes: \n  helpers: ' ;;`);
   return `firewall-cmd() {
   case "$*" in
     --get-zone-of-interface=tailscale0) ${f.interfaceZone === null ? "echo no zone; return 2" : `echo ${f.interfaceZone}`} ;;
@@ -563,6 +565,11 @@ test("firewalld that keeps the tailnet from Nexus's ports is a miss, and its fix
   ], "tailscale0 put in trusted only as it runs goes back to the default zone on a reload");
   const udp = { ...fedora, runtime: { FedoraServer: { ...fedoraServer, ports: ["7480/udp"] } }, permanent: { FedoraServer: { ...fedoraServer, ports: ["7480/udp"] } } };
   assert.equal((await findings({ ...fedoraMachine, firewall: udp }, "node")).misses.length, 1, "UDP is not TCP");
+  const elsewhere = { ...fedora, runtime: { FedoraServer: { ...fedoraServer, services: ["nexus"] } }, permanent: { FedoraServer: { ...fedoraServer, services: ["nexus"] } },
+    services: { ...fedora.services, nexus: ["7480/tcp"] }, destinations: { nexus: "ipv4:192.0.2.1" } };
+  assert.deepEqual((await findings({ ...fedoraMachine, firewall: elsewhere }, "node")).misses, [
+    `${closed("7480")}\n    sudo firewall-cmd --zone=FedoraServer --add-port=7480/tcp\n    sudo firewall-cmd --permanent --zone=FedoraServer --add-port=7480/tcp`,
+  ], "a service limited to another destination does not open the tailnet address");
 });
 
 test("firewalld that lets the tailnet in to Nexus's ports, by port, range, service or the zone's target, is no miss", async () => {

@@ -82,14 +82,16 @@ firewalld_zone() {
 # whole protocol as all its ports.
 firewalld_opens() { sed -nE 's/^ *(ports|protocols): *//p' | tr ' ' '\n' | sed 's|^tcp$|1-65535/tcp|'; }
 # What zone $1 lets in, as it runs or with --permanent as saved, one a line: `all` when its target accepts everything,
-# and each port or range, with its protocol, that its ports, protocols and services open. Rich rules are not read.
+# and each port or range, with its protocol, that its ports, protocols and services open. A service limited to a
+# destination opens nothing here, since the tailnet address may not be it. Rich rules are not read.
 firewalld_allowed() {
-  local zone=$1 mode=${2:-} rules service
+  local zone=$1 mode=${2:-} rules service info
   rules=$(firewall-cmd ${mode:+"$mode"} --zone="$zone" --list-all) || return 1
   [ "$(sed -n 's/^ *target: *//p' <<<"$rules")" != ACCEPT ] || echo all
   firewalld_opens <<<"$rules"
   for service in $(sed -n 's/^ *services: *//p' <<<"$rules"); do
-    firewall-cmd ${mode:+"$mode"} --info-service="$service" | firewalld_opens || return 1
+    info=$(firewall-cmd ${mode:+"$mode"} --info-service="$service") || return 1
+    [ -n "$(sed -n 's/^ *destination: *//p' <<<"$info")" ] || firewalld_opens <<<"$info"
   done
 }
 
