@@ -109,7 +109,7 @@ Never use `nexus land` for a pull request of this arc.
 
 ## Scripts
 
-They are in `scripts/mp/`. They were adapted from the ones used through 2026-11-27 so that they take the clone, the CLI and the nodes from the environment,. `trial.sh` ran in this form once, for #730. The other three have not run in this form.
+They are in `scripts/mp/`. They were adapted from the ones used through 2026-11-27 so that they take the clone, the CLI and the nodes from the environment. `trial.sh` ran in this form once, for #730. The other three have not run in this form.
 
 | Script | What it does |
 | --- | --- |
