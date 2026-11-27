@@ -1,9 +1,9 @@
 {
   "syncCommit": "155188614ab773629d4a5c70ec5d70b006967915",
   "covers": {
-    "src/control/review.ts": "fa6ded2c9601b3464f444ef82b620889435c53cc49cdfe42962ecbb0ceb1118e",
+    "src/control/review.ts": "fa67c7c22284ac0549fa744ca671654dd293c6e2eab7695276c6b5be9bfca58a",
     "src/control/landing.ts": "fbc0ccc0cbdf22925538c0e230dd38e9d281716b694db12199d160c9b700b9f4",
-    "src/control/review-model.ts": "2c4e9a50ba387a6cacf929dfe467b5d0e4c3221f4590be346b35dadc862436a0",
+    "src/control/review-model.ts": "8a7a8c165583acc00c4559a5dfebf842d03c847947c5ed4a3c515e900be6addb",
     "src/control/release-store.ts": "e98714acc4aca87e436b140bf05e5c86afe9b2d26b2a2186589ff0661dc2dbb0",
     "src/control/api/release-routes.ts": "8f54059373e63eeac8679d162fed09005f26d4167b997dddc09a5cac211333e0",
     "src/protocol/deploy.ts": "0a3214b10f4da49702b7c1c91e1e058dab917353f0a6341a39614c5afe96571c",
