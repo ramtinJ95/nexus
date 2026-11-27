@@ -8,7 +8,7 @@ import type { BootSpec } from "./contracts.ts";
 import { networkOptions } from "./network.ts";
 
 /**
- * The 77 probes of interrogate/guard-github/probes.mjs, each as the requests it sends, with the decision the guard must
+ * The 84 probes of interrogate/guard-github/probes.mjs, each as the requests it sends, with the decision the guard must
  * make for each. The requests gh sends are written from gh's own GraphQL operations; the pushes are bytes git 2.39.5
  * sent (github-guard.pushes.json). `refuse` names a part of the reason the guard must give.
  */
@@ -36,6 +36,8 @@ const push = (fixture: string, expect: Recorded["expect"]) =>
 	req("POST", `https://github.com/${repo}/git-receive-pack`, expect, Buffer.from(pushes[fixture]!, "base64"), { "content-type": "application/x-git-receive-pack-request" });
 const restMerge = (path: string, method = "PUT", headers?: Record<string, string>) => api(method, path, refuse(/not on the allow-list|override/), { merge_method: "merge" }, headers);
 const reviews = `/repos/${repo}/pulls/1/reviews`;
+const gh = (method: string, path: string, expect: Recorded["expect"], body = "", headers?: Record<string, string>) => req(method, `https://github.com${path}`, expect, body, headers);
+const lfsBatch = JSON.stringify({ operation: "download", transfers: ["basic"], objects: [{ oid: "a".repeat(64), size: 1 }] });
 
 const probes: [string, Recorded[]][] = [
 	["1 git clone", [lsRefs("git-upload-pack"), req("POST", `https://github.com/${repo}/git-upload-pack`, pass, "0032want 0000000000000000000000000000000000000000\n00000009done\n")]],
@@ -118,6 +120,14 @@ const probes: [string, Recorded[]][] = [
 	["10 REST review form-encoded", [api("POST", reviews, refuse(/not JSON/), "event=APPROVE", { "content-type": "application/x-www-form-urlencoded" })]],
 	["10 REST review gzip body", [req("POST", `https://api.github.com${reviews}`, refuse(/review event APPROVE/), gzipSync(JSON.stringify({ event: "APPROVE" })), { "content-encoding": "gzip", "content-type": "application/json" })]],
 	["10 REST PATCH git/refs/heads%2Fmain", [api("PATCH", `/repos/${repo}/git/refs/heads%2Fmain`, refuse(/not on the allow-list/), { sha: "a".repeat(40), force: false })]],
+	["11 curl -L release asset by tag", [gh("GET", "/cli/cli/releases/download/v2.60.0/gh_2.60.0_checksums.txt", pass)]],
+	// GitHub answers the latest asset with a redirect to the asset by its tag on github.com, and Gondolin sends that hop through the hook too.
+	["11 curl -L release asset by latest", [gh("GET", "/mikefarah/yq/releases/latest/download/checksums", pass), gh("GET", "/mikefarah/yq/releases/download/v4.54.3/checksums", pass)]],
+	["11 curl -I release asset", [gh("HEAD", "/cli/cli/releases/download/v2.60.0/gh_2.60.0_checksums.txt", pass)]],
+	["11 curl -L source archive", [gh("GET", "/cli/cli/archive/refs/tags/v2.60.0.tar.gz", pass)]],
+	["11 curl -L raw file", [gh("GET", "/cli/cli/raw/v2.60.0/README.md", pass)]],
+	["11 Git LFS batch", [gh("POST", `/${repo}.git/info/lfs/objects/batch`, refuse(/^Git LFS/), lfsBatch, { "content-type": "application/vnd.git-lfs+json" })]],
+	["11 POST to a release asset path", [gh("POST", `/${repo}/releases/download/v1/asset.txt`, refuse(/not git over HTTPS or a download/), "x")]],
 ];
 
 /** Operations the prototype did not probe, each with the decision the allow-list table makes for it. */
@@ -161,7 +171,27 @@ const shapes: [string, Recorded[]][] = [
 	["a write to another GitHub host", [req("POST", "https://codeload.github.com/acme/scratch", refuse(/only reads/), "x")]],
 ];
 
-for (const [group, rows] of [["probe", probes], ["not probed", unprobed], ["shape", shapes]] as const) {
+const downloads = ["/releases/download/v1/tool.tar.gz", "/releases/latest/download/tool.tar.gz", "/archive/refs/heads/main.tar.gz", "/raw/main/install.sh"];
+const notDownloads = ["", "/releases", "/releases/tag/v1", "/releases/download/v1", "/releases/download/release/v1/tool.tar.gz", "/releases/latest", "/archive", "/raw", "/blob/main/install.sh", "/settings", "/pulls"];
+
+/** Reads on github.com, the four the operator's review found refused and their neighbours. */
+const reads: [string, Recorded[]][] = [
+	["the operator's four reads", [
+		gh("GET", "/cli/cli/releases/download/v2.60.0/gh_2.60.0_linux_amd64.tar.gz", pass),
+		gh("GET", "/o/r/archive/refs/heads/main.tar.gz", pass),
+		gh("GET", "/o/r/raw/main/install.sh", pass),
+		gh("POST", "/o/r.git/info/lfs/objects/batch", refuse(/^Git LFS/), lfsBatch, { "content-type": "application/vnd.git-lfs+json" }),
+	]],
+	["each download as GET and as HEAD", downloads.flatMap((path) => [gh("GET", `/${repo}${path}`, pass), gh("HEAD", `/${repo}${path}`, pass)])],
+	["a write to each download path", downloads.flatMap((path) => ["POST", "PUT", "PATCH", "DELETE"].map((method) => gh(method, `/${repo}${path}`, refuse(/not git over HTTPS or a download/), "x")))],
+	["a download with a query string", [gh("GET", `/${repo}/raw/main/install.sh?token=x`, pass), gh("GET", `/${repo}/archive/main.zip?_method=DELETE`, pass)]],
+	["a download with a method override header", [gh("GET", `/${repo}/raw/main/install.sh`, refuse(/method override/), "", { "x-http-method-override": "DELETE" })]],
+	["a download through a dot segment", [gh("GET", `/${repo}/raw/main%2F..%2F..%2Fsettings`, refuse(/does not decode/)), gh("GET", `/${repo}/raw/main/%2E%2E/%2E%2E/settings`, refuse(/not git over HTTPS or a download/))]],
+	["every other read on github.com", [...notDownloads.map((path) => gh("GET", `/${repo}${path}`, refuse(/not git over HTTPS or a download/))), gh("GET", "/login", refuse(/not git over HTTPS/)), gh("GET", "/raw/main/install.sh", refuse(/not git over HTTPS/))]],
+	["Git LFS by any route", [gh("GET", `/${repo}.git/info/lfs/locks`, refuse(/^Git LFS/)), gh("POST", `/${repo}/info/lfs/objects/batch`, refuse(/^Git LFS/), lfsBatch), gh("POST", `/${repo}.git/info/lfs/locks`, refuse(/^Git LFS/), "{}"), gh("GET", `/${repo}.git/INFO/LFS/objects/${"a".repeat(64)}`, refuse(/^Git LFS/))]],
+];
+
+for (const [group, rows] of [["probe", probes], ["not probed", unprobed], ["shape", shapes], ["read", reads]] as const) {
 	for (const [name, requests] of rows) {
 		test(`${group}: ${name}`, () => {
 			for (const request of requests) {
@@ -176,8 +206,15 @@ for (const [group, rows] of [["probe", probes], ["not probed", unprobed], ["shap
 
 test("the recorded table holds every probe of the prototype, in its order", () => {
 	const names = [...readFileSync(join(import.meta.dirname, "../../interrogate/guard-github/probes.mjs"), "utf8").matchAll(/^ {2}\["([^"]+)", "(?:pass|refuse|info)"/gm)].map((m) => m[1]);
-	assert.equal(names.length, 77);
+	assert.equal(names.length, 84);
 	assert.deepEqual(probes.map(([name]) => name), names);
+});
+
+test("a download's redirect hop is decided by the host it lands on", async () => {
+	const hook = githubGuardHook({ defaultBranch: "main" }, () => {});
+	for (const host of ["release-assets.githubusercontent.com", "raw.githubusercontent.com"]) assert.equal(await hook(new Request(`https://${host}/x`)), undefined, `${host} is not the guard's`);
+	const codeload = await hook(new Request("https://codeload.github.com/cli/cli/tar.gz/refs/tags/v2.60.0"));
+	assert.ok(codeload instanceof Request, "codeload.github.com takes reads");
 });
 
 test("the default branch is the project's: a push to main passes where the project's branch is trunk", () => {

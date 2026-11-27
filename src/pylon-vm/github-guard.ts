@@ -19,7 +19,8 @@ export const guardName = "nexus-github-guard";
 /**
  * Everything that passes. A REST row is a method and a route under /repos/<owner>/<repo>, except `GET *` and `HEAD *`,
  * which take any path on api.github.com. A GraphQL row is `query`, or a mutation by its root field. A git row is a smart
- * HTTP route under /<owner>/<repo>[.git] on github.com. `check` adds a rule about the body:
+ * HTTP route under /<owner>/<repo>[.git] on github.com. A download row is a read under /<owner>/<repo> on github.com,
+ * where `:tag` and `:name` are one path segment and `:path` is one or more. `check` adds a rule about the body:
  * - `review`: the review's event, if any, is COMMENT or REQUEST_CHANGES. No event leaves a review pending.
  * - `submit`: the event is COMMENT or REQUEST_CHANGES.
  * - `service`: the query names git-upload-pack or git-receive-pack.
@@ -69,10 +70,18 @@ export const allowList: readonly Allowed[] = [
 	{ git: "GET /info/refs", check: "service", why: "the ref list before every clone, fetch and push" },
 	{ git: "POST /git-upload-pack", why: "clone and fetch" },
 	{ git: "POST /git-receive-pack", check: "push", why: "push a branch other than the default branch. A push that deletes a ref is refused, as the REST delete of a ref is, since deleting another engineer's branch closes their pull request" },
+	{ download: "GET /releases/download/:tag/:name", why: "a release asset by its tag, as install scripts and image builds fetch tools. GitHub redirects to release-assets.githubusercontent.com" },
+	{ download: "HEAD /releases/download/:tag/:name", why: "the same without a body, as curl -I sends" },
+	{ download: "GET /releases/latest/download/:name", why: "the latest release's asset. GitHub redirects to the asset by its tag" },
+	{ download: "HEAD /releases/latest/download/:name", why: "the same without a body" },
+	{ download: "GET /archive/:path", why: "a source archive of a branch, tag or commit. GitHub redirects to codeload.github.com" },
+	{ download: "HEAD /archive/:path", why: "the same without a body" },
+	{ download: "GET /raw/:path", why: "one file at a branch, tag or commit, as an install script is fetched. GitHub redirects to raw.githubusercontent.com" },
+	{ download: "HEAD /raw/:path", why: "the same without a body" },
 ];
 
 type Check = "review" | "submit" | "service" | "push";
-type Allowed = ({ rest: string } | { graphql: string } | { git: string }) & { check?: Check; why: string };
+type Allowed = ({ rest: string } | { graphql: string } | { git: string } | { download: string }) & { check?: Check; why: string };
 
 /** What the guard is given at boot. A null branch, from a pylon stored before boots carried it, refuses every push. */
 export interface GithubGuard { defaultBranch: string | null }
@@ -86,7 +95,7 @@ export function refusal(request: GuardRequest, guard: GithubGuard): string | nul
 	const path = normalPath(request.url.pathname);
 	if (path === null) return "the path does not decode";
 	const host = request.url.hostname.toLowerCase().replace(/\.$/, "");
-	if (host === "github.com") return gitRefusal(method, path, request, guard);
+	if (host === "github.com") return githubRefusal(method, path, request, guard);
 	if (host !== "api.github.com") return method === "GET" || method === "HEAD" ? null : `only reads reach ${host}`;
 	if (path === "/graphql" && method !== "POST") return `GraphQL over ${method}`;
 	if (method === "GET" || method === "HEAD") return null;
@@ -141,7 +150,7 @@ const utf8 = new TextDecoder("utf-8", { fatal: true });
 const overrideHeaders = ["x-http-method-override", "x-http-method", "x-method-override"];
 const reviewEvents = new Set(["COMMENT", "REQUEST_CHANGES"]);
 
-const restPart: Record<string, string> = { ":n": "\\d+", ":name": "[^/]+" };
+const restPart: Record<string, string> = { ":n": "\\d+", ":name": "[^/]+", ":tag": "[^/]+", ":path": ".+" };
 const routeRegExp = (prefix: string, route: string) =>
 	new RegExp(`^${prefix}${route.split("/").map((part) => restPart[part] ?? part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("/")}$`);
 const rest = allowList.flatMap((row) => {
@@ -149,11 +158,12 @@ const rest = allowList.flatMap((row) => {
 	const [method, route] = row.rest.split(" ") as [string, string];
 	return route === "*" ? [] : [{ method, route: routeRegExp("/repos/[^/]+/[^/]+", route), check: row.check }];
 });
-const git = allowList.flatMap((row) => {
-	if (!("git" in row)) return [];
-	const [method, route] = row.git.split(" ") as [string, string];
-	return [{ method, route: routeRegExp("/[^/]+/[^/]+?(?:\\.git)?", route), check: row.check }];
+const github = allowList.flatMap((row) => {
+	if (!("git" in row) && !("download" in row)) return [];
+	const [method, route] = ("git" in row ? row.git : row.download).split(" ") as [string, string];
+	return [{ method, route: routeRegExp("git" in row ? "/[^/]+/[^/]+?(?:\\.git)?" : "/[^/]+/[^/]+", route), check: row.check }];
 });
+const gitLfs = /^\/[^/]+\/[^/]+?(?:\.git)?\/info\/lfs(?:\/|$)/;
 const mutations = new Map(allowList.flatMap((row) => ("graphql" in row && row.graphql !== "query" ? [[row.graphql, row.check] as const] : [])));
 
 /**
@@ -305,9 +315,10 @@ function valueOf(node: ValueNode, vars: Record<string, unknown>): unknown {
 	}
 }
 
-function gitRefusal(method: string, path: string, request: GuardRequest, guard: GithubGuard): string | null {
-	const row = git.find((r) => r.method === method && r.route.test(path));
-	if (row === undefined) return `${method} ${path} on github.com is not git over HTTPS`;
+function githubRefusal(method: string, path: string, request: GuardRequest, guard: GithubGuard): string | null {
+	if (gitLfs.test(path)) return "Git LFS, which the guard does not pass, so a repository's LFS objects neither download nor upload";
+	const row = github.find((r) => r.method === method && r.route.test(path));
+	if (row === undefined) return `${method} ${path} on github.com is not git over HTTPS or a download on the allow-list`;
 	if (row.check === "service") return /^git-(upload|receive)-pack$/.test(request.url.searchParams.get("service") ?? "") ? null : "a ref list for no git service";
 	if (row.check !== "push") return null;
 	if (guard.defaultBranch === null) return "this pylon booted before Nexus told the guard its project's default branch, so it cannot tell a push to it from another. Start a new thread";

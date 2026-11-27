@@ -22,11 +22,11 @@ Some tests fail today and pass when their slice is done. Others pass today, beca
 
 ## The guard prototype
 
-`guard-github/` holds the prototype behind `mp-15`. `guard.mjs` has both guard shapes, `probes.mjs` has the 77 probes, and `table.md` has the results.
+`guard-github/` holds the prototype behind `mp-15`. `guard.mjs` has both guard shapes, `probes.mjs` has the 77 probes, and `table.md` has the results. `mp-25` added seven probes of downloads from `github.com`, which the prototype never ran.
 
 `guard-github/run.sh` reruns it against a private scratch repository, which `seed.sh` names. Before you run it, know that the `off` mode merges about 14 pull requests in that repository.
 
-`mp-15` built the guard in `src/pylon-vm/github-guard.ts`, and `src/pylon-vm/github-guard.test.ts` holds the 77 probes as recorded requests. `probes.mjs` also reruns the list from inside a real pylon behind the built guard. Run it from the owner's device, with the owner's thread on the scratch project and a `gh` login there that may administer the scratch repository:
+`mp-15` built the guard in `src/pylon-vm/github-guard.ts`, and `src/pylon-vm/github-guard.test.ts` holds the 84 probes as recorded requests. `probes.mjs` also reruns the list from inside a real pylon behind the built guard. Run it from the owner's device, with the owner's thread on the scratch project and a `gh` login there that may administer the scratch repository:
 
 ```sh
 export SCRATCH_REPO=<owner>/<scratch> NEXUS_THREAD=<thread>

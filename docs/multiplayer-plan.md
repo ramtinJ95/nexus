@@ -427,13 +427,13 @@ The guard of `mp-15` passes three requests on `github.com`, which are git's own:
 
 It matters for daily work. Install scripts and image builds fetch tools from `github.com` release URLs. The company monorepo's own files name such a URL in sixteen places, two of them in image builds. A template build has no guard, so a setup that runs there is not affected. A boot whose setup hash differs runs its setup in the engineer's pylon, behind the guard.
 
-- [ ] **Depends on.** `mp-15`.
-- [ ] **Files.** `src/pylon-vm/github-guard.ts`, `src/pylon-vm/github-guard.test.ts`, `interrogate/guard-github/probes.mjs`.
-- [ ] **Change.** The allow-list gains rows for reads on `github.com`, each with its `why`: `GET` and `HEAD` of a release asset, by tag and by `latest`, of a source archive, and of a raw file. Each row names a path under `/<owner>/<repo>/`, and nothing else on `github.com` opens. Such a read answers with a redirect to another host, and the pull request names those hosts and says whether an engineer's pylon reaches them today. Git LFS stays refused, and the refusal says so by name. The company monorepo does not use it.
-- [ ] **Result.** An engineer's agent downloads a release, an archive, or a raw file from `github.com`, and everything the guard refused before it still is.
-- [ ] **Unit.** The recorded table gains the four reads above with the decision for each, and a write to each of the new paths, which is refused. Every earlier row of the table keeps its decision.
+- [x] **Depends on.** `mp-15`.
+- [x] **Files.** `src/pylon-vm/github-guard.ts`, `src/pylon-vm/github-guard.test.ts`, `interrogate/guard-github/probes.mjs`. The build also corrected the probe count in `interrogate/README.md`.
+- [x] **Change.** The allow-list gains rows for reads on `github.com`, each with its `why`: `GET` and `HEAD` of a release asset, by tag and by `latest`, of a source archive, and of a raw file. Each row names a path under `/<owner>/<repo>/`, and nothing else on `github.com` opens. Such a read answers with a redirect to another host, and the pull request names those hosts and says whether an engineer's pylon reaches them today. Git LFS stays refused, and the refusal says so by name. The company monorepo does not use it.
+- [ ] **Result.** An engineer's agent downloads a release, an archive, or a raw file from `github.com`, and everything the guard refused before it still is. The guard passes each download, but the download finishes only when the project's allowlist names the host it redirects to: `release-assets.githubusercontent.com` for a release asset, `codeload.github.com` for an archive, and `raw.githubusercontent.com` for a raw file. No allowlist names them by default.
+- [x] **Unit.** The recorded table gains the four reads above with the decision for each, and a write to each of the new paths, which is refused. Every earlier row of the table keeps its decision.
 - [ ] **Live.** From a VM pylon on a shared install, `curl -L` of a public release asset succeeds and the probe list of `mp-15` gives the results it gave before. This box is part of [the guard check after the install](multiplayer-office-acceptance.md#6-the-guard).
-- [ ] **Perf.** None. The change adds rows to a table that every request already walks.
+- [x] **Perf.** None. The change adds rows to a table that every request already walks.
 
 ### ops-1: the office machine can run pylons
 
