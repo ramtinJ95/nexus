@@ -14,16 +14,18 @@ Merged into `multiplayer`: `mp-00` to `mp-11`, `mp-14`, `mp-15`, `mp-16`, `mp-18
 
 The pilot's code is complete, with one exception: `mp-25`, which the pilot needs only when work in a pylon downloads a release from `github.com`.
 
-No pull request is open.
+One pull request of a slice is open: #730, `mp-25`.
 
 ## What runs now
 
-Both threads are in the project `nexus-mp` and both are building, with no pull request yet. Nothing watches them once the old machine is off, so look with `nexus show <thread>`.
+Both threads are in the project `nexus-mp`. Nothing watches them once the old machine is off, so look with `nexus show <thread>`.
 
-| Slice | Thread | Branch | Before a merge |
-| --- | --- | --- | --- |
-| `mp-25`, the guard lets downloads through | `th-1f7854ab0652` | `mp/25-guard-downloads` | The operator's own review |
-| `mp-17`, a review runs on the asker's login | `th-5cb1991ac300` | `mp/17-review-on-asker` | The operator's own review |
+| Slice | Thread | Branch | State | Before a merge |
+| --- | --- | --- | --- | --- |
+| `mp-25`, the guard lets downloads through | `th-1f7854ab0652` | `mp/25-guard-downloads` | #730, approved by the Nexus review in round 1 at c6520042, live check passed, merges cleanly with `multiplayer` | The trial below, then the operator's own review |
+| `mp-17`, a review runs on the asker's login | `th-5cb1991ac300` | `mp/17-review-on-asker` | Building, no pull request yet | The operator's own review |
+
+#730 has not been trial-tested or read by anyone but its reviewer. Its thread lists a holds question that offers Land. Leave it unanswered.
 
 What each builder was told beyond the plan:
 
