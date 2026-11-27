@@ -48,7 +48,10 @@ The plan assumed room for 16, two for each of eight engineers. This machine does
 
 - The pilot, two engineers with the default cap of two each, needs four pylons at once. Four fit when a pylon is 6 GiB or smaller, since 27.13 / 4 - 0.15 = 6.63. Four pylons of 8 GiB do not fit.
 - The cap of `mp-22` is per person and does not bound the machine. With eight engineers, memory runs out before the caps do, and a start that does not fit is refused by placement, not by the cap.
-- The 4 GiB reserve is an estimate. Nobody has measured what the host and the control plane hold on this machine.
+- The 4 GiB reserve is an estimate. Nobody has measured what the host and the control plane hold on this machine. Admission does not use the estimate. It refuses a start that would commit more than the machine's memory, or that would leave less than 1 GiB of the memory the machine reports free (`src/control/placement.ts:115`). So a wrong estimate changes the numbers in the table and cannot overfill the machine.
+- A start that does not fit is refused today, and the engineer has to try again. With three to six pylons for eight engineers that happens daily. [`mp-23`](multiplayer-plan.md#mp-23-a-start-that-does-not-fit-waits-in-line) makes such a start wait in line, with the person who runs the fewest pylons first.
+- No size is known for the company project's pylons. Its development stack runs about twenty containers, so 8 GiB is a guess and 4 GiB may be too small. `ops-3` measures it on the first pylon.
+- A review by Nexus adds up to three pylons beside the builder's, and a CI job on Nexus is a pylon of its own. Neither fits on this machine beside eight engineers. `mp-17` and the second plan each need a second node, or a rule that runs their pylons one at a time.
 
 The pylon size for the company project, and whether eight engineers need a second node or a larger machine, are the operator's to decide.
 
@@ -72,3 +75,5 @@ What `deploy/install.sh --check` and the first check found on 2026-11-27. Nothin
 - Two facts for `ops-2`: which group in the tailnet policy holds the engineers, and who merges a change to that policy.
 - Whether the probe's user joins the `docker` group, which image builds need and which is equal to root on the machine. The operator decides, as [the deploy README](../deploy/README.md#docker-access-for-the-image-build-nodes-probe) says.
 - The pylon size and the capacity question above.
+- [Check 7](multiplayer-office-checks.md#7-the-host-firewall-selinux-and-swap): whether the machine's firewall lets a laptop reach port 7443, and whether SELinux enforces. Fedora Server turns both on by default, the installer checks neither, and neither of the operator's nodes has them.
+- The installer cannot write `people` yet, so it cannot make this install. [`mp-24`](multiplayer-plan.md#mp-24-the-installer-makes-a-shared-install) adds that, and `ops-3` waits for it.

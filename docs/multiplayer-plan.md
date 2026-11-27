@@ -22,7 +22,7 @@ An install without a `people` list in `control.json` behaves as it does today.
 
 - Running CI jobs on Nexus. The review of this design found four network-path problems that block it: containers inside a pylon cannot make HTTPS requests, a request body over 64 MiB is refused, an upload with `Expect: 100-continue` fails, and a 1 GiB download costs about 66 host CPU-seconds. A second plan covers them.
 - A harness login for each engineer.
-- Scheduling beyond a per-person cap, and any Kubernetes backend.
+- Scheduling beyond a per-person cap and a waiting line, and any Kubernetes backend. Nothing in this plan pauses one engineer's pylon to make room for another's.
 - Merging `multiplayer` into `main`. See [the branch](#the-branch).
 
 One limit matters for the pilot. A container inside a pylon cannot make an HTTPS request, because only the guest trusts the interception certificate. If the company project's daily work builds images inside the pylon, pull that fix forward from the second plan before the pilot.
@@ -115,9 +115,11 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 | `mp-20` | The setup carries plugins and skills | `mp-19` | `src/ids.ts`, `src/protocol/artifacts.ts`, `src/backends/pylon-boot.ts` |
 | `mp-21` | The deployer follows a configured release branch | nothing | `src/deploy/install.ts`, `deploy/` |
 | `mp-22` | A cap on running pylons for each person | `mp-02` | `src/control/placement.ts` |
+| `mp-23` | A start that does not fit waits in line | `mp-22` | `src/control/placement.ts`, `src/control/threads.ts`, `src/control/loop.ts` |
+| `mp-24` | The installer makes a shared install | `mp-02`, `mp-21` | `deploy/install.sh`, `src/deploy/setup.ts`, `deploy/README.md` |
 | `ops-1` | The office machine can run pylons | nothing | none |
 | `ops-2` | The company tailnet tags the node and admits the engineers | nothing | the company infrastructure repository |
-| `ops-3` | The shared install runs from `multiplayer` | `mp-21`, `ops-1`, `ops-2` | none |
+| `ops-3` | The shared install runs from `multiplayer` | `mp-21`, `mp-24`, `ops-1`, `ops-2` | none |
 | `pilot` | Two engineers work on the shared install | see the section | none |
 
 ### What may run at the same time
@@ -126,11 +128,12 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 - After `mp-00`: `mp-01`, `mp-07`, and `mp-18` are independent of each other.
 - After `mp-02`: `mp-03`, `mp-05`, `mp-06`, `mp-08`, `mp-14`, and `mp-22` branch from `multiplayer` independently. `mp-04` follows `mp-03` because both edit `thread-routes.ts`.
 - After `mp-09`: `mp-10`, `mp-11`, `mp-12`, `mp-13`, and `mp-16` are independent. `mp-10` and `mp-15` both edit `src/pylon-vm/network.ts`, so `mp-15` follows `mp-10`.
+- `mp-23` and `mp-24` came from [what the office checks found](multiplayer-office-machine.md). `mp-23` follows `mp-22` and edits the same admission code, so it does not run beside `mp-20`, which also names `src/control/placement.ts`. `mp-24` is independent of every slice still open.
 - Two slices that name the same file never run at the same time.
 
 ### What waits for the operator
 
-- Every slice that changes what a person sees or types waits for the operator's review before merge: `mp-03`, `mp-06`, `mp-08`, `mp-11`, `mp-12`, `mp-14`, `mp-15`, `mp-16`, `mp-17`, `mp-19`, `mp-20`, and `mp-22`.
+- Every slice that changes what a person sees or types waits for the operator's review before merge: `mp-03`, `mp-06`, `mp-08`, `mp-11`, `mp-12`, `mp-14`, `mp-15`, `mp-16`, `mp-17`, `mp-19`, `mp-20`, `mp-22`, `mp-23`, and `mp-24`.
 - Every slice that touches a path [the merge policy](merge-policy.md) reserves is held for the operator as that policy says. That covers auth, login, whois, `src/control/review.ts`, `src/control/main.ts`, and `deploy/`, so it covers most of this plan.
 - `mp-12` waits for an owner of the company's GitHub organisation to approve the App.
 
@@ -378,7 +381,7 @@ Three limits of this guard, each handled elsewhere:
 
 - [ ] **Depends on.** Nothing.
 - [ ] **Files.** `src/deploy/install.ts`, `src/control/api/release-routes.ts`, `deploy/install.sh`, `deploy/README.md`.
-- [ ] **Change.** The deployer installs only a commit that is an ancestor of `origin/main`. A setting names the release branch, with `main` as the default. The installer takes the first admin's tailnet user and writes `people`.
+- [ ] **Change.** The deployer installs only a commit that is an ancestor of `origin/main`. A setting names the release branch, with `main` as the default. Writing `people` moved to `mp-24`, because `people` did not exist when this slice was built.
 - [ ] **Result.** A shared install releases from `multiplayer`. Every other install is unchanged.
 - [x] **Unit.** With the setting at `multiplayer`, a commit on `multiplayer` installs and a commit only on `main` is refused. With no setting, today's tests pass.
 - [ ] **Live.** On a fresh machine, install with the release branch set to `multiplayer` and run `nexus deploy`. Pass when the running release is the head of `multiplayer` and every service reports healthy.
@@ -393,6 +396,28 @@ Three limits of this guard, each handled elsewhere:
 - [x] **Unit.** A third start is refused with a reason that names the cap and the owner's running threads. An admin's higher cap for one person applies to that person only.
 - [x] **Live.** As `alice`, start three threads. Pass when the third is held with the reason shown by `nexus show`, and starts once she pauses one.
 - [x] **Perf.** `api`. Fail above 15% over base.
+
+### mp-23: a start that does not fit waits in line
+
+The office machine holds three pylons of 8 GiB, or six of 4 GiB, as [The office machine](multiplayer-office-machine.md#how-many-pylons-fit) works out. The plan assumed room for 16. So memory runs out before the caps of `mp-22` do, and this slice decides what an engineer then sees.
+
+- [ ] **Depends on.** `mp-22`.
+- [ ] **Files.** `src/control/placement.ts`, `src/control/threads.ts`, `src/control/loop.ts`, `src/control/placement-model.ts`, `src/cli/thread-text.ts`, the dashboard's thread page.
+- [ ] **Change.** Today a start that finds no node with room is refused (`src/control/threads.ts:206`), and the engineer has to try again by hand. A wake already waits. On a shared install such a start is accepted and held, the way `mp-22` holds a start over the cap, and boots when room frees. Held starts and waiting wakes get the freed room in one order: the pylon whose owner runs the fewest pylons goes first, and among equals the one that has waited longest. The thread shows that it waits for memory, and who holds the room. No running pylon is paused to make room. The idle rules, five minutes without the agent and twenty without a person, stay the only way a pylon gives its room up.
+- [ ] **Result.** On a full machine an engineer's start waits its turn, and no engineer gets a second pylon while a colleague waits for a first.
+- [ ] **Unit.** On a shared install a start with no room is created and held, with a reason that names the memory short. When room frees, the waiting pylon of the person with the fewest running pylons boots first, and among equals the oldest wait. A start that no node could ever take is still refused. On an install without `people` a start with no room is refused as today.
+- [ ] **Live.** On the two-person stack with room for two pylons, `alice` runs two and starts a third, and then `bob` starts one. Pass when both starts are held with the reason shown by `nexus show`, and `bob`'s boots first once `alice` archives one of hers.
+- [ ] **Perf.** `boot`. Fail above 10% over base.
+
+### mp-24: the installer makes a shared install
+
+- [ ] **Depends on.** `mp-02`, `mp-21`.
+- [ ] **Files.** `deploy/install.sh`, `src/deploy/setup.ts`, its tests, `deploy/README.md`.
+- [ ] **Change.** Today a shared install exists only after someone edits `control.json` by hand. The installer's `--admit` writes `callers` and `deployers`, which a `control.json` with `people` refuses (`src/deploy/setup.ts:262`). The installer takes a person's tailnet login and role, and writes `people`. A first install with a person is shared from its first start and writes no `callers` or `deployers`. A rerun adds a person, or changes one's role or cap, and leaves the others as they are. Naming a person and `--admit` in one run is refused. An install that names no person is the same as today.
+- [ ] **Result.** `ops-3` is one installer run, and adding an engineer is one more.
+- [ ] **Unit.** A first install that names one admin writes `people` with that login and no `callers`. A rerun that names an engineer keeps the admin. A run with both a person and `--admit` is refused before it changes anything. A run that names no person writes the `control.json` it writes today.
+- [ ] **Live.** On a fresh machine, install with the release branch `multiplayer` and one admin. Pass when `nexus doctor` as that admin reports no failed check, a call from a tailnet user outside `people` gets 403, and a rerun that adds that user lets the same call through with no other step. The office machine's install in `ops-3` is this run.
+- [ ] **Perf.** `check`. Fail above 10% over base.
 
 ### ops-1: the office machine can run pylons
 
@@ -413,16 +438,20 @@ This change lives in the company's infrastructure repository, not here.
 
 ### ops-3: the shared install runs from `multiplayer`
 
-- [ ] **Depends on.** `mp-21`, `ops-1`, `ops-2`, and the pilot set below.
+- [ ] **Depends on.** `mp-21`, `mp-24`, `ops-1`, `ops-2`, and the pilot set below.
+- [ ] Run [check 7](multiplayer-office-checks.md#7-the-host-firewall-selinux-and-swap) first. If the machine's firewall closes port 7443 to the tailnet, open that port on the tailnet interface before the install, and write the rule down here.
 - [ ] Install on the office machine with the release branch `multiplayer` and the operator as the first admin.
 - [ ] Sign the install's one model login in, for failure judgments only.
 - [ ] Build and roll out the image.
 - [ ] Add the company project with an HTTPS repository URL.
 - [ ] Pass when `nexus doctor` reports no failed check.
+- [ ] Boot one pylon of the company project, run the work an engineer's agent runs in it, and read the peak memory inside the guest. Set the project's pylon size from that number, and write the size and how many fit here. Nobody has measured it. Until then every number in [How many pylons fit](multiplayer-office-machine.md#how-many-pylons-fit) is for an assumed size.
+- [ ] Decide each person's cap from that. With room for three pylons, a cap of two lets one engineer hold two thirds of the machine. The cap is `pylonCap` in `people`, and it needs no code.
+- [ ] Run [the checks after the install](multiplayer-office-acceptance.md) before a second engineer signs in. Pass when every box there is ticked, or its failure is written down with what follows from it.
 
 ### pilot: two engineers work on the shared install
 
-The pilot set is `mp-00` to `mp-05`, `mp-07` to `mp-10`, `mp-14`, `mp-15`, `mp-16`, `mp-18`, `mp-21`, and `mp-22`. The pilot needs neither `mp-12` nor `mp-13`.
+The pilot set is `mp-00` to `mp-05`, `mp-07` to `mp-10`, `mp-14`, `mp-15`, `mp-16`, `mp-18`, `mp-21`, `mp-22`, and `mp-24`. The pilot needs neither `mp-12` nor `mp-13`. It needs `mp-23` only if the company project's pylons are larger than 6 GiB, because four of those do not fit on the office machine and two engineers with two pylons each would then meet a refused start.
 
 Two engineers, A and B, each do the following on real work for one week. Every line is a pass predicate.
 
@@ -442,7 +471,10 @@ Two engineers, A and B, each do the following on real work for one week. Every l
 - Whether the company approves the GitHub App. `mp-12` waits for it, and nothing else does.
 - Whether the guard refuses an approval of another person's pull request. The prototype had one GitHub account. The live box of `mp-15` settles it.
 - Whether the guard holds with the company repository's rules in place. The scratch repository could not carry a ruleset.
-- What whois returns for a tagged device on the company tailnet. `mp-01` settles it live.
+- What a running control plane logs for a tagged device on the company tailnet. The office checks saw the whois answer, and it has the shape `mp-01` assumed. The live box of `mp-01` still needs the call.
+- Whether the office machine's firewall lets a laptop reach the control plane. The control plane listens on the machine's tailnet address (`src/deploy/setup.ts:294`), the machine runs Fedora Server, and the installer checks no firewall. This is read from the code and from Fedora's defaults, not seen. [Check 7](multiplayer-office-checks.md#7-the-host-firewall-selinux-and-swap) settles it. If the firewall does close the port, the installer's check should say so, and that is a slice this plan does not have yet.
+- Whether Nexus runs under SELinux in enforcing mode. Neither of the operator's nodes has it. Check 7 says whether the office machine does, and the checks after the install look for denials.
+- How much memory a pylon of the company project needs. `ops-3` measures it.
 - Whether a Claude token from a team subscription behaves like the personal one that Nexus uses today. The first sign-in of the pilot shows it.
 - How large a setup bundle is and how long it takes to unpack. `mp-20` measures it and has a limit.
 - Whether the arc's own migration list is enough to keep syncs from `main` clean. `mp-00` tests it, and the first sync that carries a migration from `main` proves it.
