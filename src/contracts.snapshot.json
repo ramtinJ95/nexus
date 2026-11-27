@@ -1,6 +1,7 @@
 {
   "holdsOnEveryChange": [
     ".claude/skills/verify-nexus/scripts/cap-check: verify-changed",
+    ".claude/skills/verify-nexus/scripts/https-git-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/landing-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/live-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/logins-check: reserved-path:auth",
