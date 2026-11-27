@@ -439,7 +439,7 @@ This change lives in the company's infrastructure repository, not here.
 ### ops-3: the shared install runs from `multiplayer`
 
 - [ ] **Depends on.** `mp-21`, `mp-24`, `ops-1`, `ops-2`, and the pilot set below.
-- [ ] Run [check 7](multiplayer-office-checks.md#7-the-host-firewall-selinux-and-swap) first. If the machine's firewall closes port 7443 to the tailnet, open that port on the tailnet interface before the install, and write the rule down here.
+- [ ] Run [check 7](multiplayer-office-checks.md#7-the-host-firewall-selinux-and-swap) first. If the machine's firewall closes port 7443 to the tailnet, open that port on the tailnet interface before the install, and write the rule down here. Check 7 ran on 2026-11-27 and the firewall does close it, as [The office machine](multiplayer-office-machine.md#the-firewall-selinux-and-swap) records. The rule is not written yet.
 - [ ] Install on the office machine with the release branch `multiplayer` and the operator as the first admin.
 - [ ] Sign the install's one model login in, for failure judgments only.
 - [ ] Build and roll out the image.
@@ -472,8 +472,8 @@ Two engineers, A and B, each do the following on real work for one week. Every l
 - Whether the guard refuses an approval of another person's pull request. The prototype had one GitHub account. The live box of `mp-15` settles it.
 - Whether the guard holds with the company repository's rules in place. The scratch repository could not carry a ruleset.
 - What a running control plane logs for a tagged device on the company tailnet. The office checks saw the whois answer, and it has the shape `mp-01` assumed. The live box of `mp-01` still needs the call.
-- Whether the office machine's firewall lets a laptop reach the control plane. The control plane listens on the machine's tailnet address (`src/deploy/setup.ts:294`), the machine runs Fedora Server, and the installer checks no firewall. This is read from the code and from Fedora's defaults, not seen. [Check 7](multiplayer-office-checks.md#7-the-host-firewall-selinux-and-swap) settles it. If the firewall does close the port, the installer's check should say so, and that is a slice this plan does not have yet.
-- Whether Nexus runs under SELinux in enforcing mode. Neither of the operator's nodes has it. Check 7 says whether the office machine does, and the checks after the install look for denials.
+- Whether a laptop reaches the control plane once the office machine's firewall has a rule for it. [Check 7](multiplayer-office-checks.md#7-the-host-firewall-selinux-and-swap) saw the firewall refuse a laptop on port 7443, where the control plane listens (`src/deploy/setup.ts:294`). The installer checks no firewall. Its check should say when the port is closed, and that is a slice this plan does not have yet.
+- Whether Nexus runs under SELinux in enforcing mode. Neither of the operator's nodes has it. Check 7 found that the office machine enforces, and the checks after the install look for denials.
 - How much memory a pylon of the company project needs. `ops-3` measures it.
 - Whether a Claude token from a team subscription behaves like the personal one that Nexus uses today. The first sign-in of the pilot shows it.
 - How large a setup bundle is and how long it takes to unpack. `mp-20` measures it and has a limit.
