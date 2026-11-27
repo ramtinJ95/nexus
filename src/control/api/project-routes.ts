@@ -4,7 +4,7 @@ import { HttpError } from "../http-error.ts";
 import type { AutoReviewMode, Project } from "../project.ts";
 import { editedRules } from "../standing-rules.ts";
 import { ok, created, on, parse, type RouteEntry, type ApiKit } from "./kit.ts";
-import { anyAllowed, demand, landing, type AdminPolicy } from "./access.ts";
+import { anyAllowed, type AdminPolicy } from "./access.ts";
 import { projectRoutes as routes } from "../../contract/projects.ts";
 import { projectAddSchema, projectEditSchema, projectSchema } from "../../contract/projects-parse.ts";
 import { openStatuses } from "../reconcile.ts";
@@ -13,7 +13,7 @@ import { openStatuses } from "../reconcile.ts";
 const admin = (action: string): AdminPolicy => ({ role: "admin", action, solo: { role: "person", action } });
 
 export function projectRoutes(kit: ApiKit, features: Features): readonly RouteEntry[] {
-  const { registry } = kit;
+  const { registry, lands } = kit;
 
   function refuseUnknownNode(project: Project) {
     if (project.defaultNode !== "auto" && registry.nodes.node(project.defaultNode) === undefined) throw new HttpError(400, `no node ${project.defaultNode}`);
@@ -34,7 +34,7 @@ export function projectRoutes(kit: ApiKit, features: Features): readonly RouteEn
       const { autoReview, pipeline, standingRules, secondReview, ...patch } = parse(projectEditSchema, await r.body());
       // A CLI older than modes sends `land`.
       const mode: AutoReviewMode | null | undefined = autoReview == null ? autoReview : "mode" in autoReview ? autoReview.mode : autoReview.land ? "land" : "review";
-      if (mode === "land" || mode === "yolo") demand(r.roles, landing, r.caller);
+      if (mode === "land" || mode === "yolo") lands(r);
       const project = registry.projects.editProject(id as ProjectId, ({ autoReview: kept, pipeline: running, standingRules: standing, secondReview: second, ...previous }) => {
         if (previous.removed !== undefined) throw new HttpError(409, `project ${id} is removed; its history is read-only`);
         const updated: Project = parse(projectSchema, { ...previous, ...patch, resources: { ...previous.resources, ...patch.resources } });

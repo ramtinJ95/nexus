@@ -1,5 +1,6 @@
 {
   "holdsOnEveryChange": [
+    ".claude/skills/verify-nexus/scripts/landing-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/live-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/logins-check: reserved-path:auth",
     ".claude/skills/verify-nexus/scripts/logins-check: verify-changed",

@@ -58,7 +58,7 @@ const tempDb = () => join(registries, `${randomUUID()}.db`);
 const previous = "p".repeat(40);
 
 /** `agentState` replaces the fake that reads replies and model failures from the fixture's maps. */
-function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; releaseBranch?: string; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview; secondReview?: SecondReview; agentState?: (registry: Registry) => ReviewDeps["agentState"]; personWrote?: (registry: Registry) => ReviewDeps["personWrote"] } = {}) {
+function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; releaseBranch?: string; shared?: boolean; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview; secondReview?: SecondReview; agentState?: (registry: Registry) => ReviewDeps["agentState"]; personWrote?: (registry: Registry) => ReviewDeps["personWrote"] } = {}) {
   const registry = openRegistry(options.path ?? ":memory:");
   t.after(() => { try { registry.close(); } catch { /* closed by a restart */ } });
   const repo = options.repo ?? "ramtinJ95/nexus";
@@ -156,8 +156,10 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       change: async (_, __, head) => changes.has(head) ? changes.get(head)! : files.map((f) => ({ ...f, patch: f.patch && `${f.patch}\n+// ${head}` })),
       has: async (_, __, path) => path === ".nexus/verify" && verifies,
       behind: async (_, __, head) => behind.has(head),
-      async update(_, __, sha) { updates.push(sha); return updateAnswer(sha); },
       async label(_, __, name) { labelCalls.push(name); return labelAnswer(name); },
+    },
+    lands: options.shared ? null : { github: {
+      async update(_, __, sha) { updates.push(sha); return updateAnswer(sha); },
       async merge(_, n, sha) {
         merges.push(sha);
         const answer = mergeAnswer(sha);
@@ -168,7 +170,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
         }
         return answer;
       },
-    },
+    }, mayLand: (caller) => deployers.has(caller) },
     inbox: async (target, message) => { delivering++; if (held !== null) { held.entered(); await held.released; } if (delivery === "delivered") sent.push({ to: target.id, message }); return delivery; },
     agentState: options.agentState?.(registry) ?? (async (target, since) => ({
       ...heard(target, registry.threads.agent(target).kind === "claude" ? registry.threads.claudeEntries(target.id) : null, since),
@@ -204,7 +206,6 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
       },
     }),
     release: { self, repo: "ramtinJ95/nexus", branch: options.releaseBranch ?? "main" },
-    mayLand: (caller) => deployers.has(caller),
     wake: (target) => { woken.push(target.id); },
     log: (message) => { logged.push(message); },
     now: () => clock,
@@ -6608,4 +6609,117 @@ test("behind a stopped PR watch, a queued pull request that closed does not hold
   await loop.poll();
   assert.equal(f.registry.prWatches.prWatch(f.builder)!.links.find((l) => l.pr.number === 8)!.pr.state, "open", "the stopped watch still shows #8 open and clean");
   assert.equal(f.review().pr.number, 9, "#9 gets its review though #8 is first in line");
+});
+
+/** What a shared install's review loop throws at a request to land. */
+const landingOff = { name: "Error", code: "landing-off", message: "Nexus never merges on a shared install, so it lands no pull request. An engineer merges it on GitHub" };
+
+test("on a shared install the loop refuses a review start with land, a land, and a Land answer with landing-off, and an approval ends for an engineer to merge on GitHub", async (t) => {
+  const f = fixture(t, { shared: true });
+  f.files = dockerfile;
+  const loop = f.loop();
+  await assert.rejects(loop.start(f.builder, { land: "nLAPTOP" }), landingOff);
+  assert.equal(f.registry.reviews.review(f.builder), null);
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  assert.deepEqual(holdQuestions(f), [], "no question asks to land past holds that nothing here lands");
+  f.reply(f.review().reviewer, verdict(f.review(), {}));
+  await loop.poll();
+  assert.deepEqual(f.review().phase, { kind: "approved", onGitHub: true });
+  assert.match(reviewSaid(f.review())[0]!, /: approved, .*, for an engineer to merge on GitHub, since Nexus never merges on a shared install/);
+  assert.throws(() => loop.land(f.builder, "nLAPTOP"), landingOff);
+  f.registry.questions.askQuestion({
+    kind: "holds", id: "holds-rv-old", thread: f.builder, text: "Land?", options: ["Land", "Leave it"], reserved: "image-rebuild", answerer: "deployer", askedAt: 1,
+    holds: { review: f.review().id, head: head1, base: "main", holds: [{ code: "reserved-path:image-rebuild", text: imageHold }] },
+  });
+  assert.throws(() => loop.answerHolds(f.registry.questions.question("holds-rv-old") as never, "Land", "nLAPTOP" as TailnetNodeId), landingOff);
+  await loop.poll();
+  assert.deepEqual([f.merges, f.updates], [[], []]);
+});
+
+test("on a shared install a project left in land or yolo reviews its pull requests and stops at approval, and yolo answers nothing", async (t) => {
+  for (const mode of ["land", "yolo"] as const) {
+    const f = fixture(t, { shared: true, autoReview: { mode, enabledBy: "nLAPTOP" } });
+    f.files = dockerfile;
+    const loop = f.loop();
+    await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
+    assert.equal(f.review().land, null, `${mode} asks for no landing`);
+    await loop.poll();
+    f.reply(f.review().reviewer, verdict(f.review(), {}));
+    await loop.poll();
+    await loop.poll();
+    assert.deepEqual(f.review().phase, { kind: "approved", onGitHub: true }, mode);
+    assert.deepEqual(holdQuestions(f), [], `${mode} has no question for its setting to answer`);
+    assert.deepEqual([f.merges, f.updates], [[], []], mode);
+  }
+});
+
+test("a landing asked for before the install became shared stops at approval, or, waiting in its merge, short of it with landing-off", async (t) => {
+  const path = tempDb();
+  const f = fixture(t, { path });
+  released(f, previous);
+  await f.loop().start(f.builder, { land: "nLAPTOP" });
+  f.registry.close();
+  const g = fixture(t, { path, shared: true });
+  const loop = g.loop();
+  await loop.poll();
+  g.reply(g.review().reviewer, verdict(g.review(), {}));
+  await loop.poll();
+  assert.deepEqual([g.review().phase, g.review().land], [{ kind: "approved", onGitHub: true }, null], "one still under review stops at approval and asks to land no more");
+  g.watched("merged");
+  g.snapshot = { ...g.snapshot, pr: { ...g.snapshot.pr, state: "merged" }, detail: { ...g.snapshot.detail, mergeCommit: merged } };
+  await loop.poll();
+  assert.deepEqual(g.review().phase, { kind: "merged" }, "an engineer's merge on GitHub ends it");
+
+  const merging = tempDb();
+  const h = fixture(t, { path: merging });
+  released(h, previous);
+  h.snapshot = { ...h.snapshot, pr: { ...h.snapshot.pr, checks: "pending" } };
+  await approved(h, "nLAPTOP");
+  assert.equal(h.review().phase.kind, "merging", "it waits for the pull request's GitHub checks");
+  h.registry.close();
+  const k = fixture(t, { path: merging, shared: true });
+  k.snapshot = { ...k.snapshot, pr: { ...k.snapshot.pr, checks: "passing" } };
+  await k.loop().poll();
+  assert.deepEqual(shown(k.review().phase), { kind: "needs-person", reasons: [`${landingOff.message}.`] });
+  assert.deepEqual([g.merges, g.updates, k.merges, k.updates], [[], [], [], []]);
+  assert.equal(k.registry.releases.desiredRelease()?.commit, previous);
+});
+
+test("on a shared install a yolo project's holds question left from before is withdrawn unanswered, and nothing lands", async (t) => {
+  const path = tempDb();
+  const f = fixture(t, { path, autoReview: { mode: "yolo", enabledBy: "nPHONE" } });
+  f.files = dockerfile;
+  await f.loop().auto(f.registry.threads.thread(f.builder)!, f.pr);
+  await f.loop().poll();
+  const [question] = openHolds(f);
+  assert.ok(question !== undefined && f.review().land !== null, "a solo install asked, and nPHONE, no deployer, left it open");
+  f.registry.close();
+  const g = fixture(t, { path, shared: true, autoReview: { mode: "yolo", enabledBy: "nLAPTOP" } });
+  const loop = g.loop();
+  await loop.poll();
+  assert.equal(g.registry.questions.question(question.id), null, "withdrawn before the yolo answer could take it");
+  assert.equal(g.review().waiver, null);
+  g.reply(g.review().reviewer, verdict(g.review(), {}));
+  await loop.poll();
+  assert.deepEqual(g.review().phase, { kind: "approved", onGitHub: true });
+  assert.deepEqual([g.merges, g.updates, openHolds(g)], [[], [], []]);
+});
+
+test("an approval saved on a solo install says, once the install is shared, that an engineer merges it, and ends when they do", async (t) => {
+  const path = tempDb();
+  const f = fixture(t, { path });
+  await approved(f, null);
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+  f.registry.close();
+  const g = fixture(t, { path, shared: true });
+  const loop = g.loop();
+  await loop.poll();
+  assert.deepEqual([g.review().phase, g.review().land], [{ kind: "approved", onGitHub: true }, null]);
+  assert.match(reviewSaid(g.review())[0]!, /for an engineer to merge on GitHub/);
+  g.watched("merged");
+  g.snapshot = { ...g.snapshot, pr: { ...g.snapshot.pr, state: "merged" }, detail: { ...g.snapshot.detail, mergeCommit: merged } };
+  await loop.poll();
+  assert.deepEqual(g.review().phase, { kind: "merged" });
+  assert.deepEqual([g.merges, g.updates], [[], []]);
 });

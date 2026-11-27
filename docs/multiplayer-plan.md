@@ -290,13 +290,13 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 
 ### mp-14: Nexus never merges
 
-- [ ] **Depends on.** `mp-02`.
-- [ ] **Files.** `src/control/review.ts`, `src/control/github.ts`, `src/control/api/review-routes.ts`, `src/control/api/question-routes.ts`, `src/control/api/project-routes.ts`, `src/control/main.ts`.
-- [ ] **Change.** Every merge goes through one call, `github.merge` at `src/control/review.ts:836`. On a shared install the control plane builds its GitHub client without `merge` and without the branch update, so no code path can call them. The five ways to ask for a landing are refused with one reason, `landing-off`: a review start with `land`, `POST /land`, the Land answer to a holds question, a project's `land` or `yolo` mode, and the automatic answer in `yolo` mode. An approved review ends by telling the owner that an engineer merges on GitHub.
-- [ ] **Result.** No action by any person or agent makes Nexus merge a pull request.
-- [ ] **Unit.** Each of the five paths is refused. The two existing tests that prove a landing merges still pass on an install without `people`.
+- [x] **Depends on.** `mp-02`.
+- [x] **Files.** `src/control/review.ts`, `src/control/github.ts`, `src/control/api/review-routes.ts`, `src/control/api/question-routes.ts`, `src/control/api/project-routes.ts`, `src/control/main.ts`.
+- [x] **Change.** Every merge goes through one call, `github.merge` at `src/control/review.ts:836`. On a shared install the control plane builds its GitHub client without `merge` and without the branch update, so no code path can call them. The five ways to ask for a landing are refused with one reason, `landing-off`: a review start with `land`, `POST /land`, the Land answer to a holds question, a project's `land` or `yolo` mode, and the automatic answer in `yolo` mode. An approved review ends by telling the owner that an engineer merges on GitHub.
+- [x] **Result.** No action by any person or agent makes Nexus merge a pull request.
+- [x] **Unit.** Each of the five paths is refused. The two existing tests that prove a landing merges still pass on an install without `people`.
 - [ ] **Live.** On the two-person stack with the scratch repository, run `nexus land` as an admin on an approved review. Pass when it is refused with `landing-off` and the pull request is still open on GitHub.
-- [ ] **Perf.** `check`. Fail above 10% over base.
+- [x] **Perf.** `check`. Fail above 10% over base.
 
 ### mp-15: the network guard refuses merge and approve
 

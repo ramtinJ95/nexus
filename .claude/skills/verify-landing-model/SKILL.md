@@ -79,6 +79,7 @@ All of it is `model/Landing.tla`. Each action there has a comment that names the
 - A turn saved before Nexus recorded the release it was taken at, which rolls back to the desired release as before.
 - A round saved before Nexus recorded its base, which deploys, as every landing of Nexus's repository did then.
 - A pull request retargeted to another base. The model fixes each pull request's base. In the code a retarget gets a round of its own before any merge, and a merge into another base than the approval's goes to the person, so the base does not change within a turn.
+- A shared install, one whose `control.json` has `people`. It has no landing: its review loop holds no merge or branch update, and every request to land is refused with `landing-off`, so no turn is taken there. The model describes a solo install.
 
 A pass says nothing about any of these.
 

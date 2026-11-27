@@ -50,7 +50,7 @@ function reviewNext(r: Review): string | null {
     case "quoting": return "The reviewer quotes what could not be checked live";
     case "checking": return `Runs .nexus/check at the approved head${heldNote(r)}`;
     case "verifying": return `${liveNote(r) ?? "Runs the live check"}${heldNote(r)}`;
-    case "approved": return r.land === null ? "Approved, and lands once you press Land" : "Approved, landing next";
+    case "approved": return r.phase.onGitHub ? "Approved, for an engineer to merge on GitHub" : r.land === null ? "Approved, and lands once you press Land" : "Approved, landing next";
     case "merging": return r.phase.waiting !== undefined ? `Waits to merge while ${r.phase.waiting}` : r.phase.checks !== undefined ? "Waits to merge until GitHub's checks pass" : "Merging";
     case "deploying": return `Deploying ${r.phase.commit.slice(0, 12)}`;
     case "rolling-back": return `Rolling back: ${r.phase.why}`;

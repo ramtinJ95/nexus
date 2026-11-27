@@ -903,7 +903,8 @@ type Phase =
    * request carries, once it is saved to send, and null before. The landing's checks follow.
    */
   | { kind: "quoting"; asked: string | null; failing?: ModelFailure }
-  | { kind: "approved" }
+  /** `onGitHub` on a shared install, where Nexus never merges, so an engineer merges the approved pull request on GitHub. */
+  | { kind: "approved"; onGitHub?: true }
   /**
    * `authorized` is the head this review is about to merge, saved before the merge call, so after a restart a PR that
    * merged at it is this review's own merge, and any other merge is someone else's. `previous` is the release a failed

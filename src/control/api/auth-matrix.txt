@@ -1255,8 +1255,8 @@ unnamed attach -> 403 caller is not a tailnet node this control plane allows
 shared engineer attach to alice's thread -> 403 thread {alice's thread} is alice@example.com's, so only alice@example.com may attach to a thread's pylon
 shared engineer POST /v1/threads/{alice's thread}/review -> 403 thread {alice's thread} is alice@example.com's, so only alice@example.com may start a review
 shared engineer POST /v1/threads/{alice's thread}/review/cancel -> 403 thread {alice's thread} is alice@example.com's, so only alice@example.com may cancel a review
-shared engineer POST /v1/threads/{alice's thread}/land -> 403 caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nBOB
-shared engineer POST /v1/threads/{alice's thread}/land -> 403 caller may not land a pull request, which deploys: only deployers may, never infrastructure nodes or pylons. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it deploy: sudo deploy/install.sh --admit nBOB
+shared engineer POST /v1/threads/{alice's thread}/land -> 403 Nexus never merges on a shared install, so it lands no pull request. An engineer merges it on GitHub
+shared engineer POST /v1/threads/{alice's thread}/land -> 403 Nexus never merges on a shared install, so it lands no pull request. An engineer merges it on GitHub
 shared engineer POST /v1/threads/{alice's thread}/previews -> 403 thread {alice's thread} is alice@example.com's, so only alice@example.com may publish a preview
 shared engineer DELETE /v1/threads/{alice's thread}/previews/3000 -> 403 thread {alice's thread} is alice@example.com's, so only alice@example.com may unpublish a preview
 shared engineer POST /v1/threads/{alice's thread}/sessions -> 403 thread {alice's thread} is alice@example.com's, so only alice@example.com may open a session in a thread's pylon
@@ -1281,8 +1281,8 @@ shared engineer DELETE /v1/threads/{alice's thread} -> 403 thread {alice's threa
 shared admin attach to bob's thread -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may attach to a thread's pylon
 shared admin POST /v1/threads/{bob's thread}/review -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may start a review
 shared admin POST /v1/threads/{bob's thread}/review/cancel -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may cancel a review
-shared admin POST /v1/threads/{bob's thread}/land -> 409 the review loop needs the control plane's GitHub token (github.tokenFile), which is not configured
-shared admin POST /v1/threads/{bob's thread}/land -> 400 ✖ Unrecognized key: "bogus"
+shared admin POST /v1/threads/{bob's thread}/land -> 403 Nexus never merges on a shared install, so it lands no pull request. An engineer merges it on GitHub
+shared admin POST /v1/threads/{bob's thread}/land -> 403 Nexus never merges on a shared install, so it lands no pull request. An engineer merges it on GitHub
 shared admin POST /v1/threads/{bob's thread}/previews -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may publish a preview
 shared admin DELETE /v1/threads/{bob's thread}/previews/3000 -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may unpublish a preview
 shared admin POST /v1/threads/{bob's thread}/sessions -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may open a session in a thread's pylon

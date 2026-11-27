@@ -21,6 +21,7 @@ import { notConfigured } from "../not-configured.ts";
 const landRefusals: Record<LandRefusal, (caller: TailnetNodeId) => string> = {
   "not a deployer": (caller) => `This device cannot land: landing deploys, so only the control plane's deployers may, and this device (tailnet node ${caller}) is not one. Land it from a deployer, or add this node to deployers in the control plane's config.`,
   "no review loop": () => `Nexus cannot land it now: ${notConfigured.reviews}.`,
+  "landing off": () => "Nexus never merges on a shared install. An engineer merges the pull request on GitHub.",
 };
 
 const answerRefusals: Record<AnswerRefusal, (caller: TailnetNodeId) => string> = {

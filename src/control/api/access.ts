@@ -13,7 +13,7 @@ import { answerRefusal, type AnswerRefusal, type Question } from "../questions.t
 import { tokenDigest } from "../../protocol/deploy.ts";
 import { Refusal } from "../refusal.ts";
 import { noConversation } from "../thread-agent.ts";
-import { operator, personOf, solo, type People, type Starter } from "../people.ts";
+import { landingOff, operator, personOf, solo, type People, type Starter } from "../people.ts";
 
 /**
  * Who may call a route: any machine whois names, or the join's whois names, a caller on the allowlist, a person, a
@@ -27,9 +27,9 @@ const roleNeeded = (policy: RolePolicy | OwnerPolicy): Role => policy.role === "
 /**
  * A route's role, checked before it runs. A refusal names the action a person's, a deployer's or the control node's
  * route takes, and a route any allowed caller changes state with says why it may. A route that starts a turn waits out a
- * deploy's drain.
+ * deploy's drain. A route that lands is refused to everyone on a shared install.
  */
-export type Policy = (RolePolicy | OwnerPolicy | AdminPolicy) & { startsTurn?: true };
+export type Policy = (RolePolicy | OwnerPolicy | AdminPolicy) & { startsTurn?: true; lands?: true };
 type RolePolicy = { role: "person" | "deployer" | "control-node"; action: string } | { role: "tailnet" | "joiner" | "allowed" | "reporter"; why?: string };
 /**
  * A person's route that acts on the thread its path names, which on a shared install only that thread's owner may take,
@@ -215,15 +215,25 @@ export function apiAccess(registry: Registry, wake: (node: NodeName) => void, op
     if (people.shared && !caller.roles.has("deployer")) throw new Refusal("forbidden", `caller may not ${policy.action}: only an admin may`);
   }
 
+  /** Refuses every landing on a shared install, which never merges, before any role is checked. */
+  function refuseLanding() {
+    if (people.shared) throw landingOff();
+  }
+  /** Refuses a landing a route's body asks for: on a shared install to everyone, and on a solo one to a caller who may not deploy. */
+  function lands(r: { roles: ReadonlySet<Role>; caller: TailnetNodeId }) {
+    refuseLanding();
+    demand(r.roles, landing, r.caller);
+  }
+
   const answerRefusalOf = (caller: Caller, question: Question): AnswerRefusal | null =>
     answerRefusal(question, { person: caller.roles.has("person"), deployer: caller.roles.has("deployer"), owner: !("thread" in question) || ownerOtherThan(question.thread, caller) === null });
 
-  return { lookup, thread, threadRefusal, guard, current, wakeThread: threadWaker(registry, wake), roleOf, admittable, personAs, starter, actsOn, administers, answerRefusalOf };
+  return { lookup, thread, threadRefusal, guard, current, wakeThread: threadWaker(registry, wake), roleOf, admittable, personAs, starter, actsOn, administers, refuseLanding, lands, answerRefusalOf };
 }
 export type Access = ReturnType<typeof apiAccess>;
 
 /** Landing merges and may deploy, so it takes the same right as `nexus deploy`, whatever the repository. */
-export const landing = { role: "deployer", action: "land a pull request, which deploys" } satisfies Policy;
+export const landing = { role: "deployer", action: "land a pull request, which deploys", lands: true } satisfies Policy;
 
 /** Refuses a caller holding `roles` that does not hold `policy`'s role: a route's, or one its body asks for, such as a landing. */
 export function demand(roles: ReadonlySet<Role>, policy: Policy, caller: TailnetNodeId | null = null) {

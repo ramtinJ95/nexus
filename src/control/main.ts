@@ -31,7 +31,7 @@ import { startLoop } from "./loop.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import type { NodeRecord } from "./node-store.ts";
 import { peerHandoff } from "./peers.ts";
-import { githubClient, githubRepo } from "./github.ts";
+import { controlGitHub, githubRepo } from "./github.ts";
 import { reviewLoop } from "./review.ts";
 import { agentReader } from "./agent-conversation.ts";
 import { claudeConversations } from "./claude-conversation.ts";
@@ -234,7 +234,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const claude = services.start(claudeConversations({ registry, probes: probeMap, log }));
   const agents = agentReader(registry, harness, claude);
   const usage = services.start(usageCounter({ registry, probes: probeMap, harness }));
-  const github = token === null ? null : githubClient(token);
+  const { github, landing } = token === null ? { github: null, landing: null } : controlGitHub(token, people);
   services.start(config.resumeAfterUsageLimit ? { everyMs: 30_000, ...usageLimitResumer({ registry, inbox, log }) } : null);
   const mirror = projectMirror({ githubToken: token });
   const backfill = services.start(usageBackfill({ registry, counter: usage, wake }));
@@ -252,7 +252,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     personWrote: agents.personWrote,
     runs: (ended) => ({ checks: checkRuns({ ...checkRunDeps, ended }), live: checkRuns({ ...checkRunDeps, gate: verifyGate, ended }) }),
     release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)!, branch: config.releaseBranch },
-    mayLand: (caller) => isDeployer(registry, deployment, caller as TailnetNodeId),
+    lands: landing && { github: landing, mayLand: (caller) => isDeployer(registry, deployment, caller as TailnetNodeId) },
     wake: wakeThread,
     log,
   }) });
