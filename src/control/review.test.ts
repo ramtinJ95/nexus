@@ -6638,7 +6638,33 @@ test("on a shared install the loop refuses a review start with land, a land, and
   assert.deepEqual([f.merges, f.updates], [[], []]);
 });
 
-test("on a shared install no review starts, the person's with pylon-agents-only and none of a project's own, until mp-17", async (t) => {
+test("on a shared install the person's review runs one Claude worker on the default model, owned as the builder is, and no second reviewer joins at any round", async (t) => {
+  const f = fixture(t, { people: peopleOf({ "alice@example.com": "engineer" }), shared: true, secondReview: { always: true }, secrets: claudeToken });
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  assert.deepEqual([f.review().reviewerKind, f.review().models.reviewer, f.review().second], ["claude", "claude-opus-5-5", undefined]);
+  assert.deepEqual(f.started.map((s) => [s.caller, s.owner, s.role, s.request.claude === undefined, s.request.model]), [[reviewerCaller, f.registry.threads.thread(f.builder)!.owner, "reviewer", false, "claude-opus-5-5"]], "one reviewer, a Claude worker the builder's owner owns");
+  assert.deepEqual(f.sent.map((s) => s.to), [], "its first request is its first prompt, so nothing goes through a harness conversation");
+  f.reply(f.review().reviewer, verdict(f.review(), { verdict: "changes", findings: [serious] }));
+  await loop.poll();
+  f.reply(f.builder, answers(f.review(), [{ id: "F1", action: "fixed", reason: "Added a TTL." }]));
+  f.snapshot = { ...f.snapshot, detail: { ...f.snapshot.detail, head: head2 } };
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual([f.review().rounds.length, f.review().second, f.started.length], [2, undefined, 1], "round 2 asks the same reviewer and starts no second");
+});
+
+test("a solo install with the same project still reviews a Claude builder in the harness, with a second reviewer", async (t) => {
+  const f = fixture(t, { secondReview: { always: true }, secrets: claudeToken });
+  const loop = f.loop();
+  await loop.start(f.builder, { land: null });
+  await loop.poll();
+  await loop.poll();
+  assert.deepEqual([f.review().reviewerKind, f.review().models.reviewer, f.review().second?.kind], ["harness", "gpt-6-astra", "claude"]);
+});
+
+test("on a shared install a project's own review and an owed one start none, while the person's starts", async (t) => {
   for (const people of [solo, peopleOf({ "alice@example.com": "admin" })]) {
     const f = fixture(t, { people, autoReview: { mode: "review", enabledBy: "nLAPTOP" } });
     const loop = f.loop();
@@ -6650,9 +6676,10 @@ test("on a shared install no review starts, the person's with pylon-agents-only 
     await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
     f.tick(prWatchMs);
     await loop.poll();
-    await assert.rejects(loop.start(f.builder, { land: null }), { code: "pylon-agents-only", message: /^Nexus starts no review on a shared install yet, .*Ask a colleague to review the pull request on GitHub$/ });
-    assert.equal(f.registry.reviews.review(f.builder), null, "no review started");
+    assert.equal(f.registry.reviews.review(f.builder), null, "no review started on its own");
     assert.deepEqual(f.logged.filter((line) => /review/.test(line)), [], "nothing is logged as a review that will be tried again");
+    await loop.start(f.builder, { land: null });
+    assert.equal(f.review().auto, false, "the person's start is recorded");
   }
 });
 

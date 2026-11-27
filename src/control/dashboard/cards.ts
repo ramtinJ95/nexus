@@ -18,9 +18,6 @@ import { prose } from "./markdown.ts";
 import { landingTrack } from "./lifecycle.ts";
 import { notConfigured } from "../not-configured.ts";
 
-/** What a shared install says in place of a review start, as the API's pylon-agents-only refusal of one does. */
-export const reviewsOffText = "Nexus starts no review on a shared install yet, since its reviewer would run on the install's one model login. Ask a colleague to review the pull request on GitHub.";
-
 const landRefusals: Record<LandRefusal, (caller: TailnetNodeId) => string> = {
   "not a deployer": (caller) => `This device cannot land: landing deploys, so only the control plane's deployers may, and this device (tailnet node ${caller}) is not one. Land it from a deployer, or add this node to deployers in the control plane's config.`,
   "no review loop": () => `Nexus cannot land it now: ${notConfigured.reviews}.`,
@@ -267,10 +264,10 @@ ${r.phase.kind === "needs-person" && html`<ul class="error">${r.phase.holds.map(
 ${outside === "merged" ? html`<p class="land-note">Pull request #${r.pr.number} merged on GitHub outside this review, so nothing is left to review or land.${c.deploys(r) && " Nexus deploys only what it lands, so deploy the merge commit with nexus deploy if it should run."} Cancel the review once nothing more is needed.</p>`
   : outside === "closed" ? html`<p class="land-note">Pull request #${r.pr.number} closed on GitHub, so nothing is left to review or land. Cancel the review once nothing more is needed.</p>`
   : !again && html`<p class="land-note">The thread is ${d.thread.status}, so it cannot be reviewed again.</p>`}
-<div class="land-act need-act">${again && (refusal === null && !c.pylonAgentsOnly
+<div class="land-act need-act">${again && (refusal === null
   ? html`<button type="button" class="btn btn-primary"${act("review-again")} data-thread="${d.thread.id}" data-pr="${r.pr.number}"${land && html` data-land="true"`} data-confirm="${confirm}">Review again</button>`
   : html`<button type="button" class="btn" disabled>Review again</button>`)}${cancelReview(d.thread.id, r, "btn-ghost")}</div>
-${again && (c.pylonAgentsOnly ? html`<p class="error">${reviewsOffText}</p>` : refusal !== null && html`<p class="error">${landRefusals[refusal](c.caller)}</p>`)}
+${again && refusal !== null && html`<p class="error">${landRefusals[refusal](c.caller)}</p>`}
 </section>`;
 }
 
