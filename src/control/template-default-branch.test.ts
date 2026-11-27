@@ -139,7 +139,7 @@ test("on a shared install a template recorded before the install was shared is n
   const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Bob's work", branch: "main" });
   assert.equal(started.status, 201, JSON.stringify(started.body));
   const setup = (started.body as Thread).setup;
-  assert.ok(setup?.how === "fresh" && setup.building !== undefined && !setup.building.endsWith("a1") && !setup.building.endsWith("a2"), JSON.stringify(setup));
+  assert.ok(setup?.how === "fresh" && setup.building !== undefined && !["tpl-0000000000a1", "tpl-0000000000a2"].includes(setup.building), JSON.stringify(setup));
   const build = s.registry.images.templates("acme" as ProjectId).find((r) => r.id === setup.building);
   assert.ok(build?.state === "building");
   assert.deepEqual(build.inputs.repo, { url: repo.url, branch: "main", commit: repo.mainCommit }, "bob's start builds main's head anew");
