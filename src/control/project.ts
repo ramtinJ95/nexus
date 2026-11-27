@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { NodeName, ProjectId } from "../ids.ts";
 import { chatgptTokenGrant, ownerGrants, ownerOnlyNames, type SecretGrant } from "../protocol/secret-grants.ts";
 import { anthropicApiHost } from "../protocol/agent-kinds.ts";
-import type { BootInputs, GitIdentity, PylonResources } from "../protocol/spawn.ts";
+import { ownerBoot, type BootInputs, type GitIdentity, type PylonResources } from "../protocol/spawn.ts";
 
 export interface Project {
   /** Removed from project pickers, not erased: archived history and its project identity remain readable. */
@@ -81,8 +81,6 @@ export function bootSecrets(project: Project, owned = false): readonly SecretGra
   const granted = owned ? [...project.secrets.filter((grant) => !ownerOnlyNames.includes(grant.name)), ...Object.values(ownerGrants)] : project.secrets;
   return project.logins.includes("chatgpt") ? [...granted, chatgptTokenGrant] : granted;
 }
-/** Whether a pylon booted with its owner's logins, which only a start on a shared install gives it. */
-export const ownerBoot = (boot: Pick<BootInputs, "network">) => boot.network.secrets.some((grant) => grant.owner === true);
 export type LoginKind = "claude" | "chatgpt";
 
 /**

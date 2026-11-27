@@ -162,6 +162,25 @@ test("an SSH repo on a node without a git SSH key fails as secret-missing and cr
   assert.equal(existsSync(join(instances, "pylon-ssh")), false);
 });
 
+test("a person's pylon on a shared install boots with no SSH key and no SSH remote, though the node has a key", async () => {
+  const keyFile = join(scratch, "id_shared");
+  await writeFile(keyFile, "-----BEGIN OPENSSH PRIVATE KEY-----\nthe node's one key\n");
+  const { backend, instances } = await backendWith({ gitSsh: { privateKeyFile: keyFile, knownHostsFile: keyFile }, secrets: { value: () => "owner-token", names: () => [] } });
+  const owned = { allowedHosts: ["api.github.com", "github.com"], secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com", "github.com"], owner: true as const }] };
+  const sshRepo = { kind: "clone" as const, url: "git@github.com:acme/mono.git", checkout: { branch: "main", commit: "c0ffee" } };
+  for (const owner of ["alice", "bob"]) {
+    await assert.rejects(backend.ensureRunning(bootOf(`pylon-${owner}-ssh`, { network: owned, repo: sshRepo }), live, signal()),
+      { code: "invalid", message: `pylon-${owner}-ssh: git on a shared install goes over HTTPS only, and the project's repoUrl git@github.com:acme/mono.git is SSH, so an admin adds the project again with its https:// URL` });
+    assert.equal(existsSync(join(instances, `pylon-${owner}-ssh`)), false);
+  }
+  await assert.rejects(backend.ensureRunning(bootOf("pylon-alice-dots", { network: owned, dotfiles: { repo: "git@github.com:acme/dotfiles.git", ref: "main" } }), live, signal()),
+    { code: "invalid", message: /the dotfiles repo git@github\.com:acme\/dotfiles\.git is SSH, so an admin sets an https:\/\/ one in control\.json/ });
+  // The assets are a bare manifest, so an HTTPS boot that passes every check fails once it reaches Gondolin.
+  await assert.rejects(backend.ensureRunning(bootOf("pylon-alice-https", { network: owned }), live, AbortSignal.timeout(60_000)), (err: { code?: string }) => err.code !== "invalid");
+  // A solo install's boot, which no owner's login marks, keeps the node's key.
+  await assert.rejects(backend.ensureRunning(bootOf("pylon-solo-ssh", { repo: sshRepo }), live, AbortSignal.timeout(60_000)), (err: { code?: string }) => err.code !== "invalid");
+});
+
 test("the backend tells the probe whether it has a git SSH key, journals events in its state root, and answers NEXUS_API on a socket there", async (t) => {
   const keyed = await backendWith({ gitSsh: { privateKeyFile: join(scratch, "id_ed25519"), knownHostsFile: join(scratch, "known_hosts") } });
   const plain = await backendWith();

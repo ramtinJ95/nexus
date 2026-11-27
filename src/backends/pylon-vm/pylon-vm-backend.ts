@@ -17,7 +17,7 @@ import { artifactDirectory, manifestFiles, tarCodec } from "../../image/artifact
 import { type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type SecretSource, type VmBackend } from "../backend.ts";
 import { JobFailure } from "../../protocol/jobs.ts";
 import { buildImage as buildPylonImage } from "../../image/build.ts";
-import { minPylonMemoryGiB, minPylonMemoryReason, requiredArtifacts, type BootInputs, type LiveSpec, type RepoInit } from "../../protocol/spawn.ts";
+import { minPylonMemoryGiB, minPylonMemoryReason, requiredArtifacts, sshRefusal, type BootInputs, type LiveSpec, type RepoInit } from "../../protocol/spawn.ts";
 import { shellQuote as q } from "../../shell.ts";
 import { type CheckpointId, type ImageId, isCheckpointId, isImageId, isTemplateId, maxPylonIdLength, type PortableArtifactId, type PylonId } from "../../ids.ts";
 import { pylonIdSchema } from "../../protocol/fields.ts";
@@ -63,7 +63,7 @@ export interface PylonVmBackendOptions {
    * this host and authenticates upstream with this key, so the key never enters a pylon. Upstream host keys
    * are checked against knownHostsFile. Without it, a node boots only pylons whose remotes are HTTPS.
    * SSH egress is not governed by the allowlist: it reaches only the pylon's own repository and dotfiles
-   * remotes, and only to fetch from and push to them.
+   * remotes, and only to fetch from and push to them. A pylon booted with its owner's logins never gets it (sshRefusal).
    */
   gitSsh?: { privateKeyFile: string; knownHostsFile: string };
   /** The node's tailnet DNS name, which previews are published on. Each previewed service's PUBLIC_URL is on it. */
@@ -276,6 +276,8 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       if (value === undefined) throw new JobFailure("secret-missing", `secret ${grant.name} is not in this node's secret file`);
       secrets[grant.name] = { hosts: [...grant.hosts], value };
     }
+    const https = sshRefusal(boot);
+    if (https !== null) throw new JobFailure("invalid", `${boot.pylonId}: ${https}`);
     // A scratch pylon has no remote of its own, so a repository it creates later is reached over HTTPS only.
     const remotes = [...bootRemotes(boot.repo), ...boot.dotfiles === undefined ? [] : [boot.dotfiles.repo]].flatMap((url) => sshRemoteOf(url) ?? []);
     return {

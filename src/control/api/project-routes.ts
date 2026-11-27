@@ -8,11 +8,12 @@ import { anyAllowed, type AdminPolicy } from "./access.ts";
 import { projectRoutes as routes } from "../../contract/projects.ts";
 import { projectAddSchema, projectEditSchema, projectSchema } from "../../contract/projects-parse.ts";
 import { openStatuses } from "../reconcile.ts";
+import { sshGitUrl } from "../../protocol/spawn.ts";
 
 /** A solo install lets any person change a project. */
 const admin = (action: string): AdminPolicy => ({ role: "admin", action, solo: { role: "person", action } });
 
-export function projectRoutes(kit: ApiKit, features: Features): readonly RouteEntry[] {
+export function projectRoutes(kit: ApiKit, features: Features, shared: boolean): readonly RouteEntry[] {
   const { registry, lands } = kit;
 
   function refuseUnknownNode(project: Project) {
@@ -24,6 +25,8 @@ export function projectRoutes(kit: ApiKit, features: Features): readonly RouteEn
     const rules = standingRules === undefined ? undefined : editedRules(undefined, standingRules);
     const project: Project = { ...fields, ...rules === undefined ? {} : { standingRules: rules } };
     refuseUnknownNode(project);
+    // A project's repoUrl is fixed once added, so this is the one place an SSH one could enter a shared install.
+    if (shared && project.repoUrl !== null && sshGitUrl(project.repoUrl)) throw new HttpError(400, `${project.repoUrl} is SSH, and git on a shared install goes over HTTPS only, with each person's own GitHub token. Add the project with its https:// URL`);
     if (registry.projects.project(project.id) !== undefined) throw new HttpError(409, `project ${project.id} exists`);
     registry.projects.createProject(project);
     return project;

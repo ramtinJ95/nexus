@@ -8,7 +8,7 @@ import { request } from "node:http";
 import { readFile, writeFile } from "node:fs/promises";
 import { tokenDigest } from "../../protocol/deploy.ts";
 import type { ImageId, NodeName, TailnetNodeId } from "../../ids.ts";
-import { laptop, phone, testApi, attachTo, image, project } from "../../test-support/api-kit.ts";
+import { laptop, phone, testApi, attachTo, image, sharedProject } from "../../test-support/api-kit.ts";
 import { tailnet, type WhoisAnswer } from "../../test-support/people.ts";
 import { parseWhois, type TailnetCaller } from "../../node-base/tailscaled.ts";
 import { peopleOf } from "../people.ts";
@@ -128,7 +128,7 @@ async function sharedLines(t: Parameters<typeof testApi>[0]): Promise<string[]> 
   let caller = as(tailnet.alice);
   const people = peopleOf({ [tailnet.alice.UserProfile!.LoginName]: "admin", [tailnet.bob.UserProfile!.LoginName]: "engineer" });
   const s = await testApi(t, { people, allowed: new Set(), whois: async () => caller });
-  await s.call("POST", "/v1/projects", project);
+  await s.call("POST", "/v1/projects", sharedProject);
   await s.call("POST", "/v1/images", image);
   s.registry.images.setCurrentImage(image.id as ImageId);
   const owned = { alice: (await s.call("POST", "/v1/threads", { project: "acme", title: "alice's" })).body.id as string, bob: "" };

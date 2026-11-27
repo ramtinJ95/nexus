@@ -49,6 +49,26 @@ export interface BootInputs {
 }
 
 /** The image first, because a template or checkpoint is an overlay on it. */
+/** Whether a pylon booted with its owner's logins, which only a start on a shared install gives it. */
+export const ownerBoot = (boot: Pick<BootInputs, "network">) => boot.network.secrets.some((grant) => grant.owner === true);
+
+/** Whether git reaches `url` over SSH: `ssh://`, or git's scp-like `[user@]host:path`, with a colon before any slash. */
+export const sshGitUrl = (url: string) => url.startsWith("ssh://") || /^(?:[^@/:]+@)?[^@/:]+:(?!\/\/)/.test(url);
+
+/**
+ * Why a boot with its owner's logins cannot boot, or null. Git on a shared install goes over HTTPS only, so the
+ * owner's GH_TOKEN placeholder authenticates it and every push passes the HTTP hook. Over SSH it would push with the
+ * node's one key, as whichever person, where no HTTP hook sees it. A solo install keeps SSH.
+ */
+export function sshRefusal(boot: Pick<BootInputs, "network" | "repo" | "dotfiles">): string | null {
+  if (!ownerBoot(boot)) return null;
+  const ssh = [
+    ...boot.repo.kind === "clone" && sshGitUrl(boot.repo.url) ? [`the project's repoUrl ${boot.repo.url} is SSH, so an admin adds the project again with its https:// URL`] : [],
+    ...boot.dotfiles !== undefined && sshGitUrl(boot.dotfiles.repo) ? [`the dotfiles repo ${boot.dotfiles.repo} is SSH, so an admin sets an https:// one in control.json`] : [],
+  ];
+  return ssh.length === 0 ? null : `git on a shared install goes over HTTPS only, and ${ssh.join("; and ")}`;
+}
+
 export function requiredArtifacts(boot: BootInputs): readonly PortableArtifactId[] {
   return boot.source.kind === "template" ? [boot.image, boot.source.template] : [boot.image];
 }

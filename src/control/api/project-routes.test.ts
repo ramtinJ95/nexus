@@ -7,16 +7,17 @@ import { peopleOf } from "../people.ts";
 
 const people = peopleOf({ [tailnet.alice.UserProfile!.LoginName]: "admin", [tailnet.bob.UserProfile!.LoginName]: "engineer" });
 const answer = (a: WhoisAnswer): TailnetCaller => ({ id: a.Node.StableID, ...parseWhois(a).identity });
+const https = { ...project, repoUrl: "https://github.com/acme/mono.git" };
 
 test("on a shared install an engineer reads projects and an admin alone adds, edits and removes them", async (t) => {
   let caller = answer(tailnet.alice);
   const s = await testApi(t, { people, allowed: new Set(), whois: async () => caller });
-  assert.equal((await s.call("POST", "/v1/projects", project)).status, 201, "alice, an admin, adds a project");
+  assert.equal((await s.call("POST", "/v1/projects", https)).status, 201, "alice, an admin, adds a project");
 
   caller = answer(tailnet.bob);
   const refused = [
     ["PATCH", "/v1/projects/acme", { defaultBranch: "bob's" }, "edit a project"],
-    ["POST", "/v1/projects", { ...project, id: "bobs" }, "add a project"],
+    ["POST", "/v1/projects", { ...https, id: "bobs" }, "add a project"],
     ["DELETE", "/v1/projects/acme", {}, "remove a project"],
   ] as const;
   for (const [method, path, body, action] of refused) {
@@ -38,4 +39,22 @@ test("a solo install lets its person add, edit and remove a project as before pe
   assert.equal((await s.call("POST", "/v1/projects", project)).status, 201);
   assert.equal((await s.call("PATCH", "/v1/projects/acme", { defaultBranch: "next" })).status, 200);
   assert.equal((await s.call("DELETE", "/v1/projects/acme", {})).status, 200);
+});
+
+test("on a shared install a project with an SSH repoUrl is refused, and a solo install still takes one", async (t) => {
+  const caller = answer(tailnet.alice);
+  const shared = await testApi(t, { people, allowed: new Set(), whois: async () => caller });
+  for (const repoUrl of ["git@github.com:acme/mono.git", "ssh://git@github.com/acme/mono.git"]) {
+    const r = await shared.call("POST", "/v1/projects", { ...project, repoUrl });
+    assert.deepEqual([r.status, r.body.error], [400, `${repoUrl} is SSH, and git on a shared install goes over HTTPS only, with each person's own GitHub token. Add the project with its https:// URL`]);
+  }
+  assert.equal((await shared.call("POST", "/v1/projects", https)).status, 201);
+  for (const [id, repoUrl] of [["local", "/srv/verify.git"], ["file", "file:///srv/verify.git"]]) {
+    assert.equal((await shared.call("POST", "/v1/projects", { ...project, id, repoUrl })).status, 201, `${repoUrl} is no SSH URL, as the verify stack's projects are not`);
+  }
+  assert.equal((await shared.call("PATCH", "/v1/projects/acme", { repoUrl: "git@github.com:acme/mono.git" })).status, 400, "an edit cannot change a repoUrl at all");
+  assert.equal((await shared.call("GET", "/v1/projects")).body[0].repoUrl, "https://github.com/acme/mono.git");
+
+  const solo = await testApi(t);
+  assert.equal((await solo.call("POST", "/v1/projects", { ...project, repoUrl: "git@github.com:acme/mono.git" })).status, 201);
 });
