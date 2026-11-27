@@ -605,7 +605,11 @@ test("threads lists only the caller's own on a shared install, with an Owner col
   assert.deepEqual((await device.run()).json.map((r) => r.id), ["th-a"], "a device that is no person lists everyone's");
   const older = listing([row("th-a", "alice@example.com"), row("th-b", "bob@example.com")], undefined);
   assert.deepEqual((await older.run()).json.map((r) => r.id), ["th-a", "th-b"], "a control plane whose whoami names no login lists everyone's");
+  const before = listing([row("th-a", "operator")], "bob@example.com");
+  const kept = await before.run();
+  assert.deepEqual(kept.json, [], "a shared install's threads from before people are the operator's, not bob's");
+  assert.deepEqual((await before.run("everyone")).json.map((r) => r.id), ["th-a"]);
+  assert.match((await before.run("everyone")).text, /^Thread .* Owner +Title\n.*operator +th-a's/s, "a shared install names their owner");
   const solo = listing([row("th-a", "operator")], null);
-  const text = (await solo.run()).text;
-  assert.ok(!text.includes("Owner") && !solo.asked.includes("/v1/whoami"), "a solo install's list is as it was, and asks no whoami");
+  assert.ok(!(await solo.run()).text.includes("Owner"), "a solo install's list is as it was");
 });

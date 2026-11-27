@@ -123,20 +123,13 @@ const show: Command = {
 };
 
 /**
- * A list shows its owners once some thread is a person's, which only a shared install's are: a solo install's are the
- * operator's, and a control plane from before owners names none.
+ * Whose threads a list shows, from whoami, which names a login only on a shared install: the caller's own unless
+ * `everyone`, and everyone's on a solo install, for a device that is no person, or from a control plane before whoami
+ * named the login. It shows their owners on a shared install, or once a thread is a person's, as only a shared install's are.
  */
-const owned = (of: readonly { owner?: Person }[]) => of.some((t) => (t.owner ?? operator) !== operator);
-
-/**
- * Which threads of `of` a list shows: on a shared install the caller's own, unless `everyone`. A solo install shows all
- * of them, as does a device that is no person. Whoami is asked only once some thread is a person's.
- */
-async function mineOf(api: Api, of: readonly { owner: Person }[], everyone: boolean): Promise<(t: { owner: Person }) => boolean> {
-  if (everyone || !owned(of)) return () => true;
-  // A control plane from before whoami named the login lists everyone's.
-  const { login } = await api("GET", "/v1/whoami") as Partial<Whoami>;
-  return (t) => login == null || t.owner === login;
+function listedFor({ login }: Partial<Whoami>, of: readonly { owner?: Person }[], everyone: boolean) {
+  const owners = login != null || of.some((t) => (t.owner ?? operator) !== operator);
+  return { owners, mine: (t: { owner: Person }) => everyone || login == null || t.owner === login };
 }
 
 export const threadsCommands: Readonly<Record<string, Command>> = {
@@ -158,17 +151,19 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
       const colour = colourOf(io);
       const queuing = onlyThreads ? Promise.resolve([]) : request(api, routes.queued, { query: { project, ...v.all === true ? {} : { status: "queued" } } });
       const everyone = v.everyone === true;
+      const whoami = api("GET", "/v1/whoami") as Promise<Partial<Whoami>>;
       if (v.queued === true) {
-        const all = await queuing;
-        const queued = all.filter(await mineOf(api, all, everyone)).slice(0, limit);
-        return { json: queued, text: queued.length === 0 ? "No queued threads." : queuedTable(queued, colour, owned(queued)) };
+        const [all, me] = await Promise.all([queuing, whoami]);
+        const { owners, mine } = listedFor(me, all, everyone);
+        const queued = all.filter(mine).slice(0, limit);
+        return { json: queued, text: queued.length === 0 ? "No queued threads." : queuedTable(queued, colour, owners) };
       }
       const listing = request(api, routes.list, { query: { project, ...v.open === true ? { deleted: false, status: "open" } : v.all === true ? {} : { deleted: false } } });
-      const [queued, listed] = await Promise.all([queuing, listing]);
+      const [queued, listed, me] = await Promise.all([queuing, listing, whoami]);
       const shown = listed.filter((r) => (v.active !== true || r.status === "active") && (v["needs-me"] !== true || needsPerson(r.attention)));
-      const mine = await mineOf(api, [...shown, ...queued], everyone);
+      const { owners, mine } = listedFor(me, [...shown, ...queued], everyone);
       const threads = shown.filter(mine).slice(0, limit);
-      return { json: threads, text: threadsText(threads, queued.filter(mine).slice(0, limit - threads.length), colour, owned([...shown, ...queued])) };
+      return { json: threads, text: threadsText(threads, queued.filter(mine).slice(0, limit - threads.length), colour, owners) };
     },
   },
   show,
