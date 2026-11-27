@@ -410,9 +410,12 @@ async function startUnit(t: TestContext, answers: string, timeoutMs: number) {
 . "$1/deploy/release.sh"
 repo=$1 prefix=$2 unit_dir=$3 service_path=$4 health_timeout_ms=$5 release=test
 start_unit nexus-probe.service "$prefix/active-release" "$6"`;
-  const ran = await promisify(execFile)("bash", ["-c", script, "start_unit", real, prefix, units, `${shims}:${process.env.PATH}`, String(timeoutMs), config], { env: { PATH: `${shims}:${process.env.PATH}` } })
-    .then(({ stdout, stderr }) => ({ code: 0, stdout, stderr }), (error: { code: number; stdout: string; stderr: string }) => error);
-  return { ...ran, active: await readFile(join(prefix, "active-release"), "utf8").catch(() => null), log: await readFile(log, "utf8").catch(() => "") };
+  const start = async () => {
+    const ran = await promisify(execFile)("bash", ["-c", script, "start_unit", real, prefix, units, `${shims}:${process.env.PATH}`, String(timeoutMs), config], { env: { PATH: `${shims}:${process.env.PATH}` } })
+      .then(({ stdout, stderr }) => ({ code: 0, stdout, stderr }), (error: { code: number; stdout: string; stderr: string }) => error);
+    return { ...ran, active: await readFile(join(prefix, "active-release"), "utf8").catch(() => null), log: await readFile(log, "utf8").catch(() => "") };
+  };
+  return { ...await start(), again: start, config };
 }
 
 test("start_unit reports a unit running once it answers its health check with the release's commit", async (t) => {
@@ -421,6 +424,17 @@ test("start_unit reports a unit running once it answers its health check with th
   assert.match(started.stdout, /nexus-probe\.service is running release test/);
   assert.match(started.active ?? "", /^test [0-9a-f]{12} [0-9a-f]{12}\n$/);
   assert.match(started.log, /^systemctl restart nexus-probe\.service$/m);
+});
+
+test("start_unit starts a unit again on the config it last ran, and restarts it once the config changed, as a rerun that adds a person to control.json does", async (t) => {
+  const first = await startUnit(t, commit, 60_000);
+  const same = await first.again();
+  assert.deepEqual(same.log.split("\n").filter((line) => /^systemctl (re)?start /.test(line)), ["systemctl restart nexus-probe.service", "systemctl start nexus-probe.service"]);
+  const config = JSON.parse(await readFile(first.config, "utf8"));
+  await writeFile(first.config, JSON.stringify({ ...config, people: { "alice@example.com": "admin" } }));
+  const changed = await first.again();
+  assert.equal(changed.code, 0, changed.stderr);
+  assert.equal(changed.log.split("\n").filter((line) => /^systemctl (re)?start /.test(line)).at(-1), "systemctl restart nexus-probe.service");
 });
 
 test("start_unit fails a unit systemd calls active whose service never answers health with the release's commit", async (t) => {

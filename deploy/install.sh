@@ -2,6 +2,9 @@
 # Installs or upgrades Nexus on this machine from the checkout this script is in: the control plane, a probe and the
 # deployer, or with --node only a probe and the deployer. Run as root:
 #   sudo deploy/install.sh --admit <your Mac's tailnet name> [--dotfiles <git URL>] [--release-branch <branch>]
+#   sudo deploy/install.sh --person <tailnet login>=admin --release-branch multiplayer       a shared install, with its first admin
+#   sudo deploy/install.sh --person <tailnet login>=engineer[:<cap>]       adds a person to a shared install, or changes one
+#   sudo deploy/install.sh --remove-person <tailnet login>       takes a person out, and deletes their stored logins
 #   sudo deploy/install.sh --join-token                                  on the control plane's machine, which prints:
 #   sudo deploy/install.sh --join <token> --node <the control plane's tailnet name>     on the new node
 #   sudo deploy/install.sh --rotate claude|github                         replaces this machine's stored token
@@ -19,7 +22,7 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=deploy/release.sh
 . "$repo/deploy/release.sh"
 
-usage="usage: sudo deploy/install.sh [--check] [--node <control plane device> [--join <token>]] [--admit <device>]... [--add-node <device>=<deploy key digest>]... [--peer <device>]... [--dotfiles <git URL>] [--release-branch <branch>] [--non-interactive] [--upgrade]
+usage="usage: sudo deploy/install.sh [--check] [--node <control plane device> [--join <token>]] [--admit <device>]... [--person <tailnet login>=admin|engineer[:<pylon cap>]]... [--remove-person <tailnet login>]... [--add-node <device>=<deploy key digest>]... [--peer <device>]... [--dotfiles <git URL>] [--release-branch <branch>] [--non-interactive] [--upgrade]
        sudo deploy/install.sh --join-token
        sudo deploy/install.sh --rotate claude|github [--non-interactive]"
 
@@ -352,8 +355,10 @@ check_machine() {
   fi
   if [ -n "$roles" ]; then
     echo "Every prerequisite holds, and the installed $(echo $roles) role(s) run as they should. --check changed nothing."
+    [[ $roles != *control* ]] || echo "On a shared install, add a person or change one's role or pylon cap with sudo deploy/install.sh --person <tailnet login>=engineer[:<cap>], and take one out with --remove-person <tailnet login>."
   else
     echo "Every prerequisite holds. Nexus is not installed here yet. --check changed nothing."
+    echo "Install it for yourself with sudo deploy/install.sh --admit <your Mac's tailnet name>, or as a shared install with sudo deploy/install.sh --person <your tailnet login>=admin --release-branch multiplayer."
   fi
 }
 

@@ -1,6 +1,6 @@
 /**
  * The installer once `deploy/install.sh` has checked the prerequisites: `node src/deploy/setup.ts install --package-manager
- * apt|dnf|other [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]...
+ * apt|dnf|other [--node <control device>] [--join <token>] [--admit <device>]... [--person <login>=<role>[:<cap>]]... [--remove-person <login>]... [--add-node <device>=<digest>]...
  * [--peer <device>]... [--dotfiles <git url>] [--release-branch <branch>] [--non-interactive] [--upgrade]` writes /etc/nexus/{control,control-plane,probe,deployer}.json,
  * runs the role installers, which keep the release a role runs unless --upgrade, joins a node to its control
  * plane with a join token, gives the agents their credentials (src/deploy/credentials.ts) and says what is left for the person. `write`, with the same flags and `--github-watch`, writes
@@ -11,10 +11,10 @@
  */
 import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readdir } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { promisify, isDeepStrictEqual, parseArgs } from "node:util";
-import { claudeNames, harnessSignedIn, locations, provision, rotatable, rotate, scripted, stores, system, terminal, heldNames, type FollowUp, type Rotatable } from "./credentials.ts";
+import { claudeNames, harnessSignedIn, locations, personStore, provision, rotatable, rotate, scripted, stores, system, terminal, heldNames, type FollowUp, type Rotatable } from "./credentials.ts";
 import { parseWorkerConfig, readControlPlane, type WorkerConfig } from "./control-plane.ts";
 import { parseSecretsFile } from "../node-base/secrets-env.ts";
 import { DeployHttpError, jsonRequest, urlHost } from "./http.ts";
@@ -68,6 +68,10 @@ export interface Flags {
   /** A join token minted on the control plane's machine, which registers this node there. */
   join?: string;
   admit: readonly string[];
+  /** `<login>=<role>[:<cap>]`, each a person a shared install's control.json names in `people`. */
+  person: readonly string[];
+  /** Logins to take out of `people`, whose stored logins the write deletes. */
+  removePerson: readonly string[];
   addNode: readonly string[];
   peer: readonly string[];
   dotfiles?: string;
@@ -93,6 +97,8 @@ export function parseFlags(args: readonly string[]): { command: string | undefin
       node: { type: "string" },
       join: { type: "string" },
       admit: { type: "string", multiple: true, default: [] },
+      person: { type: "string", multiple: true, default: [] },
+      "remove-person": { type: "string", multiple: true, default: [] },
       "add-node": { type: "string", multiple: true, default: [] },
       peer: { type: "string", multiple: true, default: [] },
       dotfiles: { type: "string" },
@@ -106,7 +112,7 @@ export function parseFlags(args: readonly string[]): { command: string | undefin
   const manager = values["package-manager"];
   if (manager !== undefined && !packageManagers.includes(manager)) throw new Error(`--package-manager ${manager}: give ${packageManagers.join(", ")}`);
   const flags: Flags = {
-    admit: values.admit, addNode: values["add-node"], peer: values.peer, nonInteractive: values["non-interactive"], githubWatch: values["github-watch"], upgrade: values.upgrade,
+    admit: values.admit, person: values.person, removePerson: values["remove-person"], addNode: values["add-node"], peer: values.peer, nonInteractive: values["non-interactive"], githubWatch: values["github-watch"], upgrade: values.upgrade,
     ...values.node === undefined ? {} : { node: values.node },
     ...values.join === undefined ? {} : { join: values.join },
     ...values.dotfiles === undefined ? {} : { dotfiles: values.dotfiles },
@@ -126,7 +132,7 @@ function resolve(tailnet: Tailnet, flag: string, name: string, errors: string[])
   return undefined;
 }
 
-export interface Change { kind: "added" | "kept" | "replaced"; at: string; value: Json; existing?: Json }
+export interface Change { kind: "added" | "kept" | "replaced" | "set" | "removed"; at: string; value?: Json; existing?: Json }
 
 const isObject = (v: Json | undefined): v is JsonObject => typeof v === "object" && v !== null && !Array.isArray(v);
 const isStrings = (v: Json): v is readonly string[] => Array.isArray(v) && v.every((s) => typeof s === "string");
@@ -190,6 +196,78 @@ function file(path: string, mode: number, existing: Json | undefined, generated:
   return { path, mode, value, state: changes.some((c) => c.kind !== "kept") ? "updated" : "unchanged", changes, secrets };
 }
 
+type PersonRole = "admin" | "engineer";
+const personRoles: readonly string[] = ["admin", "engineer"] satisfies PersonRole[];
+/** The tailnet login src/control/people.ts's peopleSchema takes, which this file cannot import. */
+const loginPattern = /^[^@\s]+@[^@\s]+$/;
+
+interface Named { login: string; role: PersonRole; pylonCap?: number }
+
+/** `<login>=<role>[:<cap>]`. The login is everything before the last `=`, and holds the `@` every tailnet login has. */
+function parsePerson(raw: string, errors: string[]): Named | undefined {
+  const at = raw.lastIndexOf("=");
+  const login = at === -1 ? raw : raw.slice(0, at);
+  const [role, cap, ...rest] = at === -1 ? [] : raw.slice(at + 1).split(":");
+  if (!loginPattern.test(login)) errors.push(`--person ${raw}: ${login} is not a tailnet login, such as alice@example.com, which tailscale whois prints for a person's device`);
+  else if (role === undefined || !personRoles.includes(role) || rest.length > 0 || (cap !== undefined && !(/^[1-9]\d*$/.test(cap) && Number.isSafeInteger(Number(cap))))) {
+    errors.push(`--person ${raw}: give <tailnet login>=admin or <tailnet login>=engineer, and :<cap> after the role for how many pylons they may run at once, such as ${login}=engineer:3`);
+  } else return { login, role: role as PersonRole, ...cap === undefined ? {} : { pylonCap: Number(cap) } };
+  return undefined;
+}
+
+const roleOf = (entry: Json | undefined) => typeof entry === "string" ? entry : isObject(entry) ? entry.role : undefined;
+const capOf = (entry: Json | undefined) => isObject(entry) && typeof entry.pylonCap === "number" ? entry.pylonCap : undefined;
+
+/** `people` once this run's --person and --remove-person apply to the one on disk. A person named without a cap keeps theirs. */
+function nextPeople(onDisk: JsonObject, named: readonly Named[], removed: readonly string[]): JsonObject {
+  const people: Record<string, Json> = { ...onDisk };
+  for (const { login, role, pylonCap } of named) {
+    const cap = pylonCap ?? capOf(onDisk[login]);
+    people[login] = cap === undefined ? role : { role, pylonCap: cap };
+  }
+  for (const login of removed) delete people[login];
+  return people;
+}
+
+/** control.json with this run's `people` and without callers or deployers, which setup refuses to drop unless they admit nobody. */
+function withPeople(f: FileWrite, people: JsonObject): FileWrite {
+  const { callers, deployers, ...rest } = f.value as JsonObject;
+  const value = { ...rest, people };
+  if (f.state === "new") return { ...f, value };
+  const before = isObject(rest.people) ? rest.people : {};
+  const changes: Change[] = [
+    ...f.changes,
+    ...Object.entries({ callers, deployers }).flatMap(([at, existing]): Change[] => existing === undefined ? [] : [{ kind: "removed", at, existing }]),
+    ...[...new Set([...Object.keys(before), ...Object.keys(people)])].flatMap((login): Change[] => {
+      const at = `people.${login}`;
+      const was = before[login];
+      const now = people[login];
+      if (now === undefined) return [{ kind: "removed", at, existing: was! }];
+      if (was === undefined) return [{ kind: "added", at, value: now }];
+      return isDeepStrictEqual(was, now) ? [] : [{ kind: "set", at, value: now, existing: was }];
+    }),
+  ];
+  return { ...f, value, changes, state: changes.some((c) => c.kind !== "kept") ? "updated" : "unchanged" };
+}
+
+/** Deletes the tokens a removed person stored with nexus login, in the file src/control/logins.ts keeps for them. */
+export async function forgetLogins(store: string, login: string): Promise<string> {
+  const path = join(store, `${encodeURIComponent(login)}.json`);
+  const held = await system.exists(path);
+  await rm(path, { force: true });
+  return held ? `deleted ${login}'s stored logins, ${path}` : `${login} has no stored logins`;
+}
+
+/**
+ * Stops the control plane and resolves only once systemd says it is not running. A failed stop, or one systemd cannot
+ * be asked about, throws, so no login is deleted while a control plane that still admits the person may run.
+ */
+export async function stopControl(systemctl: (args: readonly string[]) => Promise<string>): Promise<void> {
+  await systemctl(["stop", unitNames.control]);
+  const state = (await systemctl(["show", "-p", "ActiveState", "--value", unitNames.control])).trim();
+  if (state !== "inactive" && state !== "failed") throw new Error(`${unitNames.control} is ${state || "in no state systemd names"} after a stop, so it could write a removed person's logins again, and they are not deleted. Stop it, then rerun with the same --remove-person`);
+}
+
 /** The branch of --dotfiles that pylons pull. */
 const dotfilesRef = "main";
 
@@ -244,6 +322,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
     if (flags.addNode.length > 0) errors.push("--add-node is for the control machine. Run it there, without --node");
     if (flags.dotfiles !== undefined) errors.push("--dotfiles is for the control machine. Run it there, without --node");
     if (flags.githubWatch) errors.push("--github-watch is for the control machine. Run it there, without --node");
+    if (flags.person.length > 0 || flags.removePerson.length > 0) errors.push("--person and --remove-person are for the control machine. Run them there, without --node");
   }
 
   const addNodes = flags.addNode.flatMap((raw) => {
@@ -260,7 +339,27 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
   const controlOnDisk = isObject(existing.control) ? existing.control : undefined;
   // A shared install admits by login, and its control.json refuses callers and deployers, so a rerun writes neither.
   const shared = isObject(controlOnDisk?.people);
-  if (shared && flags.admit.length > 0) errors.push("--admit writes callers and deployers, which a control.json with people refuses. Add the person's tailnet login to people in /etc/nexus/control.json instead");
+  const naming = flags.person.length > 0 || flags.removePerson.length > 0;
+  if (naming && flags.admit.length > 0) errors.push("--person and --remove-person write people, and --admit writes callers and deployers, which a control.json with people refuses. Give --person alone for a shared install, or --admit alone for a one-person install");
+  else if (shared && flags.admit.length > 0) errors.push("--admit writes callers and deployers, which a control.json with people refuses. Name the person with --person <tailnet login>=engineer instead");
+  const named = flags.person.flatMap((raw) => parsePerson(raw, errors) ?? []);
+  for (const login of flags.removePerson) {
+    if (!loginPattern.test(login)) errors.push(`--remove-person ${login}: not a tailnet login, such as alice@example.com, which tailscale whois prints for a person's device`);
+  }
+  for (const login of new Set(named.map((n) => n.login))) {
+    if (named.filter((n) => n.login === login).length > 1) errors.push(`--person ${login}: named more than once. Name each person once`);
+    if (flags.removePerson.includes(login)) errors.push(`--person ${login} and --remove-person ${login}: give one`);
+  }
+  const devices = [...new Set([controlOnDisk?.callers, controlOnDisk?.deployers].flatMap((list) => list !== undefined && isStrings(list) ? list : []))];
+  if (naming && controlOnDisk !== undefined && !shared) {
+    if (devices.length > 0) errors.push(`${paths.control} is a one-person install, whose callers and deployers admit ${devices.join(", ")}. A person would make it shared: those devices would lose their access, and only the people it names could call. The installer makes an install shared only while it admits no device. To make this one shared anyway, take callers and deployers out of ${paths.control} by hand, then rerun with --person`);
+    else if (flags.person.length === 0) errors.push(`--remove-person: ${paths.control} names no people`);
+  }
+  if (naming && controlOnDisk === undefined && flags.person.length === 0) errors.push("--remove-person: this machine has no install yet, so it names no people");
+  const people = naming && named.length === flags.person.length ? nextPeople(isObject(controlOnDisk?.people) ? controlOnDisk.people : {}, named, flags.removePerson) : undefined;
+  if (people !== undefined && !Object.values(people).some((p) => roleOf(p) === "admin")) {
+    errors.push(`this run would leave ${paths.control} with no admin, and a shared install needs one, who deploys. Name one with --person <tailnet login>=admin`);
+  }
   const nodeIds = new Set([self.id, ...addNodes.map((a) => a.node.id)]);
   if (Array.isArray(controlOnDisk?.nodes)) for (const n of controlOnDisk.nodes) if (isObject(n) && typeof n.tailnetNodeId === "string") nodeIds.add(n.tailnetNodeId);
   for (const d of admitted) {
@@ -296,7 +395,7 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
       nodes: [nodeEntry(self), ...addNodes.map((a) => nodeEntry(a.node))],
       // Only a new config names this machine: an existing one without it keeps building on the schema's default node.
       ...existing.control === undefined ? { imageBuildNode: self.name } : {},
-      ...shared ? {} : { callers: admitted.map((d) => d.id), deployers: admitted.map((d) => d.id) },
+      ...shared || naming ? {} : { callers: admitted.map((d) => d.id), deployers: admitted.map((d) => d.id) },
       deployKeys: Object.fromEntries([[self.id, tokenDigest(token)], ...addNodes.map((a) => [a.node.id, a.digest])]),
       ...flags.dotfiles === undefined ? {} : { dotfiles: { repo: flags.dotfiles, ref: dotfilesRef } },
       ...releaseBranch,
@@ -307,7 +406,8 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
         model: defaultHarnessModel,
       },
     };
-    const written = file(paths.control, 0o644, existing.control, generated, Object.keys(generated.deployKeys as JsonObject).map((id) => `deployKeys.${id}`));
+    const merged = file(paths.control, 0o644, existing.control, generated, Object.keys(generated.deployKeys as JsonObject).map((id) => `deployKeys.${id}`));
+    const written = people === undefined ? merged : withPeople(merged, people);
     files.push(written);
     const listen = isObject(written.value) && isObject(written.value.listen) ? written.value.listen : {};
     controlUrl = `http://${urlHost(String(listen.host))}:${String(listen.port)}/`;
@@ -337,6 +437,8 @@ function describe(change: Change, secrets: FileWrite["secrets"]): string {
   const secret = secrets[change.at];
   if (secret !== undefined) return `added a new ${secret}`;
   if (change.kind === "added") return `added ${change.at} ${JSON.stringify(change.value)}`;
+  if (change.kind === "set") return `set ${change.at} to ${JSON.stringify(change.value)}, from ${JSON.stringify(change.existing)}`;
+  if (change.kind === "removed") return `removed ${change.at}, which was ${JSON.stringify(change.existing)}`;
   if (change.kind === "replaced") return `replaced ${change.at} ${JSON.stringify(change.existing)} with ${JSON.stringify(change.value)}, which follows from this machine's deployer`;
   return `left ${change.at} alone: it is ${JSON.stringify(change.existing)}, and this run would write ${JSON.stringify(change.value)}. Edit the file to change it`;
 }
@@ -609,6 +711,8 @@ export interface InstallSteps {
   /** Runs a program on this terminal and resolves its exit code. */
   run(program: string, args: readonly string[]): Promise<number>;
   join(token: string): Promise<void>;
+  /** Stops the control plane, which may still admit them, then deletes the stored logins of each --remove-person. */
+  forget(logins: readonly string[]): Promise<void>;
   credentials(next: Set<FollowUp>): Promise<void>;
   left(): Promise<void>;
 }
@@ -653,6 +757,9 @@ export async function install(flags: Flags, args: readonly string[], steps: Inst
   if (args.filter((arg) => arg.startsWith("--package-manager")).length > 1) throw new Error("--package-manager is install.sh's, which names the one it found");
   try {
     await write([]);
+    // A control plane that still admits the person could finish a nexus login of theirs after the delete and bring the
+    // file back, so forget stops it, and the control installer starts it again on the new people.
+    if (flags.removePerson.length > 0) await steps.forget(flags.removePerson);
     if (flags.node === undefined) await installer("control");
     await installer("probe");
     await installer("deployer", ...flags.node === undefined ? ["control", "probe"] : ["probe"]);
@@ -697,6 +804,13 @@ function machineSteps(flags: Flags, manager: PackageManager): InstallSteps {
       if (!flags.nonInteractive && !process.stdin.isTTY) console.error("No terminal, so the credentials come from NEXUS_* variables, as deploy/README.md describes, and the rest are skipped.");
       await provision(flags.node === undefined ? "control" : "node", system, unattended ? scripted(process.env) : terminal(), (line) => console.error(line), next);
     },
+    async forget(logins) {
+      await stopControl(async (args) => (await exec("systemctl", args)).stdout);
+      const { harnessCredentials } = controlFields(await readJson(paths.control), paths.control);
+      if (harnessCredentials === undefined) throw new Error(`${paths.control} has no harness.credentials, beside which each person's stored logins live`);
+      for (const login of logins) console.log(await forgetLogins(personStore(harnessCredentials), login));
+      console.log("A removed person's threads stay, and a pylon of theirs that runs keeps the tokens it booted with until it is archived. An admin archives each with nexus archive <thread>. Revoke their tokens at GitHub and Anthropic too, which Nexus cannot do.");
+    },
     async left() {
       console.log(formatLeft(left(await gather(flags, manager))));
     },
@@ -731,7 +845,7 @@ async function main(args: readonly string[]): Promise<number> {
     if (refusal !== null) console.error(`install: ${refusal}`);
     return refusal === null ? 0 : 1;
   }
-  console.error("usage: node src/deploy/setup.ts install|write|signed-in|registry|healthy|rotate claude|github [--node <control device>] [--join <token>] [--admit <device>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--upgrade] [--package-manager apt|dnf|other], and write also [--github-watch]");
+  console.error("usage: node src/deploy/setup.ts install|write|signed-in|registry|healthy|rotate claude|github [--node <control device>] [--join <token>] [--admit <device>]... [--person <login>=<role>[:<cap>]]... [--remove-person <login>]... [--add-node <device>=<digest>]... [--peer <device>]... [--dotfiles <git url>] [--non-interactive] [--upgrade] [--package-manager apt|dnf|other], and write also [--github-watch]");
   return 1;
 }
 

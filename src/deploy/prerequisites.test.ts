@@ -417,7 +417,11 @@ main --check`);
   const ready = await bash(`. "$1/deploy/install.sh"; ${stubs(complete)} ${steps}
 main --check`);
   assert.equal(ready.code, 0, ready.stderr);
-  assert.equal(ready.stdout, "Every prerequisite holds. Nexus is not installed here yet. --check changed nothing.\n");
+  assert.equal(ready.stdout, [
+    "Every prerequisite holds. Nexus is not installed here yet. --check changed nothing.",
+    "Install it for yourself with sudo deploy/install.sh --admit <your Mac's tailnet name>, or as a shared install with sudo deploy/install.sh --person <your tailnet login>=admin --release-branch multiplayer.",
+    "",
+  ].join("\n"));
   assert.equal(ready.stderr, "");
 });
 
@@ -434,7 +438,11 @@ test("--check on an installed machine adds its units and what installed.ts finds
 installed_check() { echo "installed_check \${*//$repo/.}" >&2; }
 main --check`);
   assert.equal(healthy.code, 0, healthy.stderr);
-  assert.equal(healthy.stdout, "Every prerequisite holds, and the installed control probe role(s) run as they should. --check changed nothing.\n");
+  assert.equal(healthy.stdout, [
+    "Every prerequisite holds, and the installed control probe role(s) run as they should. --check changed nothing.",
+    "On a shared install, add a person or change one's role or pylon cap with sudo deploy/install.sh --person <tailnet login>=engineer[:<cap>], and take one out with --remove-person <tailnet login>.",
+    "",
+  ].join("\n"));
   const units = { ...installed.units, "nexus-control.service": "inactive", "nexus-backup.service": "failed", "nexus-deployer.service": "inactive" };
   const run = await bash(`. "$1/deploy/install.sh"; ${stubs({ ...installed, units })} ${steps}
 installed_check() { printf -- '- /opt/nexus/current runs %s, and the desired release is %s.\\n    nexus release says where the deploy stands\\0' "$(printf 'a%.0s' {1..40})" "$(printf 'b%.0s' {1..40})"; printf -- '- /etc/nexus/probe.json: invalid.\\n    Correct it\\0'; }
