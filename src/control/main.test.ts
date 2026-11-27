@@ -7,7 +7,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { scriptedModel, scriptedModels } from "./harness/test-fixture.ts";
 import { parseProbeConfig } from "../probe/config.ts";
-import type { NodeName, TailnetNodeId } from "../ids.ts";
+import type { NodeName, Person, TailnetNodeId } from "../ids.ts";
+import { operator, peopleOf, pylonCapOf } from "./people.ts";
 import type { NodeHealth, ProbeClient } from "../protocol/client.ts";
 import { tokenDigest } from "../protocol/deploy.ts";
 import { joinControlPlane } from "../deploy/setup.ts";
@@ -53,6 +54,19 @@ test("people makes the install shared, admits by tailnet login alone, and a conf
   assert.throws(() => parseConfig(JSON.stringify({ ...rest, people: { operator: "admin" } })), /must be a tailnet login/, "no person can be the operator");
   assert.throws(() => parseConfig(JSON.stringify({ ...rest, people: { "bob@example.com": "engineer" } })), /at least one admin/);
   assert.equal(parseConfig(JSON.stringify({ ...rest, callers, deployers })).people, undefined, "without people the config parses as before");
+});
+
+test("a person in people may carry a cap on the pylons they run at once, and everyone else runs the default of two", () => {
+  const { callers, deployers, ...rest } = JSON.parse(example);
+  const people = peopleOf(parseConfig(JSON.stringify({ ...rest, people: { "alice@example.com": "admin", "bob@example.com": { role: "engineer", pylonCap: 4 } } })).people);
+  assert.deepEqual([pylonCapOf(people, "alice@example.com" as Person), pylonCapOf(people, "bob@example.com" as Person)],
+    [{ person: "alice@example.com", pylons: 2 }, { person: "bob@example.com", pylons: 4 }]);
+  assert.deepEqual(people.shared && [...people.roles], [["alice@example.com", "admin"], ["bob@example.com", "engineer"]], "a person with a cap keeps their role");
+  assert.equal(pylonCapOf(people, operator), null, "the operator's threads from before people have no cap");
+  assert.equal(pylonCapOf(peopleOf(parseConfig(JSON.stringify({ ...rest, callers, deployers })).people), operator), null, "a solo install has no cap");
+  assert.throws(() => parseConfig(JSON.stringify({ ...rest, people: { "alice@example.com": { role: "admin", pylonCap: 0 } } })), /Too small[^\n]*\n[^\n]*people\["alice@example\.com"\]\.pylonCap/);
+  assert.throws(() => parseConfig(JSON.stringify({ ...rest, people: { "alice@example.com": { role: "admin", pylons: 3 } } })), /"pylonCap": the number of pylons they may run at once/, "a misspelt field is refused");
+  assert.throws(() => parseConfig(JSON.stringify({ ...rest, people: { "bob@example.com": { role: "engineer", pylonCap: 3 } } })), /at least one admin/);
 });
 
 test("no node may be named auto, which start --node auto asks for", () => {

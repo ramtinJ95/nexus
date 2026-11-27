@@ -5,14 +5,15 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { chatgptTokenHandoff } from "./chatgpt-token.ts";
 import { startLoop, type Ingest, type Loop, type LoopOptions } from "./loop.ts";
-import { nodePylons } from "./placement.ts";
+import { nodePylons, roomLeft } from "./placement.ts";
 import { openRegistry, type Registry } from "./registry.ts";
 import { upgradeAttempts } from "./record-upgrade.ts";
 import type { PortRange, Thread } from "./thread-store.ts";
 import { addThread, seedRegistry, claudeWorkerAt } from "../test-support/registry-kit.ts";
 import { usageBackfill } from "./usage-backfill.ts";
 import { archivedDiskMs, desiredPhase, envelope, ingest as realIngest } from "./reconcile.ts";
-import type { CheckpointId, ImageId, JobId, LiveHash, NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { CheckpointId, ImageId, JobId, LiveHash, NodeName, Person, PylonId, TailnetNodeId } from "../ids.ts";
+import { peopleOf } from "./people.ts";
 import type { Job, JobEnvelope, JobErrorCode, JobStatus, SubmitReply } from "../protocol/jobs.ts";
 import type {
   BrokenCause, ListeningFact, NodeObservation, PreviewRouteFact, ProbeEvent, PylonObservation, RunningFacts, ServiceFact, SessionFact,
@@ -287,8 +288,9 @@ function seed(registry: Registry, activity: Partial<Pick<Thread, "agentTurnRunni
   return addThread(registry, { node, boot: { image }, thread: activity, claudePrompt });
 }
 
-function run(t: import("node:test").TestContext, registry: Registry, probe: ProbeClient | readonly ProbeClient[], overrides: { gitIdentity?: { name: string; email: string }; offlineAfterMs?: number; silenceMs?: number; ingest?: Ingest; onSnapshot?: LoopOptions["onSnapshot"]; previewPorts?: PortRange; log?: (line: string) => void; claudeLaunchRetryMs?: number; intervalMs?: number } = {}): Loop {
+function run(t: import("node:test").TestContext, registry: Registry, probe: ProbeClient | readonly ProbeClient[], overrides: { gitIdentity?: { name: string; email: string }; offlineAfterMs?: number; silenceMs?: number; ingest?: Ingest; onSnapshot?: LoopOptions["onSnapshot"]; previewPorts?: PortRange; log?: (line: string) => void; claudeLaunchRetryMs?: number; intervalMs?: number; people?: LoopOptions["people"] } = {}): Loop {
   const loop = polled(startLoop({
+    ...(overrides.people === undefined ? {} : { people: overrides.people }),
     ...(overrides.claudeLaunchRetryMs === undefined ? {} : { claudeLaunchRetryMs: overrides.claudeLaunchRetryMs }),
     gitIdentity: overrides.gitIdentity,
     ...(overrides.onSnapshot === undefined ? {} : { onSnapshot: overrides.onSnapshot }),
@@ -872,6 +874,52 @@ test("a wake its node has no memory for waits with no attempt counted, and boots
   await until("the pylon wakes once 4 GiB are free", () => fake.pylons.get(thread.pylonId)?.phase === "running");
   assert.deepEqual(fake.submitted.map((job) => job.kind), ["spawn", "pause", "spawn"]);
   assert.equal(registry.threads.bootHold(thread.pylonId), undefined, "the wake that went out is held no longer");
+});
+
+test("a person's pylon past their cap waits, naming the cap and their running threads, and a start or a wake boots once they archive one, while a wake for reading never waits for it", async (t) => {
+  const registry = openRegistry(tempDb());
+  seedRegistry(registry, { nodes: [node] });
+  const alice = "alice@example.com" as Person;
+  const bob = "bob@example.com" as Person;
+  const own = (owner: Person, title: string) => addThread(registry, { node, boot: { image }, thread: { owner, title } });
+  const byPylon = (threads: Thread[]) => [...threads].sort((a, b) => a.pylonId < b.pylonId ? -1 : 1).map((th) => `${th.id} (${th.title})`).join(", ");
+  const phase = (th: Thread) => fake.pylons.get(th.pylonId)?.phase;
+  const fake = fakeNode({ autoFinish: true });
+  const [a1, a2] = [own(alice, "one"), own(alice, "two")];
+  const loop = run(t, registry, fake.probe, { people: peopleOf({ [alice]: "admin", [bob]: { role: "engineer", pylonCap: 3 } }) });
+  await until("alice's two pylons run", () => phase(a1) === "running" && phase(a2) === "running");
+
+  const a3 = own(alice, "three");
+  const bobs = [own(bob, "b1"), own(bob, "b2"), own(bob, "b3")];
+  await until("bob's three pylons run, as his cap is three", () => bobs.every((th) => phase(th) === "running"));
+  await loop.wake(node);
+  assert.equal(phase(a3), undefined, "alice's third start never boots");
+  assert.equal(registry.threads.bootHold(a3.pylonId)?.why, `alice@example.com already runs 2 pylons, and may run 2 at once: ${byPylon([a1, a2])}. Archiving one of them frees its place`);
+  assert.deepEqual(registry.threads.pylon(a3.pylonId)!.attempts, { count: 0, last: null }, "a wait for the cap is no failed attempt");
+  const admitted = [a1, a2, ...bobs].map((th) => th.pylonId);
+  await until("the registry's observation counts each admitted pylon as running", () =>
+    admitted.every((id) => registry.nodes.node(node)?.observation?.pylons.some((p) => p.pylonId === id && p.phase === "running") === true));
+  const observed = registry.nodes.node(node)!.observation!;
+  assert.equal(roomLeft(registry, node, observed, observed.capacity, { cpus: 0, memoryGiB: 0, diskGiB: 0 }).pending.memoryGiB, 0, "her held start takes no room from another person's start");
+
+  registry.threads.setThreadStatus(a1.id, "archived");
+  await until("alice's third starts once she archives one", () => phase(a3) === "running");
+  assert.equal(registry.threads.bootHold(a3.pylonId), undefined);
+
+  registry.threads.setThreadStatus(a1.id, "active");
+  registry.threads.recordActivity(a1.id, { human: Date.now() });
+  await loop.wake(node);
+  await loop.wake(node);
+  assert.equal(phase(a1), "stopped", "the wake of her archived thread waits too");
+  assert.equal(registry.threads.bootHold(a1.pylonId)?.why, `alice@example.com already runs 2 pylons, and may run 2 at once: ${byPylon([a2, a3])}. Archiving one of them frees its place`);
+  registry.threads.setThreadStatus(a2.id, "archived");
+  await until("her wake boots once she archives another", () => phase(a1) === "running");
+  assert.equal(registry.threads.bootHold(a1.pylonId), undefined);
+
+  await until("her archived pylon pauses", () => phase(a2) === "stopped");
+  registry.usage.startUsageBackfill([a2.id], Date.now());
+  registry.usage.holdUsageBackfill(a2.id, Date.now());
+  await until("a wake to read her archive's usage is no start of hers, so her cap never holds it", () => phase(a2) === "running");
 });
 
 test("a pylon whose boot outlasts the idle time is not paused as it comes up, so its worker gets its first prompt", async (t) => {
