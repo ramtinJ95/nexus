@@ -25,7 +25,9 @@ Both threads are in the project `nexus-mp`. Nothing watches them once the old ma
 | `mp-25`, the guard lets downloads through | `th-1f7854ab0652` | `mp/25-guard-downloads` | #730, approved by the Nexus review in round 1 at c6520042, live check passed, merges cleanly with `multiplayer` | The trial below, then the operator's own review |
 | `mp-17`, a review runs on the asker's login | `th-5cb1991ac300` | `mp/17-review-on-asker` | Building, no pull request yet | The operator's own review |
 
-#730 has not been trial-tested or read by anyone but its reviewer. Its thread lists a holds question that offers Land. Leave it unanswered.
+#730 passed the trial at c65200420a460df8fc9c4a12316819e48462f956 on `multiplayer` 5b49b259, with tree 38d9c378: the type check is clean, the tests fail only the three this machine fails at every base, and the landing model holds. It waits only for the operator's yes. If `multiplayer` moves first, run the trial again. Its thread lists a holds question that offers Land. Leave it unanswered.
+
+It adds read rows for release assets, source archives and raw files on `github.com`, with `GET` and `HEAD` only, and it refuses Git LFS by name. GitHub redirects each of those reads to another host, and the slice adds no host to an allowlist. So a download works only in a project whose hosts include `release-assets.githubusercontent.com`, `codeload.github.com` or `raw.githubusercontent.com`, whichever the download needs.
 
 What each builder was told beyond the plan:
 
@@ -107,7 +109,7 @@ Never use `nexus land` for a pull request of this arc.
 
 ## Scripts
 
-They are in `scripts/mp/`. They were adapted from the ones used through 2026-11-27 so that they take the clone, the CLI and the nodes from the environment, and they have not run in this form.
+They are in `scripts/mp/`. They were adapted from the ones used through 2026-11-27 so that they take the clone, the CLI and the nodes from the environment,. `trial.sh` ran in this form once, for #730. The other three have not run in this form.
 
 | Script | What it does |
 | --- | --- |
