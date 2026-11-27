@@ -20,6 +20,8 @@ evidence=$("$V" evidence)
 alice=http://127.0.0.1:7470
 bob=http://127.0.0.1:7471
 gateway=http://127.0.0.1:7481
+# A shared install boots a pylon with its owner's own login, so alice signs in first, with a token no model reads.
+printf '%s\n' "sk-ant-oat01-made-up-$(date +%s)-not-a-real-token" | "$V" cli reads-login-alice -- login claude >/dev/null
 
 T=$("$V" cli reads-start-alice -- start --project spoon --title "reads: alice's" --json | jq -r .id)
 echo "alice started $T"
