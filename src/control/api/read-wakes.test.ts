@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { image, localCheckout, observeRunning, project, testApi } from "../../test-support/api-kit.ts";
+import { deployment, image, localCheckout, observeRunning, project, testApi, withThread } from "../../test-support/api-kit.ts";
+import { probeError } from "../../protocol/http.ts";
 import { tailnet, type WhoisAnswer } from "../../test-support/people.ts";
 import { parseWhois, type TailnetCaller } from "../../node-base/tailscaled.ts";
 import { desiredPhase } from "../reconcile.ts";
@@ -85,4 +86,26 @@ test("on a shared install bob's visit to alice's thread is refused as activity a
   assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/activity`, { kind: "human" })).status, 204);
   assert.deepEqual(s.woken, ["rj-firebat"]);
   assert.equal(desiredPhase(s.facts(), Date.now()), "running");
+});
+
+test("on a shared install bob's read of a pylon that pauses while he reads is refused without a wake, and no client waits on it", async (t) => {
+  const s = await idleThreadOfAlice(t);
+  observeRunning(s, {});
+  s.probePipes(async () => { throw probeError("not-running", "the pylon paused"); });
+  s.as(tailnet.bob);
+  const refused = await s.call("GET", `/v1/threads/${s.thread.id}/changes`);
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error, new RegExp(`only ${alice}'s requests wake it`));
+  assert.equal(refused.body.retryable, false);
+  assert.deepEqual(s.woken, []);
+  assert.equal(s.facts().lastHumanActivityAt, s.hourAgo);
+});
+
+test("on a solo install the control node's visit, which is no person's, still keeps the pylon awake", async (t) => {
+  const s = await withThread(t, { clock: () => Date.now() - 60 * 60_000 });
+  s.woken.length = 0;
+  s.callAs(deployment.self);
+  assert.equal((await s.call("POST", `/v1/threads/${s.thread.id}/activity`, { kind: "human" })).status, 204);
+  assert.deepEqual(s.woken, ["rj-firebat"]);
+  assert.equal(desiredPhase(s.registry.threads.thread(s.thread.id as ThreadId)!, Date.now()), "running");
 });
