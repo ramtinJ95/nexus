@@ -128,6 +128,7 @@ export function githubGuardHook(guard: GithubGuard, log: (line: string) => void 
 	};
 }
 
+const utf8 = new TextDecoder("utf-8", { fatal: true });
 const overrideHeaders = ["x-http-method-override", "x-http-method", "x-method-override"];
 const reviewEvents = new Set(["COMMENT", "REQUEST_CHANGES"]);
 
@@ -244,9 +245,10 @@ function mutationRefusal(doc: DocumentNode, fragments: ReadonlyMap<string, Selec
 	for (const op of doc.definitions) {
 		if (op.kind !== Kind.OPERATION_DEFINITION || op.operation === "query") continue;
 		if (op.operation !== "mutation") return `a GraphQL ${op.operation}`;
-		const vars: Record<string, unknown> = { ...variables };
+		// No prototype, so a variable named constructor or toString is only ever what the request gave or its default.
+		const vars: Record<string, unknown> = Object.assign(Object.create(null), variables);
 		for (const v of op.variableDefinitions ?? []) {
-			if (!(v.variable.name.value in vars) && v.defaultValue !== undefined) vars[v.variable.name.value] = valueOf(v.defaultValue, {});
+			if (!Object.hasOwn(vars, v.variable.name.value) && v.defaultValue !== undefined) vars[v.variable.name.value] = valueOf(v.defaultValue, Object.create(null));
 		}
 		for (const field of rootFields(op.selectionSet, fragments, new Set())) {
 			if (field.name === "__typename") continue;
@@ -279,7 +281,7 @@ function argumentsOf(args: readonly { name: { value: string }; value: ValueNode 
 function valueOf(node: ValueNode, vars: Record<string, unknown>): unknown {
 	switch (node.kind) {
 		case Kind.VARIABLE:
-			return vars[node.name.value];
+			return Object.hasOwn(vars, node.name.value) ? vars[node.name.value] : undefined;
 		case Kind.OBJECT:
 			return argumentsOf(node.fields, vars);
 		case Kind.LIST:
@@ -303,14 +305,15 @@ function gitRefusal(method: string, path: string, request: GuardRequest, guard: 
 	const bytes = decodedBody(request);
 	const refs = bytes === null ? null : pushedRefs(bytes);
 	if (refs === null) return "the push's command list cannot be read";
-	const branch = `refs/heads/${guard.defaultBranch}`.toLowerCase();
-	return refs.some((ref) => ref.toLowerCase() === branch) ? `a push to the default branch ${guard.defaultBranch}` : null;
+	const same = (ref: string) => ref.normalize("NFC").toLowerCase();
+	const branch = same(`refs/heads/${guard.defaultBranch}`);
+	return refs.some((ref) => same(ref) === branch) ? `a push to the default branch ${guard.defaultBranch}` : null;
 }
 
 /**
  * The refs a git-receive-pack request updates: its pkt-line commands, `<old> <new> <ref>`, the first one followed by
- * NUL and the capabilities, up to the flush packet before the pack. Shallow lines may come first. Null for anything
- * else, a signed push's certificate included.
+ * NUL and the capabilities, up to the flush packet before the pack. Shallow lines may come first. A ref name is UTF-8,
+ * as git writes it. Null for anything else, a signed push's certificate and a name that is not UTF-8 included.
  */
 export function pushedRefs(body: Buffer): string[] | null {
 	const refs: string[] = [];
@@ -320,7 +323,12 @@ export function pushedRefs(body: Buffer): string[] | null {
 		const length = parseInt(head, 16);
 		if (length === 0) return refs;
 		if (length < 5 || i + length > body.length) return null;
-		const line = body.subarray(i + 4, i + length).toString("latin1").split("\0")[0]!.replace(/\n$/, "");
+		let line: string;
+		try {
+			line = utf8.decode(body.subarray(i + 4, i + length)).split("\0")[0]!.replace(/\n$/, "");
+		} catch {
+			return null;
+		}
 		i += length;
 		if (/^shallow [0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(line)) continue;
 		const command = /^([0-9a-f]{40}|[0-9a-f]{64}) ([0-9a-f]{40}|[0-9a-f]{64}) (refs\/\S+)$/.exec(line);

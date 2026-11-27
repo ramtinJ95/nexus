@@ -147,6 +147,8 @@ const shapes: [string, Recorded[]][] = [
 	["an input object that names the event twice", [gql(`mutation { addPullRequestReview(input:{pullRequestId:"${pr}", event:COMMENT, event:APPROVE}) { clientMutationId } }`, refuse(/names event twice/))]],
 	["an argument given twice", [gql(`mutation { addPullRequestReview(input:{pullRequestId:"${pr}", event:COMMENT}, input:{pullRequestId:"${pr}", event:APPROVE}) { clientMutationId } }`, refuse(/names input twice/))]],
 	["a fragment defined twice", [gql(`mutation { ...F } fragment F on Mutation { addComment(input:{subjectId:"${pr}", body:"b"}) { clientMutationId } } fragment F on Mutation { mergePullRequest(input:{pullRequestId:"${pr}"}) { clientMutationId } }`, refuse(/fragment F twice/))]],
+	["a variable named for an Object.prototype key, whose default approves", [gql(`mutation($constructor:AddPullRequestReviewInput={pullRequestId:"${pr}", event:APPROVE}) { addPullRequestReview(input:$constructor) { clientMutationId } }`, refuse(/event APPROVE/))]],
+	["a variable named toString that the request does not give", [gql(`mutation($toString:PullRequestReviewEvent) { addPullRequestReview(input:{pullRequestId:"${pr}", event:$toString}) { clientMutationId } }`, pass)]],
 	["variables that are a string", [gql(`mutation($e:PullRequestReviewEvent!) { addPullRequestReview(input:{pullRequestId:"${pr}", event:$e}) { clientMutationId } }`, refuse(/variables that are not an object/), '{"e":"APPROVE"}')]],
 	["a GraphQL subscription", [gql("subscription { x }", refuse(/subscription/))]],
 	["a document that does not parse", [gql("mutation {", refuse(/does not parse/))]],
@@ -177,6 +179,19 @@ test("the default branch is the project's: a push to main passes where the proje
 	const toMain = push("update the default branch", pass);
 	assert.equal(refusal(toMain, { defaultBranch: "trunk" }), null);
 	assert.match(refusal(toMain, { defaultBranch: "MAIN" }) ?? "passed", /default branch MAIN/);
+});
+
+test("a default branch whose name is not ASCII is read from the push as git writes it, in UTF-8", () => {
+	const line = (ref: string) => {
+		const text = `${"0".repeat(40)} ${"1".repeat(40)} ${ref}\0 report-status\n`;
+		return `${(Buffer.byteLength(text) + 4).toString(16).padStart(4, "0")}${text}`;
+	};
+	const body = Buffer.from(`${line("refs/heads/dévelop")}0000`, "utf8");
+	assert.deepEqual(pushedRefs(body), ["refs/heads/dévelop"]);
+	assert.match(refusal({ ...push("new branch", pass), body }, { defaultBranch: "dévelop" }) ?? "passed", /default branch dévelop/);
+	assert.match(refusal({ ...push("new branch", pass), body }, { defaultBranch: "de\u0301velop" }) ?? "passed", /default branch/, "in either Unicode form");
+	const notUtf8 = Buffer.concat([Buffer.from(`${"0".repeat(40)} ${"1".repeat(40)} refs/heads/`), Buffer.from([0xff]), Buffer.from("\0 report-status\n")]);
+	assert.equal(pushedRefs(Buffer.concat([Buffer.from((notUtf8.length + 4).toString(16).padStart(4, "0")), notUtf8, Buffer.from("0000")])), null, "a ref name that is not UTF-8 is not read");
 });
 
 test("a pylon whose boot holds no default branch refuses every push and says to start a new thread", () => {
