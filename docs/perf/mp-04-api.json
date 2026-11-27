@@ -5,148 +5,294 @@
   "machine": "Nexus pylon, 4 CPU, Docker in the pylon, NEXUS_VERIFY_BASE=nexus-verify-base:pylon",
   "order": "base first, then head, alternating, five runs a side, both sides on the two-person stack with NEXUS_VERIFY_PEOPLE=1",
   "limit": "fail when the head median of medians is over 15% above base and outside base range",
-  "note": "GET /v1/threads, which the probe times, is not code this slice changes, so the gap between the sides is run-to-run noise. No run landed in the 7 ms cluster #708 reports",
+  "note": "rerun after the rebase onto mp-06, whose conflict in access.ts, which every GET /v1/threads runs through, was in apiAccess's returned object. Base run 3 at 7.9 ms is in the 7 ms cluster #708 reports. Reported as run",
   "base": {
-    "commit": "a9deaa95",
+    "commit": "830db10a",
     "runs": [
       {
         "probe": "api",
-        "revision": "a9deaa95",
+        "revision": "830db10a",
         "dirty": false,
-        "medianMs": 3.5,
-        "p95Ms": 5.1,
+        "medianMs": 3.9,
+        "p95Ms": 5.5,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.8,
+        "bobMedianMs": 3.9
+      },
+      {
+        "probe": "api",
+        "revision": "830db10a",
+        "dirty": false,
+        "medianMs": 5.5,
+        "p95Ms": 9.3,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 5.4,
+        "bobMedianMs": 6.1
+      },
+      {
+        "probe": "api",
+        "revision": "830db10a",
+        "dirty": false,
+        "medianMs": 7.9,
+        "p95Ms": 11.5,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 7.5,
+        "bobMedianMs": 8.4
+      },
+      {
+        "probe": "api",
+        "revision": "830db10a",
+        "dirty": false,
+        "medianMs": 3.8,
+        "p95Ms": 5.7,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.7,
+        "bobMedianMs": 4
+      },
+      {
+        "probe": "api",
+        "revision": "830db10a",
+        "dirty": false,
+        "medianMs": 4.4,
+        "p95Ms": 6.3,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 4.2,
+        "bobMedianMs": 4.6
+      }
+    ]
+  },
+  "head": {
+    "commit": "1ee49776",
+    "runs": [
+      {
+        "probe": "api",
+        "revision": "1ee49776",
+        "dirty": false,
+        "medianMs": 3.6,
+        "p95Ms": 4.5,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.5,
+        "bobMedianMs": 3.8
+      },
+      {
+        "probe": "api",
+        "revision": "1ee49776",
+        "dirty": false,
+        "medianMs": 3.9,
+        "p95Ms": 5.3,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.8,
+        "bobMedianMs": 3.9
+      },
+      {
+        "probe": "api",
+        "revision": "1ee49776",
+        "dirty": false,
+        "medianMs": 3.9,
+        "p95Ms": 5.3,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.8,
+        "bobMedianMs": 3.9
+      },
+      {
+        "probe": "api",
+        "revision": "1ee49776",
+        "dirty": false,
+        "medianMs": 3.8,
+        "p95Ms": 5.8,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.7,
+        "bobMedianMs": 3.9
+      },
+      {
+        "probe": "api",
+        "revision": "1ee49776",
+        "dirty": false,
+        "medianMs": 3.6,
+        "p95Ms": 5.5,
         "requests": 200,
         "failed": 0,
         "threads": 50,
         "aliceMedianMs": 3.4,
         "bobMedianMs": 3.7
-      },
-      {
-        "probe": "api",
-        "revision": "a9deaa95",
-        "dirty": false,
-        "medianMs": 4.2,
-        "p95Ms": 6.2,
-        "requests": 200,
-        "failed": 0,
-        "threads": 50,
-        "aliceMedianMs": 4.1,
-        "bobMedianMs": 4.4
-      },
-      {
-        "probe": "api",
-        "revision": "a9deaa95",
-        "dirty": false,
-        "medianMs": 4.3,
-        "p95Ms": 9.2,
-        "requests": 200,
-        "failed": 0,
-        "threads": 50,
-        "aliceMedianMs": 4.2,
-        "bobMedianMs": 4.8
-      },
-      {
-        "probe": "api",
-        "revision": "a9deaa95",
-        "dirty": false,
-        "medianMs": 4.2,
-        "p95Ms": 10.8,
-        "requests": 200,
-        "failed": 0,
-        "threads": 50,
-        "aliceMedianMs": 4,
-        "bobMedianMs": 4.2
-      },
-      {
-        "probe": "api",
-        "revision": "a9deaa95",
-        "dirty": false,
-        "medianMs": 3.9,
-        "p95Ms": 6,
-        "requests": 200,
-        "failed": 0,
-        "threads": 50,
-        "aliceMedianMs": 3.8,
-        "bobMedianMs": 4
-      }
-    ]
-  },
-  "head": {
-    "commit": "62f71f91",
-    "runs": [
-      {
-        "probe": "api",
-        "revision": "62f71f91",
-        "dirty": false,
-        "medianMs": 3.8,
-        "p95Ms": 6.9,
-        "requests": 200,
-        "failed": 0,
-        "threads": 50,
-        "aliceMedianMs": 3.8,
-        "bobMedianMs": 4
-      },
-      {
-        "probe": "api",
-        "revision": "62f71f91",
-        "dirty": false,
-        "medianMs": 3.5,
-        "p95Ms": 4.9,
-        "requests": 200,
-        "failed": 0,
-        "threads": 50,
-        "aliceMedianMs": 3.3,
-        "bobMedianMs": 3.6
-      },
-      {
-        "probe": "api",
-        "revision": "62f71f91",
-        "dirty": false,
-        "medianMs": 3.7,
-        "p95Ms": 4.7,
-        "requests": 200,
-        "failed": 0,
-        "threads": 50,
-        "aliceMedianMs": 3.6,
-        "bobMedianMs": 3.9
-      },
-      {
-        "probe": "api",
-        "revision": "62f71f91",
-        "dirty": false,
-        "medianMs": 4.3,
-        "p95Ms": 6.1,
-        "requests": 200,
-        "failed": 0,
-        "threads": 50,
-        "aliceMedianMs": 4.2,
-        "bobMedianMs": 4.4
-      },
-      {
-        "probe": "api",
-        "revision": "62f71f91",
-        "dirty": false,
-        "medianMs": 3.5,
-        "p95Ms": 4.7,
-        "requests": 200,
-        "failed": 0,
-        "threads": 50,
-        "aliceMedianMs": 3.4,
-        "bobMedianMs": 3.5
       }
     ]
   },
   "result": {
-    "baseMedianOfMediansMs": 4.2,
+    "baseMedianOfMediansMs": 4.4,
     "baseRangeMs": [
-      3.5,
-      4.3
+      3.8,
+      7.9
     ],
-    "headMedianOfMediansMs": 3.7,
+    "headMedianOfMediansMs": 3.8,
     "headRangeMs": [
-      3.5,
-      4.3
+      3.6,
+      3.9
     ],
     "verdict": "pass"
+  },
+  "earlier": {
+    "note": "the first runs, before the rebases onto mp-14, mp-22, mp-10 and mp-06",
+    "base": {
+      "commit": "a9deaa95",
+      "runs": [
+        {
+          "probe": "api",
+          "revision": "a9deaa95",
+          "dirty": false,
+          "medianMs": 3.5,
+          "p95Ms": 5.1,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 3.4,
+          "bobMedianMs": 3.7
+        },
+        {
+          "probe": "api",
+          "revision": "a9deaa95",
+          "dirty": false,
+          "medianMs": 4.2,
+          "p95Ms": 6.2,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 4.1,
+          "bobMedianMs": 4.4
+        },
+        {
+          "probe": "api",
+          "revision": "a9deaa95",
+          "dirty": false,
+          "medianMs": 4.3,
+          "p95Ms": 9.2,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 4.2,
+          "bobMedianMs": 4.8
+        },
+        {
+          "probe": "api",
+          "revision": "a9deaa95",
+          "dirty": false,
+          "medianMs": 4.2,
+          "p95Ms": 10.8,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 4,
+          "bobMedianMs": 4.2
+        },
+        {
+          "probe": "api",
+          "revision": "a9deaa95",
+          "dirty": false,
+          "medianMs": 3.9,
+          "p95Ms": 6,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 3.8,
+          "bobMedianMs": 4
+        }
+      ]
+    },
+    "head": {
+      "commit": "62f71f91",
+      "runs": [
+        {
+          "probe": "api",
+          "revision": "62f71f91",
+          "dirty": false,
+          "medianMs": 3.8,
+          "p95Ms": 6.9,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 3.8,
+          "bobMedianMs": 4
+        },
+        {
+          "probe": "api",
+          "revision": "62f71f91",
+          "dirty": false,
+          "medianMs": 3.5,
+          "p95Ms": 4.9,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 3.3,
+          "bobMedianMs": 3.6
+        },
+        {
+          "probe": "api",
+          "revision": "62f71f91",
+          "dirty": false,
+          "medianMs": 3.7,
+          "p95Ms": 4.7,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 3.6,
+          "bobMedianMs": 3.9
+        },
+        {
+          "probe": "api",
+          "revision": "62f71f91",
+          "dirty": false,
+          "medianMs": 4.3,
+          "p95Ms": 6.1,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 4.2,
+          "bobMedianMs": 4.4
+        },
+        {
+          "probe": "api",
+          "revision": "62f71f91",
+          "dirty": false,
+          "medianMs": 3.5,
+          "p95Ms": 4.7,
+          "requests": 200,
+          "failed": 0,
+          "threads": 50,
+          "aliceMedianMs": 3.4,
+          "bobMedianMs": 3.5
+        }
+      ]
+    },
+    "result": {
+      "baseMedianOfMediansMs": 4.2,
+      "baseRangeMs": [
+        3.5,
+        4.3
+      ],
+      "headMedianOfMediansMs": 3.7,
+      "headRangeMs": [
+        3.5,
+        4.3
+      ],
+      "verdict": "pass"
+    }
   }
 }
