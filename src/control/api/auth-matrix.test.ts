@@ -66,6 +66,8 @@ const requests: readonly (readonly [string, string, unknown?])[] = [
   ["POST", "/v1/images/build", {}], ["POST", "/v1/images/rollout", { bogus: 1 }], ["POST", "/v1/images/rollback", {}],
   ["GET", "/v1/doctor"], ["GET", "/v1/checks"], ["GET", "/v1/checks/changes"], ["POST", "/v1/checks/seen", { bogus: 1 }],
   ["GET", "/v1/logins"], ["PUT", "/v1/logins/claude", { bogus: 1 }], ["DELETE", "/v1/logins/claude", {}], ["POST", "/v1/logins/claude", {}],
+  ["GET", "/v1/own"], ["PUT", "/v1/own/hosts/mcp.example.com", {}], ["DELETE", "/v1/own/hosts/mcp.example.com", {}],
+  ["PUT", "/v1/own/secrets/MCP_TOKEN", { bogus: 1 }], ["DELETE", "/v1/own/secrets/MCP_TOKEN", {}], ["POST", "/v1/own", {}], ["GET", "/v1/people"],
   ["GET", "/"], ["GET", "/threads/new"], ["GET", "/projects/new"], ["GET", "/usage"], ["GET", "/pipeline"], ["GET", "/cluster"], ["GET", "/health"], ["GET", "/threads/closed"], ["GET", "/threads/quiet"],
   ["GET", `/threads/${t0}`], ["GET", `/threads/${t0}/stream`], ["GET", `/v1/threads/${t0}/attach?cols=100&rows=30`], ["GET", "/nodes/nosuch"], ["GET", "/assets/nosuch.js"],
 ];
@@ -121,7 +123,8 @@ test("each caller gets the allow, deny or 404 auth-matrix.txt records for every 
 
 /**
  * On a shared install, every request above that acts on a thread or changes a project, sent by an engineer to an
- * admin's thread and by the admin to the engineer's, which shows who the owner and admin policies admit. The admin's delete comes last, as it ends the thread.
+ * admin's thread and by the admin to the engineer's, which shows who the owner and admin policies admit, and each
+ * person's own hosts and secrets and the list of people, sent by each. The admin's delete comes last, as it ends the thread.
  */
 async function sharedLines(t: Parameters<typeof testApi>[0]): Promise<string[]> {
   const as = (a: WhoisAnswer): TailnetCaller => ({ id: a.Node.StableID, ...parseWhois(a).identity });
@@ -134,7 +137,7 @@ async function sharedLines(t: Parameters<typeof testApi>[0]): Promise<string[]> 
   const owned = { alice: (await s.call("POST", "/v1/threads", { project: "acme", claude: "alice's" })).body.id as string, bob: "" };
   caller = as(tailnet.bob);
   owned.bob = (await s.call("POST", "/v1/threads", { project: "acme", claude: "bob's" })).body.id as string;
-  const acting = requests.filter(([method, path]) => method !== "GET" && (path.startsWith(`/v1/threads/${t0}`) || path.startsWith("/v1/projects")));
+  const acting = requests.filter(([method, path]) => (method !== "GET" && (path.startsWith(`/v1/threads/${t0}`) || path.startsWith("/v1/projects"))) || path.startsWith("/v1/own") || path === "/v1/people");
   const ordered = [...acting.filter(([method, path]) => !(method === "DELETE" && path === `/v1/threads/${t0}`)), ...acting.filter(([method, path]) => method === "DELETE" && path === `/v1/threads/${t0}`)];
   const lines: string[] = [];
   for (const [who, other] of [["engineer", "alice"], ["admin", "bob"]] as const) {

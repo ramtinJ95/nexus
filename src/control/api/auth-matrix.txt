@@ -127,6 +127,13 @@ deployer GET /v1/logins -> 200
 deployer PUT /v1/logins/claude -> 400 the body must be {"token": string} and nothing else
 deployer DELETE /v1/logins/claude -> 200
 deployer POST /v1/logins/claude -> 405 POST is not allowed on /v1/logins/claude
+deployer GET /v1/own -> 409 a solo install keeps no hosts or secrets of one person's. Its one person adds them to the project, with nexus project edit <id> --allow-host HOST and --secret NAME:HOST[,HOST...], and each secret's value goes in its node's secret file
+deployer PUT /v1/own/hosts/mcp.example.com -> 409 a solo install keeps no hosts or secrets of one person's. Its one person adds them to the project, with nexus project edit <id> --allow-host HOST and --secret NAME:HOST[,HOST...], and each secret's value goes in its node's secret file
+deployer DELETE /v1/own/hosts/mcp.example.com -> 409 a solo install keeps no hosts or secrets of one person's. Its one person adds them to the project, with nexus project edit <id> --allow-host HOST and --secret NAME:HOST[,HOST...], and each secret's value goes in its node's secret file
+deployer PUT /v1/own/secrets/MCP_TOKEN -> 409 a solo install keeps no hosts or secrets of one person's. Its one person adds them to the project, with nexus project edit <id> --allow-host HOST and --secret NAME:HOST[,HOST...], and each secret's value goes in its node's secret file
+deployer DELETE /v1/own/secrets/MCP_TOKEN -> 409 a solo install keeps no hosts or secrets of one person's. Its one person adds them to the project, with nexus project edit <id> --allow-host HOST and --secret NAME:HOST[,HOST...], and each secret's value goes in its node's secret file
+deployer POST /v1/own -> 405 POST is not allowed on /v1/own
+deployer GET /v1/people -> 409 a solo install keeps no hosts or secrets of one person's. Its one person adds them to the project, with nexus project edit <id> --allow-host HOST and --secret NAME:HOST[,HOST...], and each secret's value goes in its node's secret file
 deployer GET / -> 200
 deployer GET /threads/new -> 200
 deployer GET /projects/new -> 200
@@ -277,6 +284,13 @@ person GET /v1/logins -> 200
 person PUT /v1/logins/claude -> 400 the body must be {"token": string} and nothing else
 person DELETE /v1/logins/claude -> 200
 person POST /v1/logins/claude -> 405 POST is not allowed on /v1/logins/claude
+person GET /v1/own -> 409 a solo install keeps no hosts or secrets of one person's. Its one person adds them to the project, with nexus project edit <id> --allow-host HOST and --secret NAME:HOST[,HOST...], and each secret's value goes in its node's secret file
+person PUT /v1/own/hosts/mcp.example.com -> 409 a solo install keeps no hosts or secrets of one person's. Its one person adds them to the project, with nexus project edit <id> --allow-host HOST and --secret NAME:HOST[,HOST...], and each secret's value goes in its node's secret file
+person DELETE /v1/own/hosts/mcp.example.com -> 409 a solo install keeps no hosts or secrets of one person's. Its one person adds them to the project, with nexus project edit <id> --allow-host HOST and --secret NAME:HOST[,HOST...], and each secret's value goes in its node's secret file
+person PUT /v1/own/secrets/MCP_TOKEN -> 409 a solo install keeps no hosts or secrets of one person's. Its one person adds them to the project, with nexus project edit <id> --allow-host HOST and --secret NAME:HOST[,HOST...], and each secret's value goes in its node's secret file
+person DELETE /v1/own/secrets/MCP_TOKEN -> 409 a solo install keeps no hosts or secrets of one person's. Its one person adds them to the project, with nexus project edit <id> --allow-host HOST and --secret NAME:HOST[,HOST...], and each secret's value goes in its node's secret file
+person POST /v1/own -> 405 POST is not allowed on /v1/own
+person GET /v1/people -> 409 a solo install keeps no hosts or secrets of one person's. Its one person adds them to the project, with nexus project edit <id> --allow-host HOST and --secret NAME:HOST[,HOST...], and each secret's value goes in its node's secret file
 person GET / -> 200
 person GET /threads/new -> 200
 person GET /projects/new -> 200
@@ -437,6 +451,13 @@ control-node GET /v1/logins -> 403 caller may not read their logins: only a pers
 control-node PUT /v1/logins/claude -> 403 caller may not set a login: only a person may, never the control plane, infrastructure nodes or pylons
 control-node DELETE /v1/logins/claude -> 403 caller may not remove a login: only a person may, never the control plane, infrastructure nodes or pylons
 control-node POST /v1/logins/claude -> 405 POST is not allowed on /v1/logins/claude
+control-node GET /v1/own -> 403 caller may not read their own hosts and secrets: only a person may, never the control plane, infrastructure nodes or pylons
+control-node PUT /v1/own/hosts/mcp.example.com -> 403 caller may not add a host for their own pylons: only a person may, never the control plane, infrastructure nodes or pylons
+control-node DELETE /v1/own/hosts/mcp.example.com -> 403 caller may not remove a host of their own: only a person may, never the control plane, infrastructure nodes or pylons
+control-node PUT /v1/own/secrets/MCP_TOKEN -> 403 caller may not set a secret for their own pylons: only a person may, never the control plane, infrastructure nodes or pylons
+control-node DELETE /v1/own/secrets/MCP_TOKEN -> 403 caller may not remove a secret of their own: only a person may, never the control plane, infrastructure nodes or pylons
+control-node POST /v1/own -> 405 POST is not allowed on /v1/own
+control-node GET /v1/people -> 403 caller may not list each person's hosts and secrets: only a person may, never the control plane, infrastructure nodes or pylons
 control-node GET / -> 200
 control-node GET /threads/new -> 200
 control-node GET /projects/new -> 200
@@ -583,6 +604,13 @@ control-node-without-key GET /v1/logins -> 403 caller may not read their logins:
 control-node-without-key PUT /v1/logins/claude -> 403 caller may not set a login: only a person may, never the control plane, infrastructure nodes or pylons
 control-node-without-key DELETE /v1/logins/claude -> 403 caller may not remove a login: only a person may, never the control plane, infrastructure nodes or pylons
 control-node-without-key POST /v1/logins/claude -> 405 POST is not allowed on /v1/logins/claude
+control-node-without-key GET /v1/own -> 403 caller may not read their own hosts and secrets: only a person may, never the control plane, infrastructure nodes or pylons
+control-node-without-key PUT /v1/own/hosts/mcp.example.com -> 403 caller may not add a host for their own pylons: only a person may, never the control plane, infrastructure nodes or pylons
+control-node-without-key DELETE /v1/own/hosts/mcp.example.com -> 403 caller may not remove a host of their own: only a person may, never the control plane, infrastructure nodes or pylons
+control-node-without-key PUT /v1/own/secrets/MCP_TOKEN -> 403 caller may not set a secret for their own pylons: only a person may, never the control plane, infrastructure nodes or pylons
+control-node-without-key DELETE /v1/own/secrets/MCP_TOKEN -> 403 caller may not remove a secret of their own: only a person may, never the control plane, infrastructure nodes or pylons
+control-node-without-key POST /v1/own -> 405 POST is not allowed on /v1/own
+control-node-without-key GET /v1/people -> 403 caller may not list each person's hosts and secrets: only a person may, never the control plane, infrastructure nodes or pylons
 control-node-without-key GET / -> 200
 control-node-without-key GET /threads/new -> 200
 control-node-without-key GET /projects/new -> 200
@@ -723,6 +751,13 @@ reporter GET /v1/logins -> 403 caller is not a tailnet node this control plane a
 reporter PUT /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
 reporter DELETE /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
 reporter POST /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
+reporter GET /v1/own -> 403 caller is not a tailnet node this control plane allows
+reporter PUT /v1/own/hosts/mcp.example.com -> 403 caller is not a tailnet node this control plane allows
+reporter DELETE /v1/own/hosts/mcp.example.com -> 403 caller is not a tailnet node this control plane allows
+reporter PUT /v1/own/secrets/MCP_TOKEN -> 403 caller is not a tailnet node this control plane allows
+reporter DELETE /v1/own/secrets/MCP_TOKEN -> 403 caller is not a tailnet node this control plane allows
+reporter POST /v1/own -> 403 caller is not a tailnet node this control plane allows
+reporter GET /v1/people -> 403 caller is not a tailnet node this control plane allows
 reporter GET / -> 403 caller is not a tailnet node this control plane allows
 reporter GET /threads/new -> 403 caller is not a tailnet node this control plane allows
 reporter GET /projects/new -> 403 caller is not a tailnet node this control plane allows
@@ -851,6 +886,13 @@ reporter-wrong-key GET /v1/logins -> 403 caller is not a tailnet node this contr
 reporter-wrong-key PUT /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key DELETE /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key POST /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key GET /v1/own -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key PUT /v1/own/hosts/mcp.example.com -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key DELETE /v1/own/hosts/mcp.example.com -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key PUT /v1/own/secrets/MCP_TOKEN -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key DELETE /v1/own/secrets/MCP_TOKEN -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key POST /v1/own -> 403 caller is not a tailnet node this control plane allows
+reporter-wrong-key GET /v1/people -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET / -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /threads/new -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /projects/new -> 403 caller is not a tailnet node this control plane allows
@@ -979,6 +1021,13 @@ node-without-key GET /v1/logins -> 403 caller is not a tailnet node this control
 node-without-key PUT /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
 node-without-key DELETE /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
 node-without-key POST /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
+node-without-key GET /v1/own -> 403 caller is not a tailnet node this control plane allows
+node-without-key PUT /v1/own/hosts/mcp.example.com -> 403 caller is not a tailnet node this control plane allows
+node-without-key DELETE /v1/own/hosts/mcp.example.com -> 403 caller is not a tailnet node this control plane allows
+node-without-key PUT /v1/own/secrets/MCP_TOKEN -> 403 caller is not a tailnet node this control plane allows
+node-without-key DELETE /v1/own/secrets/MCP_TOKEN -> 403 caller is not a tailnet node this control plane allows
+node-without-key POST /v1/own -> 403 caller is not a tailnet node this control plane allows
+node-without-key GET /v1/people -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET / -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /threads/new -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /projects/new -> 403 caller is not a tailnet node this control plane allows
@@ -1107,6 +1156,13 @@ stranger GET /v1/logins -> 403 caller is not a tailnet node this control plane a
 stranger PUT /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger DELETE /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger POST /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/own -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger PUT /v1/own/hosts/mcp.example.com -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger DELETE /v1/own/hosts/mcp.example.com -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger PUT /v1/own/secrets/MCP_TOKEN -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger DELETE /v1/own/secrets/MCP_TOKEN -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger POST /v1/own -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
+stranger GET /v1/people -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET / -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET /threads/new -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET /projects/new -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
@@ -1229,6 +1285,13 @@ unnamed GET /v1/logins -> 403 caller is not a tailnet node this control plane al
 unnamed PUT /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
 unnamed DELETE /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
 unnamed POST /v1/logins/claude -> 403 caller is not a tailnet node this control plane allows
+unnamed GET /v1/own -> 403 caller is not a tailnet node this control plane allows
+unnamed PUT /v1/own/hosts/mcp.example.com -> 403 caller is not a tailnet node this control plane allows
+unnamed DELETE /v1/own/hosts/mcp.example.com -> 403 caller is not a tailnet node this control plane allows
+unnamed PUT /v1/own/secrets/MCP_TOKEN -> 403 caller is not a tailnet node this control plane allows
+unnamed DELETE /v1/own/secrets/MCP_TOKEN -> 403 caller is not a tailnet node this control plane allows
+unnamed POST /v1/own -> 403 caller is not a tailnet node this control plane allows
+unnamed GET /v1/people -> 403 caller is not a tailnet node this control plane allows
 unnamed GET / -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /threads/new -> 403 caller is not a tailnet node this control plane allows
 unnamed GET /projects/new -> 403 caller is not a tailnet node this control plane allows
@@ -1276,6 +1339,13 @@ shared engineer POST /v1/threads/{alice's thread}/pylon/retry -> 403 thread {ali
 shared engineer PATCH /v1/projects/nosuch -> 403 caller may not edit a project: only an admin may
 shared engineer POST /v1/projects -> 403 caller may not add a project: only an admin may
 shared engineer DELETE /v1/projects/nosuch -> 403 caller may not remove a project: only an admin may
+shared engineer GET /v1/own -> 200
+shared engineer PUT /v1/own/hosts/mcp.example.com -> 200
+shared engineer DELETE /v1/own/hosts/mcp.example.com -> 200
+shared engineer PUT /v1/own/secrets/MCP_TOKEN -> 400 the body must be {"value": string, "hosts": [string, ...]} and nothing else
+shared engineer DELETE /v1/own/secrets/MCP_TOKEN -> 200
+shared engineer POST /v1/own -> 405 POST is not allowed on /v1/own
+shared engineer GET /v1/people -> 403 caller may not list each person's hosts and secrets: only an admin may
 shared engineer DELETE /v1/threads/{alice's thread} -> 403 thread {alice's thread} is alice@example.com's, so only alice@example.com or an admin may delete a thread
 shared admin attach to bob's thread -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may attach to a thread's pylon
 shared admin POST /v1/threads/{bob's thread}/review -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may start a review
@@ -1305,4 +1375,11 @@ shared admin POST /v1/projects -> 400 ✖ Unrecognized key: "bogus"
 ✖ Invalid input: expected string, received undefined
   → at repoUrl
 shared admin DELETE /v1/projects/nosuch -> 404 no project nosuch
+shared admin GET /v1/own -> 200
+shared admin PUT /v1/own/hosts/mcp.example.com -> 200
+shared admin DELETE /v1/own/hosts/mcp.example.com -> 200
+shared admin PUT /v1/own/secrets/MCP_TOKEN -> 400 the body must be {"value": string, "hosts": [string, ...]} and nothing else
+shared admin DELETE /v1/own/secrets/MCP_TOKEN -> 200
+shared admin POST /v1/own -> 405 POST is not allowed on /v1/own
+shared admin GET /v1/people -> 200
 shared admin DELETE /v1/threads/{bob's thread} -> 200

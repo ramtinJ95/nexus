@@ -155,6 +155,7 @@
     "src/control/api/encoding.ts: reserved-path:auth",
     "src/control/api/image-routes.ts: reserved-path:auth",
     "src/control/api/node-routes.ts: reserved-path:auth",
+    "src/control/api/own-routes.ts: reserved-path:auth",
     "src/control/api/pipeline-routes.ts: reserved-path:auth",
     "src/control/api/project-routes.ts: reserved-path:auth",
     "src/control/api/pylon-routes.ts: reserved-path:auth",
