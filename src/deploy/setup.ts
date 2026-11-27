@@ -343,6 +343,9 @@ export function setup(tailnet: Tailnet, flags: Flags, existing: Existing, newTok
   if (naming && flags.admit.length > 0) errors.push("--person and --remove-person write people, and --admit writes callers and deployers, which a control.json with people refuses. Give --person alone for a shared install, or --admit alone for a one-person install");
   else if (shared && flags.admit.length > 0) errors.push("--admit writes callers and deployers, which a control.json with people refuses. Name the person with --person <tailnet login>=engineer instead");
   const named = flags.person.flatMap((raw) => parsePerson(raw, errors) ?? []);
+  for (const login of flags.removePerson) {
+    if (!loginPattern.test(login)) errors.push(`--remove-person ${login}: not a tailnet login, such as alice@example.com, which tailscale whois prints for a person's device`);
+  }
   for (const login of new Set(named.map((n) => n.login))) {
     if (named.filter((n) => n.login === login).length > 1) errors.push(`--person ${login}: named more than once. Name each person once`);
     if (flags.removePerson.includes(login)) errors.push(`--person ${login} and --remove-person ${login}: give one`);

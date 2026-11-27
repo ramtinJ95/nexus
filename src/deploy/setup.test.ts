@@ -273,6 +273,9 @@ test("--remove-person takes the person out of people, keeps the rest, and a seco
   assert.deepEqual([...shared(["--remove-person", bob], onDisk(removed)).values()].map((f) => f.state), ["unchanged", "unchanged", "unchanged", "unchanged"]);
   assert.match(errors(run(["--remove-person", bob], onDisk(files(run(["--admit", "ramtins-macbook-pro"]))))).join("\n"), /is a one-person install/);
   assert.match(errors(run(["--remove-person", bob])).join("\n"), /no install yet/);
+  for (const malformed of ["bob", "", "bob @example.com"]) {
+    assert.match(errors(run(["--remove-person", malformed], both)).join("\n"), /not a tailnet login/, `--remove-person ${JSON.stringify(malformed)}`);
+  }
 });
 
 test("forgetLogins deletes the file the control plane keeps a person's nexus logins in, and leaves everyone else's", async (t) => {
@@ -648,6 +651,8 @@ test("--remove-person stops the control plane and deletes the person's stored lo
   const args = ["--remove-person", bob];
   assert.deepEqual((await installing(args)).ran.slice(0, 4), [lockDir, write(args.join(" ")), `forget ${bob}`, "bash ./deploy/install-control.sh"]);
   assert.ok(!(await installing(["--person", `${bob}=engineer`])).ran.some((line) => line.startsWith("forget")));
+  const refused = await installing(["--remove-person", "bob"], [], "write");
+  assert.deepEqual(refused.ran, [lockDir, write("--remove-person bob")], "a refused write stops before the stop, the delete and the role installers");
 });
 
 test("the control plane counts as stopped only when systemd says so, and a failed stop or query throws, so no login is deleted", async () => {
