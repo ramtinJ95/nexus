@@ -151,23 +151,27 @@ test("an unmapped port gets 404, and neither reaches a guest nor counts as a hit
   assert.equal(hits.length, 0);
 });
 
-test("hits are reported once a minute per route, with the tailnet login", async (t) => {
+test("hits are reported once a minute per route and tailnet login", async (t) => {
   t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2027-01-01T00:00:00Z") });
   const guest = await guestOrigin(t);
   const { routes, call, hits } = await setup(t, () => guest.origin);
   routes.set(10002, { pylonId, service: "docs" });
-  await call("/", { headers: { "tailscale-user-login": "someone@example.com" } });
-  await call("/app.js");
+  const as = (login: string) => ({ "tailscale-user-login": login });
+  await call("/", { headers: as("someone@example.com") });
+  await call("/app.js", { headers: as("someone@example.com") });
+  await call("/", { headers: as("other@example.com") });
   await call("/", { headers: { host: "infra-testbench.example.ts.net:10002" } });
   t.mock.timers.tick(59_999);
-  await call("/later");
+  await call("/later", { headers: as("someone@example.com") });
+  await call("/later", { headers: as("other@example.com") });
   t.mock.timers.tick(1);
-  await call("/a-minute-later");
+  await call("/a-minute-later", { headers: as("someone@example.com") });
   assert.deepEqual(hits.map(({ service, login, at }) => ({ service, login, at })), [
     { service: "web", login: "someone@example.com", at: "2027-01-01T00:00:00.000Z" },
+    { service: "web", login: "other@example.com", at: "2027-01-01T00:00:00.000Z" },
     { service: "docs", login: null, at: "2027-01-01T00:00:00.000Z" },
-    { service: "web", login: null, at: "2027-01-01T00:01:00.000Z" },
-  ]);
+    { service: "web", login: "someone@example.com", at: "2027-01-01T00:01:00.000Z" },
+  ], "another login's hit in the same minute does not hold back the first login's");
 });
 
 test("a pylon that cannot serve gets a waking page in a browser, plain text otherwise, and the hit still counts", async (t) => {

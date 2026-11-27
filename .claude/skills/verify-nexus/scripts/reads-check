@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# The live box of docs/multiplayer-plan.md's mp-04: on the stack started with people, alice's thread sits idle until
-# its pylon pauses. Then for 60 s bob makes the requests the dashboard's thread page makes, with its diff open: the
-# page, its visit, the changes, the diff and the files, every 5 s as the page polls. Pass when alice's pylon is
-# still paused, has no container, and its lastHumanActivityAt has not moved, and alice's own read of the changes
-# then wakes it. This pylon has no playwright-cli, so curl through bob's port sends what the page would.
+# The live box of docs/multiplayer-plan.md's mp-04: on the stack started with people, alice's thread publishes a
+# preview and sits idle until its pylon pauses. Then for 60 s bob makes the requests the dashboard's thread page makes,
+# with its diff open: the page, its visit, the changes, the diff and the files, every 5 s as the page polls, and he
+# loads the preview, as does a request with no tailnet login. Pass when alice's pylon is still paused, has no
+# container, and its lastHumanActivityAt has not moved, and alice's own preview hit, then her own read of the
+# changes, each count as her activity and wake it. This pylon has no playwright-cli, so curl through bob's port sends
+# what the page would, and curl to the preview gateway with the tailscale-user-login header plays tailscale serve.
 # Exits 0 only if every step did what it should.
 set -euo pipefail
 V="$(cd "$(dirname "$0")" && pwd)/verify-nexus"
@@ -17,11 +19,35 @@ NEXUS_VERIFY_PEOPLE=1 "$V" up
 evidence=$("$V" evidence)
 alice=http://127.0.0.1:7470
 bob=http://127.0.0.1:7471
+gateway=http://127.0.0.1:7481
 
 T=$("$V" cli reads-start-alice -- start --project spoon --title "reads: alice's" --json | jq -r .id)
 echo "alice started $T"
 facts() { curl -fsS "$alice/v1/threads/$T" | jq -c '{state: .pylon.actualState, human: .thread.lastHumanActivityAt}'; }
-# The idle policy pauses a pylon 20 minutes after the last human activity, which the start was.
+for _ in $(seq 150); do
+  [ "$(facts | jq -r .state)" = running ] && break
+  sleep 2
+done
+SERVER="setsid nohup node -e \"require('http').createServer((q, r) => r.end('reads-proof')).listen(8001)\" </dev/null >/tmp/reads-proof.log 2>&1 & sleep 1; echo started"
+"$V" cli reads-serve -- send "$T" "bash: $SERVER" --json >/dev/null
+for _ in $(seq 30); do
+  "$V" cli reads-ports -- ports "$T" --json 2>/dev/null | jq -e '.[] | select(.port == 8001)' >/dev/null && break
+  sleep 2
+done
+port=$("$V" cli reads-preview -- preview "$T" 8001 --wait --json | jq -r .httpsPort)
+[ "$port" != null ] || fail "alice's preview of 8001 has no https port"
+echo "alice published 8001 as https port $port"
+# A preview hit, as tailscale serve sends one: the gateway hears the node's port in Host and the viewer's login.
+hit() {
+  local who=$1 n; n=$(find "$evidence" -maxdepth 1 -name 'hit-*.status' | wc -l | tr -d ' ')
+  local by=${who%%@*}
+  local out="$evidence/hit-$(printf '%03d' $((n + 1)))-${by:-nologin}"
+  local code
+  code=$(curl -sS -o "$out.body" -w '%{http_code}' -H "Host: 127.0.0.1:$port" ${who:+-H "tailscale-user-login: $who"} "$gateway/")
+  echo "$code" > "$out.status"
+  echo "$code"
+}
+# The idle policy pauses a pylon 20 minutes after the last human activity, which the preview's publish was.
 for _ in $(seq 900); do
   [ "$(facts | jq -r .state)" = paused ] && break
   sleep 2
@@ -60,9 +86,14 @@ while [ $(( $(date +%s) - start )) -lt 60 ]; do
     jq -e --arg who "only alice@example.com's requests wake it" '(.error | contains($who)) and .retryable == false' "${said#* }" >/dev/null \
       || fail "bob's $read refusal does not say only alice wakes it: $(cat "${said#* }")"
   done
+  for who in bob@example.com ""; do
+    said=$(hit "$who")
+    [ "$said" = 503 ] || fail "a preview hit as '${who:-no login}' on the paused pylon answered $said, not the waking page's 503"
+  done
   sleep 5
 done
-echo "bob's last page, visit and reads:"
+echo "bob's last page, visit, reads and preview hits:"
+ls "$evidence" | grep -E '^hit-' | sed 's/\..*//' | sort -u | tail -2 | while read -r stem; do echo "  $stem -> $(cat "$evidence/$stem.status")"; done
 for step in page visit changes diff files; do
   last=$(ls "$evidence" | grep -E "^bob-[0-9]+-$step\.status$" | tail -1)
   echo "  ${last%.status} -> $(cat "$evidence/$last") $(grep -o '"error":"[^"]*"' "$evidence/${last%.status}.body" || echo '(page)')"
@@ -76,13 +107,21 @@ echo "alice's $T after 60 s of bob: $after, running containers $container"
 [ "$(jq -r .human <<< "$after")" = "$(jq -r .human <<< "$before")" ] || fail "lastHumanActivityAt moved from $(jq -r .human <<< "$before") to $(jq -r .human <<< "$after")"
 [ "$container" = 0 ] || fail "alice's pylon has a running container"
 
+echo "alice's own preview hit -> $(hit alice@example.com)"
+for _ in $(seq 15); do
+  [ "$(facts | jq -r .human)" -gt "$(jq -r .human <<< "$before")" ] && break
+  sleep 2
+done
+hitWoke=$(facts)
+echo "after alice's preview hit: $hitWoke"
+[ "$(jq -r .human <<< "$hitWoke")" -gt "$(jq -r .human <<< "$before")" ] || fail "alice's own preview hit did not count as her activity"
 own=$(curl -sS -o /dev/null -w '%{http_code}' "$alice/v1/threads/$T/changes?base=start")
 woke=$(facts)
 echo "alice's own read of the changes -> $own, then $woke"
-[ "$(jq -r .human <<< "$woke")" -gt "$(jq -r .human <<< "$before")" ] || fail "alice's own read did not count as her activity"
+[ "$(jq -r .human <<< "$woke")" -gt "$(jq -r .human <<< "$hitWoke")" ] || fail "alice's own read did not count as her activity"
 for _ in $(seq 60); do
   [ "$(facts | jq -r .state)" = running ] && break
   sleep 2
 done
 [ "$(facts | jq -r .state)" = running ] || fail "alice's own read did not wake her pylon: $(facts)"
-echo "reads check: bob's page, visit, changes, diff and files for 60 s left alice's paused pylon paused with lastHumanActivityAt unmoved, and alice's own read woke it"
+echo "reads check: bob's page, visit, changes, diff, files and preview hits, and hits with no login, for 60 s left alice's paused pylon paused with lastHumanActivityAt unmoved, and alice's own preview hit and read each counted and woke it"

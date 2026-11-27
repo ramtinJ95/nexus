@@ -23,7 +23,7 @@ export interface GatewayOptions {
   route(httpsPort: number): PreviewRoute | undefined;
   /** A browser gets a waking page for `unavailable`. A throw is a fault, which is logged and answered with 502. */
   origin(route: PreviewRoute): PreviewOrigin | { unavailable: string };
-  /** Called on the first request for a route, then at most once per hitIntervalMs. */
+  /** Called on a tailnet login's first request for a route, then at most once per hitIntervalMs for that login. */
   onHit(hit: PreviewHit): void;
   /** Default console.error. */
   log?: (message: string) => void;
@@ -55,13 +55,18 @@ export async function startGateway(options: GatewayOptions): Promise<PreviewGate
   /** Upgraded sockets leave the HTTP server's bookkeeping, so closeAllConnections does not reach them. */
   const tunnels = new Set<Socket>();
 
+  /**
+   * Each login has its own interval, because only the owner's hit counts as activity on a shared install: a teammate
+   * who keeps a preview open must not take every report of it from the owner.
+   */
   function reportHit(route: PreviewRoute, req: IncomingMessage) {
-    const key = `${route.pylonId}/${route.service}`;
+    const header = req.headers["tailscale-user-login"];
+    const login = typeof header === "string" ? header : null;
+    const key = `${route.pylonId}/${route.service}/${login ?? ""}`;
     const now = Date.now();
     if (now - (lastHit.get(key) ?? -Infinity) < hitIntervalMs) return;
     lastHit.set(key, now);
-    const login = req.headers["tailscale-user-login"];
-    options.onHit({ ...route, at: new Date(now).toISOString(), login: typeof login === "string" ? login : null });
+    options.onHit({ ...route, at: new Date(now).toISOString(), login });
   }
 
   function resolve(req: IncomingMessage): Answer | { origin: URL; port: number } {

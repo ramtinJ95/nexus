@@ -1662,11 +1662,11 @@ test("services the probe could not read change nothing: the next diff sees the l
   /** Per snapshot, the services read, and those of the last observation it is diffed against. */
   const seen: { read: readonly ServiceFact[] | null | undefined; before: readonly ServiceFact[] | null | undefined }[] = [];
   run(t, registry, fake.probe, {
-    ingest: (event, eventNode, known, now, unlisted) => {
+    ingest: (event, eventNode, known, now, unlisted, counts) => {
       if (event.type === "snapshot") {
         seen.push({ read: servicesOf(event.observation.pylons.find((p) => p.pylonId === thread.pylonId)), before: servicesOf(known.get(thread.pylonId)) });
       }
-      return ingest(event, eventNode, known, now, unlisted);
+      return ingest(event, eventNode, known, now, unlisted, counts);
     },
   });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
@@ -1719,12 +1719,12 @@ test("each snapshot is ingested against the last observation ingested for each k
   const fake = fakeNode({ autoFinish: true });
   const previous: string[][] = [];
   run(t, registry, fake.probe, {
-    ingest: (event, eventNode, known, now, unlisted) => {
+    ingest: (event, eventNode, known, now, unlisted, counts) => {
       if (event.type === "snapshot") {
         assert.deepEqual([...known.keys()], [thread.pylonId]);
         previous.push([...known.values()].map((o) => o === "absent" ? "absent" : o.phase));
       }
-      return ingest(event, eventNode, known, now, unlisted);
+      return ingest(event, eventNode, known, now, unlisted, counts);
     },
   });
   await until("the pylon runs", () => fake.pylons.get(thread.pylonId)?.phase === "running");
@@ -1782,6 +1782,28 @@ test("session, job and preview-hit events apply their writes and leave the store
   assert.equal(registry.threads.thread(thread.id)!.lastHumanActivityAt, hit);
   assert.equal(registry.threads.thread(thread.id)!.working, true);
   assert.deepEqual(registry.nodes.node(node)!.observation, stored);
+});
+
+test("on a shared install only the owner's preview hit counts as human activity, and on a solo install every hit does", async (t) => {
+  const alice = "alice@example.com" as Person;
+  const human = async (people: LoopOptions["people"], logins: readonly (string | null)[]) => {
+    const registry = openRegistry(tempDb());
+    seedRegistry(registry, { nodes: [node] });
+    const thread = addThread(registry, { node, boot: { image }, thread: { owner: alice, lastHumanActivityAt: 1 } });
+    const fake = fakeNode({ autoFinish: false });
+    const loop = run(t, registry, fake.probe, { ingest: realIngest, ...(people === undefined ? {} : { people }) });
+    await settled(fake, loop);
+    const seen: number[] = [];
+    for (const [i, login] of logins.entries()) {
+      fake.send({ type: "preview-hit", pylonId: thread.pylonId, service: "web", at: new Date(1_000 * (i + 2)).toISOString(), login });
+      await settled(fake, loop);
+      seen.push(registry.threads.thread(thread.id)!.lastHumanActivityAt);
+    }
+    return seen;
+  };
+  const shared = peopleOf({ [alice]: "admin", "bob@example.com": "engineer" });
+  assert.deepEqual(await human(shared, ["bob@example.com", null, alice]), [1, 1, 4_000], "bob's hit and a hit with no login leave alice's idle clock alone, and alice's moves it");
+  assert.deepEqual(await human(undefined, ["bob@example.com", null]), [2_000, 3_000], "a solo install counts every hit, with a login or without");
 });
 
 test("a job in flight survives a control-plane restart: the new process asks the probe and sends nothing twice", async (t) => {
