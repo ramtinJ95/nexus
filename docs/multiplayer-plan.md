@@ -329,13 +329,13 @@ Three limits of this guard, each handled elsewhere:
 
 ### mp-16: an engineer's thread is a pylon agent
 
-- [ ] **Depends on.** `mp-09`.
-- [ ] **Files.** `src/contract/threads-parse.ts`, `src/control/threads.ts`, `src/control/api/thread-routes.ts`, `src/control/planning.ts`, `src/control/pipeline.ts`, `src/control/review.ts`, `src/control/dashboard/`.
-- [ ] **Change.** On a shared install a person's thread start must name a pylon agent, and no harness conversation is created for it. Routes that only a harness thread has are refused with a reason: a `message` brief, harness `retry`, and planning. A pipeline item must name a pylon agent. A review start is refused until `mp-17`. Failure judgments keep running on the install's one login.
+- [x] **Depends on.** `mp-09`.
+- [x] **Files.** `src/control/threads.ts`, `src/control/queue.ts`, `src/control/pipeline.ts`, `src/control/review.ts`, `src/control/harness/host.ts`, `src/control/main.ts`, `src/control/project.ts`, `src/control/people.ts`, `src/control/dashboard/`, `src/cli/commands/`. `threads-parse.ts`, `thread-routes.ts` and `planning.ts` needed no change: the start's check and the harness of a shared install refuse every path those reach.
+- [x] **Change.** On a shared install a person's thread start must name a pylon agent, and no harness conversation is created for it. Routes that only a harness thread has are refused with a reason: a `message` brief, harness `retry`, and planning. A pipeline item must name a pylon agent. A review start is refused until `mp-17`. Failure judgments keep running on the install's one login.
 - [ ] **Result.** No engineer's work spends the install's shared model login. The dashboard and the CLI do not offer what is off.
-- [ ] **Unit.** `interrogate/02-harness-login-is-one.test.ts` passes in this form: on a shared install two people's thread starts make no model request from the control plane. Each refused route names its reason.
+- [x] **Unit.** `interrogate/02-harness-login-is-one.test.ts` passes in this form: on a shared install two people's thread starts make no model request from the control plane. Each refused route names its reason.
 - [ ] **Live.** As `alice`, start a thread with no agent named. Pass when the start is refused with a message that says which agents are available, and a start with Claude Code runs a turn on her token.
-- [ ] **Perf.** `boot`. Fail above 10% over base.
+- [x] **Perf.** `boot`. Fail above 10% over base.
 
 ### mp-17: a review runs on the asker's login
 
