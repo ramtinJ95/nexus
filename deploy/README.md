@@ -34,12 +34,13 @@ The installer checks every prerequisite first. It reports each one that is missi
 - `/dev/kvm`, owned by the `kvm` group;
 - 20 GiB free on each filesystem that holds `/var/lib/nexus` or `/opt/nexus`, the mark under which `nexus nodes` calls a disk low;
 - ports 7480 and 7481 free, and on the control plane's machine 7470 and 7443 too, or held by Nexus's own `nexus-probe` and `nexus-control`, as `ss` names every listener on each. A machine without `ss` gets a warning that the ports were not checked;
+- when firewalld runs, TCP 7480 let in by the zone that applies to `tailscale0`, and on the control plane's machine 7470 and 7443 too. Those are the ports other machines call on the tailnet address: laptops and nodes call the control plane's 7470 and 7443, and the control plane and the peer probes that copy images call each probe's 7480. The preview gateway's 7481 listens on `127.0.0.1`, so it needs no rule. See [A host firewall](#a-host-firewall);
 - no `nexus` or `nexus-control` user with another home than Nexus gives it, and no `/opt/nexus` with files but no `releases` directory, as other software of the same name leaves;
 - tailscale, installed, running and logged in;
 - MagicDNS and HTTPS certificates turned on for the tailnet. The installer reads them from `tailscale status --json` in the shell, so a machine without Node has them checked on the first run too;
 - on the control plane's machine, tailscaled started with `TS_PERMIT_CERT_UID=nexus-control`, so the control plane can fetch the dashboard's certificate (see [HTTPS dashboard](#https-dashboard)).
 
-On a machine that already holds `/opt/nexus/releases`, too little memory or disk is a warning, not a miss, so a rerun or `--upgrade` that recovers the install still runs. A node key that expires is a warning, not a miss. The installer names when it expires and goes on, since the machine works until then. When it expires the machine leaves the tailnet until someone logs it in again, so turn key expiry off for the machine in Tailscale's admin console.
+On a machine that already holds `/opt/nexus/releases`, too little memory or disk, or a firewall that closes Nexus's ports, is a warning, not a miss, so a rerun or `--upgrade` that recovers the install still runs. A node key that expires is a warning, not a miss. The installer names when it expires and goes on, since the machine works until then. When it expires the machine leaves the tailnet until someone logs it in again, so turn key expiry off for the machine in Tailscale's admin console.
 
 `sudo deploy/install.sh --check` runs the same checks and changes nothing, even when every prerequisite holds. On an installed machine it also checks the install: each unit of the installed roles running, or for `nexus-deployer.service` and `nexus-backup.service` not failed; each of `current`, `control-current` and `deployer-current` naming a release in `/opt/nexus/releases` that holds the desired release the control plane names, as the deployer reads it; `control-plane.json` and `deployer.json`; and `control.json`, `probe.json` and `secrets.env`, each parsed by the installed release that reads it. It lists every problem with its fix and exits 1, or says that everything holds and exits 0. Without root it checks only the prerequisites, since the install's files are root's. An installed machine without the control role is checked as a node. `src/deploy/installed.ts` makes the install's checks, and loads from the checkout before `npm ci`.
 
@@ -55,6 +56,29 @@ Then `src/deploy/setup.ts` writes the configs from `tailscale status --json`:
 | `/etc/nexus/deployer.json` | The deployer's token and timeouts. Root, mode 0600. Only the token's SHA-256 digest leaves this file. |
 
 Then it installs the release and the units with `deploy/install-control.sh`, `deploy/install-probe.sh` and `deploy/install-deployer.sh`, and starts the probe and the deployer's timer. The control plane refuses to start before its harness is signed in, so on a first install its unit is left stopped until the next step signs it in.
+
+### A host firewall
+
+The installer checks firewalld only. It reads no `ufw` and no nftables or iptables rules of anyone else's, so on a machine with another firewall, let in the ports above for the tailnet yourself.
+
+The control plane and the probe listen on the machine's tailnet address, so firewalld's rules for `tailscale0` decide who reaches them. `tailscale0` gets the zone it was put in, or else the default zone. On Fedora Server that is `FedoraServer`, which lets in SSH and not Nexus's ports, so laptops and nodes are refused while the machine reaches itself. The installer reads that zone as firewalld runs it and as it is saved for the next reload, each with the zone `tailscale0` gets then: its target, its ports and protocols, and its services' ports and protocols. It counts a port open only when both let it in. It does not read rich rules, a zone bound to the tailnet's sources, which takes precedence over the interface's, a service's `includes`, or a zone that NetworkManager keeps for `tailscale0` in its connection profile, and it counts a service limited to a destination as opening nothing. With any of these the result can be wrong either way. A zone bound by source outranks the interface's zone, and a rich rule can reject what a port lets in, so either can refuse a port the check reads as open. The others can make it report closed a port that is open. So review the suggested rule's scope before adding it. A port added to the zone is open to everything the zone applies to, which can be wider than a service limited to a destination allowed. It checks the interface named `tailscale0`, so a tailscaled started with another `--tun` name is not checked right.
+
+When a port is closed, the fix adds it to that zone, at once, in the saved rules, or both, as each lacks it. Nothing else in the zone changes, and neither does any other service the machine's other users keep behind it:
+
+```sh
+sudo firewall-cmd --zone=FedoraServer --add-port=7470/tcp --add-port=7443/tcp --add-port=7480/tcp
+sudo firewall-cmd --permanent --zone=FedoraServer --add-port=7470/tcp --add-port=7443/tcp --add-port=7480/tcp
+```
+
+On a node it is `--add-port=7480/tcp` alone. The installer names the zone it found and only the ports that are closed. It changes no firewall itself.
+
+Only root can read firewalld's rules on Fedora, so `deploy/install.sh --check` without root warns that the ports were not checked, and it never reports them open.
+
+### Node 26 on Fedora
+
+Fedora 44 ships Node 20, 22 and 24. Their packages own `/usr/bin/node` and `/usr/bin/npm`. NodeSource's package ships the same paths, and nobody has shown that it installs beside them. So on a `dnf` machine the installer names nodejs.org's archive: install Node 26 under `/usr/local`, with `node`, `npm` and `npx` in `/usr/local/bin`. That directory comes first in the units' `PATH`, Fedora's own Node stays in `/usr/bin` for whatever else uses it, and `dnf` does not update the archive. Check the archive against the `SHASUMS256.txt` published beside it before you unpack it.
+
+Fedora's QEMU package is `qemu-system-x86-core`, which holds `qemu-system-x86_64`, and `qemu-img`.
 
 ### The agents' credentials
 
