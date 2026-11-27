@@ -70,6 +70,24 @@ tailscaled_environment() {
   fi
 }
 control_config_exists() { [ -e /etc/nexus/control.json ]; }
+firewalld_running() { [ "$(systemctl is-active firewalld 2>/dev/null)" = active ]; }
+# The firewalld zone that applies to tailscale0: the one it was put in, or else the default zone.
+firewalld_zone() {
+  local zone
+  zone=$(firewall-cmd --get-zone-of-interface=tailscale0 2>/dev/null) || zone=$(firewall-cmd --get-default-zone) || return 1
+  echo "$zone"
+}
+# What zone $1 lets in, as it runs or with --permanent as saved, one a line: `all` when its target accepts everything,
+# and each port or range, with its protocol, that its ports and services open. Rich rules are not read.
+firewalld_allowed() {
+  local zone=$1 mode=${2:-} rules service
+  rules=$(firewall-cmd ${mode:+"$mode"} --zone="$zone" --list-all) || return 1
+  [ "$(sed -n 's/^ *target: *//p' <<<"$rules")" != ACCEPT ] || echo all
+  sed -n 's/^ *ports: *//p' <<<"$rules" | tr ' ' '\n'
+  for service in $(sed -n 's/^ *services: *//p' <<<"$rules"); do
+    firewall-cmd ${mode:+"$mode"} --info-service="$service" | sed -n 's/^ *ports: *//p' | tr ' ' '\n' || return 1
+  done
+}
 
 # Mints a join token from the control plane's release, which holds the registry code and its dependencies.
 mint_join_token() {
@@ -131,6 +149,17 @@ tailnet_settings() {
   }'
 }
 
+# Whether what firewalld_allowed printed, $2, lets in TCP port $1.
+firewalld_lets_in() {
+  local entry
+  while IFS= read -r entry; do
+    [ "$entry" != all ] || return 0
+    [[ $entry =~ ^([0-9]+)(-([0-9]+))?/tcp$ ]] || continue
+    [ "$1" -lt "${BASH_REMATCH[1]}" ] || [ "$1" -gt "${BASH_REMATCH[3]:-${BASH_REMATCH[1]}}" ] || return 0
+  done <<<"$2"
+  return 1
+}
+
 # Records every prerequisite this machine misses for the role, control or node, and changes nothing. $2 is the command
 # line to rerun.
 check_prerequisites() {
@@ -157,7 +186,7 @@ check_prerequisites() {
   local node_fix
   case $manager in
     apt) node_fix="curl -fsSL https://deb.nodesource.com/setup_26.x | sudo bash - && sudo apt-get install -y nodejs" ;;
-    dnf) node_fix="curl -fsSL https://rpm.nodesource.com/setup_26.x | sudo bash - && sudo dnf install -y nodejs" ;;
+    # Fedora's own nodejs owns /usr/bin/node, and NodeSource's package is not shown to install beside it.
     *) node_fix="Install Node 26 from https://nodejs.org/en/download into /usr/local." ;;
   esac
   if [ "$major" = none ] || [ "$major" -lt 26 ]; then
@@ -179,7 +208,7 @@ check_prerequisites() {
   if ! in_service_path "$qemu" || ! in_service_path qemu-img; then
     case $manager in
       apt) packages="sudo apt-get install -y qemu-system-x86 qemu-utils" ;;
-      dnf) packages="sudo dnf install -y $qemu-core qemu-img" ;;
+      dnf) packages="sudo dnf install -y qemu-system-x86-core qemu-img" ;;
       *) packages="Install QEMU so that $qemu and qemu-img are in $service_path." ;;
     esac
     miss "Pylons are QEMU VMs, and $qemu or qemu-img is not in $service_path." "$packages"
@@ -212,6 +241,28 @@ check_prerequisites() {
     done
   else
     warn "ss is missing, so ports ${ports[*]} were not checked. A service already on one stops Nexus's from starting." "Install iproute2, which brings ss, and check again"
+  fi
+
+  # The control plane and the probe listen on the tailnet address, where firewalld's zone for tailscale0 applies.
+  # Laptops and nodes call the control plane on 7470 and 7443, and the control plane and the peer probes that copy
+  # images call the probe on 7480. The preview gateway listens on 127.0.0.1, so only tailscaled here calls it.
+  local zone runtime saved called=(7480) closed=()
+  [ "$role" != control ] || called=(7470 7443 7480)
+  if in_service_path firewall-cmd && firewalld_running; then
+    if [ "$(uid)" != 0 ]; then
+      warn "firewalld runs here, and only root can read its rules, so whether tailscale0 lets in TCP ${called[*]} was not checked." "$rerun"
+    elif zone=$(firewalld_zone) && runtime=$(firewalld_allowed "$zone") && saved=$(firewalld_allowed "$zone" --permanent); then
+      for port in "${called[@]}"; do
+        { firewalld_lets_in "$port" "$runtime" && firewalld_lets_in "$port" "$saved"; } || closed+=("$port")
+      done
+      [ ${#closed[@]} = 0 ] \
+        || $short "firewalld's zone $zone, which applies to tailscale0, does not let in TCP ${closed[*]}, so other machines on the tailnet are refused there. Adding the ports leaves the zone's other rules as they are." \
+          "sudo firewall-cmd --zone=$zone$(printf ' --add-port=%s/tcp' "${closed[@]}")" \
+          "sudo firewall-cmd --permanent --zone=$zone$(printf ' --add-port=%s/tcp' "${closed[@]}")"
+    else
+      warn "firewalld runs here, and its rules for tailscale0 could not be read, so TCP ${called[*]} was not checked." \
+        "sudo firewall-cmd --get-zone-of-interface=tailscale0 || sudo firewall-cmd --get-default-zone names the zone, and sudo firewall-cmd --zone=<zone> --list-all reads it"
+    fi
   fi
 
   local user home
