@@ -134,8 +134,9 @@ const owned = (of: readonly { owner?: Person }[]) => of.some((t) => (t.owner ?? 
  */
 async function mineOf(api: Api, of: readonly { owner: Person }[], everyone: boolean): Promise<(t: { owner: Person }) => boolean> {
   if (everyone || !owned(of)) return () => true;
-  const { login } = await api("GET", "/v1/whoami") as Whoami;
-  return (t) => login === null || t.owner === login;
+  // A control plane from before whoami named the login lists everyone's.
+  const { login } = await api("GET", "/v1/whoami") as Partial<Whoami>;
+  return (t) => login == null || t.owner === login;
 }
 
 export const threadsCommands: Readonly<Record<string, Command>> = {

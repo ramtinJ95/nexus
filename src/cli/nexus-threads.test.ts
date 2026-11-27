@@ -586,11 +586,11 @@ test("show reads only a refusal coded queued as a queued thread, and passes any 
 
 test("threads lists only the caller's own on a shared install, with an Owner column, and --everyone lists everyone's", async () => {
   const row = (id: string, owner: string) => ({ id, owner, status: "active", attention: null, working: false, pylon: { actualState: "running", node, failed: null }, project: "acme", lastReplyAt: null, title: `${id}'s` });
-  const listing = (rows: readonly ReturnType<typeof row>[], login: string | null) => {
+  const listing = (rows: readonly ReturnType<typeof row>[], login: string | null | undefined) => {
     const asked: string[] = [];
     const api: Api = async (method, path) => {
       asked.push(path.split("?")[0]!);
-      return path.startsWith("/v1/threads") ? rows : path.startsWith("/v1/queued") ? [] : { login };
+      return path.startsWith("/v1/threads") ? rows : path.startsWith("/v1/queued") ? [] : login === undefined ? {} : { login };
     };
     const run = async (...flags: string[]) => (await threadsCommands.threads!.run(api, [], Object.fromEntries(flags.map((f) => [f, true])), null!, { io: { env: {}, stdout: {} } } as never)) as { json: { id: string }[]; text: string };
     return { asked, run };
@@ -603,6 +603,8 @@ test("threads lists only the caller's own on a shared install, with an Owner col
   assert.deepEqual((await shared.run("everyone")).json.map((r) => r.id), ["th-a", "th-b"]);
   const device = listing([row("th-a", "alice@example.com")], null);
   assert.deepEqual((await device.run()).json.map((r) => r.id), ["th-a"], "a device that is no person lists everyone's");
+  const older = listing([row("th-a", "alice@example.com"), row("th-b", "bob@example.com")], undefined);
+  assert.deepEqual((await older.run()).json.map((r) => r.id), ["th-a", "th-b"], "a control plane whose whoami names no login lists everyone's");
   const solo = listing([row("th-a", "operator")], null);
   const text = (await solo.run()).text;
   assert.ok(!text.includes("Owner") && !solo.asked.includes("/v1/whoami"), "a solo install's list is as it was, and asks no whoami");

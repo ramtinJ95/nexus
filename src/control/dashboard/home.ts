@@ -43,8 +43,8 @@ export function home(c: Context, h: HomeView, dialogs: Pick<Shell, "start" | "ad
 <div class="split-peek" id="peek" data-live>${peekView(c, h, carded ? null : peek)}</div>
 <section class="split-flight" id="in-flight" aria-labelledby="flight-h">
 <div class="ov-head flight-head"><h2 id="flight-h">In flight</h2><span class="count" id="flight-n" data-live>${ownCount(flying, flyingMine)}</span>
-${c.mine?.person != null && html`<div class="seg-bar flight-owners" role="radiogroup" aria-label="Whose threads"><label class="seg-tab"><input type="radio" name="flight-owners" value="mine" id="owners-mine" checked>Mine</label><label class="seg-tab"><input type="radio" name="flight-owners" value="all" id="owners-all">Everyone</label></div>`}
-<div class="seg-bar flight-view" role="radiogroup" aria-label="List the work"><label class="seg-tab"><input type="radio" name="flight-view" value="phase" id="view-phase" checked>By phase</label><label class="seg-tab"><input type="radio" name="flight-view" value="project" id="view-project">By project</label></div></div>
+${c.mine?.person != null && html`<div class="seg-bar flight-owners" role="radiogroup" aria-label="Whose threads"><label class="seg-tab"><input type="radio" name="flight-owners" value="mine" id="owners-mine" checked>Mine</label><label class="seg-tab"><input type="radio" name="flight-owners" value="all" id="owners-all">Everyone</label></div>
+`}<div class="seg-bar flight-view" role="radiogroup" aria-label="List the work"><label class="seg-tab"><input type="radio" name="flight-view" value="phase" id="view-phase" checked>By phase</label><label class="seg-tab"><input type="radio" name="flight-view" value="project" id="view-project">By project</label></div></div>
 <div class="flight" id="flight" data-live>${flightStack(placed, peeked)}</div>
 <div class="flight-projects" id="overview" data-live>${overview(c, h)}</div>
 </section>
@@ -73,8 +73,8 @@ function table(c: Context, offline: ReadonlySet<NodeName>, threads: readonly Thr
   const [label, tone] = threadState(r, c.now);
   const owned = ownedBy(c, t.owner);
   return html`<tr${dims(r) && html` class="dim"`}${ownerAttrs(owned)}>
-<td><span class="ov-title">${dot(tone, label)}<a href="/threads/${t.id}">${t.title}</a>${t.status !== "active" && html`<span class="tag">${t.status}</span>`}</span></td>
-${owned !== undefined && html`<td>${ownerName(owned)}</td>`}
+<td><span class="ov-title">${dot(tone, label)}<a href="/threads/${t.id}">${t.title}</a>${t.status !== "active" && html`<span class="tag">${t.status}</span>`}</span></td>${owned !== undefined && html`
+<td>${ownerName(owned)}</td>`}
 <td class="wide">${state(desired, desiredTone[desired])}</td>
 <td>${state(...actualBadge[r.pylon.actualState])}</td>
 <td class="wide">${r.pylon.node}${offline.has(r.pylon.node) && html` <span class="tag">offline</span>`}</td>
@@ -100,17 +100,29 @@ ${queued.length > 0 && html`<h3 class="ov-sub">Queued</h3><table class="ov ov-qu
   const [label, tone] = queuedLook(q);
   const owned = ownedBy(c, q.owner);
   return html`<tr${ownerAttrs(owned)}>
-<td><span class="ov-title">${dot(tone, label)}<a href="/threads/${q.id}">${q.title}</a><span class="tag">${label}</span></span></td>
-${owned !== undefined && html`<td>${ownerName(owned)}</td>`}
+<td><span class="ov-title">${dot(tone, label)}<a href="/threads/${q.id}">${q.title}</a><span class="tag">${label}</span></span></td>${owned !== undefined && html`
+<td>${ownerName(owned)}</td>`}
 <td>${q.waits.map((w) => html`<span class="ov-wait">${c.title(w.thread)}: ${w.why}</span>`)}</td>
 <td class="wide">${q.node}</td>
 </tr>`;
 })}</tbody>
 </table>`}
-${quiet.length > 0 && html`<details class="ov-closed" id="quiet-${p.id}"><summary>${quietLabel(quiet)}</summary>${table(c, offline, quiet.slice(0, foldCap))}${quiet.length > foldCap && html`<a class="link" href="${foldHref("quiet", p.id)}">All ${quiet.length} quiet</a>`}</details>`}
+${quiet.length > 0 && quietFold(c, offline, p.id, quiet)}
 ${closed.archived + closed.deleted > 0 && html`<p class="ov-closed" id="closed-${p.id}"><a href="${foldHref("closed", p.id)}">${closedLabel(closed)}</a></p>`}
 </section>`;
 })}`;
+}
+
+/**
+ * A project's quiet threads, folded, the first `foldCap` listed. On a shared install it lists the caller's own first
+ * `foldCap` as well, however many newer ones are someone else's, so the Mine switch never hides the fold's every row.
+ */
+function quietFold(c: Context, offline: ReadonlySet<NodeName>, project: string, quiet: readonly Thread[]): Html {
+  const person = c.mine?.person ?? null;
+  const own = person === null ? quiet : quiet.filter((t) => t.owner === person);
+  const listed = new Set([...quiet.slice(0, foldCap), ...own.slice(0, foldCap)]);
+  const label = own === quiet ? quietLabel(quiet) : html`<span class="n-mine">${quietLabel(own)}</span><span class="n-all">${quietLabel(quiet)}</span>`;
+  return html`<details class="ov-closed" id="quiet-${project}"${own.length === 0 && " data-theirs"}><summary>${label}</summary>${table(c, offline, quiet.filter((t) => listed.has(t)))}${quiet.length > foldCap && html`<a class="link" href="${foldHref("quiet", project)}">All ${quiet.length} quiet</a>`}</details>`;
 }
 
 const foldNames = { quiet: "Quiet threads", closed: "Archived and deleted threads" } as const;

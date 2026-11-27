@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { attachPathOf, attachTo, deployment, image, laptop, node, project, testApi } from "../test-support/api-kit.ts";
 import { tailnet, type WhoisAnswer } from "../test-support/people.ts";
+import { addThread, observeNode } from "../test-support/registry-kit.ts";
 import { parseWhois, type TailnetCaller } from "../node-base/tailscaled.ts";
 import { operator, peopleOf } from "./people.ts";
 import type { ImageId, Person, TailnetNodeId, ThreadId } from "../ids.ts";
@@ -261,4 +262,17 @@ test("on a shared install the home page opens on the caller's own threads, its s
   assert.match(home, /id="flight-n" data-live><span class="n-mine">1<\/span><span class="n-all">2<\/span>/);
   const page = (await s.raw(`/threads/${hers.body.id}`)).body.toString();
   assert.match(page, new RegExp(`Started by ${alice} · `), "the page names the owner, not the device");
+});
+
+test("on a shared install the quiet fold lists the caller's own quiet threads however many newer ones are someone else's", async (t) => {
+  const s = await shared(t);
+  const day = Date.now() - 3 * 86_400_000;
+  const quiet = (title: string, owner: Person, at: number) => addThread(s.registry, { thread: { title, owner, createdAt: at, lastHumanActivityAt: day } });
+  const his = quiet("bob's quiet", bob, day);
+  for (let i = 0; i < 101; i++) quiet(`alice's ${i}`, alice, day + 1000 + i);
+  observeNode(s.registry);
+  s.as(answer(tailnet.bob));
+  const fold = (await s.raw("/")).body.toString().split('<details class="ov-closed" id="quiet-acme"')[1]?.split("</details>")[0] ?? "";
+  assert.ok(fold.includes(`href="/threads/${his.id}"`), "bob's quiet thread is listed past alice's 101 newer ones");
+  assert.match(fold, /<summary><span class="n-mine">1 quiet for over \d+ hours<\/span><span class="n-all">102 quiet for over \d+ hours<\/span><\/summary>/);
 });

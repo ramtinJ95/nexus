@@ -137,7 +137,7 @@ const queuedRow = (q: QueuedThread) => {
 /** A queued thread a start refused or another thread blocks waits on the person. */
 export const queuedTable = (queued: readonly QueuedThread[], colour: boolean, owners = false) =>
   table(["Queued", "State", "Waits", "Node", "Project", "Queued at", ...owners ? ["Owner"] : [], "Title"],
-    queued.map((q) => owners ? queuedRow(q).toSpliced(6, 0, q.owner) : queuedRow(q)), (i) => colour && queued[i]!.blocked ? "failed" : null);
+    queued.map((q) => owners ? queuedRow(q).toSpliced(6, 0, q.owner ?? "-") : queuedRow(q)), (i) => colour && queued[i]!.blocked ? "failed" : null);
 
 export function queuedText(q: QueuedThread): string {
   const { cpus, memoryGiB, diskGiB } = q.resources;
