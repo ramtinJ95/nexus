@@ -189,8 +189,28 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `login claude\|github` | `PUT /v1/logins/<kind>` with `{"token": string}`, the token read from stdin. A terminal's stdin is refused, so the token never shows. A GitHub token is stored with the git identity GitHub's `GET /user` gives for it, and one GitHub refuses (400) or cannot be asked about (502) is not stored | `Logins`, `{ person: string, set: { claude: boolean, github: boolean } }`. No route answers a stored token |
 | `logout claude\|github` | `DELETE /v1/logins/<kind>` with `{}`. A kind that is not set stays unset | `Logins` |
 | `logins` | `GET /v1/logins` | `Logins`, the caller's own. On an install without `people` the person is `operator` |
+| `own` | `GET /v1/own` | `Own`, the caller's own hosts and secrets, by name and host. No route answers a secret's value |
+| `host add <host>` | `PUT /v1/own/hosts/<host>`. A host is one lower-case hostname of two labels or more, at most 253 characters, with no wildcard, or 400. Adding one that is there changes nothing. A person adds at most 64, and one more answers 409 | `Own` |
+| `host remove <host>` | `DELETE /v1/own/hosts/<host>`. One that is not there stays absent | `Own` |
+| `secret set <NAME> <host>...` | `PUT /v1/own/secrets/<NAME>` with `{"value": string, "hosts": string[]}`, the value read from stdin. A terminal's stdin is refused, so the value never shows. The value takes the probe's rules, at most 16384 bytes of letters, digits and `-._~+/` with optional `=` padding, and 1 to 16 hosts, none of them `github.com` or `api.github.com`, or 400. A name `nexus login` gives a pylon, `ANTHROPIC_API_KEY` or `NEXUS_CHATGPT_TOKEN` answers 400. A person adds at most 32, and one more answers 409. No refusal repeats the value | `Own` |
+| `secret remove <NAME>` | `DELETE /v1/own/secrets/<NAME>`. One that is not there stays absent | `Own` |
+| `people` | `GET /v1/people`, which only an admin may read, so an engineer gets 403 and exit code 3 | `PeopleAdded`, each person in `people` with their role and what `Own` shows of them |
+
+`Own` and `PeopleAdded`, which `own`, `host`, `secret` and `people` print with `--json`:
+
+<!-- types: src/contract/own.ts OwnSecret Own PersonAdded PeopleAdded -->
+```ts
+// src/contract/own.ts
+interface OwnSecret { name: string; hosts: readonly string[] }
+/** What a person added for their own pylons, as every route answers it: names and hosts, never a value. */
+interface Own { person: string; hosts: readonly string[]; secrets: readonly OwnSecret[] }
+interface PersonAdded extends Own { role: "admin" | "engineer" }
+interface PeopleAdded { people: readonly PersonAdded[] }
+```
 
 These commands need more explanation:
+
+- `own`, `host`, `secret` and `people` work on a shared install, where each person keeps a list of hosts and named secrets for their own pylons, in their own file beside their logins. A pylon's allowlist and secrets are its project's plus its owner's, fixed when its thread starts, so `bob`'s pylons never reach a host `alice` added or get her secret. A secret of the name of one of its project's grants takes that grant's place in its owner's pylons. A running pylon keeps the hosts and secrets it started with. A changed value reaches it once its node's probe restarts, and a removed one stays in the probe's memory until then. A template's build reaches its project's hosts only, so it is the same for every person. On a solo install each route answers 409 with code `solo-install`, and exit code 5, since its one person adds hosts and secrets to the project with `project edit`.
 
 - `start` without `--title` takes the title from the first non-empty line of `--message`, trimmed. A line longer than 80 characters keeps its first 80 and gets `...` appended, so such a title is 83 characters. It needs at least one of the two. If the thread starts but its first message fails, the command fails with the message's exit code, and the error names the thread that was started. With `--request-id`, running the same command again sends it.
 - `start --commit` on a scratch project fails with exit code 64, because its repository has no commit to check out. `--branch` names the empty repository's first branch instead.

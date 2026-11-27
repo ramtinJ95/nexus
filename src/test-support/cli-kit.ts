@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import type { Thread } from "../control/thread-store.ts";
 import { claudeWorkerAt } from "./registry-kit.ts";
 import type { ReviewLoop } from "../control/review.ts";
+import type { People } from "../control/people.ts";
 import { startImageRollout } from "../control/image-rollout.ts";
 import { usageBackfill } from "../control/usage-backfill.ts";
 import { testApi } from "./api-kit.ts";
@@ -142,7 +143,7 @@ export async function socksProxy(t: TestContext, reply: number | "close" = 0, po
 /** What `nexus deploy main` resolves to in the CLI tests, by the branch the control plane releases from. */
 export const branchTips: Readonly<Record<string, string>> = { main: "a".repeat(40), multiplayer: "c".repeat(40) };
 
-export async function setup(t: TestContext, setupOptions: { queue?: boolean; https?: boolean; reviews?: ReviewLoop; releaseBranch?: string } = {}) {
+export async function setup(t: TestContext, setupOptions: { queue?: boolean; https?: boolean; reviews?: ReviewLoop; releaseBranch?: string; people?: People } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "nexus-cli-"));
   const certificate = setupOptions.https === true ? await testCertificate(dir, apiName) : null;
   /** What the node's probe answers a guest command with. Tests replace it. */
@@ -167,6 +168,7 @@ export async function setup(t: TestContext, setupOptions: { queue?: boolean; htt
     }),
     usageBackfill: (registry) => usageBackfill({ registry, counter: { readWhole: () => Promise.reject(new Error("the CLI tests read no pylon")) }, wake: () => {}, intervalMs: 3_600_000, log: () => {} }),
     ...setupOptions.reviews === undefined ? {} : { reviews: setupOptions.reviews },
+    ...setupOptions.people === undefined ? {} : { people: setupOptions.people },
     deployment: {
       self: "nFIREBAT" as TailnetNodeId, deployers: new Set([laptop]), keys: {}, resolveMain: async (branch) => branchTips[branch]!,
       ...setupOptions.releaseBranch === undefined ? {} : { releaseBranch: setupOptions.releaseBranch },
