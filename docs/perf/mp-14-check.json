@@ -49,7 +49,8 @@
         "exitCode": 1,
         "failed": 1
       }
-    ]
+    ],
+    "note": "Both head runs also failed two snapshot tests, src/contracts.test.ts:185 (the new landing-check script) and src/docs.test.ts:56 (docs/cli.md embeds the review phase type, which gained onGitHub). 5230879c regenerates both and changes no code. Each run still ran the whole typecheck and test suite."
   },
   "note": "Every run on both sides exited 1 on the same one test, src/cli/completion.test.ts:34, whose thread-ID completion returns only @last in this pylon. It fails the same way at a9deaa95 run alone, and this slice changes nothing under src/cli. Each run still ran the whole typecheck and test suite. An earlier attempt was discarded because the author's own typecheck and tests ran beside it.",
   "result": {
@@ -57,5 +58,20 @@
     "headMedianMs": 433930.0,
     "change": "+0.3%",
     "verdict": "pass: the head median is 0.3% above base, inside the 10% limit"
+  },
+  "confirm": {
+    "commit": "5230879c",
+    "runs": [
+      {
+        "probe": "check",
+        "revision": "5230879c",
+        "dirty": false,
+        "dir": "/tmp/claude-1000/perf/head",
+        "wallMs": 420120,
+        "exitCode": 1,
+        "failed": 1
+      }
+    ],
+    "note": "One run at the final head. Its one failure is src/cli/completion.test.ts:34, the same as at base. Not part of the alternation."
   }
 }
