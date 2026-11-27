@@ -166,7 +166,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     const { request, caller, owner, role, queued, key } = start;
     const project = checkStart(registry, start);
     // The owner's logins are read once, at the start, and the project's and the install's git identity are not used.
-    const ownerIdentity = people.shared ? await owners!.forStart(owner) : null;
+    const ownerLogins = people.shared ? await owners!.forStart(owner) : null;
     // Decided once from the project as read now, so the thread records the rules its first message carries.
     const rules = standingRulesFor(project, start);
     const prompt = claudePromptOf(start);
@@ -193,6 +193,10 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
         ? new Refusal("conflict", `${node}'s probe has not reported yet, so whether it can start a Claude session with a first prompt of ${claudePrompt.length} characters is unknown`)
         : new Refusal("conflict", `${node}'s probe cannot start a Claude session with a first prompt of ${claudePrompt.length} characters, over the ${inlinePromptChars} its command line takes, so it needs this release of Nexus on its probe`, "probe-too-old");
     }
+    // A node's last observation outlives a restart, so only a node that never reported is let by, as for a long prompt.
+    if (people.shared && observed != null && observed.ownerGrants !== true) {
+      throw new Refusal("conflict", `${node}'s probe would boot an owner's logins from its secret file when it was not handed them, so on a shared install it needs this release of Nexus on its probe`, "probe-too-old");
+    }
     // `auto` passes such a node by, and a review's start beside its builder goes there all the same.
     const short = named || placement.how === "default" ? namedDiskShort(registry, node, resources) : null;
     if (short !== null) throw new Refusal("conflict", `${node} ${short}`);
@@ -213,7 +217,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
       const conversationId = request.claude === undefined && role !== "check" && role !== "verify" ? await harness.startThread({ threadId: id, pylonId }) : null;
       const now = registry.now();
       const { setup, firstBoot, repo } = setUp(project, read, freshRepo, image, branch, node, now);
-      const boot: Omit<BootInputs, "source"> = { pylonId, image, resources, gitIdentity: ownerIdentity ?? gitIdentityOf(project, gitIdentity), network, repo, dotfiles };
+      const boot: Omit<BootInputs, "source"> = { pylonId, image, resources, gitIdentity: ownerLogins?.identity ?? gitIdentityOf(project, gitIdentity), network, repo, dotfiles };
       const t: Thread = {
         id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, owner, createdAt: now,
         // Starting a thread is human activity, so its pylon is wanted at once.
@@ -230,7 +234,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
         liveHash: liveHashOf(live),
       });
       // Before the pylon's row exists, so no pass of the loop spawns it first. One that fails is handed on the node's next snapshot.
-      if (ownerIdentity !== null) await owners!.hand(node, pylonId, owner);
+      if (ownerLogins !== null) await owners!.hand(node, pylonId, owner, ownerLogins.owned);
       registry.threads.createThread({ ...t, ...rules === null ? {} : { standingRules: rules } }, pylon, { ...claudePrompt === undefined ? {} : { claude: { prompt: claudePrompt, model: request.model } }, queued: queued !== undefined, key });
       wake(node);
       return t;

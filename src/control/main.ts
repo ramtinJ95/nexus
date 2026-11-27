@@ -197,7 +197,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     registry, probes: [...probeMap.values()], previewPorts: config.previewPorts, gitIdentity: config.gitIdentity, ingest,
     onSnapshot(node, observation) {
       handoff?.observed(observation);
-      owners?.observed(node, observation.probeBootId);
+      owners?.observed(node, observation);
       peers.observed(node, observation.probeBootId);
     },
   }));

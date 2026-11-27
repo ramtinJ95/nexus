@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { dir, image, testApi } from "../test-support/api-kit.ts";
+import { testObservation } from "../test-support/kit.ts";
 import { loginStore } from "./logins.ts";
 import { tailnet, type WhoisAnswer } from "../test-support/people.ts";
 import { parseWhois } from "../node-base/tailscaled.ts";
 import { networkOptions } from "../pylon-vm/network.ts";
 import type { BootSpec } from "../pylon-vm/contracts.ts";
 import type { ImageId, NodeName, Person, PylonId } from "../ids.ts";
+import type { NodeObservation } from "../protocol/observations.ts";
 import { peopleOf } from "./people.ts";
 import { nodeSecrets } from "../probe/config.ts";
 
@@ -111,18 +113,22 @@ test("a probe that restarted is handed each owner's values again, for that owner
     pylons[who] = (await s.call("POST", "/v1/threads", { project: "mono", title: `${who}'s work` })).body.pylonId;
   }
   const owners = s.owners!;
-  s.pylonSecrets.length = 0;
-  owners.observed("rj-firebat" as NodeName, "boot-2");
-  await owners.close();
-  const handed = s.pylonSecrets.map(([pylon, name, value]) => `${pylon} ${name} ${value}`).sort();
-  assert.deepEqual(handed, [
+  const node = "rj-firebat" as NodeName;
+  const handed = async (probeBootId: string, phase: "booting" | "running") => {
+    s.pylonSecrets.length = 0;
+    owners.observed(node, { probeBootId, pylons: Object.values(pylons).map((pylonId) => ({ pylonId, phase }) as NodeObservation["pylons"][number]) });
+    await owners.close();
+    return s.pylonSecrets.map(([pylon, name, value]) => `${pylon} ${name} ${value}`).sort();
+  };
+  const both = [
     `${pylons.alice} CLAUDE_CODE_OAUTH_TOKEN sk-ant-oat01-alice-made-up`, `${pylons.alice} GH_TOKEN ghp_aliceMadeUp`,
     `${pylons.bob} CLAUDE_CODE_OAUTH_TOKEN ${bobClaude}`, `${pylons.bob} GH_TOKEN ${bobGithub}`,
-  ].sort());
-  s.pylonSecrets.length = 0;
-  owners.observed("rj-firebat" as NodeName, "boot-2");
-  await owners.close();
-  assert.deepEqual(s.pylonSecrets, [], "the same probe boot is not handed them twice");
+  ].sort();
+  assert.deepEqual(await handed("boot-1", "booting"), both, "a pylon still booting is handed its own values");
+  assert.deepEqual(await handed("boot-1", "booting"), both, "and again while it boots, since its boot may have read them before they came");
+  assert.deepEqual(await handed("boot-1", "running"), both, "and once more when it runs, where the probe swaps them in");
+  assert.deepEqual(await handed("boot-1", "running"), [], "then not again on the same probe boot");
+  assert.deepEqual(await handed("boot-2", "running"), both, "a probe that restarted is handed them again");
   assert.ok(s.logged.every((line) => !line.includes(bobGithub) && !line.includes(bobClaude)), "no log line holds a token");
 });
 
@@ -137,4 +143,17 @@ test("a solo install boots with the project's grants, the node's values and the 
   assert.deepEqual(boot.network.secrets, mono.secrets);
   assert.deepEqual(boot.gitIdentity, { name: "Project", email: "project@example.com" });
   assert.deepEqual(s.pylonSecrets, []);
+});
+
+test("a shared install starts no pylon on a node whose probe would fall back to its secret file", async (t) => {
+  const s = await shared(t);
+  await s.call("PUT", "/v1/logins/claude", { token: "sk-ant-oat01-alice-made-up" });
+  await s.call("PUT", "/v1/logins/github", { token: "ghp_aliceMadeUp" });
+  const { ownerGrants: _, ...olderProbe } = testObservation("rj-firebat" as NodeName, { artifacts: [image.id] });
+  s.registry.threads.ingested(olderProbe, []);
+  const refused = await s.call("POST", "/v1/threads", { project: "mono", title: "alice's work" });
+  assert.equal(refused.status, 409);
+  assert.equal(refused.body.code, "probe-too-old");
+  s.registry.threads.ingested(testObservation("rj-firebat" as NodeName, { artifacts: [image.id], ownerGrants: true }), []);
+  assert.equal((await s.call("POST", "/v1/threads", { project: "mono", title: "alice's work" })).status, 201);
 });

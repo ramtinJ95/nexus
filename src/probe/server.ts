@@ -231,6 +231,7 @@ export async function startProbe(options: ProbeOptions): Promise<Probe> {
       grants: { secrets: options.secrets.names(), gitSsh: backend.gitSsh },
       ...backend.nestedVirtualization ? { nestedVirtualization: true as const } : {},
       longPrompts: true,
+      ownerGrants: true,
       heldSecrets,
     };
   }

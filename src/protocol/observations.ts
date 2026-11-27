@@ -62,6 +62,11 @@ export interface NodeObservation {
    * refuses either.
    */
   longPrompts?: true;
+  /**
+   * True from a probe that boots a grant marked `owner` with the pylon's own value only, never its secret file's. An
+   * older probe would fall back to the file, so a shared install starts no pylon on its node.
+   */
+  ownerGrants?: true;
   /** The heldSecrets this probe takes from the control plane. */
   heldSecrets: readonly string[];
 }
@@ -255,6 +260,7 @@ const observationSchema = z.looseObject({
   grants: unchecked<NodeObservation["grants"]>(),
   nestedVirtualization: unchecked<true>(),
   longPrompts: unchecked<true>(),
+  ownerGrants: unchecked<true>(),
   heldSecrets: unchecked<readonly string[]>(),
 }) satisfies z.ZodType<NodeObservation>;
 
