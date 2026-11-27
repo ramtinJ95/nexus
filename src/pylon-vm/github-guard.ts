@@ -23,7 +23,7 @@ export const guardName = "nexus-github-guard";
  * - `review`: the review's event, if any, is COMMENT or REQUEST_CHANGES. No event leaves a review pending.
  * - `submit`: the event is COMMENT or REQUEST_CHANGES.
  * - `service`: the query names git-upload-pack or git-receive-pack.
- * - `push`: no ref the push updates is the project's default branch.
+ * - `push`: no ref the push updates is the project's default branch, and the push deletes no ref.
  */
 export const allowList: readonly Allowed[] = [
 	{ rest: "GET *", why: "every read: gh pr view, gh pr checks, gh api, and the agent's own curl" },
@@ -68,7 +68,7 @@ export const allowList: readonly Allowed[] = [
 	{ graphql: "removeReaction", why: "take a reaction back" },
 	{ git: "GET /info/refs", check: "service", why: "the ref list before every clone, fetch and push" },
 	{ git: "POST /git-upload-pack", why: "clone and fetch" },
-	{ git: "POST /git-receive-pack", check: "push", why: "push a branch other than the default branch" },
+	{ git: "POST /git-receive-pack", check: "push", why: "push a branch other than the default branch. A push that deletes a ref is refused, as the REST delete of a ref is, since deleting another engineer's branch closes their pull request" },
 ];
 
 type Check = "review" | "submit" | "service" | "push";
@@ -312,11 +312,13 @@ function gitRefusal(method: string, path: string, request: GuardRequest, guard: 
 	if (row.check !== "push") return null;
 	if (guard.defaultBranch === null) return "this pylon booted before Nexus told the guard its project's default branch, so it cannot tell a push to it from another. Start a new thread";
 	const bytes = decodedBody(request);
-	const refs = bytes === null ? null : pushedRefs(bytes);
-	if (refs === null) return "the push's command list cannot be read";
+	const commands = bytes === null ? null : pushedRefs(bytes);
+	if (commands === null) return "the push's command list cannot be read";
 	const same = (ref: string) => ref.normalize("NFC").toLowerCase();
 	const branch = same(`refs/heads/${guard.defaultBranch}`);
-	return refs.some((ref) => same(ref) === branch) ? `a push to the default branch ${guard.defaultBranch}` : null;
+	if (commands.some(({ ref }) => same(ref) === branch)) return `a push to the default branch ${guard.defaultBranch}`;
+	const deleted = commands.find((c) => c.deletes);
+	return deleted === undefined ? null : `a push that deletes ${deleted.ref}`;
 }
 
 /**
@@ -324,8 +326,8 @@ function gitRefusal(method: string, path: string, request: GuardRequest, guard: 
  * NUL and the capabilities, up to the flush packet before the pack. Shallow lines may come first. A ref name is UTF-8,
  * as git writes it. Null for anything else, a signed push's certificate and a name that is not UTF-8 included.
  */
-export function pushedRefs(body: Buffer): string[] | null {
-	const refs: string[] = [];
+export function pushedRefs(body: Buffer): { ref: string; deletes: boolean }[] | null {
+	const refs: { ref: string; deletes: boolean }[] = [];
 	for (let i = 0; i + 4 <= body.length; ) {
 		const head = body.subarray(i, i + 4).toString("latin1");
 		if (!/^[0-9a-f]{4}$/i.test(head)) return null;
@@ -342,7 +344,7 @@ export function pushedRefs(body: Buffer): string[] | null {
 		if (/^shallow [0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(line)) continue;
 		const command = /^([0-9a-f]{40}|[0-9a-f]{64}) ([0-9a-f]{40}|[0-9a-f]{64}) (refs\/\S+)$/.exec(line);
 		if (command === null) return null;
-		refs.push(command[3]!);
+		refs.push({ ref: command[3]!, deletes: /^0+$/.test(command[2]!) });
 	}
 	return null;
 }

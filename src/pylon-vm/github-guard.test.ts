@@ -137,7 +137,7 @@ const unprobed: [string, Recorded[]][] = [
 /** Shapes the prototype's parse had to survive, beyond its probes. */
 const shapes: [string, Recorded[]][] = [
 	["a pushed branch and the default branch in one push", [push("a branch and the default branch", refuse(/push to the default branch main/))]],
-	["a deleted branch", [push("delete a branch", pass)]],
+	["a deleted branch", [push("delete a branch", refuse(/a push that deletes refs\/heads\/feature/))]],
 	["a tag and a branch", [push("a tag and a branch", pass)]],
 	["a push whose command list ends early", [req("POST", `https://github.com/${repo}/git-receive-pack`, refuse(/cannot be read/), Buffer.from(pushes["new branch"]!, "base64").subarray(0, 60))]],
 	["a gzip push", [req("POST", `https://github.com/${repo}/git-receive-pack`, pass, gzipSync(Buffer.from(pushes["new branch"]!, "base64")), { "content-encoding": "gzip" })]],
@@ -192,7 +192,7 @@ test("a default branch whose name is not ASCII is read from the push as git writ
 		return `${(Buffer.byteLength(text) + 4).toString(16).padStart(4, "0")}${text}`;
 	};
 	const body = Buffer.from(`${line("refs/heads/dévelop")}0000`, "utf8");
-	assert.deepEqual(pushedRefs(body), ["refs/heads/dévelop"]);
+	assert.deepEqual(pushedRefs(body), [{ ref: "refs/heads/dévelop", deletes: false }]);
 	assert.match(refusal({ ...push("new branch", pass), body }, { defaultBranch: "dévelop" }) ?? "passed", /default branch dévelop/);
 	assert.match(refusal({ ...push("new branch", pass), body }, { defaultBranch: "de\u0301velop" }) ?? "passed", /default branch/, "in either Unicode form");
 	const notUtf8 = Buffer.concat([Buffer.from(`${"0".repeat(40)} ${"1".repeat(40)} refs/heads/`), Buffer.from([0xff]), Buffer.from("\0 report-status\n")]);
@@ -220,7 +220,8 @@ test("every row of the allow-list says which operation of an engineer's agent ne
 });
 
 test("pushedRefs reads each command of a push and nothing after the flush", () => {
-	assert.deepEqual(pushedRefs(Buffer.from(pushes["a tag and a branch"]!, "base64")), ["refs/tags/v1", "refs/heads/feature"]);
+	assert.deepEqual(pushedRefs(Buffer.from(pushes["a tag and a branch"]!, "base64")), [{ ref: "refs/tags/v1", deletes: false }, { ref: "refs/heads/feature", deletes: false }]);
+	assert.deepEqual(pushedRefs(Buffer.from(pushes["delete a branch"]!, "base64")), [{ ref: "refs/heads/feature", deletes: true }]);
 	assert.deepEqual(pushedRefs(Buffer.from("0000")), []);
 	assert.equal(pushedRefs(Buffer.from("zzzz")), null);
 });
