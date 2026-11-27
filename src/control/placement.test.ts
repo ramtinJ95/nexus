@@ -324,3 +324,13 @@ test("a report freezes the clock so a health sample cannot expire between decisi
   assert.equal(report.nodes[0]!.memory!.availableGiB, 1);
   assert.deepEqual(report.nearest, { node: "a", missingGiB: 4 });
 });
+
+test("a start with its owner's logins and an SSH repo is refused on every node, though a node has the git SSH key", () => {
+  const registry = fakeRegistry([{ name: "node-a", total: 64, committed: 0 }]);
+  const keyed = registry.nodes.nodes().map((n) => ({ ...n, observation: { ...n.observation!, grants: { secrets: [], gitSsh: true } } }));
+  const withKey = { ...registry, nodes: { nodes: () => keyed } } as unknown as Parameters<typeof placeAuto>[0];
+  const ssh = { ...need(), repo: { kind: "clone", url: "git@github.com:acme/mono.git", checkout: { branch: "main", commit: "c0ffee" } } } as Parameters<typeof placeAuto>[1];
+  assert.equal(placeAuto(withKey, ssh).node, "node-a", "a solo install's start keeps SSH");
+  const owned = { ...ssh, network: { allowedHosts: [], secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com", "github.com"], owner: true as const }] } };
+  assert.throws(() => placeAuto(withKey, owned), { message: "no node can run this pylon: node-a cannot boot it: git on a shared install goes over HTTPS only, and the project's repoUrl git@github.com:acme/mono.git is SSH, so an admin adds the project again with its https:// URL" });
+});

@@ -142,7 +142,7 @@ export function featureRoutes(kit: ApiKit, options: ApiOptions, nodeHealth: (nam
     ...dashboardRoutes(kit, options, nodeHealth),
     ...releaseRoutes(kit, options),
     ...streamRoutes(kit),
-    ...projectRoutes(kit, options.features),
+    ...projectRoutes(kit, options.features, options.people?.shared === true),
     ...usageRoutes(kit, options.features),
     ...nodeRoutes(kit, nodeHealth, options.dotfiles, options.people?.shared === true),
     ...threadRoutes(kit, options.features),

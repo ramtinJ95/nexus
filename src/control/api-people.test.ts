@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { attachPathOf, attachTo, deployment, image, laptop, node, project, testApi } from "../test-support/api-kit.ts";
+import { attachPathOf, attachTo, deployment, image, laptop, node, project, sharedProject, testApi } from "../test-support/api-kit.ts";
 import { tailnet, type WhoisAnswer } from "../test-support/people.ts";
 import { parseWhois, type TailnetCaller } from "../node-base/tailscaled.ts";
 import { operator, peopleOf } from "./people.ts";
@@ -19,7 +19,7 @@ const carol = answer({ ...tailnet.bob, Node: { ...tailnet.bob.Node, StableID: "n
 async function shared(t: Parameters<typeof testApi>[0], options: Parameters<typeof testApi>[1] = {}) {
   let caller: TailnetCaller = answer(tailnet.alice);
   const s = await testApi(t, { people, allowed: new Set(), whois: async () => caller, ...options });
-  await s.call("POST", "/v1/projects", project);
+  await s.call("POST", "/v1/projects", sharedProject);
   await s.call("POST", "/v1/images", image);
   s.registry.images.setCurrentImage(image.id as ImageId);
   return { ...s, as(c: TailnetCaller) { caller = c; } };

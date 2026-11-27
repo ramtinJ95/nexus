@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { image, project, testApi } from "../../test-support/api-kit.ts";
+import { image, sharedProject, testApi } from "../../test-support/api-kit.ts";
 import { tailnet, type WhoisAnswer } from "../../test-support/people.ts";
 import { parseWhois, type TailnetCaller } from "../../node-base/tailscaled.ts";
 import type { ImageId, ThreadId } from "../../ids.ts";
@@ -23,7 +23,7 @@ async function shared(t: Parameters<typeof testApi>[0]) {
   } as never as ReviewLoop;
   let caller = as(tailnet.alice);
   const s = await testApi(t, { people, allowed: new Set(), whois: async () => caller, reviews });
-  await s.call("POST", "/v1/projects", project);
+  await s.call("POST", "/v1/projects", sharedProject);
   await s.call("POST", "/v1/images", image);
   s.registry.images.setCurrentImage(image.id as ImageId);
   const alice = (await s.call("POST", "/v1/threads", { project: "acme", title: "alice's" })).body.id as ThreadId;
@@ -76,7 +76,7 @@ test("on a shared install the admin's switch of a project to land or yolo is ref
     assert.deepEqual(await s.call("PATCH", "/v1/projects/acme", { autoReview: { mode } }), landingOff, mode);
     assert.deepEqual(await s.call("PATCH", "/v1/projects/acme", { autoReview: { land: true } }), landingOff, "an older CLI's land");
   }
-  assert.equal(s.registry.projects.project(project.id as never)!.autoReview ?? null, null);
+  assert.equal(s.registry.projects.project(sharedProject.id as never)!.autoReview ?? null, null);
   const review = await s.call("PATCH", "/v1/projects/acme", { autoReview: { mode: "review" } });
   assert.deepEqual([review.status, review.body.autoReview.mode], [200, "review"]);
 });

@@ -62,6 +62,9 @@ export const project = {
   resources: { cpus: 2, memoryGiB: 4, diskGiB: 10 }, allowedHosts: ["registry.npmjs.org"],
   secrets: [{ name: "STRIPE_KEY", hosts: ["api.stripe.com"] }], logins: ["chatgpt"], preSetup: null,
 };
+/** A shared install takes HTTPS git URLs only. */
+export const sharedProject = { ...project, repoUrl: "https://example.com/acme.git" };
+export const sharedDotfiles = { repo: "https://github.com/ramtin/dotfiles.git", ref: "main" };
 export const image = testImage();
 
 export const dotfiles = { repo: "git@github.com:ramtin/dotfiles.git", ref: "main" };
@@ -153,7 +156,7 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
   }
   const owners = apiOptions.people?.shared === true ? ownerLogins({ registry, logins, probes, log: (message) => { logged.push(message); } }) : undefined;
   const services = threadServices({
-    registry, harness, mirror, dotfiles: dots === null ? undefined : dots ?? dotfiles, gitIdentity, wake, gate: turnGate(() => false), people: apiOptions.people, owners,
+    registry, harness, mirror, dotfiles: dots === null ? undefined : dots ?? (apiOptions.people?.shared === true ? sharedDotfiles : dotfiles), gitIdentity, wake, gate: turnGate(() => false), people: apiOptions.people, owners,
     queue: queued === true || piped === true, planning: planned === true ? { replies: agentReader(registry, harness, claude).replies } : null,
   });
   const { startThread, queue, pipeline, planning: plans } = services.api;
@@ -173,7 +176,7 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
     // The control plane runs on rj-firebat and deploys nothing unless a test says so.
     ...(deployment === null ? {} : { deployment: deployment ?? { self: "nFIREBAT" as TailnetNodeId, deployers: new Set(), keys: {} } }),
     startThread,
-    dotfiles: dots === null ? undefined : dots ?? dotfiles,
+    dotfiles: dots === null ? undefined : dots ?? (apiOptions.people?.shared === true ? sharedDotfiles : dotfiles),
     features: { ...noFeatures, reviews, cleanup, doctor, queue, pipeline, planning: plans, images: images ?? null, usageBackfill: backfill ?? null },
     gate: turnGate(() => isDraining(registry.releases.drain(), registry.now())),
     health: () => null,

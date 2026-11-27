@@ -10,12 +10,11 @@ import type { NodeName, Person, PylonId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
 import { ownerGrants } from "../protocol/secret-grants.ts";
-import type { GitIdentity } from "../protocol/spawn.ts";
+import { ownerBoot, type GitIdentity } from "../protocol/spawn.ts";
 import type { LoginKind } from "../contract/logins.ts";
 import { singleFlight, type SingleFlight } from "../single-flight.ts";
 import type { Log } from "./log-once.ts";
 import type { LoginStore, Owned } from "./logins.ts";
-import { ownerBoot } from "./project.ts";
 import { Refusal } from "./refusal.ts";
 import type { Registry } from "./registry.ts";
 

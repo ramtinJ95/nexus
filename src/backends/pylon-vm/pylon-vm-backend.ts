@@ -17,7 +17,7 @@ import { artifactDirectory, manifestFiles, tarCodec } from "../../image/artifact
 import { type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type SecretSource, type VmBackend } from "../backend.ts";
 import { JobFailure } from "../../protocol/jobs.ts";
 import { buildImage as buildPylonImage } from "../../image/build.ts";
-import { minPylonMemoryGiB, minPylonMemoryReason, requiredArtifacts, type BootInputs, type LiveSpec, type RepoInit } from "../../protocol/spawn.ts";
+import { minPylonMemoryGiB, minPylonMemoryReason, requiredArtifacts, sshRefusal, type BootInputs, type LiveSpec, type RepoInit } from "../../protocol/spawn.ts";
 import { shellQuote as q } from "../../shell.ts";
 import { type CheckpointId, type ImageId, isCheckpointId, isImageId, isTemplateId, maxPylonIdLength, type PortableArtifactId, type PylonId } from "../../ids.ts";
 import { pylonIdSchema } from "../../protocol/fields.ts";
@@ -63,7 +63,7 @@ export interface PylonVmBackendOptions {
    * this host and authenticates upstream with this key, so the key never enters a pylon. Upstream host keys
    * are checked against knownHostsFile. Without it, a node boots only pylons whose remotes are HTTPS.
    * SSH egress is not governed by the allowlist: it reaches only the pylon's own repository and dotfiles
-   * remotes, and only to fetch from and push to them.
+   * remotes, and only to fetch from and push to them. A pylon booted with its owner's logins never gets it (sshRefusal).
    */
   gitSsh?: { privateKeyFile: string; knownHostsFile: string };
   /** The node's tailnet DNS name, which previews are published on. Each previewed service's PUBLIC_URL is on it. */
@@ -143,6 +143,30 @@ function bootRemotes(repo: RepoInit): string[] {
     case "clone": return [repo.url];
     case "empty": return [];
   }
+}
+
+type GitSsh = PylonVmBackendOptions["gitSsh"];
+
+async function gitSshOf(subject: string, remotes: SshRemote[], gitSsh: GitSsh): Promise<BootSpec["ssh"]> {
+  if (remotes.length === 0) return null;
+  checkSshRemotes(subject, remotes);
+  const named = remotes.map((r) => `${r.host}:${r.repo}`).join(", ");
+  if (gitSsh === undefined) throw new JobFailure("secret-missing", `${subject} uses ${named} over SSH, and this node has no git SSH key`);
+  if (!existsSync(gitSsh.knownHostsFile)) throw new JobFailure("secret-missing", `${subject} uses ${named} over SSH, and this node's known_hosts file ${gitSsh.knownHostsFile} is missing`);
+  try {
+    return { privateKey: await readFile(gitSsh.privateKeyFile, "utf8"), knownHostsFile: gitSsh.knownHostsFile, remotes };
+  } catch (err) {
+    throw new JobFailure("secret-missing", `${subject} uses ${named} over SSH, and this node's git SSH key ${gitSsh.privateKeyFile} is unreadable: ${(err as Error).message}`);
+  }
+}
+
+/** A boot's SSH: the node's key for its SSH remotes, none for a person's pylon on a shared install (sshRefusal). */
+export async function bootSsh(boot: Pick<BootInputs, "pylonId" | "network" | "repo" | "dotfiles">, gitSsh: GitSsh): Promise<BootSpec["ssh"]> {
+  const https = sshRefusal(boot);
+  if (https !== null) throw new JobFailure("invalid", `${boot.pylonId}: ${https}`);
+  // A scratch pylon has no remote of its own, so a repository it creates later is reached over HTTPS only.
+  const remotes = [...bootRemotes(boot.repo), ...boot.dotfiles === undefined ? [] : [boot.dotfiles.repo]].flatMap((url) => sshRemoteOf(url) ?? []);
+  return gitSshOf(boot.pylonId, remotes, gitSsh);
 }
 
 /**
@@ -251,20 +275,6 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     return assets;
   }
 
-  async function gitSshOf(subject: string, remotes: SshRemote[]): Promise<BootSpec["ssh"]> {
-    if (remotes.length === 0) return null;
-    checkSshRemotes(subject, remotes);
-    const { gitSsh } = options;
-    const named = remotes.map((r) => `${r.host}:${r.repo}`).join(", ");
-    if (gitSsh === undefined) throw new JobFailure("secret-missing", `${subject} uses ${named} over SSH, and this node has no git SSH key`);
-    if (!existsSync(gitSsh.knownHostsFile)) throw new JobFailure("secret-missing", `${subject} uses ${named} over SSH, and this node's known_hosts file ${gitSsh.knownHostsFile} is missing`);
-    try {
-      return { privateKey: await readFile(gitSsh.privateKeyFile, "utf8"), knownHostsFile: gitSsh.knownHostsFile, remotes };
-    } catch (err) {
-      throw new JobFailure("secret-missing", `${subject} uses ${named} over SSH, and this node's git SSH key ${gitSsh.privateKeyFile} is unreadable: ${(err as Error).message}`);
-    }
-  }
-
   /** Everything a boot applies. Built only when a VM is about to boot, because a running VM ignores boot inputs. */
   async function bootSpec(boot: BootInputs, live: LiveSpec): Promise<BootSpec> {
     if (boot.resources.memoryGiB < minPylonMemoryGiB) {
@@ -276,13 +286,12 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       if (value === undefined) throw new JobFailure("secret-missing", `secret ${grant.name} is not in this node's secret file`);
       secrets[grant.name] = { hosts: [...grant.hosts], value };
     }
-    // A scratch pylon has no remote of its own, so a repository it creates later is reached over HTTPS only.
-    const remotes = [...bootRemotes(boot.repo), ...boot.dotfiles === undefined ? [] : [boot.dotfiles.repo]].flatMap((url) => sshRemoteOf(url) ?? []);
+    const ssh = await bootSsh(boot, options.gitSsh);
     return {
       resources: { cpus: boot.resources.cpus, memoryGiB: boot.resources.memoryGiB, ...boot.resources.nestedVirtualization === true ? { nestedVirtualization: true as const } : {} },
       allowedHosts: [...boot.network.allowedHosts],
       secrets,
-      ssh: await gitSshOf(boot.pylonId, remotes),
+      ssh,
       files: [...live.overlay],
       hooks: bootHooks(boot),
       publicUrls: publicUrls(boot.pylonId, live.previews, options.previewHost),
@@ -581,7 +590,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       await holding([key.image], async () => templates.buildTemplate(stateRoot, sandbox, store, {
         config: { version: 1, diskGiB: resources.diskGiB, image: assetsOf(key.image), workspace: workspaceDir, setup: templateSetup(inputs), retrySetup: false, resume: [], services: {} },
         // No secrets and no overlay during setup, so a template never holds either. No pylon owns the build, so nexus.pylon is blocked like any unlisted host.
-        boot: { resources: { cpus: resources.cpus, memoryGiB: resources.memoryGiB }, allowedHosts: [...inputs.allowedHosts], secrets: {}, ssh: await gitSshOf(template, remote === null ? [] : [remote]), files: [], hooks: [], publicUrls: {}, hostBridge: null },
+        boot: { resources: { cpus: resources.cpus, memoryGiB: resources.memoryGiB }, allowedHosts: [...inputs.allowedHosts], secrets: {}, ssh: await gitSshOf(template, remote === null ? [] : [remote], options.gitSsh), files: [], hooks: [], publicUrls: {}, hostBridge: null },
         manifest: { id: template, key, commit: repo.commit },
       }, signal));
     },

@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# What the Docker stack can show of docs/multiplayer-plan.md's mp-10: on the stack started with people, alice, an admin,
+# is refused `nexus project add` with an SSH URL in both of git's spellings, with a reason that names HTTPS, and no
+# project is made. Her add of the same repository over HTTPS succeeds and reads back as added. The push from a VM pylon
+# that the plan's live box names needs a VM node and a scratch repository, which this stack has neither of.
+# Exits 0 only if every step did what it should.
+set -euo pipefail
+V="$(cd "$(dirname "$0")" && pwd)/verify-nexus"
+fail() { echo "https git check: $*" >&2; exit 1; }
+
+run="https-git-check-$(date +%s)-$$"
+export NEXUS_VERIFY_RUN=$run
+trap '"$V" down >&2 || true' EXIT
+NEXUS_VERIFY_PEOPLE=1 "$V" up
+"$V" doctor
+evidence=$("$V" evidence)
+
+n=0
+for url in git@github.com:acme/mono.git ssh://git@github.com/acme/mono.git; do
+  n=$((n + 1))
+  code=0
+  "$V" cli "hg-add-ssh-$n" -- project add mono "$url" --json </dev/null >/dev/null 2>&1 || code=$?
+  said=$(grep -ho '{"error".*}' "$(ls "$evidence"/*-hg-add-ssh-$n.stderr | tail -1)" | tail -1)
+  echo "alice nexus project add mono $url: exit $code $said"
+  [ "$code" != 0 ] || fail "alice's add of $url succeeded"
+  jq -e '.status == 400' <<< "$said" >/dev/null || fail "alice's add of $url was not a 400"
+  want="$url is SSH, and git on a shared install goes over HTTPS only, with each person's own GitHub token. Add the project with its https:// URL"
+  jq -e --arg want "$want" '.error == $want' <<< "$said" >/dev/null || fail "the refusal of $url does not name HTTPS as the fix"
+done
+"$V" cli hg-projects-before -- projects --json | jq -e 'map(.id) | index("mono") == null' >/dev/null || fail "a refused add left project mono behind"
+echo "no project mono after both refusals"
+
+added=$("$V" cli hg-add-https -- project add mono https://github.com/acme/mono.git --json)
+echo "alice nexus project add mono https://github.com/acme/mono.git: $(jq -c '{id, repoUrl}' <<< "$added")"
+[ "$("$V" cli hg-show -- project show mono --json | jq -r .repoUrl)" = https://github.com/acme/mono.git ] || fail "project mono does not read back with its https:// URL"
+echo "https git check: alice was refused both SSH spellings with HTTPS named as the fix, and added the project over HTTPS"

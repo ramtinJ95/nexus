@@ -139,3 +139,19 @@ test("guest requests that fail upstream fail one by one and never take the contr
 	}
 	assert.ok(statuses.has("200") && statuses.has("502"), `both served and failed requests, got ${[...statuses]}`);
 });
+
+test("a person's git push over HTTPS carries their own token through the HTTP hook, and the guest holds only a placeholder", async () => {
+	for (const [pylon, token] of [["pylon-th-alice", "ghp_alice_real"], ["pylon-th-bob", "ghp_bob_real"]] as const) {
+		const owned: BootSpec = { ...spec, ssh: null, secrets: { GH_TOKEN: { hosts: ["api.github.com", "github.com"], value: token } } };
+		const { httpHooks, placeholders, ssh } = networkOptions(owned, pylon);
+		assert.equal(ssh, undefined, "no SSH egress, so no key and no remote");
+		const placeholder = placeholders["GH_TOKEN"]!;
+		assert.ok(!placeholder.includes(token));
+		// What git sends with the password `gh auth git-credential` gives it from GH_TOKEN.
+		const basic = `Basic ${Buffer.from(`x-access-token:${placeholder}`).toString("base64")}`;
+		const push = new Request("https://github.com/acme/mono.git/git-receive-pack", { method: "POST", headers: { authorization: basic } });
+		const sent = await httpHooks!.onRequest!(push);
+		assert.ok(sent instanceof Request);
+		assert.equal(sent.headers.get("authorization"), `Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`);
+	}
+});

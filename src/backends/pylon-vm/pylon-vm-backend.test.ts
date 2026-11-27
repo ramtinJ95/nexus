@@ -15,10 +15,11 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import type { BackendPylon } from "../backend.ts";
-import { createPylonVmBackend, hostNestsKvm, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
+import { bootSsh, createPylonVmBackend, hostNestsKvm, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
+import { networkOptions } from "../../pylon-vm/network.ts";
 import { asUserIn, bootHooks, commitMissing } from "../pylon-boot.ts";
 import { launchers } from "../../probe/guest/launchers.ts";
-import { settled, setupExited, type Inspection } from "../../pylon-vm/contracts.ts";
+import { settled, setupExited, type BootSpec, type Inspection } from "../../pylon-vm/contracts.ts";
 import { groupMembers, identityOf } from "../../pylon-vm/identity.ts";
 import { imageEnv, pylonGuest, type Sandbox } from "./pylon-guest.ts";
 import { saveJson } from "../../node-base/json-file.ts";
@@ -160,6 +161,29 @@ test("an SSH repo on a node without a git SSH key fails as secret-missing and cr
   const boot = bootOf("pylon-ssh", { repo: { kind: "clone", url: "git@github.com:acme/web.git", checkout: { branch: "main", commit: "c0ffee" } } });
   await assert.rejects(backend.ensureRunning(boot, live, signal()), { code: "secret-missing", message: /github\.com:acme\/web\.git over SSH, and this node has no git SSH key/ });
   assert.equal(existsSync(join(instances, "pylon-ssh")), false);
+});
+
+test("a person's pylon on a shared install boots with no SSH key and no SSH remote, though the node has a key", async () => {
+  const keyFile = join(scratch, "id_shared");
+  await writeFile(keyFile, "-----BEGIN OPENSSH PRIVATE KEY-----\nthe node's one key\n");
+  const { backend, instances } = await backendWith({ gitSsh: { privateKeyFile: keyFile, knownHostsFile: keyFile }, secrets: { value: () => "owner-token", names: () => [] } });
+  const owned = { allowedHosts: ["api.github.com", "github.com"], secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com", "github.com"], owner: true as const }] };
+  const sshRepo = { kind: "clone" as const, url: "git@github.com:acme/mono.git", checkout: { branch: "main", commit: "c0ffee" } };
+  for (const owner of ["alice", "bob"]) {
+    await assert.rejects(backend.ensureRunning(bootOf(`pylon-${owner}-ssh`, { network: owned, repo: sshRepo }), live, signal()),
+      { code: "invalid", message: `pylon-${owner}-ssh: git on a shared install goes over HTTPS only, and the project's repoUrl git@github.com:acme/mono.git is SSH, so an admin adds the project again with its https:// URL` });
+    assert.equal(existsSync(join(instances, `pylon-${owner}-ssh`)), false);
+  }
+  await assert.rejects(backend.ensureRunning(bootOf("pylon-alice-dots", { network: owned, dotfiles: { repo: "git@github.com:acme/dotfiles.git", ref: "main" } }), live, signal()),
+    { code: "invalid", message: /the dotfiles repo git@github\.com:acme\/dotfiles\.git is SSH, so an admin sets an https:\/\/ one in control\.json/ });
+  const gitSsh = { privateKeyFile: keyFile, knownHostsFile: keyFile };
+  const ownedSsh = await bootSsh(bootOf("pylon-alice-https", { network: owned }), gitSsh);
+  assert.equal(ownedSsh, null, "an owner's HTTPS boot carries no key and no remote");
+  const spec: BootSpec = { resources: { cpus: 2, memoryGiB: 4 }, allowedHosts: owned.allowedHosts, secrets: {}, ssh: ownedSsh, files: [], hooks: [], publicUrls: {}, hostBridge: null };
+  assert.equal(networkOptions(spec, "pylon-alice-https").ssh, undefined, "so Gondolin opens no SSH egress for it");
+  const solo = await bootSsh(bootOf("pylon-solo-ssh", { repo: sshRepo }), gitSsh);
+  assert.deepEqual(solo, { privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nthe node's one key\n", knownHostsFile: keyFile, remotes: [{ host: "github.com", port: 22, username: "git", repo: "acme/mono.git" }] }, "a solo install's boot keeps the node's key");
+  assert.equal(networkOptions({ ...spec, ssh: solo }, "pylon-solo-ssh").ssh?.credentials?.["github.com"]?.privateKey, solo!.privateKey);
 });
 
 test("the backend tells the probe whether it has a git SSH key, journals events in its state root, and answers NEXUS_API on a socket there", async (t) => {

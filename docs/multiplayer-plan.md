@@ -248,11 +248,11 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 
 ### mp-10: git goes over HTTPS only
 
-- [ ] **Depends on.** `mp-09`.
+- [x] **Depends on.** `mp-09`.
 - [ ] **Files.** `src/pylon-vm/network.ts`, `src/backends/pylon-vm/pylon-vm-backend.ts`, `src/control/api/project-routes.ts`, `src/contract/projects-parse.ts`.
-- [ ] **Change.** Today git over SSH uses one key for the whole node, so every engineer would push as the same identity and no HTTP guard would see the push. On a shared install a project's `repoUrl` must be HTTPS, a boot carries no SSH key and no SSH remote, and git authenticates with the owner's `GH_TOKEN` placeholder.
+- [x] **Change.** Today git over SSH uses one key for the whole node, so every engineer would push as the same identity and no HTTP guard would see the push. On a shared install a project's `repoUrl` must be HTTPS, a boot carries no SSH key and no SSH remote, and git authenticates with the owner's `GH_TOKEN` placeholder.
 - [ ] **Result.** Every push from a pylon carries its owner's token and passes through the HTTP hook.
-- [ ] **Unit.** `interrogate/ssh-node-key-shared.test.ts` asserts the fault. Turn it round, so that it shows a boot with no SSH key and no SSH remote. Adding a project with an SSH URL is refused on a shared install.
+- [x] **Unit.** `interrogate/ssh-node-key-shared.test.ts` asserts the fault. Turn it round, so that it shows a boot with no SSH key and no SSH remote. Adding a project with an SSH URL is refused on a shared install.
 - [ ] **Live.** In `alice`'s pylon, push a branch to the scratch repository. Pass when GitHub shows the push as hers and `ssh -T git@github.com` from the pylon is refused.
 - [ ] **Perf.** Time a push of a 5 MiB commit from a VM pylon. The review measured 0.9 seconds for that push through Gondolin. Fail above 3 seconds.
 
