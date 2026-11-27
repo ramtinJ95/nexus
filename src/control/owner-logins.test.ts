@@ -175,7 +175,7 @@ function onePylon() {
     logins: { async owned() {
       await gate;
       if (failing) throw new Error("the logins of bob@example.com cannot be read: EACCES");
-      return { claude: bobClaude, github: { token: bobGithub, identity: bobIdentity } };
+      return { claude: bobClaude, github: { token: bobGithub, identity: bobIdentity }, hosts: [], secrets: [] };
     } },
     probes: new Map([[node, { async putPylonSecret(pylon: PylonId, name: string) {
       if (refusing) throw new Error(`PUT /v1/secrets/${name}/pylons/${pylon}: HTTP 503: its running instance was not updated`);
