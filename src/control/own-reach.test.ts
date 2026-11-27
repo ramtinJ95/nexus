@@ -30,7 +30,7 @@ async function shared(t: Parameters<typeof testApi>[0]) {
   s.registry.images.setCurrentImage(image.id as ImageId);
   const start = async (who: WhoisAnswer) => {
     caller = who;
-    const started = await s.call("POST", "/v1/threads", { project: "acme", title: `${who.UserProfile!.DisplayName}'s work` });
+    const started = await s.call("POST", "/v1/threads", { project: "acme", title: `${who.UserProfile!.DisplayName}'s work`, claude: "work on it" });
     assert.equal(started.status, 201, JSON.stringify(started.body));
     return { id: started.body.id as string, pylonId: started.body.pylonId as PylonId };
   };

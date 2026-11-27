@@ -39,7 +39,7 @@ file="$base/runs/$run/people/alice%40example.com.json"
 declare -A thread
 for who in alice bob; do
   # shellcheck disable=SC2046
-  thread[$who]=$("$V" cli "own-start-$who" $(as "$who") -- start --project spoon --title "own hosts and secrets: $who's" --json | jq -r .id)
+  thread[$who]=$("$V" cli "own-start-$who" $(as "$who") -- start --project spoon --claude "own hosts and secrets: $who's" --json | jq -r .id)
   echo "$who started ${thread[$who]}"
 done
 
