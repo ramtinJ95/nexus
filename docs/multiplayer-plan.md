@@ -417,7 +417,7 @@ The office machine holds three pylons of 8 GiB, or six of 4 GiB, as [The office 
 - [ ] **Result.** `ops-3` is one installer run, and adding an engineer is one more.
 - [x] **Unit.** A first install that names one admin writes `people` with that login and no `callers`. A rerun that names an engineer keeps the admin. A run with both a person and `--admit` is refused before it changes anything. A run that names no person writes the `control.json` it writes today.
 - [ ] **Live.** On a fresh machine, install with the release branch `multiplayer` and one admin. Pass when `nexus doctor` as that admin reports no failed check, a call from a tailnet user outside `people` gets 403, and a rerun that adds that user lets the same call through with no other step. The office machine's install in `ops-3` is this run.
-- [ ] **Perf.** `check`. Fail above 10% over base.
+- [x] **Perf.** `check`. Fail above 10% over base.
 
 ### ops-1: the office machine can run pylons
 
