@@ -71,21 +71,25 @@ tailscaled_environment() {
 }
 control_config_exists() { [ -e /etc/nexus/control.json ]; }
 firewalld_running() { [ "$(systemctl is-active firewalld 2>/dev/null)" = active ]; }
-# The firewalld zone that applies to tailscale0: the one it was put in, or else the default zone.
+# The firewalld zone that applies to tailscale0 as it runs, or with --permanent after a reload: the one it was put in,
+# or else the default zone.
 firewalld_zone() {
   local zone
-  zone=$(firewall-cmd --get-zone-of-interface=tailscale0 2>/dev/null) || zone=$(firewall-cmd --get-default-zone) || return 1
+  zone=$(firewall-cmd ${1:+"$1"} --get-zone-of-interface=tailscale0 2>/dev/null) || zone=$(firewall-cmd --get-default-zone) || return 1
   echo "$zone"
 }
+# The ports and protocols that firewall-cmd's description of a zone or a service on stdin opens, one a line, with a
+# whole protocol as all its ports.
+firewalld_opens() { sed -nE 's/^ *(ports|protocols): *//p' | tr ' ' '\n' | sed 's|^tcp$|1-65535/tcp|'; }
 # What zone $1 lets in, as it runs or with --permanent as saved, one a line: `all` when its target accepts everything,
-# and each port or range, with its protocol, that its ports and services open. Rich rules are not read.
+# and each port or range, with its protocol, that its ports, protocols and services open. Rich rules are not read.
 firewalld_allowed() {
   local zone=$1 mode=${2:-} rules service
   rules=$(firewall-cmd ${mode:+"$mode"} --zone="$zone" --list-all) || return 1
   [ "$(sed -n 's/^ *target: *//p' <<<"$rules")" != ACCEPT ] || echo all
-  sed -n 's/^ *ports: *//p' <<<"$rules" | tr ' ' '\n'
+  firewalld_opens <<<"$rules"
   for service in $(sed -n 's/^ *services: *//p' <<<"$rules"); do
-    firewall-cmd ${mode:+"$mode"} --info-service="$service" | sed -n 's/^ *ports: *//p' | tr ' ' '\n' || return 1
+    firewall-cmd ${mode:+"$mode"} --info-service="$service" | firewalld_opens || return 1
   done
 }
 
@@ -246,19 +250,22 @@ check_prerequisites() {
   # The control plane and the probe listen on the tailnet address, where firewalld's zone for tailscale0 applies.
   # Laptops and nodes call the control plane on 7470 and 7443, and the control plane and the peer probes that copy
   # images call the probe on 7480. The preview gateway listens on 127.0.0.1, so only tailscaled here calls it.
-  local zone runtime saved called=(7480) closed=()
+  local zone saved_zone runtime saved called=(7480) closed=() closed_now=() closed_saved=() fixes=()
   [ "$role" != control ] || called=(7470 7443 7480)
   if in_service_path firewall-cmd && firewalld_running; then
     if [ "$(uid)" != 0 ]; then
       warn "firewalld runs here, and only root can read its rules, so whether tailscale0 lets in TCP ${called[*]} was not checked." "$rerun"
-    elif zone=$(firewalld_zone) && runtime=$(firewalld_allowed "$zone") && saved=$(firewalld_allowed "$zone" --permanent); then
+    elif zone=$(firewalld_zone) && saved_zone=$(firewalld_zone --permanent) \
+      && runtime=$(firewalld_allowed "$zone") && saved=$(firewalld_allowed "$saved_zone" --permanent); then
       for port in "${called[@]}"; do
-        { firewalld_lets_in "$port" "$runtime" && firewalld_lets_in "$port" "$saved"; } || closed+=("$port")
+        firewalld_lets_in "$port" "$runtime" || closed_now+=("$port")
+        firewalld_lets_in "$port" "$saved" || closed_saved+=("$port")
+        [[ " ${closed_now[*]} ${closed_saved[*]} " != *" $port "* ]] || closed+=("$port")
       done
+      [ ${#closed_now[@]} = 0 ] || fixes+=("sudo firewall-cmd --zone=$zone$(printf ' --add-port=%s/tcp' "${closed_now[@]}")")
+      [ ${#closed_saved[@]} = 0 ] || fixes+=("sudo firewall-cmd --permanent --zone=$saved_zone$(printf ' --add-port=%s/tcp' "${closed_saved[@]}")")
       [ ${#closed[@]} = 0 ] \
-        || $short "firewalld's zone $zone, which applies to tailscale0, does not let in TCP ${closed[*]}, so other machines on the tailnet are refused there. Adding the ports leaves the zone's other rules as they are." \
-          "sudo firewall-cmd --zone=$zone$(printf ' --add-port=%s/tcp' "${closed[@]}")" \
-          "sudo firewall-cmd --permanent --zone=$zone$(printf ' --add-port=%s/tcp' "${closed[@]}")"
+        || $short "firewalld does not let TCP ${closed[*]} in on tailscale0, as it runs or as saved for the next reload, so other machines on the tailnet are refused there. Adding the ports to tailscale0's zone leaves the zone's other rules as they are." "${fixes[@]}"
     else
       warn "firewalld runs here, and its rules for tailscale0 could not be read, so TCP ${called[*]} was not checked." \
         "sudo firewall-cmd --get-zone-of-interface=tailscale0 || sudo firewall-cmd --get-default-zone names the zone, and sudo firewall-cmd --zone=<zone> --list-all reads it"

@@ -61,9 +61,9 @@ Then it installs the release and the units with `deploy/install-control.sh`, `de
 
 The installer checks firewalld only. It reads no `ufw` and no nftables or iptables rules of anyone else's, so on a machine with another firewall, let in the ports above for the tailnet yourself.
 
-The control plane and the probe listen on the machine's tailnet address, so firewalld's rules for `tailscale0` decide who reaches them. `tailscale0` gets the zone it was put in, or else the default zone. On Fedora Server that is `FedoraServer`, which lets in SSH and not Nexus's ports, so laptops and nodes are refused while the machine reaches itself. The installer reads the zone's target, its ports and its services' ports, both as they run and as saved, and counts a port open only when both let it in. It does not read rich rules, so a port that only a rich rule lets in is reported closed.
+The control plane and the probe listen on the machine's tailnet address, so firewalld's rules for `tailscale0` decide who reaches them. `tailscale0` gets the zone it was put in, or else the default zone. On Fedora Server that is `FedoraServer`, which lets in SSH and not Nexus's ports, so laptops and nodes are refused while the machine reaches itself. The installer reads that zone as firewalld runs it and as it is saved for the next reload, each with the zone `tailscale0` gets then: its target, its ports and protocols, and its services' ports and protocols. It counts a port open only when both let it in. It does not read rich rules, so a port that only a rich rule lets in is reported closed.
 
-When a port is closed, the fix adds it to that zone, at once and in the saved rules. Nothing else in the zone changes, and neither does any other service the machine's other users keep behind it:
+When a port is closed, the fix adds it to that zone, at once, in the saved rules, or both, as each lacks it. Nothing else in the zone changes, and neither does any other service the machine's other users keep behind it:
 
 ```sh
 sudo firewall-cmd --zone=FedoraServer --add-port=7470/tcp --add-port=7443/tcp --add-port=7480/tcp
