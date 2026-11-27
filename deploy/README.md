@@ -17,7 +17,7 @@ git clone https://github.com/ramtinJ95/nexus.git && cd nexus
 sudo deploy/install.sh --admit <your Mac's tailnet name> [--dotfiles <dotfiles git URL>]
 ```
 
-This installs the control plane, a probe and the deployer on one machine. On each further machine, install only a probe and the deployer, and name the control plane's machine and a join token minted there, as [Add a node](#add-a-node) describes:
+This installs the control plane, a probe and the deployer on one machine, for you alone. For a shared install, name people instead of devices, as [A shared install](#a-shared-install) describes. On each further machine, install only a probe and the deployer, and name the control plane's machine and a join token minted there, as [Add a node](#add-a-node) describes:
 
 ```sh
 sudo deploy/install.sh --join <token> --node <control plane's tailnet name>
@@ -52,7 +52,7 @@ Then `src/deploy/setup.ts` writes the configs from `tailscale status --json`:
 
 | File | What the installer puts in it |
 | --- | --- |
-| `/etc/nexus/control.json` | This machine as `self`, the first of `nodes` and `imageBuildNode`; its tailnet IP, short and full MagicDNS names in `listen`; its full name as `https.hostname`; the `--admit` devices as `callers` and `deployers`; and this machine's deploy key digest in `deployKeys`. |
+| `/etc/nexus/control.json` | This machine as `self`, the first of `nodes` and `imageBuildNode`; its tailnet IP, short and full MagicDNS names in `listen`; its full name as `https.hostname`; the `--admit` devices as `callers` and `deployers`, or the `--person` logins as `people`; and this machine's deploy key digest in `deployKeys`. |
 | `/etc/nexus/control-plane.json` | The control plane this machine follows: its stable tailnet node ID as `tailnetNodeId`, and its API's URL as `url`. The probe admits the control plane's calls by that ID, and the deployer asks that URL for the desired release after checking that ID. Root, mode 0644. See [The control plane's identity](#the-control-planes-identity). |
 | `/etc/nexus/probe.json` | This machine's name and tailnet IP, and previews on gateway port 7481. `gitSsh` is added once `/etc/nexus/git_ed25519` exists. |
 | `/etc/nexus/deployer.json` | The deployer's token and timeouts. Root, mode 0600. Only the token's SHA-256 digest leaves this file. |
@@ -164,6 +164,31 @@ A rerun installs no release over one a role already runs, such as one `nexus dep
 
 Each role installer reads its link under the deployer's lock, so a deploy that lands during a rerun is kept too. To install the checkout's release over the one a role runs, rerun with `--upgrade`. This path has none of the deployer's drain, backup or rollback, so use it for recovery, when `nexus deploy` cannot reach a control plane that answers. An install of the control plane refuses, after the configs are written and before its link moves, when the registry's schema version is newer than the migrations the checkout's `src/control/schema.ts` applies, since that control plane would refuse to start, as [A failed deploy past a registry migration](#a-failed-deploy-past-a-registry-migration) describes. A release cut from a checkout with uncommitted changes records no commit in its `release-commit`, so the deployer installs the desired commit over it on its next poll rather than report it healthy at `HEAD`.
 
+### A shared install
+
+`--person <tailnet login>=<role>` names a person, with the role `admin` or `engineer`, and `:<cap>` after the role sets how many pylons they may run at once, two when it is left out. The login is the one `tailscale whois` prints for the person's device, such as `alice@example.com`. A first install for a team names its first admin and the release branch:
+
+```sh
+sudo deploy/install.sh --person <your tailnet login>=admin --release-branch multiplayer
+```
+
+Its `control.json` has `people` and no `callers` or `deployers`, so the control plane is shared from its first start. Grow it from the same machine, one rerun for each change:
+
+```sh
+sudo deploy/install.sh --person bob@example.com=engineer        # adds bob
+sudo deploy/install.sh --person bob@example.com=engineer:3      # lets bob run three pylons
+sudo deploy/install.sh --person bob@example.com=admin           # makes bob an admin, and keeps the cap
+sudo deploy/install.sh --remove-person bob@example.com          # takes bob out
+```
+
+A rerun changes only the people it names and keeps the rest of `people` as it is, a cap included, and it restarts the control plane, which reads `people` when it starts, so the change applies once the rerun ends. The installer refuses, before it changes anything, a run that names a person and `--admit`, a run that would leave no admin, and a person named on an install for one person whose `callers` or `deployers` admit a device, since those devices would lose their access. To make such an install shared anyway, take `callers` and `deployers` out of `control.json` by hand, then rerun with `--person`. An install whose `callers` and `deployers` are empty becomes shared with no hand edit.
+
+`--remove-person` also deletes the person's stored logins, their file in `/var/lib/nexus-control/people/`. From the restart on they get 403 for every call. Their threads stay, and a pylon of theirs that runs keeps the tokens it booted with until it is archived, so an admin archives each with `nexus archive <thread>`. Revoke their Claude and GitHub tokens at Anthropic and GitHub too, which Nexus cannot do.
+
+The deployer also starts as soon as the node's probe writes `/var/lib/nexus/deployer-wake`, which `nexus-deployer.path` watches. The control plane asks every probe to write it when the desired release changes and when the control role reports healthy at it, which each probe role waits for, so a deploy does not wait for the next tick of each timer. The probe passes on nothing but the wake: the deployer reads and checks the desired release itself, as on a tick. A start while the deployer runs joins that run, and the timer stays the fallback. A node whose deployer was installed before the path unit has only the timer until `deploy/install.sh` runs on it again.
+
+Node polling goes directly to the control plane, not through a probe. This keeps root credentials out of the probe and reuses the existing mutual tailnet identity check. Node routes additionally require the root-only token, so pylon egress through its host cannot forge health reports or drain control. Node credentials cannot set a release. The in-pylon CLI bridge accepts only its closed operation schema; it cannot forward an arbitrary API route. Tests cover the bridge, a pylon presenting its host's allowed/deployer identity, spoofed forwarding headers, missing node tokens, and the wrong control endpoint. Do not run an unauthenticated proxy on an allowed deployer: tailnet identity authorizes that machine, not individual programs on it.
+
 ### Uninstall
 
 `sudo deploy/uninstall.sh` from a checkout prints what it would remove and changes nothing. `--yes` removes it. Stopping the probe leaves every pylon's controller running, by design (`KillMode=process` in `nexus-probe.service`), so the uninstall refuses while one runs, and changes nothing. Delete the machine's threads first, or pass `--stop-pylons`. A controller saves its VM's disk on SIGTERM, as a pause does, only once it listens on its `control.sock`, so `--stop-pylons` waits for each controller still booting, then sends each SIGTERM and waits for them to stop, within 180 s in all. A controller that starts after the check stops the run unless `--stop-pylons` was given. In this order, it:
@@ -239,7 +264,7 @@ nexus release --json
 
 Only the `deployers` in control.json, which `--admit` sets, may change the release. `deployers` missing or empty disables release changes. Never list an infrastructure node as a deployer: the API rejects every configured node and `self` even if listed, and the installer refuses to admit one. The `url` in `control-plane.json` names the control plane's tailnet IP on its own machine and its MagicDNS name on port 7470 elsewhere; that name must be in the control plane's `listen.hostnames`. The worker verifies the endpoint with tailscaled **before sending its token**. Check `nexus release` for fresh reports from every role.
 
-A shared install names its people in place of `callers` and `deployers`: `"people": { "alice@example.com": "admin", "bob@example.com": "engineer" }`, each key the person's tailnet login as `tailscale whois` prints it. The control plane then admits a caller by the login whois names for its device, never by its node ID, and an admin holds what a deployer holds. A tagged device, `self` and every node are never a person, whatever user owns them. A control.json with `people` and either `callers` or `deployers` fails to load, and it must name at least one admin. Each thread records its owner: the person who started it, or on an install without `people` the operator, who owns every thread there. The installer does not write `people` yet, so a shared install's control.json is edited by hand, and `--admit` does not apply to it.
+A shared install names its people in place of `callers` and `deployers`: `"people": { "alice@example.com": "admin", "bob@example.com": "engineer" }`, each key the person's tailnet login as `tailscale whois` prints it. The control plane then admits a caller by the login whois names for its device, never by its node ID, and an admin holds what a deployer holds. A tagged device, `self` and every node are never a person, whatever user owns them. A control.json with `people` and either `callers` or `deployers` fails to load, and it must name at least one admin. Each thread records its owner: the person who started it, or on an install without `people` the operator, who owns every thread there. The installer writes `people`, as [A shared install](#a-shared-install) describes, and `--admit` does not apply to it.
 
 On a shared install a pylon booted with its owner's logins has a GitHub guard at its network edge, `src/pylon-vm/github-guard.ts`. Its agent can read, push a branch, open, edit and close pull requests, comment, review with a comment or a change request, file issues and set existing labels. Everything else to `api.github.com`, `github.com` or another `*.github.com` host gets 403, with a body that names `nexus-github-guard` and the reason: a merge, an approving review in any form, a push to the project's default branch, and any route or GraphQL mutation the guard's one allow-list table does not name. It decides by host and request, never by which token the request carries. Each refusal is a line `nexus-github-guard refused <method> <host><path>: <reason>` in the pylon's `controller.log` on its node. A pylon started before Nexus carried its project's default branch in the boot refuses every push, and a new thread gets the guard whole. A solo install's pylons have no guard.
 

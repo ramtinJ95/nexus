@@ -11,11 +11,15 @@ import { promisify } from "node:util";
 import { arcMigrations, migrations } from "../control/schema.ts";
 import { tempDir } from "../test-support/kit.ts";
 import { parseConfig } from "../control/main.ts";
+import { loginStore } from "../control/logins.ts";
+import { peopleOf } from "../control/people.ts";
+import type { Person } from "../ids.ts";
+import { defaultHarnessModel } from "../protocol/models.ts";
 import { parseProbeConfig } from "../probe/config.ts";
 import { parseControlPlane } from "./control-plane.ts";
 import { parseTailscaleStatus } from "../tailscale.ts";
 import type { FollowUp } from "./credentials.ts";
-import { checkDotfiles, dotfilesStep, withoutDotfiles, formatLeft, holdsImage, install, left, paths, parseFlags, report, tailnetDevices, setup, type Existing, type Facts, type FileWrite, type InstallSteps, type Json, type Setup } from "./setup.ts";
+import { checkDotfiles, dotfilesStep, forgetLogins, withoutDotfiles, formatLeft, holdsImage, install, left, paths, parseFlags, report, tailnetDevices, setup, type Existing, type Facts, type FileWrite, type InstallSteps, type Json, type Setup } from "./setup.ts";
 
 const status = JSON.stringify({
   Version: "1.90.0",
@@ -182,6 +186,119 @@ test("a rerun over a shared install's control.json keeps it free of callers and 
   assert.equal(rerun.deployers, undefined);
   assert.deepEqual(parseConfig(JSON.stringify(rerun)).people, { "alice@example.com": "admin" });
   assert.match(errors(run(["--admit", "ramtins-macbook-pro"], shared)).join("\n"), /--admit writes callers and deployers, which a control.json with people refuses/);
+});
+
+const alice = "alice@example.com";
+const bob = "bob@example.com";
+const shared = (args: readonly string[], existing: Existing = fresh) => files(run(args, existing));
+const peopleIn = (written: Map<string, FileWrite>) => parseConfig(JSON.stringify(value(written, paths.control))).people;
+const said = (written: Map<string, FileWrite>) => report([...written.values()]);
+
+test("a first install that names one admin is shared from its first start: people holds that login, and control.json has no callers or deployers", () => {
+  const written = shared(["--person", `${alice}=admin`, "--release-branch", "multiplayer"]);
+  const control = value(written, paths.control);
+  assert.equal("callers" in control, false);
+  assert.equal("deployers" in control, false);
+  assert.deepEqual(peopleIn(written), { [alice]: "admin" });
+  assert.equal(parseConfig(JSON.stringify(control)).releaseBranch, "multiplayer");
+  assert.equal(value(written, paths.deployer).releaseBranch, "multiplayer");
+  assert.deepEqual(peopleOf(parseConfig(JSON.stringify(control)).people), { shared: true, roles: new Map([[alice, "admin"]]), pylonCaps: new Map([[alice, 2]]) });
+});
+
+test("a rerun adds a person, or changes one's role or cap, and leaves the others and their caps as they are", () => {
+  const first = onDisk(shared(["--person", `${alice}=admin:3`]));
+  const added = shared(["--person", `${bob}=engineer`], first);
+  assert.deepEqual(peopleIn(added), { [alice]: { role: "admin", pylonCap: 3 }, [bob]: "engineer" });
+  assert.match(said(added), /added people\.bob@example\.com "engineer"/);
+  const capped = shared(["--person", `${bob}=engineer:1`], onDisk(added));
+  assert.deepEqual(peopleIn(capped), { [alice]: { role: "admin", pylonCap: 3 }, [bob]: { role: "engineer", pylonCap: 1 } });
+  const promoted = shared(["--person", `${bob}=admin`], onDisk(capped));
+  assert.deepEqual(peopleIn(promoted), { [alice]: { role: "admin", pylonCap: 3 }, [bob]: { role: "admin", pylonCap: 1 } }, "a role change without a cap keeps the cap on disk");
+  assert.match(said(promoted), /set people\.bob@example\.com to \{"role":"admin","pylonCap":1\}, from \{"role":"engineer","pylonCap":1\}/);
+  const again = shared(["--person", `${bob}=admin`], onDisk(promoted));
+  assert.deepEqual([...again.values()].map((f) => f.state), ["unchanged", "unchanged", "unchanged", "unchanged"], "the same run twice changes nothing");
+  const plain = shared([], onDisk(promoted));
+  assert.deepEqual(peopleIn(plain), peopleIn(promoted), "a rerun that names nobody keeps people");
+});
+
+test("a person and --admit in one run are refused, with nothing written", () => {
+  const both = run(["--person", `${alice}=admin`, "--admit", "ramtins-macbook-pro"]);
+  assert.equal(both.ok, false);
+  assert.match(errors(both).join("\n"), /--person and --remove-person write people, and --admit writes callers and deployers/);
+  const rerun = run(["--person", `${bob}=engineer`, "--admit", "ramtins-macbook-pro"], onDisk(shared(["--person", `${alice}=admin`])));
+  assert.equal(rerun.ok, false);
+});
+
+test("a run that names no person writes the control.json it wrote before people, byte for byte", () => {
+  const control = value(files(run(["--admit", "ramtins-macbook-pro"])), paths.control);
+  assert.equal(JSON.stringify(control), JSON.stringify({
+    https: { hostname: "rj-firebat.tail1234.ts.net" },
+    db: "/var/lib/nexus-control/registry.db",
+    listen: { host: "100.64.0.2", port: 7470, hostnames: ["rj-firebat", "rj-firebat.tail1234.ts.net", "100.64.0.2"] },
+    self: { tailnetNodeId: "nSelf1CNTRL" },
+    nodes: [{ name: "rj-firebat", tailnetHost: "rj-firebat.tail1234.ts.net", tailnetNodeId: "nSelf1CNTRL" }],
+    imageBuildNode: "rj-firebat",
+    callers: ["nMac1CNTRL"],
+    deployers: ["nMac1CNTRL"],
+    deployKeys: { nSelf1CNTRL: sha256(token) },
+    harness: { storage: "/var/lib/nexus-control/harness.sqlite", credentials: "/var/lib/nexus-control/harness-credentials.json", model: defaultHarnessModel },
+  }));
+});
+
+test("a one-person install that admits a device refuses a person and says why, and one that admits none yet becomes shared", () => {
+  const solo = onDisk(files(run(["--admit", "ramtins-macbook-pro"])));
+  const refused = errors(run(["--person", `${alice}=admin`], solo)).join("\n");
+  assert.match(refused, /is a one-person install, whose callers and deployers admit nMac1CNTRL\. A person would make it shared: those devices would lose their access/);
+  assert.match(refused, /take callers and deployers out of \/etc\/nexus\/control\.json by hand, then rerun with --person/);
+  const empty = shared(["--person", `${alice}=admin`], onDisk(files(run([]))));
+  const control = value(empty, paths.control);
+  assert.equal("callers" in control, false);
+  assert.deepEqual(peopleIn(empty), { [alice]: "admin" });
+  assert.match(said(empty), /removed callers, which was \[\]/);
+});
+
+test("a run that would leave no admin is refused", () => {
+  assert.match(errors(run(["--person", `${alice}=engineer`])).join("\n"), /would leave \/etc\/nexus\/control\.json with no admin/);
+  const both = onDisk(shared(["--person", `${alice}=admin`, "--person", `${bob}=engineer`]));
+  assert.equal(run(["--person", `${alice}=engineer`], both).ok, false, "demoting the only admin");
+  assert.equal(run(["--remove-person", alice], both).ok, false, "removing the only admin");
+  assert.deepEqual(peopleIn(shared(["--person", `${bob}=admin`, "--remove-person", alice], both)), { [bob]: "admin" }, "handing over to a new admin in one run");
+});
+
+test("--remove-person takes the person out of people, keeps the rest, and a second run is a no-op", () => {
+  const both = onDisk(shared(["--person", `${alice}=admin`, "--person", `${bob}=engineer:1`]));
+  const removed = shared(["--remove-person", bob], both);
+  assert.deepEqual(peopleIn(removed), { [alice]: "admin" });
+  assert.match(said(removed), /removed people\.bob@example\.com, which was \{"role":"engineer","pylonCap":1\}/);
+  assert.deepEqual([...shared(["--remove-person", bob], onDisk(removed)).values()].map((f) => f.state), ["unchanged", "unchanged", "unchanged", "unchanged"]);
+  assert.match(errors(run(["--remove-person", bob], onDisk(files(run(["--admit", "ramtins-macbook-pro"]))))).join("\n"), /is a one-person install/);
+  assert.match(errors(run(["--remove-person", bob])).join("\n"), /no install yet/);
+});
+
+test("forgetLogins deletes the file the control plane keeps a person's nexus logins in, and leaves everyone else's", async (t) => {
+  const store = await tempDir("nexus-logins-", t);
+  const logins = loginStore(store);
+  await logins.set(bob as Person, { kind: "claude", token: "sk-ant-oat01-bob" });
+  await logins.set(alice as Person, { kind: "claude", token: "sk-ant-oat01-alice" });
+  assert.equal(await forgetLogins(store, bob), `deleted ${bob}'s stored logins, ${join(store, "bob%40example.com.json")}`);
+  assert.equal((await logins.kinds(bob as Person)).claude, false);
+  assert.equal((await logins.kinds(alice as Person)).claude, true);
+  assert.equal(await forgetLogins(store, bob), `${bob} has no stored logins`);
+});
+
+test("--person carries the login's @ through parseFlags, and a malformed one is refused with the form", () => {
+  assert.deepEqual(parseFlags(["write", `--person=${alice}=engineer:3`, "--person", `${bob}=admin`, "--remove-person", "carol@example.com"]).flags, {
+    ...parseFlags(["write"]).flags, person: [`${alice}=engineer:3`, `${bob}=admin`], removePerson: ["carol@example.com"],
+  });
+  const said = (raw: string) => errors(run(["--person", raw])).join("\n");
+  assert.match(said("alice=admin"), /alice is not a tailnet login/);
+  assert.match(said(alice), /give <tailnet login>=admin or <tailnet login>=engineer/);
+  assert.match(said(`${alice}=owner`), /give <tailnet login>=admin/);
+  assert.match(said(`${alice}=admin:0`), /:<cap> after the role/);
+  assert.match(said(`${alice}=admin:2:3`), /:<cap> after the role/);
+  assert.match(errors(run(["--person", `${alice}=admin`, "--person", `${alice}=engineer`])).join("\n"), /named more than once/);
+  assert.match(errors(run(["--person", `${alice}=admin`, "--remove-person", alice])).join("\n"), /give one/);
+  assert.match(errors(run(["--node", "rj-firebat", "--person", `${alice}=admin`], fresh, nodeTailnet)).join("\n"), /--person and --remove-person are for the control machine/);
 });
 
 test("--add-node adds the node, its deploy key and the probe peer, once", () => {
