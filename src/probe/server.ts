@@ -16,7 +16,7 @@ import { type BackendPylon, type VmBackend } from "../backends/backend.ts";
 import type { ProbeDeps } from "./run.ts";
 import { createJobTable } from "./jobs.ts";
 import { isPortableArtifactId, isPylonId, type JobId, type NodeName, type PylonId, type TailnetNodeId } from "../ids.ts";
-import { secretNamePattern } from "../protocol/secret-grants.ts";
+import { maxSecretBytes, secretNamePattern, tokenAlphabet } from "../protocol/secret-grants.ts";
 import { jobDeadlineMs, JobFailure, type Job } from "../protocol/jobs.ts";
 import { encodeProbeEvent, heldSecrets, type NodeObservation, type ProbeEvent } from "../protocol/observations.ts";
 import { parsePylonCommand, type PylonCommand } from "../protocol/commands.ts";
@@ -93,9 +93,6 @@ export interface Probe {
 
 const snapshotIntervalMs = 60_000;
 const healthSampleMs = 1_000;
-const maxSecretBytes = 16_384;
-/** RFC 6750's b64token, the alphabet bearer tokens are written in. */
-const tokenAlphabet = /^[A-Za-z0-9\-._~+/]+=*$/;
 const sum = (pylons: readonly BackendPylon[], resource: keyof NonNullable<BackendPylon["holds"]>) => pylons.reduce((total, p) => total + (p.holds?.[resource] ?? 0), 0);
 
 /** A probe without a preview gateway. An empty set is already converged. */
