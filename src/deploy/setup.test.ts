@@ -19,7 +19,7 @@ import { parseProbeConfig } from "../probe/config.ts";
 import { parseControlPlane } from "./control-plane.ts";
 import { parseTailscaleStatus } from "../tailscale.ts";
 import type { FollowUp } from "./credentials.ts";
-import { checkDotfiles, dotfilesStep, forgetLogins, withoutDotfiles, formatLeft, holdsImage, install, left, paths, parseFlags, report, tailnetDevices, setup, type Existing, type Facts, type FileWrite, type InstallSteps, type Json, type Setup } from "./setup.ts";
+import { checkDotfiles, dotfilesStep, forgetLogins, startedOn, withoutDotfiles, formatLeft, holdsImage, install, left, paths, parseFlags, report, tailnetDevices, setup, type Existing, type Facts, type FileWrite, type InstallSteps, type Json, type Setup } from "./setup.ts";
 
 const status = JSON.stringify({
   Version: "1.90.0",
@@ -648,6 +648,15 @@ test("--remove-person deletes the person's stored logins only after the control 
   const args = ["--remove-person", bob];
   assert.deepEqual((await installing(args)).ran.slice(0, 4), [lockDir, write(args.join(" ")), "bash ./deploy/install-control.sh", `forget ${bob}`]);
   assert.ok(!(await installing(["--person", `${bob}=engineer`])).ran.some((line) => line.startsWith("forget")));
+});
+
+test("the logins are deleted only when no control plane runs, or the one that runs started on the control.json as it is now", () => {
+  const config = JSON.stringify({ people: { [alice]: "admin" } });
+  const record = (text: string) => `abc123 ${"0".repeat(12)} ${sha256(text).slice(0, 12)}\n`;
+  assert.equal(startedOn(true, record(config), config), true);
+  assert.equal(startedOn(true, record(JSON.stringify({ people: { [alice]: "admin", [bob]: "engineer" } })), config), false, "a control plane left running on the old people, as when its harness is signed out");
+  assert.equal(startedOn(true, undefined, config), false);
+  assert.equal(startedOn(false, undefined, config), true);
 });
 
 test("a config write that refuses, such as --join without --node, stops install before anything else runs, with its exit code", async () => {

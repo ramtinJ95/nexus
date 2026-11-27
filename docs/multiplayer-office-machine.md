@@ -112,4 +112,4 @@ One script on the machine does the three installs, checks each, and ends with th
 - Whether the probe's user joins the `docker` group, which image builds need and which is equal to root on the machine. The operator decides, as [the deploy README](../deploy/README.md#docker-access-for-the-image-build-nodes-probe) says.
 - The pylon size and the capacity question above.
 - Whether Nexus runs under SELinux in enforcing mode, which the first install shows. Neither of the operator's nodes has it, and the installer does not look at it.
-- The installer cannot write `people` yet, so it cannot make this install. [`mp-24`](multiplayer-plan.md#mp-24-the-installer-makes-a-shared-install) adds that, and `ops-3` waits for it.
+- The install itself. [`mp-24`](multiplayer-plan.md#mp-24-the-installer-makes-a-shared-install) taught the installer to write `people`, so `ops-3` installs with `sudo deploy/install.sh --person <the operator's tailnet login>=admin --release-branch multiplayer`, as [the deploy README](../deploy/README.md#a-shared-install) says.
