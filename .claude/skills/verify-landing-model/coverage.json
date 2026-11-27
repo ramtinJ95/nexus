@@ -1,7 +1,7 @@
 {
-  "syncCommit": "155188614ab773629d4a5c70ec5d70b006967915",
+  "syncCommit": "92146ab2a7fe8568e83bff448b03e9757f28e268",
   "covers": {
-    "src/control/review.ts": "fa67c7c22284ac0549fa744ca671654dd293c6e2eab7695276c6b5be9bfca58a",
+    "src/control/review.ts": "1fc2c7223b73d5df7815e1a9dd8898de3eeca03796d2807827e856dc32765b90",
     "src/control/landing.ts": "fbc0ccc0cbdf22925538c0e230dd38e9d281716b694db12199d160c9b700b9f4",
     "src/control/review-model.ts": "8a7a8c165583acc00c4559a5dfebf842d03c847947c5ed4a3c515e900be6addb",
     "src/control/release-store.ts": "e98714acc4aca87e436b140bf05e5c86afe9b2d26b2a2186589ff0661dc2dbb0",
