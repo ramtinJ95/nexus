@@ -904,6 +904,8 @@ export function reviewLoop(deps: ReviewDeps) {
     // A review that waits on the person ends as a running one does once the person closes its PR or archives its
     // builder, before its label, which the person no longer needs, and one stopped at approval once its PR merged
     // outside it too. One that merged is held over its deploy, which neither settles.
+    // An approval saved before the install became shared waits for an engineer's merge on GitHub, as one made since does.
+    if (lands === null && r.phase.kind === "approved" && r.phase.onGitHub !== true) return { ...r, land: null, phase: { kind: "approved", onGitHub: true } };
     const held = r.phase.kind === "needs-person" && r.merged === null;
     if (held || r.phase.kind === "approved") {
       const status = registry.threads.thread(r.builder)?.status;

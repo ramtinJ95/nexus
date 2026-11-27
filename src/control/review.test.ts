@@ -6705,3 +6705,21 @@ test("on a shared install a yolo project's holds question left from before is wi
   assert.deepEqual(g.review().phase, { kind: "approved", onGitHub: true });
   assert.deepEqual([g.merges, g.updates, openHolds(g)], [[], [], []]);
 });
+
+test("an approval saved on a solo install says, once the install is shared, that an engineer merges it, and ends when they do", async (t) => {
+  const path = tempDb();
+  const f = fixture(t, { path });
+  await approved(f, null);
+  assert.deepEqual(f.review().phase, { kind: "approved" });
+  f.registry.close();
+  const g = fixture(t, { path, shared: true });
+  const loop = g.loop();
+  await loop.poll();
+  assert.deepEqual([g.review().phase, g.review().land], [{ kind: "approved", onGitHub: true }, null]);
+  assert.match(reviewSaid(g.review())[0]!, /for an engineer to merge on GitHub/);
+  g.watched("merged");
+  g.snapshot = { ...g.snapshot, pr: { ...g.snapshot.pr, state: "merged" }, detail: { ...g.snapshot.detail, mergeCommit: merged } };
+  await loop.poll();
+  assert.deepEqual(g.review().phase, { kind: "merged" });
+  assert.deepEqual([g.merges, g.updates], [[], []]);
+});
