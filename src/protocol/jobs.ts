@@ -151,7 +151,7 @@ const bootSchema = z.looseObject({
     fresh,
   ]),
   resources: unchecked<BootInputs["resources"]>(),
-  network: unchecked<BootInputs["network"]>(),
+  network: z.looseObject({ allowedHosts: unchecked<BootInputs["network"]["allowedHosts"]>(), secrets: unchecked<BootInputs["network"]["secrets"]>(), defaultBranch: nonEmpty.optional() }),
   repo: z.discriminatedUnion("kind", [
     z.looseObject({ kind: z.literal("clone"), url: nonEmpty, checkout: z.looseObject({ branch: nonEmpty, commit: nonEmpty }) }),
     z.looseObject({ kind: z.literal("empty"), branch: nonEmpty }),

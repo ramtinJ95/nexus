@@ -158,7 +158,7 @@ test("a scratch project has no repository, and each of its threads starts an emp
   assert.deepEqual(s.reads, [], "a scratch project has no remote to read");
   const pylon = s.registry.threads.pylon(started.body.pylonId)!;
   assert.deepEqual(pylon.boot.repo, { kind: "empty", branch: "main" });
-  assert.deepEqual(pylon.boot.network, { allowedHosts: ["api.github.com", "github.com"], secrets: [githubTokenGrant] }, "the grant opens GitHub, and no repo host joins");
+  assert.deepEqual(pylon.boot.network, { allowedHosts: ["api.github.com", "github.com"], secrets: [githubTokenGrant], defaultBranch: "main" }, "the grant opens GitHub, and no repo host joins");
   assert.match(pylon.live.overlay[2]!.content, /new repository on branch main with no commits and no remote/);
 
   const trunk = await s.call("POST", "/v1/threads", { project: "sketch", title: "Trunk", branch: "trunk" });

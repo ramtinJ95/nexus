@@ -15,7 +15,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import type { BackendPylon } from "../backend.ts";
-import { bootSsh, createPylonVmBackend, hostNestsKvm, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
+import { bootSsh, createPylonVmBackend, githubGuardOf, hostNestsKvm, type PylonVmBackendOptions } from "./pylon-vm-backend.ts";
 import { networkOptions } from "../../pylon-vm/network.ts";
 import { asUserIn, bootHooks, commitMissing } from "../pylon-boot.ts";
 import { launchers } from "../../probe/guest/launchers.ts";
@@ -184,6 +184,13 @@ test("a person's pylon on a shared install boots with no SSH key and no SSH remo
   const solo = await bootSsh(bootOf("pylon-solo-ssh", { repo: sshRepo }), gitSsh);
   assert.deepEqual(solo, { privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\nthe node's one key\n", knownHostsFile: keyFile, remotes: [{ host: "github.com", port: 22, username: "git", repo: "acme/mono.git" }] }, "a solo install's boot keeps the node's key");
   assert.equal(networkOptions({ ...spec, ssh: solo }, "pylon-solo-ssh").ssh?.credentials?.["github.com"]?.privateKey, solo!.privateKey);
+});
+
+test("only a boot with its owner's logins gets the GitHub guard, with its project's default branch", () => {
+  const owned = { allowedHosts: ["api.github.com", "github.com"], secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com", "github.com"], owner: true as const }] };
+  assert.deepEqual(githubGuardOf({ network: { ...owned, defaultBranch: "trunk" } }), { githubGuard: { defaultBranch: "trunk" } });
+  assert.deepEqual(githubGuardOf({ network: owned }), { githubGuard: { defaultBranch: null } }, "a pylon stored before boots carried the branch refuses every push");
+  assert.deepEqual(githubGuardOf({ network: { allowedHosts: owned.allowedHosts, secrets: [{ name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] }], defaultBranch: "main" } }), {}, "a solo install's boot has no guard");
 });
 
 test("the backend tells the probe whether it has a git SSH key, journals events in its state root, and answers NEXUS_API on a socket there", async (t) => {

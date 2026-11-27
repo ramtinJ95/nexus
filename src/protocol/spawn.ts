@@ -42,7 +42,8 @@ export interface BootInputs {
   source: PylonSource;
   /** `nestedVirtualization` loads the KVM modules at boot, which only a node that reports it can give. */
   resources: PylonResources & { nestedVirtualization?: true };
-  network: { allowedHosts: readonly string[]; secrets: readonly SecretGrant[] };
+  /** `defaultBranch` is the project's, which an owner boot's GitHub guard refuses pushes to. A pylon stored before it has none. */
+  network: { allowedHosts: readonly string[]; secrets: readonly SecretGrant[]; defaultBranch?: string | undefined };
   repo: RepoInit; // set up on template and fresh boots only
   /** Pulled on every boot. Absent, a boot keeps the image's baked layer. */
   dotfiles?: { repo: string; ref: string } | undefined;

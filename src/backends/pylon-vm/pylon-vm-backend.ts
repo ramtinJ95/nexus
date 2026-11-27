@@ -17,7 +17,7 @@ import { artifactDirectory, manifestFiles, tarCodec } from "../../image/artifact
 import { type ArtifactStore, type BackendPylon, type BackendVm, type Guest, type SecretSource, type VmBackend } from "../backend.ts";
 import { JobFailure } from "../../protocol/jobs.ts";
 import { buildImage as buildPylonImage } from "../../image/build.ts";
-import { minPylonMemoryGiB, minPylonMemoryReason, requiredArtifacts, sshRefusal, type BootInputs, type LiveSpec, type RepoInit } from "../../protocol/spawn.ts";
+import { minPylonMemoryGiB, minPylonMemoryReason, ownerBoot, requiredArtifacts, sshRefusal, type BootInputs, type LiveSpec, type RepoInit } from "../../protocol/spawn.ts";
 import { shellQuote as q } from "../../shell.ts";
 import { type CheckpointId, type ImageId, isCheckpointId, isImageId, isTemplateId, maxPylonIdLength, type PortableArtifactId, type PylonId } from "../../ids.ts";
 import { pylonIdSchema } from "../../protocol/fields.ts";
@@ -73,6 +73,13 @@ export interface PylonVmBackendOptions {
   /** What ends a retry's read of a stuck guest's sessions, 3 s unless a test sets it. */
   retrySessions?: () => AbortSignal;
 }
+
+/**
+ * The GitHub guard of a boot with its owner's logins, which only a shared install gives. A solo install's boot has none,
+ * so its requests go out as they always have. A pylon stored before boots carried the default branch gets null.
+ */
+export const githubGuardOf = (boot: Pick<BootInputs, "network">): Pick<BootSpec, "githubGuard"> =>
+  ownerBoot(boot) ? { githubGuard: { defaultBranch: boot.network.defaultBranch ?? null } } : {};
 
 /** How often a backend in use prunes the kept boot logs past their age. */
 const keptLogsPruneMs = 60 * 60_000;
@@ -296,6 +303,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
       hooks: bootHooks(boot),
       publicUrls: publicUrls(boot.pylonId, live.previews, options.previewHost),
       hostBridge: stateFiles(options.stateRoot).hostBridge,
+      ...githubGuardOf(boot),
     };
   }
 

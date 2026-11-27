@@ -40,7 +40,7 @@ test("starting a thread creates its pylon, boots fresh from the current image, a
   assert.deepEqual(pylon.firstBoot, { kind: "fresh", preSetup: null });
   assert.deepEqual(pylon.boot, {
     pylonId: thread.pylonId, image: image.id, resources: project.resources,
-    network: { allowedHosts: ["api.openai.com", "api.stripe.com", "auth.openai.com", "chatgpt.com", "registry.npmjs.org"], secrets: [...project.secrets, { name: "NEXUS_CHATGPT_TOKEN", hosts: ["api.openai.com"] }] },
+    network: { allowedHosts: ["api.openai.com", "api.stripe.com", "auth.openai.com", "chatgpt.com", "registry.npmjs.org"], secrets: [...project.secrets, { name: "NEXUS_CHATGPT_TOKEN", hosts: ["api.openai.com"] }], defaultBranch: "main" },
     repo: { kind: "clone", url: project.repoUrl, checkout: { branch: "main", commit: "origin/main" } },
     dotfiles,
   });

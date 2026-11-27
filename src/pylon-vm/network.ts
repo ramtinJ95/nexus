@@ -1,11 +1,13 @@
 import {
 	createHttpHooks,
 	getInfoFromSshExecRequest,
+	type HttpHooks,
 	type SecretManager,
 	type SshExecPolicy,
 	type VMOptions,
 } from "@earendil-works/gondolin";
 import type { BootSpec } from "./contracts.ts";
+import { githubGuardHook } from "./github-guard.ts";
 import { hostBridgeHook } from "./host-bridge.ts";
 
 type Remote = NonNullable<BootSpec["ssh"]>["remotes"][number];
@@ -20,10 +22,14 @@ export function networkOptions(
 	spec: BootSpec,
 	instance: string,
 ): Pick<VMOptions, "httpHooks" | "ssh"> & { placeholders: Record<string, string>; secretManager: SecretManager } {
+	const hooks = [
+		...(spec.hostBridge === null ? [] : [hostBridgeHook(spec.hostBridge, instance)]),
+		...(spec.githubGuard === undefined ? [] : [githubGuardHook(spec.githubGuard)]),
+	];
 	const { httpHooks, env, secretManager } = createHttpHooks({
 		allowedHosts: spec.allowedHosts,
 		secrets: spec.secrets,
-		...(spec.hostBridge === null ? {} : { onRequest: hostBridgeHook(spec.hostBridge, instance) }),
+		...(hooks.length === 0 ? {} : { onRequest: hooks.length === 1 ? hooks[0] : firstAnswer(hooks) }),
 	});
 	if (spec.ssh === null) return { httpHooks, placeholders: env, secretManager };
 	const { privateKey, knownHostsFile, remotes } = spec.ssh;
@@ -41,6 +47,16 @@ export function networkOptions(
 		},
 	};
 }
+
+/** Each hook in turn, until one answers or rewrites the request. Each hook leaves other hosts' requests alone. */
+const firstAnswer = (hooks: readonly OnRequest[]): OnRequest => async (request) => {
+	for (const hook of hooks) {
+		const answer = await hook(request);
+		if (answer !== undefined) return answer;
+	}
+	return undefined;
+};
+type OnRequest = NonNullable<HttpHooks["onRequest"]>;
 
 const target = (r: Remote) => (r.port === 22 ? r.host : `${r.host}:${r.port}`);
 
