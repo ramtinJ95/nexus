@@ -10,6 +10,7 @@ export function checkoutText({ el, checkout }) {
     const say = (text) => el("p", { className: "empty", textContent: text });
     if (facts.status === "deleted") return [say("The thread is deleted, so its checkout is gone.")];
     if (facts.status === "archived") return [say(`An archived thread's pylon stays paused, so ${noun} can't be read until the thread is unarchived.`)];
+    if (!facts.wakes) return [say(`The pylon is ${facts.pylon}. Only the thread's owner wakes it, so ${noun} can be read once it runs.`)];
     if (checkout.wanted) return [say(`Waking the pylon to read ${noun}.`)];
     const wake = el("button", { type: "button", className: "btn btn-xs", textContent: "Wake and read" });
     wake.addEventListener("click", onWake);

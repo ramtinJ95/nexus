@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# The live box of docs/multiplayer-plan.md's mp-04: on the stack started with people, alice's thread sits idle until
+# its pylon pauses. Then for 60 s bob makes the requests the dashboard's thread page makes, with its diff open: the
+# page, its visit, the changes, the diff and the files, every 5 s as the page polls. Pass when alice's pylon is
+# still paused, has no container, and its lastHumanActivityAt has not moved, and alice's own read of the changes
+# then wakes it. This pylon has no playwright-cli, so curl through bob's port sends what the page would.
+# Exits 0 only if every step did what it should.
+set -euo pipefail
+V="$(cd "$(dirname "$0")" && pwd)/verify-nexus"
+fail() { echo "reads check: $*" >&2; exit 1; }
+
+trap '"$V" down >&2 || true' EXIT
+NEXUS_VERIFY_PEOPLE=1 "$V" up
+"$V" doctor
+evidence=$("$V" evidence)
+alice=http://127.0.0.1:7470
+bob=http://127.0.0.1:7471
+
+T=$("$V" cli reads-start-alice -- start --project spoon --title "reads: alice's" --json | jq -r .id)
+echo "alice started $T"
+facts() { curl -fsS "$alice/v1/threads/$T" | jq -c '{state: .pylon.actualState, human: .thread.lastHumanActivityAt}'; }
+# The idle policy pauses a pylon 20 minutes after the last human activity, which the start was.
+for _ in $(seq 900); do
+  [ "$(facts | jq -r .state)" = paused ] && break
+  sleep 2
+done
+"$V" cli reads-show-before -- show "$T" --json >/dev/null
+before=$(facts)
+echo "alice's $T before bob's visit: $before"
+[ "$(jq -r .state <<< "$before")" = paused ] || fail "alice's pylon never paused: $before"
+
+# One request as bob, its status and body kept in the evidence directory as <n>-<step>.
+n=0
+asBob() {
+  local step=$1 method=$2 path=$3; n=$((n + 1))
+  local out="$evidence/bob-$(printf '%03d' "$n")-$step"
+  local code
+  code=$(curl -sS -o "$out.body" -w '%{http_code}' -X "$method" -H 'content-type: application/json' ${4:+--data "$4"} "$bob$path")
+  echo "$code" > "$out.status"
+  echo "$code $out.body"
+}
+expect() {
+  local got=$1 want=$2 what=$3
+  [ "${got%% *}" = "$want" ] || fail "bob's $what answered ${got%% *}, not $want: $(head -c 300 "${got#* }")"
+}
+
+start=$(date +%s)
+while [ $(( $(date +%s) - start )) -lt 60 ]; do
+  page=$(asBob page GET "/threads/$T")
+  expect "$page" 200 "thread page"
+  ! grep -q 'data-activity=' "${page#* }" || fail "bob's thread page counts his visit"
+  grep -q 'data-wakes="false"' "${page#* }" || fail "bob's thread page offers him a wake"
+  expect "$(asBob visit POST "/v1/threads/$T/activity" '{"kind":"human"}')" 403 "visit"
+  for read in "changes?base=start" "diff?base=start&paths=README.md" "files"; do
+    said=$(asBob "${read%%\?*}" GET "/v1/threads/$T/$read")
+    expect "$said" 409 "$read"
+    jq -e --arg who "only alice@example.com's requests wake it" '(.error | contains($who)) and .retryable == false' "${said#* }" >/dev/null \
+      || fail "bob's $read refusal does not say only alice wakes it: $(cat "${said#* }")"
+  done
+  sleep 5
+done
+echo "bob's last page, visit and reads:"
+for step in page visit changes diff files; do
+  last=$(ls "$evidence" | grep -E "^bob-[0-9]+-$step\.status$" | tail -1)
+  echo "  ${last%.status} -> $(cat "$evidence/$last") $(grep -o '"error":"[^"]*"' "$evidence/${last%.status}.body" || echo '(page)')"
+done
+
+after=$(facts)
+"$V" cli reads-show-after -- show "$T" --json >/dev/null
+container=$(docker ps --filter "name=pylon-$T" --format '{{.Names}}' | wc -l | tr -d ' ')
+echo "alice's $T after 60 s of bob: $after, running containers $container"
+[ "$(jq -r .state <<< "$after")" = paused ] || fail "alice's pylon is $(jq -r .state <<< "$after") after bob's visit"
+[ "$(jq -r .human <<< "$after")" = "$(jq -r .human <<< "$before")" ] || fail "lastHumanActivityAt moved from $(jq -r .human <<< "$before") to $(jq -r .human <<< "$after")"
+[ "$container" = 0 ] || fail "alice's pylon has a running container"
+
+own=$(curl -sS -o /dev/null -w '%{http_code}' "$alice/v1/threads/$T/changes?base=start")
+woke=$(facts)
+echo "alice's own read of the changes -> $own, then $woke"
+[ "$(jq -r .human <<< "$woke")" -gt "$(jq -r .human <<< "$before")" ] || fail "alice's own read did not count as her activity"
+for _ in $(seq 60); do
+  [ "$(facts | jq -r .state)" = running ] && break
+  sleep 2
+done
+[ "$(facts | jq -r .state)" = running ] || fail "alice's own read did not wake her pylon: $(facts)"
+echo "reads check: bob's page, visit, changes, diff and files for 60 s left alice's paused pylon paused with lastHumanActivityAt unmoved, and alice's own read woke it"

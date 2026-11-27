@@ -17,12 +17,13 @@ export type Action = (typeof actions)[number];
 
 /**
  * What a thread page's `#facts` says, which changes-tree.js reads to decide when to read the checkout's changes. `open`
- * is false for an archived or deleted thread, whose pylon stays paused.
+ * is false for an archived or deleted thread, whose pylon stays paused. `wakes` is whether the viewer's reads wake a
+ * paused pylon, which only the thread's owner's do.
  */
-export interface Facts { pylon: ActualState; turn: boolean; agentAt: number; status: ThreadStatus; open: boolean }
-export const factsData = (f: Facts) => ({ pylon: f.pylon, turn: String(f.turn), agentAt: String(f.agentAt), threadStatus: f.status, open: String(f.open) });
+export interface Facts { pylon: ActualState; turn: boolean; agentAt: number; status: ThreadStatus; open: boolean; wakes: boolean }
+export const factsData = (f: Facts) => ({ pylon: f.pylon, turn: String(f.turn), agentAt: String(f.agentAt), threadStatus: f.status, open: String(f.open), wakes: String(f.wakes) });
 export const factsOf = (data: Readonly<Record<string, string | undefined>>): Facts => ({
-  pylon: data.pylon as ActualState, turn: data.turn === "true", agentAt: Number(data.agentAt), status: data.threadStatus as ThreadStatus, open: data.open === "true",
+  pylon: data.pylon as ActualState, turn: data.turn === "true", agentAt: Number(data.agentAt), status: data.threadStatus as ThreadStatus, open: data.open === "true", wakes: data.wakes === "true",
 });
 
 /**

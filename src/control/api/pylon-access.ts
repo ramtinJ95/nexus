@@ -1,9 +1,9 @@
 /**
- * What a route runs in a thread's pylon, through its node's probe: a request a human makes, which wakes the pylon,
- * or a read a page makes by itself, which only runs while the pylon does.
+ * What a route runs in a thread's pylon, through its node's probe: a request its owner makes, which wakes the pylon,
+ * or a read a page makes by itself or a reader makes, which only runs while the pylon does.
  */
 import type { CommandResult, PylonCommand } from "../../protocol/commands.ts";
-import type { NodeName, PylonId } from "../../ids.ts";
+import type { NodeName, Person, PylonId } from "../../ids.ts";
 import type { ProbeClient } from "../../protocol/client.ts";
 import type { ProbeError } from "../../protocol/http.ts";
 import type { Registry } from "../registry.ts";
@@ -18,33 +18,42 @@ const checkoutRefusal: Readonly<Record<CheckoutRefusalKind, RefusalKind>> = {
   missing: "missing", outside: "invalid", kind: "invalid", large: "too-large", "no-base": "unprocessable", slow: "timeout", busy: "unavailable", long: "invalid",
 };
 
+/** Who asks for a request in a pylon: the thread's owner, a page by itself, or a reader who does not own the thread. */
+type Asker = "owner" | "page" | "reader";
+const notRunning: Readonly<Record<Asker, (pylonId: PylonId, owner: Person) => Refusal>> = {
+  owner: (pylonId) => new Refusal("conflict", `pylon ${pylonId} is not running yet. This request wakes it, so ask again once it runs`, "not-running"),
+  page: (pylonId) => new Refusal("conflict", `pylon ${pylonId} is not running, and this request does not wake it`, "not-running"),
+  reader: (pylonId, owner) => new Refusal("conflict", `pylon ${pylonId} is not running, and only ${owner}'s requests wake it`),
+};
+
 export function pylonAccess({ registry, probes, wake, guard, current }: {
   registry: Registry; probes: ReadonlyMap<NodeName, Pick<ProbeClient, "command" | "stream">>; wake(node: NodeName): void;
   guard: Access["guard"]; current: Access["current"];
 }) {
   /**
-   * Runs what a human asked for in the thread's pylon, such as a link, a session open or a checkout read. Asking is
-   * human activity, as a message is, so a paused pylon is woken, but the request itself needs the pylon running and
-   * is refused as a conflict until it is.
+   * Runs what a human asked for in the thread's pylon, such as a link, a session open or a checkout read. The owner's
+   * asking is human activity, as a message is, so a paused pylon is woken, but the request itself needs the pylon
+   * running and is refused as a conflict until it is. A page's own read and a reader's run only while the pylon runs.
    */
-  async function inPylon<T>(t: Thread, act: (probe: Pick<ProbeClient, "command" | "stream">, pylonId: PylonId) => Promise<T>, wakes = true): Promise<T> {
+  async function inPylon<T>(t: Thread, act: (probe: Pick<ProbeClient, "command" | "stream">, pylonId: PylonId) => Promise<T>, asker: Asker = "owner"): Promise<T> {
     guard(t, { status: "pylon" });
     const pylon = registry.threads.pylon(t.pylonId)!;
     const probe = probes.get(pylon.node);
     if (probe === undefined) throw new Refusal("unavailable", `no probe is configured for ${pylon.node}`);
-    if (wakes) {
+    const refused = () => notRunning[asker](pylon.pylonId, t.owner);
+    if (asker === "owner") {
       registry.threads.recordActivity(t.id, { human: Date.now() });
       wake(pylon.node);
-    } else if (!running(pylon)) throw new Refusal("conflict", notRunning(pylon.pylonId, false), "not-running");
+    } else if (!running(pylon)) throw refused();
     // A sealed boot runs no work, and the wake pauses it for the next.
-    if (runsSealed(registry, pylon)) throw new Refusal("conflict", notRunning(pylon.pylonId, wakes), "not-running");
+    if (runsSealed(registry, pylon)) throw refused();
     let result: T;
     try {
       result = await act(probe, pylon.pylonId);
     } catch (err) {
       // A delete or archive that landed meanwhile stopped the pylon, so the thread's state answers, not the node's failure.
       guard(current(t), { status: "pylon" });
-      if ((err as Partial<ProbeError>).code === "not-running") throw new Refusal("conflict", notRunning(pylon.pylonId, wakes), "not-running");
+      if ((err as Partial<ProbeError>).code === "not-running") throw refused();
       if (err instanceof CheckoutRefused) throw new Refusal(checkoutRefusal[err.kind], err.message);
       throw err;
     }
@@ -58,10 +67,15 @@ export function pylonAccess({ registry, probes, wake, guard, current }: {
    * or counts as the person's activity, so a page left open lets the pylon sleep.
    */
   function whileRunning<T>(t: Thread, act: (probe: Pick<ProbeClient, "command" | "stream">, pylonId: PylonId) => Promise<T>) {
-    return inPylon(t, act, false);
+    return inPylon(t, act, "page");
   }
-  const notRunning = (pylonId: PylonId, wakes: boolean) => wakes ? `pylon ${pylonId} is not running yet. This request wakes it, so ask again once it runs`
-    : `pylon ${pylonId} is not running, and this request does not wake it`;
+  /**
+   * A read by someone who does not own the thread, such as a teammate browsing it, leaves its pylon and idle clock as
+   * they were. It is refused outright while the pylon does not run, since asking again wakes nothing.
+   */
+  function asReader<T>(t: Thread, act: (probe: Pick<ProbeClient, "command" | "stream">, pylonId: PylonId) => Promise<T>) {
+    return inPylon(t, act, "reader");
+  }
   /** Whether the node, online, reports the pylon running, as a Claude transcript's reads ask. */
   const running = (pylon: StoredPylon): boolean => runningNode(registry, pylon.pylonId, "work") !== null;
 
@@ -75,6 +89,6 @@ export function pylonAccess({ registry, probes, wake, guard, current }: {
     return await inPylon(t, (probe, pylonId) => probe.command(pylonId, command)) as Extract<CommandResult, { kind: K }>;
   }
 
-  return { inPylon, whileRunning, pylonCommand, execInPylon };
+  return { inPylon, whileRunning, asReader, pylonCommand, execInPylon };
 }
 export type PylonAccess = ReturnType<typeof pylonAccess>;

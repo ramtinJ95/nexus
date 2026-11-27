@@ -8,8 +8,8 @@ const datasetOf = (markup: string) => Object.fromEntries([...markup.matchAll(/ d
   .map(([, name, value]) => [name!.replace(/-(\w)/g, (_, c: string) => c.toUpperCase()), value!]));
 
 test("a thread page's facts read back as the server wrote them", () => {
-  const open: Facts = { pylon: "running", turn: true, agentAt: 1_800_000_000_000, status: "idle", open: true };
-  const archived: Facts = { pylon: "paused", turn: false, agentAt: 0, status: "archived", open: false };
+  const open: Facts = { pylon: "running", turn: true, agentAt: 1_800_000_000_000, status: "idle", open: true, wakes: true };
+  const archived: Facts = { pylon: "paused", turn: false, agentAt: 0, status: "archived", open: false, wakes: false };
   for (const facts of [open, archived]) assert.deepEqual(factsOf(datasetOf(html`<span${dataset(factsData(facts))}></span>`.text)), facts);
 });
 

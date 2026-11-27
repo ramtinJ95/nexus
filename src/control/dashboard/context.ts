@@ -32,6 +32,8 @@ export interface Context {
    * own threads the lists open on, or null for a device that is no person, which sees everyone's.
    */
   mine: { person: Person | null } | null;
+  /** Whether the viewer owns the thread, so their visit and reads keep its pylon awake. */
+  owns(thread: ThreadId): boolean;
   deploys(review: Review): boolean;
   answerRefusal(question: Question): AnswerRefusal | null;
   projects: readonly Project[];

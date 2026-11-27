@@ -203,6 +203,9 @@ export function apiAccess(registry: Registry, wake: (node: NodeName) => void, op
     return owner === personAs(caller) ? null : owner;
   }
 
+  /** Whether the caller owns thread `id`, as a solo install's one person owns every thread. A read by anyone else wakes nothing. */
+  const owns = (id: string, caller: Caller): boolean => ownerOtherThan(id, caller) === null;
+
   /** Refuses a person who may not take `policy`'s route on thread `id`: anyone but its owner, unless the route admits an admin and the caller is one. */
   function actsOn(id: string, caller: Caller, policy: OwnerPolicy) {
     const owner = ownerOtherThan(id, caller);
@@ -228,7 +231,7 @@ export function apiAccess(registry: Registry, wake: (node: NodeName) => void, op
   const answerRefusalOf = (caller: Caller, question: Question): AnswerRefusal | null =>
     answerRefusal(question, { person: caller.roles.has("person"), deployer: caller.roles.has("deployer"), owner: !("thread" in question) || ownerOtherThan(question.thread, caller) === null });
 
-  return { shared: people.shared, lookup, thread, threadRefusal, guard, current, wakeThread: threadWaker(registry, wake), roleOf, admittable, personAs, starter, actsOn, administers, refuseLanding, lands, answerRefusalOf };
+  return { shared: people.shared, lookup, thread, threadRefusal, guard, current, wakeThread: threadWaker(registry, wake), roleOf, admittable, personAs, starter, owns, actsOn, administers, refuseLanding, lands, answerRefusalOf };
 }
 export type Access = ReturnType<typeof apiAccess>;
 

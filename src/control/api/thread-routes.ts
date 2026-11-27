@@ -11,15 +11,18 @@ import { feature, type Features } from "../features.ts";
 import { isOpenStatus, openStatuses, retryRefusal, type ThreadStatus } from "../reconcile.ts";
 import { startKey } from "../threads.ts";
 import { ok, created, noContent, parse, on, type RouteEntry, type ApiKit } from "./kit.ts";
-import { anyAllowed, type Caller } from "./access.ts";
+import { anyAllowed, type Caller, type OwnerPolicy } from "./access.ts";
 import { threadRoutes as routes, type QueuedThread } from "../../contract/threads.ts";
 import { activitySchema, messageSchema, seenSchema, startSchema } from "../../contract/threads-parse.ts";
+
+/** A visit is the owner's activity alone, so a teammate who browses a thread leaves its pylon paused. */
+const keepsAwake: OwnerPolicy = { role: "owner", action: "record activity on a thread, which keeps its pylon awake" };
 
 /** What `deleted=false` lists. The record fails to typecheck when a status is added, so none is left out unseen. */
 const keptStatuses = Object.keys({ active: true, idle: true, archived: true } satisfies Record<Exclude<ThreadStatus, "deleted">, true>) as ThreadStatus[];
 
 export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEntry[] {
-  const { lookup, thread, guard, wakeThread, rows, shown, open, registry, harness, startThread, agents, agentOf, deleteThread, starter, personAs } = kit;
+  const { lookup, thread, guard, wakeThread, rows, shown, open, registry, harness, startThread, agents, agentOf, deleteThread, starter, personAs, actsOn } = kit;
 
   /**
    * The threads as the caller has seen them: with their own mark where they do not own the thread. A caller who is no
@@ -195,7 +198,12 @@ export function threadRoutes(kit: ApiKit, features: Features): readonly RouteEnt
       if (registry.projects.project(project)?.removed !== undefined) throw new HttpError(409, `project ${project} is removed; its history is read-only`);
       return ok("queued" in found ? queuedStatus(id, "queued") : unarchive(found.thread));
     }),
-    on(routes.activity, { role: "allowed", why: "a page open on the thread only keeps its pylon awake" }, async ({ thread: id }, r) => { recordActivity(thread(id), await r.body()); return noContent; }),
+    // The owner policy asks for a person, which a solo install's control node is not, so the owner is asked for here.
+    on(routes.activity, { role: "allowed", why: "a page open on the thread only keeps its pylon awake, and only its owner's counts" }, async ({ thread: id }, r) => {
+      actsOn(id, r, keepsAwake);
+      recordActivity(thread(id), await r.body());
+      return noContent;
+    }),
     // The body first, so the thread's status is read after the last await before the message is submitted.
     on(routes.message, { role: "owner", action: "message a thread", startsTurn: true }, async ({ thread: id }, r) => {
       const body = await r.body();

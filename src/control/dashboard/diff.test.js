@@ -256,7 +256,7 @@ test("each base names itself, its empty tree, an empty list and a diff's compari
 });
 
 test("the changes pane and the diff say the same of a checkout they cannot read, a deleted thread's included", () => {
-  const paused = { status: "idle", pylon: "paused" };
+  const paused = { status: "idle", pylon: "paused", wakes: true };
   for (const [noun, texts] of [
     ["its changes", ["Reading its changes wakes it.", "Waking the pylon to read its changes.", "its changes can't be read"]],
     ["the diff", ["Reading the diff wakes it.", "Waking the pylon to read the diff.", "the diff can't be read"]],
@@ -270,6 +270,8 @@ test("the changes pane and the diff say the same of a checkout they cannot read,
     assert.deepEqual(said(checkoutTexts().unreadable({ status: "archived", pylon: "paused" }, noun, () => {})),
       [`An archived thread's pylon stays paused, so ${texts[2]} until the thread is unarchived.`]);
     assert.deepEqual(said(checkoutTexts().unreadable({ status: "deleted", pylon: "paused" }, noun, () => {})), ["The thread is deleted, so its checkout is gone."], `${noun} of a deleted thread`);
+    assert.deepEqual(said(checkoutTexts().unreadable({ ...paused, wakes: false }, noun, () => {})),
+      [`The pylon is paused. Only the thread's owner wakes it, so ${noun} can be read once it runs.`], `${noun} to a reader, who has no wake`);
     assert.equal(woke, 1);
   }
 });
