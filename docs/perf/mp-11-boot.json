@@ -1,0 +1,112 @@
+{
+  "slice": "mp-11",
+  "box": "mp-11 Perf: boot. Fail above 10% over base.",
+  "probe": "NEXUS_VERIFY_PEOPLE=1 node scripts/mp-probe.ts boot, with NEXUS_VERIFY_BASE=nexus-verify-base:pylon. The probe from 5302b366 runs on both sides, so base is dirty in scripts/mp-probe.ts alone. Before the timed start alice signs in and adds the host mcp.alice.example and the secret MCP_TOKEN, which base answers 404 for and head stores, reads at the start and hands to the probe.",
+  "machine": "Nexus pylon pylon-th-00fb8d8a92c6 on node infra-testbench, no /dev/kvm, Docker in the pylon started as .nexus/verify starts it. Base in a git worktree at 830db10a, head in the main checkout, run one after another.",
+  "order": "alternating, base first",
+  "limit": "fail when the head median is over 10% above base and outside base range",
+  "baseMedianMs": 5025.5,
+  "headMedianMs": 4968.2,
+  "baseRangeMs": [
+    3716.6,
+    6326.4
+  ],
+  "headRangeMs": [
+    3445.7,
+    5709.4
+  ],
+  "verdict": "pass: head median is 1.1% under base",
+  "explained": "Both sides spread over 3.4 to 6.3 s from run to run, more than any gap between them. What head adds to a start is a read of the same per-person file mp-09 already reads, and one more loopback PUT to the probe. Head runs 8 and 10 are dirty only in docs/multiplayer-plan.md, edited while they ran.",
+  "runs": [
+    {
+      "order": 1,
+      "side": "base",
+      "revision": "830db10a",
+      "dirty": true,
+      "bootMs": 4266.8,
+      "template": "tpl-12d516fc09cd",
+      "failed": 0
+    },
+    {
+      "order": 2,
+      "side": "head",
+      "revision": "5302b366",
+      "dirty": false,
+      "bootMs": 4221.5,
+      "template": "tpl-ff5cbeb672f8",
+      "failed": 0
+    },
+    {
+      "order": 3,
+      "side": "base",
+      "revision": "830db10a",
+      "dirty": true,
+      "bootMs": 6326.4,
+      "template": "tpl-b727adfd3025",
+      "failed": 0
+    },
+    {
+      "order": 4,
+      "side": "head",
+      "revision": "5302b366",
+      "dirty": false,
+      "bootMs": 5642.1,
+      "template": "tpl-051d347405f3",
+      "failed": 0
+    },
+    {
+      "order": 5,
+      "side": "base",
+      "revision": "830db10a",
+      "dirty": true,
+      "bootMs": 5025.5,
+      "template": "tpl-452ecd27db19",
+      "failed": 0
+    },
+    {
+      "order": 6,
+      "side": "head",
+      "revision": "5302b366",
+      "dirty": false,
+      "bootMs": 4968.2,
+      "template": "tpl-6782a621fa8d",
+      "failed": 0
+    },
+    {
+      "order": 7,
+      "side": "base",
+      "revision": "830db10a",
+      "dirty": true,
+      "bootMs": 5235,
+      "template": "tpl-de373f5b62d8",
+      "failed": 0
+    },
+    {
+      "order": 8,
+      "side": "head",
+      "revision": "5302b366",
+      "dirty": true,
+      "bootMs": 5709.4,
+      "template": "tpl-a06739cb52ab",
+      "failed": 0
+    },
+    {
+      "order": 9,
+      "side": "base",
+      "revision": "830db10a",
+      "dirty": true,
+      "bootMs": 3716.6,
+      "template": "tpl-241b3821804a",
+      "failed": 0
+    },
+    {
+      "order": 10,
+      "side": "head",
+      "revision": "5302b366",
+      "dirty": true,
+      "bootMs": 3445.7,
+      "template": "tpl-631d576fea16",
+      "failed": 0
+    }
+  ]
+}
