@@ -19,7 +19,7 @@ import { parseProbeConfig } from "../probe/config.ts";
 import { parseControlPlane } from "./control-plane.ts";
 import { parseTailscaleStatus } from "../tailscale.ts";
 import type { FollowUp } from "./credentials.ts";
-import { checkDotfiles, dotfilesStep, forgetLogins, startedOn, withoutDotfiles, formatLeft, holdsImage, install, left, paths, parseFlags, report, tailnetDevices, setup, type Existing, type Facts, type FileWrite, type InstallSteps, type Json, type Setup } from "./setup.ts";
+import { checkDotfiles, dotfilesStep, forgetLogins, readCurrent, withoutDotfiles, formatLeft, holdsImage, install, left, paths, parseFlags, report, tailnetDevices, setup, type Existing, type Facts, type FileWrite, type InstallSteps, type Json, type Setup } from "./setup.ts";
 
 const status = JSON.stringify({
   Version: "1.90.0",
@@ -650,13 +650,15 @@ test("--remove-person deletes the person's stored logins only after the control 
   assert.ok(!(await installing(["--person", `${bob}=engineer`])).ran.some((line) => line.startsWith("forget")));
 });
 
-test("the logins are deleted only when no control plane runs, or the one that runs started on the control.json as it is now", () => {
-  const config = JSON.stringify({ people: { [alice]: "admin" } });
-  const record = (text: string) => `abc123 ${"0".repeat(12)} ${sha256(text).slice(0, 12)}\n`;
-  assert.equal(startedOn(true, record(config), config), true);
-  assert.equal(startedOn(true, record(JSON.stringify({ people: { [alice]: "admin", [bob]: "engineer" } })), config), false, "a control plane left running on the old people, as when its harness is signed out");
-  assert.equal(startedOn(true, undefined, config), false);
-  assert.equal(startedOn(false, undefined, config), true);
+test("the logins are deleted only when no control plane runs, or the one that runs started after control.json was last written", () => {
+  const now = 1_800_000_000_000;
+  const uptime = 1000;
+  const startedAgo = (ms: number) => (uptime * 1000 - ms) * 1000;
+  assert.equal(readCurrent(true, startedAgo(2_000), uptime, now - 5_000, now), true, "restarted by this rerun's control installer");
+  assert.equal(readCurrent(true, startedAgo(60_000), uptime, now - 5_000, now), false, "left running on the old people, as when its harness is signed out");
+  assert.equal(readCurrent(true, startedAgo(60_000), uptime, now - 600_000, now), true, "a rerun that changed nothing, after a restart that read the file");
+  assert.equal(readCurrent(true, 0, uptime, now - 5_000, now), false, "a running unit with no start time");
+  assert.equal(readCurrent(false, 0, uptime, now - 5_000, now), true);
 });
 
 test("a config write that refuses, such as --join without --node, stops install before anything else runs, with its exit code", async () => {

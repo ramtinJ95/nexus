@@ -10,8 +10,8 @@
  * It runs as root from a checkout before `npm ci`, so it imports only Node's builtins and modules that do too.
  */
 import { execFile, spawn } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
-import { readdir, rm } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { readdir, readFile, rm, stat } from "node:fs/promises";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { promisify, isDeepStrictEqual, parseArgs } from "node:util";
 import { claudeNames, harnessSignedIn, locations, personStore, provision, rotatable, rotate, scripted, stores, system, terminal, heldNames, type FollowUp, type Rotatable } from "./credentials.ts";
@@ -259,12 +259,13 @@ export async function forgetLogins(store: string, login: string): Promise<string
 }
 
 /**
- * Whether the control plane that runs started on `config`, from the record release.sh's start_unit writes: the release,
- * the unit file's digest, then each config's, each cut to 12 hex characters. A unit that does not run reads none.
+ * Whether the control plane read control.json as it is now: no process runs, or the one that runs started after the
+ * file was last written. `startedUs` is systemd's ExecMainStartTimestampMonotonic and `uptimeS` /proc/uptime's first
+ * field, on the same clock. A running unit with no start time has not proven it.
  */
-export function startedOn(active: boolean, record: string | undefined, config: string): boolean {
+export function readCurrent(active: boolean, startedUs: number, uptimeS: number, writtenMs: number, nowMs: number): boolean {
   if (!active) return true;
-  return record?.trim().split(" ").at(-1) === createHash("sha256").update(config).digest("hex").slice(0, 12);
+  return startedUs > 0 && uptimeS * 1000 - startedUs / 1000 < nowMs - writtenMs;
 }
 
 /** The branch of --dotfiles that pylons pull. */
@@ -801,12 +802,14 @@ function machineSteps(flags: Flags, manager: PackageManager): InstallSteps {
       await provision(flags.node === undefined ? "control" : "node", system, unattended ? scripted(process.env) : terminal(), (line) => console.error(line), next);
     },
     async forget(logins) {
-      const config = await system.read(paths.control) ?? "";
       const active = await exec("systemctl", ["is-active", "--quiet", unitNames.control]).then(() => true, () => false);
-      if (!startedOn(active, await system.read(join(prefix, "control-active-release")), config)) {
+      const started = Number((await exec("systemctl", ["show", "-p", "ExecMainStartTimestampMonotonic", "--value", unitNames.control]).catch(() => ({ stdout: "0" }))).stdout.trim()) || 0;
+      const uptime = Number((await readFile("/proc/uptime", "utf8")).split(" ")[0]);
+      const written = (await stat(paths.control)).mtimeMs;
+      if (!readCurrent(active, started, uptime, written, Date.now())) {
         throw new Error(`${unitNames.control} still runs on the people before this run, so it could write a removed person's logins again, and they are not deleted. Once the harness is signed in, rerun with the same --remove-person`);
       }
-      const { harnessCredentials } = controlFields(JSON.parse(config), paths.control);
+      const { harnessCredentials } = controlFields(await readJson(paths.control), paths.control);
       if (harnessCredentials === undefined) throw new Error(`${paths.control} has no harness.credentials, beside which each person's stored logins live`);
       for (const login of logins) console.log(await forgetLogins(personStore(harnessCredentials), login));
       console.log("A removed person's threads stay, and a pylon of theirs that runs keeps the tokens it booted with until it is archived. An admin archives each with nexus archive <thread>. Revoke their tokens at GitHub and Anthropic too, which Nexus cannot do.");
