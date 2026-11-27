@@ -155,7 +155,9 @@ const shapes: [string, Recorded[]][] = [
 	["a dot segment in a path", [api("POST", `/repos/${repo}/issues/1%2F..%2Fcomments`, refuse(/does not decode/), { body: "b" })]],
 	["a host with a trailing dot", [req("PUT", `https://api.github.com./repos/${repo}/pulls/1/merge`, refuse(/only reads|not on the allow-list/), "{}"), req("GET", `https://api.github.com./repos/${repo}`, pass)]],
 	["a body that is not UTF-8", [req("POST", `https://api.github.com/repos/${repo}/issues/1/comments`, refuse(/not UTF-8/), Buffer.concat([Buffer.from('{"body":"'), Buffer.from([0xff]), Buffer.from('"}')]))]],
-	["a body in another charset", [api("POST", reviews, refuse(/charset utf-16/), { event: "COMMENT" }, { "content-type": "application/json; charset=UTF-16" }), api("POST", reviews, pass, { event: "COMMENT" }, { "content-type": "application/json; charset=utf-8" })]],
+	["a body in another charset", [api("POST", reviews, refuse(/charset utf-16/), { event: "COMMENT" }, { "content-type": "application/json; charset=UTF-16" }), api("POST", reviews, pass, { event: "COMMENT" }, { "content-type": "application/json; charset=utf-8" }),
+		api("POST", reviews, refuse(/charset utf-7/), '{"+AGU-vent":"APPROVE"}', { "content-type": 'application/json; note=";charset=utf-8"; charset=utf-7' }),
+		api("POST", reviews, refuse(/charset utf-16/), { event: "COMMENT" }, { "content-type": "application/json; charset=utf-8; charset=utf-16" })]],
 	["a write to another GitHub host", [req("POST", "https://codeload.github.com/acme/scratch", refuse(/only reads/), "x")]],
 ];
 

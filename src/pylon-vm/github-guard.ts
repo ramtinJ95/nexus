@@ -93,8 +93,9 @@ export function refusal(request: GuardRequest, guard: GithubGuard): string | nul
 	if ([...request.url.searchParams.keys()].length > 0) return "a write with query parameters";
 	const bytes = decodedBody(request);
 	if (bytes === null) return "the body's encoding cannot be read";
-	const charset = /;\s*charset\s*=\s*"?([^";\s]+)/i.exec(request.headers.get("content-type") ?? "")?.[1]?.toLowerCase();
-	if (charset !== undefined && charset !== "utf-8" && charset !== "utf8") return `a body in the charset ${charset}`;
+	// Every charset the header names, inside a quoted parameter too, so no reading of it can find another one.
+	const charset = [...(request.headers.get("content-type") ?? "").matchAll(/charset\s*=\s*"?([^";\s]*)/gi)].map((m) => m[1]!.toLowerCase()).find((c) => c !== "utf-8" && c !== "utf8");
+	if (charset !== undefined) return `a body in the charset ${charset}`;
 	let text: string;
 	try {
 		text = utf8.decode(bytes);
