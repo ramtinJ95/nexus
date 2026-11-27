@@ -1274,6 +1274,9 @@ shared engineer POST /v1/threads/{alice's thread}/messages -> 403 thread {alice'
 shared engineer POST /v1/threads/{alice's thread}/abort -> 403 thread {alice's thread} is alice@example.com's, so only alice@example.com or an admin may abort a thread's turn
 shared engineer POST /v1/threads/{alice's thread}/retry -> 403 thread {alice's thread} is alice@example.com's, so only alice@example.com may retry a thread's turn
 shared engineer POST /v1/threads/{alice's thread}/pylon/retry -> 403 thread {alice's thread} is alice@example.com's, so only alice@example.com may retry a thread's pylon
+shared engineer PATCH /v1/projects/nosuch -> 403 caller may not edit a project: only an admin may
+shared engineer POST /v1/projects -> 403 caller may not add a project: only an admin may
+shared engineer DELETE /v1/projects/nosuch -> 403 caller may not remove a project: only an admin may
 shared engineer DELETE /v1/threads/{alice's thread} -> 403 thread {alice's thread} is alice@example.com's, so only alice@example.com or an admin may delete a thread
 shared admin attach to bob's thread -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may attach to a thread's pylon
 shared admin POST /v1/threads/{bob's thread}/review -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may start a review
@@ -1297,4 +1300,11 @@ shared admin POST /v1/threads/{bob's thread}/messages -> 403 thread {bob's threa
 shared admin POST /v1/threads/{bob's thread}/abort -> 204
 shared admin POST /v1/threads/{bob's thread}/retry -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may retry a thread's turn
 shared admin POST /v1/threads/{bob's thread}/pylon/retry -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may retry a thread's pylon
+shared admin PATCH /v1/projects/nosuch -> 400 ✖ Unrecognized key: "bogus"
+shared admin POST /v1/projects -> 400 ✖ Unrecognized key: "bogus"
+✖ Invalid input: expected string, received undefined
+  → at id
+✖ Invalid input: expected string, received undefined
+  → at repoUrl
+shared admin DELETE /v1/projects/nosuch -> 404 no project nosuch
 shared admin DELETE /v1/threads/{bob's thread} -> 200

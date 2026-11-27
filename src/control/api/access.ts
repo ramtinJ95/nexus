@@ -23,18 +23,21 @@ import { operator, personOf, solo, type People, type Starter } from "../people.t
  */
 export type Role = "tailnet" | "joiner" | "allowed" | "person" | "deployer" | "reporter" | "control-node";
 /** The role a policy asks of the caller. Whether the caller owns the thread is a fact of the thread, not a role. */
-const roleNeeded = (policy: Policy): Role => policy.role === "owner" ? "person" : policy.role;
+const roleNeeded = (policy: RolePolicy | OwnerPolicy): Role => policy.role === "owner" ? "person" : policy.role;
 /**
  * A route's role, checked before it runs. A refusal names the action a person's, a deployer's or the control node's
  * route takes, and a route any allowed caller changes state with says why it may. A route that starts a turn waits out a
  * deploy's drain.
  */
-export type Policy = ({ role: "person" | "deployer" | "control-node"; action: string } | OwnerPolicy | { role: "tailnet" | "joiner" | "allowed" | "reporter"; why?: string }) & { startsTurn?: true };
+export type Policy = (RolePolicy | OwnerPolicy | AdminPolicy) & { startsTurn?: true };
+type RolePolicy = { role: "person" | "deployer" | "control-node"; action: string } | { role: "tailnet" | "joiner" | "allowed" | "reporter"; why?: string };
 /**
  * A person's route that acts on the thread its path names, which on a shared install only that thread's owner may take,
  * and an admin too where `admin` says so. A solo install's one person owns every thread.
  */
 export interface OwnerPolicy { role: "owner"; action: string; admin?: true }
+/** A route that on a shared install only an admin may take. A solo install checks `solo`, the route's policy before people. */
+export interface AdminPolicy { role: "admin"; action: string; solo: RolePolicy }
 export const anyAllowed = { role: "allowed" } satisfies Policy;
 
 type AccessRegistry = Pick<Registry, "nodes">;
@@ -66,7 +69,7 @@ function isReporter(registry: AccessRegistry, deployment: Deployment, caller: Ta
 }
 
 /** The role a caller must hold before a route says more than that it does not know the caller. */
-const admittedAs: Readonly<Record<Policy["role"], Role>> = {
+const admittedAs: Readonly<Record<Exclude<Policy["role"], "admin">, Role>> = {
   tailnet: "tailnet", joiner: "joiner", allowed: "allowed", person: "allowed", owner: "allowed", deployer: "allowed", reporter: "reporter", "control-node": "reporter",
 };
 
@@ -80,7 +83,8 @@ const unknown = (role: Role, caller: TailnetNodeId | null) => new Refusal("forbi
  * Refuses a caller holding `roles` that may not reach `policy`'s route, or, without one, any route: an unknown caller,
  * whom the route's own refusal would tell more than that.
  */
-export function admit(roles: ReadonlySet<Role>, policy: Policy | undefined, caller: TailnetNodeId | null) {
+export function admit(roles: ReadonlySet<Role>, policy: Policy | undefined, caller: TailnetNodeId | null): void {
+  if (policy?.role === "admin") return admit(roles, policy.solo, caller);
   const role = policy === undefined ? null : admittedAs[policy.role];
   if (role === null ? roles.has("allowed") || roles.has("reporter") : roles.has(role)) return;
   throw unknown(role ?? "allowed", caller);
@@ -88,6 +92,7 @@ export function admit(roles: ReadonlySet<Role>, policy: Policy | undefined, call
 
 /** A person who is no deployer is told how to become one. A node never may, so it is not. */
 export function refusal(roles: ReadonlySet<Role>, policy: Policy, caller: TailnetNodeId | null = null): Refusal | null {
+  if (policy.role === "admin") return refusal(roles, policy.solo, caller);
   if (roles.has(roleNeeded(policy))) return null;
   switch (policy.role) {
     case "person": case "owner": return new Refusal("forbidden", `caller may not ${policy.action}: only a person may, never the control plane, infrastructure nodes or pylons`);
@@ -205,10 +210,15 @@ export function apiAccess(registry: Registry, wake: (node: NodeName) => void, op
     throw new Refusal("forbidden", `thread ${id} is ${owner}'s, so only ${owner}${policy.admin === true ? " or an admin" : ""} may ${policy.action}`);
   }
 
+  /** Refuses anyone but an admin `policy`'s route on a shared install, where an admin holds what a deployer holds. */
+  function administers(caller: Pick<Caller, "roles">, policy: AdminPolicy) {
+    if (people.shared && !caller.roles.has("deployer")) throw new Refusal("forbidden", `caller may not ${policy.action}: only an admin may`);
+  }
+
   const answerRefusalOf = (caller: Caller, question: Question): AnswerRefusal | null =>
     answerRefusal(question, { person: caller.roles.has("person"), deployer: caller.roles.has("deployer"), owner: !("thread" in question) || ownerOtherThan(question.thread, caller) === null });
 
-  return { lookup, thread, threadRefusal, guard, current, wakeThread: threadWaker(registry, wake), roleOf, admittable, personAs, starter, actsOn, answerRefusalOf };
+  return { lookup, thread, threadRefusal, guard, current, wakeThread: threadWaker(registry, wake), roleOf, admittable, personAs, starter, actsOn, administers, answerRefusalOf };
 }
 export type Access = ReturnType<typeof apiAccess>;
 

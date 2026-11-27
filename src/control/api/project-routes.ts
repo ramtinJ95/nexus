@@ -4,11 +4,13 @@ import { HttpError } from "../http-error.ts";
 import type { AutoReviewMode, Project } from "../project.ts";
 import { editedRules } from "../standing-rules.ts";
 import { ok, created, on, parse, type RouteEntry, type ApiKit } from "./kit.ts";
-import { anyAllowed, demand, landing } from "./access.ts";
+import { anyAllowed, demand, landing, type AdminPolicy } from "./access.ts";
 import { projectRoutes as routes } from "../../contract/projects.ts";
 import { projectAddSchema, projectEditSchema, projectSchema } from "../../contract/projects-parse.ts";
 import { openStatuses } from "../reconcile.ts";
 
+/** A solo install lets any person change a project. */
+const admin = (action: string): AdminPolicy => ({ role: "admin", action, solo: { role: "person", action } });
 
 export function projectRoutes(kit: ApiKit, features: Features): readonly RouteEntry[] {
   const { registry } = kit;
@@ -28,7 +30,7 @@ export function projectRoutes(kit: ApiKit, features: Features): readonly RouteEn
   }
 
   return [
-    on(routes.edit, { role: "person", action: "edit a project" }, async ({ project: id }, r) => {
+    on(routes.edit, admin("edit a project"), async ({ project: id }, r) => {
       const { autoReview, pipeline, standingRules, secondReview, ...patch } = parse(projectEditSchema, await r.body());
       // A CLI older than modes sends `land`.
       const mode: AutoReviewMode | null | undefined = autoReview == null ? autoReview : "mode" in autoReview ? autoReview.mode : autoReview.land ? "land" : "review";
@@ -48,7 +50,7 @@ export function projectRoutes(kit: ApiKit, features: Features): readonly RouteEn
       if (project === undefined) throw new HttpError(404, `no project ${id}`);
       return ok(project);
     }),
-    on(routes.remove, { role: "person", action: "remove a project" }, ({ project: id }, r) => {
+    on(routes.remove, admin("remove a project"), ({ project: id }, r) => {
       // Check and mark in the same transaction. No await may let a start or an unarchive slip between them.
       const project = registry.projects.editProject(id as ProjectId, (stored) => {
         if (stored.removed !== undefined) return stored;
@@ -66,6 +68,6 @@ export function projectRoutes(kit: ApiKit, features: Features): readonly RouteEn
       return ok(project);
     }),
     on(routes.list, anyAllowed, (_, r) => ok(registry.projects.projects(r.query))),
-    on(routes.add, { role: "allowed", why: "adding a project changes no thread, pylon or project there is" }, async (_, r) => created(createProject(await r.body()))),
+    on(routes.add, { role: "admin", action: "add a project", solo: { role: "allowed", why: "adding a project changes no thread, pylon or project there is" } }, async (_, r) => created(createProject(await r.body()))),
   ];
 }
