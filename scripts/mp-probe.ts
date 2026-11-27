@@ -2,6 +2,7 @@
  * The multiplayer arc's perf probe, which docs/multiplayer-plan.md's perf boxes compare against a baseline:
  *   node scripts/mp-probe.ts api           200 GET /v1/threads, alternating alice and bob, on a stack holding 50 threads
  *   node scripts/mp-probe.ts boot          POST /v1/threads to a running pylon whose resume exited, for a template boot
+ *   node scripts/mp-probe.ts fresh-boot    POST /v1/threads on setup-change, whose .nexus/setup differs from main's, to a running pylon booted fresh
  *   node scripts/mp-probe.ts check [dir]   the wall time of .nexus/check, in the repo root or in `dir`
  *
  * It prints one JSON line on stdout and a summary on stderr, and exits 1 when anything it measured failed, so a run that
@@ -149,7 +150,8 @@ async function until<T>(what: string, seconds: number, everyMs: number, read: ()
   }
 }
 
-async function boot(): Promise<Result> {
+/** With `branch`, the timed thread starts on it and must boot fresh, which runs setup and no resume, so it is timed to running. */
+async function boot(branch?: string): Promise<Result> {
   const agent = new Agent({ keepAlive: true });
   try {
     return await withStack({}, async (state, run) => {
@@ -190,8 +192,20 @@ async function boot(): Promise<Result> {
       });
 
       const start = process.hrtime.bigint();
-      const timedThread = await call("POST", "/v1/threads", { project, title: "mp-probe: boots from the template" }, 201) as Detail["thread"];
+      const timedThread = await call("POST", "/v1/threads", { project, title: `mp-probe: boots ${branch === undefined ? "from the template" : `fresh on ${branch}`}`, ...branch === undefined ? {} : { branch } }, 201) as Detail["thread"];
       try {
+        if (branch !== undefined) {
+          if (timedThread.setup?.how !== "fresh") throw new Error(`${timedThread.id} on ${branch} does not boot fresh: ${JSON.stringify(timedThread.setup)}`);
+          const reason = timedThread.setup.reason;
+          await until(`${timedThread.id} running fresh`, 900, 250, async () => {
+            const d = await detail(timedThread.id);
+            if (d.pylon.failed !== null) throw new Error(`${timedThread.id}'s pylon failed: ${d.pylon.failed}`);
+            return d.pylon.actualState === "running" ? { done: true } : { seen: d.pylon.actualState };
+          });
+          const bootMs = ms(process.hrtime.bigint() - start);
+          console.error(`fresh-boot: ${timedThread.id} on ${branch} ran fresh (${reason}), ${bootMs} ms after POST /v1/threads`);
+          return { bootMs, branch, reason, failed: 0 };
+        }
         if (timedThread.setup?.how !== "template" || timedThread.setup.template !== template) throw new Error(`${timedThread.id} does not boot from template ${template}: ${JSON.stringify(timedThread.setup)}`);
         const booted = await until(`${timedThread.id} running from its template with its resume exited`, 600, 250, async () => {
           const d = await detail(timedThread.id);
@@ -229,9 +243,9 @@ async function check(dir: string): Promise<Result> {
 
 const [probe, ...rest] = process.argv.slice(2);
 const dir = resolve(rest[0] ?? root);
-const runs: Record<string, () => Promise<Result>> = { api, boot, check: () => check(dir) };
+const runs: Record<string, () => Promise<Result>> = { api, boot: () => boot(), "fresh-boot": () => boot("setup-change"), check: () => check(dir) };
 if (probe === undefined || !Object.hasOwn(runs, probe) || rest.length > (probe === "check" ? 1 : 0)) {
-  console.error("usage: node scripts/mp-probe.ts api | boot | check [dir]");
+  console.error("usage: node scripts/mp-probe.ts api | boot | fresh-boot | check [dir]");
   process.exit(64);
 }
 let measured: Record<string, unknown> & Result;

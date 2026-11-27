@@ -1,0 +1,315 @@
+{
+  "slice": "mp-18",
+  "probe": "NEXUS_VERIFY_PEOPLE=1 node scripts/mp-probe.ts boot, then fresh-boot, with NEXUS_VERIFY_BASE=nexus-verify-base:pylon",
+  "machine": "Nexus pylon pylon-th-0709a041a467 on node infra-testbench, Docker in the pylon started as .nexus/verify starts it",
+  "base": "51b7a3a5, with this branch's scripts/mp-probe.ts and verify-nexus stack.ts copied in, so both sides run the same probe and seed and only src/ differs. That is why base reads dirty.",
+  "head": "2ca32951, the branch's code as it ships. The earlier runs are at 02ea0c2c, before the fix that passes by templates recorded before the install was shared, which only filters the registry's template records in memory.",
+  "shared": "Both sides run with people, the install the rule changes. The timed thread names no branch, so head reads the same one .nexus/setup it did at base.",
+  "boot": {
+    "limit": "fail when the head median is over 10% above base and outside base's range",
+    "baseMedianMs": 4820.9,
+    "headMedianMs": 3777.2,
+    "baseRangeMs": [
+      3766.7,
+      6164.9
+    ],
+    "headRangeMs": [
+      3448.4,
+      4011.1
+    ],
+    "runs": [
+      {
+        "order": 1,
+        "side": "base",
+        "revision": "51b7a3a5",
+        "bootMs": 6164.9,
+        "failed": 0
+      },
+      {
+        "order": 2,
+        "side": "head",
+        "revision": "2ca32951",
+        "bootMs": 3950.7,
+        "failed": 0
+      },
+      {
+        "order": 3,
+        "side": "base",
+        "revision": "51b7a3a5",
+        "bootMs": 3766.7,
+        "failed": 0
+      },
+      {
+        "order": 4,
+        "side": "head",
+        "revision": "2ca32951",
+        "bootMs": 3521.1,
+        "failed": 0
+      },
+      {
+        "order": 5,
+        "side": "base",
+        "revision": "51b7a3a5",
+        "bootMs": 4820.9,
+        "failed": 0
+      },
+      {
+        "order": 6,
+        "side": "head",
+        "revision": "2ca32951",
+        "bootMs": 3448.4,
+        "failed": 0
+      },
+      {
+        "order": 7,
+        "side": "base",
+        "revision": "51b7a3a5",
+        "bootMs": 5490.2,
+        "failed": 0
+      },
+      {
+        "order": 8,
+        "side": "head",
+        "revision": "2ca32951",
+        "bootMs": 4011.1,
+        "failed": 0
+      },
+      {
+        "order": 9,
+        "side": "base",
+        "revision": "51b7a3a5",
+        "bootMs": 3982.5,
+        "failed": 0
+      },
+      {
+        "order": 10,
+        "side": "head",
+        "revision": "2ca32951",
+        "bootMs": 3777.2,
+        "failed": 0
+      }
+    ]
+  },
+  "bootAt02ea0c2c": {
+    "note": "the first set. Head's median was 13.9% over base's and inside base's range, so it did not fail either. The set at 2ca32951 has head 21.6% under base, on a timed start that makes no more mirror reads at head than at base, so the spread is run-to-run noise.",
+    "baseMedianMs": 3937.7,
+    "headMedianMs": 4483.3,
+    "baseRangeMs": [
+      3776.2,
+      5702.5
+    ],
+    "headRangeMs": [
+      3799.9,
+      5788.3
+    ],
+    "runs": [
+      {
+        "order": 1,
+        "side": "base",
+        "revision": "51b7a3a5",
+        "bootMs": 4481.1,
+        "failed": 0
+      },
+      {
+        "order": 2,
+        "side": "head",
+        "revision": "02ea0c2c",
+        "bootMs": 4598.9,
+        "failed": 0
+      },
+      {
+        "order": 3,
+        "side": "base",
+        "revision": "51b7a3a5",
+        "bootMs": 3937.7,
+        "failed": 0
+      },
+      {
+        "order": 4,
+        "side": "head",
+        "revision": "02ea0c2c",
+        "bootMs": 4002.3,
+        "failed": 0
+      },
+      {
+        "order": 5,
+        "side": "base",
+        "revision": "51b7a3a5",
+        "bootMs": 5702.5,
+        "failed": 0
+      },
+      {
+        "order": 6,
+        "side": "head",
+        "revision": "02ea0c2c",
+        "bootMs": 5788.3,
+        "failed": 0
+      },
+      {
+        "order": 7,
+        "side": "base",
+        "revision": "51b7a3a5",
+        "bootMs": 3776.2,
+        "failed": 0
+      },
+      {
+        "order": 8,
+        "side": "head",
+        "revision": "02ea0c2c",
+        "bootMs": 3799.9,
+        "failed": 0
+      },
+      {
+        "order": 9,
+        "side": "base",
+        "revision": "51b7a3a5",
+        "bootMs": 3934.6,
+        "failed": 0
+      },
+      {
+        "order": 10,
+        "side": "head",
+        "revision": "02ea0c2c",
+        "bootMs": 4483.3,
+        "failed": 0
+      }
+    ],
+    "headFirst": {
+      "why": "head ran second in every pair of boot, so three more pairs ran head first to test an order effect",
+      "baseMedianMs": 4932.1,
+      "headMedianMs": 5097,
+      "runs": [
+        {
+          "order": 1,
+          "side": "head",
+          "revision": "02ea0c2c",
+          "bootMs": 6205.5,
+          "failed": 0
+        },
+        {
+          "order": 2,
+          "side": "base",
+          "revision": "51b7a3a5",
+          "bootMs": 6358.1,
+          "failed": 0
+        },
+        {
+          "order": 3,
+          "side": "head",
+          "revision": "02ea0c2c",
+          "bootMs": 5097,
+          "failed": 0
+        },
+        {
+          "order": 4,
+          "side": "base",
+          "revision": "51b7a3a5",
+          "bootMs": 4001.3,
+          "failed": 0
+        },
+        {
+          "order": 5,
+          "side": "head",
+          "revision": "02ea0c2c",
+          "bootMs": 4645.4,
+          "failed": 0
+        },
+        {
+          "order": 6,
+          "side": "base",
+          "revision": "51b7a3a5",
+          "bootMs": 4932.1,
+          "failed": 0
+        }
+      ]
+    }
+  },
+  "freshBoot": {
+    "what": "a thread on setup-change, whose .nexus/setup differs from main's, timed from POST /v1/threads to running. It boots fresh on both sides: at base because no template of its setup exists, at head because of the rule. The stack's setup is one echo, so this is the floor of a fresh boot, not a real repository's setup time.",
+    "baseMedianMs": 3774.7,
+    "headMedianMs": 4084.6,
+    "runs": [
+      {
+        "order": 1,
+        "side": "base",
+        "revision": "51b7a3a5",
+        "bootMs": 3730.9,
+        "failed": 0,
+        "reason": "no template of this setup is on verify-node yet"
+      },
+      {
+        "order": 2,
+        "side": "head",
+        "revision": "02ea0c2c",
+        "bootMs": 3779.9,
+        "failed": 0,
+        "reason": "its setup differs from main's, and on a shared install a template is built only from main"
+      },
+      {
+        "order": 3,
+        "side": "base",
+        "revision": "51b7a3a5",
+        "bootMs": 3693.8,
+        "failed": 0,
+        "reason": "no template of this setup is on verify-node yet"
+      },
+      {
+        "order": 4,
+        "side": "head",
+        "revision": "02ea0c2c",
+        "bootMs": 4084.6,
+        "failed": 0,
+        "reason": "its setup differs from main's, and on a shared install a template is built only from main"
+      },
+      {
+        "order": 5,
+        "side": "base",
+        "revision": "51b7a3a5",
+        "bootMs": 4057.9,
+        "failed": 0,
+        "reason": "no template of this setup is on verify-node yet"
+      },
+      {
+        "order": 6,
+        "side": "head",
+        "revision": "02ea0c2c",
+        "bootMs": 3735.8,
+        "failed": 0,
+        "reason": "its setup differs from main's, and on a shared install a template is built only from main"
+      },
+      {
+        "order": 7,
+        "side": "base",
+        "revision": "51b7a3a5",
+        "bootMs": 3774.7,
+        "failed": 0,
+        "reason": "no template of this setup is on verify-node yet"
+      },
+      {
+        "order": 8,
+        "side": "head",
+        "revision": "02ea0c2c",
+        "bootMs": 4920.4,
+        "failed": 0,
+        "reason": "its setup differs from main's, and on a shared install a template is built only from main"
+      },
+      {
+        "order": 9,
+        "side": "base",
+        "revision": "51b7a3a5",
+        "bootMs": 5689.8,
+        "failed": 0,
+        "reason": "no template of this setup is on verify-node yet"
+      },
+      {
+        "order": 10,
+        "side": "head",
+        "revision": "02ea0c2c",
+        "bootMs": 6227.6,
+        "failed": 0,
+        "reason": "its setup differs from main's, and on a shared install a template is built only from main"
+      }
+    ],
+    "note": "at 02ea0c2c. The fix after it does not touch this path: the start boots fresh in sharedBuild, before the template records are read."
+  }
+}

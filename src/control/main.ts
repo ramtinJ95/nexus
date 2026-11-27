@@ -233,7 +233,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const backfill = services.start(usageBackfill({ registry, counter: usage, wake }));
   const threads = services.start(threadServices({
     registry, harness, mirror, dotfiles: config.dotfiles, gitIdentity: config.gitIdentity, wake, gate, log,
-    queue: github !== null, planning: { replies: agents.replies },
+    queue: github !== null, planning: { replies: agents.replies }, people: peopleOf(config.people),
   }));
   const { startThread, queue, pipeline, planning } = threads.api;
   const people = peopleOf(config.people);

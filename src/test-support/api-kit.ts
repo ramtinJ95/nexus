@@ -135,7 +135,7 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
   }]]);
   const claude = claudeConversations({ registry, probes: apiOptions.probes ?? probes, log: (message) => { logged.push(message); } });
   const services = threadServices({
-    registry, harness, mirror, dotfiles: dots === null ? undefined : dots ?? dotfiles, gitIdentity, wake, gate: turnGate(() => false),
+    registry, harness, mirror, dotfiles: dots === null ? undefined : dots ?? dotfiles, gitIdentity, wake, gate: turnGate(() => false), people: apiOptions.people,
     queue: queued === true || piped === true, planning: planned === true ? { replies: agentReader(registry, harness, claude).replies } : null,
   });
   const { startThread, queue, pipeline, planning: plans } = services.api;

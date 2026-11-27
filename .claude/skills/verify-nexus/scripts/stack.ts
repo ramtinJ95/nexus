@@ -206,14 +206,29 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
   });
 }
 
+/**
+ * main's .nexus/setup runs scripts/install.sh. alice/wip changes only that script, which then leaves alice-wrote-this
+ * in the checkout. setup-change changes .nexus/setup itself.
+ */
 async function makeTemplateRepo() {
   const work = join(runDir, "template-work");
   const git = (...args: string[]) => exec("git", ["-C", work, "-c", "user.name=verify", "-c", "user.email=verify@invalid", ...args]);
-  await mkdir(work, { recursive: true });
+  const install = (lines: string[]) => writeFile(join(work, "scripts", "install.sh"), ["#!/bin/sh", ...lines, ""].join("\n"), { mode: 0o755 });
+  await mkdir(join(work, ".nexus"), { recursive: true });
+  await mkdir(join(work, "scripts"), { recursive: true });
   await git("init", "--quiet", "--initial-branch=main");
   await writeFile(join(work, "README.md"), "# verify-nexus template repository\n");
-  await git("add", "README.md");
+  await writeFile(join(work, ".nexus", "setup"), "#!/bin/sh\nexec ./scripts/install.sh\n", { mode: 0o755 });
+  await install(["echo deps > .installed"]);
+  await git("add", "-A");
   await git("commit", "--quiet", "-m", "init");
+  await git("checkout", "--quiet", "-b", "alice/wip");
+  await install(["echo deps > .installed", "echo 'alice/wip ran here' > alice-wrote-this"]);
+  await git("commit", "--quiet", "-am", "alice: install.sh leaves a file");
+  await git("checkout", "--quiet", "-b", "setup-change", "main");
+  await writeFile(join(work, ".nexus", "setup"), "#!/bin/sh\nset -e\nexec ./scripts/install.sh\n", { mode: 0o755 });
+  await git("commit", "--quiet", "-am", "setup: set -e");
+  await git("checkout", "--quiet", "main");
   await exec("git", ["clone", "--quiet", "--bare", work, templateRepo]);
   await rm(work, { recursive: true, force: true });
 }
