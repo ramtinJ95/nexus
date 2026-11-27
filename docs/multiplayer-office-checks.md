@@ -14,6 +14,7 @@ This repository is public. Do not commit any output of these checks, and do not 
 | [4. The company tailnet](#4-the-company-tailnet) | Any device on the company tailnet | The live box of `mp-01`, and what `ops-2` has to change | 10 minutes |
 | [5. GitHub](#5-github) | A browser and a laptop with `gh` | The gate of `mp-12`, and the token engineers use until then | 20 minutes |
 | [6. A Claude token from the team subscription](#6-a-claude-token-from-the-team-subscription) | A laptop signed in to the team subscription | An item under "What stays unproven" | 5 minutes |
+| [7. The host firewall, SELinux, and swap](#7-the-host-firewall-selinux-and-swap) | The office machine, and a laptop on the tailnet | Whether laptops can reach the control plane after `ops-3`, and two items under "What stays unproven" | 10 minutes |
 
 Checks 1, 4, and 5 matter most. If time is short, do those.
 
@@ -210,6 +211,46 @@ CLAUDE_CODE_OAUTH_TOKEN="$(pbpaste)" claude -p "Answer with the single word ok."
 
 Keep the token. The pilot's first step is `pbpaste | nexus login claude`.
 
+## 7. The host firewall, SELinux, and swap
+
+This check was added after checks 1 to 4 ran. They found that the office machine runs Fedora Server, which the operator's own nodes do not. Fedora Server turns on a firewall and SELinux by default, and the installer looks at neither. Run this block on the office machine. `sudo` asks for a password there, and the commands only read.
+
+```sh
+{
+  echo "== firewalld";    systemctl is-active firewalld 2>&1
+  echo "== default zone"; sudo firewall-cmd --get-default-zone 2>&1
+  echo "== active zones"; sudo firewall-cmd --get-active-zones 2>&1
+  echo "== tailscale0";   sudo firewall-cmd --get-zone-of-interface=tailscale0 2>&1
+  echo "== what the default zone lets in"; sudo firewall-cmd --list-services 2>&1; sudo firewall-cmd --list-ports 2>&1
+  echo "== selinux";      getenforce 2>&1
+  echo "== swap";         swapon --show=NAME,TYPE,SIZE 2>&1
+} 2>&1 | tee ~/nexus-office-host.txt
+```
+
+- [ ] `firewalld` prints `active` or `inactive`. If it is inactive, the firewall questions below do not apply.
+- [ ] If it is active, say which zone holds `tailscale0`, or that none does, and whether that zone or the default zone lists port 7443.
+- [ ] `selinux` prints `Enforcing`, `Permissive`, or `Disabled`. None of them is a failure. `Enforcing` means the first install watches for denials, which [the checks after the install](multiplayer-office-acceptance.md) do.
+- [ ] Write down the swap type. Nexus never commits more memory than a machine has, so swap adds no pylons. The type only says how the machine behaves when something else fills its memory.
+
+The control plane listens on the machine's tailnet address, and engineers' laptops call it on port 7443. A firewall whose zone for `tailscale0` does not let that port in would refuse them, even though SSH works. That is read from the code and from Fedora's defaults. The next test shows it either way, without installing anything.
+
+On the office machine, serve an empty directory on that port for a minute. This opens the port while the command runs and changes no setting. It is the one command on this page that does more than read. The probe's ports need no test, because the probe is called from the same machine. Previews are served through Tailscale, which this test does not cover, and the checks after the install open the dashboard and a thread for real.
+
+```sh
+python3 -m http.server 7443 --bind "$(tailscale ip -4)" --directory "$(mktemp -d)"
+```
+
+On a laptop on the company tailnet, with the machine's tailnet name in place of `<machine>`.
+
+```sh
+curl -sS -m 5 -o /dev/null -w 'http %{http_code}\n' "http://<machine>:7443/"
+```
+
+Stop the server on the office machine with Ctrl-C afterwards.
+
+- [ ] The laptop prints `http 200`. Then the firewall and the tailnet policy both let the port through today.
+- [ ] If it does not, copy the error. An answer at once that says the host is unreachable or the connection was refused points at the machine's firewall. A timeout after five seconds points at the tailnet policy, which `ops-2` changes. The firewall block above says which rule is missing.
+
 ## What to bring back
 
 - [ ] `~/nexus-office-machine.txt`, `~/nexus-install-check.txt`, and `~/nexus-office-network.txt` from the office machine.
@@ -219,9 +260,10 @@ Keep the token. The pilot's first step is `pbpaste | nexus login claude`.
 - [ ] The owner's answer on the App.
 - [ ] Whether the team token worked.
 - [ ] The number of pylons that fit.
+- [ ] `~/nexus-office-host.txt`, and what the laptop printed in check 7.
 
 ## Not for today
 
-- Installing on the office machine. That is `ops-3`, and it waits for `mp-10`, `mp-15`, and `mp-16`.
+- Installing on the office machine. That is `ops-3`, and it waits for `mp-10`, `mp-15`, `mp-16`, and `mp-24`.
 - Changing the tailnet policy. That is `ops-2`, a change in the company's infrastructure repository.
-- The live boxes of `mp-07` and `mp-09`, which need a pylon on a VM node. They run on the office machine after `ops-3`.
+- The live boxes that need a pylon on a VM node or two real people. They run on the office machine after `ops-3`, from [the checks after the install](multiplayer-office-acceptance.md).
