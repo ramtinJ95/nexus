@@ -9,6 +9,8 @@ set -euo pipefail
 V="$(cd "$(dirname "$0")" && pwd)/verify-nexus"
 fail() { echo "reads check: $*" >&2; exit 1; }
 
+# Named, so the trap stops this run alone, never one another caller started.
+export NEXUS_VERIFY_RUN="reads-check-$(date +%Y%m%d-%H%M%S)"
 trap '"$V" down >&2 || true' EXIT
 NEXUS_VERIFY_PEOPLE=1 "$V" up
 "$V" doctor
@@ -29,11 +31,12 @@ before=$(facts)
 echo "alice's $T before bob's visit: $before"
 [ "$(jq -r .state <<< "$before")" = paused ] || fail "alice's pylon never paused: $before"
 
-# One request as bob, its status and body kept in the evidence directory as <n>-<step>.
-n=0
+# One request as bob, its status and body kept in the evidence directory as bob-<n>-<step>, numbered by what is there,
+# since each call runs in a subshell.
 asBob() {
-  local step=$1 method=$2 path=$3; n=$((n + 1))
-  local out="$evidence/bob-$(printf '%03d' "$n")-$step"
+  local step=$1 method=$2 path=$3
+  local n; n=$(find "$evidence" -maxdepth 1 -name 'bob-*.status' | wc -l | tr -d ' ')
+  local out="$evidence/bob-$(printf '%03d' $((n + 1)))-$step"
   local code
   code=$(curl -sS -o "$out.body" -w '%{http_code}' -X "$method" -H 'content-type: application/json' ${4:+--data "$4"} "$bob$path")
   echo "$code" > "$out.status"
