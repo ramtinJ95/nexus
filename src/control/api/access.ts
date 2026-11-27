@@ -228,7 +228,7 @@ export function apiAccess(registry: Registry, wake: (node: NodeName) => void, op
   const answerRefusalOf = (caller: Caller, question: Question): AnswerRefusal | null =>
     answerRefusal(question, { person: caller.roles.has("person"), deployer: caller.roles.has("deployer"), owner: !("thread" in question) || ownerOtherThan(question.thread, caller) === null });
 
-  return { lookup, thread, threadRefusal, guard, current, wakeThread: threadWaker(registry, wake), roleOf, admittable, personAs, starter, actsOn, administers, refuseLanding, lands, answerRefusalOf };
+  return { shared: people.shared, lookup, thread, threadRefusal, guard, current, wakeThread: threadWaker(registry, wake), roleOf, admittable, personAs, starter, actsOn, administers, refuseLanding, lands, answerRefusalOf };
 }
 export type Access = ReturnType<typeof apiAccess>;
 

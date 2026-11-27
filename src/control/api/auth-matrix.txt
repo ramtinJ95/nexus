@@ -1,8 +1,8 @@
 deployer GET /v1/health -> 200
 deployer GET /v1/health?x=1 -> 200
 deployer POST /v1/health -> 405 POST is not allowed on /v1/health
-deployer GET /v1/whoami -> 200 {"node":"nLAPTOP","allowed":true,"person":true,"deployer":true}
-deployer GET /v1/whoami?x=1 -> 200 {"node":"nLAPTOP","allowed":true,"person":true,"deployer":true}
+deployer GET /v1/whoami -> 200 {"node":"nLAPTOP","allowed":true,"person":true,"deployer":true,"login":null}
+deployer GET /v1/whoami?x=1 -> 200 {"node":"nLAPTOP","allowed":true,"person":true,"deployer":true,"login":null}
 deployer POST /v1/whoami -> 405 POST is not allowed on /v1/whoami
 deployer POST /v1/join -> 400 ✖ Invalid input: expected string, received undefined
   → at token
@@ -153,8 +153,8 @@ deployer attach -> 404 no thread th-000000000000
 person GET /v1/health -> 200
 person GET /v1/health?x=1 -> 200
 person POST /v1/health -> 405 POST is not allowed on /v1/health
-person GET /v1/whoami -> 200 {"node":"nPHONE","allowed":true,"person":true,"deployer":false}
-person GET /v1/whoami?x=1 -> 200 {"node":"nPHONE","allowed":true,"person":true,"deployer":false}
+person GET /v1/whoami -> 200 {"node":"nPHONE","allowed":true,"person":true,"deployer":false,"login":null}
+person GET /v1/whoami?x=1 -> 200 {"node":"nPHONE","allowed":true,"person":true,"deployer":false,"login":null}
 person POST /v1/whoami -> 405 POST is not allowed on /v1/whoami
 person POST /v1/join -> 400 ✖ Invalid input: expected string, received undefined
   → at token
@@ -303,8 +303,8 @@ person attach -> 404 no thread th-000000000000
 control-node GET /v1/health -> 200
 control-node GET /v1/health?x=1 -> 200
 control-node POST /v1/health -> 405 POST is not allowed on /v1/health
-control-node GET /v1/whoami -> 200 {"node":"nFIREBAT","allowed":true,"person":false,"deployer":false}
-control-node GET /v1/whoami?x=1 -> 200 {"node":"nFIREBAT","allowed":true,"person":false,"deployer":false}
+control-node GET /v1/whoami -> 200 {"node":"nFIREBAT","allowed":true,"person":false,"deployer":false,"login":null}
+control-node GET /v1/whoami?x=1 -> 200 {"node":"nFIREBAT","allowed":true,"person":false,"deployer":false,"login":null}
 control-node POST /v1/whoami -> 405 POST is not allowed on /v1/whoami
 control-node POST /v1/join -> 400 ✖ Invalid input: expected string, received undefined
   → at token
@@ -463,8 +463,8 @@ control-node attach -> 403 caller may not attach to a thread's pylon: only a per
 control-node-without-key GET /v1/health -> 200
 control-node-without-key GET /v1/health?x=1 -> 200
 control-node-without-key POST /v1/health -> 405 POST is not allowed on /v1/health
-control-node-without-key GET /v1/whoami -> 200 {"node":"nFIREBAT","allowed":true,"person":false,"deployer":false}
-control-node-without-key GET /v1/whoami?x=1 -> 200 {"node":"nFIREBAT","allowed":true,"person":false,"deployer":false}
+control-node-without-key GET /v1/whoami -> 200 {"node":"nFIREBAT","allowed":true,"person":false,"deployer":false,"login":null}
+control-node-without-key GET /v1/whoami?x=1 -> 200 {"node":"nFIREBAT","allowed":true,"person":false,"deployer":false,"login":null}
 control-node-without-key POST /v1/whoami -> 405 POST is not allowed on /v1/whoami
 control-node-without-key POST /v1/join -> 400 ✖ Invalid input: expected string, received undefined
   → at token
@@ -609,8 +609,8 @@ control-node-without-key attach -> 403 caller may not attach to a thread's pylon
 reporter GET /v1/health -> 403 caller is not a tailnet node this control plane allows
 reporter GET /v1/health?x=1 -> 403 caller is not a tailnet node this control plane allows
 reporter POST /v1/health -> 403 caller is not a tailnet node this control plane allows
-reporter GET /v1/whoami -> 200 {"node":"nBENCH","allowed":false,"person":false,"deployer":false}
-reporter GET /v1/whoami?x=1 -> 200 {"node":"nBENCH","allowed":false,"person":false,"deployer":false}
+reporter GET /v1/whoami -> 200 {"node":"nBENCH","allowed":false,"person":false,"deployer":false,"login":null}
+reporter GET /v1/whoami?x=1 -> 200 {"node":"nBENCH","allowed":false,"person":false,"deployer":false,"login":null}
 reporter POST /v1/whoami -> 405 POST is not allowed on /v1/whoami
 reporter POST /v1/join -> 400 ✖ Invalid input: expected string, received undefined
   → at token
@@ -749,8 +749,8 @@ reporter attach -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /v1/health -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key GET /v1/health?x=1 -> 403 caller is not a tailnet node this control plane allows
 reporter-wrong-key POST /v1/health -> 403 caller is not a tailnet node this control plane allows
-reporter-wrong-key GET /v1/whoami -> 200 {"node":"nBENCH","allowed":false,"person":false,"deployer":false}
-reporter-wrong-key GET /v1/whoami?x=1 -> 200 {"node":"nBENCH","allowed":false,"person":false,"deployer":false}
+reporter-wrong-key GET /v1/whoami -> 200 {"node":"nBENCH","allowed":false,"person":false,"deployer":false,"login":null}
+reporter-wrong-key GET /v1/whoami?x=1 -> 200 {"node":"nBENCH","allowed":false,"person":false,"deployer":false,"login":null}
 reporter-wrong-key POST /v1/whoami -> 405 POST is not allowed on /v1/whoami
 reporter-wrong-key POST /v1/join -> 400 ✖ Invalid input: expected string, received undefined
   → at token
@@ -877,8 +877,8 @@ reporter-wrong-key attach -> 403 caller is not a tailnet node this control plane
 node-without-key GET /v1/health -> 403 caller is not a tailnet node this control plane allows
 node-without-key GET /v1/health?x=1 -> 403 caller is not a tailnet node this control plane allows
 node-without-key POST /v1/health -> 403 caller is not a tailnet node this control plane allows
-node-without-key GET /v1/whoami -> 200 {"node":"nBENCH","allowed":false,"person":false,"deployer":false}
-node-without-key GET /v1/whoami?x=1 -> 200 {"node":"nBENCH","allowed":false,"person":false,"deployer":false}
+node-without-key GET /v1/whoami -> 200 {"node":"nBENCH","allowed":false,"person":false,"deployer":false,"login":null}
+node-without-key GET /v1/whoami?x=1 -> 200 {"node":"nBENCH","allowed":false,"person":false,"deployer":false,"login":null}
 node-without-key POST /v1/whoami -> 405 POST is not allowed on /v1/whoami
 node-without-key POST /v1/join -> 400 ✖ Invalid input: expected string, received undefined
   → at token
@@ -1005,8 +1005,8 @@ node-without-key attach -> 403 caller is not a tailnet node this control plane a
 stranger GET /v1/health -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger GET /v1/health?x=1 -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
 stranger POST /v1/health -> 403 caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER
-stranger GET /v1/whoami -> 200 {"node":"nSTRANGER","allowed":false,"person":false,"deployer":false}
-stranger GET /v1/whoami?x=1 -> 200 {"node":"nSTRANGER","allowed":false,"person":false,"deployer":false}
+stranger GET /v1/whoami -> 200 {"node":"nSTRANGER","allowed":false,"person":false,"deployer":false,"login":null}
+stranger GET /v1/whoami?x=1 -> 200 {"node":"nSTRANGER","allowed":false,"person":false,"deployer":false,"login":null}
 stranger POST /v1/whoami -> 405 POST is not allowed on /v1/whoami
 stranger POST /v1/join -> 400 ✖ Invalid input: expected string, received undefined
   → at token

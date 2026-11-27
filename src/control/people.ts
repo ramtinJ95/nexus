@@ -26,8 +26,7 @@ export const peopleSchema = z.record(z.string(), z.union([role, z.strictObject({
   if (!Object.values(people).some((p) => p === "admin" || (typeof p === "object" && p.role === "admin"))) ctx.addIssue({ code: "custom", message: "must name at least one admin, who deploys" });
 });
 
-/** The one person of a solo install, and the owner the arc's first migration gives every thread that came before it. */
-export const operator = "operator" as Person;
+export { operator } from "../ids.ts";
 
 export type People = { shared: false } | { shared: true; roles: ReadonlyMap<Person, PersonRole>; pylonCaps: ReadonlyMap<Person, number> };
 

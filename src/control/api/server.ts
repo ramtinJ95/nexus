@@ -204,7 +204,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     ["GET", /^\/v1\/health$/, anyAllowed, () => ok(health())],
     // A device not yet allowed learns the node ID to allow. It learns only its own ID and its own access, which
     // `tailscale status` and a refused request already tell it.
-    ["GET", /^\/v1\/whoami$/, { role: "tailnet" }, (_, { caller, roles }) => ok({ node: caller, allowed: roles.has("allowed"), person: roles.has("person"), deployer: roles.has("deployer") } satisfies Whoami)],
+    ["GET", /^\/v1\/whoami$/, { role: "tailnet" }, (_, r) => ok({ node: r.caller, allowed: r.roles.has("allowed"), person: r.roles.has("person"), deployer: r.roles.has("deployer"), login: access.shared ? access.personAs(r) : null } satisfies Whoami)],
     ...options.joins === undefined ? [] : [joinRoute(options.joins)],
     // A browser's WebSocket cannot read the refusal of an upgrade, so the dashboard's terminal reads it with a GET that
     // does not upgrade. It answers what the upgrade would get, or 426 when the upgrade would be taken.

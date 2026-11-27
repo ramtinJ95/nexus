@@ -348,4 +348,21 @@ export const arcMigrations: Migrations = [
   // What each person has seen of a thread someone else owns. The owner's mark stays threads.seen_at, which the thread's
   // attention reads, so a teammate reading the thread leaves the owner's unread reply unread.
   `CREATE TABLE IF NOT EXISTS seen_marks (thread TEXT NOT NULL REFERENCES threads (id), person TEXT NOT NULL, seen_at INTEGER, PRIMARY KEY (thread, person)) STRICT;`,
+  // The day sums by the owner of each call's thread as well. A call still recorded sums under its thread's owner, and
+  // what the sums hold of calls no longer recorded, those of deleted threads, under the operator.
+  `CREATE TABLE usage_days_owned (day TEXT NOT NULL, project TEXT NOT NULL, role TEXT NOT NULL, agent TEXT NOT NULL, model TEXT NOT NULL, owner TEXT NOT NULL,
+     input INTEGER NOT NULL, output INTEGER NOT NULL, cache_write INTEGER NOT NULL, cache_read INTEGER NOT NULL, calls INTEGER NOT NULL,
+     PRIMARY KEY (day, project, role, agent, model, owner)) STRICT;
+   INSERT INTO usage_days_owned SELECT date(r.at / 1000, 'unixepoch'), r.project, r.role, r.agent, r.model, coalesce(t.owner, 'operator'),
+     sum(r.input), sum(r.output), sum(r.cache_write), sum(r.cache_read), count(*) FROM usage_records r LEFT JOIN threads t ON t.id = r.thread GROUP BY 1, 2, 3, 4, 5, 6;
+   INSERT INTO usage_days_owned SELECT d.day, d.project, d.role, d.agent, d.model, 'operator', d.input - coalesce(o.input, 0), d.output - coalesce(o.output, 0),
+       d.cache_write - coalesce(o.cache_write, 0), d.cache_read - coalesce(o.cache_read, 0), d.calls - coalesce(o.calls, 0)
+     FROM usage_days d LEFT JOIN (SELECT day, project, role, agent, model, sum(input) AS input, sum(output) AS output, sum(cache_write) AS cache_write,
+       sum(cache_read) AS cache_read, sum(calls) AS calls FROM usage_days_owned GROUP BY 1, 2, 3, 4, 5) o USING (day, project, role, agent, model)
+     WHERE d.input <> coalesce(o.input, 0) OR d.output <> coalesce(o.output, 0) OR d.cache_write <> coalesce(o.cache_write, 0)
+       OR d.cache_read <> coalesce(o.cache_read, 0) OR d.calls <> coalesce(o.calls, 0)
+     ON CONFLICT DO UPDATE SET input = input + excluded.input, output = output + excluded.output, cache_write = cache_write + excluded.cache_write,
+       cache_read = cache_read + excluded.cache_read, calls = calls + excluded.calls;
+   DROP TABLE usage_days;
+   ALTER TABLE usage_days_owned RENAME TO usage_days;`,
 ];

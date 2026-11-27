@@ -37,8 +37,9 @@ function usageText(r: UsageReport): string {
 export const usageCommands: Readonly<Record<string, Command>> = {
   usage: {
     help: [
-      "  nexus usage [--since today|7d|30d|all|DATE] [--project P] [--by model|project|kind|role|day]",
+      "  nexus usage [--since today|7d|30d|all|DATE] [--project P] [--by owner|model|project|kind|role|day]",
       "    the tokens the agents spent, in all and by model, project, agent, role and day, or only --by's; --since is 7d by default",
+      "    a shared install also sums by owner",
     ],
     args: [0, 0],
     options: { since: { type: "string" }, project: { type: "string" }, by: { type: "string" } },

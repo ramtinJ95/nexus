@@ -85,7 +85,7 @@ export function queuedView(registry: QueueRegistry, record: QueuedRecord): Queue
   const waits = ahead === null ? after : [...after, waiting(ahead.builder, behindGate(behindOf(ahead)))];
   const claude = request.claude !== undefined;
   return {
-    id: record.id, title: record.title, project: record.project, startedBy: record.startedBy, createdAt: record.createdAt, status: record.status,
+    id: record.id, title: record.title, project: record.project, startedBy: record.startedBy, owner: record.owner ?? operator, createdAt: record.createdAt, status: record.status,
     after: record.after, waits, blocked: record.refused !== undefined || waits.some((w) => w.state === "blocked"), node: request.node ?? registry.projects.project(record.project)?.defaultNode ?? "auto",
     worker: claude ? "claude" : "harness", model: claude ? request.model ?? defaultClaudeModel : null,
     prompt: record.message ?? request.claude ?? null, branch: request.branch ?? null, commit: request.commit ?? null,

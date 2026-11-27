@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import { sessionHarnessSchema } from "../../protocol/agent-kinds.ts";
-import { threadRoutes as routes, type Preview } from "../../contract/threads.ts";
+import { threadRoutes as routes, type Preview, type Whoami } from "../../contract/threads.ts";
+import { operator, type Person } from "../../ids.ts";
 import { pylonRoutes, type ChangesBase } from "../../contract/pylon.ts";
 import { projectOf, threadOf } from "../refs.ts";
 import { attachTerminal, processTty } from "../attach.ts";
@@ -121,15 +122,32 @@ const show: Command = {
   },
 };
 
+/**
+ * A list shows its owners once some thread is a person's, which only a shared install's are: a solo install's are the
+ * operator's, and a control plane from before owners names none.
+ */
+const owned = (of: readonly { owner?: Person }[]) => of.some((t) => (t.owner ?? operator) !== operator);
+
+/**
+ * Which threads of `of` a list shows: on a shared install the caller's own, unless `everyone`. A solo install shows all
+ * of them, as does a device that is no person. Whoami is asked only once some thread is a person's.
+ */
+async function mineOf(api: Api, of: readonly { owner: Person }[], everyone: boolean): Promise<(t: { owner: Person }) => boolean> {
+  if (everyone || !owned(of)) return () => true;
+  const { login } = await api("GET", "/v1/whoami") as Whoami;
+  return (t) => login === null || t.owner === login;
+}
+
 export const threadsCommands: Readonly<Record<string, Command>> = {
   threads: {
     help: [
-      "  nexus threads [--project P] [--all] [--open] [--active] [--needs-me] [--limit N] [--queued]",
+      "  nexus threads [--project P] [--all] [--open] [--active] [--needs-me] [--limit N] [--queued] [--everyone]",
       "    threads, then queued ones; deleted ones and cancelled queued ones only with --all, no archived ones with --open, and --queued lists only queued ones",
+      "    on a shared install only your own, and everyone's with --everyone",
       "    --active lists only active threads and --needs-me only those whose attention waits on you, with no queued ones; --limit N the first N",
     ],
     args: [0, 0],
-    options: { project: { type: "string" }, all: { type: "boolean" }, open: { type: "boolean" }, queued: { type: "boolean" }, active: { type: "boolean" }, "needs-me": { type: "boolean" }, limit: { type: "string" } },
+    options: { project: { type: "string" }, all: { type: "boolean" }, open: { type: "boolean" }, queued: { type: "boolean" }, active: { type: "boolean" }, "needs-me": { type: "boolean" }, limit: { type: "string" }, everyone: { type: "boolean" } },
     async run(api, _, v, _follow, { io }) {
       const project = str(v, "project");
       const limit = int(str(v, "limit"), "--limit", Infinity);
@@ -138,15 +156,18 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
       if (v.queued === true && onlyThreads) throw new UsageError("--queued lists threads that have not started, so it cannot go with --active or --needs-me");
       const colour = colourOf(io);
       const queuing = onlyThreads ? Promise.resolve([]) : request(api, routes.queued, { query: { project, ...v.all === true ? {} : { status: "queued" } } });
+      const everyone = v.everyone === true;
       if (v.queued === true) {
-        const queued = (await queuing).slice(0, limit);
-        return { json: queued, text: queued.length === 0 ? "No queued threads." : queuedTable(queued, colour) };
+        const all = await queuing;
+        const queued = all.filter(await mineOf(api, all, everyone)).slice(0, limit);
+        return { json: queued, text: queued.length === 0 ? "No queued threads." : queuedTable(queued, colour, owned(queued)) };
       }
       const listing = request(api, routes.list, { query: { project, ...v.open === true ? { deleted: false, status: "open" } : v.all === true ? {} : { deleted: false } } });
       const [queued, listed] = await Promise.all([queuing, listing]);
       const shown = listed.filter((r) => (v.active !== true || r.status === "active") && (v["needs-me"] !== true || needsPerson(r.attention)));
-      const threads = shown.slice(0, limit);
-      return { json: threads, text: threadsText(threads, queued.slice(0, limit - threads.length), colour) };
+      const mine = await mineOf(api, [...shown, ...queued], everyone);
+      const threads = shown.filter(mine).slice(0, limit);
+      return { json: threads, text: threadsText(threads, queued.filter(mine).slice(0, limit - threads.length), colour, owned([...shown, ...queued])) };
     },
   },
   show,

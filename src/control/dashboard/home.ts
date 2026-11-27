@@ -13,7 +13,7 @@ import { prose, inline } from "./markdown.ts";
 import { cleanupCard, judgmentCards, questionCard, landing, nudgeCard, resumeCard } from "./cards.ts";
 import { layout, threadsOf, queuedLook, closedLabel, quietLabel, newProjectButton, foldCap, foldHref, type Shell } from "./shell.ts";
 import { lifeOfThread, roleLine, type Life } from "./lifecycle.ts";
-import { flightLines, flightRows, flightStack, heldLine, inFlight, itemActions, itemBrief, peekKey, peekView } from "./flight.ts";
+import { flightLines, flightRows, flightStack, heldLine, inFlight, itemActions, itemBrief, ownCount, ownedBy, ownerAttrs, ownerName, peekKey, peekView } from "./flight.ts";
 import { lifeTrack } from "./timeline.ts";
 import { findText, found, peekHref, type NoticeAttention } from "./contract.ts";
 
@@ -30,18 +30,20 @@ export function home(c: Context, h: HomeView, dialogs: Pick<Shell, "start" | "ad
   const peeked = peek === null ? null : peek.kind === "item" && peek.item.thread !== null ? peek.item.thread : peekKey(peek);
   const carded = peeked !== null && cards.has(peeked);
   const flying = inFlight(placed);
+  const flyingMine = inFlight(placed, true);
   const waiting = c.needs.length;
   return layout(c, {
     title: dialogs.start !== undefined ? "Start a thread" : dialogs.addProject === true ? "New project" : "Threads",
     ...dialogs,
     page: "home",
     main: html`<header class="bar">${menu}<div class="crumb"><h1>Threads</h1></div><div class="bar-end"><a class="btn btn-ghost" href="/projects/new" data-new-project>New project</a><a class="btn btn-new phone-only" href="/threads/new" data-start>New thread</a></div></header>
-<div class="seg-bar home-seg" role="radiogroup" aria-label="Show"><label class="seg-tab"><input type="radio" name="home-side" value="needs" id="side-needs" checked>Needs you<span class="seg-n" id="seg-needs-n" data-live>${waiting || ""}</span></label><label class="seg-tab"><input type="radio" name="home-side" value="flight" id="side-flight">In flight<span class="seg-n" id="seg-flight-n" data-live>${flying || ""}</span></label></div>
+<div class="seg-bar home-seg" role="radiogroup" aria-label="Show"><label class="seg-tab"><input type="radio" name="home-side" value="needs" id="side-needs" checked>Needs you<span class="seg-n" id="seg-needs-n" data-live>${waiting || ""}</span></label><label class="seg-tab"><input type="radio" name="home-side" value="flight" id="side-flight">In flight<span class="seg-n" id="seg-flight-n" data-live>${flying === 0 ? "" : ownCount(flying, flyingMine)}</span></label></div>
 <div class="split${peek !== null && !carded && " peeking"}" id="split">
 <section class="split-needs" id="needs-you" aria-labelledby="needs-h" data-live>${needsList(c, h, carded ? { key: peeked, card, reply: peek?.kind === "thread" ? peek.latest.reply : null } : null)}</section>
 <div class="split-peek" id="peek" data-live>${peekView(c, h, carded ? null : peek)}</div>
 <section class="split-flight" id="in-flight" aria-labelledby="flight-h">
-<div class="ov-head flight-head"><h2 id="flight-h">In flight</h2><span class="count" id="flight-n" data-live>${flying}</span>
+<div class="ov-head flight-head"><h2 id="flight-h">In flight</h2><span class="count" id="flight-n" data-live>${ownCount(flying, flyingMine)}</span>
+${c.mine?.person != null && html`<div class="seg-bar flight-owners" role="radiogroup" aria-label="Whose threads"><label class="seg-tab"><input type="radio" name="flight-owners" value="mine" id="owners-mine" checked>Mine</label><label class="seg-tab"><input type="radio" name="flight-owners" value="all" id="owners-all">Everyone</label></div>`}
 <div class="seg-bar flight-view" role="radiogroup" aria-label="List the work"><label class="seg-tab"><input type="radio" name="flight-view" value="phase" id="view-phase" checked>By phase</label><label class="seg-tab"><input type="radio" name="flight-view" value="project" id="view-project">By project</label></div></div>
 <div class="flight" id="flight" data-live>${flightStack(placed, peeked)}</div>
 <div class="flight-projects" id="overview" data-live>${overview(c, h)}</div>
@@ -64,13 +66,15 @@ function autoReviewSwitch(c: Context, p: Project): Html {
 /** Threads as a table of what each pylon is asked to be and is. */
 function table(c: Context, offline: ReadonlySet<NodeName>, threads: readonly Thread[]): Html {
   return html`<table class="ov">
-<thead><tr><th>Thread</th><th class="wide">Desired</th><th>Observed</th><th class="wide">Node</th><th class="wide">Human</th><th class="wide">Agent</th></tr></thead>
+<thead><tr><th>Thread</th>${c.mine !== null && html`<th>Owner</th>`}<th class="wide">Desired</th><th>Observed</th><th class="wide">Node</th><th class="wide">Human</th><th class="wide">Agent</th></tr></thead>
 <tbody>${threads.map((t) => {
   const r = c.row(t);
   const desired = desiredPhase(t, c.now);
   const [label, tone] = threadState(r, c.now);
-  return html`<tr${dims(r) && html` class="dim"`}>
+  const owned = ownedBy(c, t.owner);
+  return html`<tr${dims(r) && html` class="dim"`}${ownerAttrs(owned)}>
 <td><span class="ov-title">${dot(tone, label)}<a href="/threads/${t.id}">${t.title}</a>${t.status !== "active" && html`<span class="tag">${t.status}</span>`}</span></td>
+${owned !== undefined && html`<td>${ownerName(owned)}</td>`}
 <td class="wide">${state(desired, desiredTone[desired])}</td>
 <td>${state(...actualBadge[r.pylon.actualState])}</td>
 <td class="wide">${r.pylon.node}${offline.has(r.pylon.node) && html` <span class="tag">offline</span>`}</td>
@@ -91,11 +95,13 @@ function overview(c: Context, { offline }: HomeView): Html {
 <div class="ov-head"><h2 id="project-${p.id}">${p.id}</h2><code class="dim">${p.repoUrl ?? "scratch, no remote"}</code>${autoReviewSwitch(c, p)}<a class="btn btn-xs" href="/threads/new?project=${encodeURIComponent(p.id)}" data-start="${p.id}">New thread</a></div>
 ${recent.length > 0 ? table(c, offline, recent) : quiet.length === 0 && html`<p class="empty">No open threads.</p>`}
 ${queued.length > 0 && html`<h3 class="ov-sub">Queued</h3><table class="ov ov-queued">
-<thead><tr><th>Thread</th><th>Waits for</th><th class="wide">Node</th></tr></thead>
+<thead><tr><th>Thread</th>${c.mine !== null && html`<th>Owner</th>`}<th>Waits for</th><th class="wide">Node</th></tr></thead>
 <tbody>${queued.map((q) => {
   const [label, tone] = queuedLook(q);
-  return html`<tr>
+  const owned = ownedBy(c, q.owner);
+  return html`<tr${ownerAttrs(owned)}>
 <td><span class="ov-title">${dot(tone, label)}<a href="/threads/${q.id}">${q.title}</a><span class="tag">${label}</span></span></td>
+${owned !== undefined && html`<td>${ownerName(owned)}</td>`}
 <td>${q.waits.map((w) => html`<span class="ov-wait">${c.title(w.thread)}: ${w.why}</span>`)}</td>
 <td class="wide">${q.node}</td>
 </tr>`;

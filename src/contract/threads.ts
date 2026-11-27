@@ -1,7 +1,7 @@
 /** It imports only route.ts at run time, so a browser can bundle it. */
 import type { z } from "zod";
 import type { ConversationView } from "@earendil-works/pi-durable";
-import type { ProjectId, ThreadId } from "../ids.ts";
+import type { Person, ProjectId, ThreadId } from "../ids.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
 import type { ClaudeConversation } from "../control/claude-transcript.ts";
 import type { Thread } from "../control/thread-store.ts";
@@ -41,6 +41,8 @@ export interface QueuedThread {
   project: ProjectId;
   /** Who queued it, and the thread's startedBy once it starts. */
   startedBy: string;
+  /** The person whose thread it becomes. */
+  owner: Person;
   /** When it was queued, in Unix milliseconds. */
   createdAt: number;
   /** Archived means cancelled. */

@@ -134,7 +134,7 @@ test("connect finds the API on the dashboard's HTTPS port, saves it, and the nex
   assert.equal(plain.code, 0, plain.stderr);
   assert.deepEqual(JSON.parse(plain.stdout), {
     url: `http://${apiName}:7470`, socks: `127.0.0.1:${proxy.port}`, config,
-    caller: { node: laptop, allowed: true, person: true, deployer: true }, versions: { cli: version, control: version },
+    caller: { node: laptop, allowed: true, person: true, deployer: true, login: null }, versions: { cli: version, control: version },
   }, "a certificate this device does not trust falls back to HTTP, and the saved proxy is kept");
   assert.deepEqual(JSON.parse(await readFile(config, "utf8")), { url: `http://${apiName}:7470`, socks: `127.0.0.1:${proxy.port}` });
 });

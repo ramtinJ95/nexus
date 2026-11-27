@@ -21,8 +21,7 @@ import type { ThreadDetail, ThreadRow } from "../wire.ts";
 import type { Thread } from "../thread-store.ts";
 import type { AgentView, QueuedThread } from "../../contract/threads.ts";
 import { queuedView } from "../queue.ts";
-import { periods, periodStart, type Period } from "../usage.ts";
-import { breakdowns } from "../../contract/usage.ts";
+import { offeredBreakdowns, periods, periodStart, type Period } from "../usage.ts";
 import type { NodeHealth } from "../../protocol/client.ts";
 import type { Features } from "../features.ts";
 import type { Review } from "../review-model.ts";
@@ -96,7 +95,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
     const queued: ReadonlyMap<string, readonly QueuedThread[]> = Map.groupBy(registry.queue.queuedThreads().filter((q) => q.status === "queued").map((q) => queuedView(registry, q)), (q) => q.project);
     const queuedIn = (project: string) => queued.get(project) ?? [];
     return {
-      now, caller, deploys, landRefusal: options.people?.shared ? "landing off" : options.features.reviews === null ? "no review loop" : refusal(roles, landing) === null ? null : "not a deployer",
+      now, caller, mine: kit.shared ? { person: kit.personAs({ roles, identity }) } : null, deploys, landRefusal: options.people?.shared ? "landing off" : options.features.reviews === null ? "no review loop" : refusal(roles, landing) === null ? null : "not a deployer",
       answerRefusal: (question) => kit.answerRefusalOf({ roles, identity }, question),
       projects: registry.projects.projects(), nodes: registry.nodes.nodes(), image: registry.images.currentImage(),
       health: { states: registry.health.healthStates(), changes: registry.health.healthChanges() },
@@ -183,7 +182,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
       const query = r.query.get("period") ?? "";
       const period = Object.hasOwn(periods, query) ? query as Period : "7d";
       const project = (r.query.get("project") || null) as ProjectId | null;
-      return ok(usagePage(c, { period, project, report: registry.usage.usageReport({ since: periodStart(period, c.now), project, by: breakdowns }) }));
+      return ok(usagePage(c, { period, project, report: registry.usage.usageReport({ since: periodStart(period, c.now), project, by: offeredBreakdowns(kit.shared) }) }));
     }],
     // The pipeline's items show on the home page's work in flight now, and on their threads.
     ["GET", /^\/pipeline$/, anyAllowed, () => ({ status: 303, headers: { location: "/#in-flight" }, body: "" })],

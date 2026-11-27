@@ -157,7 +157,7 @@ test("a queue record is checked as a start is, and freezes the size the project 
   assert.deepEqual(f.registry.threads.threads().map((x) => x.id).sort(), ["th-a", "th-check", "th-review", "th-verify"]);
   const claude = q.add(f.request({ claude: "Fix it", node: "auto" }), null, [record.id], { caller: laptop, owner: operator });
   assert.deepEqual(queuedView(f.registry, f.registry.queue.queuedThread(claude.id)!), {
-    id: claude.id, title: "After", project: project.id, startedBy: laptop, createdAt: claude.createdAt, status: "queued", after: [record.id],
+    id: claude.id, title: "After", project: project.id, startedBy: laptop, owner: operator, createdAt: claude.createdAt, status: "queued", after: [record.id],
     waits: [{ thread: record.id, state: "waiting", why: "is queued" }], blocked: false, node: "auto", worker: "claude", model: "claude-opus-5-5",
     prompt: "Fix it", branch: null, commit: null, resources: project.resources, startNow: null, lastError: null,
   });

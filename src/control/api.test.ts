@@ -34,10 +34,10 @@ test("alice and bob are two people the API allows, each named by their own devic
     answers.push((await s.call("GET", "/v1/whoami")).body);
   }
   assert.deepEqual(answers, [
-    { node: "nALICE", allowed: true, person: true, deployer: false },
-    { node: "nBOB", allowed: true, person: true, deployer: false },
-    { node: "nALICE", allowed: true, person: true, deployer: false },
-    { node: "nNEXUSNODE", allowed: false, person: false, deployer: false },
+    { node: "nALICE", allowed: true, person: true, deployer: false, login: null },
+    { node: "nBOB", allowed: true, person: true, deployer: false, login: null },
+    { node: "nALICE", allowed: true, person: true, deployer: false, login: null },
+    { node: "nNEXUSNODE", allowed: false, person: false, deployer: false, login: null },
   ], "the user and the tags change no role");
   assert.deepEqual(s.logged.filter((line) => line.startsWith("api: caller")), [
     "api: caller nALICE is user alice@example.com",
@@ -69,10 +69,10 @@ test("any tailnet node may ask who it is and what it may do, under the API's nam
     answers.push((await s.call("GET", "/v1/whoami")).body);
   }
   assert.deepEqual(answers, [
-    { node: laptop, allowed: true, person: true, deployer: true },
-    { node: phone, allowed: true, person: true, deployer: false },
-    { node: "nFIREBAT", allowed: true, person: false, deployer: false },
-    { node: "nSTRANGER", allowed: false, person: false, deployer: false },
+    { node: laptop, allowed: true, person: true, deployer: true, login: null },
+    { node: phone, allowed: true, person: true, deployer: false, login: null },
+    { node: "nFIREBAT", allowed: true, person: false, deployer: false, login: null },
+    { node: "nSTRANGER", allowed: false, person: false, deployer: false, login: null },
   ], asks.map(([, who]) => who).join(", "));
   assert.deepEqual(await s.call("GET", "/v1/whoami", undefined, { host: "evil.example" }), { status: 403, body: { error: "the API does not answer to host evil.example", code: null, retryable: false } });
   assert.deepEqual(await s.call("GET", "/v1/projects"), { status: 403, body: { error: "caller is not a tailnet node this control plane allows. If it is your own device, run this on the control plane's machine, in its nexus checkout after git pull, to let it use Nexus and deploy: sudo deploy/install.sh --admit nSTRANGER", code: null, retryable: false } }, "it opens no other route to a stranger");
@@ -163,7 +163,7 @@ test("a joined node joins again with a new token, which replaces its deploy key,
   assert.equal((await s.call("POST", "/v1/join", { token: mintJoinToken(s.registry).token, deployKey: tokenDigest("second") })).status, 200);
   assert.equal((await s.call("POST", "/v1/deployer/report", report, { authorization: "Bearer first" })).status, 403);
   assert.equal((await s.call("POST", "/v1/deployer/report", report, { authorization: "Bearer second" })).status, 200);
-  assert.deepEqual((await s.call("GET", "/v1/whoami")).body, { node: joiner, allowed: false, person: false, deployer: false });
+  assert.deepEqual((await s.call("GET", "/v1/whoami")).body, { node: joiner, allowed: false, person: false, deployer: false, login: null });
 });
 
 test("a machine neither admitted nor joined reaches only whoami and join, and a joined node only its deployer's routes", async (t) => {

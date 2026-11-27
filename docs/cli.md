@@ -65,7 +65,7 @@ A device the control plane does not allow gets the same line, which admits it as
 
 A control plane that refuses this device its health is not asked its version, and `connect` prints only the CLI's. `connect` exits 0 once it saved a URL, whatever the device may do, and `--json` prints `{"url", "socks", "config", "caller", "versions"}`, where `caller` is the `Whoami` below and, since 0.80.0, `versions` is `{"cli": string, "control": string | null}`, with `control` null when the health reports no version or the control plane refuses this device its health. It exits 2 when nothing answers at either port, naming each try and, without a proxy, saying how to give one. It exits 3 when the control plane answers but not to that name, because the name is not in its `listen.hostnames`, and 64 for a host that is neither a name nor a URL. A failed `connect` writes nothing.
 
-`GET /v1/whoami` answers any tailnet node, allowed or not, under one of the API's names, as `{"node": string, "allowed": boolean, "person": boolean, "deployer": boolean}`. `allowed` is whether the node may call the API, `person` whether it may start and message threads, and `deployer` whether it may deploy, land and build images. It tells a node only its own ID, which `tailscale status` already shows it, and its own access, which a refused request already tells it. It names no other node, thread or setting, and a page under another name is refused as on every route, so a page cannot read it either. A caller tailscaled does not know gets 403.
+`GET /v1/whoami` answers any tailnet node, allowed or not, under one of the API's names, as `{"node": string, "allowed": boolean, "person": boolean, "deployer": boolean, "login": string | null}`. `allowed` is whether the node may call the API, `person` whether it may start and message threads, and `deployer` whether it may deploy, land and build images. `login` is the person the node is on a shared install, by their tailnet login, and null on a solo install or for a node that is no person. It tells a node only its own ID, which `tailscale status` already shows it, and its own access, which a refused request already tells it. It names no other node, thread or setting, and a page under another name is refused as on every route, so a page cannot read it either. A caller tailscaled does not know gets 403.
 
 ### Version skew
 
@@ -136,9 +136,9 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `image list` | `GET /v1/images` | `ImagesView` |
 | `images` | The same as `image list` | `ImagesView` |
 | `image current` | `GET /v1/images/current` | `{ current: ImageEntry \| null, previous: ImageEntry \| null }` |
-| `threads [--project P] [--all] [--open] [--active] [--needs-me] [--limit N]` | `GET /v1/threads?deleted=false[&project=P]`, or `GET /v1/threads[?project=P]` with `--all`, or `GET /v1/threads?deleted=false&status=open[&project=P]` with `--open`, and `GET /v1/queued?status=queued[&project=P]`, or `GET /v1/queued[?project=P]` with `--all`, for the queued threads its text lists after the others | `ThreadRow[]`: each `Thread` with `desired` and `pylon: { node, actualState, failed }`, as in `ThreadDetail`. A thread whose harness or session turn runs carries `workingSince`, the earliest known start of those turns in Unix milliseconds, unless no start is known. Deleted threads are left out unless `--all` is given, and `--open` lists only active and idle threads. `--active` lists only active threads, and `--needs-me` only those whose `attention` waits on the person: `failed`, `decision`, `died`, `parked`, `limited`, `boot-held`, `reply` or `waiting`. Either leaves the queued threads out of the text too. `--limit N` keeps the first N rows, the threads before the queued ones. Queued threads are never in it. The text heads its columns: the thread, its status, its attention, whether it works or stopped on its usage limit, the pylon's state, the project, when it last replied, and the title. The queued threads follow under a header of their own |
+| `threads [--project P] [--all] [--open] [--active] [--needs-me] [--limit N] [--everyone]` | `GET /v1/threads?deleted=false[&project=P]`, or `GET /v1/threads[?project=P]` with `--all`, or `GET /v1/threads?deleted=false&status=open[&project=P]` with `--open`, and `GET /v1/queued?status=queued[&project=P]`, or `GET /v1/queued[?project=P]` with `--all`, for the queued threads its text lists after the others | `ThreadRow[]`: each `Thread` with `desired` and `pylon: { node, actualState, failed }`, as in `ThreadDetail`. A thread whose harness or session turn runs carries `workingSince`, the earliest known start of those turns in Unix milliseconds, unless no start is known. Deleted threads are left out unless `--all` is given, and `--open` lists only active and idle threads. `--active` lists only active threads, and `--needs-me` only those whose `attention` waits on the person: `failed`, `decision`, `died`, `parked`, `limited`, `boot-held`, `reply` or `waiting`. Either leaves the queued threads out of the text too. `--limit N` keeps the first N rows, the threads before the queued ones. Queued threads are never in it. The text heads its columns: the thread, its status, its attention, whether it works or stopped on its usage limit, the pylon's state, the project, when it last replied, and the title. The queued threads follow under a header of their own. Once a thread is a person's, as only a shared install's are, it also asks `GET /v1/whoami` and lists only the caller's own threads and queued threads, before `--limit`, unless `--everyone` is given, and the text and the queued threads' table gain an Owner column before the title. A device that is no person lists everyone's |
 | `threads --queued [--project P] [--all] [--limit N]` | `GET /v1/queued?status=queued[&project=P]`, or `GET /v1/queued[?project=P]` with `--all` | `QueuedThread[]`, the threads that have not started. Cancelled and deleted ones are left out unless `--all` is given |
-| `show <thread>` | `GET /v1/threads/<thread>`, then `GET /v1/queued/<thread>` when that answers 409 with code `queued` | `ThreadDetail`. Its `said` holds the sentences the text prints of the thread's state and review. Its `desired` is what the planner wants of the pylon now: `running`, `paused` or `deleted`. Its `attach` is `hc`, the command that opens Herdr Core's picker of the pylon's terminals from a shell in the pylon. Without `--json`, it prints `attach: nexus attach <thread>`, the command that attaches from this Mac, unless the thread is archived or deleted, and `disk: kept past its 24 hours, as ...` with why for an archived thread whose disk is kept. For a thread that has not started, `QueuedThread` |
+| `show <thread>` | `GET /v1/threads/<thread>`, then `GET /v1/queued/<thread>` when that answers 409 with code `queued` | `ThreadDetail`. Its `said` holds the sentences the text prints of the thread's state and review. Its `desired` is what the planner wants of the pylon now: `running`, `paused` or `deleted`. Its `attach` is `hc`, the command that opens Herdr Core's picker of the pylon's terminals from a shell in the pylon. Without `--json`, it prints `attach: nexus attach <thread>`, the command that attaches from this Mac, unless the thread is archived or deleted, and `disk: kept past its 24 hours, as ...` with why for an archived thread whose disk is kept. For a thread that has not started, `QueuedThread`. The text prints `owner: <login>` for a thread of a shared install's person, and nothing for the operator's |
 | `thread show <thread>` | The same as `show <thread>` | The same as `show` |
 | `ports <thread>` | `GET /v1/threads/<thread>` | `ListeningPort[] \| null`, the detail's `ports` |
 | `preview <thread> <port> [--wait]` | `POST /v1/threads/<thread>/previews` with `{"port": number}`, then with `--wait` polls `GET /v1/threads/<thread>` | `Preview`, the port's preview |
@@ -184,7 +184,7 @@ With `--json`, a command prints one JSON value on stdout, pretty-printed. The va
 | `node show <name>` | The same as `node <name>` | `NodeHealth` |
 | `doctor` | `GET /v1/doctor` | `DoctorReport`, as [Doctor](#doctor) describes. It exits 1 with its report on stdout when a check failed |
 | none: the dashboard's Cluster page reads it | `GET /v1/nodes/<name>/metrics?from=<ms>[&to=<ms>]` | `NodeMetrics` |
-| `usage [--since today\|7d\|30d\|all\|DATE] [--project P] [--by model\|project\|kind\|role\|day]` | `GET /v1/usage?since=<since>[&project=P][&by=B]`, with `since=7d` unless `--since` is given | `UsageReport` |
+| `usage [--since today\|7d\|30d\|all\|DATE] [--project P] [--by owner\|model\|project\|kind\|role\|day]` | `GET /v1/usage?since=<since>[&project=P][&by=B]`, with `since=7d` unless `--since` is given | `UsageReport`. Only a shared install offers `owner`, a total for each person whose threads made the calls, and lists it first. A solo install refuses `--by owner` with 400, as any other unknown breakdown |
 | `usage backfill [--dry-run \| --stop]` | `POST /v1/usage/backfill`, or `GET` with `--dry-run`, or `DELETE` with `--stop` | `UsageBackfill`, or `{ backfill: UsageBackfill, plan: BackfillPlanRow[] }` with `--dry-run` |
 | `login claude\|github` | `PUT /v1/logins/<kind>` with `{"token": string}`, the token read from stdin. A terminal's stdin is refused, so the token never shows. A GitHub token is stored with the git identity GitHub's `GET /user` gives for it, and one GitHub refuses (400) or cannot be asked about (502) is not stored | `Logins`, `{ person: string, set: { claude: boolean, github: boolean } }`. No route answers a stored token |
 | `logout claude\|github` | `DELETE /v1/logins/<kind>` with `{}`. A kind that is not set stays unset | `Logins` |
@@ -1143,6 +1143,8 @@ interface QueuedThread {
   project: ProjectId;
   /** Who queued it, and the thread's startedBy once it starts. */
   startedBy: string;
+  /** The person whose thread it becomes. */
+  owner: Person;
   /** When it was queued, in Unix milliseconds. */
   createdAt: number;
   /** Archived means cancelled. */
@@ -1619,7 +1621,7 @@ The control plane records every model call the agents of its threads make, one r
 interface Tokens { input: number; output: number; cacheWrite: number; cacheRead: number }
 // src/contract/usage.ts
 interface UsageTotals extends Tokens { total: number; calls: number }
-/** `key` is the model, project, agent kind, thread role, or UTC day as YYYY-MM-DD. */
+/** `key` is the owner's tailnet login, the model, project, agent kind, thread role, or UTC day as YYYY-MM-DD. */
 type UsageRow = UsageTotals & { key: string };
 /** What `GET /v1/usage` answers. Rows are biggest first, except days, which are newest first. */
 interface UsageReport {
@@ -1638,7 +1640,8 @@ interface UsageReport {
   backfill: UsageBackfill;
 }
 type Breakdown = typeof breakdowns[number];
-const breakdowns = ["model", "project", "kind", "role", "day"] as const;
+/** `owner` sums by the person who owns each thread, and only a shared install offers it. */
+const breakdowns = ["owner", "model", "project", "kind", "role", "day"] as const;
 ```
 
 `total` is the sum of the four token counts. An unknown `--since` or `--by` fails with exit code 64, the API's 400.

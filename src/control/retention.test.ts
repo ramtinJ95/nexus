@@ -215,7 +215,7 @@ test("a deleted thread is purged a week after its delete once a backup began sin
   const reviewer = w.closed("deleted");
   r.reviews.saveReview(testReview({ builder, reviewer, phase: { kind: "merged" } }));
   r.usage.recordUsage(free, [{ id: "call-1", agent: "pi", model: "gpt-6-astra", at: w.now, input: 7, output: 3, cacheWrite: 0, cacheRead: 0 }]);
-  const usage = r.usage.usageReport({ since: null }).total;
+  const usage = r.usage.usageReport({ since: null, by: ["owner"] });
 
   w.later(week + minute);
   await w.passes();
@@ -226,7 +226,8 @@ test("a deleted thread is purged a week after its delete once a backup began sin
   await w.passes();
   assert.equal(w.status(free), "purged");
   assert.ok(w.logged.some((l) => l.startsWith(`retention: purged ${free} from the registry`)));
-  assert.deepEqual(r.usage.usageReport({ since: null }).total, usage, "its calls stay in the day's sums");
+  const kept = r.usage.usageReport({ since: null, by: ["owner"] });
+  assert.deepEqual([kept.total, kept.by], [usage.total, usage.by], "its calls stay in the day's sums, under its owner");
   for (const [id, why] of [
     [listed.id, "its pylon is not gone from rj-firebat: the node lists or routes it, or a job, preview port, retry or Claude launch of it is left to settle"],
     [unaborted, "the abort of its harness conversation is not recorded yet"],

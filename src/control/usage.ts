@@ -13,21 +13,25 @@ export function periodStart(period: Period, now: number): number | null {
   return now - (now % 86_400_000) - (days - 1) * 86_400_000;
 }
 
+/** A solo install has one owner, so it offers no `owner` breakdown. */
+export const offeredBreakdowns = (shared: boolean): readonly Breakdown[] => shared ? breakdowns : breakdowns.filter((b) => b !== "owner");
+
 /**
  * The filter of `GET /v1/usage`: `since` is a period (today, 7d, 30d or all) or the UTC day to start at, such as
  * 2026-10-01; `project` and `thread` narrow it; each `by`, comma-separated or repeated, adds a breakdown, and none adds
- * every one.
+ * every one the install offers.
  */
-export function usageFilter(query: URLSearchParams, now: number): { since: number | null; project: ProjectId | null; thread: ThreadId | null; by: Breakdown[] } {
+export function usageFilter(query: URLSearchParams, now: number, shared: boolean): { since: number | null; project: ProjectId | null; thread: ThreadId | null; by: Breakdown[] } {
   const since = query.get("since") ?? "all";
+  const offered = offeredBreakdowns(shared);
   const by = query.getAll("by").flatMap((b) => b.split(",")).filter((b) => b !== "");
-  const unknown = by.find((b) => !(breakdowns as readonly string[]).includes(b));
-  if (unknown !== undefined) throw new Refusal("invalid", `by must be one of ${breakdowns.join(", ")}, not ${JSON.stringify(unknown)}`);
+  const unknown = by.find((b) => !(offered as readonly string[]).includes(b));
+  if (unknown !== undefined) throw new Refusal("invalid", `by must be one of ${offered.join(", ")}, not ${JSON.stringify(unknown)}`);
   return {
     since: sinceOf(since, now),
     project: query.get("project") as ProjectId | null,
     thread: query.get("thread") as ThreadId | null,
-    by: by.length === 0 ? [...breakdowns] : [...new Set(by)] as Breakdown[],
+    by: by.length === 0 ? [...offered] : [...new Set(by)] as Breakdown[],
   };
 }
 

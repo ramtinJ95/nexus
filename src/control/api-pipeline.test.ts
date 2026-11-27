@@ -1,4 +1,5 @@
 /** The pipeline's items, queued starts and planning threads. */
+import { operator } from "./people.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ThreadDetail, ThreadRow } from "./wire.ts";
@@ -71,7 +72,7 @@ test("a start after other threads is queued with no row or pylon, until start-qu
   assert.equal(answer.status, 201, JSON.stringify(answer.body));
   const queued = answer.body as QueuedThread;
   assert.deepEqual(queued, {
-    id: queued.id, title: "Then", project: "acme", startedBy: laptop, createdAt: queued.createdAt, status: "queued", after: [s.first.id],
+    id: queued.id, title: "Then", project: "acme", startedBy: laptop, owner: operator, createdAt: queued.createdAt, status: "queued", after: [s.first.id],
     waits: [{ thread: s.first.id, state: "waiting", why: "has no pull request yet" }], blocked: false, node, worker: "harness", model: null,
     prompt: "Fix the next bug.", branch: null, commit: null, resources: project.resources, startNow: null, lastError: null,
   });

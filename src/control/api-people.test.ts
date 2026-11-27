@@ -27,11 +27,11 @@ async function shared(t: Parameters<typeof testApi>[0], options: Parameters<type
 
 test("on a shared install a person is admitted by tailnet login, an admin holds a deployer's role, and an engineer does not", async (t) => {
   const s = await shared(t);
-  assert.deepEqual((await s.call("GET", "/v1/whoami")).body, { node: tailnet.alice.Node.StableID, allowed: true, person: true, deployer: true });
+  assert.deepEqual((await s.call("GET", "/v1/whoami")).body, { node: tailnet.alice.Node.StableID, allowed: true, person: true, deployer: true, login: alice });
   s.as(answer(tailnet.bob));
-  assert.deepEqual((await s.call("GET", "/v1/whoami")).body, { node: tailnet.bob.Node.StableID, allowed: true, person: true, deployer: false });
+  assert.deepEqual((await s.call("GET", "/v1/whoami")).body, { node: tailnet.bob.Node.StableID, allowed: true, person: true, deployer: false, login: bob });
   s.as(carol);
-  assert.deepEqual((await s.call("GET", "/v1/whoami")).body, { node: "nCAROL", allowed: false, person: false, deployer: false }, "a login people does not name is no one");
+  assert.deepEqual((await s.call("GET", "/v1/whoami")).body, { node: "nCAROL", allowed: false, person: false, deployer: false, login: null }, "a login people does not name is no one");
   assert.equal((await s.call("GET", "/v1/threads")).status, 403);
 });
 
@@ -191,6 +191,11 @@ test("without people the operator owns every thread and a device on the allowlis
   assert.equal(r.body.owner, operator);
   assert.equal(r.body.startedBy, laptop);
   assert.equal(s.registry.threads.pylon(r.body.pylonId)?.node, node);
+  const home = (await s.raw("/")).body.toString();
+  assert.ok(!home.includes("data-owner") && !home.includes("flight-owners") && !home.includes("<th>Owner</th>"), "the lists name no owner and offer no switch");
+  assert.match((await s.raw(`/threads/${r.body.id}`)).body.toString(), new RegExp(`Started by ${laptop} · `));
+  assert.equal((await s.call("GET", "/v1/whoami")).body.login, null);
+  assert.deepEqual(Object.keys((await s.call("GET", "/v1/usage")).body.by), ["model", "project", "kind", "role", "day"]);
 });
 
 test("on a shared install a repeat of another person's start request is refused, so it never sends a message into their thread", async (t) => {
@@ -220,4 +225,40 @@ test("on a shared install a caller the allowlist still admits but who is no pers
   const marked = await s.call("POST", `/v1/threads/${id}/unseen`, {});
   assert.equal(marked.status, 403, "whatever user whois names for it, the control node marks nothing");
   assert.equal(s.registry.threads.attention(id), null, "alice's reply stays seen");
+});
+
+test("on a shared install a thread's row and view carry its owner, and the usage report sums by owner", async (t) => {
+  const s = await shared(t);
+  const mine = await s.call("POST", "/v1/threads", { project: "acme", title: "alice's" });
+  s.as(answer(tailnet.bob));
+  const theirs = await s.call("POST", "/v1/threads", { project: "acme", title: "bob's" });
+  const call = (id: string, input: number) => ({ id, agent: "pi" as const, model: "gpt-6-astra", at: Date.now(), input, output: 0, cacheWrite: 0, cacheRead: 0 });
+  s.registry.usage.recordUsage(mine.body.id, [call("a", 7)]);
+  s.registry.usage.recordUsage(theirs.body.id, [call("b", 40)]);
+  assert.deepEqual((await s.call("GET", "/v1/threads")).body.map((r: { title: string; owner: Person }) => [r.title, r.owner]), [["alice's", alice], ["bob's", bob]]);
+  assert.equal((await s.call("GET", `/v1/threads/${mine.body.id}`)).body.thread.owner, alice);
+  const usage = await s.call("GET", "/v1/usage");
+  assert.deepEqual(usage.body.by.owner.map((r: { key: string; total: number }) => [r.key, r.total]), [[bob, 40], [alice, 7]]);
+  assert.deepEqual(Object.keys(usage.body.by), ["owner", "model", "project", "kind", "role", "day"]);
+});
+
+test("on a shared install the home page opens on the caller's own threads, its switch shows everyone's, and each row and page names its owner", async (t) => {
+  const s = await shared(t);
+  const hers = await s.call("POST", "/v1/threads", { project: "acme", title: "alice's" });
+  s.as(answer(tailnet.bob));
+  const his = await s.call("POST", "/v1/threads", { project: "acme", title: "bob's" });
+  const home = (await s.raw("/")).body.toString();
+  const row = (id: string) => {
+    const before = home.slice(0, home.indexOf(`<a href="/threads/${id}">`));
+    return before.slice(before.lastIndexOf("<tr")).split("\n")[0]!;
+  };
+  assert.match(home, /<input type="radio" name="flight-owners" value="mine" id="owners-mine" checked>Mine/);
+  assert.match(home, /id="owners-all">Everyone/);
+  assert.ok(row(his.body.id).endsWith(` data-owner="${bob}">`), row(his.body.id));
+  assert.ok(row(hers.body.id).endsWith(` data-owner="${alice}" data-theirs>`), "the Mine switch hides alice's row from bob");
+  assert.match(home, new RegExp(`<span class="owner" title="${alice}">alice</span>`));
+  assert.match(home, /<li data-owner="alice@example.com" data-theirs><a class="fl-row/, "the phase view marks her line too");
+  assert.match(home, /id="flight-n" data-live><span class="n-mine">1<\/span><span class="n-all">2<\/span>/);
+  const page = (await s.raw(`/threads/${hers.body.id}`)).body.toString();
+  assert.match(page, new RegExp(`Started by ${alice} · `), "the page names the owner, not the device");
 });

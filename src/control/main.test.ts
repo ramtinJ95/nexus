@@ -215,10 +215,10 @@ test("a registry and control.json from before join tokens come up with the same 
   const whoami = [];
   for (const id of ["nLaptopCNTRL", "nControlPlaneCNTRL", "nPeerProbeCNTRL", "nStrangerCNTRL"]) whoami.push((await plane.call(id, "GET", "/v1/whoami")).body);
   assert.deepEqual(whoami, [
-    { node: "nLaptopCNTRL", allowed: true, person: true, deployer: true },
-    { node: "nControlPlaneCNTRL", allowed: true, person: false, deployer: false },
-    { node: "nPeerProbeCNTRL", allowed: false, person: false, deployer: false },
-    { node: "nStrangerCNTRL", allowed: false, person: false, deployer: false },
+    { node: "nLaptopCNTRL", allowed: true, person: true, deployer: true, login: null },
+    { node: "nControlPlaneCNTRL", allowed: true, person: false, deployer: false, login: null },
+    { node: "nPeerProbeCNTRL", allowed: false, person: false, deployer: false, login: null },
+    { node: "nStrangerCNTRL", allowed: false, person: false, deployer: false, login: null },
   ]);
   assert.deepEqual((await plane.call("nLaptopCNTRL", "GET", "/v1/nodes")).body.map((n: { name: string }) => n.name), ["infra-testbench", "rj-firebat"]);
   const report = { role: "probe", commit: null, target: null, state: "pending", reason: null };

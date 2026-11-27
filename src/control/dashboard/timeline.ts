@@ -14,6 +14,7 @@ import { prose } from "./markdown.ts";
 import { promptLabel, type Item } from "./items.ts";
 import { landingTrack, stageLabel, stepStates, type Life, type StepState } from "./lifecycle.ts";
 import { steps, type Step } from "../pipeline.ts";
+import { roleOf } from "../agent-protocol.ts";
 
 interface Turn { from: string; text: string; at: number; queued: boolean; tools: number; failed: number; reply: string | null; took: string | null; running: boolean }
 
@@ -107,7 +108,7 @@ export function timeline(c: Context, page: ThreadView, life: Life): Html {
 
   const body: Record<Step, Part> = {
     planned: html`${brief.text === null ? html`<p class="empty">It started without a brief.</p>` : html`<div class="tl-brief">${prose(brief.text)}</div>`}
-<p class="tl-meta">${brief.item !== null && html`Item <a class="link" href="/?peek=${brief.item}"><code>${brief.item}</code></a> on the pipeline · `}Started by ${t.startedBy} · ${agent.kind === "claude" ? `Claude Code${agent.worker.model !== null ? `, ${agent.worker.model}` : ""}` : agent.kind === "harness" ? "Nexus agent" : "no agent"}${d.planning && " · planning thread"}</p>
+<p class="tl-meta">${brief.item !== null && html`Item <a class="link" href="/?peek=${brief.item}"><code>${brief.item}</code></a> on the pipeline · `}Started by ${c.mine !== null && roleOf(t.startedBy) === "builder" ? t.owner : t.startedBy} · ${agent.kind === "claude" ? `Claude Code${agent.worker.model !== null ? `, ${agent.worker.model}` : ""}` : agent.kind === "harness" ? "Nexus agent" : "no agent"}${d.planning && " · planning thread"}</p>
 ${heldAt("planned")}`,
     queued: html`<p class="tl-meta">${queuedAfter === null ? "Started at once, with nothing ahead of it in the queue." : html`Queued after ${queuedAfter.length === 0 ? "nothing" : queuedAfter.map((id, i) => html`${i > 0 && ", "}<a class="link" href="/threads/${id}">${c.thread(id)?.title ?? id}</a>`)}.`} Its pylon runs on <a class="link" href="/nodes/${encodeURIComponent(d.pylon.node)}">${d.pylon.node}</a> with ${cpus} CPUs, ${memoryGiB} GiB of memory and ${diskGiB} GiB of disk.</p>${heldAt("queued")}`,
     building: html`${turnsList(turns, c.now)}

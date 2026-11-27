@@ -1,4 +1,4 @@
-import type { ItemId, NodeName, ProjectId, TailnetNodeId, ThreadId } from "../../ids.ts";
+import type { ItemId, NodeName, Person, ProjectId, TailnetNodeId, ThreadId } from "../../ids.ts";
 import type { ItemRecord } from "../pipeline-store.ts";
 import type { ServerDetail, ThreadRow } from "../wire.ts";
 import type { Thread, ThreadAgent } from "../thread-store.ts";
@@ -27,6 +27,11 @@ export type LandRefusal = "no review loop" | "not a deployer" | "landing off";
  */
 export interface Context {
   now: number; caller: TailnetNodeId; landRefusal: LandRefusal | null;
+  /**
+   * Null on a solo install, whose one person owns every thread. On a shared install, the person the caller is, whose
+   * own threads the lists open on, or null for a device that is no person, which sees everyone's.
+   */
+  mine: { person: Person | null } | null;
   deploys(review: Review): boolean;
   answerRefusal(question: Question): AnswerRefusal | null;
   projects: readonly Project[];

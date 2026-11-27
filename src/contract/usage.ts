@@ -3,9 +3,10 @@ import type { Tokens } from "../control/agent-usage.ts";
 import type { NodeName, ProjectId, ThreadId } from "../ids.ts";
 
 export interface UsageTotals extends Tokens { total: number; calls: number }
-export const breakdowns = ["model", "project", "kind", "role", "day"] as const;
+/** `owner` sums by the person who owns each thread, and only a shared install offers it. */
+export const breakdowns = ["owner", "model", "project", "kind", "role", "day"] as const;
 export type Breakdown = typeof breakdowns[number];
-/** `key` is the model, project, agent kind, thread role, or UTC day as YYYY-MM-DD. */
+/** `key` is the owner's tailnet login, the model, project, agent kind, thread role, or UTC day as YYYY-MM-DD. */
 export type UsageRow = UsageTotals & { key: string };
 
 /** What `GET /v1/usage` answers. Rows are biggest first, except days, which are newest first. */
@@ -59,6 +60,7 @@ export const tokenColumns = [
   { label: "Total", short: "total", field: "total" },
 ] as const;
 export const breakdownLook: Readonly<Record<Breakdown, { title: string; key: string }>> = {
+  owner: { title: "By owner", key: "Owner" },
   model: { title: "By model", key: "Model" },
   project: { title: "By project", key: "Project" },
   kind: { title: "By agent", key: "Agent" },

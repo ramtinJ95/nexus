@@ -18,6 +18,20 @@ import { deployedForMs, lifeOfItem, phaseTone, lifeOfThread, roleLine, stages, t
 import { lifeTrack } from "./timeline.ts";
 import { lastActive, queuedLook } from "./shell.ts";
 import { isOpenStatus } from "../reconcile.ts";
+import type { Person } from "../../ids.ts";
+
+/**
+ * Whose a row is, on a shared install: its owner, and whether that is someone other than the caller, whose row the
+ * lists' Mine switch hides. Undefined on a solo install, whose rows stay as they were.
+ */
+export type Owned = { person: Person; theirs: boolean } | undefined;
+export const ownedBy = (c: Context, person: Person): Owned => c.mine === null ? undefined : { person, theirs: c.mine.person !== null && person !== c.mine.person };
+/** A row's owner attributes. `data-theirs` is what the Mine switch hides. */
+export const ownerAttrs = (o: Owned): Part => o !== undefined && html` data-owner="${o.person}"${o.theirs && " data-theirs"}`;
+/** The owner's login before its `@`, as a company tailnet's logins share their domain, with the whole login as its title. */
+export const ownerName = (o: NonNullable<Owned>): Html => html`<span class="owner" title="${o.person}">${o.person.split("@")[0]}</span>`;
+/** A count, read as the caller's own share under the Mine switch once some of it is someone else's. */
+export const ownCount = (all: number, mine: number): Part => all === mine ? String(all) : html`<span class="n-mine">${mine}</span><span class="n-all">${all}</span>`;
 
 /** An item's Approve, while its project waits for the person to approve each item, and its Cancel, until it has a thread. */
 export const itemActions = (i: PipelineItem, p: Project): Part => i.thread === null && i.phase.kind !== "cancelled" && html`<div class="need-act">${[
@@ -29,16 +43,16 @@ export const itemActions = (i: PipelineItem, p: Project): Part => i.thread === n
  * One line of the stack: what it is, the key its preview goes by, its life, and its state as the sidebar's dot says
  * it. Work with a card in Needs you previews in that card.
  */
-export interface Line { key: string; title: string; project: string; life: Life; state: readonly [string, Tone]; when: Part; dim: boolean; order: number; carded?: true }
+export interface Line { key: string; title: string; project: string; life: Life; state: readonly [string, Tone]; when: Part; dim: boolean; order: number; carded?: true; owned?: Owned }
 
 const threadLine = (c: Context, t: Thread): Line => {
   const r = c.row(t);
   return {
-    key: t.id, title: t.title, project: t.project, life: lifeOfThread(c, t.id), state: threadState(r, c.now), dim: dims(r), order: -lastActive(t),
+    key: t.id, title: t.title, project: t.project, life: lifeOfThread(c, t.id), state: threadState(r, c.now), dim: dims(r), order: -lastActive(t), owned: ownedBy(c, t.owner),
     when: t.working && t.workingSince !== undefined ? since(t.workingSince, c.now) : span(lastActive(t), c.now) ?? "now",
   };
 };
-const queuedLine = (c: Context, q: QueuedThread): Line => ({ key: q.id, title: q.title, project: q.project, life: lifeOfThread(c, q.id), state: queuedLook(q), when: "queued", dim: false, order: 0 });
+const queuedLine = (c: Context, q: QueuedThread): Line => ({ key: q.id, title: q.title, project: q.project, life: lifeOfThread(c, q.id), state: queuedLook(q), when: "queued", dim: false, order: 0, owned: ownedBy(c, q.owner) });
 const itemLine = (c: Context, i: PipelineItem): Line => ({ key: i.id, title: i.title, project: i.project, life: lifeOfItem(c, i), state: [i.phase.kind, phaseTone[i.phase.kind]], when: "item", dim: false, order: i.addedAt });
 
 /**
@@ -77,7 +91,7 @@ export const heldLine = (c: Context, w: HeldWork): Line => w.kind === "item" ? i
 /** A line of the stack, a link to its preview, which for work in Needs you is its card there. */
 function line(l: Line, peeked: string | null): Html {
   const [label, tone] = l.state;
-  return html`<li><a class="fl-row${l.dim && " dim"}" href="${peekHref(l.key)}" data-peek="${l.key}"${l.key === peeked && html` aria-current="true"`}>${dot(tone, label)}<span class="fl-title">${l.title}</span><span class="fl-why" title="${l.life.why}">${l.life.why}</span><span class="fl-when">${l.carded ? html`<span class="tag tag-bad">needs you</span>` : l.when}</span></a></li>`;
+  return html`<li${ownerAttrs(l.owned)}><a class="fl-row${l.dim && " dim"}" href="${peekHref(l.key)}" data-peek="${l.key}"${l.key === peeked && html` aria-current="true"`}>${dot(tone, label)}<span class="fl-title">${l.title}</span>${l.owned !== undefined && ownerName(l.owned)}<span class="fl-why" title="${l.life.why}">${l.life.why}</span><span class="fl-when">${l.carded ? html`<span class="tag tag-bad">needs you</span>` : l.when}</span></a></li>`;
 }
 
 /** The phases in order, each with its lines, as `flightRows` places them. */
@@ -85,14 +99,15 @@ export function flightStack(placed: Map<Stage, Line[]>, peeked: string | null): 
   return html`${stages.filter((s) => s.stage !== "held").map((s) => {
     const lines = placed.get(s.stage) ?? [];
     return html`<section class="phase${lines.length === 0 && " phase-empty"}" id="phase-${s.stage}" data-stage="${s.stage}" aria-labelledby="phase-${s.stage}-h">
-<h3 class="phase-h" id="phase-${s.stage}-h" title="${s.means}"><span class="col-mark mark-${s.tone}" aria-hidden="true"></span>${s.label}<span class="count">${lines.length}</span></h3>
+<h3 class="phase-h" id="phase-${s.stage}-h" title="${s.means}"><span class="col-mark mark-${s.tone}" aria-hidden="true"></span>${s.label}<span class="count">${ownCount(lines.length, mineOf(lines))}</span></h3>
 ${lines.length > 0 && html`<ul class="fl-list">${lines.map((l) => line(l, peeked))}</ul>`}
 </section>`;
   })}`;
 }
 
 /** How many lines the stack shows on their way, which its head and the phone's switch count: held and deployed work is not. */
-export const inFlight = (placed: Map<Stage, Line[]>) => [...placed].filter(([stage]) => stage !== "held" && stage !== "deployed").reduce((n, [, lines]) => n + lines.length, 0);
+export const inFlight = (placed: Map<Stage, Line[]>, mine = false) => [...placed].filter(([stage]) => stage !== "held" && stage !== "deployed").reduce((n, [, lines]) => n + (mine ? mineOf(lines) : lines.length), 0);
+const mineOf = (lines: readonly Line[]) => lines.filter((l) => l.owned?.theirs !== true).length;
 
 /** The key a preview goes by, which its close link and the stack's lines name. */
 export const peekKey = (p: Peek) => p.kind === "thread" ? p.d.thread.id : p.kind === "queued" ? p.q.id : p.item.id;

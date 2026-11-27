@@ -855,6 +855,12 @@ a.need-thread:hover { color: var(--accent); }
 .flight-view { margin-left: auto; padding: 2px; border-radius: 8px; }
 .flight-view .seg-tab { flex: none; height: 24px; padding: 0 10px; border-radius: 6px; font-size: 11.5px; }
 .split-flight:has(#view-project:checked) .flight, .split-flight:has(#view-phase:checked) .flight-projects { display: none; }
+.flight-owners { padding: 2px; border-radius: 8px; }
+.flight-owners .seg-tab { flex: none; height: 24px; padding: 0 10px; border-radius: 6px; font-size: 11.5px; }
+.flight-owners + .flight-view { margin-left: 8px; }
+.flight-head:has(.flight-owners) .flight-owners { margin-left: auto; }
+.owner { flex: none; font: 11.5px var(--mono); color: var(--text-3); }
+:root:has(#owners-mine:checked) :is([data-theirs], .n-all, .ov:not(:has(tbody > tr:not([data-theirs])))), :root:has(#owners-all:checked) .n-mine { display: none; }
 /* With no project there is no work to stack, so the table's offer of a project shows whichever way is picked. */
 .split-flight:has(.first-project) .flight { display: none; }
 .split-flight:has(.first-project) .flight-projects { display: block; }
