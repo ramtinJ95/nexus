@@ -296,6 +296,7 @@ test("--person carries the login's @ through parseFlags, and a malformed one is 
   assert.match(said(`${alice}=owner`), /give <tailnet login>=admin/);
   assert.match(said(`${alice}=admin:0`), /:<cap> after the role/);
   assert.match(said(`${alice}=admin:2:3`), /:<cap> after the role/);
+  assert.match(said(`${alice}=admin:${2 ** 53}`), /:<cap> after the role/, "a cap peopleSchema's z.int() refuses");
   assert.match(errors(run(["--person", `${alice}=admin`, "--person", `${alice}=engineer`])).join("\n"), /named more than once/);
   assert.match(errors(run(["--person", `${alice}=admin`, "--remove-person", alice])).join("\n"), /give one/);
   assert.match(errors(run(["--node", "rj-firebat", "--person", `${alice}=admin`], fresh, nodeTailnet)).join("\n"), /--person and --remove-person are for the control machine/);
@@ -580,6 +581,9 @@ async function installing(args: readonly string[], next: readonly FollowUp[] = [
       for (const step of next) found.add(step);
       if (refuse === "credentials") throw new Error("NEXUS_GH_TOKEN: a GitHub token is letters, digits and underscores");
     },
+    async forget(logins) {
+      ran.push(`forget ${logins.join(" ")}`);
+    },
     async left() {
       ran.push("left");
     },
@@ -638,6 +642,12 @@ test("a join runs after the role installers and before the credentials, and a re
   assert.match(String(refused.code), /the configs are written and the probe runs, but the control plane did not take the join/);
   assert.deepEqual(refused.said, ["install: the control plane at http://100.64.0.2:7470/ did not take the join: the token is spent"]);
   assert.ok(!refused.ran.includes("credentials"), refused.ran.join("\n"));
+});
+
+test("--remove-person deletes the person's stored logins only after the control installer restarted the control plane on the new people", async () => {
+  const args = ["--remove-person", bob];
+  assert.deepEqual((await installing(args)).ran.slice(0, 4), [lockDir, write(args.join(" ")), "bash ./deploy/install-control.sh", `forget ${bob}`]);
+  assert.ok(!(await installing(["--person", `${bob}=engineer`])).ran.some((line) => line.startsWith("forget")));
 });
 
 test("a config write that refuses, such as --join without --node, stops install before anything else runs, with its exit code", async () => {

@@ -209,7 +209,7 @@ function parsePerson(raw: string, errors: string[]): Named | undefined {
   const login = at === -1 ? raw : raw.slice(0, at);
   const [role, cap, ...rest] = at === -1 ? [] : raw.slice(at + 1).split(":");
   if (!loginPattern.test(login)) errors.push(`--person ${raw}: ${login} is not a tailnet login, such as alice@example.com, which tailscale whois prints for a person's device`);
-  else if (role === undefined || !personRoles.includes(role) || rest.length > 0 || (cap !== undefined && !/^[1-9]\d*$/.test(cap))) {
+  else if (role === undefined || !personRoles.includes(role) || rest.length > 0 || (cap !== undefined && !(/^[1-9]\d*$/.test(cap) && Number.isSafeInteger(Number(cap))))) {
     errors.push(`--person ${raw}: give <tailnet login>=admin or <tailnet login>=engineer, and :<cap> after the role for how many pylons they may run at once, such as ${login}=engineer:3`);
   } else return { login, role: role as PersonRole, ...cap === undefined ? {} : { pylonCap: Number(cap) } };
   return undefined;
@@ -582,12 +582,6 @@ async function write(flags: Flags): Promise<number> {
   }
   for (const f of result.files) if (f.state !== "unchanged") await saveJson(f.path, f.value, { mode: f.mode, mkdir: true });
   console.log(report(result.files));
-  if (flags.removePerson.length > 0) {
-    const { harnessCredentials } = controlFields(result.files.find((f) => f.path === paths.control)!.value, paths.control);
-    if (harnessCredentials === undefined) throw new Error(`${paths.control} has no harness.credentials, beside which each person's stored logins live`);
-    for (const login of flags.removePerson) console.log(await forgetLogins(personStore(harnessCredentials), login));
-    console.log("A removed person's threads stay, and a pylon of theirs that runs keeps the tokens it booted with until it is archived. An admin archives each with nexus archive <thread>. Revoke their tokens at GitHub and Anthropic too, which Nexus cannot do.");
-  }
   return 0;
 }
 
@@ -704,6 +698,8 @@ export interface InstallSteps {
   /** Runs a program on this terminal and resolves its exit code. */
   run(program: string, args: readonly string[]): Promise<number>;
   join(token: string): Promise<void>;
+  /** Deletes the stored logins of each --remove-person, once no control plane that still admits them runs. */
+  forget(logins: readonly string[]): Promise<void>;
   credentials(next: Set<FollowUp>): Promise<void>;
   left(): Promise<void>;
 }
@@ -749,6 +745,9 @@ export async function install(flags: Flags, args: readonly string[], steps: Inst
   try {
     await write([]);
     if (flags.node === undefined) await installer("control");
+    // After the control installer restarted the control plane on the new people, since one that still admits the person
+    // could finish a nexus login of theirs after the delete and bring the file back.
+    if (flags.removePerson.length > 0) await steps.forget(flags.removePerson);
     await installer("probe");
     await installer("deployer", ...flags.node === undefined ? ["control", "probe"] : ["probe"]);
     // Before the credentials' prompts, so a refused token stops the run before the person answers them.
@@ -791,6 +790,12 @@ function machineSteps(flags: Flags, manager: PackageManager): InstallSteps {
       const unattended = flags.nonInteractive || !process.stdin.isTTY;
       if (!flags.nonInteractive && !process.stdin.isTTY) console.error("No terminal, so the credentials come from NEXUS_* variables, as deploy/README.md describes, and the rest are skipped.");
       await provision(flags.node === undefined ? "control" : "node", system, unattended ? scripted(process.env) : terminal(), (line) => console.error(line), next);
+    },
+    async forget(logins) {
+      const { harnessCredentials } = controlFields(await readJson(paths.control), paths.control);
+      if (harnessCredentials === undefined) throw new Error(`${paths.control} has no harness.credentials, beside which each person's stored logins live`);
+      for (const login of logins) console.log(await forgetLogins(personStore(harnessCredentials), login));
+      console.log("A removed person's threads stay, and a pylon of theirs that runs keeps the tokens it booted with until it is archived. An admin archives each with nexus archive <thread>. Revoke their tokens at GitHub and Anthropic too, which Nexus cannot do.");
     },
     async left() {
       console.log(formatLeft(left(await gather(flags, manager))));
