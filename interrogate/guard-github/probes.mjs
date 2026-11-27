@@ -85,6 +85,8 @@ const curl = (method, url, { body, headers = [], gzip = false } = {}) => ({
   run: () => sh(`${body === undefined ? "" : gzip ? "gzip -c | " : "cat | "}curl -sS --path-as-is -o /tmp/b -w '%{http_code}' -X ${method} -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' ${headers.map((h) => `-H '${h}'`).join(" ")} ${body === undefined ? "" : "--data-binary @-"} '${url}'; printf ' '; cat /tmp/b`, body === undefined ? {} : { stdin: body }),
 });
 const guest = (script) => ({ run: () => sh(script) });
+// No token, as a public download is made. -f makes an HTTP error a failed exit, so "succeeds" can read it.
+const download = (url, flag = "-o /dev/null") => guest(`curl -sSfL ${flag} -m 60 -w '%{http_code} %{url_effective}\\n' '${url}' 2>&1`);
 const A = "https://api.github.com";
 const gqlBody = (query, variables, extra = {}) => JSON.stringify({ query, variables, ...extra });
 
@@ -174,6 +176,14 @@ const probes = [
   ["10 REST review form-encoded", "refuse", () => curl("POST", `${A}/repos/${OR}/pulls/${ctx.pr.number}/reviews`, { headers: ["Content-Type: application/x-www-form-urlencoded"], body: "event=APPROVE" })],
   ["10 REST review gzip body", "refuse", () => curl("POST", `${A}/repos/${OR}/pulls/${ctx.pr.number}/reviews`, { headers: ["Content-Encoding: gzip", "Content-Type: application/json"], gzip: true, body: JSON.stringify({ event: "APPROVE" }) })],
   ["10 REST PATCH git/refs/heads%2Fmain", "refuse", () => curl("PATCH", `${A}/repos/${OR}/git/refs/heads%2Fmain`, { body: JSON.stringify({ sha: ctx.pr2.headRefOid, force: false }) })],
+  // 11: downloads from github.com, as an install script makes them. Each must also finish, which needs the host it redirects to.
+  ["11 curl -L release asset by tag", "pass", () => download("https://github.com/cli/cli/releases/download/v2.60.0/gh_2.60.0_checksums.txt"), "succeeds"],
+  ["11 curl -L release asset by latest", "pass", () => download("https://github.com/mikefarah/yq/releases/latest/download/checksums"), "succeeds"],
+  ["11 curl -I release asset", "pass", () => download("https://github.com/cli/cli/releases/download/v2.60.0/gh_2.60.0_checksums.txt", "-I"), "succeeds"],
+  ["11 curl -L source archive", "pass", () => download("https://github.com/cli/cli/archive/refs/tags/v2.60.0.tar.gz"), "succeeds"],
+  ["11 curl -L raw file", "pass", () => download("https://github.com/cli/cli/raw/v2.60.0/README.md"), "succeeds"],
+  ["11 Git LFS batch", "refuse", () => curl("POST", `https://github.com/${OR}.git/info/lfs/objects/batch`, { headers: ["Content-Type: application/vnd.git-lfs+json"], body: JSON.stringify({ operation: "download", transfers: ["basic"], objects: [{ oid: "a".repeat(64), size: 1 }] }) })],
+  ["11 POST to a release asset path", "refuse", () => curl("POST", `https://github.com/${OR}/releases/download/v1/asset.txt`, { body: "x" })],
 ];
 
 // ---------- run ----------
@@ -205,7 +215,7 @@ for (const [name, expect, make, capture] of probes) {
   const refusedByHook = decisions.some((d) => d.verdict === "REFUSED");
   const row = { name, expect, mode, ms, code: r.code, out: r.out.replace(/\s+/g, " ").slice(0, 300), refusedByHook, slips, decisions: [...decisions] };
   results.push(row);
-  const ok = expect === "info" ? "info" : expect === "refuse" ? (refusedByHook && !slips.some((s) => !s.startsWith("REACHED")) ? "ok" : "SLIPPED") : (!refusedByHook ? "ok" : "BROKEN");
+  const ok = expect === "info" ? "info" : expect === "refuse" ? (refusedByHook && !slips.some((s) => !s.startsWith("REACHED")) ? "ok" : "SLIPPED") : (!refusedByHook && (capture !== "succeeds" || r.code === 0) ? "ok" : "BROKEN");
   console.log(`\n[${ok}] ${name} (expect ${expect}, ${ms} ms, exit ${r.code})${slips.length ? `\n    slips: ${slips.join("; ")}` : ""}`);
   console.log(`    out: ${row.out.slice(0, 160)}`);
   for (const h of hook) console.log(`    hook: ${h}`);
