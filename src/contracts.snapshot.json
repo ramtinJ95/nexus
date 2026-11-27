@@ -12,6 +12,7 @@
     ".claude/skills/verify-nexus/scripts/owner-logins-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/people-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/project-check: verify-changed",
+    ".claude/skills/verify-nexus/scripts/pylon-agents-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/reads-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/show-owner-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/stack.ts: verify-changed",
