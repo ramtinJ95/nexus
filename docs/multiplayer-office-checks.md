@@ -12,7 +12,7 @@ This repository is public. Do not commit any output of these checks, and do not 
 | [2. The installer's own check](#2-the-installers-own-check) | The office machine | Every prerequisite of `ops-3`, without installing | 5 minutes |
 | [3. Network from the office machine](#3-network-from-the-office-machine) | The office machine | Whether pylons can reach GitHub, Anthropic, and npm from there | 5 minutes |
 | [4. The company tailnet](#4-the-company-tailnet) | Any device on the company tailnet | The live box of `mp-01`, and what `ops-2` has to change | 10 minutes |
-| [5. GitHub](#5-github) | A browser and a laptop with `gh` | The gate of `mp-12`, and the token engineers use until then | 20 minutes |
+| [5. GitHub](#5-github) | A browser and a laptop with `gh` | The gate of `mp-12`, the token engineers use until then, and what the guard of `mp-15` leaves to the repository's settings | 25 minutes |
 | [6. A Claude token from the team subscription](#6-a-claude-token-from-the-team-subscription) | A laptop signed in to the team subscription | An item under "What stays unproven" | 5 minutes |
 | [7. The host firewall, SELinux, and swap](#7-the-host-firewall-selinux-and-swap) | The office machine, and a laptop on the tailnet | Whether laptops can reach the control plane after `ops-3`, and two items under "What stays unproven" | 10 minutes |
 
@@ -174,6 +174,17 @@ gh api "repos/<org>/<repo>/rulesets" | jq -c '.[] | {name, enforcement, id}'
 - [ ] A `pull_request` rule is present with `required_approving_review_count` of 1 or more and `require_code_owner_review` true.
 - [ ] For each ruleset, open it in the browser and write down its bypass list. An actor on a bypass list can merge without review, so a token of such a person inside a pylon could too.
 
+### What the guard leaves to the repository
+
+The guard of `mp-15` refuses a merge, an approval, and a push to the default branch. It lets an agent push to every other branch, a colleague's included, and lets it add a label or a comment. Two things then rest on the repository's own settings.
+
+```sh
+gh api "repos/<org>/<repo>/rules/branches/main" | jq -c '.[] | select(.type == "pull_request") | .parameters | {dismiss_stale_reviews_on_push, require_last_push_approval}'
+```
+
+- [ ] One of the two is true. If both are false, a commit that an agent pushes after the review lands with the approval the earlier commits got. Write down which holds, and if neither does, whether the organisation would turn one on.
+- [ ] List the workflows and bots of the repository that act on a label or a comment. Does any of them merge, approve, turn on auto-merge, or add to a merge queue? Write down each that does, and what triggers it.
+
 ### The GitHub App, which an owner of the organisation approves
 
 This is the gate of `mp-12`. Nothing else waits for it. Bring this description to an owner and ask whether they would approve it.
@@ -257,6 +268,7 @@ Stop the server on the office machine with Ctrl-C afterwards.
 - [ ] `~/nexus-tailnet-whois.txt` and the three answers for `ops-2`.
 - [ ] The three answers about personal access tokens, and what the two token commands printed.
 - [ ] The branch rules and each ruleset's bypass list.
+- [ ] What the two approval settings are, and each workflow or bot that acts on a label or a comment.
 - [ ] The owner's answer on the App.
 - [ ] Whether the team token worked.
 - [ ] The number of pylons that fit.
@@ -264,6 +276,6 @@ Stop the server on the office machine with Ctrl-C afterwards.
 
 ## Not for today
 
-- Installing on the office machine. That is `ops-3`, and it waits for `mp-10`, `mp-15`, `mp-16`, and `mp-24`.
+- Installing on the office machine. That is `ops-3`, and it waits for `mp-16` and `mp-24`. `mp-10` and `mp-15` have merged.
 - Changing the tailnet policy. That is `ops-2`, a change in the company's infrastructure repository.
 - The live boxes that need a pylon on a VM node or two real people. They run on the office machine after `ops-3`, from [the checks after the install](multiplayer-office-acceptance.md).

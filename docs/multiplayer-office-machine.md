@@ -53,7 +53,8 @@ What follows from it:
 - The refusal came at once and not after the five-second timeout, which the checks page reads as the machine's firewall and not the tailnet policy. That is a reading of the timing. Nobody has read the rule that refused it.
 - A refusal at once also means the request reached the machine, so the tailnet policy let the operator's laptop through to that port. That says nothing yet for the engineers' group, which `ops-2` grants.
 - SSH over the tailnet works on the same interface. The firewall lets some ports in from the tailnet and not this one.
-- The check 7 box of `ops-3` applies: open port 7443 on the tailnet interface before the install. The installer checks no firewall, so it would install and report nothing wrong while laptops are refused.
+- The check 7 box of `ops-3` applies: open the ports on the tailnet interface before the install. When check 7 ran, the installer checked no firewall. Since 2026-11-27 its check does, on `main` and on `multiplayer`. Run as root, `deploy/install.sh --check` names the zone that applies to `tailscale0`, each closed port, and the `firewall-cmd` line that adds it and changes nothing else in the zone. Without root it warns that the ports were not checked.
+- The control plane's machine needs three ports let in, not one: 7470 and 7443, which laptops and nodes call, and 7480, which the control plane and other probes call. Check 7 tried 7443 only. [The deploy README](../deploy/README.md#a-host-firewall) has the rule.
 - The test covered port 7443 only. Previews are served through Tailscale and were not tested.
 - SELinux enforces, so the first install on this machine is the first time Nexus runs under it. [The checks after the install](multiplayer-office-acceptance.md#1-the-install) look for denials.
 - The swap is zram, so it takes its room from the same memory the pylons use and adds none.
@@ -95,7 +96,7 @@ What `deploy/install.sh --check` and the first check found on 2026-11-27. Nothin
 
 A look at the machine's packages on 2026-11-27, without `sudo`, found how each has to be installed there.
 
-- **QEMU.** The installer's fix for a `dnf` machine is wrong on Fedora. It prints `sudo dnf install -y qemu-system-x86_64-core qemu-img` (`deploy/install.sh:182`), which builds the package name from the binary's name. Fedora has no such package. Its package is `qemu-system-x86-core`, which holds `/usr/bin/qemu-system-x86_64`. The same line is on `main`, so the fix belongs there first.
+- **QEMU.** The installer's fix for a `dnf` machine is wrong on Fedora. It prints `sudo dnf install -y qemu-system-x86_64-core qemu-img` (`deploy/install.sh:182`), which builds the package name from the binary's name. Fedora has no such package. Its package is `qemu-system-x86-core`, which holds `/usr/bin/qemu-system-x86_64`. That was fixed on `main` on 2026-11-27 and has reached `multiplayer`. The installer now prints `qemu-system-x86-core`, and for Node it names the archive from nodejs.org.
 - **Node.** Fedora 44 offers Node 20, 22 and 24, and no 26. The machine's Node 22 is Fedora's, whose packages own `/usr/bin/node` and `/usr/bin/npm`. The installer suggests NodeSource's package, which ships the same two paths and names no Fedora package it replaces, so nobody has shown that it installs beside them. Node 26 goes on from the official tarball instead, checked against its published SHA-256, under `/usr/local` with `node`, `npm` and `npx` linked into `/usr/local/bin`. That is first in the units' path, and it leaves Fedora's Node 22 in `/usr/bin`. `dnf` will not update it.
 - **Docker.** Podman is installed and not running, and nothing there stands in for Docker. Docker goes on from Docker's own Fedora repository, which has packages for Fedora 44, with its buildx plugin.
 
@@ -104,8 +105,7 @@ One script on the machine does the three installs, checks each, and ends with th
 ## What is still open
 
 - Installing QEMU, Node 26 and Docker, which waits for the operator to start the script. Docker adds firewall zones of its own, so the firewall facts above are from before it.
-- The rule that opens port 7443 to the tailnet, which `ops-3` asks the operator to write down, and what the default zone lets in today. Three commands on the machine read the second: `sudo firewall-cmd --list-services`, `sudo firewall-cmd --list-ports` and `sudo firewall-cmd --zone=FedoraServer --list-all`.
-- The installer's `dnf` line for QEMU, which names a package Fedora does not have. No slice has it yet.
+- The rule that opens ports 7470, 7443 and 7480 to the tailnet, which `ops-3` asks the operator to write down. `sudo deploy/install.sh --check` from the current `multiplayer` prints it for this machine, and that run is also the first test of the installer's firewall check on a real Fedora host.
 - Check 5, GitHub: the organisation's rules for personal access tokens, the branch rules and their bypass lists, and an owner's answer on the App.
 - Check 6: whether a Claude token from the team subscription works.
 - Two facts for `ops-2`: which group in the tailnet policy holds the engineers, and who merges a change to that policy.

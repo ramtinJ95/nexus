@@ -4,7 +4,7 @@ These checks run once, on the office machine, after the install of `ops-3` in [t
 
 This repository is public. Keep every output in a private note, as [the office checks](multiplayer-office-checks.md) say. Tick a box in the plan with a sentence that names no machine, person, or company.
 
-This page was written before `mp-10`, `mp-15`, `mp-16`, and `mp-24` merged. Where one of them ships a command that differs from the one here, its pull request says so, and that command wins.
+This page was written before `mp-11`, `mp-16`, `mp-24`, and `mp-25` merged. Where one of them ships a command that differs from the one here, its pull request says so, and that command wins. `mp-10` and `mp-15` have merged, and checks 5 and 6 use their commands.
 
 ## What you need
 
@@ -23,11 +23,12 @@ This page was written before `mp-10`, `mp-15`, `mp-16`, and `mp-24` merged. Wher
 | [3. The first pylon](#3-the-first-pylon) | The pylon size in `ops-3`, a pylon's path to its hosts |
 | [4. Each pylon acts as its owner](#4-each-pylon-acts-as-its-owner) | Live of `mp-07` and `mp-09` |
 | [5. Git over HTTPS](#5-git-over-https) | Live and Perf of `mp-10` |
-| [6. The guard](#6-the-guard) | Live of `mp-15`, and its item under "What stays unproven" |
+| [6. The guard](#6-the-guard) | Live of `mp-15`, its item under "What stays unproven", and Live of `mp-25` if it has merged |
 | [7. Nexus never merges](#7-nexus-never-merges) | Live of `mp-14` |
 | [8. A thread is a pylon agent](#8-a-thread-is-a-pylon-agent) | Live of `mp-16` |
 | [9. A colleague's thread](#9-a-colleagues-thread) | Live of `mp-04`, and `mp-03` on a real install |
 | [10. The cap and a full machine](#10-the-cap-and-a-full-machine) | `mp-22` on a real install, Live of `mp-23` if it has merged |
+| [11. An engineer's own host and secret](#11-an-engineers-own-host-and-secret) | Live of `mp-11`, if it has merged |
 
 ## 1. The install
 
@@ -46,7 +47,7 @@ nexus release
 nexus nodes
 ```
 
-- [ ] The installer's check reports that every prerequisite holds and the installed roles run as they should.
+- [ ] The installer's check reports that every prerequisite holds and the installed roles run as they should. It names no port that firewalld closes on the tailnet interface. This is the first run of that part of the check on a Fedora host.
 - [ ] `nexus doctor` reports no failed check.
 - [ ] `nexus release` shows the running release as the head of `multiplayer` on every role.
 - [ ] `ausearch` shows no denial that names a Nexus service, `node`, QEMU, or tailscaled. If `getenforce` printed `Disabled` in check 7 of the office checks, skip this box and say so.
@@ -125,9 +126,23 @@ nexus exec <thread> 'git switch -c check/https-push && head -c 5242880 /dev/uran
 
 ## 6. The guard
 
-Rerun the probe list of [`interrogate/guard-github/`](../interrogate/README.md) from A's pylon against the scratch repository, with the guard that `mp-15` built in place of the prototype's. The pull request of `mp-15` names the command.
+Rerun the probe list of [`interrogate/guard-github/`](../interrogate/README.md) from A's pylon against the scratch repository, with the guard that `mp-15` built in place of the prototype's. Run it from A's laptop, where `gh` is signed in as someone who may administer the scratch repository. `<node>` is the office machine.
 
-- [ ] No probe that must be refused reaches GitHub, and every probe that must pass succeeds.
+```sh
+export SCRATCH_REPO=<owner>/<scratch> NEXUS_THREAD=<A's thread>
+WANT=14 interrogate/guard-github/seed.sh
+gh auth token | PYLON_LOG_CMD="ssh <node> sudo cat /var/lib/nexus/pylons/instances/pylon-$NEXUS_THREAD/controller.log" node interrogate/guard-github/probes.mjs | tee ~/guard-pylon.txt
+```
+
+- [ ] Every probe prints `[ok]`. None prints `[SLIPPED]`, which is a request that must be refused and reached GitHub, or `[BROKEN]`, which is a request that must pass and did not.
+
+Then a download, from A's pylon.
+
+```sh
+nexus exec <thread> 'curl -sSL -o /dev/null -m 60 -w "%{http_code}\n" https://github.com/cli/cli/releases/download/v2.60.0/gh_2.60.0_checksums.txt'
+```
+
+- [ ] Write down what it printed. Before `mp-25` the guard refuses it with 403. With `mp-25` it prints 200. If it fails with another status, the host the download redirects to is missing from the pylon's allowlist, so say which.
 
 Then B opens a pull request from B's thread, and A tries to act on it from inside A's pylon.
 
@@ -189,6 +204,34 @@ Then A and B together start threads until the machine has no room for one more.
 - [ ] Write down how many pylons ran at once, and their size. It should match the number from check 3.
 - [ ] Write down what the next start did. Without `mp-23` it is refused with the memory short as its reason. With `mp-23` it is held, and when a pylon is archived the waiting start of the person with fewer running pylons boots first.
 - [ ] With the machine full, `nexus doctor` reports no failed check, and the machine's free memory in `nexus nodes` is still above zero.
+
+## 11. An engineer's own host and secret
+
+Skip this check if `mp-11` has not merged. B adds a host and a secret. The value is made up, because the check sends it to a public service that echoes a request's headers.
+
+```sh
+nexus host add postman-echo.com
+printf 'made-up-value-123' | nexus secret set CHECK_TOKEN postman-echo.com
+nexus own
+```
+
+A pylon's hosts and secrets are fixed when it starts. So A and B each start a new thread on `scratch`, and each runs these in it.
+
+```sh
+nexus exec <thread> 'printenv CHECK_TOKEN'
+nexus exec <thread> 'curl -sS -m 20 -H "authorization: Bearer $CHECK_TOKEN" https://postman-echo.com/headers'
+```
+
+Then A, who is an admin, and B, who is not.
+
+```sh
+nexus people
+```
+
+- [ ] In B's pylon `printenv` prints a placeholder, not the value, and the service echoes `Bearer made-up-value-123`. The value was put in at the network edge.
+- [ ] In A's pylon the variable is empty and the request to the host is refused. A person's host and secret reach only their own pylons.
+- [ ] `nexus own` and A's `nexus people` list B's host and the secret's name, and neither prints the value. B's `nexus people` is refused.
+- [ ] B removes both with `nexus host remove postman-echo.com` and `nexus secret remove CHECK_TOKEN`. Write down whether B's running pylon still reaches the host afterwards. The pull request of `mp-11` says a running pylon keeps what it started with.
 
 ## Afterwards
 
