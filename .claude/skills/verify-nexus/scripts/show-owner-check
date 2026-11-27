@@ -2,7 +2,7 @@
 # The live box of docs/multiplayer-plan.md's mp-06: on the stack started with people, alice and bob each start a thread.
 # Bob's `nexus threads` lists only his own with an Owner column and `--everyone` lists both, alice's lists only hers, and
 # the home page bob is served opens on Mine with alice's row marked as hers, so the switch hides it until he picks
-# Everyone. Her thread's page says she started it, and `nexus usage` has a total for each owner. Where `playwright-cli`
+# Everyone. Her thread's page says she started it, and `nexus usage` offers the owner breakdown. Where `playwright-cli`
 # runs, it also screenshots bob's home page under Mine and under Everyone. Exits 0 only if every step did what it should.
 set -euo pipefail
 V="$(cd "$(dirname "$0")" && pwd)/verify-nexus"
@@ -60,4 +60,4 @@ if command -v playwright-cli >/dev/null; then
 else
   echo "show-owner check: no playwright-cli here, so no screenshots; bob-home.html in $evidence is the page he was served"
 fi
-echo "show-owner check: bob's lists open on his own thread, --everyone and the Everyone switch show alice's too, each row names its owner, and usage sums by owner"
+echo "show-owner check: bob's lists open on his own thread, --everyone and the Everyone switch show alice's too, each row names its owner, and nexus usage offers the owner breakdown"

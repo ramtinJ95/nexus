@@ -1,0 +1,163 @@
+{
+  "slice": "mp-06",
+  "probe": "api",
+  "recorded": "2026-11-27",
+  "machine": "Nexus pylon, 4 CPU, Docker in the pylon, NEXUS_VERIFY_BASE=nexus-verify-base:pylon",
+  "order": "base first, then head, alternating, five runs a side, both sides on the two-person stack with NEXUS_VERIFY_PEOPLE=1; order is each run's place in that sequence",
+  "limit": "fail when the head median of medians is over 15% above base and outside base range",
+  "note": "The head runs are of 5742e338. Its follow-up commits change the quiet fold, the CLI and the verify script, none of which GET /v1/threads runs. The slice changes nothing GET /v1/threads runs: its route, rows() and the thread store are as on base, and owner was on each row since mp-02. Both sides show the two clusters of medians this probe is known for, about 3.1 to 3.3 ms and 3.7 to 4.2 ms, with one head run at 5.0 ms.",
+  "base": {
+    "commit": "e7b97842",
+    "runs": [
+      {
+        "order": 1,
+        "probe": "api",
+        "revision": "e7b97842",
+        "dirty": false,
+        "medianMs": 4.2,
+        "p95Ms": 7.2,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 4.1,
+        "bobMedianMs": 4.3
+      },
+      {
+        "order": 3,
+        "probe": "api",
+        "revision": "e7b97842",
+        "dirty": false,
+        "medianMs": 4.1,
+        "p95Ms": 6.3,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 4,
+        "bobMedianMs": 4.2
+      },
+      {
+        "order": 5,
+        "probe": "api",
+        "revision": "e7b97842",
+        "dirty": false,
+        "medianMs": 3.3,
+        "p95Ms": 4.3,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.2,
+        "bobMedianMs": 3.4
+      },
+      {
+        "order": 7,
+        "probe": "api",
+        "revision": "e7b97842",
+        "dirty": false,
+        "medianMs": 3.1,
+        "p95Ms": 3.9,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3,
+        "bobMedianMs": 3.2
+      },
+      {
+        "order": 9,
+        "probe": "api",
+        "revision": "e7b97842",
+        "dirty": false,
+        "medianMs": 3.9,
+        "p95Ms": 7,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.7,
+        "bobMedianMs": 4.1
+      }
+    ]
+  },
+  "head": {
+    "commit": "5742e338",
+    "runs": [
+      {
+        "order": 2,
+        "probe": "api",
+        "revision": "5742e338",
+        "dirty": false,
+        "medianMs": 5,
+        "p95Ms": 11.5,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 4.9,
+        "bobMedianMs": 5.1
+      },
+      {
+        "order": 4,
+        "probe": "api",
+        "revision": "5742e338",
+        "dirty": false,
+        "medianMs": 3.3,
+        "p95Ms": 4.6,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.2,
+        "bobMedianMs": 3.3
+      },
+      {
+        "order": 6,
+        "probe": "api",
+        "revision": "5742e338",
+        "dirty": false,
+        "medianMs": 3.7,
+        "p95Ms": 8.6,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.6,
+        "bobMedianMs": 3.9
+      },
+      {
+        "order": 8,
+        "probe": "api",
+        "revision": "5742e338",
+        "dirty": false,
+        "medianMs": 3.8,
+        "p95Ms": 5.2,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 3.7,
+        "bobMedianMs": 3.9
+      },
+      {
+        "order": 10,
+        "probe": "api",
+        "revision": "5742e338",
+        "dirty": false,
+        "medianMs": 4,
+        "p95Ms": 5.7,
+        "requests": 200,
+        "failed": 0,
+        "threads": 50,
+        "aliceMedianMs": 4,
+        "bobMedianMs": 4.1
+      }
+    ]
+  },
+  "result": {
+    "baseMedianOfMediansMs": 3.9,
+    "baseRangeMs": [
+      3.1,
+      4.2
+    ],
+    "headMedianOfMediansMs": 3.8,
+    "headRangeMs": [
+      3.3,
+      5
+    ],
+    "limitMs": 4.48,
+    "verdict": "pass"
+  }
+}
