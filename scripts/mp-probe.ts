@@ -162,6 +162,11 @@ async function boot(branch?: string): Promise<Result> {
       };
       const detail = async (id: string) => await call("GET", `/v1/threads/${id}`) as Detail;
       const project = "ladle";
+      // On a shared install a pylon boots with its owner's own logins, so alice signs in before the timed start.
+      if (process.env.NEXUS_VERIFY_PEOPLE === "1") {
+        await call("PUT", "/v1/logins/claude", { token: "sk-ant-oat01-mp-probe-made-up" });
+        await call("PUT", "/v1/logins/github", { token: "ghp_verifyalice0mpprobe" });
+      }
       // The stack's spoon names a repository only its image holds, so the control plane cannot read its setup and every
       // spoon thread boots fresh. ladle names one both sides hold.
       await call("POST", "/v1/projects", {

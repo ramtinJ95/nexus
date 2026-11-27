@@ -17,6 +17,7 @@ import type { Registry } from "./registry.ts";
 import type { Start, StartKey, StartRequest } from "./start-request.ts";
 import { standingRulesFor, withStandingRules } from "./standing-rules.ts";
 import { solo, type People } from "./people.ts";
+import type { OwnerLogins } from "./owner-logins.ts";
 
 type ThreadsRegistry = Pick<Registry, "threads" | "images" | "nodeMetrics" | "nodes" | "now" | "projects" | "placement">;
 
@@ -30,12 +31,12 @@ const claudePromptOf = ({ request, role }: Pick<Start, "request" | "role">) =>
   request.claude === undefined || role === "reviewer" || startsWithSkill.test(request.claude) ? request.claude : `${claudeSkill} ${request.claude}`;
 
 /** The inputs placement weighs, shared by a start and the read-only project preview. */
-export function placementNeed(project: Project, request: Pick<StartRequest, "branch" | "commit" | "resources">, image: BootInputs["image"], dotfiles: PylonOverlay["dotfiles"]) {
+export function placementNeed(project: Project, request: Pick<StartRequest, "branch" | "commit" | "resources">, image: BootInputs["image"], dotfiles: PylonOverlay["dotfiles"], owned = false) {
   const branch = request.branch ?? project.defaultBranch;
   const repo: RepoInit = hasRemote(project)
     ? { kind: "clone", url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } }
     : { kind: "empty", branch };
-  return { image, resources: resourcesOf(request.resources, project), network: bootNetwork(project, dotfiles?.repo), repo, dotfiles };
+  return { image, resources: resourcesOf(request.resources, project), network: bootNetwork(project, dotfiles?.repo, owned), repo, dotfiles };
 }
 
 /**
@@ -70,12 +71,15 @@ export const resourcesOf = (size: StartRequest["resources"], project: Pick<Proje
 });
 
 /**
- * The network a pylon boots with: its project's hosts and secrets. Every boot pulls the dotfiles through the
- * allowlist. A template build pulls none, so their host stays out of the setup hash.
+ * The network a pylon boots with: its project's hosts and secrets, and with `owned` its owner's logins in place of the
+ * project's grants of those names. Every boot pulls the dotfiles through the allowlist. A template build pulls none, so
+ * their host stays out of the setup hash.
  */
-export const bootNetwork = (project: Project, dotfilesRepo: string | undefined): BootInputs["network"] => ({
-  allowedHosts: withHttpsHosts(effectiveAllowedHosts(project), dotfilesRepo === undefined ? [] : [dotfilesRepo]), secrets: bootSecrets(project),
-});
+export function bootNetwork(project: Project, dotfilesRepo: string | undefined, owned = false): BootInputs["network"] {
+  const secrets = bootSecrets(project, owned);
+  const hosts = owned ? [...effectiveAllowedHosts(project), ...secrets.flatMap((grant) => grant.hosts)] : effectiveAllowedHosts(project);
+  return { allowedHosts: withHttpsHosts(hosts, dotfilesRepo === undefined ? [] : [dotfilesRepo]), secrets };
+}
 
 /**
  * What the mirror read for the thread's ref, or why the thread boots fresh without a template. `build` is the checkout
@@ -83,8 +87,13 @@ export const bootNetwork = (project: Project, dotfilesRepo: string | undefined):
  */
 type SetupRead = { project: RemoteProject; inputs: SetupInputs; build?: Checkout } | { fresh: string };
 
-export function threadStarter(options: { registry: ThreadsRegistry; harness: Pick<HarnessHost, "startThread">; mirror: ProjectMirror; dotfiles: PylonOverlay["dotfiles"]; gitIdentity?: BootInputs["gitIdentity"]; wake(node: NodeName): void; people?: People | undefined }) {
-  const { registry, harness, mirror, dotfiles, gitIdentity, wake, people = solo } = options;
+/**
+ * `owners` gives a shared install's starts their owner's logins and git identity, and must be given with a shared
+ * `people`. A solo install boots with the project's grants, the node's values and the configured git identity.
+ */
+export function threadStarter(options: { registry: ThreadsRegistry; harness: Pick<HarnessHost, "startThread">; mirror: ProjectMirror; dotfiles: PylonOverlay["dotfiles"]; gitIdentity?: BootInputs["gitIdentity"]; wake(node: NodeName): void; people?: People | undefined; owners?: OwnerLogins | undefined }) {
+  const { registry, harness, mirror, dotfiles, gitIdentity, wake, people = solo, owners } = options;
+  if (people.shared && owners === undefined) throw new Error("a shared install's thread starter needs the owners' logins");
 
   /** A branch the start names and the remote does not have refuses the start, since the pylon's checkout of it would fail. */
   async function readSetup(project: Project, request: StartRequest, branch: string): Promise<SetupRead> {
@@ -156,6 +165,8 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
   return async function startThread(start: Start): Promise<Thread> {
     const { request, caller, owner, role, queued, key } = start;
     const project = checkStart(registry, start);
+    // The owner's logins are read once, at the start, and the project's and the install's git identity are not used.
+    const ownerIdentity = people.shared ? await owners!.forStart(owner) : null;
     // Decided once from the project as read now, so the thread records the rules its first message carries.
     const rules = standingRulesFor(project, start);
     const prompt = claudePromptOf(start);
@@ -165,7 +176,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     if (image === null) throw new Refusal("conflict", "no image is current yet, so a pylon has nothing to boot");
     const branch = request.branch ?? project.defaultBranch;
     // The repository as a fresh boot makes it. setUp pins a template boot's commit, and the pylon's boot freezes either.
-    const need = placementNeed(project, request, image, dotfiles);
+    const need = placementNeed(project, request, image, dotfiles, people.shared);
     const { repo: freshRepo, network, resources } = need;
     const id = queued ?? start.id ?? newThreadId();
     const pylonId = pylonIdOf(id);
@@ -202,7 +213,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
       const conversationId = request.claude === undefined && role !== "check" && role !== "verify" ? await harness.startThread({ threadId: id, pylonId }) : null;
       const now = registry.now();
       const { setup, firstBoot, repo } = setUp(project, read, freshRepo, image, branch, node, now);
-      const boot: Omit<BootInputs, "source"> = { pylonId, image, resources, gitIdentity: gitIdentityOf(project, gitIdentity), network, repo, dotfiles };
+      const boot: Omit<BootInputs, "source"> = { pylonId, image, resources, gitIdentity: ownerIdentity ?? gitIdentityOf(project, gitIdentity), network, repo, dotfiles };
       const t: Thread = {
         id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, owner, createdAt: now,
         // Starting a thread is human activity, so its pylon is wanted at once.
@@ -218,6 +229,8 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
         live,
         liveHash: liveHashOf(live),
       });
+      // Before the pylon's row exists, so no pass of the loop spawns it first. One that fails is handed on the node's next snapshot.
+      if (ownerIdentity !== null) await owners!.hand(node, pylonId, owner);
       registry.threads.createThread({ ...t, ...rules === null ? {} : { standingRules: rules } }, pylon, { ...claudePrompt === undefined ? {} : { claude: { prompt: claudePrompt, model: request.model } }, queued: queued !== undefined, key });
       wake(node);
       return t;

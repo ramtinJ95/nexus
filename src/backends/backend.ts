@@ -141,6 +141,7 @@ export interface ArtifactStore {
 /**
  * Node-local secret values, from a root-owned file such as /etc/nexus/secrets.env.
  * `names` lists the secrets the node holds, which its probe reports. Values never leave the node.
- * `value` with a pylon gives that pylon's own value when it has one, and the node's otherwise.
+ * `value` with a pylon gives that pylon's own value when it has one, and the node's otherwise. With `owned`, for a grant
+ * whose value is the pylon owner's, it never gives the node's.
  */
-export interface SecretSource { value(name: string, pylonId?: PylonId): string | undefined; names(): readonly string[] }
+export interface SecretSource { value(name: string, pylonId?: PylonId, owned?: boolean): string | undefined; names(): readonly string[] }

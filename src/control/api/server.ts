@@ -51,7 +51,8 @@ import { Refusal, type RefusalCode, type RefusalKind } from "../refusal.ts";
 import { ok, parse, type ApiKit, type RouteEntry } from "./kit.ts";
 import { admit, anyAllowed, apiAccess, demand, type Policy, type Role } from "./access.ts";
 import type { People } from "../people.ts";
-import type { LoginStore } from "../logins.ts";
+import { githubIdentity, type LoginStore } from "../logins.ts";
+import type { GitIdentity } from "../../protocol/spawn.ts";
 import { loginRoutes } from "./login-routes.ts";
 import { pylonAccess } from "./pylon-access.ts";
 import { eventStreams, maxStreams } from "./sse.ts";
@@ -98,6 +99,8 @@ export interface ApiOptions {
   people?: People;
   /** Each person's own credentials, which only their own person routes set. */
   logins: LoginStore;
+  /** The git identity GitHub gives for a token, read when a person sets their GitHub login. Tests stand in for GitHub. */
+  githubIdentity?: (token: string) => Promise<GitIdentity>;
   /** `POST /v1/join`, the one route a machine that is no node or caller yet may call. Omitted: no machine can join. */
   joins?: { whois: WhoisNode; configured: ReadonlySet<TailnetNodeId>; joined(node: JoinedNode): void };
   /** Names the API answers to in the Host header. Any other name is a DNS rebinding page on an allowed machine. */
@@ -141,7 +144,7 @@ export function featureRoutes(kit: ApiKit, options: ApiOptions, nodeHealth: (nam
     ...streamRoutes(kit),
     ...projectRoutes(kit, options.features),
     ...usageRoutes(kit, options.features),
-    ...nodeRoutes(kit, nodeHealth, options.dotfiles),
+    ...nodeRoutes(kit, nodeHealth, options.dotfiles, options.people?.shared === true),
     ...threadRoutes(kit, options.features),
     ...pipelineRoutes(kit, options.features),
     ...reviewRoutes(kit, options.features),
@@ -149,7 +152,7 @@ export function featureRoutes(kit: ApiKit, options: ApiOptions, nodeHealth: (nam
     ...pylonRoutes(kit, options),
     ...imageRoutes(kit, options.features),
     ...doctorRoutes(kit, options),
-    ...loginRoutes(kit, options.logins),
+    ...loginRoutes(kit, options.logins, options.githubIdentity ?? ((token) => githubIdentity(token))),
   ];
 }
 

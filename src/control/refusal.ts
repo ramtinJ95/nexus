@@ -9,7 +9,7 @@ export type RefusalKind = "invalid" | "forbidden" | "missing" | "method" | "conf
  */
 const retryableCodes = {
   "not-running": true, "not-ready": true, moved: true, draining: true,
-  blocked: false, queued: false, "no-route": false, "no-branch": false, "too-long": false, "probe-too-old": false, "probe-unreachable": false, "probe-forbidden": false,
+  blocked: false, queued: false, "no-route": false, "no-branch": false, "too-long": false, "probe-too-old": false, "probe-unreachable": false, "probe-forbidden": false, "no-login": false,
 } as const satisfies Record<string, boolean>;
 export type RefusalCode = keyof typeof retryableCodes;
 

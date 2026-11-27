@@ -8,6 +8,7 @@ import type { ServerDetail, ThreadDetail, ThreadRow } from "../wire.ts";
 import { actualState, desiredPhase, keptPastDay, retryRefusal } from "../reconcile.ts";
 import { agentView, type AgentView } from "../../contract/threads.ts";
 import { bootNetwork } from "../threads.ts";
+import { ownerBoot } from "../project.ts";
 import { judgmentView } from "../judgment.ts";
 import { reviewView } from "../review-view.ts";
 import { linkedName } from "../../services-file.ts";
@@ -56,7 +57,7 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
   function pylonOf({ pylon, node, observed, actualState }: ReturnType<typeof pylonState>, project: Project): ThreadDetail["pylon"] {
     const held = registry.threads.bootHold(pylon.pylonId);
     return {
-      grantsOutdated: networkGrantsKey(pylon.boot.network) !== networkGrantsKey(bootNetwork(project, pylon.boot.dotfiles?.repo)),
+      grantsOutdated: networkGrantsKey(pylon.boot.network) !== networkGrantsKey(bootNetwork(project, pylon.boot.dotfiles?.repo, ownerBoot(pylon.boot))),
       id: pylon.pylonId, node: pylon.node, failed: pylon.failed, observedAt: node.observation?.observedAt ?? null, resources: pylon.boot.resources,
       actualState, retryRefused: retryRefusal(observed),
       ...(observed !== "absent" && observed.phase === "running" && observed.notAnswering ? { notAnswering: observed.notAnswering } : {}),

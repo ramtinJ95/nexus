@@ -14,7 +14,7 @@ import { isDeployer, threadWaker } from "./api/access.ts";
 import { peopleOf, peopleSchema } from "./people.ts";
 import { loginStore } from "./logins.ts";
 import { personStore } from "../deploy/credentials.ts";
-import { gitIdentitySchema } from "../protocol/spawn.ts";
+import { gitIdentitySchema, type GitIdentity } from "../protocol/spawn.ts";
 import { gitUrl } from "./project.ts";
 import { ingest } from "./reconcile.ts";
 import { linuxTailscaledSocket, localApiWhois, localApiWhoisCaller, localApiWhoisNode, localApiCertificate, localApiStatus } from "../node-base/tailscaled.ts";
@@ -54,6 +54,7 @@ import { startImageRollout } from "./image-rollout.ts";
 import { loadImageRecipe } from "../image/recipe.ts";
 import { runningCommit } from "../deploy/health.ts";
 import { chatgptTokenHandoff } from "./chatgpt-token.ts";
+import { ownerLogins } from "./owner-logins.ts";
 import { isDraining, turnGate } from "./drain.ts";
 import { checkEveryMs, healthPasses, runDoctor, servedCertificate } from "./doctor-run.ts";
 import { backedUpAt, readBackupStatus } from "./backup-status.ts";
@@ -161,10 +162,12 @@ export interface ControlPlaneOptions {
   chatgptToken?: () => Promise<string | undefined>;
   /** Stands in for each node's probe in tests. */
   probe?: (node: NodeAddress) => ProbeClient;
+  /** Stands in for GitHub's GET /user, which a GitHub login reads its git identity from, in tests and the verify stack. */
+  githubIdentity?: (token: string) => Promise<GitIdentity>;
 }
 
 /** Everything but the model login, so src/checks/control/thread-on-node.ts runs this same wiring with a scripted model. */
-export async function startControlPlane(config: ControlPlaneConfig, models: Models, { chatgptToken, probe }: ControlPlaneOptions = {}): Promise<ControlPlane> {
+export async function startControlPlane(config: ControlPlaneConfig, models: Models, { chatgptToken, probe, githubIdentity }: ControlPlaneOptions = {}): Promise<ControlPlane> {
   const token = config.github ? (await readFile(config.github.tokenFile, "utf8")).trim() : null;
   if (token !== null && !/^[A-Za-z0-9_]+$/.test(token)) throw new Error("github.tokenFile must contain only a GitHub token");
   const tailscaled = config.tailscaledSocket ?? linuxTailscaledSocket;
@@ -186,11 +189,15 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   for (const node of [...config.nodes, ...registry.nodes.joinedNodes()]) if (!probeMap.has(node.name)) connect(node);
   const services = startServices();
   const handoff = services.start(chatgptToken === undefined ? null : { everyMs: 60_000, ...chatgptTokenHandoff({ probes: () => [...probeMap.values()], token: chatgptToken }) });
+  const people = peopleOf(config.people);
+  const logins = loginStore(personStore(config.harness.credentials));
+  const owners = services.start(people.shared ? ownerLogins({ registry, logins, probes: probeMap, log }) : null);
   const peers = services.start(peerHandoff({ registry, probes: probeMap, log }));
   const loop = services.start(startLoop({
     registry, probes: [...probeMap.values()], previewPorts: config.previewPorts, gitIdentity: config.gitIdentity, ingest,
     onSnapshot(node, observation) {
       handoff?.observed(observation);
+      owners?.observed(node, observation.probeBootId);
       peers.observed(node, observation.probeBootId);
     },
   }));
@@ -233,10 +240,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const backfill = services.start(usageBackfill({ registry, counter: usage, wake }));
   const threads = services.start(threadServices({
     registry, harness, mirror, dotfiles: config.dotfiles, gitIdentity: config.gitIdentity, wake, gate, log,
-    queue: github !== null, planning: { replies: agents.replies }, people: peopleOf(config.people),
+    queue: github !== null, planning: { replies: agents.replies }, people, owners: owners ?? undefined,
   }));
   const { startThread, queue, pipeline, planning } = threads.api;
-  const people = peopleOf(config.people);
   const deployment = { self: config.self.tailnetNodeId, deployers: new Set(config.deployers ?? []), keys: config.deployKeys ?? {} };
   const checkRunDeps = { registry, probes: probeMap, startThread, wake: wakeThread };
   const reviews = services.start(github === null ? null : { everyMs: passMs, ...reviewLoop({
@@ -297,7 +303,8 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     registry, whois: localApiWhoisCaller(tailscaled), host: config.listen.host, port: config.listen.port,
     allowed: new Set([config.self.tailnetNodeId, ...config.callers ?? []]),
     people,
-    logins: loginStore(personStore(config.harness.credentials)),
+    logins,
+    ...githubIdentity === undefined ? {} : { githubIdentity },
     joins: {
       whois: localApiWhoisNode(tailscaled),
       configured: new Set(config.nodes.map((n) => n.tailnetNodeId)),

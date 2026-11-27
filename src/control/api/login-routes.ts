@@ -1,5 +1,6 @@
 import { HttpError } from "../http-error.ts";
-import { tokenFault, type LoginStore } from "../logins.ts";
+import { NoGithubIdentity, tokenFault, type Login, type LoginStore } from "../logins.ts";
+import type { GitIdentity } from "../../protocol/spawn.ts";
 import { loginKinds, loginRoutes as routes, type LoginKind } from "../../contract/logins.ts";
 import { ok, on, type ApiKit, type RouteEntry } from "./kit.ts";
 import { Refusal } from "../refusal.ts";
@@ -25,7 +26,18 @@ function kindOf(kind: string): LoginKind {
   throw new HttpError(404, `no login ${kind}: the logins are ${loginKinds.join(", ")}`);
 }
 
-export function loginRoutes(kit: Pick<ApiKit, "personAs">, store: LoginStore): readonly RouteEntry[] {
+/** A GitHub token is stored with the identity GitHub reads for it, so a token GitHub refuses or cannot be asked about is not stored. */
+async function loginOf(kind: LoginKind, token: string, githubIdentity: (token: string) => Promise<GitIdentity>): Promise<Login> {
+  if (kind === "claude") return { kind, token };
+  try {
+    return { kind, token, identity: await githubIdentity(token) };
+  } catch (err) {
+    if (!(err instanceof NoGithubIdentity)) throw err;
+    throw new HttpError(err.refused ? 400 : 502, `the github token was not stored: ${err.message}. Its git identity comes from GitHub${err.refused ? "" : ", so try again"}`);
+  }
+}
+
+export function loginRoutes(kit: Pick<ApiKit, "personAs">, store: LoginStore, githubIdentity: (token: string) => Promise<GitIdentity>): readonly RouteEntry[] {
   const view = async (person: Person) => ok({ person, set: await store.kinds(person) });
   function personFor(r: Caller, action: string): Person {
     const person = kit.personAs(r);
@@ -41,7 +53,7 @@ export function loginRoutes(kit: Pick<ApiKit, "personAs">, store: LoginStore): r
       const token = tokenOf(await r.body());
       const fault = tokenFault(kind, token);
       if (fault !== undefined) throw new HttpError(400, `the ${kind} token was not stored: ${fault}`);
-      await store.set(person, kind, token);
+      await store.set(person, await loginOf(kind, token, githubIdentity));
       return view(person);
     }),
     on(routes.remove, own("remove a login"), async (params, r) => {

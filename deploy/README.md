@@ -124,7 +124,11 @@ A person's GitHub token is a fine-grained token for the repositories their proje
 - Pull requests: read and write.
 - Metadata: read, which GitHub adds.
 
-It must not hold Workflows or Administration. A token with Workflows can push a workflow file, and that workflow then runs on GitHub, past the network guard that refuses merges and approvals at the pylon's edge. Administration can change branch protection and merge rules. A pylon does not use these tokens yet: the slice that boots a pylon with its owner's credentials does.
+It must not hold Workflows or Administration. A token with Workflows can push a workflow file, and that workflow then runs on GitHub, past the network guard that refuses merges and approvals at the pylon's edge. Administration can change branch protection and merge rules.
+
+`nexus login github` asks GitHub whose token it is, with one `GET https://api.github.com/user` from the control plane, and keeps that account's git identity beside the token: its name, or its login when it has none, and its public address, or else its `<id>+<login>@users.noreply.github.com` address. A token GitHub refuses is not stored, and neither is one GitHub cannot be asked about, which the command says to try again.
+
+On an install with `people`, every pylon boots with its owner's Claude token as `CLAUDE_CODE_OAUTH_TOKEN` and their GitHub token as `GH_TOKEN`, read when the thread starts, and commits as their GitHub identity. A start whose owner lacks either login is refused and names it. A pylon never falls back to a node's `secrets.env` or a project's grant of `GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`, and a project's git identity and `control.json`'s `gitIdentity` are not used. A token changed later reaches the person's new threads at once, and their existing pylons only once their node's probe restarts.
 
 The installer ends with what is left and the command for each, in the order to do them. First come the rest of the setup: admitting your Mac or joining the node, the `nexus` CLI on the Mac with `deploy/mac/install` and `nexus connect`, and Docker with buildx for image builds and the probe's access to it. Next comes a rerun for any credential that was skipped. Last comes the first image, which needs the control plane running. A rerun lists only what is still missing, and says `Nothing is left to do.` once that is nothing. The control plane's machine lists the CLI until it holds an image, since the first image is built from the Mac with it, and a node's list leaves the CLI out, as the control plane's names it.
 
