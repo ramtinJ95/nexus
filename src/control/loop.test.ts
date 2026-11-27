@@ -896,6 +896,9 @@ test("a person's pylon past their cap waits, naming the cap and their running th
   assert.equal(phase(a3), undefined, "alice's third start never boots");
   assert.equal(registry.threads.bootHold(a3.pylonId)?.why, `alice@example.com already runs 2 pylons, and may run 2 at once: ${byPylon([a1, a2])}. Archiving one of them frees its place`);
   assert.deepEqual(registry.threads.pylon(a3.pylonId)!.attempts, { count: 0, last: null }, "a wait for the cap is no failed attempt");
+  const admitted = [a1, a2, ...bobs].map((th) => th.pylonId);
+  await until("the registry's observation counts each admitted pylon as running", () =>
+    admitted.every((id) => registry.nodes.node(node)?.observation?.pylons.some((p) => p.pylonId === id && p.phase === "running") === true));
   const observed = registry.nodes.node(node)!.observation!;
   assert.equal(roomLeft(registry, node, observed, observed.capacity, { cpus: 0, memoryGiB: 0, diskGiB: 0 }).pending.memoryGiB, 0, "her held start takes no room from another person's start");
 
