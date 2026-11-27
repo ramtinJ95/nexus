@@ -21,7 +21,7 @@ import { linuxTailscaledSocket, localApiWhois, localApiWhoisCaller, localApiWhoi
 import { parseTailscaleStatus } from "../tailscale.ts";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { chatgptToken, harnessModels, loginState, openCredentials, requireModel } from "./harness/credentials.ts";
-import { gateTurns, judgmentsOnly, openHarnessHost, type ConversationId } from "./harness/host.ts";
+import { gateTurns, openHarnessHost, type ConversationId } from "./harness/host.ts";
 import { startApi } from "./api/server.ts";
 import { retentionPass } from "./retention-pass.ts";
 import { retentionPassMs } from "./retention.ts";
@@ -218,6 +218,8 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     // The registry row is what the planner and the dashboard read.
     onParked: (id, parked) => registry.threads.recordParked(id as ThreadId, parked),
     onReply: (id, at) => registry.threads.recordReply(id as ThreadId, at),
+    // A shared install's harness runs failure judgments alone, on the install's one model login.
+    judgmentsOnly: people.shared,
     onActivity(threadId, facts) {
       const t = registry.threads.thread(threadId as ThreadId)!;
       registry.threads.recordActivity(t.id, { agent: facts.lastAgentActivityAt, agentTurnRunning: facts.agentTurnRunning });
@@ -227,9 +229,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   }));
 
   const gate = turnGate(() => isDraining(registry.releases.drain(), registry.now()));
-  const gated = gateTurns(rawHarness, gate);
-  // A shared install's harness runs failure judgments alone, on the install's one model login.
-  const harness = people.shared ? judgmentsOnly(gated) : gated;
+  const harness = gateTurns(rawHarness, gate);
   const images = services.start(startImageRollout({
     registry, probes: probeMap, buildNode: config.imageBuildNode, recipe: () => loadImageRecipe(), release: runningCommit,
   }));
@@ -275,7 +275,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   services.start(github === null ? null : { everyMs: passMs, ...builderNudger({ registry, github, inbox, personWroteTo: agents.personWrote, replies: agents.replies, wake: wakeThread, watch }) });
   services.start({ everyMs: passMs, ...deadTurnResumer({ registry, inbox, personWroteTo: agents.personWrote }) });
   // Judgments need no GitHub, so they run without a token too.
-  services.start({ everyMs: passMs, ...judgmentPass({ registry, harness: gated, probes: probeMap, wake }) });
+  services.start({ everyMs: passMs, ...judgmentPass({ registry, harness, probes: probeMap, wake }) });
   const cleanup = services.start({ everyMs: cleanupEveryMs, ...cleanupPass({ registry, probes: probeMap, log }) });
   const startedAt = Date.now();
   const loopDelay = services.start(loopWatch());

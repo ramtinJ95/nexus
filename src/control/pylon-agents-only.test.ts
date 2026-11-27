@@ -10,7 +10,7 @@ import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import type { Credential, CredentialStore } from "@earendil-works/pi-ai";
 import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
-import { judgmentsOnly, openHarnessHost, type HarnessHost } from "./harness/host.ts";
+import { judgmentsOnly, openHarnessHost, type HarnessHost, type HarnessHostOptions } from "./harness/host.ts";
 import { harnessModels } from "./harness/credentials.ts";
 import { peopleOf, type People } from "./people.ts";
 import { image, project, sharedProject, testApi } from "../test-support/api-kit.ts";
@@ -24,21 +24,26 @@ const bob = tailnet.bob.UserProfile!.LoginName as Person;
 const shared = peopleOf({ [alice]: "admin", [bob]: "engineer" });
 const answer = (a: WhoisAnswer): TailnetCaller => ({ id: a.Node.StableID, ...parseWhois(a).identity });
 
-/** The real harness on one login, and every model request it sent, by the marker each one's text carried. */
+/**
+ * The real harness on one login, and every model request it sent, by the marker each one's text carried. `open` opens
+ * another host on the same storage. While `hold` is set, the upstream answers nothing, so a turn stays unfinished.
+ */
 async function recordedHarness(t: Parameters<typeof testApi>[0] & { after(fn: () => unknown): void }) {
   const scratch = await tempDir("pylon-agents-only-", t);
   const arrived: string[] = [];
+  const control = { hold: false };
   const upstream = createServer((req, res) => {
     let body = "";
     req.on("data", (c) => { body += c; });
     req.on("end", () => {
       arrived.push(/(\w+)-says-hello/.exec(body)?.[1] ?? "?");
+      if (control.hold) return;
       res.writeHead(401, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: { message: "recorded by the test", type: "invalid_request_error" } }));
     });
   });
   await new Promise<void>((r) => upstream.listen(0, "127.0.0.1", r));
-  t.after(() => upstream.close());
+  t.after(() => { upstream.closeAllConnections(); upstream.close(); });
   const baseUrl = `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/v1`;
   const stored = new Map<string, Credential>([["openai", { type: "api_key", key: "sk-THE-INSTALLATIONS-ONE-LOGIN" }]]);
   const store: CredentialStore = {
@@ -51,13 +56,17 @@ async function recordedHarness(t: Parameters<typeof testApi>[0] & { after(fn: ()
   const real = openaiProvider();
   const moved = (list: readonly unknown[]) => list.map((m) => ({ ...(m as object), baseUrl }));
   models.setProvider({ ...real, baseUrl, getModels: () => moved(real.getModels()) as never, ...(real.getAllModels ? { getAllModels: () => moved(real.getAllModels!()) as never } : {}) });
-  const host = await openHarnessHost({
-    storagePath: join(scratch, "harness.sqlite"), models, model: { provider: "openai", modelId: (await models.getAvailable("openai"))[0]!.id }, tailscaled: join(scratch, "none.sock"),
-    locator: { awaitRunning: () => Promise.reject(new Error("no pylon in this test")) },
-    threads: [], deleted: [], onActivity: () => {}, log: () => {},
-  });
-  t.after(() => host.close());
-  return { host, arrived };
+  const modelId = (await models.getAvailable("openai"))[0]!.id;
+  const open = async (more: Partial<Pick<HarnessHostOptions, "threads" | "judgmentsOnly">> = {}) => {
+    const opened = await openHarnessHost({
+      storagePath: join(scratch, "harness.sqlite"), models, model: { provider: "openai", modelId }, tailscaled: join(scratch, "none.sock"),
+      locator: { awaitRunning: () => Promise.reject(new Error("no pylon in this test")) },
+      threads: [], deleted: [], onActivity: () => {}, log: () => {}, ...more,
+    });
+    t.after(() => opened.close().catch(() => {}));
+    return opened;
+  };
+  return { host: await open(), open, arrived, control };
 }
 
 /** The API as main.ts wires it for `people`, over `host`, with project acme and a current image. */
@@ -126,4 +135,34 @@ test("a shared install's harness refuses each turn of a thread's conversation an
   await harness.sendJudgment(judgment, "judge-says-hello", "judgment:1");
   await until(() => arrived.includes("judge"));
   assert.deepEqual([...new Set(arrived)], ["judge"], "only the judgment's request arrived");
+});
+
+test("a shared install's harness does not open while a thread's turn from before is unfinished, so nothing resumes it", async (t) => {
+  const { host, open, arrived, control } = await recordedHarness(t);
+  const conversationId = await host.startThread({ threadId: "th-alice", pylonId: "pylon-th-alice" as PylonId });
+  control.hold = true;
+  await host.send("th-alice", "alice-says-hello", "m-alice", "followUp");
+  await until(() => arrived.includes("alice"));
+  await host.close();
+  control.hold = false;
+  const threads = [{ threadId: "th-alice", conversationId, agentTurnRunning: true }];
+  await assert.rejects(open({ threads, judgmentsOnly: true }), { message: /^the harness holds unfinished work of th-alice, which a shared install would resume on its one model login\. Start the control plane once without people/ });
+  await new Promise((r) => setTimeout(r, 1_000));
+  assert.deepEqual(arrived, ["alice"], "the shared open resumed nothing");
+  await open({ threads });
+  await until(() => arrived.length > 1);
+  assert.deepEqual(arrived, ["alice", "alice"], "a solo open resumes the same turn, which the shared one held back");
+});
+
+test("a shared install's harness opens over an unfinished failure judgment and resumes it", async (t) => {
+  const { host, open, arrived, control } = await recordedHarness(t);
+  const judgment = await host.startJudgment();
+  control.hold = true;
+  await host.sendJudgment(judgment, "judge-says-hello", "judgment:1");
+  await until(() => arrived.includes("judge"));
+  await host.close();
+  control.hold = false;
+  await open({ judgmentsOnly: true });
+  await until(() => arrived.length > 1);
+  assert.deepEqual(arrived, ["judge", "judge"], "the judgment's turn resumed");
 });
