@@ -14,26 +14,33 @@ Merged into `multiplayer`: `mp-00` to `mp-11`, `mp-14`, `mp-15`, `mp-16`, `mp-18
 
 The pilot's code is complete, with one exception: `mp-25`, which the pilot needs only when work in a pylon downloads a release from `github.com`.
 
-One pull request of a slice is open: #730, `mp-25`.
+Two pull requests of slices are open, #730 (`mp-25`) and #732 (`mp-17`). The Nexus review approved both, and both wait for the operator's yes.
 
-## What runs now
+## What waits for a merge
 
-Both threads are in the project `nexus-mp`. Nothing watches them once the old machine is off, so look with `nexus show <thread>`.
+Both threads are in the project `nexus-mp`. Nothing watches them once the old machine is off, so look with `nexus show <thread>`. Each thread lists a holds question that offers Land. Leave it unanswered.
 
-| Slice | Thread | Branch | State | Before a merge |
-| --- | --- | --- | --- | --- |
-| `mp-25`, the guard lets downloads through | `th-1f7854ab0652` | `mp/25-guard-downloads` | #730, approved by the Nexus review in round 1 at c6520042, live check passed, merges cleanly with `multiplayer` | The trial below, then the operator's own review |
-| `mp-17`, a review runs on the asker's login | `th-5cb1991ac300` | `mp/17-review-on-asker` | Building, no pull request yet | The operator's own review |
+| Slice | Thread | Pull request | Approved head |
+| --- | --- | --- | --- |
+| `mp-25`, the guard lets downloads through | `th-1f7854ab0652` | #730, `mp/25-guard-downloads` | c65200420a460df8fc9c4a12316819e48462f956, round 1, live check passed |
+| `mp-17`, a review runs on the asker's login | `th-5cb1991ac300` | #732, `mp/17-review-on-asker` | a792c14775226772665f3c6e3281b500b41221c5, round 1, live check passed |
 
-#730 passed the trial at c65200420a460df8fc9c4a12316819e48462f956 on `multiplayer` 5b49b259, with tree 38d9c378: the type check is clean, the tests fail only the three this machine fails at every base, and the landing model holds. It waits only for the operator's yes. If `multiplayer` moves first, run the trial again. Its thread lists a holds question that offers Land. Leave it unanswered.
+The two merge cleanly with `multiplayer` 5b49b259 and with each other. After the first merges, run the trial of the second again, since its base moved.
+
+**#730** passed the trial on 5b49b259, with tree 38d9c378: the type check is clean, the tests fail only the three this machine fails at every base, and the landing model holds.
 
 It adds read rows for release assets, source archives and raw files on `github.com`, with `GET` and `HEAD` only, and it refuses Git LFS by name. GitHub redirects each of those reads to another host, and the slice adds no host to an allowlist. So a download works only in a project whose hosts include `release-assets.githubusercontent.com`, `codeload.github.com` or `raw.githubusercontent.com`, whichever the download needs.
 
-What each builder was told beyond the plan:
+**#732** has not passed the trial yet. It was running when this line was written.
 
-- **`mp-25`** changes only `github-guard.ts`, its test and `interrogate/guard-github/probes.mjs`. Git LFS stays refused and the pull request names it. It adds no host to an allowlist.
-- **`mp-17`** stops and reports before it writes code when the cap of two pylons a person keeps a review from running. `mp-22` counts every running pylon the person owns, and a review adds a reviewer, a check and a verify pylon. It also says whether a review's pylons can run one after another, because the office machine fits three pylons of 8 GiB. Reviews that start on their own stay off on a shared install, since they have no asker.
-- `mp-17` changes `review.ts`, which the landing model covers. After its merge, confirm the model as [after a merge](#after-a-merge) describes.
+What a yes to #732 agrees to:
+
+- On a shared install a review runs one Claude worker on the default model, owned by the thread's owner, on their Claude and GitHub logins. The rule that a reviewer runs on another model than the builder does not hold there, and no second reviewer starts.
+- Only a thread's owner may ask for its review. An admin may not.
+- Reviews that start on their own stay off on a shared install, since they have no asker.
+- A review adds up to three pylons, all the asker's, and the cap of two a person makes them take turns. No review gets stuck, by the builder's reading of the idle timers. A check's deadline of 60 minutes counts about 20 minutes of that wait.
+- Its Live, Result and Perf boxes stay open. They need a real Claude token, a GitHub token and an image with Claude Code, so they run on the office machine.
+- It changes `review.ts`, which the landing model covers. After its merge, confirm the model as [after a merge](#after-a-merge) describes.
 
 ## What has not started
 
