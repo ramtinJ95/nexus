@@ -153,6 +153,9 @@ const shapes: [string, Recorded[]][] = [
 	["a GraphQL subscription", [gql("subscription { x }", refuse(/subscription/))]],
 	["a document that does not parse", [gql("mutation {", refuse(/does not parse/))]],
 	["a dot segment in a path", [api("POST", `/repos/${repo}/issues/1%2F..%2Fcomments`, refuse(/does not decode/), { body: "b" })]],
+	["a host with a trailing dot", [req("PUT", `https://api.github.com./repos/${repo}/pulls/1/merge`, refuse(/only reads|not on the allow-list/), "{}"), req("GET", `https://api.github.com./repos/${repo}`, pass)]],
+	["a body that is not UTF-8", [req("POST", `https://api.github.com/repos/${repo}/issues/1/comments`, refuse(/not UTF-8/), Buffer.concat([Buffer.from('{"body":"'), Buffer.from([0xff]), Buffer.from('"}')]))]],
+	["a body in another charset", [api("POST", reviews, refuse(/charset utf-16/), { event: "COMMENT" }, { "content-type": "application/json; charset=UTF-16" }), api("POST", reviews, pass, { event: "COMMENT" }, { "content-type": "application/json; charset=utf-8" })]],
 	["a write to another GitHub host", [req("POST", "https://codeload.github.com/acme/scratch", refuse(/only reads/), "x")]],
 ];
 
@@ -266,6 +269,12 @@ test("an owner boot refuses a merge whichever GitHub secret the request carries"
 		assert.ok(reply instanceof Response, name);
 		assert.equal(reply.status, 403, name);
 	}
+});
+
+test("the hook takes a GitHub host written with a trailing dot", async () => {
+	const reply = await githubGuardHook({ defaultBranch: "main" }, () => {})(new Request(`https://api.github.com./repos/${repo}/pulls/1/merge`, { method: "PUT", body: "{}" }));
+	assert.ok(reply instanceof Response);
+	assert.equal(reply.status, 403);
 });
 
 test("a boot without the guard sends GitHub requests as before, and the guard leaves other hosts alone", async () => {

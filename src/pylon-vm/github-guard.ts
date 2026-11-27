@@ -85,7 +85,7 @@ export function refusal(request: GuardRequest, guard: GithubGuard): string | nul
 	if (overrideHeaders.some((name) => request.headers.has(name))) return "a method override header";
 	const path = normalPath(request.url.pathname);
 	if (path === null) return "the path does not decode";
-	const host = request.url.hostname.toLowerCase();
+	const host = request.url.hostname.toLowerCase().replace(/\.$/, "");
 	if (host === "github.com") return gitRefusal(method, path, request, guard);
 	if (host !== "api.github.com") return method === "GET" || method === "HEAD" ? null : `only reads reach ${host}`;
 	if (path === "/graphql" && method !== "POST") return `GraphQL over ${method}`;
@@ -93,7 +93,15 @@ export function refusal(request: GuardRequest, guard: GithubGuard): string | nul
 	if ([...request.url.searchParams.keys()].length > 0) return "a write with query parameters";
 	const bytes = decodedBody(request);
 	if (bytes === null) return "the body's encoding cannot be read";
-	const body = bytes.length === 0 ? undefined : jsonObject(bytes.toString("utf8"));
+	const charset = /;\s*charset\s*=\s*"?([^";\s]+)/i.exec(request.headers.get("content-type") ?? "")?.[1]?.toLowerCase();
+	if (charset !== undefined && charset !== "utf-8" && charset !== "utf8") return `a body in the charset ${charset}`;
+	let text: string;
+	try {
+		text = utf8.decode(bytes);
+	} catch {
+		return "the body is not UTF-8";
+	}
+	const body = bytes.length === 0 ? undefined : jsonObject(text);
 	if (typeof body === "string") return body;
 	if (path === "/graphql") return graphqlRefusal(body);
 	const row = rest.find((r) => r.method === method && r.route.test(path));
@@ -102,7 +110,7 @@ export function refusal(request: GuardRequest, guard: GithubGuard): string | nul
 }
 
 /** The hosts the guard decides for. Every other host falls through to the allowlist as before. */
-export const guarded = (host: string) => host === "github.com" || host.endsWith(".github.com");
+export const guarded = (host: string) => /(?:^|\.)github\.com\.?$/.test(host);
 
 /**
  * The request hook. A refused request gets a 403 that names the guard and the reason, and one line in the pylon's
