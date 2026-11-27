@@ -31,7 +31,7 @@ The two merge cleanly with `multiplayer` 5b49b259 and with each other. After the
 
 It adds read rows for release assets, source archives and raw files on `github.com`, with `GET` and `HEAD` only, and it refuses Git LFS by name. GitHub redirects each of those reads to another host, and the slice adds no host to an allowlist. So a download works only in a project whose hosts include `release-assets.githubusercontent.com`, `codeload.github.com` or `raw.githubusercontent.com`, whichever the download needs.
 
-**#732** has not passed the trial yet. It was running when this line was written.
+**#732** passed the trial on 5b49b259, with tree 38d6522d: the type check is clean, the tests fail only the same three, and the rules of the landing model hold. The model exits 3 because `review.ts` changed, so it needs the confirmation after the merge.
 
 What a yes to #732 agrees to:
 
