@@ -396,7 +396,7 @@ Three limits of this guard, each handled elsewhere:
 
 ### ops-1: the office machine can run pylons
 
-The machine is reachable only from the company network, so the operator runs this.
+The machine is reachable only from the company network, so the operator runs this. The commands, and every other check that needs the office, are in [Checks to run in the office](multiplayer-office-checks.md).
 
 - [ ] Run `ls -l /dev/kvm`, `nproc`, `free -g`, and `df -h` on the machine. Pass when `/dev/kvm` exists and the control plane's user can open it.
 - [ ] Work out how many pylons fit: usable memory divided by the project's pylon size plus 0.15 GiB. The smallest pylon is 3 GiB. Write the number here, because it sets the cap in `mp-22`.
