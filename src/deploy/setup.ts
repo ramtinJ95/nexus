@@ -11,7 +11,7 @@
  */
 import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readdir, readFile, rm, stat } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { promisify, isDeepStrictEqual, parseArgs } from "node:util";
 import { claudeNames, harnessSignedIn, locations, personStore, provision, rotatable, rotate, scripted, stores, system, terminal, heldNames, type FollowUp, type Rotatable } from "./credentials.ts";
@@ -256,16 +256,6 @@ export async function forgetLogins(store: string, login: string): Promise<string
   const held = await system.exists(path);
   await rm(path, { force: true });
   return held ? `deleted ${login}'s stored logins, ${path}` : `${login} has no stored logins`;
-}
-
-/**
- * Whether the control plane read control.json as it is now: no process runs, or the one that runs started after the
- * file was last written. `startedUs` is systemd's ExecMainStartTimestampMonotonic and `uptimeS` /proc/uptime's first
- * field, on the same clock. A running unit with no start time has not proven it.
- */
-export function readCurrent(active: boolean, startedUs: number, uptimeS: number, writtenMs: number, nowMs: number): boolean {
-  if (!active) return true;
-  return startedUs > 0 && uptimeS * 1000 - startedUs / 1000 < nowMs - writtenMs;
 }
 
 /** The branch of --dotfiles that pylons pull. */
@@ -708,7 +698,7 @@ export interface InstallSteps {
   /** Runs a program on this terminal and resolves its exit code. */
   run(program: string, args: readonly string[]): Promise<number>;
   join(token: string): Promise<void>;
-  /** Deletes the stored logins of each --remove-person, once no control plane that still admits them runs. */
+  /** Stops the control plane, which may still admit them, then deletes the stored logins of each --remove-person. */
   forget(logins: readonly string[]): Promise<void>;
   credentials(next: Set<FollowUp>): Promise<void>;
   left(): Promise<void>;
@@ -754,10 +744,10 @@ export async function install(flags: Flags, args: readonly string[], steps: Inst
   if (args.filter((arg) => arg.startsWith("--package-manager")).length > 1) throw new Error("--package-manager is install.sh's, which names the one it found");
   try {
     await write([]);
-    if (flags.node === undefined) await installer("control");
-    // After the control installer restarted the control plane on the new people, since one that still admits the person
-    // could finish a nexus login of theirs after the delete and bring the file back.
+    // A control plane that still admits the person could finish a nexus login of theirs after the delete and bring the
+    // file back, so forget stops it, and the control installer starts it again on the new people.
     if (flags.removePerson.length > 0) await steps.forget(flags.removePerson);
+    if (flags.node === undefined) await installer("control");
     await installer("probe");
     await installer("deployer", ...flags.node === undefined ? ["control", "probe"] : ["probe"]);
     // Before the credentials' prompts, so a refused token stops the run before the person answers them.
@@ -802,12 +792,9 @@ function machineSteps(flags: Flags, manager: PackageManager): InstallSteps {
       await provision(flags.node === undefined ? "control" : "node", system, unattended ? scripted(process.env) : terminal(), (line) => console.error(line), next);
     },
     async forget(logins) {
-      const active = await exec("systemctl", ["is-active", "--quiet", unitNames.control]).then(() => true, () => false);
-      const started = Number((await exec("systemctl", ["show", "-p", "ExecMainStartTimestampMonotonic", "--value", unitNames.control]).catch(() => ({ stdout: "0" }))).stdout.trim()) || 0;
-      const uptime = Number((await readFile("/proc/uptime", "utf8")).split(" ")[0]);
-      const written = (await stat(paths.control)).mtimeMs;
-      if (!readCurrent(active, started, uptime, written, Date.now())) {
-        throw new Error(`${unitNames.control} still runs on the people before this run, so it could write a removed person's logins again, and they are not deleted. Once the harness is signed in, rerun with the same --remove-person`);
+      await exec("systemctl", ["stop", unitNames.control]).catch(() => {});
+      if (await exec("systemctl", ["is-active", "--quiet", unitNames.control]).then(() => true, () => false)) {
+        throw new Error(`${unitNames.control} did not stop, so it could write a removed person's logins again, and they are not deleted. Stop it, then rerun with the same --remove-person`);
       }
       const { harnessCredentials } = controlFields(await readJson(paths.control), paths.control);
       if (harnessCredentials === undefined) throw new Error(`${paths.control} has no harness.credentials, beside which each person's stored logins live`);
