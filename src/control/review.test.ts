@@ -6665,7 +6665,11 @@ test("a landing asked for before the install became shared stops at approval, or
   await loop.poll();
   g.reply(g.review().reviewer, verdict(g.review(), {}));
   await loop.poll();
-  assert.deepEqual(g.review().phase, { kind: "approved", onGitHub: true }, "one still under review");
+  assert.deepEqual([g.review().phase, g.review().land], [{ kind: "approved", onGitHub: true }, null], "one still under review stops at approval and asks to land no more");
+  g.watched("merged");
+  g.snapshot = { ...g.snapshot, pr: { ...g.snapshot.pr, state: "merged" }, detail: { ...g.snapshot.detail, mergeCommit: merged } };
+  await loop.poll();
+  assert.deepEqual(g.review().phase, { kind: "merged" }, "an engineer's merge on GitHub ends it");
 
   const merging = tempDb();
   const h = fixture(t, { path: merging });
@@ -6680,4 +6684,24 @@ test("a landing asked for before the install became shared stops at approval, or
   assert.deepEqual(shown(k.review().phase), { kind: "needs-person", reasons: [`${landingOff.message}.`] });
   assert.deepEqual([g.merges, g.updates, k.merges, k.updates], [[], [], [], []]);
   assert.equal(k.registry.releases.desiredRelease()?.commit, previous);
+});
+
+test("on a shared install a yolo project's holds question left from before is withdrawn unanswered, and nothing lands", async (t) => {
+  const path = tempDb();
+  const f = fixture(t, { path, autoReview: { mode: "yolo", enabledBy: "nPHONE" } });
+  f.files = dockerfile;
+  await f.loop().auto(f.registry.threads.thread(f.builder)!, f.pr);
+  await f.loop().poll();
+  const [question] = openHolds(f);
+  assert.ok(question !== undefined && f.review().land !== null, "a solo install asked, and nPHONE, no deployer, left it open");
+  f.registry.close();
+  const g = fixture(t, { path, shared: true, autoReview: { mode: "yolo", enabledBy: "nLAPTOP" } });
+  const loop = g.loop();
+  await loop.poll();
+  assert.equal(g.registry.questions.question(question.id), null, "withdrawn before the yolo answer could take it");
+  assert.equal(g.review().waiver, null);
+  g.reply(g.review().reviewer, verdict(g.review(), {}));
+  await loop.poll();
+  assert.deepEqual(g.review().phase, { kind: "approved", onGitHub: true });
+  assert.deepEqual([g.merges, g.updates, openHolds(g)], [[], [], []]);
 });

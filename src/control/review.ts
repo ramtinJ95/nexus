@@ -262,7 +262,9 @@ export function reviewLoop(deps: ReviewDeps) {
   /** Past every check, a review records what holds its head, then stops at approval, or lands when asked to. */
   const checked = async (r: Review): Promise<Review> => {
     const next = await recordHolds(r) ?? r;
-    return { ...next, phase: lands === null ? { kind: "approved", onGitHub: true } : r.land === null ? { kind: "approved" } : { kind: "merging", authorized: null } };
+    // A landing asked for before the install became shared is dropped, so a merge on GitHub ends the review as merged.
+    if (lands === null) return { ...next, land: null, phase: { kind: "approved", onGitHub: true } };
+    return { ...next, phase: r.land === null ? { kind: "approved" } : { kind: "merging", authorized: null } };
   };
   /** Past the check at the round's head: the live check runs where the head has a `.nexus/verify` and none ran there yet. */
   const checkPassed = async (r: Review, verifies: boolean): Promise<Review> => {
@@ -530,7 +532,8 @@ export function reviewLoop(deps: ReviewDeps) {
     const project = registry.threads.thread(r.builder)?.project;
     const setting = project === undefined ? undefined : registry.projects.project(project)?.autoReview;
     // Only a review asked to land is landed: one the person started without --land stops at approval, as they asked.
-    if (lands === null || r.land === null || setting?.mode !== "yolo" || !lands.mayLand(setting.enabledBy) || !registry.reviews.isCurrentReview(r)) return;
+    // A shared install has no deployer, and its landHolds refuses with landing-off.
+    if (r.land === null || setting?.mode !== "yolo" || lands?.mayLand(setting.enabledBy) === false || !registry.reviews.isCurrentReview(r)) return;
     const question = askingHolds(registry.questions.questions(r.builder), r.id, r.rounds.at(-1));
     if (question === undefined) return;
     try {
