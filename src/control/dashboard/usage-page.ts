@@ -58,7 +58,7 @@ ${backfillNote(c, report.backfill)}
 <p>The summaries the Nexus agent's compactions write, and model calls its tools make, are not counted.</p>
 </div>
 </section>
-${report.total.calls === 0 ? html`<p class="empty">No model calls were counted in this period.</p>` : breakdowns.map((b) => html`<section aria-labelledby="usage-by-${b}-h"><div class="ov-head"><h2 id="usage-by-${b}-h">${breakdownLook[b].title}</h2></div>
+${report.total.calls === 0 ? html`<p class="empty">No model calls were counted in this period.</p>` : breakdowns.filter((b) => report.by[b] !== undefined).map((b) => html`<section aria-labelledby="usage-by-${b}-h"><div class="ov-head"><h2 id="usage-by-${b}-h">${breakdownLook[b].title}</h2></div>
 ${usageTable(`usage-by-${b}`, breakdownLook[b].key, report.by[b]!.map((r) => b === "project" ? { ...r, key: html`<a class="link" href="${href(period, r.key)}">${r.key}</a>` } : r))}
 </section>`)}
 </div></div>`,

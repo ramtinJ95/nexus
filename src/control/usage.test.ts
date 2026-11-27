@@ -14,7 +14,7 @@ import type { AgentCall, Tokens } from "./agent-usage.ts";
 import { checkCaller, reviewerCaller, roleOf, verifyCaller } from "./agent-protocol.ts";
 import { processStream } from "../process-stream.ts";
 import type { ConversationId } from "./harness/host.ts";
-import type { ImageId, LiveHash, NodeName, ProjectId, PylonId, ThreadId } from "../ids.ts";
+import type { ImageId, LiveHash, NodeName, Person, ProjectId, PylonId, ThreadId } from "../ids.ts";
 import type { ProbeClient } from "../protocol/client.ts";
 import { runningPylon, tempDir } from "../test-support/kit.ts";
 
@@ -32,10 +32,10 @@ function openOnline(t: TestContext, path = join(dir, `${randomUUID()}.db`)): Reg
   return seedRegistry(testRegistry(t, path), { nodes: [node] });
 }
 
-function addThread(registry: Registry, options: { startedBy?: string; conversationId?: string | null; phase?: "running" | "paused" } = {}): Thread {
+function addThread(registry: Registry, options: { startedBy?: string; owner?: Person; conversationId?: string | null; phase?: "running" | "paused" } = {}): Thread {
   const conversationId = options.conversationId ?? null;
   // As a start does: a harness thread has no Claude worker.
-  const { id, pylonId } = addTestThread(registry, { node, boot: { image }, thread: { conversationId, startedBy: options.startedBy ?? "nLAPTOP" }, claudePrompt: conversationId === null ? "hello" : undefined });
+  const { id, pylonId } = addTestThread(registry, { node, boot: { image }, thread: { conversationId, startedBy: options.startedBy ?? "nLAPTOP", ...options.owner === undefined ? {} : { owner: options.owner } }, claudePrompt: conversationId === null ? "hello" : undefined });
   observe(registry, pylonId, options.phase ?? "running");
   return registry.threads.thread(id)!;
 }
@@ -475,9 +475,33 @@ test("the report groups calls by model, project, kind, role and UTC day, within 
   assert.ok(Math.abs(report.countingSince - Date.now()) < 60_000);
 });
 
+test("the report sums each owner's threads, a reviewer's under its builder's owner", (t) => {
+  const registry = openOnline(t);
+  const alice = "alice@example.com" as Person;
+  const bob = "bob@example.com" as Person;
+  const builder = addThread(registry, { owner: alice });
+  const reviewer = addThread(registry, { startedBy: reviewerCaller, owner: alice });
+  const other = addThread(registry, { owner: bob });
+  const call = (id: string, input: number): AgentCall => ({ id, agent: "claude", model: "claude-opus-5-5", at: Date.now(), input, output: 0, cacheWrite: 0, cacheRead: 0 });
+  registry.usage.recordUsage(builder.id, [call("a", 10)]);
+  registry.usage.recordUsage(reviewer.id, [call("b", 5)]);
+  registry.usage.recordUsage(other.id, [call("c", 100), call("d", 1)]);
+  const owners = () => registry.usage.usageReport({ since: null, by: ["owner"] }).by.owner!.map((r) => [r.key, r.total, r.calls]);
+  assert.deepEqual(owners(), [[bob, 101, 2], [alice, 15, 2]]);
+  assert.deepEqual(registry.usage.usageReport({ since: null, thread: reviewer.id, by: ["owner"] }).by.owner!.map((r) => [r.key, r.total]), [[alice, 5]]);
+});
+
+test("only a shared install offers the owner breakdown, so a solo install's report is as it was", () => {
+  const now = Date.UTC(2026, 9, 27, 15, 30);
+  assert.deepEqual(usageFilter(new URLSearchParams(""), now, false).by, ["model", "project", "kind", "role", "day"]);
+  assert.throws(() => usageFilter(new URLSearchParams("by=owner"), now, false), /by must be one of model, project, kind, role, day, not "owner"/);
+  assert.deepEqual(usageFilter(new URLSearchParams(""), now, true).by, ["owner", "model", "project", "kind", "role", "day"]);
+  assert.deepEqual(usageFilter(new URLSearchParams("by=owner"), now, true).by, ["owner"]);
+});
+
 test("the usage query takes a period or a UTC day, and refuses anything else", () => {
   const now = Date.UTC(2026, 9, 27, 15, 30);
-  const q = (s: string) => usageFilter(new URLSearchParams(s), now);
+  const q = (s: string) => usageFilter(new URLSearchParams(s), now, false);
   assert.equal(q("").since, null);
   assert.equal(q("since=today").since, Date.UTC(2026, 9, 27));
   assert.equal(q("since=7d").since, Date.UTC(2026, 9, 21));

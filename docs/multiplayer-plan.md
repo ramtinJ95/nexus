@@ -208,13 +208,13 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 
 ### mp-06: the CLI and the dashboard show the owner
 
-- [ ] **Depends on.** `mp-02`.
+- [x] **Depends on.** `mp-02`.
 - [ ] **Files.** `src/control/dashboard/timeline.ts`, `src/control/dashboard/flight.ts`, `src/control/dashboard/home.ts`, `src/control/api/thread-view.ts`, `src/cli/commands/`, `src/control/usage.ts`.
-- [ ] **Change.** Thread lists and thread pages show the owner's name where they show a raw node ID today. On a shared install the lists open on the caller's own threads, with a way to see everyone's. `nexus usage` adds a total for each owner.
-- [ ] **Result.** An engineer sees their own work first and can tell whose thread any other one is.
-- [ ] **Unit.** A thread view carries the owner. The usage rollup sums by owner.
+- [x] **Change.** Thread lists and thread pages show the owner's name where they show a raw node ID today. On a shared install the lists open on the caller's own threads, with a way to see everyone's. `nexus usage` adds a total for each owner.
+- [x] **Result.** An engineer sees their own work first and can tell whose thread any other one is.
+- [x] **Unit.** A thread view carries the owner. The usage rollup sums by owner.
 - [ ] **Live.** With threads of both people on the stack, open the dashboard as `bob`. Pass when the home table shows only `bob`'s threads by default, the switch shows both, and each row names its owner. Attach screenshots.
-- [ ] **Perf.** `api`. Fail above 15% over base.
+- [x] **Perf.** `api`. Fail above 15% over base.
 
 ### mp-07: a secret value can belong to one pylon
 

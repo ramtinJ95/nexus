@@ -583,3 +583,33 @@ test("show reads only a refusal coded queued as a queued thread, and passes any 
   await assert.rejects(threadsCommands.show!.run(refusing(blocked), ["th-0123456789ab"], {}, null!, null!) as Promise<unknown>, blocked);
   assert.deepEqual(asked, ["GET /v1/threads/th-0123456789ab"], "a 409 that is not queued asks for no queued thread");
 });
+
+test("threads lists only the caller's own on a shared install, with an Owner column, and --everyone lists everyone's", async () => {
+  const row = (id: string, owner: string) => ({ id, owner, status: "active", attention: null, working: false, pylon: { actualState: "running", node, failed: null }, project: "acme", lastReplyAt: null, title: `${id}'s` });
+  const listing = (rows: readonly ReturnType<typeof row>[], login: string | null | undefined) => {
+    const asked: string[] = [];
+    const api: Api = async (method, path) => {
+      asked.push(path.split("?")[0]!);
+      return path.startsWith("/v1/threads") ? rows : path.startsWith("/v1/queued") ? [] : login === undefined ? {} : { login };
+    };
+    const run = async (...flags: string[]) => (await threadsCommands.threads!.run(api, [], Object.fromEntries(flags.map((f) => [f, true])), null!, { io: { env: {}, stdout: {} } } as never)) as { json: { id: string }[]; text: string };
+    return { asked, run };
+  };
+  const shared = listing([row("th-a", "alice@example.com"), row("th-b", "bob@example.com")], "bob@example.com");
+  const own = await shared.run();
+  assert.deepEqual(own.json.map((r) => r.id), ["th-b"]);
+  assert.match(own.text, /^Thread +Status +Attention +Run +Pylon +Project +Last reply +Owner +Title\n/);
+  assert.match(own.text, /bob@example\.com +th-b's/);
+  assert.deepEqual((await shared.run("everyone")).json.map((r) => r.id), ["th-a", "th-b"]);
+  const device = listing([row("th-a", "alice@example.com")], null);
+  assert.deepEqual((await device.run()).json.map((r) => r.id), ["th-a"], "a device that is no person lists everyone's");
+  const older = listing([row("th-a", "alice@example.com"), row("th-b", "bob@example.com")], undefined);
+  assert.deepEqual((await older.run()).json.map((r) => r.id), ["th-a", "th-b"], "a control plane whose whoami names no login lists everyone's");
+  const before = listing([row("th-a", "operator")], "bob@example.com");
+  const kept = await before.run();
+  assert.deepEqual(kept.json, [], "a shared install's threads from before people are the operator's, not bob's");
+  assert.deepEqual((await before.run("everyone")).json.map((r) => r.id), ["th-a"]);
+  assert.match((await before.run("everyone")).text, /^Thread .* Owner +Title\n.*operator +th-a's/s, "a shared install names their owner");
+  const solo = listing([row("th-a", "operator")], null);
+  assert.ok(!(await solo.run()).text.includes("Owner"), "a solo install's list is as it was");
+});

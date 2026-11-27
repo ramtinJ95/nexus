@@ -10,7 +10,7 @@ import { headHolds } from "./policy.ts";
 import { addThread, seedRegistry, testReview } from "../test-support/registry-kit.ts";
 import { openRegistry } from "./registry.ts";
 import { operator } from "./people.ts";
-import type { Person } from "../ids.ts";
+import type { Person, ThreadId } from "../ids.ts";
 import { tempDir } from "../test-support/kit.ts";
 import { rewindTo, versionBefore } from "../test-support/schema-kit.ts";
 
@@ -136,6 +136,34 @@ test("the arc's first migration gives every thread that came before it the opera
   const after = openRegistry(path);
   t.after(() => after.close());
   assert.equal(after.threads.thread(old.id)?.owner, operator);
+});
+
+test("the arc's owner migration sums each day's usage by the owner of each call's thread, and a call no longer recorded under the operator", async (t) => {
+  const path = join(await tempDir("nexus-usage-owner-", t), "registry.db");
+  const before = seedRegistry(openRegistry(path));
+  const alice = "alice@example.com" as Person;
+  const bob = "bob@example.com" as Person;
+  const call = (id: string, input: number) => ({ id, agent: "pi" as const, model: "gpt-6-astra", at: Date.UTC(2026, 10, 1), input, output: 1, cacheWrite: 0, cacheRead: 0 });
+  const [a, b, purged] = [alice, bob, bob].map((owner) => addThread(before, { thread: { owner } }).id) as [ThreadId, ThreadId, ThreadId];
+  before.usage.recordUsage(a, [call("a1", 10), call("a2", 20)]);
+  before.usage.recordUsage(b, [call("b1", 100)]);
+  before.usage.recordUsage(purged, [call("p1", 1000)]);
+  const total = before.usage.usageReport({ since: null }).total;
+  before.close();
+  const db = new DatabaseSync(path);
+  const owned = arcMigrations.findIndex((sql) => sql.includes("usage_days_owned"));
+  db.exec(`BEGIN; DELETE FROM usage_records WHERE thread = '${purged}';
+    CREATE TABLE usage_days_was (day TEXT NOT NULL, project TEXT NOT NULL, role TEXT NOT NULL, agent TEXT NOT NULL, model TEXT NOT NULL,
+      input INTEGER NOT NULL, output INTEGER NOT NULL, cache_write INTEGER NOT NULL, cache_read INTEGER NOT NULL, calls INTEGER NOT NULL,
+      PRIMARY KEY (day, project, role, agent, model)) STRICT;
+    INSERT INTO usage_days_was SELECT day, project, role, agent, model, sum(input), sum(output), sum(cache_write), sum(cache_read), sum(calls) FROM usage_days GROUP BY 1, 2, 3, 4, 5;
+    DROP TABLE usage_days; ALTER TABLE usage_days_was RENAME TO usage_days; UPDATE arc_schema SET version = ${owned}; COMMIT`);
+  db.close();
+  const after = openRegistry(path);
+  t.after(() => after.close());
+  const report = after.usage.usageReport({ since: null, by: ["owner"] });
+  assert.deepEqual(report.total, total, "the migration keeps every call's tokens");
+  assert.deepEqual(report.by.owner!.map((r) => [r.key, r.input, r.calls]), [[operator, 1000, 1], [bob, 100, 1], [alice, 30, 2]]);
 });
 
 test("the merge policy holds a change inside the arc list as irreversible, even one that names no table", async (t) => {

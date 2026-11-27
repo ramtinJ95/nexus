@@ -48,6 +48,7 @@ export function usageStore(db: Db, threads: {
    * calls, and any other the sums per day, which stay few however many calls there are.
    */
   const groupings: Readonly<Record<Breakdown, { key: string; order: string }>> = {
+    owner: { key: "owner", order: "total DESC, key" },
     model: { key: "model", order: "total DESC, key" },
     project: { key: "project", order: "total DESC, key" },
     kind: { key: "agent", order: "total DESC, key" },
@@ -158,6 +159,7 @@ export function usageStore(db: Db, threads: {
       const t = threadRecord(thread);
       if (t === undefined) throw new Error(`no thread ${thread} to record usage under`);
       const role = roleOf(t.started_by as string);
+      const owner = t.owner as string;
       const added = { calls: 0, tokens: 0 };
       transaction(() => {
         for (const c of calls) {
@@ -169,9 +171,10 @@ export function usageStore(db: Db, threads: {
           const at = (stored?.at as number | undefined) ?? c.at;
           const key = stored === undefined ? [thread, t.project as string, role, c.agent, c.model] : [thread, stored.project, stored.role, stored.agent, stored.model] as string[];
           sql("INSERT OR REPLACE INTO usage_records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(c.id, ...key, at, now.input, now.output, now.cacheWrite, now.cacheRead);
-          sql(`INSERT INTO usage_days VALUES ($day, $project, $role, $agent, $model, $input, $output, $cacheWrite, $cacheRead, $calls)
+          sql(`INSERT INTO usage_days (day, project, role, agent, model, owner, input, output, cache_write, cache_read, calls)
+            VALUES ($day, $project, $role, $agent, $model, $owner, $input, $output, $cacheWrite, $cacheRead, $calls)
             ON CONFLICT DO UPDATE SET input = input + $input, output = output + $output, cache_write = cache_write + $cacheWrite, cache_read = cache_read + $cacheRead, calls = calls + $calls`).run({
-            $day: day(at), $project: key[1]!, $role: key[2]!, $agent: key[3]!, $model: key[4]!, $calls: stored === undefined ? 1 : 0,
+            $day: day(at), $project: key[1]!, $role: key[2]!, $agent: key[3]!, $model: key[4]!, $owner: owner, $calls: stored === undefined ? 1 : 0,
             $input: now.input - was.input, $output: now.output - was.output, $cacheWrite: now.cacheWrite - was.cacheWrite, $cacheRead: now.cacheRead - was.cacheRead,
           });
           if (stored === undefined) added.calls++;
@@ -195,11 +198,13 @@ export function usageStore(db: Db, threads: {
     usageReport(filter: { since: number | null; project?: ProjectId | null; thread?: ThreadId | null; by?: readonly Breakdown[] }): UsageReport {
       const params = { $since: filter.since === null ? null : day(filter.since), $project: filter.project ?? null, $thread: filter.thread ?? null };
       const [from, calls, dayOf] = params.$thread === null ? ["usage_days", "coalesce(sum(calls), 0)", "day"] : ["usage_records", "count(*)", "date(at / 1000, 'unixepoch')"];
+      // A call's own record names its thread, whose owner never changes.
+      const ownerOf = params.$thread === null ? "owner" : "(SELECT owner FROM threads WHERE id = thread)";
       const where = `WHERE ($since IS NULL OR ${dayOf} >= $since) AND ($project IS NULL OR project = $project)${params.$thread === null ? " AND $thread IS NULL" : " AND thread = $thread"}`;
       const by: UsageReport["by"] = {};
       for (const breakdown of filter.by ?? []) {
         const { key, order } = groupings[breakdown];
-        by[breakdown] = sql(`SELECT ${key === "day" ? dayOf : key} AS key, ${sums(calls)} FROM ${from} ${where} GROUP BY 1 ORDER BY ${order}`)
+        by[breakdown] = sql(`SELECT ${key === "day" ? dayOf : key === "owner" ? ownerOf : key} AS key, ${sums(calls)} FROM ${from} ${where} GROUP BY 1 ORDER BY ${order}`)
           .all(params).map((r) => ({ key: r.key as string, ...totalsOf(r) }));
       }
       return {

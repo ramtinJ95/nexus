@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# The live box of docs/multiplayer-plan.md's mp-06: on the stack started with people, alice and bob each start a thread.
+# Bob's `nexus threads` lists only his own with an Owner column and `--everyone` lists both, alice's lists only hers, and
+# the home page bob is served opens on Mine with alice's row marked as hers, so the switch hides it until he picks
+# Everyone. Her thread's page says she started it, and `nexus usage` offers the owner breakdown. Where `playwright-cli`
+# runs, it also screenshots bob's home page under Mine and under Everyone. Exits 0 only if every step did what it should.
+set -euo pipefail
+V="$(cd "$(dirname "$0")" && pwd)/verify-nexus"
+base="$(cd "$(dirname "$0")/../../../.." && pwd)/.verify/nexus"
+fail() { echo "show-owner check: $*" >&2; exit 1; }
+
+trap '"$V" down >&2 || true' EXIT
+NEXUS_VERIFY_PEOPLE=1 "$V" up
+"$V" doctor
+evidence=$("$V" evidence)
+run=$(cat "$base/current")
+bobApi=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).bobApi)' "$base/runs/$run/state.json")
+
+# A shared start boots with its owner's own logins, so each signs in first, with made-up tokens.
+for who in alice bob; do
+  printf '%s\n' "sk-ant-oat01-$who-made-up-$(date +%s)" | "$V" cli "show-owner-login-claude-$who" --as "$who" -- login claude >/dev/null
+  printf '%s\n' "ghp_verify${who}0$(date +%s)" | "$V" cli "show-owner-login-github-$who" --as "$who" -- login github >/dev/null
+done
+A=$("$V" cli show-owner-start-alice -- start --project spoon --title "alice's thread" --json | jq -r .id)
+B=$("$V" cli show-owner-start-bob --as bob -- start --project spoon --title "bob's thread" --json | jq -r .id)
+echo "alice started $A, bob started $B"
+
+ids() { jq -c '[.[] | .id]'; }
+own=$("$V" cli show-owner-threads-bob --as bob -- threads --json | ids)
+everyone=$("$V" cli show-owner-threads-bob-everyone --as bob -- threads --everyone --json | ids)
+hers=$("$V" cli show-owner-threads-alice -- threads --json | ids)
+echo "bob's nexus threads: $own, with --everyone: $everyone, alice's: $hers"
+[ "$own" = "[\"$B\"]" ] || fail "bob's nexus threads lists $own"
+[ "$hers" = "[\"$A\"]" ] || fail "alice's nexus threads lists $hers"
+jq -e --arg a "$A" --arg b "$B" 'index($a) != null and index($b) != null and length == 2' <<< "$everyone" >/dev/null || fail "bob's --everyone lists $everyone"
+table=$("$V" cli show-owner-threads-bob-text --as bob -- threads --everyone)
+head -1 <<< "$table" | grep -q " Owner " || fail "bob's nexus threads has no Owner column"
+grep "$A" <<< "$table" | grep -q "alice@example.com" || fail "the row of $A does not name alice"
+
+curl -fsS "$bobApi/" > "$evidence/bob-home.html"
+grep -q 'id="owners-mine" checked>Mine' "$evidence/bob-home.html" || fail "bob's home page does not open on Mine"
+grep -q 'id="owners-all">Everyone' "$evidence/bob-home.html" || fail "bob's home page has no Everyone switch"
+grep -q "<li data-owner=\"alice@example.com\" data-theirs><a class=\"fl-row[^\"]*\" href=\"/?peek=$A\"" "$evidence/bob-home.html" || fail "alice's line is not marked as someone else's"
+grep -q "<li data-owner=\"bob@example.com\"><a class=\"fl-row[^\"]*\" href=\"/?peek=$B\"" "$evidence/bob-home.html" || fail "bob's line is not marked as his own"
+echo "bob's home page opens on Mine, with $A marked alice's and hidden under it, and $B his own"
+curl -fsS "$bobApi/threads/$A" > "$evidence/bob-thread-page.html"
+grep -q "Started by alice@example.com · " "$evidence/bob-thread-page.html" || fail "alice's thread page does not say she started it"
+echo "alice's thread page, as bob reads it: Started by alice@example.com"
+
+usage=$("$V" cli show-owner-usage --as bob -- usage --json | jq -c '{owners: [.by.owner[] | {key, total}], breakdowns: (.by | keys)}')
+echo "nexus usage as bob: $usage"
+jq -e '.breakdowns | index("owner") != null' <<< "$usage" >/dev/null || fail "nexus usage has no owner breakdown"
+
+if command -v playwright-cli >/dev/null; then
+  "$V" browser show-owner-open -- open "$bobApi/"
+  "$V" browser show-owner-mine -- screenshot --filename bob-home-mine.png
+  "$V" browser show-owner-pick-everyone -- click 'label.seg-tab:has(#owners-all)'
+  "$V" browser show-owner-everyone -- screenshot --filename bob-home-everyone.png
+  echo "screenshots: $evidence/bob-home-mine.png and $evidence/bob-home-everyone.png"
+else
+  echo "show-owner check: no playwright-cli here, so no screenshots; bob-home.html in $evidence is the page he was served"
+fi
+echo "show-owner check: bob's lists open on his own thread, --everyone and the Everyone switch show alice's too, each row names its owner, and nexus usage offers the owner breakdown"

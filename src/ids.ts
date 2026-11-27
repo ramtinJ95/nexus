@@ -16,8 +16,14 @@ export type JobId = Brand<string, "JobId">; // UUID minted by the control plane
 export type LiveHash = Brand<string, "LiveHash">;
 /** Tailscale's stable node ID, as LocalAPI whois reports it. It survives renames and address changes. */
 export type TailnetNodeId = Brand<string, "TailnetNodeId">;
-/** A person who owns threads: a tailnet login control.json's `people` names, or src/control/people.ts's operator. */
+/** A person who owns threads: a tailnet login control.json's `people` names, or the operator. */
 export type Person = Brand<string, "Person">;
+
+/**
+ * The one person of a solo install, and the owner the arc's first migration gives every thread that came before it. A
+ * tailnet login always holds an `@`, so no person of a shared install is the operator.
+ */
+export const operator = "operator" as Person;
 
 /** At most 34 characters, so `pylon-<id>` fits pi-sandbox's 40. */
 export type ThreadId = Brand<string, "ThreadId">;

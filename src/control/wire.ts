@@ -7,7 +7,7 @@ import type { PersonNeed } from "./work-model.ts";
 import type { ActualState, DesiredPhase } from "./reconcile.ts";
 import type { BootInputs } from "../protocol/spawn.ts";
 import type { GuestNotAnswering } from "../protocol/observations.ts";
-import type { NodeName, PylonId, TailnetNodeId } from "../ids.ts";
+import type { NodeName, Person, PylonId, TailnetNodeId } from "../ids.ts";
 import type { ClaudeResume, ClaudeSent, ClaudeWorkerState } from "./claude-worker.ts";
 import type { Output, Preview, Session, Thread } from "./thread-store.ts";
 import type { NodeRecord } from "./node-store.ts";
@@ -101,8 +101,11 @@ export interface ListeningPort { port: number; service: string | null; preview: 
 /** `pullRequestNumbers` are the numbers of the pull requests linked to the thread, in the order they were linked. */
 export type ThreadRow = Thread & { attention: Attention; desired: DesiredPhase; pylon: Pick<ThreadDetail["pylon"], "node" | "actualState" | "failed">; pullRequestNumbers: number[] };
 
-/** What `GET /v1/whoami` tells a caller about itself: its tailnet node, and what this control plane lets it do. */
-export interface Whoami { node: TailnetNodeId; allowed: boolean; person: boolean; deployer: boolean }
+/**
+ * What `GET /v1/whoami` tells a caller about itself: its tailnet node, and what this control plane lets it do. `login`
+ * is the person it is on a shared install, and null on a solo install or for a device that is no person.
+ */
+export interface Whoami { node: TailnetNodeId; allowed: boolean; person: boolean; deployer: boolean; login: Person | null }
 
 /**
  * A node without its probe's latest observation, which thread detail already reports per pylon. `pylons` sorts the

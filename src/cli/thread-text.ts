@@ -5,6 +5,7 @@ import type { Changes, Listing } from "../contract/pylon.ts";
 import { when, table, clip, type Tone } from "./kit.ts";
 import { needsPerson } from "../contract/attention.ts";
 import { gib } from "../util/gib.ts";
+import { operator } from "../ids.ts";
 
 const roomText = (r: Room) => `${gib(r.memoryGiB)} GiB memory, ${r.cpus} CPUs and ${gib(r.diskGiB)} GiB disk left`;
 function placementText(p: Placement): string {
@@ -58,6 +59,7 @@ export function detailText({ thread: t, pylon: p, agent, sessions, previews, por
   return [
     `${t.id}  ${t.title}`,
     `project: ${t.project}`,
+    ...(t.owner ?? operator) === operator ? [] : [`owner: ${t.owner}`],
     ...planning ? ["planning: its proposed items become questions you accept or reject"] : [],
     ...t.standingRulesRevision === undefined ? [] : [`standing rules: revision ${t.standingRulesRevision} of the project's, sent with its first message`],
     ...(claudeWorker === undefined ? [] : [`Claude worker: ${claudeWorker.state}, model ${claudeWorker.model ?? "unknown"}`, ...(claudeWorker.message === undefined ? [] : [`failed: ${claudeWorker.message}`])]),
@@ -133,14 +135,16 @@ const queuedRow = (q: QueuedThread) => {
 };
 
 /** A queued thread a start refused or another thread blocks waits on the person. */
-export const queuedTable = (queued: readonly QueuedThread[], colour: boolean) =>
-  table(["Queued", "State", "Waits", "Node", "Project", "Queued at", "Title"], queued.map(queuedRow), (i) => colour && queued[i]!.blocked ? "failed" : null);
+export const queuedTable = (queued: readonly QueuedThread[], colour: boolean, owners = false) =>
+  table(["Queued", "State", "Waits", "Node", "Project", "Queued at", ...owners ? ["Owner"] : [], "Title"],
+    queued.map((q) => owners ? queuedRow(q).toSpliced(6, 0, q.owner ?? "-") : queuedRow(q)), (i) => colour && queued[i]!.blocked ? "failed" : null);
 
 export function queuedText(q: QueuedThread): string {
   const { cpus, memoryGiB, diskGiB } = q.resources;
   return [
     `${q.id}  ${q.title}`,
     `project: ${q.project}`,
+    ...(q.owner ?? operator) === operator ? [] : [`owner: ${q.owner}`],
     `status: ${queuedState(q)}`,
     `node: ${q.node === "auto" ? "auto, the node with the most room once it starts" : q.node}`,
     `worker: ${q.worker === "claude" ? `Claude worker, model ${q.model ?? "unknown"}` : "Nexus agent"}`,
@@ -158,14 +162,14 @@ export function queuedText(q: QueuedThread): string {
 
 const threadTone = (t: ThreadRow): Tone | null => t.attention === "failed" || t.pylon.failed !== null ? "failed" : needsPerson(t.attention) ? "attention" : null;
 
-/** The threads, then the queued ones under their own header, coloured only when `colour`. */
-export function threadsText(threads: readonly ThreadRow[], queued: readonly QueuedThread[], colour: boolean): string {
+/** The threads, then the queued ones under their own header, coloured only when `colour`, with an Owner column when `owners`. */
+export function threadsText(threads: readonly ThreadRow[], queued: readonly QueuedThread[], colour: boolean, owners = false): string {
   if (threads.length === 0 && queued.length === 0) return "No threads.";
   const now = Date.now();
   const rows = threads.map((t) => [t.id, t.status, t.attention ?? "-", t.usageLimit !== undefined ? usageLimitText(t.usageLimit, now) : t.working ? "working" : "-",
-    t.pylon.actualState, t.project, t.lastReplyAt === null ? "no reply yet" : when(t.lastReplyAt, now), t.title]);
+    t.pylon.actualState, t.project, t.lastReplyAt === null ? "no reply yet" : when(t.lastReplyAt, now), ...owners ? [t.owner] : [], t.title]);
   return [
-    ...threads.length === 0 ? [] : [table(["Thread", "Status", "Attention", "Run", "Pylon", "Project", "Last reply", "Title"], rows, (i) => colour ? threadTone(threads[i]!) : null)],
-    ...queued.length === 0 ? [] : [queuedTable(queued, colour)],
+    ...threads.length === 0 ? [] : [table(["Thread", "Status", "Attention", "Run", "Pylon", "Project", "Last reply", ...owners ? ["Owner"] : [], "Title"], rows, (i) => colour ? threadTone(threads[i]!) : null)],
+    ...queued.length === 0 ? [] : [queuedTable(queued, colour, owners)],
   ].join("\n\n");
 }
