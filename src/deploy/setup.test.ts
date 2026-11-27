@@ -19,7 +19,7 @@ import { parseProbeConfig } from "../probe/config.ts";
 import { parseControlPlane } from "./control-plane.ts";
 import { parseTailscaleStatus } from "../tailscale.ts";
 import type { FollowUp } from "./credentials.ts";
-import { checkDotfiles, dotfilesStep, forgetLogins, withoutDotfiles, formatLeft, holdsImage, install, left, paths, parseFlags, report, tailnetDevices, setup, type Existing, type Facts, type FileWrite, type InstallSteps, type Json, type Setup } from "./setup.ts";
+import { checkDotfiles, dotfilesStep, forgetLogins, stopControl, withoutDotfiles, formatLeft, holdsImage, install, left, paths, parseFlags, report, tailnetDevices, setup, type Existing, type Facts, type FileWrite, type InstallSteps, type Json, type Setup } from "./setup.ts";
 
 const status = JSON.stringify({
   Version: "1.90.0",
@@ -648,6 +648,17 @@ test("--remove-person stops the control plane and deletes the person's stored lo
   const args = ["--remove-person", bob];
   assert.deepEqual((await installing(args)).ran.slice(0, 4), [lockDir, write(args.join(" ")), `forget ${bob}`, "bash ./deploy/install-control.sh"]);
   assert.ok(!(await installing(["--person", `${bob}=engineer`])).ran.some((line) => line.startsWith("forget")));
+});
+
+test("the control plane counts as stopped only when systemd says so, and a failed stop or query throws, so no login is deleted", async () => {
+  const systemctl = (stop: () => Promise<string>, state: () => Promise<string>) => (args: readonly string[]) => args[0] === "stop" ? stop() : state();
+  const ok = async () => "";
+  const refused = async () => { throw new Error("Failed to connect to bus"); };
+  await stopControl(systemctl(ok, async () => "inactive\n"));
+  await stopControl(systemctl(ok, async () => "failed\n"));
+  await assert.rejects(stopControl(systemctl(ok, async () => "deactivating\n")), /is deactivating after a stop/);
+  await assert.rejects(stopControl(systemctl(refused, async () => "inactive\n")), /Failed to connect to bus/);
+  await assert.rejects(stopControl(systemctl(ok, refused)), /Failed to connect to bus/);
 });
 
 test("a config write that refuses, such as --join without --node, stops install before anything else runs, with its exit code", async () => {

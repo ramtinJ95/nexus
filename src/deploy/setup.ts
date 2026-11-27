@@ -258,6 +258,16 @@ export async function forgetLogins(store: string, login: string): Promise<string
   return held ? `deleted ${login}'s stored logins, ${path}` : `${login} has no stored logins`;
 }
 
+/**
+ * Stops the control plane and resolves only once systemd says it is not running. A failed stop, or one systemd cannot
+ * be asked about, throws, so no login is deleted while a control plane that still admits the person may run.
+ */
+export async function stopControl(systemctl: (args: readonly string[]) => Promise<string>): Promise<void> {
+  await systemctl(["stop", unitNames.control]);
+  const state = (await systemctl(["show", "-p", "ActiveState", "--value", unitNames.control])).trim();
+  if (state !== "inactive" && state !== "failed") throw new Error(`${unitNames.control} is ${state || "in no state systemd names"} after a stop, so it could write a removed person's logins again, and they are not deleted. Stop it, then rerun with the same --remove-person`);
+}
+
 /** The branch of --dotfiles that pylons pull. */
 const dotfilesRef = "main";
 
@@ -792,10 +802,7 @@ function machineSteps(flags: Flags, manager: PackageManager): InstallSteps {
       await provision(flags.node === undefined ? "control" : "node", system, unattended ? scripted(process.env) : terminal(), (line) => console.error(line), next);
     },
     async forget(logins) {
-      await exec("systemctl", ["stop", unitNames.control]).catch(() => {});
-      if (await exec("systemctl", ["is-active", "--quiet", unitNames.control]).then(() => true, () => false)) {
-        throw new Error(`${unitNames.control} did not stop, so it could write a removed person's logins again, and they are not deleted. Stop it, then rerun with the same --remove-person`);
-      }
+      await stopControl(async (args) => (await exec("systemctl", args)).stdout);
       const { harnessCredentials } = controlFields(await readJson(paths.control), paths.control);
       if (harnessCredentials === undefined) throw new Error(`${paths.control} has no harness.credentials, beside which each person's stored logins live`);
       for (const login of logins) console.log(await forgetLogins(personStore(harnessCredentials), login));
