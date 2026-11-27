@@ -95,6 +95,8 @@ export const bootSchema = z.strictObject({
 	publicUrls: z.record(serviceName, z.url({ protocol: /^https$/ })),
 	/** The probe's socket, which the guest's requests to http://nexus.pylon are forwarded to (host-bridge.ts). Null for a template build, which no pylon owns. */
 	hostBridge: z.string().startsWith("/").nullable(),
+	/** A shared install's owner boot only (github-guard.ts). A null branch refuses every push. */
+	githubGuard: z.strictObject({ defaultBranch: z.string().min(1).nullable() }).optional(),
 });
 export type BootSpec = z.infer<typeof bootSchema>;
 export const commandOutcomeSchema = z.discriminatedUnion("state", [

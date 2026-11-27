@@ -36,7 +36,7 @@ export function placementNeed(project: Project, request: Pick<StartRequest, "bra
   const repo: RepoInit = hasRemote(project)
     ? { kind: "clone", url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } }
     : { kind: "empty", branch };
-  return { image, resources: resourcesOf(request.resources, project), network: bootNetwork(project, dotfiles?.repo, owned), repo, dotfiles };
+  return { image, resources: resourcesOf(request.resources, project), network: { ...bootNetwork(project, dotfiles?.repo, owned), defaultBranch: project.defaultBranch }, repo, dotfiles };
 }
 
 /**

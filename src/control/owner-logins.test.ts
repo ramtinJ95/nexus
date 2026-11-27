@@ -9,6 +9,7 @@ import { ownerLogins } from "./owner-logins.ts";
 import { tailnet, type WhoisAnswer } from "../test-support/people.ts";
 import { parseWhois } from "../node-base/tailscaled.ts";
 import { networkOptions } from "../pylon-vm/network.ts";
+import { githubGuardOf } from "../backends/pylon-vm/pylon-vm-backend.ts";
 import type { BootSpec } from "../pylon-vm/contracts.ts";
 import type { ImageId, NodeName, Person, PylonId } from "../ids.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
@@ -61,6 +62,7 @@ test("an admin's edit of a shared project changes no host that receives an engin
     { name: "CLAUDE_CODE_OAUTH_TOKEN", hosts: ["api.anthropic.com"], owner: true },
     { name: "GH_TOKEN", hosts: ["api.github.com", "github.com"], owner: true },
   ], "bob's tokens go only to their own hosts, whatever the project grants");
+  assert.deepEqual(githubGuardOf(boot), { githubGuard: { defaultBranch: "main" } }, "bob's pylon boots behind the GitHub guard, with the project's default branch");
   assert.deepEqual(boot.gitIdentity, bobIdentity, "bob's commits are authored as the account of his GitHub login, not as the project says");
   assert.deepEqual(s.pylonSecrets.filter(([pylon]) => pylon === started.body.pylonId).map(([, name, value]) => [name, value]),
     [["CLAUDE_CODE_OAUTH_TOKEN", bobClaude], ["GH_TOKEN", bobGithub]], "the probe holds bob's own values for bob's pylon");

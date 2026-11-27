@@ -43,6 +43,7 @@ const jobs = [
   { kind: "fetch-artifact", artifact: "ckpt-abc", from: "rj-firebat", sha256: hex },
   { kind: "drop-artifact", artifact: image },
   { kind: "drop-artifact", artifact: template },
+  { kind: "spawn", pylonId, boot: { ...boot({ kind: "fresh", preSetup: null }, clone), network: { allowedHosts: [], secrets: [], defaultBranch: "trunk" } }, live, liveHash: "h" },
 ];
 const envelope = (job: unknown) => ({ jobId: "job-1", node, issuedAt: "2027-01-01T00:00:00Z", notAfter: "2027-01-01T00:00:30Z", job });
 
@@ -64,6 +65,7 @@ test("a probe refuses an envelope that fails any check of its fields", () => {
       { ...spawn, boot: { ...spawn.boot, source: { kind: "fresh", preSetup: "" } } }, { ...spawn, boot: { ...spawn.boot, repo: { url: clone.url, checkout: clone.checkout } } },
       { ...spawn, boot: { ...spawn.boot, repo: { kind: "fork" } } }, { ...spawn, boot: { ...spawn.boot, repo: { kind: "clone", url: clone.url, checkout: { branch: "main" } } } },
       { ...spawn, boot: { ...spawn.boot, repo: { kind: "empty", branch: "" } } }, { ...spawn, live: { previews: [] } }, { ...spawn, live: { previews: {}, overlay: [] } },
+      { ...spawn, boot: { ...spawn.boot, network: { allowedHosts: [], secrets: [], defaultBranch: "" } } },
       without(spawn, "liveHash"), { ...spawn, relaunch: true }, { ...spawn, relaunch: null },
       { kind: "pause", pylonId, checkpoint: "abc" }, { kind: "pause", checkpoint: "ckpt-1" }, { kind: "delete", pylonId: 1 },
       { kind: "build-image", image: template, recipe: {} }, { kind: "build-image", image, recipe: [] }, { kind: "build-template", template: image, inputs: {} }, { kind: "build-template", template },

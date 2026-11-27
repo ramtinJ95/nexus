@@ -2,7 +2,7 @@
 # Creates (or reuses) the private scratch repo and tops it up to $WANT open seed pull requests, from the host,
 # with the host's gh login. Each seed PR adds its own file, so every one stays mergeable on its own.
 set -eu
-repo=ramtinJ95/nexus-guard-scratch
+repo=${SCRATCH_REPO:-ramtinJ95/nexus-guard-scratch}
 want=${WANT:-10}
 if ! gh repo view "$repo" >/dev/null 2>&1; then
   gh repo create "$repo" --private --add-readme --description "throwaway: Nexus egress guard prototype" >/dev/null
