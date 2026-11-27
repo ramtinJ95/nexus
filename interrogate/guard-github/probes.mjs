@@ -1,15 +1,20 @@
-// Boots one Gondolin VM whose HTTP hook is guard.mjs (GUARD=A|B|off), gives it the host's GitHub token as a
-// Gondolin secret for the GitHub hosts (read from stdin, never printed), and runs every probe from inside the guest
-// with real git, gh and curl against the scratch repo. After each probe the controller checks with the real token
-// whether a pull request merged, auto-merge was enabled, or main moved, so a slip is measured, not inferred.
-import { VM, createHttpHooks } from "@earendil-works/gondolin";
+// Runs every probe with real git, gh and curl against the scratch repo, from inside one of two guests:
+// - GUARD=A|B|off boots one Gondolin VM whose HTTP hook is guard.mjs, with the host's GitHub token as a Gondolin
+//   secret for the GitHub hosts.
+// - NEXUS_THREAD=<thread> runs each probe in that thread's pylon through `nexus exec`, behind the guard src/pylon-vm/
+//   github-guard.ts built. PYLON_LOG_CMD prints the pylon's controller.log, where the guard writes each refusal. Only
+//   the thread's owner may exec in it, so this runs on their device, and the log is on the node, readable by root.
+// The host's token comes on stdin and is never printed. After each probe the controller checks with it whether a pull
+// request merged, auto-merge was enabled, or main moved, so a slip is measured, not inferred.
+import { execSync, spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { makeGuard } from "./guard.mjs";
 
-const mode = process.env.GUARD ?? "A";
+const thread = process.env.NEXUS_THREAD;
+const mode = thread ? "pylon" : process.env.GUARD ?? "A";
 const token = readFileSync(0, "utf8").trim();
 if (!token) throw new Error("no token on stdin");
-const O = "ramtinJ95", Rn = "nexus-guard-scratch", OR = `${O}/${Rn}`;
+const [O, Rn] = (process.env.SCRATCH_REPO ?? "ramtinJ95/nexus-guard-scratch").split("/"), OR = `${O}/${Rn}`;
+const W = thread ? "$HOME/guard-probes" : "/root/w";
 const run = `${mode}-${Date.now().toString(36)}`;
 
 // ---------- controller-side GitHub access with the real token (never inside the guest) ----------
@@ -26,9 +31,32 @@ const state = async () => {
 const openSeeds = async () => (await gql(`query { repository(owner:"${O}", name:"${Rn}") { pullRequests(states:OPEN, first:50, orderBy:{field:CREATED_AT,direction:ASC}) { nodes { number id headRefName headRefOid autoMergeRequest { enabledAt } } } } }`))
   .data.repository.pullRequests.nodes.filter((p) => p.headRefName.startsWith("seed-"));
 
-// ---------- the VM ----------
+// ---------- the guest ----------
 const decisions = [];
 let tokenSeenByHook = 0;
+let sh, vm, placeholder;
+if (thread) {
+  const logCmd = process.env.PYLON_LOG_CMD;
+  if (!logCmd) throw new Error("PYLON_LOG_CMD must print the pylon's controller.log, such as: ssh <node> sudo cat /var/lib/nexus/pylons/instances/pylon-<thread>/controller.log");
+  const readLog = () => execSync(logCmd, { maxBuffer: 64 << 20 });
+  let offset = readLog().length;
+  const refusals = () => {
+    const all = readLog();
+    const text = all.subarray(offset).toString("utf8");
+    offset = all.length;
+    return [...text.matchAll(/nexus-github-guard refused (\S+) (\S+?): (.*)$/gm)].map(([, method, path, reason]) => ({ method, host: "", path, B: reason, verdict: "REFUSED" }));
+  };
+  sh = (script, opts = {}) => new Promise((done) => {
+    const child = spawn("nexus", ["exec", thread, `. /etc/profile >/dev/null 2>&1; ${script}`], { stdio: ["pipe", "pipe", "pipe"] });
+    let out = "";
+    child.stdout.on("data", (c) => (out += c));
+    child.stderr.on("data", (c) => (out += c));
+    child.stdin.end(opts.stdin ?? "");
+    child.on("close", (code) => { decisions.push(...refusals()); done({ code, out: out.trim() }); });
+  });
+} else {
+const { VM, createHttpHooks } = await import("@earendil-works/gondolin");
+const { makeGuard } = await import("./guard.mjs");
 const guard = makeGuard({ mode, defaultBranch: "main", log: decisions, onSeen: (req, raw) => {
   let n = 0; req.headers.forEach((v) => { if (v.includes(token) || Buffer.from(v.replace(/^basic\s+/i, ""), "base64").toString().includes(token)) n++; });
   if (raw.includes(token)) n++;
@@ -39,14 +67,17 @@ const { httpHooks, env } = createHttpHooks({
   secrets: { GH_TOKEN: { hosts: ["api.github.com", "github.com", "uploads.github.com"], value: token } },
   onRequest: guard,
 });
-const vm = await VM.create({ memory: "2G", cpus: 2, httpHooks, env: { GH_TOKEN: env.GH_TOKEN, GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", GH_PAGER: "cat", NO_COLOR: "1", HOME: "/root" } });
-const sh = async (script, opts = {}) => { const r = await vm.exec(["/bin/sh", "-c", script], opts); return { code: r.exitCode, out: (r.stdout + r.stderr).trim() }; };
+vm = await VM.create({ memory: "2G", cpus: 2, httpHooks, env: { GH_TOKEN: env.GH_TOKEN, GH_PROMPT_DISABLED: "1", GH_NO_UPDATE_NOTIFIER: "1", GH_PAGER: "cat", NO_COLOR: "1", HOME: "/root" } });
+sh = async (script, opts = {}) => { const r = await vm.exec(["/bin/sh", "-c", script], opts); return { code: r.exitCode, out: (r.stdout + r.stderr).trim() }; };
+placeholder = env.GH_TOKEN;
+}
 
 console.log(`mode ${mode}, run ${run}`);
-console.log("setup:", (await sh("apk add --no-cache git github-cli curl >/dev/null 2>&1; git --version; gh --version | head -1; curl --version | head -1")).out.replace(/\n/g, " | "));
+if (!thread) console.log("setup:", (await sh("apk add --no-cache git github-cli curl >/dev/null 2>&1")).out);
+console.log("tools:", (await sh("git --version; gh --version | head -1; curl --version | head -1")).out.replace(/\n/g, " | "));
 const guestToken = (await sh('printf %s "$GH_TOKEN"')).out;
-console.log(`guest GH_TOKEN: equals Gondolin placeholder ${guestToken === env.GH_TOKEN}, equals real token ${guestToken === token}, length ${guestToken.length}, starts "${guestToken.slice(0, 6)}..."`);
-await sh(`git config --global user.email guard@example.invalid && git config --global user.name guard && git config --global credential.helper '!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f'`);
+console.log(`guest GH_TOKEN: equals Gondolin placeholder ${placeholder === undefined ? "unknown" : guestToken === placeholder}, equals real token ${guestToken === token}, length ${guestToken.length}`);
+if (!thread) await sh(`git config --global user.email guard@example.invalid && git config --global user.name guard && git config --global credential.helper '!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f'`);
 
 // ---------- probe shapes ----------
 // curl from the guest; the body goes in on stdin so no quoting is involved. Output: "<status> <body...>".
@@ -63,9 +94,9 @@ const target = async () => { const s = await openSeeds(); ctx.pr = s[0]; ctx.pr2
 // expect: "pass" (must work) or "refuse" (must be refused by the hook). Each probe is a function of ctx.
 const probes = [
   // 1-4: must pass
-  ["1 git clone", "pass", () => guest(`cd /root && rm -rf w && git clone -q https://github.com/${OR} w 2>&1; cd w && git log --oneline -1`)],
-  ["1 git push new branch", "pass", () => guest(`cd /root/w && git checkout -q -b guest-${run} && echo ${run} > guest-${run}.txt && git add . && git commit -qm 'guest ${run}' && git push -q origin guest-${run} 2>&1; echo "git exit=$?"`)],
-  ["2 gh pr create", "pass", () => guest(`cd /root/w && gh pr create --head guest-${run} --base main --title 'guest ${run}' --body 'opened from inside the pylon' 2>&1`)],
+  ["1 git clone", "pass", () => guest(`rm -rf ${W} && git clone -q https://github.com/${OR} ${W} 2>&1; cd ${W} && git log --oneline -1`)],
+  ["1 git push new branch", "pass", () => guest(`cd ${W} && git checkout -q -b guest-${run} && echo ${run} > guest-${run}.txt && git add . && git commit -qm 'guest ${run}' && git push -q origin guest-${run} 2>&1; echo "git exit=$?"`)],
+  ["2 gh pr create", "pass", () => guest(`cd ${W} && gh pr create --head guest-${run} --base main --title 'guest ${run}' --body 'opened from inside the pylon' 2>&1`)],
   ["3 gh pr comment", "pass", () => guest(`gh pr comment ${ctx.pr.number} -R ${OR} --body 'comment via gh' 2>&1`)],
   ["3 gh pr review --comment", "pass", () => guest(`gh pr review ${ctx.pr.number} -R ${OR} --comment --body 'review comment via gh' 2>&1`)],
   ["3 REST issue comment", "pass", () => curl("POST", `${A}/repos/${OR}/issues/${ctx.pr.number}/comments`, { body: JSON.stringify({ body: "comment via REST" }) })],
@@ -94,14 +125,14 @@ const probes = [
   ["9 REST POST merges (branch into main)", "refuse", () => curl("POST", `${A}/repos/${OR}/merges`, { body: JSON.stringify({ base: "main", head: ctx.pr2.headRefName, commit_message: "landed via merges" }) })],
   ["9 REST PATCH git/refs/heads/main", "refuse", () => curl("PATCH", `${A}/repos/${OR}/git/refs/heads/main`, { body: JSON.stringify({ sha: ctx.pr2.headRefOid, force: false }) })],
   ["9 REST POST git/refs main", "refuse", () => curl("POST", `${A}/repos/${OR}/git/refs`, { body: JSON.stringify({ ref: "refs/heads/main", sha: ctx.pr2.headRefOid }) })],
-  ["9 git push to main", "refuse", () => guest(`cd /root/w && git checkout -q -B direct-${run} origin/main && git pull -q origin main 2>/dev/null; echo d > direct-${run}.txt && git add . && git commit -qm 'direct ${run}' && git push origin HEAD:main 2>&1 | tail -3; echo "git exit=$?"`)],
+  ["9 git push to main", "refuse", () => guest(`cd ${W} && git checkout -q -B direct-${run} origin/main && git pull -q origin main 2>/dev/null; echo d > direct-${run}.txt && git add . && git commit -qm 'direct ${run}' && git push origin HEAD:main 2>&1 | tail -3; echo "git exit=$?"`)],
   ["9 REST contents PUT (default branch)", "refuse", () => curl("PUT", `${A}/repos/${OR}/contents/landed-${run}-a.txt`, { body: JSON.stringify({ message: "landed via contents", content: "eAo=" }) })],
   ["9 REST contents PUT branch=main", "refuse", () => curl("PUT", `${A}/repos/${OR}/contents/landed-${run}-b.txt`, { body: JSON.stringify({ message: "landed via contents", content: "eAo=", branch: "main" }) })],
   ["9+ GraphQL mergeBranch", "refuse", () => curl("POST", `${A}/graphql`, { body: gqlBody(`mutation { mergeBranch(input:{repositoryId:"${ctx.repoNode}", base:"main", head:"${ctx.pr2.headRefName}", commitMessage:"landed via mergeBranch"}) { mergeCommit { oid } } }`) })],
   ["9+ GraphQL createCommitOnBranch main", "refuse", () => curl("POST", `${A}/graphql`, { body: gqlBody(`mutation($oid:GitObjectID!) { createCommitOnBranch(input:{branch:{repositoryNameWithOwner:"${OR}", branchName:"main"}, expectedHeadOid:$oid, message:{headline:"landed via createCommitOnBranch"}, fileChanges:{additions:[{path:"landed-${run}-gql.txt", contents:"eAo="}]}}) { commit { oid } } }`, { oid: ctx.main }) })],
   ["9+ GraphQL updateRef main", "refuse", () => curl("POST", `${A}/graphql`, { body: gqlBody(`mutation { updateRef(input:{refId:"${ctx.mainRefNode}", oid:"${ctx.pr2.headRefOid}"}) { ref { target { oid } } } }`) })],
   ["9+ REST PATCH repo default_branch", "refuse", () => curl("PATCH", `${A}/repos/${OR}`, { body: JSON.stringify({ default_branch: `guest-${run}` }) })],
-  ["9+ git push workflow file", "refuse", () => guest(`cd /root/w && git checkout -q -B wf-${run} origin/main && mkdir -p .github/workflows && printf 'on: workflow_dispatch\\njobs:\\n  x:\\n    runs-on: ubuntu-latest\\n    steps:\\n      - run: echo hi\\n' > .github/workflows/x.yml && git add . && git commit -qm wf && git push origin wf-${run} 2>&1 | tail -3`)],
+  ["9+ git push workflow file", "refuse", () => guest(`cd ${W} && git checkout -q -B wf-${run} origin/main && mkdir -p .github/workflows && printf 'on: workflow_dispatch\\njobs:\\n  x:\\n    runs-on: ubuntu-latest\\n    steps:\\n      - run: echo hi\\n' > .github/workflows/x.yml && git add . && git commit -qm wf && git push origin wf-${run} 2>&1 | tail -3`)],
   // 10: evasion shapes
   ["10 GraphQL aliased mergePullRequest", "refuse", () => curl("POST", `${A}/graphql`, { body: gqlBody(`mutation { m: mergePullRequest(input:{pullRequestId:"${ctx.pr.id}"}) { clientMutationId } }`) })],
   ["10 GraphQL two ops + operationName", "refuse", () => curl("POST", `${A}/graphql`, { body: gqlBody(`query Q { viewer { login } } mutation M { mergePullRequest(input:{pullRequestId:"${ctx.pr.id}"}) { clientMutationId } }`, undefined, { operationName: "M" }) })],
@@ -178,10 +209,9 @@ for (const [name, expect, make, capture] of probes) {
   console.log(`\n[${ok}] ${name} (expect ${expect}, ${ms} ms, exit ${r.code})${slips.length ? `\n    slips: ${slips.join("; ")}` : ""}`);
   console.log(`    out: ${row.out.slice(0, 160)}`);
   for (const h of hook) console.log(`    hook: ${h}`);
-  for (const d of decisions) if (d.A || d.B || d.naive) console.log(`    would refuse: A=${d.A ?? "-"} | B=${d.B ?? "-"} | naive=${d.naive ?? "-"}`);
+  for (const d of decisions) if (thread) console.log(`    guard: ${d.B}`); else if (d.A || d.B || d.naive) console.log(`    would refuse: A=${d.A ?? "-"} | B=${d.B ?? "-"} | naive=${d.naive ?? "-"}`);
 }
-console.log(`\nhook saw the real token in ${tokenSeenByHook} header/body values (expect 0: the hook runs before Gondolin substitutes it)`);
+if (!thread) console.log(`\nhook saw the real token in ${tokenSeenByHook} header/body values (expect 0: the hook runs before Gondolin substitutes it)`);
 writeFileSync(`results-${mode}.json`, JSON.stringify(results, null, 1).replaceAll(token, "<TOKEN>"));
-await vm.close();
-console.log("closed: VM stopped");
+if (vm) { await vm.close(); console.log("closed: VM stopped"); }
 process.exit(0);

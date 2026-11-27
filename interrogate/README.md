@@ -30,6 +30,16 @@ Some tests fail today and pass when their slice is done. Others pass today, beca
 
 `guard-github/run.sh` reruns it against a private scratch repository, which `seed.sh` names. Before you run it, know that the `off` mode merges about 14 pull requests in that repository.
 
+`mp-15` built the guard in `src/pylon-vm/github-guard.ts`, and `src/pylon-vm/github-guard.test.ts` holds the 77 probes as recorded requests. `probes.mjs` also reruns the list from inside a real pylon behind the built guard. Run it from the owner's device, with the owner's thread on the scratch project and a `gh` login there that may administer the scratch repository:
+
+```sh
+export SCRATCH_REPO=<owner>/<scratch> NEXUS_THREAD=<thread>
+WANT=14 interrogate/guard-github/seed.sh
+gh auth token | PYLON_LOG_CMD="ssh <node> sudo cat /var/lib/nexus/pylons/instances/pylon-$NEXUS_THREAD/controller.log" node interrogate/guard-github/probes.mjs | tee guard-pylon.txt
+```
+
+Each probe prints `[ok]`, `[SLIPPED]` or `[BROKEN]`, the guard's refusals that the pylon's log gained, and any slip the runner saw on GitHub.
+
 ## The VM rigs
 
 `vm/` holds two rigs that boot real Gondolin VMs. Both need `/dev/kvm`.
