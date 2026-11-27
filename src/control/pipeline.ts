@@ -122,7 +122,8 @@ function startedPhase(registry: PipelineRegistry, t: Thread, review: Review | nu
     case "merged": return phase("landed", `${pr} merged outside its review`);
     case "needs-person": return phase("held", `its review ended for the person: ${review.phase.holds[0]?.text ?? "no reason given"}`);
     case "merging": case "deploying": case "rolling-back": return phase("landing", `${pr} is ${review.phase.kind.replace("-", " ")}${phaseNote(review)}`);
-    case "approved": return review.land === null ? phase("held", `${pr} is approved, and lands once the person runs nexus land ${id}`) : phase("landing", `${pr} is approved`);
+    case "approved": return review.phase.onGitHub ? phase("held", `${pr} is approved, for an engineer to merge on GitHub`)
+      : review.land === null ? phase("held", `${pr} is approved, and lands once the person runs nexus land ${id}`) : phase("landing", `${pr} is approved`);
     case "reviewing": case "fixing": case "quoting": case "checking": return phase(onTrack(review), `${pr}, round ${review.rounds.length}: ${review.phase.kind}${checkBeside(review)}${heldNote(review)}`);
     case "verifying": return phase(onTrack(review), `${pr}, round ${review.rounds.length}: ${liveNote(review)}${heldNote(review)}`);
     // A review that ended without landing says nothing of a pull request reopened or merged since, which its links do.

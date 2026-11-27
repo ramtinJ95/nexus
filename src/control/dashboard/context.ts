@@ -19,7 +19,7 @@ import type { NodePylons } from "../placement.ts";
 import type { HealthSample } from "../node-metrics.ts";
 import type { Period } from "../usage.ts";
 
-export type LandRefusal = "no review loop" | "not a deployer";
+export type LandRefusal = "no review loop" | "not a deployer" | "landing off";
 
 /**
  * What every part of a page reads, read once per render however many parts show it. `now` is read once, so every

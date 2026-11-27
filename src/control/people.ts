@@ -7,6 +7,7 @@
 import { z } from "zod";
 import type { Person } from "../ids.ts";
 import type { TailnetIdentity } from "../node-base/tailscaled.ts";
+import { Refusal } from "./refusal.ts";
 
 export type PersonRole = "admin" | "engineer";
 
@@ -37,3 +38,6 @@ export function personOf(people: Extract<People, { shared: true }>, identity: Ta
 
 /** Who starts or queues a thread: the device or role name its `startedBy` records, and the person who owns it. */
 export interface Starter { caller: string; owner: Person }
+
+/** What refuses every landing on a shared install, whoever asks for it, since Nexus never merges there. */
+export const landingOff = () => new Refusal("forbidden", "Nexus never merges on a shared install, so it lands no pull request. An engineer merges it on GitHub", "landing-off");

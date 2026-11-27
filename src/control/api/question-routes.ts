@@ -5,7 +5,7 @@ import { answerDelivered, answerExits, claudeHook } from "../../../images/pylon/
 import { askAnswer, choicesSchema, choicesSummary, type AnswerRefusal, type Choice, type ClaudeQuestion, type Question, type QuestionKind, type QuestionOf } from "../questions.ts";
 import { ok, on, parse, type RouteEntry, type ApiKit } from "./kit.ts";
 import { anyAllowed } from "./access.ts";
-import { questionRoutes as routes } from "../../contract/reviews.ts";
+import { landOption, questionRoutes as routes } from "../../contract/reviews.ts";
 import { answerSchema } from "../../contract/reviews-parse.ts";
 import type { z } from "zod";
 
@@ -32,7 +32,7 @@ function answeredWith<Q extends Question>(answered: Q, option: string): Q {
 }
 
 export function questionRoutes(kit: ApiKit, features: Features): readonly RouteEntry[] {
-  const { execInPylon, registry, claude, answerRefusalOf } = kit;
+  const { execInPylon, registry, claude, answerRefusalOf, refuseLanding } = kit;
 
   /**
    * Hands the person's choices to the Claude worker's AskUserQuestion dialog through the hook that waits in its pylon,
@@ -109,6 +109,7 @@ export function questionRoutes(kit: ApiKit, features: Features): readonly RouteE
       const question = registry.questions.question(id);
       if (question === null) throw new HttpError(404, `no question ${id}`);
       if (question.withdrawn !== undefined) throw new HttpError(409, `question ${question.id} was withdrawn when its thread was archived`);
+      if (question.kind === "holds" && "option" in body && body.option === landOption) refuseLanding();
       const refused = answerRefusalOf(r, question);
       if (refused !== null) throw new HttpError(403, `caller may not answer this question: ${answerRefusals[refused]("thread" in question ? registry.threads.thread(question.thread)?.owner : undefined)}`);
       const answer = answering[question.kind] as (question: Question, body: Body, caller: TailnetNodeId) => Question | Promise<Question>;

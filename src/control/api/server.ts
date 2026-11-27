@@ -161,7 +161,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
   asset(entry);
   const { registry, whois, allowed, hostnames, harness, claude, startThread, wake, probes, streamStallMs = 30_000, attachTiming: timing = attachTiming, closeWaitMs = 5_000 } = options;
   const access = apiAccess(registry, wake, options);
-  const { thread, threadRefusal, guard, current, roleOf, admittable, actsOn, administers } = access;
+  const { thread, threadRefusal, guard, current, roleOf, admittable, actsOn, administers, refuseLanding } = access;
   const pylon = pylonAccess({ registry, probes, wake, guard, current });
   const { inPylon, whileRunning } = pylon;
   const wakeThread = access.wakeThread;
@@ -288,6 +288,7 @@ export async function startApi(options: ApiOptions): Promise<Api> {
     if (atPath.length === 0) throw new Refusal("missing", `no route ${path}`, "no-route");
     if (match === undefined) throw new Refusal("method", `${req.method} is not allowed on ${path}`);
     const { entry: [, , policy, route], m } = match;
+    if (policy.lands) refuseLanding();
     demand(roles, policy, caller);
     // An owner route's path starts with its thread, which kit.ts's `on` checks.
     if (policy.role === "owner") actsOn(m[1]!, { identity, roles }, policy);

@@ -1,3 +1,5 @@
+import type { People } from "./people.ts";
+
 export interface PullRequest {
   /** owner/repository. */
   repo: string;
@@ -48,6 +50,12 @@ export interface GitHub {
   change(repo: string, base: string, head: string): Promise<ChangedFile[] | null>;
   /** Whether branch `base` has commits that commit `head` lacks, so a merge of `head` would land a combination no check ran. */
   behind(repo: string, base: string, head: string): Promise<boolean>;
+  /** Adds the label `name` to the PR, creating it in the repository first if it has none. Adding it twice is harmless. */
+  label(repo: string, number: number, name: string): Promise<LabelResult>;
+  has(repo: string, commit: string, path: string): Promise<boolean>;
+}
+/** The writes a landing makes, which only a solo install's control plane holds. */
+export interface GitHubLanding {
   /**
    * Merges the PR's base into its branch while its head is still `head`, as GitHub's "Update branch" does. False when
    * GitHub refuses, as for a conflict.
@@ -55,9 +63,6 @@ export interface GitHub {
   update(repo: string, number: number, head: string): Promise<boolean>;
   /** Squash-merges only while the PR's head is still `head`, so it never merges a commit nobody reviewed. */
   merge(repo: string, number: number, head: string): Promise<MergeResult>;
-  /** Adds the label `name` to the PR, creating it in the repository first if it has none. Adding it twice is harmless. */
-  label(repo: string, number: number, name: string): Promise<LabelResult>;
-  has(repo: string, commit: string, path: string): Promise<boolean>;
 }
 
 /**
@@ -87,7 +92,7 @@ const changedFile = (f: FileEntry): ChangedFile => ({ path: f.filename, previous
  * Each resource has its own ETag: a PR's ETag says nothing about its checks or comments. The cache keeps the resources
  * read most recently, and drops a PR's commit resources once its head moves, since nothing reads them again.
  */
-export function githubClient(token: string, request: typeof fetch = fetch, clock: () => number = Date.now): GitHub & { token(): Promise<TokenAnswer> } {
+export function githubClient(token: string, request: typeof fetch = fetch, clock: () => number = Date.now): GitHub & GitHubLanding & { token(): Promise<TokenAnswer> } {
   let answer: { at: number; value: TokenAnswer } | null = null;
   const cache = new Map<string, { etag: string | null; value: unknown; next: string | null }>();
   /** Each open PR's head at its last read, by repository and number. */
@@ -271,4 +276,13 @@ export function githubClient(token: string, request: typeof fetch = fetch, clock
       throw new Error(`GitHub contents: HTTP ${response.status}`);
     },
   };
+}
+
+/**
+ * The control plane's client, and apart from it the writes a landing makes. A shared install keeps no landing, so
+ * nothing the control plane hands its passes or routes can merge or update a branch.
+ */
+export function controlGitHub(token: string, people: People): { github: GitHub & { token(): Promise<TokenAnswer> }; landing: GitHubLanding | null } {
+  const { update, merge, ...github } = githubClient(token);
+  return { github, landing: people.shared ? null : { update, merge } };
 }

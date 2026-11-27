@@ -50,6 +50,7 @@ import { threadPage, queuedPage } from "../dashboard/thread-page.ts";
 import { liveStreams, type ItemsOf } from "../dashboard/live-frames.ts";
 import type { ApiKit, RouteEntry } from "./kit.ts";
 import { anyAllowed, landing, refusal, type Role } from "./access.ts";
+import type { People } from "../people.ts";
 import { readHealth } from "./node-routes.ts";
 
 type Caller = { caller: TailnetNodeId; roles: ReadonlySet<Role>; identity: TailnetIdentity };
@@ -66,7 +67,7 @@ function latestOf(d: ThreadDetail, items: readonly Item[]): Latest {
   };
 }
 
-export function dashboardRoutes(kit: ApiKit, options: { features: Features; health(): DoctorReport | null }, nodeHealth: (name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
+export function dashboardRoutes(kit: ApiKit, options: { features: Features; health(): DoctorReport | null; people?: People | undefined }, nodeHealth: (name: NodeName) => Promise<NodeHealth>): readonly RouteEntry[] {
   const { registry, detail } = kit;
   const deploys = (r: Review) => options.features.reviews?.deploys(r) ?? false;
   const live = liveStreams();
@@ -95,7 +96,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
     const queued: ReadonlyMap<string, readonly QueuedThread[]> = Map.groupBy(registry.queue.queuedThreads().filter((q) => q.status === "queued").map((q) => queuedView(registry, q)), (q) => q.project);
     const queuedIn = (project: string) => queued.get(project) ?? [];
     return {
-      now, caller, deploys, landRefusal: options.features.reviews === null ? "no review loop" : refusal(roles, landing) === null ? null : "not a deployer",
+      now, caller, deploys, landRefusal: options.people?.shared ? "landing off" : options.features.reviews === null ? "no review loop" : refusal(roles, landing) === null ? null : "not a deployer",
       answerRefusal: (question) => kit.answerRefusalOf({ roles, identity }, question),
       projects: registry.projects.projects(), nodes: registry.nodes.nodes(), image: registry.images.currentImage(),
       health: { states: registry.health.healthStates(), changes: registry.health.healthChanges() },

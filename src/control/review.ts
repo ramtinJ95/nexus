@@ -24,7 +24,7 @@ import { scopedFlight } from "../single-flight.ts";
 import type { SecretGrant } from "../protocol/secret-grants.ts";
 import { grantsClaude, type Owed } from "./owed-review.ts";
 import { defaultClaudeModel } from "../protocol/models.ts";
-import type { ChangedFile, GitHub, PrSnapshot, PullRequest } from "./github.ts";
+import type { ChangedFile, GitHub, GitHubLanding, PrSnapshot, PullRequest } from "./github.ts";
 import { NoRoom, Refusal } from "./refusal.ts";
 import type { Inbox } from "./inbox.ts";
 import { logOnce, type Log } from "./log-once.ts";
@@ -50,6 +50,7 @@ import type { Start } from "./start-request.ts";
 import { owedOf, servesReview, threadRole } from "./work-model.ts";
 import { builderFindings, builderNotes, fencedAnswers, nextRound, quoteRequest, reminder, reviewerRequest, type FencedAnswer } from "./prompts.ts";
 import { isOpenStatus, openStatuses } from "./reconcile.ts";
+import { landingOff } from "./people.ts";
 
 type ReviewRegistry = Pick<Registry, "threads" | "questions" | "releases" | "reviews" | "nodes" | "now" | "planning" | "prWatches" | "projects">;
 
@@ -89,8 +90,11 @@ export interface ReviewDeps {
   harnessModel: string;
   /** The control plane's own node, for the release view, the repository its releases come from, and the branch it releases from. */
   release: { self: string | undefined; repo: string; branch: string };
-  /** Whether `caller` may land, which takes the right to deploy. A landing asks again before every merge. */
-  mayLand(caller: string): boolean;
+  /**
+   * How a solo install lands: the writes of a merge, and whether `caller` may land, which takes the right to deploy and
+   * is asked again before every merge. A shared install has none, so no review it runs can merge.
+   */
+  lands: { github: GitHubLanding; mayLand(caller: string): boolean } | null;
   /** Tells the planner a thread's status changed, so an archived thread's pylon pauses at once. */
   wake(t: Thread): void;
   log: Log;
@@ -174,7 +178,7 @@ export function secondReviewerFor(taken: readonly string[], secrets: readonly Se
 }
 
 export function reviewLoop(deps: ReviewDeps) {
-  const { registry, github, inbox, agentState, release, log } = deps;
+  const { registry, github, inbox, agentState, release, lands, log } = deps;
   const now = deps.now ?? Date.now;
   // The failures each pass retries. Never log transport errors' text: a fetch implementation may put authorization headers in them.
   const retried = logOnce(log);
@@ -223,7 +227,13 @@ export function reviewLoop(deps: ReviewDeps) {
     return { ...r, phase, outbox: null, ...r.second?.kind === "claude" && { second: { ...r.second, outbox: null } } };
   };
   const toPerson = (r: Review, cause: HoldCause, ...items: (Hold | string)[]): Review => end(r, personPhase(cause, ...items));
-  const landings = landing({ registry, release, mayLand: deps.mayLand, now, toPerson });
+  const landings = landing({ registry, release, mayLand: (caller) => lands?.mayLand(caller) ?? false, now, toPerson });
+  /** Refuses a request to land on a shared install, whoever made it. */
+  const refuseLanding = () => {
+    if (lands === null) throw landingOff();
+  };
+  /** Whether a project's setting lands what its reviews approve, which no setting does on a shared install. */
+  const projectLands = (setting: Project["autoReview"]) => lands !== null && landsOnItsOwn(setting);
   const { deploys, ofReleaseRepo } = landings;
   /** A review that lands still decides whether a merge made outside it deploys. */
   const outside = (r: Review, state: PullRequest["state"] | undefined): Review | null =>
@@ -252,7 +262,7 @@ export function reviewLoop(deps: ReviewDeps) {
   /** Past every check, a review records what holds its head, then stops at approval, or lands when asked to. */
   const checked = async (r: Review): Promise<Review> => {
     const next = await recordHolds(r) ?? r;
-    return { ...next, phase: r.land === null ? { kind: "approved" } : { kind: "merging", authorized: null } };
+    return { ...next, phase: lands === null ? { kind: "approved", onGitHub: true } : r.land === null ? { kind: "approved" } : { kind: "merging", authorized: null } };
   };
   /** Past the check at the round's head: the live check runs where the head has a `.nexus/verify` and none ran there yet. */
   const checkPassed = async (r: Review, verifies: boolean): Promise<Review> => {
@@ -480,7 +490,7 @@ export function reviewLoop(deps: ReviewDeps) {
     const askFor = (question: Unanswered<HoldsQuestion> | null) => {
       if (registry.reviews.isCurrentReview(r)) ask(r.builder, question);
     };
-    const askable = r.merged === null && (ended(r) ? landable(r) : landingVerb(r) === null);
+    const askable = lands !== null && r.merged === null && (ended(r) ? landable(r) : landingVerb(r) === null);
     if (!askable) {
       early.delete(r.id);
       askFor(null);
@@ -520,7 +530,7 @@ export function reviewLoop(deps: ReviewDeps) {
     const project = registry.threads.thread(r.builder)?.project;
     const setting = project === undefined ? undefined : registry.projects.project(project)?.autoReview;
     // Only a review asked to land is landed: one the person started without --land stops at approval, as they asked.
-    if (r.land === null || setting?.mode !== "yolo" || !deps.mayLand(setting.enabledBy) || !registry.reviews.isCurrentReview(r)) return;
+    if (lands === null || r.land === null || setting?.mode !== "yolo" || !lands.mayLand(setting.enabledBy) || !registry.reviews.isCurrentReview(r)) return;
     const question = askingHolds(registry.questions.questions(r.builder), r.id, r.rounds.at(-1));
     if (question === undefined) return;
     try {
@@ -804,6 +814,8 @@ export function reviewLoop(deps: ReviewDeps) {
         }
         commit = snapshot.detail.mergeCommit;
       } else {
+        // A landing asked for before the install became shared stops here, short of its merge.
+        if (lands === null) return toPerson(r, "policy", { code: "loop", text: `${landingOff().message}.` });
         // A head pushed after the approval, such as a rebase on the PR watch's news of a conflict, gets its own round.
         if (snapshot.detail.head !== head) return await newHead(r, snapshot.detail.head, snapshot.detail.base, `The pull request's head moved to ${snapshot.detail.head}`);
         if (retargeted) return await newHead(r, head, snapshot.detail.base, `The pull request's base changed from ${base} to ${snapshot.detail.base}`);
@@ -832,14 +844,14 @@ export function reviewLoop(deps: ReviewDeps) {
         // nothing is authorized, so a merge of the stale head outside this review is judged as someone else's.
         if (await github.behind(r.pr.repo, snapshot.detail.base, head)) {
           if (phase.updated !== undefined && now() - phase.updated < updateGraceMs) return r;
-          if (!(await github.update(r.pr.repo, r.pr.number, head))) return rebase(review, snapshot.detail.base);
+          if (!(await lands.github.update(r.pr.repo, r.pr.number, head))) return rebase(review, snapshot.detail.base);
           reads.delete(prKey(r));
           return { ...review, phase: { kind: "merging", authorized: null, updated: now() } };
         }
         if (phase.authorized !== head) return { ...review, phase: { kind: "merging", authorized: head, ...previous !== undefined && { previous } } };
         // A release requested since the turn was taken has not run yet, so the turn goes back until it is healthy.
         if (landings.turnLost(r, previous)) return { ...review, phase: { kind: "merging", authorized: null } };
-        const merged = await github.merge(r.pr.repo, r.pr.number, head);
+        const merged = await lands.github.merge(r.pr.repo, r.pr.number, head);
         reads.delete(prKey(r));
         if (merged.kind !== "merged") {
           // GitHub may learn of a conflict only when asked to merge.
@@ -1110,7 +1122,7 @@ export function reviewLoop(deps: ReviewDeps) {
         try {
           const t = registry.threads.thread(id)!;
           const setting = registry.projects.project(t.project)!.autoReview!;
-          await begin(t, pr, { land: landsOnItsOwn(setting) ? { requestedBy: setting.enabledBy, fromProject: true } : null, auto: true, mergeable: true });
+          await begin(t, pr, { land: projectLands(setting) ? { requestedBy: setting.enabledBy, fromProject: true } : null, auto: true, mergeable: true });
           owedTries.delete(key);
           retried.ok(key);
           break;
@@ -1168,9 +1180,9 @@ export function reviewLoop(deps: ReviewDeps) {
     if (current === null || !waitsOnPerson(current) || current.merged !== null || (current.pr.repo === pr.repo && current.pr.number === pr.number)) return;
     const open = (registry.prWatches.prWatch(builder)?.links ?? []).some((l) => l.pr.state === "open" && l.pr.repo === current.pr.repo && l.pr.number === current.pr.number);
     if (!open) return;
-    const how = current.phase.kind === "approved" ? "is approved and lands once you land it" : "is held for you";
+    const how = current.phase.kind !== "approved" ? "is held for you" : lands === null ? "is approved for an engineer to merge on GitHub" : "is approved and lands once you land it";
     // Only what the review takes is offered: a Land where it would land, a cancel where it can be cancelled.
-    const ways = [...landable(current) ? [`land it first with nexus land ${builder}`] : [], ...cancellable(current) ? [`end it with nexus review --cancel ${builder}`] : [], "start this one with --replace to give it up"];
+    const ways = [...lands !== null && landable(current) ? [`land it first with nexus land ${builder}`] : [], ...cancellable(current) ? [`end it with nexus review --cancel ${builder}`] : [], "start this one with --replace to give it up"];
     const advice = `${ways.slice(0, -1).join(", ")}, or ${ways.at(-1)}`;
     throw new Refusal("conflict", `review ${current.id} of pull request #${current.pr.number} ${how}, and a review of #${pr.number} would take its place as ${builder}'s one review, so #${current.pr.number}'s ${landable(current) ? "approval" : "review"} would be given up. ${advice[0]!.toUpperCase()}${advice.slice(1)}`);
   }
@@ -1182,7 +1194,7 @@ export function reviewLoop(deps: ReviewDeps) {
     const other = registry.reviews.reviews().find((r) => r.builder !== builder && r.pr.repo === repo && r.pr.number === number && !settled(r));
     if (other === undefined) return;
     const next = cancellable(other) ? `. Cancel it with nexus review --cancel ${other.builder} to start another`
-      : other.phase.kind === "approved" ? `. Land it with nexus land ${other.builder}, or start the review again from ${other.builder}`
+      : other.phase.kind === "approved" ? `. ${lands === null ? "Merge it on GitHub" : `Land it with nexus land ${other.builder}`}, or start the review again from ${other.builder}`
       : ", and a merge or deploy that has begun is seen through. It ends landed or with the person";
     throw new Refusal("conflict", `pull request #${number} is under review ${other.id} of ${other.builder}, which is ${other.phase.kind}${next}`);
   }
@@ -1320,6 +1332,7 @@ export function reviewLoop(deps: ReviewDeps) {
     },
 
     async start(builderId: ThreadId, request: { pr?: number | undefined; rounds?: number | undefined; land: string | null; replace?: boolean | undefined }): Promise<Review> {
+      if (request.land !== null) refuseLanding();
       const builder = registry.threads.thread(builderId);
       if (builder === undefined) throw new Refusal("missing", `no thread ${builderId}`);
       if (builder.status !== "active") throw new Refusal("conflict", `thread ${builder.id} is ${builder.status}`);
@@ -1350,7 +1363,7 @@ export function reviewLoop(deps: ReviewDeps) {
         return;
       }
       try {
-        await begin(t, pr, { land: landsOnItsOwn(setting) ? { requestedBy: setting.enabledBy, fromProject: true } : null, auto: true });
+        await begin(t, pr, { land: projectLands(setting) ? { requestedBy: setting.enabledBy, fromProject: true } : null, auto: true });
       } catch (err) {
         if (!(err instanceof Refusal)) throw err;
         log(`${t.id}: no review started on its own for pull request #${pr.number}: ${err.message}`);
@@ -1367,6 +1380,7 @@ export function reviewLoop(deps: ReviewDeps) {
      * the reviewer's quote of what could not be checked live asks the reviewer for it first, at the same head.
      */
     land(builderId: ThreadId, requestedBy: string, head?: string, waive?: readonly string[]): Review {
+      refuseLanding();
       const r = landableAt(builderId);
       if (head !== undefined && r.rounds.at(-1)!.head !== head) throw new Refusal("conflict", `review ${r.id} of ${builderId} is at ${r.rounds.at(-1)!.head}, not ${head}, so it was not landed. Look at it again before landing it`);
       const next = pressed(r, requestedBy, waive);
@@ -1409,6 +1423,7 @@ export function reviewLoop(deps: ReviewDeps) {
    * project whose setting answered it in the person's place.
    */
   function landHolds(question: HoldsQuestion, by: TailnetNodeId, yolo?: ProjectId): HoldsQuestion {
+    refuseLanding();
     const { holds } = question;
     const r = registry.reviews.review(question.thread);
     const moved = new Refusal("conflict", `the review of ${question.thread} moved on since question ${question.id} asked about its holds at ${holds.head}, so nothing was waived. Look at it again`);
