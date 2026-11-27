@@ -2,7 +2,7 @@
 
 These are the checks of [the multiplayer plan](multiplayer-plan.md) that need the company network, the company tailnet, or a person with rights in the company's GitHub organisation. Nothing here installs Nexus or changes a setting. Every command only reads.
 
-This repository is public. Do not commit any output of these checks, and do not paste it into a pull request or an issue. Outputs name machines, people, and the company. Keep them in a private note, and give them to the agent that runs the plan in its session.
+This repository is public. Do not commit any output of these checks, and do not paste it into a pull request or an issue. Outputs name machines, people, and the company. Keep them in a private note, and give them to the agent that runs the plan in its session. What the checks found, with every name left out, is in [The office machine](multiplayer-office-machine.md).
 
 ## What each check settles
 

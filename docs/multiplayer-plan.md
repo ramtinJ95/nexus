@@ -398,9 +398,9 @@ Three limits of this guard, each handled elsewhere:
 
 The machine is reachable only from the company network, so the operator runs this. The commands, and every other check that needs the office, are in [Checks to run in the office](multiplayer-office-checks.md).
 
-- [ ] Run `ls -l /dev/kvm`, `nproc`, `free -g`, and `df -h` on the machine. Pass when `/dev/kvm` exists and the control plane's user can open it.
-- [ ] Work out how many pylons fit: usable memory divided by the project's pylon size plus 0.15 GiB. The smallest pylon is 3 GiB. Write the number here, because it sets the cap in `mp-22`.
-- [ ] Record the machine's CPU count, memory, disk, and operating system in the pilot's notes.
+- [x] Run `ls -l /dev/kvm`, `nproc`, `free -g`, and `df -h` on the machine. Pass when `/dev/kvm` exists and the control plane's user can open it. It exists and every user may read and write it, so the users the installer creates can too.
+- [x] Work out how many pylons fit: usable memory divided by the project's pylon size plus 0.15 GiB. The smallest pylon is 3 GiB. Write the number here, because it sets the cap in `mp-22`. With 31.13 GiB and 4 GiB kept for the host: 3 pylons of 8 GiB, 6 of 4 GiB, or 8 of 3 GiB, not the 16 that eight engineers with two each would need. [The office machine](multiplayer-office-machine.md#how-many-pylons-fit) has the arithmetic.
+- [x] Record the machine's CPU count, memory, disk, and operating system in the pilot's notes. They are in [The office machine](multiplayer-office-machine.md#what-the-checks-found).
 
 ### ops-2: the company tailnet tags the node and admits the engineers
 
@@ -438,7 +438,6 @@ Two engineers, A and B, each do the following on real work for one week. Every l
 
 ## What stays unproven
 
-- Whether the office machine has `/dev/kvm`. `ops-1` settles it.
 - Whether the Codex CLI works with a token swapped at the network edge. `mp-13` starts with that prototype.
 - Whether the company approves the GitHub App. `mp-12` waits for it, and nothing else does.
 - Whether the guard refuses an approval of another person's pull request. The prototype had one GitHub account. The live box of `mp-15` settles it.
