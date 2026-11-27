@@ -14,6 +14,11 @@ NEXUS_VERIFY_PEOPLE=1 "$V" up
 "$V" doctor
 evidence=$("$V" evidence)
 
+# A shared install boots a pylon only with its owner's own logins, so each person signs in with made-up tokens first.
+printf '%s\n' "sk-ant-oat01-alice-made-up-$(date +%s)" | "$V" cli landing-login-claude-alice -- login claude >/dev/null
+printf '%s\n' "ghp_verifyalice0$(date +%s)" | "$V" cli landing-login-github-alice -- login github >/dev/null
+printf '%s\n' "sk-ant-oat01-bob-made-up-$(date +%s)" | "$V" cli landing-login-claude-bob --as bob -- login claude >/dev/null
+printf '%s\n' "ghp_verifybob0$(date +%s)" | "$V" cli landing-login-github-bob --as bob -- login github >/dev/null
 A=$("$V" cli landing-start-alice -- start --project spoon --title "landing: alice's" --json | jq -r .id)
 B=$("$V" cli landing-start-bob --as bob -- start --project spoon --title "landing: bob's" --json | jq -r .id)
 echo "alice started $A, bob started $B"
