@@ -20,7 +20,7 @@ declare -A github=([alice]="ghp_verifyalice0$(date +%s)" [bob]="ghp_verifybob0$(
 as() { [ "$1" = bob ] && echo "--as bob" || true; }
 
 code=0
-"$V" cli olc-start-bob-signed-out --as bob -- start --project spoon --title "owner logins: bob signed out" --json >/dev/null 2>&1 || code=$?
+"$V" cli olc-start-bob-signed-out --as bob -- start --project spoon --claude "owner logins: bob signed out" --json >/dev/null 2>&1 || code=$?
 said=$(cat "$(ls "$evidence"/*-olc-start-bob-signed-out.stderr | tail -1)" | grep -o '{"error".*}' | tail -1)
 echo "bob's start before he signs in: exit $code $said"
 [ "$code" = 5 ] || fail "bob's start without logins exited $code, not 5, a conflict"
@@ -34,7 +34,7 @@ for who in alice bob; do
   # shellcheck disable=SC2046
   printf '%s\n' "${github[$who]}" | "$V" cli "olc-login-github-$who" $(as "$who") -- login github >/dev/null
   # shellcheck disable=SC2046
-  thread[$who]=$("$V" cli "olc-start-$who" $(as "$who") -- start --project spoon --title "owner logins: $who's" --json | jq -r .id)
+  thread[$who]=$("$V" cli "olc-start-$who" $(as "$who") -- start --project spoon --claude "owner logins: $who's" --json | jq -r .id)
   echo "$who started ${thread[$who]}"
 done
 

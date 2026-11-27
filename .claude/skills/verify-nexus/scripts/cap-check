@@ -23,12 +23,12 @@ NEXUS_VERIFY_PEOPLE=1 "$V" up
 # A shared start boots with its owner's own logins, so alice signs in first, with made-up tokens.
 printf '%s\n' "sk-ant-oat01-alice-made-up-$(date +%s)" | "$V" cli cap-login-claude -- login claude >/dev/null
 printf '%s\n' "ghp_verifyalice0$(date +%s)" | "$V" cli cap-login-github -- login github >/dev/null
-T1=$("$V" cli cap-start-1 -- start --project spoon --title "cap: one" --json | jq -r .id)
-T2=$("$V" cli cap-start-2 -- start --project spoon --title "cap: two" --json | jq -r .id)
+T1=$("$V" cli cap-start-1 -- start --project spoon --claude "cap: one" --json | jq -r .id)
+T2=$("$V" cli cap-start-2 -- start --project spoon --claude "cap: two" --json | jq -r .id)
 until_json cap-running-1 120 '.pylon.actualState == "running"' show "$T1"
 until_json cap-running-2 120 '.pylon.actualState == "running"' show "$T2"
 
-T3=$("$V" cli cap-start-3 -- start --project spoon --title "cap: three" --json | jq -r .id)
+T3=$("$V" cli cap-start-3 -- start --project spoon --claude "cap: three" --json | jq -r .id)
 until_json cap-held-3 60 '.pylon.held.why | test("^alice@example.com already runs 2 pylons, and may run 2 at once: ")' show "$T3"
 held=$("$V" cli cap-show-held -- show "$T3")
 echo "$held"

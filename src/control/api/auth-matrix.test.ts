@@ -131,9 +131,9 @@ async function sharedLines(t: Parameters<typeof testApi>[0]): Promise<string[]> 
   await s.call("POST", "/v1/projects", sharedProject);
   await s.call("POST", "/v1/images", image);
   s.registry.images.setCurrentImage(image.id as ImageId);
-  const owned = { alice: (await s.call("POST", "/v1/threads", { project: "acme", title: "alice's" })).body.id as string, bob: "" };
+  const owned = { alice: (await s.call("POST", "/v1/threads", { project: "acme", claude: "alice's" })).body.id as string, bob: "" };
   caller = as(tailnet.bob);
-  owned.bob = (await s.call("POST", "/v1/threads", { project: "acme", title: "bob's" })).body.id as string;
+  owned.bob = (await s.call("POST", "/v1/threads", { project: "acme", claude: "bob's" })).body.id as string;
   const acting = requests.filter(([method, path]) => method !== "GET" && (path.startsWith(`/v1/threads/${t0}`) || path.startsWith("/v1/projects")));
   const ordered = [...acting.filter(([method, path]) => !(method === "DELETE" && path === `/v1/threads/${t0}`)), ...acting.filter(([method, path]) => method === "DELETE" && path === `/v1/threads/${t0}`)];
   const lines: string[] = [];

@@ -75,11 +75,12 @@ export const hasRemote = (project: Project): project is RemoteProject => project
 /**
  * What a new thread's pylon is granted: the project's grants, plus the ChatGPT token when the project has the chatgpt
  * login. With `owned`, on a shared install, the owner's own Claude and GitHub logins take the place of any grant a
- * project makes of those names, so no person's edit of a project decides where another person's token goes.
+ * project makes of those names, so no person's edit of a project decides where another person's token goes. The
+ * ChatGPT token is the harness's own login there too, the install's one, so an owned pylon gets none.
  */
 export function bootSecrets(project: Project, owned = false): readonly SecretGrant[] {
-  const granted = owned ? [...project.secrets.filter((grant) => !ownerOnlyNames.includes(grant.name)), ...Object.values(ownerGrants)] : project.secrets;
-  return project.logins.includes("chatgpt") ? [...granted, chatgptTokenGrant] : granted;
+  if (owned) return [...project.secrets.filter((grant) => !ownerOnlyNames.includes(grant.name)), ...Object.values(ownerGrants)];
+  return project.logins.includes("chatgpt") ? [...project.secrets, chatgptTokenGrant] : project.secrets;
 }
 export type LoginKind = "claude" | "chatgpt";
 

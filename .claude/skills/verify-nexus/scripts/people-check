@@ -22,7 +22,10 @@ echo "node:  $(whoami "$nodeApi")"
 [ "$(whoami "$api")" = '{"node":"nALICE","person":true,"deployer":true}' ] || fail "alice is not an admin person"
 [ "$(whoami "$bobApi")" = '{"node":"nBOB","person":true,"deployer":false}' ] || fail "bob is not an engineer person"
 
-T=$("$V" cli people-start -- start --project spoon --title "people: alice's" --json | jq -r .id)
+# A shared install boots a pylon only with its owner's own logins, so each person signs in with made-up tokens first.
+printf '%s\n' "sk-ant-oat01-alice-made-up-$(date +%s)" | "$V" cli people-login-claude-alice -- login claude >/dev/null
+printf '%s\n' "ghp_verifyalice0$(date +%s)" | "$V" cli people-login-github-alice -- login github >/dev/null
+T=$("$V" cli people-start -- start --project spoon --claude "people: alice's" --json | jq -r .id)
 owner=$("$V" cli people-show-bob --as bob -- show "$T" --json | jq -r .thread.owner)
 echo "bob's nexus show $T names owner $owner"
 [ "$owner" = alice@example.com ] || fail "bob's show names $owner as the owner of alice's thread"

@@ -8,7 +8,7 @@
  * phase is derived on every read from the records that thread has: the queued record, the thread, its pull request
  * links, its review, its attention and what of it waits on the person.
  */
-import { operator, type Starter } from "./people.ts";
+import { operator, solo, type People, type Starter } from "./people.ts";
 import { defaultClaudeModel } from "../protocol/models.ts";
 import { singleFlight } from "../single-flight.ts";
 import { newItemId, requestIds, type ItemId, type ProjectId, type ThreadId } from "../ids.ts";
@@ -184,8 +184,8 @@ export type Pipeline = ReturnType<typeof pipeline>;
 const starterOf = ({ approved, addedBy, owner }: ItemRecord): Starter =>
   approved === null ? { caller: addedBy, owner: owner ?? operator } : { caller: approved.by, owner: approved.owner ?? owner ?? operator };
 
-export function pipeline(options: { registry: PipelineRegistry; queue: Pick<ThreadQueue, "add" | "poll">; log?: (message: string) => void }) {
-  const { registry, queue, log = () => {} } = options;
+export function pipeline(options: { registry: PipelineRegistry; queue: Pick<ThreadQueue, "add" | "poll">; log?: (message: string) => void; people?: People | undefined }) {
+  const { registry, queue, log = () => {}, people = solo } = options;
 
   function find(id: string): ItemRecord {
     const item = registry.pipeline.item(id as ItemId);
@@ -228,7 +228,7 @@ export function pipeline(options: { registry: PipelineRegistry; queue: Pick<Thre
     add(request: StartRequest, message: string | null, after: readonly string[], { caller, owner }: Starter, id = newItemId()): ItemRecord {
       const broken = brokenRule(itemRules, { ...request, message });
       if (broken !== undefined) throw new Refusal("invalid", broken);
-      const project = checkStart(registry, { request, role: "builder" });
+      const project = checkStart(registry, { request, role: "builder" }, people);
       if (project.pipeline == null) throw new Refusal("conflict", `the pipeline does not run for project ${project.id}. nexus project edit ${project.id} --pipeline start turns it on`);
       const ids = [...new Set(after)] as ItemId[];
       for (const id of ids) {

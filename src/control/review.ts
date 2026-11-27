@@ -50,7 +50,10 @@ import type { Start } from "./start-request.ts";
 import { owedOf, servesReview, threadRole } from "./work-model.ts";
 import { builderFindings, builderNotes, fencedAnswers, nextRound, quoteRequest, reminder, reviewerRequest, type FencedAnswer } from "./prompts.ts";
 import { isOpenStatus, openStatuses } from "./reconcile.ts";
-import { landingOff } from "./people.ts";
+import { landingOff, pylonAgentsOnly, solo, type People } from "./people.ts";
+
+/** What refuses every review start on a shared install, the person's and a project's own, until mp-17 runs one on the asker's login. */
+export const reviewsOff = () => pylonAgentsOnly("Nexus starts no review on a shared install yet, since its reviewer would be the control plane's own agent", "Ask a colleague to review the pull request on GitHub");
 
 type ReviewRegistry = Pick<Registry, "threads" | "questions" | "releases" | "reviews" | "nodes" | "now" | "planning" | "prWatches" | "projects">;
 
@@ -95,6 +98,8 @@ export interface ReviewDeps {
    * is asked again before every merge. A shared install has none, so no review it runs can merge.
    */
   lands: { github: GitHubLanding; mayLand(caller: string): boolean } | null;
+  /** A shared install starts no review until mp-17, since its reviewer would run on the install's one model login. */
+  people?: People | undefined;
   /** Tells the planner a thread's status changed, so an archived thread's pylon pauses at once. */
   wake(t: Thread): void;
   log: Log;
@@ -178,7 +183,7 @@ export function secondReviewerFor(taken: readonly string[], secrets: readonly Se
 }
 
 export function reviewLoop(deps: ReviewDeps) {
-  const { registry, github, inbox, agentState, release, lands, log } = deps;
+  const { registry, github, inbox, agentState, release, lands, log, people = solo } = deps;
   const now = deps.now ?? Date.now;
   // The failures each pass retries. Never log transport errors' text: a fetch implementation may put authorization headers in them.
   const retried = logOnce(log);
@@ -1100,6 +1105,7 @@ export function reviewLoop(deps: ReviewDeps) {
    * has told the builder of the conflict.
    */
   async function startOwed() {
+    if (people.shared) return;
     let threads: ThreadId[];
     try {
       threads = registry.threads.storedThreads({ status: ["active"] }).map((t) => t.id);
@@ -1337,6 +1343,7 @@ export function reviewLoop(deps: ReviewDeps) {
     },
 
     async start(builderId: ThreadId, request: { pr?: number | undefined; rounds?: number | undefined; land: string | null; replace?: boolean | undefined }): Promise<Review> {
+      if (people.shared) throw reviewsOff();
       if (request.land !== null) refuseLanding();
       const builder = registry.threads.thread(builderId);
       if (builder === undefined) throw new Refusal("missing", `no thread ${builderId}`);
@@ -1359,7 +1366,7 @@ export function reviewLoop(deps: ReviewDeps) {
      */
     async auto(t: Thread, pr: Pick<PullRequest, "repo" | "number">): Promise<void> {
       const setting = registry.projects.project(t.project)?.autoReview;
-      if (setting == null || servesReview(threadRole(registry, t))) return;
+      if (setting == null || people.shared || servesReview(threadRole(registry, t))) return;
       // Another thread on the same branch links the same PR, which has had its review, even one its builder's next replaced.
       if (registry.reviews.prReviewed(pr.repo, pr.number)) return;
       const current = registry.reviews.review(t.id);

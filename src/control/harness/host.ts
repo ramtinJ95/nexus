@@ -26,6 +26,7 @@ import type { AgentCall } from "../agent-usage.ts";
 import { type Sender, senders } from "../agent-protocol.ts";
 import { checkoutDir } from "../../../images/pylon/nexus-contract.ts";
 import type { TurnGate } from "../drain.ts";
+import { pylonAgentsOnly } from "../people.ts";
 
 export type { ConversationId };
 
@@ -107,6 +108,26 @@ export function gateTurns(host: HarnessHost, gate: Pick<TurnGate, "run">): Harne
     Object.assign(gated, { [method]: (...args: unknown[]) => gate.run(() => start(...args)) });
   }
   return gated;
+}
+
+/**
+ * What starts a turn of a thread's conversation, as opposed to a failure judgment's, and what a shared install's refusal
+ * of each names.
+ */
+const threadTurns = {
+  startThread: "A thread on the Nexus agent cannot start",
+  send: "The Nexus agent takes no message",
+  retry: "A harness retry runs the Nexus agent, so it cannot run",
+} as const satisfies Partial<Record<AsyncMethod, string>>;
+
+/**
+ * The harness of a shared install, which runs failure judgments alone: every method that would start a turn of a
+ * thread's conversation is refused, whoever calls it, so no person's work spends the install's one model login.
+ */
+export function judgmentsOnly(host: HarnessHost): HarnessHost {
+  const refusing = { ...host };
+  for (const [method, what] of Object.entries(threadTurns)) Object.assign(refusing, { [method]: () => Promise.reject(pylonAgentsOnly(what)) });
+  return refusing;
 }
 
 export async function openHarnessHost(options: HarnessHostOptions): Promise<HarnessHost> {

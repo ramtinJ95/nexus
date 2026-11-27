@@ -65,8 +65,6 @@
     "images/pylon/nexus-turn.ts: reserved-path:image-rebuild",
     "images/pylon/pins.json: reserved-path:image-rebuild",
     "images/pylon/rootfs-init-extra.sh: reserved-path:image-rebuild",
-    "interrogate/02-harness-login-is-one.test.ts: reserved-path:auth",
-    "interrogate/harness-credential.ts: reserved-path:secrets",
     "interrogate/tailnet-users.mjs: reserved-path:tailnet",
     "interrogate/whois-shape.ts: reserved-path:auth",
     "package-lock.json: reserved-path:secrets",

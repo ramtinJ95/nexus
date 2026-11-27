@@ -21,7 +21,7 @@ import { linuxTailscaledSocket, localApiWhois, localApiWhoisCaller, localApiWhoi
 import { parseTailscaleStatus } from "../tailscale.ts";
 import type { Models } from "@earendil-works/pi-ai/models";
 import { chatgptToken, harnessModels, loginState, openCredentials, requireModel } from "./harness/credentials.ts";
-import { gateTurns, openHarnessHost, type ConversationId } from "./harness/host.ts";
+import { gateTurns, judgmentsOnly, openHarnessHost, type ConversationId } from "./harness/host.ts";
 import { startApi } from "./api/server.ts";
 import { retentionPass } from "./retention-pass.ts";
 import { retentionPassMs } from "./retention.ts";
@@ -188,8 +188,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   };
   for (const node of [...config.nodes, ...registry.nodes.joinedNodes()]) if (!probeMap.has(node.name)) connect(node);
   const services = startServices();
-  const handoff = services.start(chatgptToken === undefined ? null : { everyMs: 60_000, ...chatgptTokenHandoff({ probes: () => [...probeMap.values()], token: chatgptToken }) });
   const people = peopleOf(config.people);
+  // The harness's ChatGPT login is the install's one, so a shared install hands it to no probe.
+  const handoff = services.start(chatgptToken === undefined || people.shared ? null : { everyMs: 60_000, ...chatgptTokenHandoff({ probes: () => [...probeMap.values()], token: chatgptToken }) });
   const logins = loginStore(personStore(config.harness.credentials));
   const owners = services.start(people.shared ? ownerLogins({ registry, logins, probes: probeMap, log }) : null);
   const peers = services.start(peerHandoff({ registry, probes: probeMap, log }));
@@ -226,7 +227,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   }));
 
   const gate = turnGate(() => isDraining(registry.releases.drain(), registry.now()));
-  const harness = gateTurns(rawHarness, gate);
+  const gated = gateTurns(rawHarness, gate);
+  // A shared install's harness runs failure judgments alone, on the install's one model login.
+  const harness = people.shared ? judgmentsOnly(gated) : gated;
   const images = services.start(startImageRollout({
     registry, probes: probeMap, buildNode: config.imageBuildNode, recipe: () => loadImageRecipe(), release: runningCommit,
   }));
@@ -253,6 +256,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     runs: (ended) => ({ checks: checkRuns({ ...checkRunDeps, ended }), live: checkRuns({ ...checkRunDeps, gate: verifyGate, ended }) }),
     release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)!, branch: config.releaseBranch },
     lands: landing && { github: landing, mayLand: (caller) => isDeployer(registry, deployment, caller as TailnetNodeId) },
+    people,
     wake: wakeThread,
     log,
   }) });
@@ -271,7 +275,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   services.start(github === null ? null : { everyMs: passMs, ...builderNudger({ registry, github, inbox, personWroteTo: agents.personWrote, replies: agents.replies, wake: wakeThread, watch }) });
   services.start({ everyMs: passMs, ...deadTurnResumer({ registry, inbox, personWroteTo: agents.personWrote }) });
   // Judgments need no GitHub, so they run without a token too.
-  services.start({ everyMs: passMs, ...judgmentPass({ registry, harness, probes: probeMap, wake }) });
+  services.start({ everyMs: passMs, ...judgmentPass({ registry, harness: gated, probes: probeMap, wake }) });
   const cleanup = services.start({ everyMs: cleanupEveryMs, ...cleanupPass({ registry, probes: probeMap, log }) });
   const startedAt = Date.now();
   const loopDelay = services.start(loopWatch());

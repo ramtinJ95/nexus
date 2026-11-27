@@ -77,7 +77,7 @@ async function install(t: Parameters<typeof testApi>[0], url: string, people: Pe
 /** Alice starts a thread on her branch, and the build her start asked for runs as the node's build would, then publishes. */
 async function aliceBuilds(s: Awaited<ReturnType<typeof install>>, repo: Awaited<ReturnType<typeof remote>>) {
   s.callAs(alice);
-  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Alice's work", branch: "alice/wip" });
+  const started = await s.call("POST", "/v1/threads", { project: "acme", claude: "Alice's work", branch: "alice/wip" });
   assert.equal(started.status, 201, JSON.stringify(started.body));
   const [template] = s.registry.images.templates("acme" as ProjectId);
   assert.ok(template?.state === "building", "her start asks the node to build the template of this setup");
@@ -92,7 +92,7 @@ async function aliceBuilds(s: Awaited<ReturnType<typeof install>>, repo: Awaited
 /** Bob starts a thread on main, and his pylon's first boot checks out over the template disk when it boots from one. */
 async function bobBoots(s: Awaited<ReturnType<typeof install>>, repo: Awaited<ReturnType<typeof remote>>) {
   s.callAs(bob);
-  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Bob's work", branch: "main" });
+  const started = await s.call("POST", "/v1/threads", { project: "acme", claude: "Bob's work", branch: "main" });
   assert.equal(started.status, 201, JSON.stringify(started.body));
   const pylon = s.registry.threads.pylon((started.body as Thread).pylonId)!;
   if (pylon.firstBoot.kind === "template") {
@@ -117,7 +117,7 @@ test("on a shared install a thread whose setup differs from the default branch's
   const repo = await remote(t, { setup: true });
   const s = await install(t, repo.url, shared);
   s.callAs(alice);
-  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Alice's work", branch: "alice/wip" });
+  const started = await s.call("POST", "/v1/threads", { project: "acme", claude: "Alice's work", branch: "alice/wip" });
   assert.equal(started.status, 201, JSON.stringify(started.body));
   assert.deepEqual((started.body as Thread).setup, { how: "fresh", reason: "its setup differs from main's, and on a shared install a template is built only from main" });
   assert.deepEqual(s.registry.images.templates("acme" as ProjectId), []);
@@ -127,7 +127,7 @@ test("on a shared install a template recorded before the install was shared is n
   const repo = await remote(t, { setup: false });
   const s = await install(t, repo.url, shared);
   s.callAs(alice);
-  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", title: "Alice's work", branch: "alice/wip" })).status, 201);
+  assert.equal((await s.call("POST", "/v1/threads", { project: "acme", claude: "Alice's work", branch: "alice/wip" })).status, 201);
   const [asked] = s.registry.images.templates("acme" as ProjectId);
   assert.ok(asked?.state === "building" && asked.defaultHead === true);
   const legacy = { key: asked.key, on: node, inputs: { ...asked.inputs, repo: { url: repo.url, branch: "alice/wip", commit: repo.aliceCommit } }, submitted: null };
@@ -136,7 +136,7 @@ test("on a shared install a template recorded before the install was shared is n
   s.registry.images.saveTemplate({ id: "tpl-0000000000a2" as TemplateId, state: "building", ...legacy });
   observeNode(s, node, { total: 64, committed: 0 }, { artifacts: [image.id, "tpl-0000000000a1"] as NodeObservation["artifacts"] });
   s.callAs(bob);
-  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "Bob's work", branch: "main" });
+  const started = await s.call("POST", "/v1/threads", { project: "acme", claude: "Bob's work", branch: "main" });
   assert.equal(started.status, 201, JSON.stringify(started.body));
   const setup = (started.body as Thread).setup;
   assert.ok(setup?.how === "fresh" && setup.building !== undefined && !["tpl-0000000000a1", "tpl-0000000000a2"].includes(setup.building), JSON.stringify(setup));

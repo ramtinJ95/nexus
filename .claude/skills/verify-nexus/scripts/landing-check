@@ -19,8 +19,8 @@ printf '%s\n' "sk-ant-oat01-alice-made-up-$(date +%s)" | "$V" cli landing-login-
 printf '%s\n' "ghp_verifyalice0$(date +%s)" | "$V" cli landing-login-github-alice -- login github >/dev/null
 printf '%s\n' "sk-ant-oat01-bob-made-up-$(date +%s)" | "$V" cli landing-login-claude-bob --as bob -- login claude >/dev/null
 printf '%s\n' "ghp_verifybob0$(date +%s)" | "$V" cli landing-login-github-bob --as bob -- login github >/dev/null
-A=$("$V" cli landing-start-alice -- start --project spoon --title "landing: alice's" --json | jq -r .id)
-B=$("$V" cli landing-start-bob --as bob -- start --project spoon --title "landing: bob's" --json | jq -r .id)
+A=$("$V" cli landing-start-alice -- start --project spoon --claude "landing: alice's" --json | jq -r .id)
+B=$("$V" cli landing-start-bob --as bob -- start --project spoon --claude "landing: bob's" --json | jq -r .id)
 echo "alice started $A, bob started $B"
 
 off() {

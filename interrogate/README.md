@@ -12,12 +12,10 @@ Some tests fail today and pass when their slice is done. Others pass today, beca
 
 | File | Today | Slice | What it shows |
 |---|---|---|---|
-| `02-harness-login-is-one.test.ts` | fails | `mp-16` | Two engineers' harness threads send one login. |
 | `review-mode-label-write.test.ts` | passes, asserts the fault | none | The label write uses the control plane's token. The review dropped this as harmless. |
 
 ## Scripts
 
-- `harness-credential.ts` shows the same fault as `02-harness-login-is-one.test.ts`, with the real credential store.
 - `whois-shape.ts` and `tailnet-users.mjs` print what this machine's tailscaled says about its peers, without names.
 - `gondolin-git-push.mjs`, `gondolin-guard-sees-body.mjs`, and `gondolin-http-limits.mjs` measure Gondolin's HTTP path without a VM.
 - `gondolin-facts.py` prints public facts about the Gondolin package.

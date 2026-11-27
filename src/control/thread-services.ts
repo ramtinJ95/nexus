@@ -21,14 +21,14 @@ export function threadServices(options: Parameters<typeof threadStarter>[0] & {
   /** Reads a planning thread's replies. Null: no planning pass. */
   planning: { replies(t: Thread): Promise<string[]> } | null;
 }) {
-  const { registry, harness, gate, log = () => {} } = options;
+  const { registry, harness, gate, log = () => {}, people } = options;
   const startThread = threadStarter(options);
   // Its starts pass the drain gate, so a deploy's drain refuses them, which leaves them queued, and waits for one in flight.
   const queue = !options.queue ? null : threadQueue({
-    registry, startThread, gate, log,
+    registry, startThread, gate, log, people,
     send: (id, text, requestId) => harness.send(id, text, requestId, "followUp"),
   });
-  const items = queue === null ? null : pipeline({ registry, queue, log });
+  const items = queue === null ? null : pipeline({ registry, queue, log, people });
   const plans = options.planning === null ? null : planning({ registry, pipeline: items, replies: options.planning.replies, log });
   return {
     api: { startThread, queue, pipeline: items, planning: plans },

@@ -160,7 +160,7 @@ function healthLink(c: Context, open: boolean): Html {
 }
 
 /**
- * The dialog starts a Claude Code worker unless the reader picks the Nexus agent. A Claude worker's title is its
+ * The dialog starts a Claude Code worker unless the reader picks the Nexus agent, which a shared install does not offer. A Claude worker's title is its
  * prompt's first line unless given, as `nexus start --claude` does. client.js disables the fields of the worker not
  * picked, so the form never sends them, and makes the title required for the Nexus agent.
  */
@@ -172,10 +172,10 @@ function startDialog(c: Context, start: Shell["start"]): Html {
 <div id="start-body" data-live>
 ${chosen === undefined ? html`<div class="modal-empty"><p class="empty">No projects yet, so there is no repository to start a thread on.</p>${newProjectButton}</div>` : html`<form id="start" class="form">
 ${image === null && html`<p class="error">No image is current yet, so a new pylon has nothing to boot.</p>`}
-<fieldset class="seg" id="start-worker"><legend>Worker</legend>
+${c.pylonAgentsOnly ? html`<input type="hidden" name="worker" value="claude">` : html`<fieldset class="seg" id="start-worker"><legend>Worker</legend>
 <label class="seg-opt"><input type="radio" name="worker" value="claude" checked><span class="seg-name">Claude Code</span><span class="seg-repo">for code work</span></label>
 <label class="seg-opt"><input type="radio" name="worker" value="harness"><span class="seg-name">Nexus agent</span><span class="seg-repo">the control plane's own harness</span></label>
-</fieldset>
+</fieldset>`}
 <div id="start-claude-fields">
 <label for="start-claude">Prompt</label>
 <textarea id="start-claude" name="claude" required placeholder="What should Claude do?" autofocus></textarea>
@@ -184,10 +184,10 @@ ${image === null && html`<p class="error">No image is current yet, so a new pylo
 <input id="start-model" name="model" autocomplete="off" placeholder="${defaultClaudeModel}">
 <p class="hint"><code>${defaultClaudeModel}</code> unless you name another.</p>
 </div>
-<div id="start-harness-fields" hidden>
+${!c.pylonAgentsOnly && html`<div id="start-harness-fields" hidden>
 <label class="check"><input type="checkbox" id="start-planning" name="planning" value="true" disabled> Planning thread</label>
 <p class="hint">It plans with you and proposes items. Each becomes a card here that you accept into the pipeline or reject, as <code>nexus start --plan</code> does.</p>
-</div>
+</div>`}
 <label for="start-title" id="start-title-label">Title (optional)</label>
 <input id="start-title" name="title" autocomplete="off" placeholder="The prompt's first line">
 <fieldset class="seg"><legend>Project</legend>

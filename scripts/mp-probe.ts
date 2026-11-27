@@ -173,7 +173,9 @@ async function boot(branch?: string): Promise<Result> {
         id: project, repoUrl: state.templateRepo, defaultBranch: "main", defaultNode: state.node,
         resources: { cpus: 1, memoryGiB: 3, diskGiB: 1 }, allowedHosts: [], secrets: [], logins: [], preSetup: null,
       }, 201);
-      const warm = await call("POST", "/v1/threads", { project, title: "mp-probe: builds the template" }, 201) as Detail["thread"];
+      // A shared install starts a person's thread only on a pylon agent, so each start there names Claude Code.
+      const brief = (title: string) => process.env.NEXUS_VERIFY_PEOPLE === "1" ? { claude: title } : { title };
+      const warm = await call("POST", "/v1/threads", { project, ...brief("mp-probe: builds the template") }, 201) as Detail["thread"];
       const template = warm.setup?.how === "fresh" ? warm.setup.building : undefined;
       if (template === undefined) throw new Error(`the first ${project} thread asked for no template build: ${JSON.stringify(warm.setup)}`);
       console.error(`boot: ${warm.id} boots fresh and asked for template ${template}`);
@@ -197,7 +199,7 @@ async function boot(branch?: string): Promise<Result> {
       });
 
       const start = process.hrtime.bigint();
-      const timedThread = await call("POST", "/v1/threads", { project, title: `mp-probe: boots ${branch === undefined ? "from the template" : `fresh on ${branch}`}`, ...branch === undefined ? {} : { branch } }, 201) as Detail["thread"];
+      const timedThread = await call("POST", "/v1/threads", { project, ...brief(`mp-probe: boots ${branch === undefined ? "from the template" : `fresh on ${branch}`}`), ...branch === undefined ? {} : { branch } }, 201) as Detail["thread"];
       try {
         if (branch !== undefined) {
           if (timedThread.setup?.how !== "fresh") throw new Error(`${timedThread.id} on ${branch} does not boot fresh: ${JSON.stringify(timedThread.setup)}`);

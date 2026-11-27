@@ -16,7 +16,7 @@ import { pylonLive } from "./live.ts";
 import type { Registry } from "./registry.ts";
 import type { Start, StartKey, StartRequest } from "./start-request.ts";
 import { standingRulesFor, withStandingRules } from "./standing-rules.ts";
-import { solo, type People } from "./people.ts";
+import { pylonAgentsOnly, solo, type People } from "./people.ts";
 import type { OwnerLogins } from "./owner-logins.ts";
 
 type ThreadsRegistry = Pick<Registry, "threads" | "images" | "nodeMetrics" | "nodes" | "now" | "projects" | "placement">;
@@ -30,6 +30,16 @@ const startsWithSkill = new RegExp(`^${claudeSkill}(?:\\s|$)`);
 const claudePromptOf = ({ request, role }: Pick<Start, "request" | "role">) =>
   request.claude === undefined || role === "reviewer" || startsWithSkill.test(request.claude) ? request.claude : `${claudeSkill} ${request.claude}`;
 
+/** A check or verify thread runs commands in its pylon and has no agent, so only another role's start talks to one. */
+const hasConversation = (role: Start["role"]): role is Exclude<Start["role"], "check" | "verify"> => role !== "check" && role !== "verify";
+
+/** What a shared install's refusal of a start on the Nexus agent names, by the thread's role. */
+const harnessStarts = {
+  builder: "A start must name a pylon agent, and a message brief is the Nexus agent's first message",
+  planning: "A planning thread runs on the Nexus agent, so it cannot start",
+  reviewer: "A reviewer on the Nexus agent cannot start",
+} as const;
+
 /** The inputs placement weighs, shared by a start and the read-only project preview. */
 export function placementNeed(project: Project, request: Pick<StartRequest, "branch" | "commit" | "resources">, image: BootInputs["image"], dotfiles: PylonOverlay["dotfiles"], owned = false) {
   const branch = request.branch ?? project.defaultBranch;
@@ -41,10 +51,12 @@ export function placementNeed(project: Project, request: Pick<StartRequest, "bra
 
 /**
  * What a start refuses before it places anything, which a queued start is checked against when it is queued too. A
- * Claude prompt must fit the pylon's open-session prompt, its project's standing rules included.
+ * Claude prompt must fit the pylon's open-session prompt, its project's standing rules included. On a shared install a
+ * thread with a conversation must run a pylon agent, since the harness would run it on the install's one model login.
  */
-export function checkStart(registry: ThreadsRegistry, start: Pick<Start, "request" | "role">): Project {
+export function checkStart(registry: ThreadsRegistry, start: Pick<Start, "request" | "role">, people: People): Project {
   const { request } = start;
+  if (people.shared && request.claude === undefined && hasConversation(start.role)) throw pylonAgentsOnly(harnessStarts[start.role]);
   const claudePrompt = claudePromptOf(start);
   // A reviewer's first request carries the pull request's description and the builder's brief, which Nexus does not
   // bound, so it may be as long as an open session takes. The probe hands one past the command line's room in a file.
@@ -164,7 +176,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
   /** The conversation is created before the registry row, as HarnessHost.startThread requires. */
   return async function startThread(start: Start): Promise<Thread> {
     const { request, caller, owner, role, queued, key } = start;
-    const project = checkStart(registry, start);
+    const project = checkStart(registry, start, people);
     // The owner's logins are read once, at the start, and the project's and the install's git identity are not used.
     const ownerLogins = people.shared ? await owners!.forStart(owner) : null;
     // Decided once from the project as read now, so the thread records the rules its first message carries.
@@ -215,7 +227,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
       const fetched = disk === null || request.branch !== undefined ? await readSetup(project, request, branch) : null;
       const read: SetupRead = disk ?? await sharedBuild(project, fetched!, request, branch);
 
-      const conversationId = request.claude === undefined && role !== "check" && role !== "verify" ? await harness.startThread({ threadId: id, pylonId }) : null;
+      const conversationId = request.claude === undefined && hasConversation(role) ? await harness.startThread({ threadId: id, pylonId }) : null;
       const now = registry.now();
       const { setup, firstBoot, repo } = setUp(project, read, freshRepo, image, branch, node, now);
       const boot: Omit<BootInputs, "source"> = { pylonId, image, resources, gitIdentity: ownerLogins?.identity ?? gitIdentityOf(project, gitIdentity), network, repo, dotfiles };

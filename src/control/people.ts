@@ -57,3 +57,12 @@ export interface Starter { caller: string; owner: Person }
 
 /** What refuses every landing on a shared install, whoever asks for it, since Nexus never merges there. */
 export const landingOff = () => new Refusal("forbidden", "Nexus never merges on a shared install, so it lands no pull request. An engineer merges it on GitHub", "landing-off");
+/** What a person runs in place of the harness on a shared install, which a start's refusal names. */
+export const pylonAgentAdvice = "The one agent a thread can run there is Claude Code, in its pylon on its owner's own login: name it with claude, as nexus start --claude does";
+/**
+ * What refuses a person's work that the control plane's own agent, the harness, would run on the install's one model
+ * login, which a shared install keeps for failure judgments: a thread with no pylon agent, a planning thread, a
+ * `message` brief, a harness retry, and a review until mp-17. `what` names the work, and `instead` what the person does.
+ */
+export const pylonAgentsOnly = (what: string, instead = pylonAgentAdvice) =>
+  new Refusal("forbidden", `${what}. On a shared install the control plane's own agent runs no person's work, since it would spend the install's one model login. ${instead}`, "pylon-agents-only");

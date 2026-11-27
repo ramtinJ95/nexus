@@ -89,7 +89,7 @@ test("a start whose owner lacks a login is refused naming it, and does not fall 
   assert.deepEqual(s.pylonSecrets, [], "nothing was handed to the probe");
 
   await s.call("DELETE", "/v1/logins/github");
-  const neither = await s.call("POST", "/v1/threads", { project: "mono", title: "bob's work" });
+  const neither = await s.call("POST", "/v1/threads", { project: "mono", claude: "bob's work" });
   assert.match(neither.body.error, /has no Claude or GitHub login.*nexus login claude and nexus login github/);
 });
 
@@ -111,7 +111,7 @@ test("a probe that restarted is handed each owner's values again, for that owner
     s.as(answer);
     await s.call("PUT", "/v1/logins/claude", { token: claude });
     await s.call("PUT", "/v1/logins/github", { token: github });
-    pylons[who] = (await s.call("POST", "/v1/threads", { project: "mono", title: `${who}'s work` })).body.pylonId;
+    pylons[who] = (await s.call("POST", "/v1/threads", { project: "mono", claude: `${who}'s work` })).body.pylonId;
   }
   const owners = s.owners!;
   const node = "rj-firebat" as NodeName;
@@ -138,7 +138,7 @@ test("a solo install boots with the project's grants, the node's values and the 
   assert.equal((await s.call("POST", "/v1/projects", { ...mono, gitIdentity: { name: "Project", email: "project@example.com" } })).status, 201);
   assert.equal((await s.call("POST", "/v1/images", image)).status, 201);
   s.registry.images.setCurrentImage(image.id as ImageId);
-  const started = await s.call("POST", "/v1/threads", { project: "mono", title: "work" });
+  const started = await s.call("POST", "/v1/threads", { project: "mono", claude: "work" });
   assert.equal(started.status, 201);
   const { boot } = s.registry.threads.pylon(started.body.pylonId)!;
   assert.deepEqual(boot.network.secrets, mono.secrets);
@@ -152,11 +152,11 @@ test("a shared install starts no pylon on a node whose probe would fall back to 
   await s.call("PUT", "/v1/logins/github", { token: "ghp_aliceMadeUp" });
   const { ownerGrants: _, ...olderProbe } = testObservation("rj-firebat" as NodeName, { artifacts: [image.id] });
   s.registry.threads.ingested(olderProbe, []);
-  const refused = await s.call("POST", "/v1/threads", { project: "mono", title: "alice's work" });
+  const refused = await s.call("POST", "/v1/threads", { project: "mono", claude: "alice's work" });
   assert.equal(refused.status, 409);
   assert.equal(refused.body.code, "probe-too-old");
   s.registry.threads.ingested(testObservation("rj-firebat" as NodeName, { artifacts: [image.id], ownerGrants: true }), []);
-  assert.equal((await s.call("POST", "/v1/threads", { project: "mono", title: "alice's work" })).status, 201);
+  assert.equal((await s.call("POST", "/v1/threads", { project: "mono", claude: "alice's work" })).status, 201);
 });
 
 /** ownerLogins over one pylon of bob's on one node, whose login reads wait for `gate` while it is set. */
@@ -227,11 +227,11 @@ test("placement on a shared install passes by a node whose probe would fall back
   observeNode(s, "older", { total: 64, committed: 0 });
   const { ownerGrants: _, ...older } = s.registry.nodes.node("older" as NodeName)!.observation!;
   s.registry.threads.ingested(older, []);
-  const refused = await s.call("POST", "/v1/threads", { project: "mono", title: "alice's work", node: "auto" });
+  const refused = await s.call("POST", "/v1/threads", { project: "mono", claude: "alice's work", node: "auto" });
   assert.equal(refused.status, 409);
   assert.match(refused.body.error, /older has a probe that would boot an owner's logins from its secret file/);
   observeNode(s, "newer", { total: 64, committed: 0 });
-  const placed = await s.call("POST", "/v1/threads", { project: "mono", title: "alice's work", node: "auto" });
+  const placed = await s.call("POST", "/v1/threads", { project: "mono", claude: "alice's work", node: "auto" });
   assert.equal(placed.status, 201);
   assert.equal(s.registry.threads.pylon(placed.body.pylonId)!.node, "newer");
 });
@@ -259,7 +259,7 @@ test("a shared start refuses a node whose probe has not reported, since whether 
   await s.call("PUT", "/v1/logins/claude", { token: "sk-ant-oat01-alice-made-up" });
   await s.call("PUT", "/v1/logins/github", { token: "ghp_aliceMadeUp" });
   s.registry.nodes.upsertNode({ name: "fresh" as NodeName, tailnetHost: "fresh.tail.ts.net", tailnetNodeId: "nFRESH" as never });
-  const refused = await s.call("POST", "/v1/threads", { project: "mono", title: "alice's work", node: "fresh" });
+  const refused = await s.call("POST", "/v1/threads", { project: "mono", claude: "alice's work", node: "fresh" });
   assert.equal(refused.status, 409);
   assert.match(refused.body.error, /fresh's probe has not reported yet, so whether it keeps an owner's logins from its secret file is unknown/);
   assert.deepEqual(s.pylonSecrets, [], "nothing was handed to it");
