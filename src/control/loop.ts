@@ -166,7 +166,7 @@ export function startLoop(options: LoopOptions): Loop {
     const nodeObservation = observation(stored.node);
     const observed = nodeObservation?.pylons.find((p) => p.pylonId === stored.pylonId);
     if (nodeObservation !== null && (observed === undefined || observed.phase === "stopped") && stored.submitted === null) {
-      const gitIdentity = gitIdentityOf(registry.projects.project(thread.project)!, options.gitIdentity);
+      const gitIdentity = gitIdentityOf(registry.projects.project(thread.project)!, options.gitIdentity, stored.boot);
       if (JSON.stringify(gitIdentity) !== JSON.stringify(stored.boot.gitIdentity)) {
         stored = { ...stored, boot: { ...stored.boot, gitIdentity } };
         registry.threads.savePylon(stored);

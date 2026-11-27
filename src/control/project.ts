@@ -1,9 +1,9 @@
 /** Nexus owns where and with what access: the Project record. Secret values live only on nodes. */
 import { z } from "zod";
 import type { NodeName, ProjectId } from "../ids.ts";
-import { chatgptTokenGrant, type SecretGrant } from "../protocol/secret-grants.ts";
+import { chatgptTokenGrant, ownerGrants, ownerOnlyNames, type SecretGrant } from "../protocol/secret-grants.ts";
 import { anthropicApiHost } from "../protocol/agent-kinds.ts";
-import type { GitIdentity, PylonResources } from "../protocol/spawn.ts";
+import type { BootInputs, GitIdentity, PylonResources } from "../protocol/spawn.ts";
 
 export interface Project {
   /** Removed from project pickers, not erased: archived history and its project identity remain readable. */
@@ -72,10 +72,17 @@ export interface StandingRules { text: string | null; revision: number }
 /** Templates mirror a remote, so they take a project that has one. */
 export type RemoteProject = Project & { repoUrl: string };
 export const hasRemote = (project: Project): project is RemoteProject => project.repoUrl !== null;
-/** What a new thread's pylon is granted: the project's grants, plus the ChatGPT token when the project has the chatgpt login. */
-export function bootSecrets(project: Project): readonly SecretGrant[] {
-  return project.logins.includes("chatgpt") ? [...project.secrets, chatgptTokenGrant] : project.secrets;
+/**
+ * What a new thread's pylon is granted: the project's grants, plus the ChatGPT token when the project has the chatgpt
+ * login. With `owned`, on a shared install, the owner's own Claude and GitHub logins take the place of any grant a
+ * project makes of those names, so no person's edit of a project decides where another person's token goes.
+ */
+export function bootSecrets(project: Project, owned = false): readonly SecretGrant[] {
+  const granted = owned ? [...project.secrets.filter((grant) => !ownerOnlyNames.includes(grant.name)), ...Object.values(ownerGrants)] : project.secrets;
+  return project.logins.includes("chatgpt") ? [...granted, chatgptTokenGrant] : granted;
 }
+/** Whether a pylon booted with its owner's logins, which only a start on a shared install gives it. */
+export const ownerBoot = (boot: Pick<BootInputs, "network">) => boot.network.secrets.some((grant) => grant.owner === true);
 export type LoginKind = "claude" | "chatgpt";
 
 /**
@@ -88,8 +95,12 @@ export const loginHosts: { readonly [K in LoginKind]: readonly string[] } = {
   chatgpt: ["auth.openai.com", "chatgpt.com", "api.openai.com"],
 };
 
-/** The git identity a project's pylons boot with: its own, or else the one the control plane is configured with. */
-export const gitIdentityOf = (project: Pick<Project, "gitIdentity">, configured: GitIdentity | undefined): GitIdentity | undefined => project.gitIdentity ?? configured;
+/**
+ * The git identity a project's pylons boot with: its own, or else the one the control plane is configured with. A
+ * pylon that booted with its owner's logins keeps the owner's identity its start gave it.
+ */
+export const gitIdentityOf = (project: Pick<Project, "gitIdentity">, configured: GitIdentity | undefined, boot?: Pick<BootInputs, "network" | "gitIdentity">): GitIdentity | undefined =>
+  boot !== undefined && ownerBoot(boot) ? boot.gitIdentity : project.gitIdentity ?? configured;
 
 /**
  * project.allowedHosts, plus the host of an HTTPS repoUrl, plus loginHosts for project.logins, plus every

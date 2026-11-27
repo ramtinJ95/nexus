@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# The live scenario of docs/multiplayer-plan.md's mp-09, on the stack's Docker backend and not on a VM node, so it leaves
+# the box open: Docker pylons get no secrets, so no recording host can see a token. On the stack started with people,
+# bob's start before he signs in is refused naming his Claude login. alice and bob each sign in to Claude and GitHub with
+# made-up tokens and start a thread on spoon. The probe's log shows each pylon holding its own owner's values, by the
+# SHA-256 of each, and never the other person's, and a commit in each pylon is authored as its owner's GitHub account.
+# Exits 0 only if every step did what it should.
+set -euo pipefail
+V="$(cd "$(dirname "$0")" && pwd)/verify-nexus"
+base="$(cd "$(dirname "$0")/../../../.." && pwd)/.verify/nexus"
+fail() { echo "owner logins check: $*" >&2; exit 1; }
+sha() { printf '%s' "$1" | sha256sum | cut -c1-12; }
+
+trap '"$V" down >&2 || true' EXIT
+NEXUS_VERIFY_PEOPLE=1 "$V" up
+run=$(cat "$base/current")
+evidence=$("$V" evidence)
+declare -A claude=([alice]="sk-ant-oat01-alice-made-up-$(date +%s)" [bob]="sk-ant-oat01-bob-made-up-$(date +%s)")
+declare -A github=([alice]="ghp_verifyalice0$(date +%s)" [bob]="ghp_verifybob0$(date +%s)")
+as() { [ "$1" = bob ] && echo "--as bob" || true; }
+
+code=0
+"$V" cli olc-start-bob-signed-out --as bob -- start --project spoon --title "owner logins: bob signed out" --json >/dev/null 2>&1 || code=$?
+said=$(cat "$(ls "$evidence"/*-olc-start-bob-signed-out.stderr | tail -1)" | grep -o '{"error".*}' | tail -1)
+echo "bob's start before he signs in: exit $code $said"
+[ "$code" = 5 ] || fail "bob's start without logins exited $code, not 5, a conflict"
+jq -e '.code == "no-login"' <<< "$said" >/dev/null || fail "bob's refusal is not no-login"
+grep -q "has no Claude or GitHub login" <<< "$said" || fail "bob's refusal does not name the Claude and GitHub logins"
+
+declare -A thread
+for who in alice bob; do
+  # shellcheck disable=SC2046
+  printf '%s\n' "${claude[$who]}" | "$V" cli "olc-login-claude-$who" $(as "$who") -- login claude >/dev/null
+  # shellcheck disable=SC2046
+  printf '%s\n' "${github[$who]}" | "$V" cli "olc-login-github-$who" $(as "$who") -- login github >/dev/null
+  # shellcheck disable=SC2046
+  thread[$who]=$("$V" cli "olc-start-$who" $(as "$who") -- start --project spoon --title "owner logins: $who's" --json | jq -r .id)
+  echo "$who started ${thread[$who]}"
+done
+
+running() {
+  local s=""
+  for _ in $(seq 300); do
+    s=$("$V" cli "olc-show-$1" -- show "${thread[$1]}" --json | jq -r .pylon.actualState)
+    [ "$s" = running ] && return 0
+    sleep 2
+  done
+  fail "$1's pylon is $s, not running"
+}
+running alice
+running bob
+
+log="$base/runs/$run/stack.log"
+for who in alice bob; do
+  other=$([ "$who" = alice ] && echo bob || echo alice)
+  pylon="pylon-${thread[$who]}"
+  held=$(grep -o "probe: holds [A-Z_]* for $pylon, sha256 [0-9a-f]*" "$log" | sort -u)
+  echo "$who's pylon $pylon: $(tr '\n' ';' <<< "$held")"
+  grep -q "holds CLAUDE_CODE_OAUTH_TOKEN for $pylon, sha256 $(sha "${claude[$who]}")" <<< "$held" || fail "$pylon holds no Claude token of $who's"
+  grep -q "holds GH_TOKEN for $pylon, sha256 $(sha "${github[$who]}")" <<< "$held" || fail "$pylon holds no GitHub token of $who's"
+  if grep -q -e "$(sha "${claude[$other]}")" -e "$(sha "${github[$other]}")" <<< "$held"; then fail "$pylon holds a token of $other's"; fi
+
+  author=$("$V" pylon "olc-commit-$who" "${thread[$who]}" -- runuser -u user -- sh -c 'git commit --quiet --allow-empty -m "owner logins check" && git log -1 --format="%an <%ae>"')
+  echo "$who's commit is authored as: $author"
+  login=$who
+  want="${login^} <$(( ${#login} * 1000 ))+$login@users.noreply.github.com>"
+  [ "$author" = "$want" ] || fail "$who's commit is authored as $author, not $want"
+done
+
+leaks=$(grep -rl --exclude-dir=people -e "${claude[alice]}" -e "${claude[bob]}" -e "${github[alice]}" -e "${github[bob]}" "$base/runs/$run" "$evidence" || true)
+[ -z "$leaks" ] || fail "a token is in $leaks"
+echo "owner logins check (Docker, not a VM node): each pylon holds only its owner's Claude and GitHub values, each commit is its owner's GitHub account, and no output or log of run $run holds a token"

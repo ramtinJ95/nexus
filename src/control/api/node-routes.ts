@@ -22,7 +22,7 @@ function whole(query: URLSearchParams, name: string): number | null {
   return value;
 }
 
-export function nodeRoutes(kit: ApiKit, nodeHealth: (name: NodeName) => Promise<NodeHealth>, dotfiles: PylonOverlay["dotfiles"]): readonly RouteEntry[] {
+export function nodeRoutes(kit: ApiKit, nodeHealth: (name: NodeName) => Promise<NodeHealth>, dotfiles: PylonOverlay["dotfiles"], shared: boolean): readonly RouteEntry[] {
   const { registry } = kit;
 
   /** Read from the registry alone. */
@@ -49,7 +49,7 @@ export function nodeRoutes(kit: ApiKit, nodeHealth: (name: NodeName) => Promise<
       if (project.removed !== undefined) throw new HttpError(409, `project ${id} is removed`);
       const image = registry.images.currentImage();
       if (image === null) throw new HttpError(409, "no image is current yet, so a pylon has nothing to boot");
-      const need = placementNeed(project, {}, image, dotfiles);
+      const need = placementNeed(project, {}, image, dotfiles, shared);
       return ok({ project: id, defaultNode: project.defaultNode, resources: need.resources, ...placementReport(registry, need) });
     }),
     on(routes.health, readHealth, async ({ node }) => ok(await nodeHealth(node as NodeName))),

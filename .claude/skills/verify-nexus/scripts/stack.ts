@@ -24,6 +24,7 @@
  * outlive it, as pylons outlive a probe. `verify-nexus down` removes them.
  */
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { copyFile, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { connect, createServer as createTcpServer } from "node:net";
@@ -34,7 +35,9 @@ import { createDockerBackend } from "../../../../src/backends/docker-backend.ts"
 import { scriptedModel, scriptedModels } from "../../../../src/control/harness/test-fixture.ts";
 import { startControlPlane } from "../../../../src/control/main.ts";
 import { openRegistry } from "../../../../src/control/registry.ts";
-import { nodeSecrets } from "../../../../src/probe/config.ts";
+import { nodeSecrets, type NodeSecrets } from "../../../../src/probe/config.ts";
+import { NoGithubIdentity } from "../../../../src/control/logins.ts";
+import type { GitIdentity } from "../../../../src/protocol/spawn.ts";
 import { fakeTailscale, nodeHost, viaGateway } from "../../../../src/probe/fake-tailscale.ts";
 import { startProbe } from "../../../../src/probe/server.ts";
 import type { ImageId, NodeName, Person, ProjectId, TailnetNodeId } from "../../../../src/ids.ts";
@@ -139,6 +142,27 @@ const forwarded = new Map<number, { answer: WhoisAnswer; forget: NodeJS.Timeout 
  * tailscaled's LocalAPI whois for the control plane, answered by port: the probe's is the node, a forwarded connection
  * is whoever its forwarder carries, and everything else is alice. It logs each identity the first time it names it.
  */
+/**
+ * GitHub's GET /user for the stack's made-up tokens, so a GitHub login never leaves the machine. `ghp_verify<login>…`
+ * belongs to that login, as GitHub would answer for an account with no public address. Any other token is refused.
+ */
+async function verifyGithubIdentity(token: string): Promise<GitIdentity> {
+  const login = /^ghp_verify([a-z]+)0/.exec(token)?.[1];
+  if (login === undefined) throw new NoGithubIdentity("GitHub refused the token with 401", true);
+  return { name: login[0]!.toUpperCase() + login.slice(1), email: `${login.length * 1000}+${login}@users.noreply.github.com` };
+}
+
+/**
+ * Docker pylons get no secrets, so the probe's log line for each value it holds for one pylon is what shows whose value
+ * that pylon would boot with: its name, the pylon, and the first 12 hex digits of the value's SHA-256, never the value.
+ */
+function pylonValuesLogged(secrets: NodeSecrets): NodeSecrets {
+  return { ...secrets, holdFor(pylonId, name, value) {
+    log(`probe: holds ${name} for ${pylonId}, sha256 ${createHash("sha256").update(value).digest("hex").slice(0, 12)}`);
+    secrets.holdFor(pylonId, name, value);
+  } };
+}
+
 async function fakeTailscaled(socket: string) {
   const named = new Set<string>();
   const server = createServer((req, res) => {
@@ -255,7 +279,7 @@ const probe = await startProbe({
   auth: { controlPlane: controlPlaneId, peers: [] },
   whois: async () => controlPlaneId,
   backend: createDockerBackend({ images: { [imageId]: tag }, labels, hostBridgePort: ports.bridge, previewHost: nodeHost, artifacts: join(runDir, "artifacts") }),
-  secrets: nodeSecrets({ value: () => undefined, names: () => [] }),
+  secrets: pylonValuesLogged(nodeSecrets({ value: () => undefined, names: () => [] })),
   log: (message) => log(`probe: ${message}`),
   previews: { gatewayPort: ports.gateway, routesFile: join(runDir, "preview-routes.json"), tailscale: serve.cli, get: viaGateway(() => `http://127.0.0.1:${ports.gateway}`).get },
 });
@@ -312,7 +336,7 @@ const controlPlane = await startControlPlane({
   tailscaledSocket: socket,
   previewPorts: { first: 10200, last: 10299 },
   resumeAfterUsageLimit: false,
-}, scriptedModels());
+}, scriptedModels(), { githubIdentity: verifyGithubIdentity });
 closers.push(() => controlPlane.close());
 
 if (seededThreads === 0) await call("POST", "/v1/projects", project);

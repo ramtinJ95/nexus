@@ -13,6 +13,7 @@ import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { startApi, type ApiOptions } from "../control/api/server.ts";
 import { loginStore } from "../control/logins.ts";
+import { ownerLogins } from "../control/owner-logins.ts";
 import { threadServices } from "../control/thread-services.ts";
 import { isDraining, turnGate } from "../control/drain.ts";
 import { noFeatures, type Features } from "../control/features.ts";
@@ -95,6 +96,8 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
   const images = imagesOf?.(registry);
   const backfill = backfillOf?.(registry);
   registry.nodes.upsertNode({ name: node, tailnetHost: "rj-firebat.tail.ts.net", tailnetNodeId: "nFIREBAT" as TailnetNodeId });
+  // A shared install starts a pylon only on a node whose probe said it keeps owner grants apart, as this release's does.
+  if (apiOptions.people?.shared === true) registry.threads.ingested(testObservation(node, { artifacts: [image.id], grants: { secrets: ["STRIPE_KEY", "NEXUS_CHATGPT_TOKEN"], gitSsh: true } }), []);
   let caller: TailnetNodeId | null = laptop;
   let requests = 0;
   /** Every whois waits for it, so a test can hold a request at admission, and tells `asked` it got there. */
@@ -128,20 +131,33 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
   const reads: Parameters<ProjectMirror["setupInputs"]>[1][] = [];
   const wake = (n: NodeName) => { woken.push(n); };
   const mirror: ProjectMirror = { setupInputs(p, ref) { reads.push(ref); return read(p, ref); } };
+  /** Each pylon's own secret values the node's probe was handed, in order. */
+  const pylonSecrets: [PylonId, string, string][] = [];
   const probes = new Map([[node, {
+    putPylonSecret: async (pylonId: PylonId, name: string, value: string) => { pylonSecrets.push([pylonId, name, value]); },
     command: (pylonId: PylonId, command: PylonCommand) => { commands.push([pylonId, command]); return answer(command); },
     stream: (pylonId: PylonId, argv: readonly string[]) => { streams.push([pylonId, argv]); return pipe(argv); },
     health: () => health(),
   }]]);
   const claude = claudeConversations({ registry, probes: apiOptions.probes ?? probes, log: (message) => { logged.push(message); } });
+  /**
+   * Each person's logins, in a directory of this API's own. On a shared install every person is signed in to Claude and
+   * GitHub, so their starts boot, unless the test brings its own store.
+   */
+  const logins = apiOptions.logins ?? loginStore(join(dir, randomUUID()));
+  if (apiOptions.people?.shared === true && apiOptions.logins === undefined) {
+    for (const person of apiOptions.people.roles.keys()) {
+      await logins.set(person, { kind: "claude", token: `sk-ant-oat01-${person}-made-up` });
+      await logins.set(person, { kind: "github", token: `ghp_${person}MadeUp`, identity: { name: person, email: person } });
+    }
+  }
+  const owners = apiOptions.people?.shared === true ? ownerLogins({ registry, logins, probes, log: (message) => { logged.push(message); } }) : undefined;
   const services = threadServices({
-    registry, harness, mirror, dotfiles: dots === null ? undefined : dots ?? dotfiles, gitIdentity, wake, gate: turnGate(() => false), people: apiOptions.people,
+    registry, harness, mirror, dotfiles: dots === null ? undefined : dots ?? dotfiles, gitIdentity, wake, gate: turnGate(() => false), people: apiOptions.people, owners,
     queue: queued === true || piped === true, planning: planned === true ? { replies: agentReader(registry, harness, claude).replies } : null,
   });
   const { startThread, queue, pipeline, planning: plans } = services.api;
   /** The options of an API on `port`, so a restart serves the same registry and services. */
-  /** Each person's logins, in a directory of this API's own. */
-  const logins = loginStore(join(dir, randomUUID()));
   const optionsAt = (port: number): ApiOptions => ({
     registry, host: "127.0.0.1", port,
     // Every loopback caller is whoever the test says. Tests never ask tailscaled.
@@ -170,6 +186,8 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
     previewPorts: { first: 10200, last: 10299 },
     log: (message) => { logged.push(message); },
     logins,
+    // GitHub's account for a token, as GET /user names it, without asking GitHub.
+    githubIdentity: async (token) => ({ name: `Owner of ${token.slice(0, 8)}`, email: `${token.length}+${token.slice(0, 8).toLowerCase()}@users.noreply.github.com` }),
     ...apiOptions,
   });
   let api = await startApi(optionsAt(0));
@@ -196,7 +214,7 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
     });
   }
   return {
-    registry, images, queue, plans, call, raw, woken, logged, joined, hosts, calls, commands, streams, reads, fake, startThread,
+    registry, images, queue, plans, call, raw, woken, logged, pylonSecrets, logins, owners, joined, hosts, calls, commands, streams, reads, fake, startThread,
     get api() { return api; }, get port() { return api.port; }, get httpsPort() { return api.httpsPort; }, close: () => api.close(),
     /** How many requests the API has admitted. */
     requests: () => requests,

@@ -15,7 +15,6 @@ Some tests fail today and pass when their slice is done. Others pass today, beca
 | `02-harness-login-is-one.test.ts` | fails | `mp-16` | Two engineers' harness threads send one login. |
 | `read-wakes.test.ts` | fails | `mp-04` | A diff or files read wakes the pylon. |
 | `reader-wakes-owner-pylon.test.ts` | passes, asserts the fault | `mp-04` | A reader's visit wakes the owner's paused pylon. |
-| `project-edit-redirects-token.test.ts` | passes, asserts the fault | `mp-09` | One person's project edit redirects another person's token and git author. |
 | `ssh-node-key-shared.test.ts` | passes, asserts the fault | `mp-10` | Two engineers' pylons push with one node key. |
 | `review-mode-label-write.test.ts` | passes, asserts the fault | none | The label write uses the control plane's token. The review dropped this as harmless. |
 

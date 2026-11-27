@@ -89,7 +89,7 @@ export interface NodeSecrets extends SecretSource {
 /**
  * A pylon can boot before the first handoff, when the probe restarts between the snapshot the control plane boots it on
  * and the spawn, and a missing value fails its spawn for good (secret-missing is final). It boots with this instead,
- * which no API accepts, and the next handoff replaces it.
+ * which no API accepts, and the next handoff replaces it. An owner's grant that a restart lost boots with it too.
  */
 const notHandedOver = "nexus-held-secret-not-handed-over-yet";
 
@@ -100,7 +100,7 @@ export function nodeSecrets(file: SecretSource): NodeSecrets {
   const nodeValue = (name: string) => heldSecrets.includes(name) ? held.get(name) ?? notHandedOver : file.value(name);
   const names = () => [...file.names(), ...held.keys()];
   return {
-    value: (name, pylonId) => (pylonId === undefined ? undefined : pylons.get(pylonId)?.get(name)) ?? nodeValue(name),
+    value: (name, pylonId, owned) => (pylonId === undefined ? undefined : pylons.get(pylonId)?.get(name)) ?? (owned === true ? notHandedOver : nodeValue(name)),
     names,
     values: () => [...names().flatMap((name) => nodeValue(name) ?? []), ...[...pylons.values()].flatMap((own) => [...own.values()])],
     hold(name, value) { held.set(name, value); },

@@ -272,7 +272,7 @@ export function createPylonVmBackend(options: PylonVmBackendOptions): VmBackend 
     }
     const secrets: BootSpec["secrets"] = {};
     for (const grant of boot.network.secrets) {
-      const value = options.secrets.value(grant.name, boot.pylonId);
+      const value = options.secrets.value(grant.name, boot.pylonId, grant.owner);
       if (value === undefined) throw new JobFailure("secret-missing", `secret ${grant.name} is not in this node's secret file`);
       secrets[grant.name] = { hosts: [...grant.hosts], value };
     }

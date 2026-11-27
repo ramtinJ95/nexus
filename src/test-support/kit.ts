@@ -115,7 +115,7 @@ export function stoppedPylon(pylonId: PylonId, over: Partial<Omit<StoppedPylon, 
 export function testObservation(node: NodeName, over: Partial<NodeObservation> = {}): NodeObservation {
   return {
     node, observedAt: new Date().toISOString(), probeBootId: "b", events: [], capacity: testCapacity(), artifacts: [], jobs: [], pylons: [],
-    grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [], ...over,
+    grants: { secrets: [], gitSsh: false }, previewRoutes: [], heldSecrets: [], ownerGrants: true, ...over,
   };
 }
 

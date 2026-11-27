@@ -8,7 +8,8 @@ import { dir, phone, testApi } from "../../test-support/api-kit.ts";
 import { tailnet, type WhoisAnswer } from "../../test-support/people.ts";
 import { parseWhois, type TailnetCaller } from "../../node-base/tailscaled.ts";
 import { peopleOf } from "../people.ts";
-import { loginStore } from "../logins.ts";
+import { githubIdentity, loginStore, NoGithubIdentity } from "../logins.ts";
+import type { GitIdentity } from "../../protocol/spawn.ts";
 import type { Person, TailnetNodeId } from "../../ids.ts";
 
 const alice = tailnet.alice.UserProfile!.LoginName as Person;
@@ -22,10 +23,10 @@ const aliceToken = "sk-ant-oat01-alice-made-up-0000";
 const bobToken = "ghp_bobMadeUp0000";
 const none = { claude: false, github: false };
 
-async function shared(t: Parameters<typeof testApi>[0]) {
+async function shared(t: Parameters<typeof testApi>[0], options: Partial<Parameters<typeof testApi>[1]> = {}) {
   const store = join(dir, randomUUID());
   let caller = answer(tailnet.alice);
-  const s = await testApi(t, { people, allowed: new Set(), whois: async () => caller, logins: loginStore(store) });
+  const s = await testApi(t, { people, allowed: new Set(), whois: async () => caller, logins: loginStore(store), ...options });
   const bodies: string[] = [];
   const call = async (method: string, path: string, body?: unknown) => {
     const r = await s.call(method, path, body);
@@ -120,4 +121,33 @@ test("on a solo install the operator sets their own logins from any person's dev
   assert.deepEqual((await s.call("GET", "/v1/logins")).body, { person: "operator", set: { claude: true, github: false } });
   s.callAs("nFIREBAT" as TailnetNodeId);
   assert.equal((await s.call("GET", "/v1/logins")).status, 403, "the control plane's own node is no person");
+});
+
+test("a GitHub token is stored with the identity GitHub gives for it, and one GitHub refuses or cannot be asked about is not stored", async (t) => {
+  let github: (token: string) => Promise<GitIdentity> = async () => ({ name: "Bob Builder", email: "2+bob@users.noreply.github.com" });
+  const s = await shared(t, { githubIdentity: (token) => github(token) });
+  s.as(tailnet.bob);
+  assert.equal((await s.call("PUT", "/v1/logins/github", { token: bobToken })).status, 200);
+  assert.deepEqual(JSON.parse(await readFile(join(s.store, "bob%40example.com.json"), "utf8")), { github: bobToken, gitIdentity: { name: "Bob Builder", email: "2+bob@users.noreply.github.com" } });
+  await s.call("DELETE", "/v1/logins/github");
+  for (const [fault, status] of [[new NoGithubIdentity("GitHub refused the token with 401", true), 400], [new NoGithubIdentity("GitHub could not be reached to read whose token it is (TimeoutError)", false), 502]] as const) {
+    github = () => Promise.reject(fault);
+    const r = await s.call("PUT", "/v1/logins/github", { token: bobToken });
+    assert.equal(r.status, status);
+    assert.match(r.body.error, /the github token was not stored/);
+    assert.deepEqual((await s.call("GET", "/v1/logins")).body.set, none, `${fault.message}: nothing is stored`);
+  }
+  for (const body of s.bodies) assert.ok(!body.includes(bobToken), `${body} holds no token`);
+});
+
+test("GitHub's GET /user gives the account's name and public address, or its login and no-reply address, and never the token in a fault", async () => {
+  const answering = (status: number, body: unknown): typeof fetch => async (_url, init) => {
+    assert.equal(new Headers(init?.headers).get("authorization"), `Bearer ${bobToken}`);
+    return new Response(JSON.stringify(body), { status });
+  };
+  assert.deepEqual(await githubIdentity(bobToken, answering(200, { id: 2, login: "bob", name: "Bob Builder", email: "bob@example.com" })), { name: "Bob Builder", email: "bob@example.com" });
+  assert.deepEqual(await githubIdentity(bobToken, answering(200, { id: 2, login: "bob", name: null, email: null })), { name: "bob", email: "2+bob@users.noreply.github.com" });
+  await assert.rejects(githubIdentity(bobToken, answering(401, { message: "Bad credentials" })), (err: NoGithubIdentity) => err.refused && !err.message.includes(bobToken));
+  await assert.rejects(githubIdentity(bobToken, answering(500, {})), (err: NoGithubIdentity) => !err.refused);
+  await assert.rejects(githubIdentity(bobToken, async () => { throw new TypeError(`fetch failed for ${bobToken}`); }), (err: NoGithubIdentity) => !err.refused && !err.message.includes(bobToken));
 });
