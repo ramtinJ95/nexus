@@ -198,13 +198,13 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 
 ### mp-05: admins alone edit projects
 
-- [ ] **Depends on.** `mp-02`.
-- [ ] **Files.** `src/control/api/project-routes.ts`, `src/control/api/auth-matrix.txt`.
-- [ ] **Change.** On a shared install, project add, edit, and remove admit an admin only.
-- [ ] **Result.** An engineer can read a project and cannot change it.
-- [ ] **Unit.** An engineer's `PATCH /v1/projects/<id>` gets 403. An admin's succeeds.
-- [ ] **Live.** As `bob`, an engineer, run `nexus project edit` on the stack's project. Pass when it is refused and `nexus project show` is unchanged.
-- [ ] **Perf.** `check`. Fail above 10% over base.
+- [x] **Depends on.** `mp-02`.
+- [x] **Files.** `src/control/api/project-routes.ts`, `src/control/api/auth-matrix.txt`.
+- [x] **Change.** On a shared install, project add, edit, and remove admit an admin only.
+- [x] **Result.** An engineer can read a project and cannot change it.
+- [x] **Unit.** An engineer's `PATCH /v1/projects/<id>` gets 403. An admin's succeeds.
+- [x] **Live.** As `bob`, an engineer, run `nexus project edit` on the stack's project. Pass when it is refused and `nexus project show` is unchanged.
+- [x] **Perf.** `check`. Fail above 10% over base.
 
 ### mp-06: the CLI and the dashboard show the owner
 

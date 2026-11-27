@@ -1,0 +1,101 @@
+{
+  "slice": "mp-05",
+  "probe": "check",
+  "recorded": "2026-11-27",
+  "machine": "Nexus pylon, 4 CPU, dockerd idle, nothing else running",
+  "order": "base first, then head, alternating, two runs a side, in separate worktrees set up with .nexus/resume --setup and npm run build before the first run",
+  "limit": "fail when the head median is over 10% above base and outside base range",
+  "base": {
+    "commit": "cca80fdd",
+    "runs": [
+      {
+        "probe": "check",
+        "revision": "cca80fdd",
+        "dirty": false,
+        "dir": "/tmp/claude-1000/perf05/base",
+        "wallMs": 375662.2,
+        "exitCode": 0,
+        "failed": 0
+      },
+      {
+        "probe": "check",
+        "revision": "cca80fdd",
+        "dirty": false,
+        "dir": "/tmp/claude-1000/perf05/base",
+        "wallMs": 408790.3,
+        "exitCode": 0,
+        "failed": 0
+      }
+    ]
+  },
+  "head": {
+    "commit": "64dfec32",
+    "runs": [
+      {
+        "probe": "check",
+        "revision": "64dfec32",
+        "dirty": false,
+        "dir": "/tmp/claude-1000/perf05/head",
+        "wallMs": 424201.4,
+        "exitCode": 0,
+        "failed": 0
+      },
+      {
+        "probe": "check",
+        "revision": "64dfec32",
+        "dirty": false,
+        "dir": "/tmp/claude-1000/perf05/head",
+        "wallMs": 422671.3,
+        "exitCode": 0,
+        "failed": 0
+      }
+    ]
+  },
+  "earlier": {
+    "runs": [
+      {
+        "probe": "check",
+        "revision": "cca80fdd",
+        "dirty": false,
+        "dir": "/tmp/claude-1000/perf05/base",
+        "wallMs": 428745.7,
+        "exitCode": 1,
+        "failed": 1
+      },
+      {
+        "probe": "check",
+        "revision": "64dfec32",
+        "dirty": false,
+        "dir": "/tmp/claude-1000/perf05/head",
+        "wallMs": 390670.3,
+        "exitCode": 1,
+        "failed": 1
+      },
+      {
+        "probe": "check",
+        "revision": "cca80fdd",
+        "dirty": false,
+        "dir": "/tmp/claude-1000/perf05/base",
+        "wallMs": 442523.7,
+        "exitCode": 1,
+        "failed": 1
+      },
+      {
+        "probe": "check",
+        "revision": "64dfec32",
+        "dirty": false,
+        "dir": "/tmp/claude-1000/perf05/head",
+        "wallMs": 393411.1,
+        "exitCode": 1,
+        "failed": 1
+      }
+    ],
+    "note": "The same alternation of the same commits, run first in worktrees set up with a plain npm ci, which writes no .nexus-lockfile-sha256. Every run then reinstalled the packages and failed only src/cli/completion.test.ts, whose deploy/mac/nexus shim refuses a checkout without the stamp. The main checkout passes that test. Kept to show the run-to-run spread: head was 9% faster than base there. Not used for the verdict."
+  },
+  "result": {
+    "baseMedianMs": 392226.3,
+    "headMedianMs": 423436.3,
+    "change": "+8.0%",
+    "verdict": "pass: the head median is under 10% over base"
+  }
+}
