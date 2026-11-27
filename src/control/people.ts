@@ -62,7 +62,7 @@ export const pylonAgentAdvice = "The one agent a thread can run there is Claude 
 /**
  * What refuses a person's work that the control plane's own agent, the harness, would run on the install's one model
  * login, which a shared install keeps for failure judgments: a thread with no pylon agent, a planning thread, a
- * `message` brief, a harness retry, and a review until mp-17. `what` names the work, and `instead` what the person does.
+ * `message` brief, and a harness retry. `what` names the work, and `instead` what the person does.
  */
 export const pylonAgentsOnly = (what: string, instead = pylonAgentAdvice) =>
   new Refusal("forbidden", `${what}. On a shared install the control plane's own agent runs no person's work, since it would spend the install's one model login. ${instead}`, "pylon-agents-only");

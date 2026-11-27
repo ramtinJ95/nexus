@@ -17,12 +17,17 @@ import { image, project, sharedProject, testApi } from "../test-support/api-kit.
 import { tailnet, type WhoisAnswer } from "../test-support/people.ts";
 import { parseWhois, type TailnetCaller } from "../node-base/tailscaled.ts";
 import { tempDir } from "../test-support/kit.ts";
-import { addThread, seedRegistry } from "../test-support/registry-kit.ts";
+import { addThread, seedRegistry, testPr } from "../test-support/registry-kit.ts";
 import { openRegistry } from "./registry.ts";
 import { DatabaseSync } from "node:sqlite";
 import { chatgptTokenGrant, ownerGrants } from "../protocol/secret-grants.ts";
 import { heldSecrets } from "../protocol/observations.ts";
-import type { ImageId, Person, PylonId } from "../ids.ts";
+import type { ImageId, Person, PylonId, ThreadId } from "../ids.ts";
+import { reviewLoop } from "./review.ts";
+import { reviewerCaller } from "./agent-protocol.ts";
+import { heard } from "./agent-conversation.ts";
+import type { CheckRuns } from "./gate.ts";
+import type { ChangedFile, PrSnapshot } from "./github.ts";
 
 const alice = tailnet.alice.UserProfile!.LoginName as Person;
 const bob = tailnet.bob.UserProfile!.LoginName as Person;
@@ -190,4 +195,38 @@ test("a shared pylon booted before mp-16 with the harness's ChatGPT grant loses 
   assert.deepEqual(held(shared.pylonId), [], "the shared pylon's boot asks for no held secret, so a probe after a restart wakes it");
   assert.deepEqual(after.threads.pylon(shared.pylonId)!.boot.network.secrets, Object.values(ownerGrants), "its owner's own logins stay");
   assert.deepEqual(held(solo.pylonId), [chatgptTokenGrant.name], "a solo install's pylon keeps the grant its probe is still handed");
+});
+
+test("a review alice starts on a shared install runs one reviewer thread she owns, on her Claude login, and makes no model request from the control plane", async (t) => {
+  const { host, arrived } = await recordedHarness(t);
+  const s = await install(t, host, shared);
+  s.as(answer(tailnet.alice));
+  const started = await s.call("POST", "/v1/threads", { project: "acme", claude: "alice-says-hello" });
+  assert.equal(started.status, 201, JSON.stringify(started.body));
+  const builder = started.body.id as ThreadId;
+  const pr = testPr({ repo: "acme/repo", number: 7, title: "Add the cache" });
+  s.registry.prWatches.savePrWatch(builder, { links: [{ pr, seen: [], failed: false }], commentWakes: 0, pending: null, error: null });
+  const snapshot: PrSnapshot = { pr, detail: { head: "1".repeat(40), branch: "feature", base: "main", body: "Adds a cache.", mergeCommit: null }, failures: [], comments: [] };
+  const files: ChangedFile[] = [{ path: "src/cache.ts", previous: null, patch: "@@ -0,0 +1 @@\n+export {};" }];
+  const delivered: ThreadId[] = [];
+  const noRun: CheckRuns = { start: async () => ({ refused: "no check in this test", room: false }), step: () => ({ kind: "void" }), result: () => null, discard: () => {} };
+  const loop = reviewLoop({
+    registry: s.registry, harnessModel: "gpt-6-astra", people: shared, lands: null, startThread: s.startThread,
+    github: { find: async () => [7], poll: async () => structuredClone(snapshot), files: async () => files, change: async () => files, behind: async () => false, has: async () => false, label: async () => ({ kind: "labelled" }) },
+    inbox: async (target) => { delivered.push(target.id); return "delivered"; },
+    agentState: async (target, since) => ({ ...heard(target, s.registry.threads.claudeEntries(target.id), since), replies: [], failure: null }),
+    personWrote: async () => false, brief: async () => null, runs: () => ({ checks: noRun, live: noRun }),
+    release: { self: undefined, repo: "ramtinJ95/nexus", branch: "main" }, wake: () => {}, log: () => {},
+  });
+  t.after(() => loop.close());
+  await loop.start(builder, { land: null });
+  await loop.poll();
+  const review = s.registry.reviews.review(builder)!;
+  const reviewer = s.registry.threads.thread(review.reviewer);
+  assert.deepEqual([reviewer?.owner, reviewer?.startedBy, reviewer?.conversationId, s.registry.threads.agent(reviewer!).kind], [alice, reviewerCaller, null, "claude"], "the reviewer is a Claude worker alice owns");
+  assert.equal(review.second, undefined, "no second reviewer");
+  assert.deepEqual(s.pylonSecrets.filter(([pylon, name]) => pylon === reviewer!.pylonId && name === ownerGrants.claude.name).map(([, , value]) => value), [`sk-ant-oat01-${alice}-made-up`], "its pylon was handed alice's Claude login");
+  assert.deepEqual(delivered, [], "its first request is its first prompt");
+  await new Promise((r) => setTimeout(r, 1_000));
+  assert.deepEqual(arrived, [], "no model request left the control plane");
 });

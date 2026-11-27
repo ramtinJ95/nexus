@@ -4,7 +4,7 @@
  * rounds run out. The control plane runs the repository's checks at each round's head while the reviewer reads it, and
  * once both the approval and the checks are in, its live check when the head has a `.nexus/verify`, and, when the person
  * asked for it, lands the PR under the merge policy (policy.ts): merge, then deploy and roll back if the fleet is not
- * healthy (landing.ts).
+ * healthy (landing.ts). On a shared install the reviewer is one Claude worker on the asker's login, and nothing lands.
  *
  * The loop runs on the control plane, one pass every few seconds, from the record the registry keeps per builder. Each
  * phase's step reads what the world says now (the agents' replies, the PR, the release) and moves on only from that,
@@ -50,10 +50,13 @@ import type { Start } from "./start-request.ts";
 import { owedOf, servesReview, threadRole } from "./work-model.ts";
 import { builderFindings, builderNotes, fencedAnswers, nextRound, quoteRequest, reminder, reviewerRequest, type FencedAnswer } from "./prompts.ts";
 import { isOpenStatus, openStatuses } from "./reconcile.ts";
-import { landingOff, pylonAgentsOnly, solo, type People } from "./people.ts";
+import { landingOff, solo, type People } from "./people.ts";
 
-/** What refuses every review start on a shared install, the person's and a project's own, until mp-17 runs one on the asker's login. */
-export const reviewsOff = () => pylonAgentsOnly("Nexus starts no review on a shared install yet, since its reviewer would be the control plane's own agent", "Ask a colleague to review the pull request on GitHub");
+/**
+ * A shared install's reviewer: one Claude worker, the review's only one. Only a thread's owner may start its review, so
+ * the reviewer's owner, the builder's, is the engineer who asked, and its pylon boots on their Claude login.
+ */
+const ownersReviewer = { claude: true, model: defaultClaudeModel } as const;
 
 type ReviewRegistry = Pick<Registry, "threads" | "questions" | "releases" | "reviews" | "nodes" | "now" | "planning" | "prWatches" | "projects">;
 
@@ -98,7 +101,7 @@ export interface ReviewDeps {
    * is asked again before every merge. A shared install has none, so no review it runs can merge.
    */
   lands: { github: GitHubLanding; mayLand(caller: string): boolean } | null;
-  /** A shared install starts no review until mp-17, since its reviewer would run on the install's one model login. */
+  /** A shared install's review runs one reviewer on the asker's login, and the install starts none on its own. */
   people?: People | undefined;
   /** Tells the planner a thread's status changed, so an archived thread's pylon pauses at once. */
   wake(t: Thread): void;
@@ -353,7 +356,7 @@ export function reviewLoop(deps: ReviewDeps) {
     if (second?.kind === "none" || second?.kind === "starting") return r;
     if (second?.kind === "claude") return registry.threads.thread(second.thread)?.status === "active" ? r : { ...r, second: starting(second.rule, second.model) };
     const project = registry.projects.project(registry.threads.thread(r.builder)!.project)!;
-    const rule = project.secondReview == null ? null : secondReviewRule(project.secondReview, await github.files(r.pr.repo, r.pr.number), ofReleaseRepo(r));
+    const rule = await secondRule(project, r.pr.repo, r.pr.number);
     return rule === null ? r : { ...r, second: secondFor(rule, r.models, project.secrets) };
   };
   const withRound = (r: Review, round: Partial<Round>): Review => ({ ...r, rounds: [...r.rounds.slice(0, -1), { ...r.rounds.at(-1)!, ...round }] });
@@ -1226,11 +1229,11 @@ export function reviewLoop(deps: ReviewDeps) {
     const agent = registry.threads.agent(builder);
     const builderModel = agent.kind === "claude" ? agent.worker.model ?? defaultClaudeModel : deps.harnessModel;
     const project = registry.projects.project(builder.project)!;
-    const kind = reviewerFor({ claude: agent.kind === "claude", model: builderModel }, project.secrets, deps.harnessModel);
+    const kind = people.shared ? ownersReviewer : reviewerFor({ claude: agent.kind === "claude", model: builderModel }, project.secrets, deps.harnessModel);
     if ("why" in kind) throw new Refusal("conflict", kind.why);
     const models = { builder: builderModel, reviewer: kind.model };
     // A later round whose head the rule names gets a second reviewer then, which stays for every round after it.
-    const rule = project.secondReview == null ? null : secondReviewRule(project.secondReview, await github.files(repo, number), ofReleaseRepo({ pr: { repo } }));
+    const rule = await secondRule(project, repo, number);
     const brief = await deps.brief(builder).then((text) => text?.slice(0, 8_000) ?? null, (err: unknown) => {
       log(`${builder.id}: the review of pull request #${number} starts without the builder's brief, which could not be read (${(err as Error).name})`);
       return null;
@@ -1301,6 +1304,9 @@ export function reviewLoop(deps: ReviewDeps) {
     const { behind: _, ...started } = r;
     return { ...started, reviewerStarted: true };
   }
+  /** The project's rule that names the PR's change for a second reviewer, which a shared install never starts. */
+  const secondRule = async (project: Project, repo: string, number: number): Promise<string | null> =>
+    people.shared || project.secondReview == null ? null : secondReviewRule(project.secondReview, await github.files(repo, number), ofReleaseRepo({ pr: { repo } }));
   /** An independent second reviewer for `rule` on the default Claude model, to start, or why none can run. */
   const secondFor = (rule: string, models: Review["models"], secrets: Project["secrets"]): SecondReviewer => {
     const model = secondReviewerFor([models.builder, models.reviewer], secrets);
@@ -1343,7 +1349,6 @@ export function reviewLoop(deps: ReviewDeps) {
     },
 
     async start(builderId: ThreadId, request: { pr?: number | undefined; rounds?: number | undefined; land: string | null; replace?: boolean | undefined }): Promise<Review> {
-      if (people.shared) throw reviewsOff();
       if (request.land !== null) refuseLanding();
       const builder = registry.threads.thread(builderId);
       if (builder === undefined) throw new Refusal("missing", `no thread ${builderId}`);

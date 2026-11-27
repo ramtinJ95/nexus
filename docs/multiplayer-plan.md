@@ -341,11 +341,11 @@ Three limits of this guard, each handled elsewhere:
 
 ### mp-17: a review runs on the asker's login
 
-- [ ] **Depends on.** `mp-16`. Not needed for the pilot.
-- [ ] **Files.** `src/control/review.ts`, its tests.
-- [ ] **Change.** Today the reviewer of a Claude builder is a harness thread, and the second reviewer needs the project's Claude grant. On a shared install the reviewer is one Claude worker whose owner is the engineer who asked for the review. There is no second reviewer.
+- [x] **Depends on.** `mp-16`. Not needed for the pilot.
+- [x] **Files.** `src/control/review.ts`, its tests and `src/control/pylon-agents-only.test.ts`. The dashboard's review card and auto-review switch, the CLI's `nexus review` help and a comment in `people.ts` said reviews were off, so their words changed too.
+- [x] **Change.** Today the reviewer of a Claude builder is a harness thread, and the second reviewer needs the project's Claude grant. On a shared install the reviewer is one Claude worker whose owner is the engineer who asked for the review. There is no second reviewer. A review a project starts on its own, `auto` or owed, has no asker, so it stays off there as `mp-16` left it.
 - [ ] **Result.** An engineer can ask Nexus to review their thread before a colleague does, and the review runs on their own subscription.
-- [ ] **Unit.** A review that `alice` starts creates a reviewer thread owned by `alice` and makes no model request from the control plane.
+- [x] **Unit.** A review that `alice` starts creates a reviewer thread owned by `alice` and makes no model request from the control plane.
 - [ ] **Live.** As `alice`, start a review of a thread with an open pull request. Pass when a verdict arrives, the reviewer's pylon carried her token, and nothing was merged or approved on GitHub.
 - [ ] **Perf.** Time from review start to the first verdict on a fixed small change. Fail above 20% over the same review on an install without `people`.
 
