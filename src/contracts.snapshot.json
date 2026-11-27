@@ -11,6 +11,7 @@
     ".claude/skills/verify-nexus/scripts/owner-logins-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/people-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/project-check: verify-changed",
+    ".claude/skills/verify-nexus/scripts/show-owner-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/stack.ts: verify-changed",
     ".claude/skills/verify-nexus/scripts/template-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/tsconfig.json: verify-changed",
