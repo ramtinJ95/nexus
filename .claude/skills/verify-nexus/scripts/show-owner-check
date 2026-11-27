@@ -16,6 +16,11 @@ evidence=$("$V" evidence)
 run=$(cat "$base/current")
 bobApi=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).bobApi)' "$base/runs/$run/state.json")
 
+# A shared start boots with its owner's own logins, so each signs in first, with made-up tokens.
+for who in alice bob; do
+  printf '%s\n' "sk-ant-oat01-$who-made-up-$(date +%s)" | "$V" cli "show-owner-login-claude-$who" --as "$who" -- login claude >/dev/null
+  printf '%s\n' "ghp_verify${who}0$(date +%s)" | "$V" cli "show-owner-login-github-$who" --as "$who" -- login github >/dev/null
+done
 A=$("$V" cli show-owner-start-alice -- start --project spoon --title "alice's thread" --json | jq -r .id)
 B=$("$V" cli show-owner-start-bob --as bob -- start --project spoon --title "bob's thread" --json | jq -r .id)
 echo "alice started $A, bob started $B"
