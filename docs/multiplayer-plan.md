@@ -117,6 +117,7 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 | `mp-22` | A cap on running pylons for each person | `mp-02` | `src/control/placement.ts` |
 | `mp-23` | A start that does not fit waits in line | `mp-22` | `src/control/placement.ts`, `src/control/threads.ts`, `src/control/loop.ts` |
 | `mp-24` | The installer makes a shared install | `mp-02`, `mp-21` | `deploy/install.sh`, `src/deploy/setup.ts`, `deploy/README.md` |
+| `mp-25` | The guard lets downloads from `github.com` through | `mp-15` | `src/pylon-vm/github-guard.ts` and its test |
 | `ops-1` | The office machine can run pylons | nothing | none |
 | `ops-2` | The company tailnet tags the node and admits the engineers | nothing | the company infrastructure repository |
 | `ops-3` | The shared install runs from `multiplayer` | `mp-21`, `mp-24`, `ops-1`, `ops-2` | none |
@@ -129,11 +130,12 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 - After `mp-02`: `mp-03`, `mp-05`, `mp-06`, `mp-08`, `mp-14`, and `mp-22` branch from `multiplayer` independently. `mp-04` follows `mp-03` because both edit `thread-routes.ts`.
 - After `mp-09`: `mp-10`, `mp-11`, `mp-12`, `mp-13`, and `mp-16` are independent. `mp-10` and `mp-15` both edit `src/pylon-vm/network.ts`, so `mp-15` follows `mp-10`.
 - `mp-23` and `mp-24` came from [what the office checks found](multiplayer-office-machine.md). `mp-23` follows `mp-22` and edits the same admission code, so it does not run beside `mp-20`, which also names `src/control/placement.ts`. `mp-24` is independent of every slice still open.
+- `mp-25` came from the operator's review of `mp-15`. It edits the guard module and its test, which no slice still open names.
 - Two slices that name the same file never run at the same time.
 
 ### What waits for the operator
 
-- Every slice that changes what a person sees or types waits for the operator's review before merge: `mp-03`, `mp-06`, `mp-08`, `mp-11`, `mp-12`, `mp-14`, `mp-15`, `mp-16`, `mp-17`, `mp-19`, `mp-20`, `mp-22`, `mp-23`, and `mp-24`.
+- Every slice that changes what a person sees or types waits for the operator's review before merge: `mp-03`, `mp-06`, `mp-08`, `mp-11`, `mp-12`, `mp-14`, `mp-15`, `mp-16`, `mp-17`, `mp-19`, `mp-20`, `mp-22`, `mp-23`, `mp-24`, and `mp-25`.
 - Every slice that touches a path [the merge policy](merge-policy.md) reserves is held for the operator as that policy says. That covers auth, login, whois, `src/control/review.ts`, `src/control/main.ts`, and `deploy/`, so it covers most of this plan.
 - `mp-12` waits for an owner of the company's GitHub organisation to approve the App.
 
@@ -419,6 +421,20 @@ The office machine holds three pylons of 8 GiB, or six of 4 GiB, as [The office 
 - [ ] **Live.** On a fresh machine, install with the release branch `multiplayer` and one admin. Pass when `nexus doctor` as that admin reports no failed check, a call from a tailnet user outside `people` gets 403, and a rerun that adds that user lets the same call through with no other step. The office machine's install in `ops-3` is this run.
 - [ ] **Perf.** `check`. Fail above 10% over base.
 
+### mp-25: the guard lets downloads from `github.com` through
+
+The guard of `mp-15` passes three requests on `github.com`, which are git's own: the ref list, a fetch, and a push. Every other request to that host is refused, a read included. The operator's review ran the guard's decision on four reads and each was refused: a release asset under `/releases/download/`, a source archive under `/archive/`, a raw file under `/raw/`, and a Git LFS batch request. The pull request of `mp-15` did not name this.
+
+It matters for daily work. Install scripts and image builds fetch tools from `github.com` release URLs. The company monorepo's own files name such a URL in sixteen places, two of them in image builds. A template build has no guard, so a setup that runs there is not affected. A boot whose setup hash differs runs its setup in the engineer's pylon, behind the guard.
+
+- [ ] **Depends on.** `mp-15`.
+- [ ] **Files.** `src/pylon-vm/github-guard.ts`, `src/pylon-vm/github-guard.test.ts`, `interrogate/guard-github/probes.mjs`.
+- [ ] **Change.** The allow-list gains rows for reads on `github.com`, each with its `why`: `GET` and `HEAD` of a release asset, by tag and by `latest`, of a source archive, and of a raw file. Each row names a path under `/<owner>/<repo>/`, and nothing else on `github.com` opens. Such a read answers with a redirect to another host, and the pull request names those hosts and says whether an engineer's pylon reaches them today. Git LFS stays refused, and the refusal says so by name. The company monorepo does not use it.
+- [ ] **Result.** An engineer's agent downloads a release, an archive, or a raw file from `github.com`, and everything the guard refused before it still is.
+- [ ] **Unit.** The recorded table gains the four reads above with the decision for each, and a write to each of the new paths, which is refused. Every earlier row of the table keeps its decision.
+- [ ] **Live.** From a VM pylon on a shared install, `curl -L` of a public release asset succeeds and the probe list of `mp-15` gives the results it gave before. This box is part of [the guard check after the install](multiplayer-office-acceptance.md#6-the-guard).
+- [ ] **Perf.** None. The change adds rows to a table that every request already walks.
+
 ### ops-1: the office machine can run pylons
 
 The machine is reachable only from the company network, so the operator runs this. The commands, and every other check that needs the office, are in [Checks to run in the office](multiplayer-office-checks.md).
@@ -439,7 +455,7 @@ This change lives in the company's infrastructure repository, not here.
 ### ops-3: the shared install runs from `multiplayer`
 
 - [ ] **Depends on.** `mp-21`, `mp-24`, `ops-1`, `ops-2`, and the pilot set below.
-- [ ] Run [check 7](multiplayer-office-checks.md#7-the-host-firewall-selinux-and-swap) first. If the machine's firewall closes port 7443 to the tailnet, open that port on the tailnet interface before the install, and write the rule down here. Check 7 ran on 2026-11-27 and the firewall does close it, as [The office machine](multiplayer-office-machine.md#the-firewall-selinux-and-swap) records. The rule is not written yet.
+- [ ] Run [check 7](multiplayer-office-checks.md#7-the-host-firewall-selinux-and-swap) first. If the machine's firewall closes port 7443 to the tailnet, open that port on the tailnet interface before the install, and write the rule down here. Check 7 ran on 2026-11-27 and the firewall does close it, as [The office machine](multiplayer-office-machine.md#the-firewall-selinux-and-swap) records. The rule is not written yet. It covers three ports on the control plane's machine, 7470, 7443 and 7480, and `sudo deploy/install.sh --check` prints it.
 - [ ] Install on the office machine with the release branch `multiplayer` and the operator as the first admin.
 - [ ] Sign the install's one model login in, for failure judgments only.
 - [ ] Build and roll out the image.
@@ -451,7 +467,7 @@ This change lives in the company's infrastructure repository, not here.
 
 ### pilot: two engineers work on the shared install
 
-The pilot set is `mp-00` to `mp-05`, `mp-07` to `mp-10`, `mp-14`, `mp-15`, `mp-16`, `mp-18`, `mp-21`, `mp-22`, and `mp-24`. The pilot needs neither `mp-12` nor `mp-13`. It needs `mp-23` only if the company project's pylons are larger than 6 GiB, because four of those do not fit on the office machine and two engineers with two pylons each would then meet a refused start.
+The pilot set is `mp-00` to `mp-05`, `mp-07` to `mp-10`, `mp-14`, `mp-15`, `mp-16`, `mp-18`, `mp-21`, `mp-22`, and `mp-24`. The pilot needs neither `mp-12` nor `mp-13`. It needs `mp-25` as soon as an engineer's work downloads a tool from a `github.com` release, which the company monorepo's files do. It needs `mp-23` only if the company project's pylons are larger than 6 GiB, because four of those do not fit on the office machine and two engineers with two pylons each would then meet a refused start.
 
 Two engineers, A and B, each do the following on real work for one week. Every line is a pass predicate.
 
@@ -472,7 +488,9 @@ Two engineers, A and B, each do the following on real work for one week. Every l
 - Whether the guard refuses an approval of another person's pull request. The prototype had one GitHub account. The live box of `mp-15` settles it.
 - Whether the guard holds with the company repository's rules in place. The scratch repository could not carry a ruleset.
 - What a running control plane logs for a tagged device on the company tailnet. The office checks saw the whois answer, and it has the shape `mp-01` assumed. The live box of `mp-01` still needs the call.
-- Whether a laptop reaches the control plane once the office machine's firewall has a rule for it. [Check 7](multiplayer-office-checks.md#7-the-host-firewall-selinux-and-swap) saw the firewall refuse a laptop on port 7443, where the control plane listens (`src/deploy/setup.ts:294`). The installer checks no firewall. Its check should say when the port is closed, and that is a slice this plan does not have yet.
+- Whether a laptop reaches the control plane once the office machine's firewall has a rule for it. [Check 7](multiplayer-office-checks.md#7-the-host-firewall-selinux-and-swap) saw the firewall refuse a laptop on port 7443, where the control plane listens (`src/deploy/setup.ts:294`). Since the fix that reached `multiplayer` on 2026-11-27, the installer's check, run as root, names each port that firewalld closes on the tailnet interface and the command that opens it. Nobody has run that check on the office machine yet.
+- Whether an approval on the company monorepo survives a later push. The guard lets an agent push to any branch but the default one, a colleague's included. So a commit pushed after a review lands unreviewed unless the repository dismisses the approval or asks for a new one. [Check 5](multiplayer-office-checks.md#what-the-guard-leaves-to-the-repository) reads the two settings.
+- Whether a label or a comment on the company monorepo can lead to a merge. The guard passes both, and a bot that merges on one is outside it. Check 5 asks.
 - Whether Nexus runs under SELinux in enforcing mode. Neither of the operator's nodes has it. Check 7 found that the office machine enforces, and the checks after the install look for denials.
 - How much memory a pylon of the company project needs. `ops-3` measures it.
 - Whether a Claude token from a team subscription behaves like the personal one that Nexus uses today. The first sign-in of the pilot shows it.
