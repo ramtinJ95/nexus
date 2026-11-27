@@ -234,7 +234,6 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   const claude = services.start(claudeConversations({ registry, probes: probeMap, log }));
   const agents = agentReader(registry, harness, claude);
   const usage = services.start(usageCounter({ registry, probes: probeMap, harness }));
-  const people = peopleOf(config.people);
   const { github, landing } = token === null ? { github: null, landing: null } : controlGitHub(token, people);
   services.start(config.resumeAfterUsageLimit ? { everyMs: 30_000, ...usageLimitResumer({ registry, inbox, log }) } : null);
   const mirror = projectMirror({ githubToken: token });
