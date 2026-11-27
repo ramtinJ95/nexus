@@ -1,3 +1,4 @@
+import { peopleOf, solo, type People } from "./people.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -58,7 +59,7 @@ const tempDb = () => join(registries, `${randomUUID()}.db`);
 const previous = "p".repeat(40);
 
 /** `agentState` replaces the fake that reads replies and model failures from the fixture's maps. */
-function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; releaseBranch?: string; shared?: boolean; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview; secondReview?: SecondReview; agentState?: (registry: Registry) => ReviewDeps["agentState"]; personWrote?: (registry: Registry) => ReviewDeps["personWrote"] } = {}) {
+function fixture(t: import("node:test").TestContext, options: { path?: string; repo?: string; releaseBranch?: string; shared?: boolean; people?: People; secrets?: SecretGrant[]; claudeBuilder?: boolean; autoReview?: AutoReview; secondReview?: SecondReview; agentState?: (registry: Registry) => ReviewDeps["agentState"]; personWrote?: (registry: Registry) => ReviewDeps["personWrote"] } = {}) {
   const registry = openRegistry(options.path ?? ":memory:");
   t.after(() => { try { registry.close(); } catch { /* closed by a restart */ } });
   const repo = options.repo ?? "ramtinJ95/nexus";
@@ -147,7 +148,7 @@ function fixture(t: import("node:test").TestContext, options: { path?: string; r
   const woken: ThreadId[] = [];
   const logged: string[] = [];
   const loop = () => reviewLoop({
-    registry, harnessModel: "gpt-6-astra",
+    registry, harnessModel: "gpt-6-astra", people: options.people,
     github: {
       find: async () => [7],
       async poll(_, n) { polls++; onPoll(); if (heldPoll !== null && heldPoll.skip-- <= 0) { heldPoll.entered(); await heldPoll.released; } return structuredClone(read(n)); },
@@ -6635,6 +6636,24 @@ test("on a shared install the loop refuses a review start with land, a land, and
   assert.throws(() => loop.answerHolds(f.registry.questions.question("holds-rv-old") as never, "Land", "nLAPTOP" as TailnetNodeId), landingOff);
   await loop.poll();
   assert.deepEqual([f.merges, f.updates], [[], []]);
+});
+
+test("on a shared install no review starts, the person's with pylon-agents-only and none of a project's own, until mp-17", async (t) => {
+  for (const people of [solo, peopleOf({ "alice@example.com": "admin" })]) {
+    const f = fixture(t, { people, autoReview: { mode: "review", enabledBy: "nLAPTOP" } });
+    const loop = f.loop();
+    await loop.poll();
+    if (!people.shared) {
+      assert.notEqual(f.registry.reviews.review(f.builder), null, "a solo install starts the review the project owes on its own");
+      continue;
+    }
+    await loop.auto(f.registry.threads.thread(f.builder)!, f.pr);
+    f.tick(prWatchMs);
+    await loop.poll();
+    await assert.rejects(loop.start(f.builder, { land: null }), { code: "pylon-agents-only", message: /^Nexus starts no review on a shared install yet, .*Ask a colleague to review the pull request on GitHub$/ });
+    assert.equal(f.registry.reviews.review(f.builder), null, "no review started");
+    assert.deepEqual(f.logged.filter((line) => /review/.test(line)), [], "nothing is logged as a review that will be tried again");
+  }
 });
 
 test("on a shared install a project left in land or yolo reviews its pull requests and stops at approval, and yolo answers nothing", async (t) => {

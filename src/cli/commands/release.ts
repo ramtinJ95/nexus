@@ -126,6 +126,7 @@ export const releaseCommands: Readonly<Record<string, Command>> = {
       "  nexus review <thread> [--pr N] [--rounds N] [--land] [--replace]",
       "    a reviewer on another model for the thread's open PR, round after round until it approves; --land merges and deploys under the merge policy;",
       "    --replace starts it though it takes the place of the thread's review of another open PR that waits on you",
+      "    a shared install starts no review until reviews run on the asker's own login",
       "  nexus review --cancel <thread>               end the thread's running review and archive its reviewer, unless it began merging or deploying",
     ],
     args: [1, 1], thread: true, options: { pr: { type: "string" }, rounds: { type: "string" }, land: { type: "boolean" }, replace: { type: "boolean" }, cancel: { type: "boolean" } },

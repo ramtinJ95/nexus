@@ -1295,7 +1295,7 @@ shared admin POST /v1/threads/{bob's thread}/archive -> 200
 shared admin POST /v1/threads/{bob's thread}/unarchive -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may unarchive a thread
 shared admin POST /v1/threads/{bob's thread}/activity -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may record activity on a thread, which keeps its pylon awake
 shared admin POST /v1/threads/{bob's thread}/messages -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may message a thread
-shared admin POST /v1/threads/{bob's thread}/abort -> 204
+shared admin POST /v1/threads/{bob's thread}/abort -> 409 the Claude worker of {bob's thread} has not started a session yet, so it has no turn to interrupt
 shared admin POST /v1/threads/{bob's thread}/retry -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may retry a thread's turn
 shared admin POST /v1/threads/{bob's thread}/pylon/retry -> 403 thread {bob's thread} is bob@example.com's, so only bob@example.com may retry a thread's pylon
 shared admin PATCH /v1/projects/nosuch -> 400 ✖ Unrecognized key: "bogus"

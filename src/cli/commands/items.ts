@@ -35,6 +35,7 @@ export const itemsCommands: Readonly<Record<string, Command>> = {
       "  nexus item add [--project P] [--title T] (--message M | --claude PROMPT [--model ID]) [--after ITEM[,ITEM...]]",
       "                 [--node N|auto] [--branch B] [--commit C] [--cpus n] [--memory GiB] [--disk GiB]",
       "    --message-file PATH|- and --claude-file PATH|- read the brief from a file or stdin",
+      "    a shared install takes --claude alone, since a --message item would be a Nexus agent thread",
       "    an item becomes a queued thread once the items it is after are, and starts once their pull requests merge",
     ],
     args: [0, 0],

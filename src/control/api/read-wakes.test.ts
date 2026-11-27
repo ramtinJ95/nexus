@@ -23,7 +23,7 @@ async function idleThreadOfAlice(t: Parameters<typeof testApi>[0]) {
   await s.call("POST", "/v1/projects", sharedProject);
   await s.call("POST", "/v1/images", image);
   s.registry.images.setCurrentImage(image.id as ImageId);
-  const thread = (await s.call("POST", "/v1/threads", { project: "acme", title: "alice's" })).body as Thread;
+  const thread = (await s.call("POST", "/v1/threads", { project: "acme", claude: "alice's" })).body as Thread;
   const facts = () => s.registry.threads.thread(thread.id as ThreadId)!;
   assert.equal(desiredPhase(facts(), Date.now()), "paused", "the pylon of an idle thread is to be paused");
   s.woken.length = 0;

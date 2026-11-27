@@ -26,9 +26,9 @@ async function shared(t: Parameters<typeof testApi>[0]) {
   await s.call("POST", "/v1/projects", sharedProject);
   await s.call("POST", "/v1/images", image);
   s.registry.images.setCurrentImage(image.id as ImageId);
-  const alice = (await s.call("POST", "/v1/threads", { project: "acme", title: "alice's" })).body.id as ThreadId;
+  const alice = (await s.call("POST", "/v1/threads", { project: "acme", claude: "alice's" })).body.id as ThreadId;
   caller = as(tailnet.bob);
-  const bob = (await s.call("POST", "/v1/threads", { project: "acme", title: "bob's" })).body.id as ThreadId;
+  const bob = (await s.call("POST", "/v1/threads", { project: "acme", claude: "bob's" })).body.id as ThreadId;
   const callAs = (who: "alice" | "bob") => { caller = as(who === "alice" ? tailnet.alice : tailnet.bob); };
   return { s, reached, threads: { alice, bob }, callAs };
 }

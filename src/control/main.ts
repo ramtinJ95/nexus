@@ -188,8 +188,9 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
   };
   for (const node of [...config.nodes, ...registry.nodes.joinedNodes()]) if (!probeMap.has(node.name)) connect(node);
   const services = startServices();
-  const handoff = services.start(chatgptToken === undefined ? null : { everyMs: 60_000, ...chatgptTokenHandoff({ probes: () => [...probeMap.values()], token: chatgptToken }) });
   const people = peopleOf(config.people);
+  // The harness's ChatGPT login is the install's one, so a shared install hands it to no probe.
+  const handoff = services.start(chatgptToken === undefined || people.shared ? null : { everyMs: 60_000, ...chatgptTokenHandoff({ probes: () => [...probeMap.values()], token: chatgptToken }) });
   const logins = loginStore(personStore(config.harness.credentials));
   const owners = services.start(people.shared ? ownerLogins({ registry, logins, probes: probeMap, log }) : null);
   const peers = services.start(peerHandoff({ registry, probes: probeMap, log }));
@@ -217,6 +218,8 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     // The registry row is what the planner and the dashboard read.
     onParked: (id, parked) => registry.threads.recordParked(id as ThreadId, parked),
     onReply: (id, at) => registry.threads.recordReply(id as ThreadId, at),
+    // A shared install's harness runs failure judgments alone, on the install's one model login.
+    judgmentsOnly: people.shared,
     onActivity(threadId, facts) {
       const t = registry.threads.thread(threadId as ThreadId)!;
       registry.threads.recordActivity(t.id, { agent: facts.lastAgentActivityAt, agentTurnRunning: facts.agentTurnRunning });
@@ -253,6 +256,7 @@ export async function startControlPlane(config: ControlPlaneConfig, models: Mode
     runs: (ended) => ({ checks: checkRuns({ ...checkRunDeps, ended }), live: checkRuns({ ...checkRunDeps, gate: verifyGate, ended }) }),
     release: { self: config.self.tailnetNodeId, repo: githubRepo(repository)!, branch: config.releaseBranch },
     lands: landing && { github: landing, mayLand: (caller) => isDeployer(registry, deployment, caller as TailnetNodeId) },
+    people,
     wake: wakeThread,
     log,
   }) });

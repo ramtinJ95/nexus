@@ -34,6 +34,8 @@ export interface Context {
   mine: { person: Person | null } | null;
   /** Whether the viewer owns the thread, so their visit and reads keep its pylon awake. */
   owns(thread: ThreadId): boolean;
+  /** A shared install's: the control plane's own agent runs no person's work, so no Nexus agent thread, planning, retry or review is offered. */
+  pylonAgentsOnly: boolean;
   deploys(review: Review): boolean;
   answerRefusal(question: Question): AnswerRefusal | null;
   projects: readonly Project[];

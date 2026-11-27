@@ -53,13 +53,17 @@ ${c.mine?.person != null && html`<div class="seg-bar flight-owners" role="radiog
 }
 
 const autoModes = [["off", "Off"], ["review", "Review"], ["land", "Land"], ["yolo", "Yolo"]] as const;
-/** The project's auto-review setting, which a press switches as `nexus project edit --auto-review` does. Landing modes need a deployer. */
+/**
+ * The project's auto-review setting, which a press switches as `nexus project edit --auto-review` does. Landing modes
+ * need a deployer. A shared install starts no review, so it offers only Off.
+ */
 function autoReviewSwitch(c: Context, p: Project): Html {
   const current = p.autoReview?.mode ?? "off";
   const by = p.autoReview == null ? "" : `, set by ${p.autoReview.enabledBy}`;
   return html`<span class="auto-review" role="group" aria-label="Auto review for ${p.id}${by}"><span class="dim">Auto review</span>${autoModes.map(([mode, label]) => {
+  const off = mode !== current && mode !== "off" && c.pylonAgentsOnly;
   const refused = mode !== current && (mode === "land" || mode === "yolo") && (c.landRefusal === "not a deployer" || c.landRefusal === "landing off");
-  return html`<button type="button" class="btn btn-xs${mode === current ? " btn-primary" : ""}"${act("auto-review")} data-project="${p.id}" data-mode="${mode}" aria-pressed="${mode === current ? "true" : "false"}"${(mode === current || refused) && html` disabled`}${refused && html` title="${c.landRefusal === "landing off" ? "Nexus never merges on a shared install" : "Landing deploys, so only a deployer may turn it on"}"`}${mode === "yolo" && html` data-confirm="Turn on yolo for project ${p.id}? Nexus then answers each review's holds question with Land for you, waiving every hold the policy lets you waive, reserved paths and data-deleting migrations included, until you switch it off."`}>${label}</button>`;
+  return html`<button type="button" class="btn btn-xs${mode === current ? " btn-primary" : ""}"${act("auto-review")} data-project="${p.id}" data-mode="${mode}" aria-pressed="${mode === current ? "true" : "false"}"${(mode === current || refused || off) && html` disabled`}${(refused || off) && html` title="${off ? "Nexus starts no review on a shared install yet" : c.landRefusal === "landing off" ? "Nexus never merges on a shared install" : "Landing deploys, so only a deployer may turn it on"}"`}${mode === "yolo" && html` data-confirm="Turn on yolo for project ${p.id}? Nexus then answers each review's holds question with Land for you, waiving every hold the policy lets you waive, reserved paths and data-deleting migrations included, until you switch it off."`}>${label}</button>`;
 })}</span>`;
 }
 

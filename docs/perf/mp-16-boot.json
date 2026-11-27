@@ -1,0 +1,102 @@
+{
+  "slice": "mp-16",
+  "box": "mp-16 Perf: boot. Fail above 10% over base.",
+  "probe": "NEXUS_VERIFY_PEOPLE=1 node scripts/mp-probe.ts boot, with NEXUS_VERIFY_BASE=nexus-verify-base:pylon. The probe from cd63dfce runs on both sides, so base's checkout is dirty in scripts/mp-probe.ts alone. On a shared stack it starts each thread as a Claude worker, which head requires and base takes. Head's checkout is dirty in docs/multiplayer-plan.md alone, the uncommitted ticks of this box's section.",
+  "machine": "Nexus pylon pylon-th-2279fc7dee91 on node infra-testbench, no /dev/kvm, Docker in the pylon started as .nexus/verify starts it. Base in its own git worktree at 830db10a, head in the main checkout at cd63dfce, run one after another.",
+  "order": "alternating, base first",
+  "limit": "fail when the head median is over 10% above base and outside base's range",
+  "baseMedianMs": 6211.8,
+  "headMedianMs": 6450.7,
+  "baseRangeMs": [
+    5584.3,
+    6735.6
+  ],
+  "headRangeMs": [
+    6198.4,
+    6668.6
+  ],
+  "verdict": "pass: head's median is 3.8% over base's, under the 10% limit and inside base's range",
+  "explained": "Both sides start the same Claude worker, so the timed path differs only by checkStart's one in-memory test of the request, which reads no file and makes no call. A template boot here is the container start and its resume, and base's own runs spread over 1.15 s, wider than the 0.24 s between the medians.",
+  "runs": [
+    {
+      "order": 1,
+      "side": "base",
+      "revision": "830db10a",
+      "bootMs": 6211.8,
+      "template": "tpl-9f105f4ff429",
+      "failed": 0
+    },
+    {
+      "order": 2,
+      "side": "head",
+      "revision": "cd63dfce",
+      "bootMs": 6668.6,
+      "template": "tpl-5bcf90b9aef6",
+      "failed": 0
+    },
+    {
+      "order": 3,
+      "side": "base",
+      "revision": "830db10a",
+      "bootMs": 6735.6,
+      "template": "tpl-4b3f23d3f950",
+      "failed": 0
+    },
+    {
+      "order": 4,
+      "side": "head",
+      "revision": "cd63dfce",
+      "bootMs": 6536.4,
+      "template": "tpl-4afbeb71900b",
+      "failed": 0
+    },
+    {
+      "order": 5,
+      "side": "base",
+      "revision": "830db10a",
+      "bootMs": 6019.7,
+      "template": "tpl-fb13134c839b",
+      "failed": 0
+    },
+    {
+      "order": 6,
+      "side": "head",
+      "revision": "cd63dfce",
+      "bootMs": 6389,
+      "template": "tpl-1fc3da4e0be1",
+      "failed": 0
+    },
+    {
+      "order": 7,
+      "side": "base",
+      "revision": "830db10a",
+      "bootMs": 6567.2,
+      "template": "tpl-803c0fbddcb5",
+      "failed": 0
+    },
+    {
+      "order": 8,
+      "side": "head",
+      "revision": "cd63dfce",
+      "bootMs": 6450.7,
+      "template": "tpl-e17056e6bd3a",
+      "failed": 0
+    },
+    {
+      "order": 9,
+      "side": "base",
+      "revision": "830db10a",
+      "bootMs": 5584.3,
+      "template": "tpl-bc9131bb1a3b",
+      "failed": 0
+    },
+    {
+      "order": 10,
+      "side": "head",
+      "revision": "cd63dfce",
+      "bootMs": 6198.4,
+      "template": "tpl-3a8f5b5f20c6",
+      "failed": 0
+    }
+  ]
+}

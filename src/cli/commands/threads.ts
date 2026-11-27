@@ -286,6 +286,7 @@ export const threadsCommands: Readonly<Record<string, Command>> = {
       "    --message-file PATH|- and --claude-file PATH|- read the message or prompt from a file or stdin",
       "    --after queues it to start once each of those threads' pull requests has merged",
       "    --plan makes it a planning thread, whose proposed items become questions you accept or reject",
+      "    a shared install takes --claude alone: --message, --plan and a start with neither are the Nexus agent's, which runs no person's work there",
       "    --request-id makes a repeat of the start answer the thread the first made",
       "    --watch then follows the run until it replies, as watch --until-idle does",
     ],

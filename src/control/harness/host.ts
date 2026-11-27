@@ -26,6 +26,7 @@ import type { AgentCall } from "../agent-usage.ts";
 import { type Sender, senders } from "../agent-protocol.ts";
 import { checkoutDir } from "../../../images/pylon/nexus-contract.ts";
 import type { TurnGate } from "../drain.ts";
+import { pylonAgentsOnly } from "../people.ts";
 
 export type { ConversationId };
 
@@ -54,6 +55,12 @@ export interface HarnessHostOptions {
   /** A thread's agent facts changed, or differ at open from what `threads` says the registry holds. */
   onActivity(threadId: string, facts: AgentFacts): void;
   log(message: string): void;
+  /**
+   * A shared install's: the host runs failure judgments alone, as `judgmentsOnly` says, and refuses to open while a
+   * thread's conversation, a deleted thread's among them, holds unfinished work, since opening would resume it on the
+   * install's one model login. Nothing runs before that check.
+   */
+  judgmentsOnly?: boolean;
 }
 
 export interface HarnessHost {
@@ -109,6 +116,26 @@ export function gateTurns(host: HarnessHost, gate: Pick<TurnGate, "run">): Harne
   return gated;
 }
 
+/**
+ * What starts a turn of a thread's conversation, as opposed to a failure judgment's, and what a shared install's refusal
+ * of each names.
+ */
+const threadTurns = {
+  startThread: "A thread on the Nexus agent cannot start",
+  send: "The Nexus agent takes no message",
+  retry: "A harness retry runs the Nexus agent, so it cannot run",
+} as const satisfies Partial<Record<AsyncMethod, string>>;
+
+/**
+ * The harness of a shared install, which runs failure judgments alone: every method that would start a turn of a
+ * thread's conversation is refused, whoever calls it, so no person's work spends the install's one model login.
+ */
+export function judgmentsOnly(host: HarnessHost): HarnessHost {
+  const refusing = { ...host };
+  for (const [method, what] of Object.entries(threadTurns)) Object.assign(refusing, { [method]: () => Promise.reject(pylonAgentsOnly(what)) });
+  return refusing;
+}
+
 export async function openHarnessHost(options: HarnessHostOptions): Promise<HarnessHost> {
   const { log } = options;
   const activity = trackActivity({ onParked: (id, parked) => options.onParked?.(id, parked), onChange: options.onActivity, onReply: (id, at) => options.onReply?.(id, at) });
@@ -138,6 +165,18 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
   for (const { record, state } of (await harness.inspect(context)).tasks) {
     if (state.kind === "blocked" && state.reason === "restart_limit") activity.park(record.conversationId, record.id);
   }
+  if (options.judgmentsOnly === true) {
+    const threadOf = new Map<ConversationId, string>([...options.deleted.map((id) => [id, `a deleted thread's conversation ${id}`] as const), ...options.threads.map((t) => [t.conversationId, t.threadId] as const)]);
+    const { tasks, submissions } = await harness.inspect(context);
+    // A task parked by the restart limit runs again only on a retry, which the host refuses.
+    const unfinished = new Set([...tasks.filter((t) => t.state.kind !== "blocked").map((t) => t.record.conversationId), ...submissions.map((s) => s.conversationId)].flatMap((id) => threadOf.has(id) ? [threadOf.get(id)!] : []));
+    if (unfinished.size > 0) {
+      await activity.close();
+      await harness.close(context);
+      envs.close();
+      throw new Error(`the harness holds unfinished work of ${[...unfinished].sort().join(", ")}, which a shared install would resume on its one model login. Start the control plane once without people in control.json, run nexus abort on each of those threads, and start it again`);
+    }
+  }
   harness.resume();
   for (const id of options.deleted) {
     const deleted = await harness.conversation(id, context);
@@ -159,7 +198,7 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
     return found;
   }
 
-  return {
+  const host: HarnessHost = {
     activity,
     async startThread({ threadId, pylonId }) {
       const existing = conversations.get(threadId);
@@ -250,4 +289,5 @@ export async function openHarnessHost(options: HarnessHostOptions): Promise<Harn
       envs.close();
     },
   };
+  return options.judgmentsOnly === true ? judgmentsOnly(host) : host;
 }

@@ -113,7 +113,9 @@ export async function testApi(t: Pick<import("node:test").TestContext, "after">,
   const joined: JoinedNode[] = [];
   const hosts = new Map<TailnetNodeId, string>();
   const fake = fakeHarness({ onParked: (id, parked) => registry.threads.recordParked(id as ThreadId, parked) });
-  const { harness, calls } = fake;
+  const { calls } = fake;
+  // A test that brings its own harness, such as the real one, has the API and the thread services share it.
+  const harness = apiOptions.harness ?? fake.harness;
   const commands: [PylonId, PylonCommand][] = [];
   /** What the node's probe answers a guest command with. Tests replace it. */
   let answer = async (command: PylonCommand): Promise<CommandResult> => {

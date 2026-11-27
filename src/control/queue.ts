@@ -10,7 +10,7 @@
  * pass and read rather than stored, so a reopened or later-merged pull request unblocks it. None starts on its own while
  * a review's gate pylon waits for room (`gateAhead`), so the gate gets the room that frees first, and its record says so.
  */
-import { operator, type Starter } from "./people.ts";
+import { operator, solo, type People, type Starter } from "./people.ts";
 import { defaultClaudeModel } from "../protocol/models.ts";
 import { newThreadId, requestIds, type ProjectId, type ThreadId } from "../ids.ts";
 import { singleFlight } from "../single-flight.ts";
@@ -106,8 +106,9 @@ export function threadQueue(options: {
   /** The drain gate, which refuses a start while a deploy drains and counts one in flight as a turn starting. */
   gate: { run<T>(action: () => Promise<T>): Promise<T> };
   log?: (message: string) => void;
+  people?: People | undefined;
 }): ThreadQueue {
-  const { registry, startThread, send, gate, log = () => {} } = options;
+  const { registry, startThread, send, gate, log = () => {}, people = solo } = options;
   const starting = new Map<ThreadId, Promise<Thread>>();
 
   function queued(id: ThreadId): QueuedRecord {
@@ -180,7 +181,7 @@ export function threadQueue(options: {
     add(request, message, after, { caller, owner }, key) {
       const broken = brokenRule(startRules, { ...request, message });
       if (broken !== undefined) throw new Refusal("invalid", broken);
-      const project = checkStart(registry, { request, role: "builder" });
+      const project = checkStart(registry, { request, role: "builder" }, people);
       const ids = [...new Set(after)] as ThreadId[];
       for (const id of ids) {
         const t = registry.threads.thread(id);

@@ -34,10 +34,12 @@ function updateStartHint() {
 function syncWorker(form) {
   const claude = form.elements.worker.value === "claude";
   form.querySelector("#start-claude-fields").hidden = !claude;
-  form.querySelector("#start-harness-fields").hidden = claude;
+  // A shared install offers Claude Code alone, so its form has no Nexus agent fields.
+  const harness = form.querySelector("#start-harness-fields");
+  if (harness !== null) harness.hidden = claude;
   form.elements.claude.disabled = !claude;
   form.elements.model.disabled = !claude;
-  form.elements.planning.disabled = claude;
+  if (form.elements.planning !== undefined) form.elements.planning.disabled = claude;
   form.elements.title.required = !claude;
   form.elements.title.placeholder = claude ? "The prompt's first line" : "What should this thread do?";
   form.querySelector("#start-title-label").textContent = claude ? "Title (optional)" : "Title";

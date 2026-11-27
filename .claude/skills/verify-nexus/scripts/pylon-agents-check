@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# The refusal half of docs/multiplayer-plan.md's mp-16 live box: on the stack started with people, alice's `nexus start`
+# with no agent named, with --message, and with --plan are each refused with a 403 whose code is pylon-agents-only and
+# whose message names Claude Code as the agent to run, her start with --claude starts a thread with no harness
+# conversation, and the dashboard's start dialog offers Claude Code alone. The other half, a turn on her own Claude
+# token, needs a real token and an image with Claude Code, which this stack has neither of. Exits 0 only if every step
+# did what it should.
+set -euo pipefail
+V="$(cd "$(dirname "$0")" && pwd)/verify-nexus"
+base="$(cd "$(dirname "$0")/../../../.." && pwd)/.verify/nexus"
+fail() { echo "pylon agents check: $*" >&2; exit 1; }
+
+trap '"$V" down >&2 || true' EXIT
+NEXUS_VERIFY_PEOPLE=1 "$V" up
+"$V" doctor
+evidence=$("$V" evidence)
+run=$(cat "$base/current")
+api=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).api)' "$base/runs/$run/state.json")
+
+printf '%s\n' "sk-ant-oat01-alice-made-up-$(date +%s)" | "$V" cli pa-login-claude -- login claude >/dev/null
+printf '%s\n' "ghp_verifyalice0$(date +%s)" | "$V" cli pa-login-github -- login github >/dev/null
+
+off() {
+  local step=$1; shift
+  local code=0
+  "$V" cli "$step" -- "$@" --json </dev/null >/dev/null 2>&1 || code=$?
+  local said
+  said=$(grep -ho '{"error".*}' "$(ls "$evidence"/*-"$step".stderr | tail -1)" | tail -1)
+  echo "alice nexus $*: exit $code $said"
+  [ "$code" = 3 ] || fail "alice's nexus $* exited $code, not 3"
+  jq -e '.status == 403 and .code == "pylon-agents-only"' <<< "$said" >/dev/null || fail "alice's nexus $* was not a 403 with code pylon-agents-only"
+  grep -q "The one agent a thread can run there is Claude Code" <<< "$said" || fail "alice's nexus $* refusal does not name Claude Code"
+}
+off pa-start-none start --project spoon --title "pylon agents: no agent"
+off pa-start-message start --project spoon --message "pylon agents: a message brief"
+off pa-start-plan start --project spoon --message "pylon agents: a plan" --plan
+
+shown=$("$V" cli pa-start-claude -- start --project spoon --claude "pylon agents: Claude Code" --json)
+T=$(jq -r .id <<< "$shown")
+echo "alice nexus start --claude: $T, conversationId $(jq -r .conversationId <<< "$shown")"
+jq -e '.conversationId == null' <<< "$shown" >/dev/null || fail "alice's Claude worker $T has a harness conversation"
+[ "$("$V" cli pa-threads -- threads --json | jq 'length')" = 1 ] || fail "a refused start left a thread"
+
+dialog=$(curl -fsS "$api/threads/new?project=spoon")
+grep -q 'name="worker" value="claude"' <<< "$dialog" || fail "the start dialog does not start Claude Code"
+if grep -q 'Nexus agent\|start-planning' <<< "$dialog"; then fail "the start dialog offers the Nexus agent or planning"; fi
+echo "the dashboard's start dialog offers Claude Code alone"
+echo "pylon agents check: a start with no agent, --message and --plan were refused with pylon-agents-only naming Claude Code, a Claude worker started with no harness conversation, and the dashboard offers Claude Code alone"

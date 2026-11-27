@@ -40,7 +40,7 @@ test("on a shared install a tagged device, or a node in the registry whatever us
   const s = await shared(t);
   for (const device of [answer(tailnet.node), nodeAsAlice]) {
     s.as(device);
-    const r = await s.call("POST", "/v1/threads", { project: "acme", title: "x" });
+    const r = await s.call("POST", "/v1/threads", { project: "acme", claude: "x" });
     assert.equal(r.status, 403, `${device.id} on POST /v1/threads`);
     assert.equal((await s.call("GET", "/v1/whoami")).body.person, false, `${device.id} is no person`);
   }
@@ -49,9 +49,9 @@ test("on a shared install a tagged device, or a node in the registry whatever us
 
 test("on a shared install each thread is owned by the person who started it, and startedBy still names the device", async (t) => {
   const s = await shared(t);
-  const first = await s.call("POST", "/v1/threads", { project: "acme", title: "alice's" });
+  const first = await s.call("POST", "/v1/threads", { project: "acme", claude: "alice's" });
   s.as(answer(tailnet.bob));
-  const second = await s.call("POST", "/v1/threads", { project: "acme", title: "bob's" });
+  const second = await s.call("POST", "/v1/threads", { project: "acme", claude: "bob's" });
   assert.equal(first.status, 201);
   assert.equal(second.status, 201);
   assert.deepEqual(s.registry.threads.storedThreads().map((th) => [th.title, th.owner, th.startedBy]), [
@@ -63,9 +63,9 @@ test("on a shared install each thread is owned by the person who started it, and
 
 test("on a shared install a queued thread is its queuer's, who alone starts it now", async (t) => {
   const s = await shared(t, { queue: true });
-  const ahead = await s.call("POST", "/v1/threads", { project: "acme", title: "ahead" });
+  const ahead = await s.call("POST", "/v1/threads", { project: "acme", claude: "ahead" });
   s.as(answer(tailnet.bob));
-  const queued = await s.call("POST", "/v1/threads", { project: "acme", title: "after", after: [ahead.body.id] });
+  const queued = await s.call("POST", "/v1/threads", { project: "acme", claude: "after", after: [ahead.body.id] });
   assert.equal(queued.status, 201);
   assert.equal(s.registry.queue.queuedThread(queued.body.id)?.owner, bob);
   s.as(answer(tailnet.alice));
@@ -90,7 +90,7 @@ const acting = (id: ThreadId): readonly [string, string, unknown?][] => [
 
 test("on a shared install a teammate is refused every route that acts on a thread, by a 403 that names its owner, and the owner is admitted", async (t) => {
   const s = await shared(t);
-  const started = await s.call("POST", "/v1/threads", { project: "acme", title: "alice's" });
+  const started = await s.call("POST", "/v1/threads", { project: "acme", claude: "alice's" });
   const id = started.body.id as ThreadId;
   s.as(answer(tailnet.bob));
   for (const [method, path, body] of acting(id)) {
@@ -118,12 +118,15 @@ test("on a shared install a teammate is refused every route that acts on a threa
 test("on a shared install an admin may abort, archive and delete an engineer's thread, and nothing else of it", async (t) => {
   const s = await shared(t);
   s.as(answer(tailnet.bob));
-  const id = (await s.call("POST", "/v1/threads", { project: "acme", title: "bob's" })).body.id as ThreadId;
+  const id = (await s.call("POST", "/v1/threads", { project: "acme", claude: "bob's" })).body.id as ThreadId;
   s.as(answer(tailnet.alice));
   const message = await s.call("POST", `/v1/threads/${id}/messages`, { text: "hi" });
   assert.equal(message.status, 403);
   assert.match(message.body.error, /is bob@example\.com's, so only bob@example\.com may message a thread/);
-  assert.equal((await s.call("POST", `/v1/threads/${id}/abort`, {})).status, 204);
+  // Access admits the admin's abort, and the Claude worker has no session yet whose turn it interrupts.
+  const abort = await s.call("POST", `/v1/threads/${id}/abort`, {});
+  assert.equal(abort.status, 409);
+  assert.match(abort.body.error, /has not started a session yet, so it has no turn to interrupt/);
   assert.equal((await s.call("POST", `/v1/threads/${id}/archive`, {})).status, 200);
   const unarchive = await s.call("POST", `/v1/threads/${id}/unarchive`, {});
   assert.equal(unarchive.status, 403, "an admin does not open an engineer's thread again");
@@ -133,7 +136,7 @@ test("on a shared install an admin may abort, archive and delete an engineer's t
 
 test("on a shared install a question about a thread is its owner's to answer", async (t) => {
   const s = await shared(t);
-  const id = (await s.call("POST", "/v1/threads", { project: "acme", title: "alice's" })).body.id as ThreadId;
+  const id = (await s.call("POST", "/v1/threads", { project: "acme", claude: "alice's" })).body.id as ThreadId;
   s.registry.questions.askQuestion({ kind: "judgment", id: "qn-go", thread: id, text: "Go?", options: ["Yes", "No"], reserved: null, answerer: "person", askedAt: 1, failure: 0 });
   s.as(answer(tailnet.bob));
   const refused = await s.call("POST", "/v1/questions/qn-go/answer", { option: "Yes" });
@@ -146,7 +149,7 @@ test("on a shared install a question about a thread is its owner's to answer", a
 
 test("on a shared install each person has their own seen mark, and a teammate's leaves the owner's reply unread", async (t) => {
   const s = await shared(t);
-  const id = (await s.call("POST", "/v1/threads", { project: "acme", title: "alice's" })).body.id as ThreadId;
+  const id = (await s.call("POST", "/v1/threads", { project: "acme", claude: "alice's" })).body.id as ThreadId;
   s.registry.threads.recordReply(id, 5_000);
   const seenAt = async () => (await s.call("GET", `/v1/threads/${id}`)).body.seenAt as number | null;
   const listed = async () => ((await s.call("GET", "/v1/threads")).body as { id: string; seenAt: number | null }[]).find((r) => r.id === id)!.seenAt;
@@ -187,7 +190,7 @@ test("without people the operator owns every thread and a device on the allowlis
   await s.call("POST", "/v1/projects", project);
   await s.call("POST", "/v1/images", image);
   s.registry.images.setCurrentImage(image.id as ImageId);
-  const r = await s.call("POST", "/v1/threads", { project: "acme", title: "x" });
+  const r = await s.call("POST", "/v1/threads", { project: "acme", claude: "x" });
   assert.equal(r.status, 201);
   assert.equal(r.body.owner, operator);
   assert.equal(r.body.startedBy, laptop);
@@ -199,25 +202,25 @@ test("without people the operator owns every thread and a device on the allowlis
   assert.deepEqual(Object.keys((await s.call("GET", "/v1/usage")).body.by), ["model", "project", "kind", "role", "day"]);
 });
 
-test("on a shared install a repeat of another person's start request is refused, so it never sends a message into their thread", async (t) => {
+test("on a shared install a repeat of another person's start request is refused, so it never answers with their thread", async (t) => {
   const s = await shared(t);
-  const body = { project: "acme", title: "alice's", message: "Go.", requestId: "alice:1" };
+  const body = { project: "acme", claude: "Go.", requestId: "alice:1" };
   const first = await s.call("POST", "/v1/threads", body);
   assert.equal(first.status, 201, JSON.stringify(first.body));
-  const sends = () => s.calls.filter((c) => c[0] === "send").length;
-  const before = sends();
   s.as(answer(tailnet.bob));
   const repeat = await s.call("POST", "/v1/threads", body);
   assert.equal(repeat.status, 403);
   assert.match(repeat.body.error, new RegExp(`started thread ${first.body.id} of alice@example\\.com's, so only alice@example\\.com may repeat it`));
-  assert.equal(sends(), before, "bob's repeat sent nothing");
   s.as(answer(tailnet.alice));
-  assert.equal((await s.call("POST", "/v1/threads", body)).status, 201, "alice's own repeat answers her thread");
+  const own = await s.call("POST", "/v1/threads", body);
+  assert.equal(own.status, 201, "alice's own repeat answers her thread");
+  assert.equal(own.body.id, first.body.id);
+  assert.equal(s.registry.threads.storedThreads().length, 1, "no repeat made a second thread");
 });
 
 test("on a shared install a caller the allowlist still admits but who is no person reads threads with their owners' marks, and has no mark of its own", async (t) => {
   const s = await shared(t, { allowed: new Set(["nFIREBAT" as TailnetNodeId]) });
-  const id = (await s.call("POST", "/v1/threads", { project: "acme", title: "alice's" })).body.id as ThreadId;
+  const id = (await s.call("POST", "/v1/threads", { project: "acme", claude: "alice's" })).body.id as ThreadId;
   s.registry.threads.recordReply(id, 5_000);
   assert.equal((await s.call("POST", `/v1/threads/${id}/seen`, { lastReplyAt: 5_000 })).status, 204);
   s.as(nodeAsAlice);
@@ -230,9 +233,9 @@ test("on a shared install a caller the allowlist still admits but who is no pers
 
 test("on a shared install a thread's row and view carry its owner, and the usage report sums by owner", async (t) => {
   const s = await shared(t);
-  const mine = await s.call("POST", "/v1/threads", { project: "acme", title: "alice's" });
+  const mine = await s.call("POST", "/v1/threads", { project: "acme", claude: "alice's" });
   s.as(answer(tailnet.bob));
-  const theirs = await s.call("POST", "/v1/threads", { project: "acme", title: "bob's" });
+  const theirs = await s.call("POST", "/v1/threads", { project: "acme", claude: "bob's" });
   const call = (id: string, input: number) => ({ id, agent: "pi" as const, model: "gpt-6-astra", at: Date.now(), input, output: 0, cacheWrite: 0, cacheRead: 0 });
   s.registry.usage.recordUsage(mine.body.id, [call("a", 7)]);
   s.registry.usage.recordUsage(theirs.body.id, [call("b", 40)]);
@@ -245,9 +248,9 @@ test("on a shared install a thread's row and view carry its owner, and the usage
 
 test("on a shared install the home page opens on the caller's own threads, its switch shows everyone's, and each row and page names its owner", async (t) => {
   const s = await shared(t);
-  const hers = await s.call("POST", "/v1/threads", { project: "acme", title: "alice's" });
+  const hers = await s.call("POST", "/v1/threads", { project: "acme", claude: "alice's" });
   s.as(answer(tailnet.bob));
-  const his = await s.call("POST", "/v1/threads", { project: "acme", title: "bob's" });
+  const his = await s.call("POST", "/v1/threads", { project: "acme", claude: "bob's" });
   const home = (await s.raw("/")).body.toString();
   const row = (id: string) => {
     const before = home.slice(0, home.indexOf(`<a href="/threads/${id}">`));

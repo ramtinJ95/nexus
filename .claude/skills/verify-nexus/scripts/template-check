@@ -22,7 +22,12 @@ aliceCommit=$(git -C "${repo#file://}" rev-parse alice/wip)
 echo "ladle's remote: main $main, alice/wip $aliceCommit"
 
 "$V" cli tc-project -- project add ladle "$repo" --node "$stackNode" --cpus 1 --memory 3 --disk 1 --json >/dev/null
-A=$("$V" cli tc-start-alice -- start --project ladle --title "template: alice's" --branch alice/wip --json)
+# A shared install boots a pylon only with its owner's own logins, so each person signs in with made-up tokens first.
+printf '%s\n' "sk-ant-oat01-alice-made-up-$(date +%s)" | "$V" cli tc-login-claude-alice -- login claude >/dev/null
+printf '%s\n' "ghp_verifyalice0$(date +%s)" | "$V" cli tc-login-github-alice -- login github >/dev/null
+printf '%s\n' "sk-ant-oat01-bob-made-up-$(date +%s)" | "$V" cli tc-login-claude-bob --as bob -- login claude >/dev/null
+printf '%s\n' "ghp_verifybob0$(date +%s)" | "$V" cli tc-login-github-bob --as bob -- login github >/dev/null
+A=$("$V" cli tc-start-alice -- start --project ladle --claude "template: alice's" --branch alice/wip --json)
 echo "alice's start: $(jq -c '{id, setup}' <<< "$A")"
 template=$(jq -r '.setup.building // empty' <<< "$A")
 [ -n "$template" ] || fail "alice's start asked for no template build"
@@ -59,7 +64,7 @@ running() {
   done
   fail "$1's pylon is $s, not running"
 }
-B=$("$V" cli tc-start-bob --as bob -- start --project ladle --title "template: bob's" --json)
+B=$("$V" cli tc-start-bob --as bob -- start --project ladle --claude "template: bob's" --json)
 echo "bob's start: $(jq -c '{id, setup}' <<< "$B")"
 [ "$(jq -r .setup.how <<< "$B")" = template ] || fail "bob's thread does not boot from a template"
 [ "$(jq -r .setup.template <<< "$B")" = "$template" ] || fail "bob's thread boots from another template than alice's start asked for"

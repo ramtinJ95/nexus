@@ -95,7 +95,7 @@ export function dashboardRoutes(kit: ApiKit, options: { features: Features; heal
     const queued: ReadonlyMap<string, readonly QueuedThread[]> = Map.groupBy(registry.queue.queuedThreads().filter((q) => q.status === "queued").map((q) => queuedView(registry, q)), (q) => q.project);
     const queuedIn = (project: string) => queued.get(project) ?? [];
     return {
-      now, caller, mine: kit.shared ? { person: kit.personAs({ roles, identity }) } : null, deploys, landRefusal: options.people?.shared ? "landing off" : options.features.reviews === null ? "no review loop" : refusal(roles, landing) === null ? null : "not a deployer",
+      now, caller, mine: kit.shared ? { person: kit.personAs({ roles, identity }) } : null, deploys, pylonAgentsOnly: options.people?.shared === true, landRefusal: options.people?.shared ? "landing off" : options.features.reviews === null ? "no review loop" : refusal(roles, landing) === null ? null : "not a deployer",
       answerRefusal: (question) => kit.answerRefusalOf({ roles, identity }, question),
       owns: (id) => kit.owns(id, { roles, identity }),
       projects: registry.projects.projects(), nodes: registry.nodes.nodes(), image: registry.images.currentImage(),
