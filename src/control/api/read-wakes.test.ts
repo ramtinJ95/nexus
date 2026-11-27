@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { deployment, image, localCheckout, observeRunning, project, testApi, withThread } from "../../test-support/api-kit.ts";
+import { deployment, image, localCheckout, observeRunning, sharedProject, testApi, withThread } from "../../test-support/api-kit.ts";
 import { probeError } from "../../protocol/http.ts";
 import { tailnet, type WhoisAnswer } from "../../test-support/people.ts";
 import { parseWhois, type TailnetCaller } from "../../node-base/tailscaled.ts";
@@ -20,7 +20,7 @@ async function idleThreadOfAlice(t: Parameters<typeof testApi>[0]) {
   const hourAgo = Date.now() - 60 * 60_000;
   let caller = as(tailnet.alice);
   const s = await testApi(t, { people, allowed: new Set(), whois: async () => caller, clock: () => hourAgo });
-  await s.call("POST", "/v1/projects", project);
+  await s.call("POST", "/v1/projects", sharedProject);
   await s.call("POST", "/v1/images", image);
   s.registry.images.setCurrentImage(image.id as ImageId);
   const thread = (await s.call("POST", "/v1/threads", { project: "acme", title: "alice's" })).body as Thread;
