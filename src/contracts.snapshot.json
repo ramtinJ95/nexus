@@ -7,6 +7,7 @@
     ".claude/skills/verify-nexus/scripts/logins-check: reserved-path:auth",
     ".claude/skills/verify-nexus/scripts/logins-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/new-project-shots.ts: verify-changed",
+    ".claude/skills/verify-nexus/scripts/own-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/owner-check: verify-changed",
     ".claude/skills/verify-nexus/scripts/owner-logins-check: reserved-path:auth",
     ".claude/skills/verify-nexus/scripts/owner-logins-check: verify-changed",
