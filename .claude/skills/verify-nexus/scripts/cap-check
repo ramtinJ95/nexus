@@ -20,6 +20,9 @@ export NEXUS_VERIFY_RUN="cap-check-$(date +%Y%m%d-%H%M%S)-$$"
 trap '"$V" down >&2 || true' EXIT
 NEXUS_VERIFY_PEOPLE=1 "$V" up
 "$V" doctor
+# A shared start boots with its owner's own logins, so alice signs in first, with made-up tokens.
+printf '%s\n' "sk-ant-oat01-alice-made-up-$(date +%s)" | "$V" cli cap-login-claude -- login claude >/dev/null
+printf '%s\n' "ghp_verifyalice0$(date +%s)" | "$V" cli cap-login-github -- login github >/dev/null
 T1=$("$V" cli cap-start-1 -- start --project spoon --title "cap: one" --json | jq -r .id)
 T2=$("$V" cli cap-start-2 -- start --project spoon --title "cap: two" --json | jq -r .id)
 until_json cap-running-1 120 '.pylon.actualState == "running"' show "$T1"
