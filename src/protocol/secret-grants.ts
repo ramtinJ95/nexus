@@ -9,6 +9,10 @@ export interface SecretGrant { name: string; hosts: readonly string[]; owner?: t
 export const secretNamePattern = /^[A-Z_][A-Z0-9_]*$/;
 /** A host a grant sends its secret to: a lower-case hostname of two labels or more. */
 export const secretHostPattern = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+/** The longest value a probe takes for a secret, in bytes. */
+export const maxSecretBytes = 16_384;
+/** RFC 6750's b64token, the alphabet bearer tokens are written in, and the only one a probe takes a secret value in. */
+export const tokenAlphabet = /^[A-Za-z0-9\-._~+/]+=*$/;
 /** The grant `gh`, and git through gh's credential helper, need to create GitHub repositories and push to them. */
 export const githubTokenGrant: SecretGrant = { name: "GH_TOKEN", hosts: ["api.github.com", "github.com"] };
 /**

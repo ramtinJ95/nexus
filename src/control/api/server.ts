@@ -50,10 +50,11 @@ import { refusalStatus } from "../http-error.ts";
 import { Refusal, type RefusalCode, type RefusalKind } from "../refusal.ts";
 import { ok, parse, type ApiKit, type RouteEntry } from "./kit.ts";
 import { admit, anyAllowed, apiAccess, demand, type Policy, type Role } from "./access.ts";
-import type { People } from "../people.ts";
+import { solo, type People } from "../people.ts";
 import { githubIdentity, type LoginStore } from "../logins.ts";
 import type { GitIdentity } from "../../protocol/spawn.ts";
 import { loginRoutes } from "./login-routes.ts";
+import { ownRoutes } from "./own-routes.ts";
 import { pylonAccess } from "./pylon-access.ts";
 import { eventStreams, maxStreams } from "./sse.ts";
 import { threadViews } from "./thread-view.ts";
@@ -153,6 +154,7 @@ export function featureRoutes(kit: ApiKit, options: ApiOptions, nodeHealth: (nam
     ...imageRoutes(kit, options.features),
     ...doctorRoutes(kit, options),
     ...loginRoutes(kit, options.logins, options.githubIdentity ?? ((token) => githubIdentity(token))),
+    ...ownRoutes(kit, options.people ?? solo, options.logins),
   ];
 }
 

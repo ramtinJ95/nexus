@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# The live scenario of docs/multiplayer-plan.md's mp-11, on the stack's Docker backend and not on a VM node, so it leaves
+# the box open: a Docker pylon gets no allowlist and no secrets, so no request from it shows a host reached or refused.
+# On the stack started with people, alice and bob sign in to Claude and GitHub with made-up tokens, alice adds a host and
+# a secret for her own pylons with a made-up value, and each starts a thread on spoon. The PYLON.md each pylon booted
+# with lists alice's host and secret in hers alone, and the probe's log shows it holding her MCP_TOKEN, by the SHA-256 of
+# her value, for her pylon alone. bob reads none of hers as his and may not list people, alice's nexus people lists her
+# host and secret by name, and no output or log of the run holds the value.
+# Exits 0 only if every step did what it should.
+set -euo pipefail
+V="$(cd "$(dirname "$0")" && pwd)/verify-nexus"
+base="$(cd "$(dirname "$0")/../../../.." && pwd)/.verify/nexus"
+fail() { echo "own check: $*" >&2; exit 1; }
+sha() { printf '%s' "$1" | sha256sum | cut -c1-12; }
+
+trap '"$V" down >&2 || true' EXIT
+NEXUS_VERIFY_PEOPLE=1 "$V" up
+run=$(cat "$base/current")
+evidence=$("$V" evidence)
+host=mcp.alice.example
+value="alice-mcp-made-up-$(date +%s)"
+as() { [ "$1" = bob ] && echo "--as bob" || true; }
+
+for who in alice bob; do
+  # shellcheck disable=SC2046
+  printf '%s\n' "sk-ant-oat01-$who-made-up-$(date +%s)" | "$V" cli "own-login-claude-$who" $(as "$who") -- login claude >/dev/null
+  # shellcheck disable=SC2046
+  printf '%s\n' "ghp_verify${who}0$(date +%s)" | "$V" cli "own-login-github-$who" $(as "$who") -- login github >/dev/null
+done
+
+"$V" cli own-host-add -- host add "$host" >/dev/null
+printf '%s\n' "$value" | "$V" cli own-secret-set -- secret set MCP_TOKEN "$host" >/dev/null
+mine=$("$V" cli own-alice -- own --json)
+echo "alice's own: $(jq -c . <<< "$mine")"
+jq -e --arg h "$host" '.hosts == [$h] and .secrets == [{name: "MCP_TOKEN", hosts: [$h]}]' <<< "$mine" >/dev/null || fail "alice's own does not list $host and MCP_TOKEN"
+file="$base/runs/$run/people/alice%40example.com.json"
+[ "$(stat -c %a "$file")" = 600 ] || fail "alice's store file $file is mode $(stat -c %a "$file"), not 600"
+
+declare -A thread
+for who in alice bob; do
+  # shellcheck disable=SC2046
+  thread[$who]=$("$V" cli "own-start-$who" $(as "$who") -- start --project spoon --claude "own hosts and secrets: $who's" --json | jq -r .id)
+  echo "$who started ${thread[$who]}"
+done
+
+running() {
+  local s=""
+  for _ in $(seq 300); do
+    s=$("$V" cli "own-show-$1" -- show "${thread[$1]}" --json | jq -r .pylon.actualState)
+    [ "$s" = running ] && return 0
+    sleep 2
+  done
+  fail "$1's pylon is $s, not running"
+}
+running alice
+running bob
+
+declare -A guide
+for who in alice bob; do
+  # shellcheck disable=SC2046
+  guide[$who]=$("$V" cli "own-guide-$who" $(as "$who") -- exec "${thread[$who]}" "cat /home/user/.nexus/PYLON.md")
+done
+grep -qxF -- "- $host" <<< "${guide[alice]}" || fail "alice's pylon booted without $host in its allowlist"
+grep -qxF -- "- MCP_TOKEN: $host" <<< "${guide[alice]}" || fail "alice's pylon booted without MCP_TOKEN for $host"
+if grep -qF -e "$host" -e MCP_TOKEN <<< "${guide[bob]}"; then fail "bob's pylon booted with alice's host or secret"; fi
+echo "alice's pylon booted with $host and MCP_TOKEN: $host, and bob's with neither"
+
+log="$base/runs/$run/stack.log"
+held=$(grep -o "probe: holds MCP_TOKEN for pylon-[a-z0-9-]*, sha256 [0-9a-f]*" "$log" | sort -u)
+echo "the probe holds: $(tr '\n' ';' <<< "$held")"
+[ "$held" = "probe: holds MCP_TOKEN for pylon-${thread[alice]}, sha256 $(sha "$value")" ] || fail "the probe holds MCP_TOKEN for a pylon other than alice's, or not her value"
+
+code=0
+"$V" cli own-people-bob --as bob -- people >/dev/null 2>&1 || code=$?
+echo "bob's nexus people: exit $code"
+[ "$code" = 3 ] || fail "bob's people exited $code, not 3, a refusal"
+bobs=$("$V" cli own-bob --as bob -- own --json)
+echo "bob's own: $(jq -c . <<< "$bobs")"
+jq -e '.person == "bob@example.com" and .hosts == [] and .secrets == []' <<< "$bobs" >/dev/null || fail "bob's own shows something of alice's"
+listed=$("$V" cli own-people-alice -- people --json)
+echo "alice's nexus people: $(jq -c . <<< "$listed")"
+jq -e --arg h "$host" '.people | map(select(.person == "alice@example.com" and .role == "admin" and .hosts == [$h] and .secrets == [{name: "MCP_TOKEN", hosts: [$h]}])) | length == 1' <<< "$listed" >/dev/null || fail "alice's people does not list her host and MCP_TOKEN"
+
+leaks=$(grep -rlF --exclude-dir=people -e "$value" "$base/runs/$run" "$evidence" || true)
+[ -z "$leaks" ] || fail "the value is in $leaks"
+echo "own check (Docker, not a VM node): alice's pylon alone booted with her host and secret and was handed her value, bob saw none of hers and may not list people, alice's people lists her host and MCP_TOKEN, and no output or log of run $run holds the value"

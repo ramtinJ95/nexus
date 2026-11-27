@@ -3,7 +3,7 @@ import { fullCommit } from "../protocol/deploy.ts";
 import { inlinePromptChars, maxOpenPromptChars, maxPromptChars as maxPersonPromptChars } from "../protocol/commands.ts";
 import type { HarnessHost } from "./harness/host.ts";
 import { chooseTemplate, setupHashOf, type ProjectMirror, type SetupInputs, type ThreadSetup } from "./templates.ts";
-import { bootSecrets, effectiveAllowedHosts, gitIdentityOf, hasRemote, withHttpsHosts, type Project, type RemoteProject } from "./project.ts";
+import { bootSecrets, effectiveAllowedHosts, gitIdentityOf, hasRemote, withHttpsHosts, type OwnerReach, type Project, type RemoteProject } from "./project.ts";
 import type { PylonOverlay } from "./overlay.ts";
 import { liveHashOf, minPylonMemoryGiB, minPylonMemoryReason, type BootInputs, type Checkout, type RepoInit } from "../protocol/spawn.ts";
 import { newThreadId, pylonIdOf, type ImageId, type NodeName, type ProjectId, type TemplateId } from "../ids.ts";
@@ -41,12 +41,12 @@ const harnessStarts = {
 } as const;
 
 /** The inputs placement weighs, shared by a start and the read-only project preview. */
-export function placementNeed(project: Project, request: Pick<StartRequest, "branch" | "commit" | "resources">, image: BootInputs["image"], dotfiles: PylonOverlay["dotfiles"], owned = false) {
+export function placementNeed(project: Project, request: Pick<StartRequest, "branch" | "commit" | "resources">, image: BootInputs["image"], dotfiles: PylonOverlay["dotfiles"], owner?: OwnerReach) {
   const branch = request.branch ?? project.defaultBranch;
   const repo: RepoInit = hasRemote(project)
     ? { kind: "clone", url: project.repoUrl, checkout: { branch, commit: request.commit ?? `origin/${branch}` } }
     : { kind: "empty", branch };
-  return { image, resources: resourcesOf(request.resources, project), network: { ...bootNetwork(project, dotfiles?.repo, owned), defaultBranch: project.defaultBranch }, repo, dotfiles };
+  return { image, resources: resourcesOf(request.resources, project), network: { ...bootNetwork(project, dotfiles?.repo, owner), defaultBranch: project.defaultBranch }, repo, dotfiles };
 }
 
 /**
@@ -83,13 +83,13 @@ export const resourcesOf = (size: StartRequest["resources"], project: Pick<Proje
 });
 
 /**
- * The network a pylon boots with: its project's hosts and secrets, and with `owned` its owner's logins in place of the
- * project's grants of those names. Every boot pulls the dotfiles through the allowlist. A template build pulls none, so
- * their host stays out of the setup hash.
+ * The network a pylon boots with: its project's hosts and secrets, and with `owner` its owner's logins and own secrets
+ * in place of the project's grants of those names, and its owner's own hosts. Every boot pulls the dotfiles through the
+ * allowlist. A template build pulls none, so their host stays out of the setup hash.
  */
-export function bootNetwork(project: Project, dotfilesRepo: string | undefined, owned = false): BootInputs["network"] {
-  const secrets = bootSecrets(project, owned);
-  const hosts = owned ? [...effectiveAllowedHosts(project), ...secrets.flatMap((grant) => grant.hosts)] : effectiveAllowedHosts(project);
+export function bootNetwork(project: Project, dotfilesRepo: string | undefined, owner?: OwnerReach): BootInputs["network"] {
+  const secrets = bootSecrets(project, owner);
+  const hosts = owner === undefined ? effectiveAllowedHosts(project) : [...effectiveAllowedHosts(project), ...owner.hosts, ...secrets.flatMap((grant) => grant.hosts)];
   return { allowedHosts: withHttpsHosts(hosts, dotfilesRepo === undefined ? [] : [dotfilesRepo]), secrets };
 }
 
@@ -188,7 +188,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
     if (image === null) throw new Refusal("conflict", "no image is current yet, so a pylon has nothing to boot");
     const branch = request.branch ?? project.defaultBranch;
     // The repository as a fresh boot makes it. setUp pins a template boot's commit, and the pylon's boot freezes either.
-    const need = placementNeed(project, request, image, dotfiles, people.shared);
+    const need = placementNeed(project, request, image, dotfiles, ownerLogins?.reach);
     const { repo: freshRepo, network, resources } = need;
     const id = queued ?? start.id ?? newThreadId();
     const pylonId = pylonIdOf(id);
@@ -230,7 +230,7 @@ export function threadStarter(options: { registry: ThreadsRegistry; harness: Pic
       const conversationId = request.claude === undefined && hasConversation(role) ? await harness.startThread({ threadId: id, pylonId }) : null;
       const now = registry.now();
       const { setup, firstBoot, repo } = setUp(project, read, freshRepo, image, branch, node, now);
-      const boot: Omit<BootInputs, "source"> = { pylonId, image, resources, gitIdentity: ownerLogins?.identity ?? gitIdentityOf(project, gitIdentity), network, repo, dotfiles };
+      const boot: Omit<BootInputs, "source"> = { pylonId, image, resources, gitIdentity: ownerLogins?.identity ?? gitIdentityOf(project, gitIdentity), network, ...ownerLogins === null ? {} : { ownerHosts: ownerLogins.reach.hosts }, repo, dotfiles };
       const t: Thread = {
         id, title: request.title, project: project.id, pylonId, status: "active", conversationId: conversationId === null ? null : String(conversationId), startedBy: caller, owner, createdAt: now,
         // Starting a thread is human activity, so its pylon is wanted at once.

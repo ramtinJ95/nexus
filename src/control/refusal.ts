@@ -7,11 +7,11 @@ export type RefusalKind = "invalid" | "forbidden" | "missing" | "method" | "conf
  * a person, so `blocked` does not, and a queued thread starts only once the threads it waits on end, which can take
  * hours, so `queued` does not either. `landing-off` is a landing a shared install refuses, which it never takes, and
  * `pylon-agents-only` is a person's work it refuses, since the control plane's own agent would run it on the install's
- * one model login.
+ * one model login. `solo-install` is a route only a shared install has.
  */
 const retryableCodes = {
   "not-running": true, "not-ready": true, moved: true, draining: true,
-  blocked: false, queued: false, "landing-off": false, "pylon-agents-only": false, "no-route": false, "no-branch": false, "too-long": false, "probe-too-old": false, "probe-unreachable": false, "probe-forbidden": false, "no-login": false,
+  blocked: false, queued: false, "landing-off": false, "pylon-agents-only": false, "no-route": false, "no-branch": false, "too-long": false, "probe-too-old": false, "probe-unreachable": false, "probe-forbidden": false, "no-login": false, "solo-install": false,
 } as const satisfies Record<string, boolean>;
 export type RefusalCode = keyof typeof retryableCodes;
 

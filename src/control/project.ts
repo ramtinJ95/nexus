@@ -72,15 +72,21 @@ export interface StandingRules { text: string | null; revision: number }
 /** Templates mirror a remote, so they take a project that has one. */
 export type RemoteProject = Project & { repoUrl: string };
 export const hasRemote = (project: Project): project is RemoteProject => project.repoUrl !== null;
+/** What a shared install's pylon gets from its owner beyond its project: the hosts they added, and a grant of each secret they added. */
+export interface OwnerReach { hosts: readonly string[]; secrets: readonly SecretGrant[] }
+/** What an owner adds to a pylon when no one person's own counts, as in the project's placement preview. */
+export const noReach: OwnerReach = { hosts: [], secrets: [] };
+
 /**
  * What a new thread's pylon is granted: the project's grants, plus the ChatGPT token when the project has the chatgpt
- * login. With `owned`, on a shared install, the owner's own Claude and GitHub logins take the place of any grant a
- * project makes of those names, so no person's edit of a project decides where another person's token goes. The
- * ChatGPT token is the harness's own login there too, the install's one, so an owned pylon gets none.
+ * login. With `owner`, on a shared install, the owner's own Claude and GitHub logins and their own secrets take the place
+ * of any grant a project makes of those names, so no person's edit of a project decides where another person's token
+ * goes. The ChatGPT token is the harness's own login there too, the install's one, so an owner's pylon gets none.
  */
-export function bootSecrets(project: Project, owned = false): readonly SecretGrant[] {
-  if (owned) return [...project.secrets.filter((grant) => !ownerOnlyNames.includes(grant.name)), ...Object.values(ownerGrants)];
-  return project.logins.includes("chatgpt") ? [...project.secrets, chatgptTokenGrant] : project.secrets;
+export function bootSecrets(project: Project, owner?: OwnerReach): readonly SecretGrant[] {
+  if (owner === undefined) return project.logins.includes("chatgpt") ? [...project.secrets, chatgptTokenGrant] : project.secrets;
+  const owners = [...Object.values(ownerGrants), ...owner.secrets];
+  return [...project.secrets.filter((grant) => !ownerOnlyNames.includes(grant.name) && !owners.some((own) => own.name === grant.name)), ...owners];
 }
 export type LoginKind = "claude" | "chatgpt";
 

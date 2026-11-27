@@ -15,7 +15,8 @@ import { ownerBoot, type BootInputs } from "../../protocol/spawn.ts";
 import type { PylonObservation } from "../../protocol/observations.ts";
 import type { NodeRecord } from "../node-store.ts";
 import type { NodeName, PylonId } from "../../ids.ts";
-import type { Project } from "../project.ts";
+import type { OwnerReach, Project } from "../project.ts";
+import { ownerOnlyNames } from "../../protocol/secret-grants.ts";
 import { observedPylon } from "../observed.ts";
 import { watchStopped } from "../pr-watch-model.ts";
 import { noChangeOf } from "../work-model.ts";
@@ -35,6 +36,10 @@ function networkGrantsKey(network: BootInputs["network"]): string {
     secrets: sorted(secrets.keys()).map((name) => ({ name, hosts: sorted(secrets.get(name)!) })),
   });
 }
+
+/** What an owner's pylon got from its owner at its start, read back from its boot, so the owner's later edits do not show it outdated. */
+const bootReach = (boot: Pick<BootInputs, "network" | "ownerHosts">): OwnerReach | undefined => !ownerBoot(boot) ? undefined
+  : { hosts: boot.ownerHosts ?? [], secrets: boot.network.secrets.filter((grant) => grant.owner === true && !ownerOnlyNames.includes(grant.name)) };
 
 /** The planner deletes a failed pylon all the same, so a deleted thread's pylon shows the delete. */
 const gaveUp = (t: Pick<Thread, "status">, failed: string | null) => failed !== null && t.status !== "deleted";
@@ -56,7 +61,7 @@ export function threadViews(registry: Registry, agents: ThreadAgents, options: {
   function pylonOf({ pylon, node, observed, actualState }: ReturnType<typeof pylonState>, project: Project): ThreadDetail["pylon"] {
     const held = registry.threads.bootHold(pylon.pylonId);
     return {
-      grantsOutdated: networkGrantsKey(pylon.boot.network) !== networkGrantsKey(bootNetwork(project, pylon.boot.dotfiles?.repo, ownerBoot(pylon.boot))),
+      grantsOutdated: networkGrantsKey(pylon.boot.network) !== networkGrantsKey(bootNetwork(project, pylon.boot.dotfiles?.repo, bootReach(pylon.boot))),
       id: pylon.pylonId, node: pylon.node, failed: pylon.failed, observedAt: node.observation?.observedAt ?? null, resources: pylon.boot.resources,
       actualState, retryRefused: retryRefusal(observed),
       ...(observed !== "absent" && observed.phase === "running" && observed.notAnswering ? { notAnswering: observed.notAnswering } : {}),

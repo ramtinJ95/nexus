@@ -263,13 +263,13 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 
 ### mp-11: an engineer adds hosts and secrets for their own pylons
 
-- [ ] **Depends on.** `mp-09`.
-- [ ] **Files.** `src/control/threads.ts`, `src/control/project.ts`, a route module, `src/cli/commands/`.
-- [ ] **Change.** A person keeps a list of allowed hosts and of named secrets with the hosts that receive them. A pylon's allowlist and grants are its project's plus its owner's, fixed at start. An admin can list everyone's hosts and secret names, never the values.
+- [x] **Depends on.** `mp-09`.
+- [x] **Files.** `src/control/threads.ts`, `src/control/project.ts`, a route module, `src/cli/commands/`.
+- [x] **Change.** A person keeps a list of allowed hosts and of named secrets with the hosts that receive them. A pylon's allowlist and grants are its project's plus its owner's, fixed at start. An admin can list everyone's hosts and secret names, never the values.
 - [ ] **Result.** An engineer's own MCP servers and tools work in their pylons without an admin editing the project.
-- [ ] **Unit.** `alice`'s host is reachable from her pylon and refused from `bob`'s. A person cannot grant one of the names `mp-09` reserves.
+- [x] **Unit.** `alice`'s host is reachable from her pylon and refused from `bob`'s. A person cannot grant one of the names `mp-09` reserves.
 - [ ] **Live.** As `alice`, add a host and a secret, then start a thread. Pass when her pylon reaches the host with the secret swapped in, `bob`'s new pylon gets 403 for the same host, and `nexus people` as an admin lists the host.
-- [ ] **Perf.** `boot`. Fail above 10% over base.
+- [x] **Perf.** `boot`. Fail above 10% over base.
 
 ### mp-12: GitHub App tokens for each engineer
 

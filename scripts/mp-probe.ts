@@ -166,6 +166,11 @@ async function boot(branch?: string): Promise<Result> {
       if (process.env.NEXUS_VERIFY_PEOPLE === "1") {
         await call("PUT", "/v1/logins/claude", { token: "sk-ant-oat01-mp-probe-made-up" });
         await call("PUT", "/v1/logins/github", { token: "ghp_verifyalice0mpprobe" });
+        // mp-11's own host and secret, which a release before it answers 404 for and boots without.
+        for (const [path, body] of [["/v1/own/hosts/mcp.alice.example", undefined], ["/v1/own/secrets/MCP_TOKEN", { value: "mp-probe-made-up", hosts: ["mcp.alice.example"] }]] as const) {
+          const res = await send(`${state.api}${path}`, agent, "PUT", body);
+          if (res.status !== 200 && res.status !== 404) throw new Error(`PUT ${path}: HTTP ${res.status}: ${JSON.stringify(res.body)}`);
+        }
       }
       // The stack's spoon names a repository only its image holds, so the control plane cannot read its setup and every
       // spoon thread boots fresh. ladle names one both sides hold.

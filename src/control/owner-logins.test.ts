@@ -15,6 +15,7 @@ import type { ImageId, NodeName, Person, PylonId } from "../ids.ts";
 import type { NodeObservation } from "../protocol/observations.ts";
 import { peopleOf } from "./people.ts";
 import { nodeSecrets } from "../probe/config.ts";
+import { ownerGrants } from "../protocol/secret-grants.ts";
 
 const alice = tailnet.alice.UserProfile!.LoginName as Person;
 const bob = tailnet.bob.UserProfile!.LoginName as Person;
@@ -171,11 +172,11 @@ function onePylon() {
   let failing = false;
   let refusing = false;
   const owners = ownerLogins({
-    registry: { threads: { pylonsWithThreadsOn: () => [{ pylon: { pylonId, boot: { network: { secrets: [{ name: "GH_TOKEN", hosts: ["github.com"], owner: true }] } } }, thread: { status: "active", owner: bob } }] } } as never,
+    registry: { threads: { pylonsWithThreadsOn: () => [{ pylon: { pylonId, boot: { network: { secrets: Object.values(ownerGrants) } } }, thread: { status: "active", owner: bob } }] } } as never,
     logins: { async owned() {
       await gate;
       if (failing) throw new Error("the logins of bob@example.com cannot be read: EACCES");
-      return { claude: bobClaude, github: { token: bobGithub, identity: bobIdentity } };
+      return { claude: bobClaude, github: { token: bobGithub, identity: bobIdentity }, hosts: [], secrets: [] };
     } },
     probes: new Map([[node, { async putPylonSecret(pylon: PylonId, name: string) {
       if (refusing) throw new Error(`PUT /v1/secrets/${name}/pylons/${pylon}: HTTP 503: its running instance was not updated`);

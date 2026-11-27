@@ -635,6 +635,8 @@ test("the route table holds the routes it always has, and each path matches one 
   });
   assert.deepEqual(described.sort(), [
     "DELETE ^\\/v1\\/logins\\/([^/]+)$ person: remove a login",
+    "DELETE ^\\/v1\\/own\\/hosts\\/([^/]+)$ person: remove a host of their own",
+    "DELETE ^\\/v1\\/own\\/secrets\\/([^/]+)$ person: remove a secret of their own",
     "DELETE ^\\/v1\\/projects\\/([^/]+)$ admin: remove a project, solo person",
     "DELETE ^\\/v1\\/threads\\/([^/]+)$ owner: delete a thread, admin",
     "DELETE ^\\/v1\\/threads\\/([^/]+)\\/previews\\/([^/]+)$ owner: unpublish a preview",
@@ -666,6 +668,8 @@ test("the route table holds the routes it always has, and each path matches one 
     "GET ^\\/v1\\/nodes$ allowed",
     "GET ^\\/v1\\/nodes\\/([^/]+)\\/health$ deployer: read a node's health",
     "GET ^\\/v1\\/nodes\\/([^/]+)\\/metrics$ deployer: read a node's metrics",
+    "GET ^\\/v1\\/own$ person: read their own hosts and secrets",
+    "GET ^\\/v1\\/people$ admin: list each person's hosts and secrets, solo person",
     "GET ^\\/v1\\/placement\\/([^/]+)$ deployer: read a node's health",
     "GET ^\\/v1\\/projects$ allowed",
     "GET ^\\/v1\\/questions\\/([^/]+)$ allowed",
@@ -716,6 +720,8 @@ test("the route table holds the routes it always has, and each path matches one 
     "POST ^\\/v1\\/threads\\/([^/]+)\\/unseen$ allowed: each person's own mark of what they have read changes no thread or pylon",
     "POST ^\\/v1\\/usage\\/backfill$ deployer: start or stop the usage backfill",
     "PUT ^\\/v1\\/logins\\/([^/]+)$ person: set a login",
+    "PUT ^\\/v1\\/own\\/hosts\\/([^/]+)$ person: add a host for their own pylons",
+    "PUT ^\\/v1\\/own\\/secrets\\/([^/]+)$ person: set a secret for their own pylons",
     "PUT ^\\/v1\\/release$ deployer: deploy",
   ]);
   const routes = [["GET", /^\/v1\/health$/] as const, ...table];
