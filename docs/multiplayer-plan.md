@@ -238,13 +238,13 @@ The scripts that the review of this design wrote are in [`interrogate/`](../inte
 
 ### mp-09: a pylon boots with its owner's credentials and git identity
 
-- [ ] **Depends on.** `mp-07`, `mp-08`.
-- [ ] **Files.** `src/control/threads.ts`, `src/control/project.ts`, `src/control/placement.ts`, `src/backends/pylon-boot.ts`, `src/protocol/secret-grants.ts`.
-- [ ] **Change.** On a shared install a thread's Claude token and `GH_TOKEN` come from its owner's store, fixed when the thread starts and delivered as values for that one pylon. A start with a missing login fails and names the login. There is no fallback to a shared value. A project can no longer grant those names. The git author is the owner's, read from their GitHub login when they sign in. The project's and the install's `gitIdentity` are ignored. A thread the control plane starts for a person, such as a check, uses the credentials of the person whose action led to it.
+- [x] **Depends on.** `mp-07`, `mp-08`.
+- [x] **Files.** `src/control/threads.ts`, `src/control/project.ts`, `src/control/placement.ts`, `src/backends/pylon-boot.ts`, `src/protocol/secret-grants.ts`.
+- [x] **Change.** On a shared install a thread's Claude token and `GH_TOKEN` come from its owner's store, fixed when the thread starts and delivered as values for that one pylon. A start with a missing login fails and names the login. There is no fallback to a shared value. A project can no longer grant those names. The git author is the owner's, read from their GitHub login when they sign in. The project's and the install's `gitIdentity` are ignored. A thread the control plane starts for a person, such as a check, uses the credentials of the person whose action led to it.
 - [ ] **Result.** Whatever an agent does with a token in a pylon, it does as that pylon's owner.
-- [ ] **Unit.** `interrogate/project-edit-redirects-token.test.ts` asserts the fault. Turn it round, so that it shows a project edit by one person changing no host that receives another person's token and no commit author. A start without a Claude login fails with a reason that names it.
+- [x] **Unit.** `interrogate/project-edit-redirects-token.test.ts` asserts the fault. Turn it round, so that it shows a project edit by one person changing no host that receives another person's token and no commit author. A start without a Claude login fails with a reason that names it.
 - [ ] **Live.** `alice` and `bob` each start a thread on one project on one VM node. Pass when a recording host sees `alice`'s token only from `alice`'s pylon, and a commit made in each pylon has that owner's name and address.
-- [ ] **Perf.** `boot`. Fail above 10% over base.
+- [x] **Perf.** `boot`. Fail above 10% over base.
 
 ### mp-10: git goes over HTTPS only
 

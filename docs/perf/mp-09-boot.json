@@ -1,0 +1,102 @@
+{
+  "slice": "mp-09",
+  "box": "mp-09 Perf: boot. Fail above 10% over base.",
+  "probe": "NEXUS_VERIFY_PEOPLE=1 node scripts/mp-probe.ts boot, with NEXUS_VERIFY_BASE=nexus-verify-base:pylon. The probe from 2eff9c38 runs on both sides, so base's checkout is dirty in scripts/mp-probe.ts alone. It signs alice in to Claude and GitHub before the timed start, which base stores and does not read.",
+  "machine": "Nexus pylon pylon-th-88805904e28d on node infra-testbench, no /dev/kvm, Docker in the pylon started as .nexus/verify starts it. Each side in its own git worktree, run one after another.",
+  "order": "alternating, base first",
+  "limit": "fail when the head median is over 10% above base and outside base's range",
+  "baseMedianMs": 4587.6,
+  "headMedianMs": 5657.8,
+  "baseRangeMs": [
+    3658.8,
+    6434
+  ],
+  "headRangeMs": [
+    3935.4,
+    6644.1
+  ],
+  "verdict": "pass: head's median is 23.3% over base's and inside base's range",
+  "explained": "Both sides are bimodal, 3.6 to 4.6 s and 6.0 to 6.6 s, and head drew three of five runs from the slow mode where base drew two. What head adds to a start is one read of the owner's login file and two PUTs to the probe on loopback. In stack.log the second PUT's line follows the first by 2 to 7 ms in all ten head threads, so the start's own added work is about 10 ms, not the 1070 ms between the medians.",
+  "runs": [
+    {
+      "order": 1,
+      "side": "base",
+      "revision": "a9deaa95",
+      "bootMs": 6012.5,
+      "template": "tpl-0c251656be42",
+      "failed": 0
+    },
+    {
+      "order": 2,
+      "side": "head",
+      "revision": "2eff9c38",
+      "bootMs": 6448.4,
+      "template": "tpl-767513395208",
+      "failed": 0
+    },
+    {
+      "order": 3,
+      "side": "base",
+      "revision": "a9deaa95",
+      "bootMs": 6434,
+      "template": "tpl-486e37c08044",
+      "failed": 0
+    },
+    {
+      "order": 4,
+      "side": "head",
+      "revision": "2eff9c38",
+      "bootMs": 6644.1,
+      "template": "tpl-985c229aa57a",
+      "failed": 0
+    },
+    {
+      "order": 5,
+      "side": "base",
+      "revision": "a9deaa95",
+      "bootMs": 3658.8,
+      "template": "tpl-f505fbc6a109",
+      "failed": 0
+    },
+    {
+      "order": 6,
+      "side": "head",
+      "revision": "2eff9c38",
+      "bootMs": 3935.4,
+      "template": "tpl-0edf2863b1a7",
+      "failed": 0
+    },
+    {
+      "order": 7,
+      "side": "base",
+      "revision": "a9deaa95",
+      "bootMs": 4587.6,
+      "template": "tpl-a8c9abcd2c67",
+      "failed": 0
+    },
+    {
+      "order": 8,
+      "side": "head",
+      "revision": "2eff9c38",
+      "bootMs": 4313.5,
+      "template": "tpl-5104315e3dd5",
+      "failed": 0
+    },
+    {
+      "order": 9,
+      "side": "base",
+      "revision": "a9deaa95",
+      "bootMs": 3751.2,
+      "template": "tpl-03792eaee41e",
+      "failed": 0
+    },
+    {
+      "order": 10,
+      "side": "head",
+      "revision": "2eff9c38",
+      "bootMs": 5657.8,
+      "template": "tpl-bbe790188c22",
+      "failed": 0
+    }
+  ]
+}
