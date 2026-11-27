@@ -13,7 +13,7 @@ import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { judgmentsOnly, openHarnessHost, type HarnessHost } from "./harness/host.ts";
 import { harnessModels } from "./harness/credentials.ts";
 import { peopleOf, type People } from "./people.ts";
-import { image, project, testApi } from "../test-support/api-kit.ts";
+import { image, project, sharedProject, testApi } from "../test-support/api-kit.ts";
 import { tailnet, type WhoisAnswer } from "../test-support/people.ts";
 import { parseWhois, type TailnetCaller } from "../node-base/tailscaled.ts";
 import { tempDir } from "../test-support/kit.ts";
@@ -64,7 +64,7 @@ async function recordedHarness(t: Parameters<typeof testApi>[0] & { after(fn: ()
 async function install(t: Parameters<typeof testApi>[0], host: HarnessHost, people: People) {
   let caller = answer(tailnet.alice);
   const s = await testApi(t, { ...people.shared ? { people, allowed: new Set(), whois: async () => caller } : {}, harness: people.shared ? judgmentsOnly(host) : host, queue: true, pipeline: true });
-  await s.call("POST", "/v1/projects", project);
+  await s.call("POST", "/v1/projects", people.shared ? sharedProject : project);
   await s.call("POST", "/v1/images", image);
   s.registry.images.setCurrentImage(image.id as ImageId);
   return { ...s, as(c: TailnetCaller) { caller = c; } };
